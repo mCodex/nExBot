@@ -43,9 +43,6 @@ end
 
 -- Display header
 UI.Label("nExBot v".. version .." - Advanced Bot Framework")
-UI.Button("Join Discord Community", function() 
-  g_platform.openUrl("https://discord.gg/yhqBE4A") 
-end)
 UI.Separator()
 
 -- Load core modules
@@ -59,12 +56,17 @@ local function loadCoreModules()
       PerformanceMonitor = dofile("/nExBot/core/performance_monitor.lua")
     }
     
-    -- Initialize core modules
+    -- Initialize core modules (with nil checks)
     nExBot.EventBus = nExBot.Core.EventBus
     nExBot.BotState = nExBot.Core.BotState
     
-    nExBot.EventBus:initialize()
-    nExBot.BotState:initialize()
+    if nExBot.EventBus and nExBot.EventBus.initialize then
+      nExBot.EventBus:initialize()
+    end
+    
+    if nExBot.BotState and nExBot.BotState.initialize then
+      nExBot.BotState:initialize()
+    end
     
     logInfo("nExBot core modules loaded successfully")
   end)
@@ -133,6 +135,116 @@ local function loadFeatureModules()
   return true
 end
 
+-- Load Tools panel modules
+local function loadToolsModules()
+  local success, err = pcall(function()
+    -- Import styles
+    importStyle("/nExBot/modules/tools/tools.otui")
+    
+    -- Tools modules
+    dofile("/nExBot/modules/tools/smart_fishing.lua")
+    dofile("/nExBot/modules/tools/smart_mount.lua")
+    dofile("/nExBot/modules/tools/containers.lua")
+    dofile("/nExBot/modules/tools/dropper.lua")
+    dofile("/nExBot/modules/tools/extras.lua")
+    
+    -- Avoidance modules (AI-powered)
+    dofile("/nExBot/modules/avoidance/wave_avoidance_ui.lua")
+    
+    logInfo("nExBot Tools modules loaded successfully")
+  end)
+  
+  if not success then
+    warn("[nExBot] Failed to load Tools modules: " .. tostring(err))
+    return false
+  end
+  
+  return true
+end
+
+-- Load Main tab modules (vBot-style)
+local function loadMainTabModules()
+  local success, err = pcall(function()
+    -- Import styles
+    importStyle("/nExBot/modules/main/main.otui")
+    
+    -- Main tab modules
+    dofile("/nExBot/modules/main/combo_bot.lua")
+    dofile("/nExBot/modules/main/friend_healer.lua")
+    dofile("/nExBot/modules/main/pushmax.lua")
+    
+    logInfo("nExBot Main tab modules loaded successfully")
+  end)
+  
+  if not success then
+    warn("[nExBot] Failed to load Main tab modules: " .. tostring(err))
+    return false
+  end
+  
+  return true
+end
+
+-- Load Regen tab modules (vBot-style)
+local function loadRegenTabModules()
+  local success, err = pcall(function()
+    -- Import styles
+    importStyle("/nExBot/modules/regen/regen.otui")
+    
+    -- Regen tab modules
+    dofile("/nExBot/modules/regen/healbot.lua")
+    dofile("/nExBot/modules/regen/auto_equip.lua")
+    
+    logInfo("nExBot Regen tab modules loaded successfully")
+  end)
+  
+  if not success then
+    warn("[nExBot] Failed to load Regen tab modules: " .. tostring(err))
+    return false
+  end
+  
+  return true
+end
+
+-- Load Cave tab modules (vBot-style)
+local function loadCaveTabModules()
+  local success, err = pcall(function()
+    -- Import styles
+    importStyle("/nExBot/modules/cave/cave.otui")
+    
+    -- Cave tab modules (main cavebot must be loaded first)
+    dofile("/nExBot/modules/cave/cavebot.lua")
+    
+    logInfo("nExBot Cave tab modules loaded successfully")
+  end)
+  
+  if not success then
+    warn("[nExBot] Failed to load Cave tab modules: " .. tostring(err))
+    return false
+  end
+  
+  return true
+end
+
+-- Load Target tab modules (vBot-style)
+local function loadTargetTabModules()
+  local success, err = pcall(function()
+    -- Import styles
+    importStyle("/nExBot/modules/target/target.otui")
+    
+    -- Target tab modules (main targetbot loads creature editor and looting)
+    dofile("/nExBot/modules/target/targetbot.lua")
+    
+    logInfo("nExBot Target tab modules loaded successfully")
+  end)
+  
+  if not success then
+    warn("[nExBot] Failed to load Target tab modules: " .. tostring(err))
+    return false
+  end
+  
+  return true
+end
+
 -- Initialize the bot
 local function initializenExBot()
   if nExBot.initialized then
@@ -150,8 +262,32 @@ local function initializenExBot()
     warn("[nExBot] Some feature modules failed to load, continuing with available modules")
   end
   
-  -- Emit initialization event
-  nExBot.EventBus:emit(nExBot.EventBus.Events.MODULE_ENABLED, "nExBot", version)
+  -- Load vBot-style tab modules
+  if not loadMainTabModules() then
+    warn("[nExBot] Some Main tab modules failed to load, continuing with available modules")
+  end
+  
+  if not loadRegenTabModules() then
+    warn("[nExBot] Some Regen tab modules failed to load, continuing with available modules")
+  end
+  
+  if not loadCaveTabModules() then
+    warn("[nExBot] Some Cave tab modules failed to load, continuing with available modules")
+  end
+  
+  if not loadTargetTabModules() then
+    warn("[nExBot] Some Target tab modules failed to load, continuing with available modules")
+  end
+  
+  -- Load tools panel modules
+  if not loadToolsModules() then
+    warn("[nExBot] Some Tools modules failed to load, continuing with available modules")
+  end
+  
+  -- Emit initialization event (only if EventBus loaded successfully)
+  if nExBot.EventBus then
+    nExBot.EventBus:emit(nExBot.EventBus.Events.MODULE_ENABLED, "nExBot", version)
+  end
   
   nExBot.initialized = true
   logInfo("nExBot initialization complete")

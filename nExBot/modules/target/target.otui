@@ -1,0 +1,601 @@
+/* 
+  Target Tab OTUI Styles
+  nExBot Target Tab windows and widgets
+  
+  Author: nExBot Team
+  Version: 1.0.0
+*/
+
+/* TargetBot Main Window */
+TargetBotWindow < MainWindow
+  id: targetBotWindow
+  !text: tr('TargetBot Settings')
+  size: 400 450
+  @onEscape: self:hide()
+
+  Label
+    id: settingsLabel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text-align: center
+    font: verdana-11px-rounded
+    color: #ffffff
+    text: Target Settings
+
+  /* Attack Range */
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+    text: Attack Range:
+    width: 100
+    
+  HorizontalScrollBar
+    id: rangeSlider
+    anchors.top: prev.top
+    anchors.left: prev.right
+    anchors.right: parent.right
+    margin-right: 50
+    margin-left: 5
+    minimum: 1
+    maximum: 8
+    value: 7
+    step: 1
+
+  Label
+    id: rangeValue
+    anchors.top: prev.top
+    anchors.left: prev.right
+    anchors.right: parent.right
+    margin-left: 5
+    text: 7
+    text-align: center
+
+  /* Chase Mode */
+  CheckBox
+    id: chaseCheck
+    anchors.top: rangeSlider.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    margin-left: 10
+    text: Chase Target
+    checked: true
+    width: 120
+
+  /* Face Target */
+  CheckBox
+    id: faceCheck
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 10
+    text: Face Target
+    checked: true
+    width: 120
+
+  /* Avoid Waves */
+  CheckBox
+    id: avoidCheck
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 5
+    margin-left: 10
+    text: Avoid Waves
+    checked: true
+    width: 120
+
+  /* Anti AFK */
+  CheckBox
+    id: antiAfkCheck
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 10
+    text: Anti AFK
+    checked: false
+    width: 120
+
+  /* Attack Mode */
+  Label
+    anchors.top: avoidCheck.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+    text: Attack Mode:
+    width: 100
+
+  ComboBox
+    id: attackModeCombo
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 120
+    height: 20
+    
+  /* Separator */
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 15
+    margin-left: 10
+    margin-right: 10
+
+  /* Buttons */
+  Button
+    id: saveBtn
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    margin-left: 10
+    margin-bottom: 10
+    width: 80
+    text: Save
+
+  Button
+    id: closeBtn
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    margin-right: 10
+    margin-bottom: 10
+    width: 80
+    text: Close
+
+
+/* Creature Editor Window */
+CreatureEditorWindow < MainWindow
+  id: creatureEditorWindow
+  !text: tr('Creature Editor')
+  size: 500 500
+  @onEscape: self:hide()
+
+  /* Creature List Panel */
+  Panel
+    id: listPanel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.bottom: parent.bottom
+    width: 180
+    margin: 5
+    border: 1 #555555
+    background-color: #22222288
+
+    Label
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 3
+      text-align: center
+      text: Creatures
+      color: #aaaaaa
+
+    TextList
+      id: creatureList
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: listButtons.top
+      margin: 3
+      vertical-scrollbar: creatureListScroll
+
+    VerticalScrollBar
+      id: creatureListScroll
+      anchors.top: creatureList.top
+      anchors.bottom: creatureList.bottom
+      anchors.right: parent.right
+      margin-right: 1
+      step: 14
+      pixels-scroll: true
+
+    Panel
+      id: listButtons
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      height: 25
+
+      Button
+        id: addCreatureBtn
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        margin-left: 3
+        margin-bottom: 3
+        width: 50
+        text: Add
+
+      Button
+        id: removeCreatureBtn
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        margin-right: 3
+        margin-bottom: 3
+        width: 50
+        text: Del
+
+      Button
+        id: importBtn
+        anchors.left: addCreatureBtn.right
+        anchors.right: removeCreatureBtn.left
+        anchors.bottom: parent.bottom
+        margin-left: 3
+        margin-right: 3
+        margin-bottom: 3
+        text: Import
+
+  /* Settings Panel */
+  Panel
+    id: settingsPanel
+    anchors.top: parent.top
+    anchors.left: listPanel.right
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    margin: 5
+    margin-left: 10
+
+    Label
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 3
+      text-align: center
+      text: Creature Settings
+      color: #ffffff
+
+    /* Priority */
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 15
+      text: Priority:
+      width: 80
+
+    SpinBox
+      id: priorityField
+      anchors.top: prev.top
+      anchors.left: prev.right
+      width: 60
+      minimum: 0
+      maximum: 10
+      value: 1
+
+    /* Danger Level */
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 10
+      text: Danger:
+      width: 80
+
+    SpinBox
+      id: dangerField
+      anchors.top: prev.top
+      anchors.left: prev.right
+      width: 60
+      minimum: 0
+      maximum: 10
+      value: 5
+
+    /* Checkboxes */
+    CheckBox
+      id: attackCheck
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 15
+      text: Attack
+      checked: true
+      width: 100
+
+    CheckBox
+      id: lootCheck
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      text: Loot Body
+      checked: true
+      width: 100
+
+    CheckBox
+      id: avoidCheck
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      text: Avoid Waves
+      checked: true
+      width: 100
+
+    CheckBox
+      id: distanceCheck
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      text: Keep Distance
+      checked: false
+      width: 100
+
+    /* Spells Section */
+    HorizontalSeparator
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 15
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 10
+      text: Spells:
+      color: #aaaaaa
+
+    TextList
+      id: spellList
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      height: 80
+      margin-top: 5
+      margin-right: 5
+
+    Button
+      id: addSpellBtn
+      anchors.top: spellList.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      width: 70
+      text: Add Spell
+
+    Button
+      id: removeSpellBtn
+      anchors.top: prev.top
+      anchors.left: prev.right
+      margin-left: 5
+      width: 70
+      text: Remove
+
+    /* Save Button */
+    Button
+      id: saveCreatureBtn
+      anchors.bottom: parent.bottom
+      anchors.right: parent.right
+      margin-bottom: 5
+      margin-right: 5
+      width: 80
+      text: Save
+
+
+/* Creature List Item */
+CreatureListItem < Label
+  font: verdana-11px-rounded
+  background-color: alpha
+  color: #bbbbbb
+  text-offset: 5 2
+  focusable: true
+  phantom: false
+  height: 18
+
+  $hover !disabled:
+    background-color: #ffffff22
+    color: #ffffff
+
+  $focus:
+    background-color: #ffffff44
+    color: #ffffff
+
+  $disabled:
+    color: #666666
+
+
+/* Looting Window */
+LootingWindow < MainWindow
+  id: lootingWindow
+  !text: tr('Looting Settings')
+  size: 380 420
+  @onEscape: self:hide()
+
+  Label
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text-align: center
+    font: verdana-11px-rounded
+    color: #ffffff
+    text: Loot Configuration
+
+  /* Loot Distance */
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+    text: Loot Distance:
+    width: 100
+
+  HorizontalScrollBar
+    id: distanceSlider
+    anchors.top: prev.top
+    anchors.left: prev.right
+    width: 150
+    margin-left: 5
+    minimum: 1
+    maximum: 6
+    value: 3
+    step: 1
+
+  Label
+    id: distanceValue
+    anchors.top: prev.top
+    anchors.left: prev.right
+    width: 30
+    margin-left: 5
+    text: 3
+    text-align: center
+
+  /* Options */
+  CheckBox
+    id: goldOnlyCheck
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    margin-left: 10
+    text: Gold Only
+    width: 120
+
+  CheckBox
+    id: skinCheck
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 10
+    text: Skin Bodies
+    width: 120
+
+  CheckBox
+    id: eatFoodCheck
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 5
+    margin-left: 10
+    text: Eat Food
+    checked: true
+    width: 120
+
+  CheckBox
+    id: openBodiesCheck
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 10
+    text: Open Bodies
+    checked: true
+    width: 120
+
+  /* Separator */
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 15
+    margin-left: 10
+    margin-right: 10
+
+  /* Loot List */
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    margin-left: 10
+    text: Loot Items:
+    color: #aaaaaa
+
+  TextList
+    id: lootList
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: lootButtons.top
+    margin-top: 5
+    margin-left: 10
+    margin-right: 10
+    margin-bottom: 5
+    vertical-scrollbar: lootListScroll
+
+  VerticalScrollBar
+    id: lootListScroll
+    anchors.top: lootList.top
+    anchors.bottom: lootList.bottom
+    anchors.right: lootList.right
+    step: 14
+    pixels-scroll: true
+
+  Panel
+    id: lootButtons
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: statsPanel.top
+    height: 30
+    margin-left: 10
+    margin-right: 10
+    margin-bottom: 5
+
+    Button
+      id: addLootBtn
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      width: 70
+      text: Add
+
+    Button
+      id: removeLootBtn
+      anchors.left: prev.right
+      anchors.verticalCenter: parent.verticalCenter
+      margin-left: 5
+      width: 70
+      text: Remove
+
+    Button
+      id: clearLootBtn
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      width: 70
+      text: Clear
+
+  /* Stats Panel */
+  Panel
+    id: statsPanel
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    height: 55
+    margin: 10
+    border: 1 #444444
+    background-color: #22222288
+
+    Label
+      anchors.top: parent.top
+      anchors.left: parent.left
+      margin-top: 5
+      margin-left: 10
+      text: Session Stats
+      color: #ffffff
+
+    Label
+      id: bodiesLabel
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      margin-left: 10
+      text: Bodies Looted: 0
+      color: #aaaaaa
+
+    Label
+      id: goldLabel
+      anchors.top: prev.top
+      anchors.left: prev.right
+      margin-left: 20
+      text: Gold: 0
+      color: #ffcc00
+
+    Button
+      id: resetStatsBtn
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      margin-right: 10
+      width: 60
+      text: Reset
+
+
+/* Loot Item Row */
+LootListItem < Label
+  font: verdana-11px-rounded
+  background-color: alpha
+  color: #bbbbbb
+  text-offset: 5 2
+  focusable: true
+  phantom: false
+  height: 18
+
+  $hover !disabled:
+    background-color: #ffffff22
+    color: #ffffff
+
+  $focus:
+    background-color: #ffffff44
+    color: #ffffff

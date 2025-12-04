@@ -1,0 +1,373 @@
+-- Regen Tab OTUI Styles --
+
+HealBotWindow < MainWindow
+  size: 400 500
+  padding: 20
+  !text: tr('HealBot Settings')
+  @onEscape: self:hide()
+
+  Panel
+    id: healer
+    anchors.fill: parent
+    
+    Label
+      id: infoLabel
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      text-align: center
+      text: Configure healing spells and items
+      margin-bottom: 10
+
+    HorizontalSeparator
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 5
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 10
+      text: Healing Spells
+      color: #aaaaff
+
+    Panel
+      id: spellList
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      height: 150
+      margin-top: 5
+      border: 1 #555555
+
+    Button
+      id: addSpell
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      width: 80
+      text: Add Spell
+
+    Button
+      id: removeSpell
+      anchors.top: prev.top
+      anchors.left: prev.right
+      margin-left: 5
+      width: 100
+      text: Remove Selected
+
+    HorizontalSeparator
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 10
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 10
+      text: Healing Items
+      color: #aaaaff
+
+    Panel
+      id: itemList
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      height: 100
+      margin-top: 5
+      border: 1 #555555
+
+    Button
+      id: addItem
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      width: 80
+      text: Add Item
+
+    Button
+      id: removeItem
+      anchors.top: prev.top
+      anchors.left: prev.right
+      margin-left: 5
+      width: 100
+      text: Remove Selected
+
+  Panel
+    id: settings
+    anchors.fill: parent
+    visible: false
+
+    Label
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      text-align: center
+      text: HealBot Settings
+      margin-bottom: 10
+
+    BotSwitch
+      id: Visible
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 10
+      text: Check Visibility
+
+    BotSwitch
+      id: Cooldown
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 5
+      text: Check Cooldown
+
+    BotSwitch
+      id: Delay
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 5
+      text: Check Delay
+
+    BotSwitch
+      id: MessageDelay
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 5
+      text: Check Message Delay
+
+    BotSwitch
+      id: Interval
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 5
+      text: Check Interval
+
+    BotSwitch
+      id: Conditions
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 5
+      text: Check Conditions
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 15
+      text: Profile Name:
+      width: 100
+
+    TextEdit
+      id: profileName
+      anchors.top: prev.top
+      anchors.left: prev.right
+      anchors.right: parent.right
+      margin-left: 5
+
+    Panel
+      id: profiles
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      height: 30
+      margin-top: 10
+
+      Button
+        id: ResetSettings
+        anchors.centerIn: parent
+        width: 120
+        text: Reset Profile
+
+  HorizontalSeparator
+    anchors.bottom: next.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-bottom: 8
+
+  Button
+    id: settingsButton
+    !text: tr('Settings')
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    width: 80
+    height: 20
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    width: 64
+    height: 20
+
+ConditionsWindow < MainWindow
+  size: 340 500
+  padding: 20
+  !text: tr('Conditions Settings')
+  @onEscape: self:hide()
+
+  Label
+    id: infoLabel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    text: Status condition management
+    margin-bottom: 10
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Cure Conditions
+    color: #aaaaff
+
+  BotSwitch
+    id: curePoison
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.horizontalCenter
+    margin-top: 5
+    margin-right: 3
+    text: Cure Poison
+
+  BotSwitch
+    id: cureCurse
+    anchors.top: prev.top
+    anchors.left: parent.horizontalCenter
+    anchors.right: parent.right
+    margin-left: 3
+    text: Cure Curse
+
+  BotSwitch
+    id: cureBleed
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.horizontalCenter
+    margin-top: 5
+    margin-right: 3
+    text: Cure Bleed
+
+  BotSwitch
+    id: cureBurn
+    anchors.top: prev.top
+    anchors.left: parent.horizontalCenter
+    anchors.right: parent.right
+    margin-left: 3
+    text: Cure Burn
+
+  BotSwitch
+    id: cureElectrify
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.horizontalCenter
+    margin-top: 5
+    margin-right: 3
+    text: Cure Electrify
+
+  BotSwitch
+    id: cureParalyse
+    anchors.top: prev.top
+    anchors.left: parent.horizontalCenter
+    anchors.right: parent.right
+    margin-left: 3
+    text: Cure Paralyse
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Hold Buffs
+    color: #aaaaff
+
+  BotSwitch
+    id: holdHaste
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Hold Haste
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Haste Spell:
+    width: 100
+
+  TextEdit
+    id: hasteSpell
+    anchors.top: prev.top
+    anchors.left: prev.right
+    anchors.right: parent.right
+    margin-left: 5
+
+  BotSwitch
+    id: holdUtamo
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+    text: Hold Magic Shield
+
+  BotSwitch
+    id: holdUtana
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Hold Invisibility
+
+  BotSwitch
+    id: holdUtura
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Hold Regeneration
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+
+  BotSwitch
+    id: ignoreInPz
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+    text: Ignore in Protection Zone
+
+  HorizontalSeparator
+    anchors.bottom: next.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-bottom: 8
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    width: 64
+    height: 20

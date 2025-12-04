@@ -1,0 +1,430 @@
+-- Cave Tab OTUI Styles --
+
+CaveBotWindow < MainWindow
+  size: 400 500
+  padding: 20
+  !text: tr('CaveBot Configuration')
+  @onEscape: self:hide()
+
+  Label
+    id: infoLabel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    text: Configure CaveBot settings
+    margin-bottom: 10
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Walking Settings
+    color: #aaaaff
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Walk Delay:
+    width: 100
+
+  SpinBox
+    id: walkDelay
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 80
+    minimum: 50
+    maximum: 1000
+    step: 50
+
+  Label
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    text: ms
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Action Delay:
+    width: 100
+
+  SpinBox
+    id: actionDelay
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 80
+    minimum: 100
+    maximum: 2000
+    step: 100
+
+  Label
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    text: ms
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Tool Usage
+    color: #aaaaff
+
+  BotSwitch
+    id: useRope
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.horizontalCenter
+    margin-top: 5
+    margin-right: 3
+    text: Use Rope
+
+  BotSwitch
+    id: useShovel
+    anchors.top: prev.top
+    anchors.left: parent.horizontalCenter
+    anchors.right: parent.right
+    margin-left: 3
+    text: Use Shovel
+
+  BotSwitch
+    id: useMachete
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.horizontalCenter
+    margin-top: 5
+    margin-right: 3
+    text: Use Machete
+
+  BotSwitch
+    id: usePickaxe
+    anchors.top: prev.top
+    anchors.left: parent.horizontalCenter
+    anchors.right: parent.right
+    margin-left: 3
+    text: Use Pickaxe
+
+  BotSwitch
+    id: openDoors
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Open Doors Automatically
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Waypoint List
+    color: #aaaaff
+
+  TextList
+    id: waypointList
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 120
+    margin-top: 5
+    vertical-scrollbar: waypointListScrollBar
+
+  VerticalScrollBar
+    id: waypointListScrollBar
+    anchors.top: waypointList.top
+    anchors.bottom: waypointList.bottom
+    anchors.right: waypointList.right
+    step: 14
+    pixels-scroll: true
+
+  Panel
+    anchors.top: waypointList.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 25
+    margin-top: 5
+
+    Button
+      id: moveUp
+      anchors.left: parent.left
+      anchors.top: parent.top
+      width: 50
+      text: Up
+
+    Button
+      id: moveDown
+      anchors.left: prev.right
+      anchors.top: parent.top
+      margin-left: 3
+      width: 50
+      text: Down
+
+    Button
+      id: removeWp
+      anchors.left: prev.right
+      anchors.top: parent.top
+      margin-left: 3
+      width: 60
+      text: Remove
+
+    Button
+      id: clearAll
+      anchors.left: prev.right
+      anchors.top: parent.top
+      margin-left: 3
+      width: 60
+      text: Clear All
+
+  HorizontalSeparator
+    anchors.bottom: next.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-bottom: 8
+
+  Button
+    id: saveButton
+    !text: tr('Save')
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    width: 64
+    height: 20
+
+  Button
+    id: loadButton
+    !text: tr('Load')
+    anchors.bottom: parent.bottom
+    anchors.left: prev.right
+    margin-left: 5
+    width: 64
+    height: 20
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    width: 64
+    height: 20
+
+DepositorWindow < MainWindow
+  size: 320 400
+  padding: 20
+  !text: tr('Depositor Settings')
+  @onEscape: self:hide()
+
+  Label
+    id: infoLabel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    text: Configure depot settings
+    margin-bottom: 10
+
+  BotSwitch
+    id: depositGold
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+    text: Deposit Gold/Platinum/Crystal
+
+  BotSwitch
+    id: openStash
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Use Stash
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Min Cap to Leave:
+    width: 120
+
+  SpinBox
+    id: minCap
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 80
+    minimum: 0
+    maximum: 1000
+    step: 10
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Items to Deposit
+    color: #aaaaff
+
+  TextList
+    id: depositList
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 100
+    margin-top: 5
+
+  Button
+    id: addItem
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 5
+    width: 50
+    text: Add
+
+  Button
+    id: removeItem
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 60
+    text: Remove
+
+  HorizontalSeparator
+    anchors.bottom: next.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-bottom: 8
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    width: 64
+    height: 20
+
+SupplyCheckWindow < MainWindow
+  size: 320 400
+  padding: 20
+  !text: tr('Supply Check Settings')
+  @onEscape: self:hide()
+
+  Label
+    id: infoLabel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    text: Configure supply checking
+    margin-bottom: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Refill Label:
+    width: 100
+
+  TextEdit
+    id: checkLabel
+    anchors.top: prev.top
+    anchors.left: prev.right
+    anchors.right: parent.right
+    margin-left: 5
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Hunt Label:
+    width: 100
+
+  TextEdit
+    id: goLabel
+    anchors.top: prev.top
+    anchors.left: prev.right
+    anchors.right: parent.right
+    margin-left: 5
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Supplies to Track
+    color: #aaaaff
+
+  TextList
+    id: supplyList
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 150
+    margin-top: 5
+
+  Button
+    id: addSupply
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 5
+    width: 50
+    text: Add
+
+  Button
+    id: editSupply
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 50
+    text: Edit
+
+  Button
+    id: removeSupply
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 60
+    text: Remove
+
+  HorizontalSeparator
+    anchors.bottom: next.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-bottom: 8
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    width: 64
+    height: 20

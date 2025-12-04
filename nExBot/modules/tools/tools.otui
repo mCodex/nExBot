@@ -1,0 +1,573 @@
+ SmartFishingWindow < MainWindow
+  size: 280 280
+  padding: 20
+  !text: tr('Smart Fishing Settings')
+  @onEscape: self:hide()
+
+  Label
+    id: infoLabel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    text: Configure fishing settings
+    margin-bottom: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Fishing Rod:
+    width: 100
+
+  BotItem
+    id: rodItem
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    virtual: true
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Max Tile Items:
+    width: 100
+
+  SpinBox
+    id: maxTileItems
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 60
+    minimum: 1
+    maximum: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Search Radius:
+    width: 100
+
+  SpinBox
+    id: searchRadius
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 60
+    minimum: 1
+    maximum: 10
+
+  BotSwitch
+    id: randomTile
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 15
+    text: Random Tile Selection
+
+  BotSwitch
+    id: autoWalk
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Auto Walk to Water
+
+  BotSwitch
+    id: dropTrash
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Auto Drop Trash Fish
+
+  HorizontalSeparator
+    anchors.bottom: next.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-bottom: 8
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    width: 64
+    height: 20
+
+ContainersWindow < MainWindow
+  size: 320 380
+  padding: 20
+  !text: tr('Container Settings')
+  @onEscape: self:hide()
+
+  Label
+    id: infoLabel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    text: Manage Containers
+    margin-bottom: 10
+
+  CheckBox
+    id: autoOpen
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Auto-Open Containers
+    checked: true
+    width: 200
+
+  CheckBox
+    id: stackGold
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 5
+    text: Stack Gold Coins
+    checked: true
+    width: 200
+
+  CheckBox
+    id: closeFull
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 5
+    text: Close Full Containers
+    width: 200
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Open Containers:
+    color: #aaaaaa
+
+  TextList
+    id: containerList
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 150
+    margin-top: 5
+    vertical-scrollbar: containerListScroll
+
+  VerticalScrollBar
+    id: containerListScroll
+    anchors.top: containerList.top
+    anchors.bottom: containerList.bottom
+    anchors.right: containerList.right
+    step: 14
+    pixels-scroll: true
+
+  Button
+    id: refreshBtn
+    anchors.top: containerList.bottom
+    anchors.left: parent.left
+    margin-top: 5
+    width: 80
+    text: Refresh
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    width: 64
+    height: 20
+
+ContainerListItem < Label
+  font: verdana-11px-rounded
+  background-color: alpha
+  color: #bbbbbb
+  text-offset: 5 2
+  focusable: true
+  height: 18
+
+  $hover !disabled:
+    background-color: #ffffff22
+    color: #ffffff
+
+  $focus:
+    background-color: #ffffff44
+    color: #ffffff
+
+DropperWindow < MainWindow
+  size: 320 380
+  padding: 20
+  !text: tr('Dropper Settings')
+  @onEscape: self:hide()
+
+  Label
+    id: infoLabel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    text: Configure Items to Drop
+    margin-bottom: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Drop Distance:
+    width: 100
+
+  SpinBox
+    id: dropDistance
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 60
+    minimum: 1
+    maximum: 3
+    value: 1
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Drop Delay:
+    width: 100
+
+  SpinBox
+    id: dropDelay
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 80
+    minimum: 100
+    maximum: 5000
+    step: 100
+    value: 500
+
+  Label
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    text: ms
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Items to Drop:
+    color: #aaaaaa
+
+  TextList
+    id: dropList
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 120
+    margin-top: 5
+    vertical-scrollbar: dropListScroll
+
+  VerticalScrollBar
+    id: dropListScroll
+    anchors.top: dropList.top
+    anchors.bottom: dropList.bottom
+    anchors.right: dropList.right
+    step: 14
+    pixels-scroll: true
+
+  Panel
+    id: dropButtons
+    anchors.top: dropList.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 25
+    margin-top: 5
+
+    Button
+      id: addBtn
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      width: 60
+      text: Add
+
+    Button
+      id: removeBtn
+      anchors.left: prev.right
+      anchors.verticalCenter: parent.verticalCenter
+      margin-left: 5
+      width: 60
+      text: Remove
+
+    Button
+      id: defaultsBtn
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      width: 70
+      text: Defaults
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    width: 64
+    height: 20
+
+DropListItem < Label
+  font: verdana-11px-rounded
+  background-color: alpha
+  color: #bbbbbb
+  text-offset: 5 2
+  focusable: true
+  height: 18
+
+  $hover !disabled:
+    background-color: #ffffff22
+    color: #ffffff
+
+  $focus:
+    background-color: #ffffff44
+    color: #ffffff
+
+SmartMountWindow < MainWindow
+  size: 280 300
+  padding: 20
+  !text: tr('Smart Mount Settings')
+  @onEscape: self:hide()
+
+  Label
+    id: infoLabel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    text: Configure mount settings
+    margin-bottom: 10
+
+  BotSwitch
+    id: pzAware
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 15
+    text: Only mount outside PZ
+
+  BotSwitch
+    id: waitPzLock
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Wait for PZ Lock to drop
+
+  BotSwitch
+    id: autoDismount
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Auto dismount in PZ
+
+  BotSwitch
+    id: safeMode
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Don't mount in combat
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    text: Combat Cooldown:
+    width: 110
+
+  SpinBox
+    id: combatCooldown
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 70
+    minimum: 0
+    maximum: 10000
+    step: 500
+
+  Label
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    text: ms
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Min HP%:
+    width: 110
+
+  SpinBox
+    id: minHp
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 70
+    minimum: 0
+    maximum: 100
+    step: 5
+
+  HorizontalSeparator
+    anchors.bottom: next.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-bottom: 8
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    width: 64
+    height: 20
+
+WaveAvoidanceWindow < MainWindow
+  size: 320 380
+  padding: 20
+  !text: tr('Wave Avoidance AI Settings')
+  @onEscape: self:hide()
+
+  Label
+    id: infoLabel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    text: AI-powered wave attack avoidance
+    margin-bottom: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 15
+    text: Check Interval:
+    width: 120
+
+  SpinBox
+    id: checkInterval
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 80
+    minimum: 50
+    maximum: 500
+    step: 50
+
+  Label
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    text: ms
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Safe Distance:
+    width: 120
+
+  SpinBox
+    id: safeDistance
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 80
+    minimum: 1
+    maximum: 8
+    step: 1
+
+  Label
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    text: tiles
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Max Threat Level:
+    width: 120
+
+  SpinBox
+    id: maxThreatLevel
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 5
+    width: 80
+    minimum: 1
+    maximum: 20
+    step: 1
+
+  HorizontalSeparator
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 15
+    margin-bottom: 10
+
+  Label
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text: Behavior Options:
+    margin-top: 5
+    margin-bottom: 5
+
+  BotSwitch
+    id: avoidPlayers
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Avoid Player AoE Attacks
+
+  BotSwitch
+    id: prioritizePath
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Stay on CaveBot Path
+
+  BotSwitch
+    id: debugMode
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 5
+    text: Debug Mode (Show Logs)
+
+  HorizontalSeparator
+    anchors.bottom: next.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-bottom: 8
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    width: 64
+    height: 20
