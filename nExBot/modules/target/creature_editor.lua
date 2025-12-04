@@ -2,7 +2,7 @@
   TargetBot Creature Editor
   
   Visual editor for creature targeting settings.
-  Based on vBot 4.8 creature editor patterns.
+  Based on classic OTClient bot creature editor patterns.
   
   Author: nExBot Team
   Version: 1.0.0

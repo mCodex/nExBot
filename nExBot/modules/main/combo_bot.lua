@@ -2,7 +2,7 @@
   ComboBot Module
   
   Team combo coordination for synchronized attacks.
-  Based on vBot 4.8 combo patterns.
+  Based on classic OTClient bot combo patterns.
   
   Author: nExBot Team
   Version: 1.0.0

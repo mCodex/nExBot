@@ -159,18 +159,50 @@ local function loadFeatureModules()
   return true
 end
 
+-- Load nExBot Design System and styles
+local function loadDesignSystem()
+  local success, err = pcall(function()
+    -- Core design system (must load first)
+    importStyle("/nExBot/styles/nexbot_theme.otui")
+    
+    -- Module-specific styles (extend the design system)
+    importStyle("/nExBot/styles/healbot.otui")
+    importStyle("/nExBot/styles/attackbot.otui")
+    importStyle("/nExBot/styles/extras.otui")
+    importStyle("/nExBot/styles/alarms.otui")
+    importStyle("/nExBot/styles/supplies.otui")
+    importStyle("/nExBot/styles/stashing.otui")
+    importStyle("/nExBot/styles/botserver.otui")
+    importStyle("/nExBot/styles/tools.otui")
+    importStyle("/nExBot/styles/main_tabs.otui")
+    
+    log("Design system loaded successfully")
+  end)
+  
+  if not success then
+    warn("[nExBot] Failed to load design system: " .. tostring(err))
+    return false
+  end
+  
+  return true
+end
+
 -- Load Tools panel modules
 local function loadToolsModules()
   local success, err = pcall(function()
     -- Import styles
     importStyle("/nExBot/modules/tools/tools.otui")
     
+    -- Automation and utility modules
+    dofile("/nExBot/modules/tools/automation.lua")
+    dofile("/nExBot/modules/tools/eat_food.lua")
+    dofile("/nExBot/modules/tools/hold_target.lua")
+    
     -- Tools modules (consolidated)
     dofile("/nExBot/modules/tools/smart_fishing.lua")
     dofile("/nExBot/modules/tools/smart_mount.lua")
     dofile("/nExBot/modules/tools/containers.lua")
     dofile("/nExBot/modules/tools/dropper.lua")
-    dofile("/nExBot/modules/tools/extras.lua")
     
     -- Avoidance UI (uses wave_avoidance.lua engine)
     dofile("/nExBot/modules/avoidance/wave_avoidance_ui.lua")
@@ -186,11 +218,15 @@ local function loadToolsModules()
   return true
 end
 
--- Load Main tab modules (simplified)
+-- Load Main tab modules
 local function loadMainTabModules()
   local success, err = pcall(function()
     -- Import styles
     importStyle("/nExBot/modules/main/main.otui")
+    
+    -- Load main tab modules
+    dofile("/nExBot/modules/main/alarms.lua")
+    dofile("/nExBot/modules/main/attackbot.lua")
     
     -- Load consolidated main tab
     dofile("/nExBot/modules/main/main_tab.lua")
@@ -206,7 +242,7 @@ local function loadMainTabModules()
   return true
 end
 
--- Load Regen tab modules (vBot-style)
+-- Load Regen tab modules
 local function loadRegenTabModules()
   local success, err = pcall(function()
     -- Import styles
@@ -227,7 +263,7 @@ local function loadRegenTabModules()
   return true
 end
 
--- Load Cave tab modules (vBot-style)
+-- Load Cave tab modules
 local function loadCaveTabModules()
   local success, err = pcall(function()
     -- Import styles
@@ -273,6 +309,11 @@ local function initializenExBot()
     return true
   end
   
+  -- Load design system first
+  if not loadDesignSystem() then
+    warn("[nExBot] Design system failed to load, continuing with default styles")
+  end
+  
   -- Load core
   if not loadCoreModules() then
     return false
@@ -284,7 +325,7 @@ local function initializenExBot()
     warn("[nExBot] Some feature modules failed to load, continuing with available modules")
   end
   
-  -- Load vBot-style tab modules
+  -- Load tab modules
   if not loadMainTabModules() then
     warn("[nExBot] Some Main tab modules failed to load, continuing with available modules")
   end

@@ -1,0 +1,180 @@
+/*
+  nExBot Design System - Alarms Module
+  Audio and visual alerts for various game events
+*/
+
+AlarmsWindow < MainWindow
+  id: AlarmsWindow
+  !text: tr('Alarms')
+  size: 400 380
+  @onEscape: self:hide()
+
+  FlatPanel
+    id: alarmsPanel
+    anchors.fill: parent
+    anchors.bottom: separator.top
+    margin-bottom: 8
+    padding: 10
+    layout:
+      type: verticalBox
+
+    Label
+      text: Alarm Configuration
+      text-align: center
+      font: verdana-11px-rounded
+      color: #ff4513
+
+    HorizontalSeparator
+      margin-bottom: 10
+
+    /* Health Alarm */
+    AlarmCheckBoxAndSpinBox
+      id: HealthAlarm
+
+      AlarmCheckBox
+        id: enabled
+        text: Health Below
+
+      SpinBox
+        id: value
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        minimum: 0
+        maximum: 100
+        step: 5
+        width: 60
+
+      Label
+        anchors.right: prev.left
+        anchors.verticalCenter: parent.verticalCenter
+        margin-right: 5
+        text: '%'
+        font: verdana-11px-rounded
+
+    /* Mana Alarm */
+    AlarmCheckBoxAndSpinBox
+      id: ManaAlarm
+
+      AlarmCheckBox
+        id: enabled
+        text: Mana Below
+
+      SpinBox
+        id: value
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        minimum: 0
+        maximum: 100
+        step: 5
+        width: 60
+
+      Label
+        anchors.right: prev.left
+        anchors.verticalCenter: parent.verticalCenter
+        margin-right: 5
+        text: '%'
+        font: verdana-11px-rounded
+
+    /* Damage Alarm */
+    AlarmCheckBoxAndSpinBox
+      id: DamageAlarm
+
+      AlarmCheckBox
+        id: enabled
+        text: Damage Taken Over
+
+      SpinBox
+        id: value
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        minimum: 0
+        maximum: 10000
+        step: 100
+        width: 70
+
+    /* Player On Screen */
+    AlarmCheckBox
+      id: PlayerOnScreen
+      text: Player on Screen
+      margin-top: 7
+
+    /* Player Attacks */
+    AlarmCheckBox
+      id: PlayerAttacks
+      text: Player Attacks
+      margin-top: 7
+
+    /* Private Message */
+    AlarmCheckBox
+      id: PrivateMessage
+      text: Private Message
+      margin-top: 7
+
+    /* Default Message */
+    AlarmCheckBox
+      id: DefaultMessage
+      text: Default Message
+      margin-top: 7
+
+    /* Creature Detection */
+    HorizontalSeparator
+      margin-top: 10
+      margin-bottom: 5
+
+    Label
+      text: Creature Detection
+      text-align: center
+      font: verdana-11px-rounded
+      color: #269e26
+
+    AlarmCheckBoxAndTextEdit
+      id: CreatureAlarm
+
+      AlarmCheckBox
+        id: enabled
+        text: Creature Name:
+
+      ExtrasTextEdit
+        id: value
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        width: 150
+
+    /* Item On Floor */
+    AlarmCheckBoxAndTextEdit
+      id: ItemAlarm
+
+      AlarmCheckBox
+        id: enabled
+        text: Item On Floor:
+
+      ExtrasTextEdit
+        id: value
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        width: 150
+
+  HorizontalSeparator
+    id: separator
+    anchors.right: parent.right
+    anchors.left: parent.left
+    anchors.bottom: closeButton.top
+    margin-bottom: 8
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    font: cipsoftFont
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    size: 45 21
+    margin-right: 5
+
+  Button
+    id: testButton
+    !text: tr('Test')
+    font: cipsoftFont
+    anchors.left: parent.left
+    anchors.bottom: parent.bottom
+    size: 45 21
+    margin-left: 5

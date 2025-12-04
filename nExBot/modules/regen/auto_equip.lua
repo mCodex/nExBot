@@ -2,7 +2,7 @@
   Auto Equip Module
   
   Automatic equipment switching based on conditions.
-  Based on vBot 4.8 equip patterns.
+  Based on classic OTClient bot equip patterns.
   
   Author: nExBot Team
   Version: 1.0.0

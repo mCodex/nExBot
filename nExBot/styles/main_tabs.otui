@@ -1,0 +1,559 @@
+/*
+  nExBot Design System - Main Tabs Layout
+  Primary navigation with 5 tabs: Main, Tools, Cave, Target, HP
+*/
+
+/* Tab Button Style */
+TabButton < Button
+  size: 80 25
+  font: verdana-11px-rounded
+
+  $on:
+    color: #00ff00
+
+/* Profile Button Style - smaller */
+ProfileButton < Button
+  size: 25 20
+  font: cipsoftFont
+  text-offset: 0 0
+
+  $on:
+    color: #00ff00
+
+/* Module Panel - used for each feature panel */
+ModulePanel < FlatPanel
+  height: 50
+  margin-top: 5
+  padding: 5
+
+  BotSwitch
+    id: enabled
+    anchors.left: parent.left
+    anchors.verticalCenter: parent.verticalCenter
+    width: 160
+
+  Button
+    id: setup
+    anchors.right: parent.right
+    anchors.verticalCenter: parent.verticalCenter
+    text: Setup
+    size: 45 20
+    font: cipsoftFont
+
+/* Module Panel with profiles */
+ModulePanelWithProfiles < FlatPanel
+  height: 50
+  margin-top: 5
+  padding: 5
+
+  BotSwitch
+    id: enabled
+    anchors.left: parent.left
+    anchors.verticalCenter: parent.verticalCenter
+    width: 130
+
+  ProfileButton
+    id: profile1
+    anchors.right: profile2.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-right: 2
+    text: 1
+
+  ProfileButton
+    id: profile2
+    anchors.right: profile3.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-right: 2
+    text: 2
+
+  ProfileButton
+    id: profile3
+    anchors.right: profile4.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-right: 2
+    text: 3
+
+  ProfileButton
+    id: profile4
+    anchors.right: profile5.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-right: 2
+    text: 4
+
+  ProfileButton
+    id: profile5
+    anchors.right: setup.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-right: 5
+    text: 5
+
+  Button
+    id: setup
+    anchors.right: parent.right
+    anchors.verticalCenter: parent.verticalCenter
+    text: Setup
+    size: 45 20
+    font: cipsoftFont
+
+/* ===================== */
+/* MAIN TAB              */
+/* ===================== */
+MainTabPanel < Panel
+  layout:
+    type: verticalBox
+
+  /* Bot Server */
+  ModulePanel
+    id: BotServerPanel
+
+    BotSwitch
+      id: enabled
+      text: Bot Server
+
+  /* Alarms */
+  ModulePanel
+    id: AlarmsPanel
+
+    BotSwitch
+      id: enabled
+      text: Alarms
+
+  /* PushMax */
+  ModulePanel
+    id: PushMaxPanel
+
+    BotSwitch
+      id: enabled
+      text: PushMax
+
+  /* Combo Bot */
+  ModulePanel
+    id: ComboBotPanel
+
+    BotSwitch
+      id: enabled
+      text: Combo Bot
+
+  /* Friend Healer */
+  ModulePanelWithProfiles
+    id: FriendHealerPanel
+
+    BotSwitch
+      id: enabled
+      text: Friend Healer
+
+  /* Attack Bot */
+  ModulePanelWithProfiles
+    id: AttackBotPanel
+
+    BotSwitch
+      id: enabled
+      text: Attack Bot
+
+/* ===================== */
+/* TOOLS TAB             */
+/* ===================== */
+ToolsTabPanel < Panel
+  layout:
+    type: verticalBox
+
+  /* Extras */
+  ModulePanel
+    id: ExtrasPanel
+
+    BotSwitch
+      id: enabled
+      text: Extras
+
+  /* Eat Food */
+  FlatPanel
+    id: EatFoodPanel
+    height: 30
+    margin-top: 5
+    padding: 5
+
+    BotSwitch
+      id: enabled
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      text: Eat Food
+      width: 160
+
+  /* Cast Food */
+  FlatPanel
+    id: CastFoodPanel
+    height: 30
+    margin-top: 3
+    padding: 5
+
+    BotSwitch
+      id: enabled
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      text: Cast Food
+      width: 160
+
+  /* Fishing */
+  ModulePanel
+    id: FishingPanel
+    height: 30
+    margin-top: 3
+    padding: 5
+
+    BotSwitch
+      id: enabled
+      text: Fishing
+      width: 160
+
+  /* Auto Mount */
+  FlatPanel
+    id: AutoMountPanel
+    height: 30
+    margin-top: 3
+    padding: 5
+
+    BotSwitch
+      id: enabled
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      text: Auto Mount
+      width: 160
+
+  /* Dropper */
+  ModulePanel
+    id: DropperPanel
+
+    BotSwitch
+      id: enabled
+      text: Dropper
+
+  /* Containers */
+  ModulePanel
+    id: ContainersPanel
+
+    BotSwitch
+      id: enabled
+      text: Containers
+
+  /* Quiver Manager */
+  ModulePanel
+    id: QuiverManagerPanel
+
+    BotSwitch
+      id: enabled
+      text: Quiver Manager
+
+  /* Exchange Money */
+  ModulePanel
+    id: ExchangeMoneyPanel
+
+    BotSwitch
+      id: enabled
+      text: Exchange Money
+
+  /* Anti-RS */
+  ModulePanel
+    id: AntiRsPanel
+
+    BotSwitch
+      id: enabled
+      text: Anti-RS
+
+  /* Depot Withdraw */
+  ModulePanel
+    id: DepotWithdrawPanel
+
+    BotSwitch
+      id: enabled
+      text: Depot Withdraw
+
+  /* Hold Target */
+  ModulePanel
+    id: HoldTargetPanel
+
+    BotSwitch
+      id: enabled
+      text: Hold Target
+
+/* ===================== */
+/* CAVE TAB              */
+/* ===================== */
+CaveTabPanel < Panel
+  layout:
+    type: verticalBox
+
+  /* CaveBot */
+  ModulePanelWithProfiles
+    id: CaveBotPanel
+
+    BotSwitch
+      id: enabled
+      text: CaveBot
+
+  /* Supply Settings */
+  ModulePanel
+    id: SupplySettingsPanel
+
+    BotSwitch
+      id: enabled
+      text: Supply Settings
+
+  /* Stashing Settings */
+  ModulePanel
+    id: StashingSettingsPanel
+
+    BotSwitch
+      id: enabled
+      text: Stashing Settings
+
+  /* Sell Exceptions */
+  ModulePanel
+    id: SellExceptionsPanel
+
+    BotSwitch
+      id: enabled
+      text: Sell Exceptions
+      width: 160
+
+  /* Refill Settings */
+  FlatPanel
+    id: RefillPanel
+    height: 100
+    margin-top: 5
+    padding: 8
+
+    Label
+      text: Refill Settings
+      anchors.top: parent.top
+      anchors.left: parent.left
+      font: verdana-11px-rounded
+      color: #269e26
+
+    HorizontalSeparator
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+
+    SettingCheckBox
+      id: CapSwitch
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      text: Leave when cap low
+
+    SettingCheckBox
+      id: StaminaSwitch
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      text: Leave when stamina low
+
+    SettingCheckBox
+      id: SoftBoots
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      text: Refill soft boots
+
+/* ===================== */
+/* TARGET TAB            */
+/* ===================== */
+TargetTabPanel < Panel
+  layout:
+    type: verticalBox
+
+  /* Target Bot */
+  ModulePanelWithProfiles
+    id: TargetBotPanel
+
+    BotSwitch
+      id: enabled
+      text: TargetBot
+
+  /* Looting */
+  ModulePanelWithProfiles
+    id: LootingPanel
+
+    BotSwitch
+      id: enabled
+      text: Looting
+
+  /* Creature Editor */
+  ModulePanel
+    id: CreatureEditorPanel
+
+    BotSwitch
+      id: enabled
+      text: Creature Editor
+
+  /* Lure Settings */
+  FlatPanel
+    id: LurePanel
+    height: 60
+    margin-top: 5
+    padding: 8
+
+    Label
+      text: Lure Settings
+      anchors.top: parent.top
+      anchors.left: parent.left
+      font: verdana-11px-rounded
+      color: #ff4513
+
+    HorizontalSeparator
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+
+    SettingCheckBox
+      id: LureEnabled
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      text: Enable Lure Mode
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      text: Lure Count:
+      font: verdana-11px-rounded
+      margin-top: 3
+
+    SpinBox
+      id: LureCount
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 10
+      minimum: 1
+      maximum: 20
+      step: 1
+      width: 50
+
+/* ===================== */
+/* HP TAB (Regen)        */
+/* ===================== */
+HpTabPanel < Panel
+  layout:
+    type: verticalBox
+
+  /* HealBot */
+  ModulePanelWithProfiles
+    id: HealBotPanel
+
+    BotSwitch
+      id: enabled
+      text: HealBot
+
+  /* Mana Training */
+  FlatPanel
+    id: ManaTrainingPanel
+    height: 60
+    margin-top: 5
+    padding: 8
+
+    Label
+      text: Mana Training
+      anchors.top: parent.top
+      anchors.left: parent.left
+      font: verdana-11px-rounded
+      color: #269e26
+
+    HorizontalSeparator
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+
+    SettingCheckBox
+      id: ManaTrainEnabled
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      text: Enable Mana Training
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      text: Train when mana above:
+      font: verdana-11px-rounded
+      margin-top: 3
+
+    SpinBox
+      id: ManaTrainValue
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 10
+      minimum: 0
+      maximum: 100
+      step: 5
+      width: 60
+
+    Label
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 3
+      text: '%'
+      font: verdana-11px-rounded
+
+  /* Equip */
+  ModulePanel
+    id: EquipPanel
+
+    BotSwitch
+      id: enabled
+      text: Equipper
+
+  /* Conditions */
+  FlatPanel
+    id: ConditionsPanel
+    height: 100
+    margin-top: 5
+    padding: 8
+
+    Label
+      text: Condition Curing
+      anchors.top: parent.top
+      anchors.left: parent.left
+      font: verdana-11px-rounded
+      color: #ff4513
+
+    HorizontalSeparator
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+
+    SettingCheckBox
+      id: CurePoison
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 5
+      text: Cure Poison
+
+    SettingCheckBox
+      id: CureBleeding
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      text: Cure Bleeding
+
+    SettingCheckBox
+      id: CureBurning
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      text: Cure Burning
+
+    SettingCheckBox
+      id: CureCurse
+      anchors.top: parent.top
+      anchors.right: parent.right
+      margin-top: 25
+      margin-right: 100
+      text: Cure Curse
+
+    SettingCheckBox
+      id: CureElectrify
+      anchors.top: prev.bottom
+      anchors.left: prev.left
+      text: Cure Electrify
+
+    SettingCheckBox
+      id: CureParalyze
+      anchors.top: prev.bottom
+      anchors.left: prev.left
+      text: Cure Paralyze

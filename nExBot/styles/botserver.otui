@@ -1,0 +1,462 @@
+/*
+  nExBot Design System - BotServer Module
+  Multiplayer coordination and team features
+*/
+
+BotServerWindow < MainWindow
+  id: BotServerWindow
+  !text: tr('Bot Server')
+  size: 350 300
+  @onEscape: self:hide()
+
+  FlatPanel
+    id: serverPanel
+    anchors.fill: parent
+    anchors.bottom: separator.top
+    margin-bottom: 8
+    padding: 10
+    layout:
+      type: verticalBox
+
+    Label
+      text: Bot Server Configuration
+      text-align: center
+      font: verdana-11px-rounded
+      color: #269e26
+
+    HorizontalSeparator
+      margin-bottom: 10
+
+    SettingCheckBox
+      id: Enabled
+      text: Enable Bot Server
+      margin-top: 5
+
+    HorizontalSeparator
+      margin-top: 10
+      margin-bottom: 10
+
+    Label
+      text: Server Name:
+      font: verdana-11px-rounded
+
+    TextEdit
+      id: ServerName
+      margin-top: 3
+
+    Label
+      text: Server Password (optional):
+      font: verdana-11px-rounded
+      margin-top: 10
+
+    TextEdit
+      id: ServerPassword
+      margin-top: 3
+
+    HorizontalSeparator
+      margin-top: 15
+      margin-bottom: 10
+
+    Label
+      id: StatusLabel
+      text: Status: Disconnected
+      text-align: center
+      font: verdana-11px-rounded
+      color: #ff4513
+
+    Label
+      id: PlayersLabel
+      text: Connected Players: 0
+      text-align: center
+      font: verdana-11px-rounded
+      margin-top: 5
+
+  HorizontalSeparator
+    id: separator
+    anchors.right: parent.right
+    anchors.left: parent.left
+    anchors.bottom: closeButton.top
+    margin-bottom: 8
+
+  Button
+    id: connectButton
+    !text: tr('Connect')
+    font: cipsoftFont
+    anchors.left: parent.left
+    anchors.bottom: parent.bottom
+    size: 60 21
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    font: cipsoftFont
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    size: 45 21
+    margin-right: 5
+
+/* Combo Bot Window */
+ComboBotWindow < MainWindow
+  id: ComboBotWindow
+  !text: tr('Combo Bot')
+  size: 400 350
+  @onEscape: self:hide()
+
+  FlatPanel
+    id: comboPanel
+    anchors.fill: parent
+    anchors.bottom: separator.top
+    margin-bottom: 8
+    padding: 10
+
+    Label
+      text: Combo Bot Configuration
+      text-align: center
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      font: verdana-11px-rounded
+      color: #ff4513
+
+    HorizontalSeparator
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-bottom: 10
+
+    SettingCheckBox
+      id: Enabled
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      text: Enable Combo Bot
+      margin-top: 10
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 15
+      text: Trigger Word:
+      font: verdana-11px-rounded
+
+    TextEdit
+      id: TriggerWord
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 3
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 10
+      text: Spell to Cast:
+      font: verdana-11px-rounded
+
+    TextEdit
+      id: ComboSpell
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 3
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 10
+      text: Delay (ms):
+      font: verdana-11px-rounded
+
+    SpinBox
+      id: ComboDelay
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      margin-top: 3
+      minimum: 0
+      maximum: 5000
+      step: 100
+      width: 80
+
+  HorizontalSeparator
+    id: separator
+    anchors.right: parent.right
+    anchors.left: parent.left
+    anchors.bottom: closeButton.top
+    margin-bottom: 8
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    font: cipsoftFont
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    size: 45 21
+    margin-right: 5
+
+/* Friend Healer Window */
+FriendHealerWindow < MainWindow
+  id: FriendHealerWindow
+  !text: tr('Friend Healer')
+  size: 450 400
+  @onEscape: self:hide()
+
+  /* Profile Buttons */
+  Panel
+    id: profilePanel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 25
+
+    ProfileLabel
+      id: profile1
+      anchors.left: parent.left
+      text: 1
+      width: 50
+
+    ProfileLabel
+      id: profile2
+      anchors.left: prev.right
+      margin-left: 5
+      text: 2
+      width: 50
+
+    ProfileLabel
+      id: profile3
+      anchors.left: prev.right
+      margin-left: 5
+      text: 3
+      width: 50
+
+    ProfileLabel
+      id: profile4
+      anchors.left: prev.right
+      margin-left: 5
+      text: 4
+      width: 50
+
+    ProfileLabel
+      id: profile5
+      anchors.left: prev.right
+      margin-left: 5
+      text: 5
+      width: 50
+
+  FlatPanel
+    id: healerPanel
+    anchors.top: profilePanel.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: separator.top
+    margin-top: 8
+    margin-bottom: 8
+    padding: 10
+
+    /* Friend List */
+    Label
+      text: Friend List:
+      anchors.top: parent.top
+      anchors.left: parent.left
+      font: verdana-11px-rounded
+
+    TextList
+      id: friendList
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.bottom: addFriendEdit.top
+      width: 180
+      margin-top: 5
+      margin-bottom: 5
+      padding: 1
+      vertical-scrollbar: friendScrollBar
+
+    VerticalScrollBar
+      id: friendScrollBar
+      anchors.top: friendList.top
+      anchors.bottom: friendList.bottom
+      anchors.right: friendList.right
+      step: 14
+      pixels-scroll: true
+
+    TextEdit
+      id: addFriendEdit
+      anchors.bottom: parent.bottom
+      anchors.left: parent.left
+      width: 130
+
+    Button
+      id: addFriendBtn
+      anchors.bottom: parent.bottom
+      anchors.left: prev.right
+      margin-left: 5
+      text: Add
+      size: 45 21
+
+    /* Heal Settings */
+    VerticalSeparator
+      anchors.left: friendList.right
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      margin-left: 10
+
+    Label
+      text: Heal Settings:
+      anchors.top: parent.top
+      anchors.left: prev.right
+      margin-left: 10
+      font: verdana-11px-rounded
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: prev.left
+      margin-top: 15
+      text: Heal Spell:
+      font: verdana-11px-rounded
+
+    TextEdit
+      id: HealSpell
+      anchors.top: prev.bottom
+      anchors.left: prev.left
+      anchors.right: parent.right
+      margin-top: 3
+
+    Label
+      anchors.top: prev.bottom
+      anchors.left: prev.left
+      margin-top: 10
+      text: Heal when HP below:
+      font: verdana-11px-rounded
+
+    SpinBox
+      id: HealPercent
+      anchors.top: prev.bottom
+      anchors.left: prev.left
+      margin-top: 3
+      minimum: 1
+      maximum: 100
+      step: 5
+      width: 70
+
+    Label
+      anchors.right: parent.right
+      anchors.verticalCenter: prev.verticalCenter
+      text: '%'
+      font: verdana-11px-rounded
+
+    Label
+      anchors.top: HealPercent.bottom
+      anchors.left: HealPercent.left
+      margin-top: 10
+      text: Min Mana:
+      font: verdana-11px-rounded
+
+    SpinBox
+      id: MinMana
+      anchors.top: prev.bottom
+      anchors.left: prev.left
+      margin-top: 3
+      minimum: 0
+      maximum: 50000
+      step: 100
+      width: 80
+
+    SettingCheckBox
+      id: HealKnights
+      anchors.top: prev.bottom
+      anchors.left: prev.left
+      margin-top: 15
+      text: Heal Knights
+
+    SettingCheckBox
+      id: HealPaladins
+      anchors.top: prev.bottom
+      anchors.left: prev.left
+      text: Heal Paladins
+
+    SettingCheckBox
+      id: HealMages
+      anchors.top: prev.bottom
+      anchors.left: prev.left
+      text: Heal Mages
+
+  HorizontalSeparator
+    id: separator
+    anchors.right: parent.right
+    anchors.left: parent.left
+    anchors.bottom: closeButton.top
+    margin-bottom: 8
+
+  Button
+    id: removeFriendBtn
+    !text: tr('Remove')
+    font: cipsoftFont
+    anchors.left: parent.left
+    anchors.bottom: parent.bottom
+    size: 60 21
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    font: cipsoftFont
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    size: 45 21
+    margin-right: 5
+
+/* PushMax Window */
+PushMaxWindow < MainWindow
+  id: PushMaxWindow
+  !text: tr('PushMax')
+  size: 300 200
+  @onEscape: self:hide()
+
+  FlatPanel
+    id: pushPanel
+    anchors.fill: parent
+    anchors.bottom: separator.top
+    margin-bottom: 8
+    padding: 10
+    layout:
+      type: verticalBox
+
+    Label
+      text: PushMax Configuration
+      text-align: center
+      font: verdana-11px-rounded
+      color: #269e26
+
+    HorizontalSeparator
+      margin-bottom: 10
+
+    SettingCheckBox
+      id: Enabled
+      text: Enable PushMax
+      margin-top: 5
+
+    Label
+      text: Max creatures to push:
+      font: verdana-11px-rounded
+      margin-top: 15
+
+    SpinBox
+      id: MaxPush
+      margin-top: 3
+      minimum: 1
+      maximum: 10
+      step: 1
+      width: 60
+
+  HorizontalSeparator
+    id: separator
+    anchors.right: parent.right
+    anchors.left: parent.left
+    anchors.bottom: closeButton.top
+    margin-bottom: 8
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    font: cipsoftFont
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    size: 45 21
+    margin-right: 5

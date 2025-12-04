@@ -268,7 +268,7 @@ local function profileChange()
   activeProfileColor()
   setProfileName()
   ui.title:setOn(currentSettings.enabled)
-  vBotConfigSave("heal")
+  nexbotConfigSave("heal")
 end
 
 --[[
@@ -282,7 +282,7 @@ ui.title:setOn(currentSettings.enabled)
 ui.title.onClick = function(widget)
   currentSettings.enabled = not currentSettings.enabled
   widget:setOn(currentSettings.enabled)
-  vBotConfigSave("heal")
+  nexbotConfigSave("heal")
 end
 
 -- Profile selection buttons (1-5)
@@ -310,7 +310,7 @@ if rootWidget then
     -- Save config when window closes
     healWindow.onVisibilityChange = function(widget, visible)
       if not visible then
-        vBotConfigSave("heal")
+        nexbotConfigSave("heal")
         if healWindow.healer then healWindow.healer:show() end
         if healWindow.settings then healWindow.settings:hide() end
         if healWindow.settingsButton then healWindow.settingsButton:setText("Settings") end
@@ -351,7 +351,7 @@ end
 
 --- Saves HealBot configuration to storage
 -- @param configType (string) Type identifier (used for logging)
-function vBotConfigSave(configType)
+function nexbotConfigSave(configType)
   storage.HealBotConfig = HealBotConfig
 end
 
@@ -499,14 +499,14 @@ HealBot = {
   setOff = function()
     currentSettings.enabled = false
     ui.title:setOn(false)
-    vBotConfigSave("heal")
+    nexbotConfigSave("heal")
   end,
   
   --- Enables HealBot
   setOn = function()
     currentSettings.enabled = true
     ui.title:setOn(true)
-    vBotConfigSave("heal")
+    nexbotConfigSave("heal")
   end,
   
   --- Gets the current active profile number
@@ -550,7 +550,7 @@ HealBot = {
       maxValue = maxValue or 60,
       cost = cost or 20
     })
-    vBotConfigSave("heal")
+    nexbotConfigSave("heal")
   end,
   
   --- Programmatically adds an item/potion rule to current profile
@@ -566,7 +566,7 @@ HealBot = {
       minValue = minValue or 0,
       maxValue = maxValue or 30
     })
-    vBotConfigSave("heal")
+    nexbotConfigSave("heal")
   end,
   
   --- Sets standby mode for spell healing

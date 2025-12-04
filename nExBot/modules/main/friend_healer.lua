@@ -2,7 +2,7 @@
   Friend Healer Module
   
   Automated healing for party members and friends.
-  Based on vBot 4.8 new_healer patterns.
+  Based on classic OTClient bot new_healer patterns.
   
   Author: nExBot Team
   Version: 1.0.0

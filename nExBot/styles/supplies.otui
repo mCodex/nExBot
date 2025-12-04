@@ -1,0 +1,277 @@
+/*
+  nExBot Design System - Supplies Module
+  Supply management and refill configuration
+*/
+
+/* Supply Item Panel */
+SupplyItemPanel < FlatPanel
+  height: 50
+  padding: 5
+
+  BotItem
+    id: item
+    anchors.left: parent.left
+    anchors.verticalCenter: parent.verticalCenter
+
+  Label
+    id: name
+    anchors.left: prev.right
+    anchors.top: parent.top
+    margin-left: 8
+    font: verdana-11px-rounded
+    text: Supply Name
+
+  Label
+    id: minLabel
+    anchors.left: item.right
+    anchors.bottom: parent.bottom
+    margin-left: 8
+    font: verdana-11px-rounded
+    text: Min:
+
+  TextEdit
+    id: minValue
+    anchors.left: prev.right
+    anchors.bottom: parent.bottom
+    margin-left: 3
+    width: 45
+
+  Label
+    id: maxLabel
+    anchors.left: prev.right
+    anchors.bottom: parent.bottom
+    margin-left: 8
+    font: verdana-11px-rounded
+    text: Max:
+
+  TextEdit
+    id: maxValue
+    anchors.left: prev.right
+    anchors.bottom: parent.bottom
+    margin-left: 3
+    width: 45
+
+  Label
+    id: currentLabel
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    margin-right: 5
+    font: verdana-11px-rounded
+    text: Current: 0
+    color: #269e26
+
+/* Supply Settings Window */
+SupplySettingsWindow < MainWindow
+  id: SupplySettingsWindow
+  !text: tr('Supply Settings')
+  size: 450 500
+  @onEscape: self:hide()
+
+  /* Profile Buttons */
+  Panel
+    id: profilePanel
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 25
+
+    ProfileLabel
+      id: profile1
+      anchors.left: parent.left
+      text: 1
+      width: 50
+
+    ProfileLabel
+      id: profile2
+      anchors.left: prev.right
+      margin-left: 5
+      text: 2
+      width: 50
+
+    ProfileLabel
+      id: profile3
+      anchors.left: prev.right
+      margin-left: 5
+      text: 3
+      width: 50
+
+    ProfileLabel
+      id: profile4
+      anchors.left: prev.right
+      margin-left: 5
+      text: 4
+      width: 50
+
+    ProfileLabel
+      id: profile5
+      anchors.left: prev.right
+      margin-left: 5
+      text: 5
+      width: 50
+
+  /* Supply List */
+  FlatPanel
+    id: supplyListPanel
+    anchors.top: profilePanel.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: optionsPanel.top
+    margin-top: 8
+    margin-bottom: 8
+    padding: 5
+
+    ScrollablePanel
+      id: supplyList
+      anchors.fill: parent
+      vertical-scrollbar: supplyScrollBar
+      layout:
+        type: verticalBox
+
+    VerticalScrollBar
+      id: supplyScrollBar
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      anchors.right: parent.right
+      step: 50
+      pixels-scroll: true
+
+  /* Options Panel */
+  FlatPanel
+    id: optionsPanel
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: separator.top
+    height: 100
+    margin-bottom: 8
+    padding: 8
+    layout:
+      type: verticalBox
+
+    Label
+      text: Additional Options
+      text-align: center
+      font: verdana-11px-rounded
+
+    HorizontalSeparator
+      margin-bottom: 5
+
+    SettingCheckBox
+      id: CapSwitch
+      text: Leave spawn when cap is low
+
+    SettingCheckBox
+      id: SoftBoots
+      text: Refill soft boots
+
+    SettingCheckBox
+      id: StaminaSwitch
+      text: Leave when stamina is low
+
+    SettingCheckBox
+      id: ImbueCheck
+      text: Check imbues before hunting
+
+  HorizontalSeparator
+    id: separator
+    anchors.right: parent.right
+    anchors.left: parent.left
+    anchors.bottom: closeButton.top
+    margin-bottom: 8
+
+  Button
+    id: addSupplyBtn
+    !text: tr('Add Supply')
+    font: cipsoftFont
+    anchors.left: parent.left
+    anchors.bottom: parent.bottom
+    size: 80 21
+
+  Button
+    id: closeButton
+    !text: tr('Close')
+    font: cipsoftFont
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    size: 45 21
+    margin-right: 5
+
+/* Add Supply Dialog */
+AddSupplyDialog < MainWindow
+  id: AddSupplyDialog
+  !text: tr('Add Supply')
+  size: 300 150
+  @onEscape: self:hide()
+
+  Label
+    anchors.top: parent.top
+    anchors.left: parent.left
+    text: Item:
+    font: verdana-11px-rounded
+
+  BotItem
+    id: supplyItem
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 5
+
+  Label
+    anchors.top: parent.top
+    anchors.left: prev.right
+    margin-left: 20
+    text: Name:
+    font: verdana-11px-rounded
+
+  TextEdit
+    id: supplyName
+    anchors.top: prev.bottom
+    anchors.left: supplyItem.right
+    anchors.right: parent.right
+    margin-left: 20
+    margin-top: 5
+
+  Label
+    anchors.top: supplyItem.bottom
+    anchors.left: parent.left
+    margin-top: 10
+    text: Min Amount:
+    font: verdana-11px-rounded
+
+  TextEdit
+    id: minAmount
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    width: 80
+    margin-top: 3
+
+  Label
+    anchors.top: supplyItem.bottom
+    anchors.left: minAmount.right
+    margin-top: 10
+    margin-left: 20
+    text: Max Amount:
+    font: verdana-11px-rounded
+
+  TextEdit
+    id: maxAmount
+    anchors.top: prev.bottom
+    anchors.left: minAmount.right
+    width: 80
+    margin-left: 20
+    margin-top: 3
+
+  Button
+    id: addButton
+    !text: tr('Add')
+    font: cipsoftFont
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    size: 45 21
+
+  Button
+    id: cancelButton
+    !text: tr('Cancel')
+    font: cipsoftFont
+    anchors.right: prev.left
+    anchors.bottom: parent.bottom
+    size: 55 21
+    margin-right: 5

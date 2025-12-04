@@ -2,7 +2,7 @@
   PushMax Module
   
   Automated magic wall pushing for team defense.
-  Based on vBot 4.8 pushmax patterns.
+  Based on classic OTClient bot pushmax patterns.
   
   Author: nExBot Team
   Version: 1.0.0

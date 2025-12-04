@@ -2,7 +2,7 @@
   TargetBot Looting Module
   
   Automatic looting and skinning system.
-  Based on vBot 4.8 looting patterns.
+  Based on classic OTClient bot looting patterns.
   
   Author: nExBot Team
   Version: 1.0.0

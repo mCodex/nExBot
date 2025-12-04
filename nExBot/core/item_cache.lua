@@ -210,7 +210,13 @@ local function scanContainerRecursive(container, parentId, depth)
   depth = depth or 0
   if depth > 20 then return end  -- Prevent infinite recursion
   
-  local containerId = container:getId and container:getId() or container:getContainerItem():getId()
+  local containerId
+  if container.getId then
+    containerId = container:getId()
+  else
+    local containerItem = container:getContainerItem()
+    containerId = containerItem and containerItem:getId() or 0
+  end
   
   -- Initialize container node
   cacheState.containerTree[containerId] = {

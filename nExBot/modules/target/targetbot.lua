@@ -2,7 +2,7 @@
   TargetBot Module
   
   Main TargetBot controller for automated targeting and attacking.
-  Based on vBot 4.8 TargetBot patterns.
+  Based on classic OTClient bot TargetBot patterns.
   
   Author: nExBot Team
   Version: 1.0.0
