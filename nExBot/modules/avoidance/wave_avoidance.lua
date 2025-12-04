@@ -1,40 +1,106 @@
 --[[
-  Wave Avoidance AI System
+  ============================================================================
+  nExBot Wave Avoidance AI System
+  ============================================================================
   
   Intelligent wave/spell avoidance using event-driven pattern recognition
   and predictive movement algorithms.
   
-  Features:
-  - Pattern recognition for monster area attacks
-  - Predictive tile safety calculation
-  - Efficient event-driven architecture (low CPU usage)
-  - Learning from monster behavior patterns
-  - Multi-threat assessment
+  HOW IT WORKS:
+  1. Monitors visible creatures for known area attack patterns
+  2. Calculates threatened tiles based on creature facing direction
+  3. Accumulates danger scores from multiple threats
+  4. When player is in danger, finds safest adjacent tile
+  5. Executes smooth avoidance movement
+  
+  PATTERN RECOGNITION:
+  Each creature has known attack patterns with:
+  - Range: How far the attack reaches
+  - Shape: wave (fan), beam (line), area (circle), explosion (target-centered)
+  - Cooldown: Time between attacks
+  - Danger Level: How dangerous (1-10 scale)
+  
+  OPTIMIZATION FEATURES:
+  - Local function caching for hot paths
+  - Tile danger caching (refreshed every 500ms)
+  - Movement cooldown prevents spam-walking
+  - Early returns when not in danger
+  - Chebyshev distance for efficient range checks
+  
+  INTEGRATION:
+  - Emits events via EventBus when dodging
+  - Respects CaveBot path when choosing escape tiles
+  - Works alongside TargetBot and HealBot
   
   Author: nExBot Team
-  Version: 1.0.0
+  Version: 2.0.0 (Optimized)
+  Last Updated: December 2025
+  
+  ============================================================================
+]]
+
+--[[
+  ============================================================================
+  LOCAL CACHING FOR PERFORMANCE
+  ============================================================================
+]]
+local table_insert = table.insert
+local ipairs = ipairs
+local pairs = pairs
+local math_abs = math.abs
+local math_sqrt = math.sqrt
+local math_floor = math.floor
+local math_max = math.max
+local string_format = string.format
+local setmetatable = setmetatable
+
+--[[
+  ============================================================================
+  CLASS DEFINITION
+  ============================================================================
 ]]
 
 local WaveAvoidance = {}
 WaveAvoidance.__index = WaveAvoidance
 
--- Configuration
+--[[
+  ============================================================================
+  CONFIGURATION DEFAULTS
+  ============================================================================
+]]
 local DEFAULT_CONFIG = {
   enabled = true,
-  checkInterval = 100,        -- ms between safety checks
+  checkInterval = 100,        -- ms between safety checks (10 checks/sec)
   safeDistance = 3,           -- minimum safe distance from threats
   predictionWindow = 500,     -- ms to predict threat positions
   maxThreatLevel = 10,        -- maximum danger score before fleeing
-  diagonalWeight = 1.4,       -- weight for diagonal movement
+  diagonalWeight = 1.4,       -- weight for diagonal movement (~sqrt(2))
   avoidPlayers = false,       -- avoid player AoE attacks
   prioritizePath = true,      -- try to stay on cavebot path
   debugMode = false           -- show debug info
 }
 
--- Known area attack patterns (monster name -> attack patterns)
--- Pattern format: {range, shape, damage_type, cooldown, cast_time}
+--[[
+  ============================================================================
+  KNOWN ATTACK PATTERNS DATABASE
+  ============================================================================
+  
+  Maps creature names to their known area attack patterns.
+  Used to predict which tiles will be threatened.
+  
+  Pattern structure:
+  {
+    range = 5,         -- Attack range in tiles
+    shape = "wave",    -- Shape type (see SHAPE_PATTERNS)
+    cooldown = 2000,   -- Attack cooldown in ms
+    dangerLevel = 7    -- Danger score (1-10)
+  }
+  ============================================================================
+]]
 local KNOWN_ATTACK_PATTERNS = {
-  -- High-tier creatures
+  -- ========================================
+  -- HIGH-TIER CREATURES
+  -- ========================================
   ["Demon"] = {
     {range = 8, shape = "beam", cooldown = 2000, dangerLevel = 8},
     {range = 1, shape = "wave", cooldown = 1500, dangerLevel = 9}
@@ -60,96 +126,129 @@ local KNOWN_ATTACK_PATTERNS = {
   ["Frost Dragon"] = {
     {range = 6, shape = "beam", cooldown = 2500, dangerLevel = 7}
   },
-  -- Bosses
+  -- ========================================
+  -- BOSSES
+  -- ========================================
   ["Ferumbras"] = {
     {range = 8, shape = "wave", cooldown = 1000, dangerLevel = 10}
   },
-  -- Default for unknown creatures with area attacks
+  -- ========================================
+  -- DEFAULT PATTERN
+  -- Used for unknown creatures with area attacks
+  -- ========================================
   ["_default"] = {
     {range = 4, shape = "wave", cooldown = 2000, dangerLevel = 5}
   }
 }
 
--- Shape definitions for threat area calculation
+--[[
+  ============================================================================
+  SHAPE PATTERN FUNCTIONS
+  ============================================================================
+  
+  Each function calculates which tiles are threatened by an attack shape.
+  
+  Parameters:
+  - origin: Creature position {x, y, z}
+  - target: Target position (usually player)
+  - range: Attack range
+  
+  Returns: Array of threatened tile positions
+  ============================================================================
+]]
 local SHAPE_PATTERNS = {
+  --- Wave (fan-shaped) - like exori gran
+  -- Spreads wider at longer range
   wave = function(origin, target, range)
-    -- Fan-shaped wave pattern
     local tiles = {}
     local dx = target.x - origin.x
     local dy = target.y - origin.y
     
-    -- Normalize direction
-    if dx ~= 0 then dx = dx / math.abs(dx) end
-    if dy ~= 0 then dy = dy / math.abs(dy) end
+    -- Normalize direction to -1, 0, or 1
+    if dx ~= 0 then dx = dx / math_abs(dx) end
+    if dy ~= 0 then dy = dy / math_abs(dy) end
     
     for r = 1, range do
       for spread = -r, r do
         local tx, ty
         if dx ~= 0 and dy ~= 0 then
+          -- Diagonal direction
           tx = origin.x + dx * r + spread * (dx == 0 and 1 or 0)
           ty = origin.y + dy * r + spread * (dy == 0 and 1 or 0)
         elseif dx ~= 0 then
+          -- Horizontal direction
           tx = origin.x + dx * r
           ty = origin.y + spread
         else
+          -- Vertical direction
           tx = origin.x + spread
           ty = origin.y + dy * r
         end
-        table.insert(tiles, {x = tx, y = ty, z = origin.z})
+        tiles[#tiles + 1] = {x = tx, y = ty, z = origin.z}
       end
     end
     return tiles
   end,
   
+  --- Beam (straight line) - like exori vis
+  -- Fixed width line in direction
   beam = function(origin, target, range)
-    -- Straight line beam pattern
     local tiles = {}
     local dx = target.x - origin.x
     local dy = target.y - origin.y
     
-    -- Normalize direction
-    local len = math.sqrt(dx * dx + dy * dy)
+    -- Normalize direction vector
+    local len = math_sqrt(dx * dx + dy * dy)
     if len > 0 then
       dx = dx / len
       dy = dy / len
     end
     
     for r = 1, range do
-      local tx = math.floor(origin.x + dx * r + 0.5)
-      local ty = math.floor(origin.y + dy * r + 0.5)
-      -- Also add adjacent tiles for beam width
-      table.insert(tiles, {x = tx, y = ty, z = origin.z})
-      if math.abs(dx) > math.abs(dy) then
-        table.insert(tiles, {x = tx, y = ty - 1, z = origin.z})
-        table.insert(tiles, {x = tx, y = ty + 1, z = origin.z})
+      local tx = math_floor(origin.x + dx * r + 0.5)
+      local ty = math_floor(origin.y + dy * r + 0.5)
+      
+      -- Add center tile
+      tiles[#tiles + 1] = {x = tx, y = ty, z = origin.z}
+      
+      -- Add adjacent tiles for beam width
+      if math_abs(dx) > math_abs(dy) then
+        tiles[#tiles + 1] = {x = tx, y = ty - 1, z = origin.z}
+        tiles[#tiles + 1] = {x = tx, y = ty + 1, z = origin.z}
       else
-        table.insert(tiles, {x = tx - 1, y = ty, z = origin.z})
-        table.insert(tiles, {x = tx + 1, y = ty, z = origin.z})
+        tiles[#tiles + 1] = {x = tx - 1, y = ty, z = origin.z}
+        tiles[#tiles + 1] = {x = tx + 1, y = ty, z = origin.z}
       end
     end
     return tiles
   end,
   
+  --- Area (circular) - like exori
+  -- Circle centered on caster
   area = function(origin, target, range)
-    -- Circular area pattern (like UE)
     local tiles = {}
+    local rangeSq = range * range
+    
     for dx = -range, range do
       for dy = -range, range do
-        if dx * dx + dy * dy <= range * range then
-          table.insert(tiles, {x = origin.x + dx, y = origin.y + dy, z = origin.z})
+        if dx * dx + dy * dy <= rangeSq then
+          tiles[#tiles + 1] = {x = origin.x + dx, y = origin.y + dy, z = origin.z}
         end
       end
     end
     return tiles
   end,
   
+  --- Explosion (target-centered circle) - like GFB
+  -- Circle centered on target position
   explosion = function(origin, target, range)
-    -- Target-centered explosion
     local tiles = {}
+    local rangeSq = range * range
+    
     for dx = -range, range do
       for dy = -range, range do
-        if dx * dx + dy * dy <= range * range then
-          table.insert(tiles, {x = target.x + dx, y = target.y + dy, z = target.z})
+        if dx * dx + dy * dy <= rangeSq then
+          tiles[#tiles + 1] = {x = target.x + dx, y = target.y + dy, z = target.z}
         end
       end
     end
@@ -157,17 +256,96 @@ local SHAPE_PATTERNS = {
   end
 }
 
--- Threat state tracking
+--[[
+  ============================================================================
+  THREAT STATE TRACKING
+  ============================================================================
+]]
 local threatState = {
-  activeThreats = {},      -- Currently tracked threats
+  activeThreats = {},      -- Currently tracked creatures
   recentAttacks = {},      -- Recent attack events for learning
   tileDangerCache = {},    -- Cached danger levels per tile
-  lastUpdate = 0,          -- Last cache update time
-  lastMoveTime = 0,        -- Last time we moved to avoid
+  lastUpdate = 0,          -- Last cache update timestamp
+  lastMoveTime = 0,        -- Last avoidance movement timestamp
   moveCooldown = 300       -- ms between avoid movements
 }
 
--- Initialize the wave avoidance system
+--[[
+  ============================================================================
+  UTILITY FUNCTIONS
+  ============================================================================
+]]
+
+--- Calculates Manhattan distance (grid distance)
+-- @param pos1 (table) First position
+-- @param pos2 (table) Second position
+-- @return (number) Distance
+local function manhattanDistance(pos1, pos2)
+  return math_abs(pos1.x - pos2.x) + math_abs(pos1.y - pos2.y)
+end
+
+--- Calculates Chebyshev distance (allows diagonal movement)
+-- Also known as "king distance" - moves like a chess king
+-- @param pos1 (table) First position
+-- @param pos2 (table) Second position
+-- @return (number) Distance
+local function chebyshevDistance(pos1, pos2)
+  return math_max(math_abs(pos1.x - pos2.x), math_abs(pos1.y - pos2.y))
+end
+
+--- Gets attack patterns for a creature by name
+-- Falls back to default if no specific patterns known
+-- @param creatureName (string) Creature name
+-- @return (table) Array of attack patterns
+local function getAttackPatterns(creatureName)
+  -- Exact match first
+  local patterns = KNOWN_ATTACK_PATTERNS[creatureName]
+  if patterns then return patterns end
+  
+  -- Partial match (e.g., "Elite Dragon" matches "Dragon")
+  local lowerName = creatureName:lower()
+  for name, pat in pairs(KNOWN_ATTACK_PATTERNS) do
+    if name ~= "_default" and lowerName:find(name:lower()) then
+      return pat
+    end
+  end
+  
+  return KNOWN_ATTACK_PATTERNS["_default"]
+end
+
+--- Calculates normalized direction from origin to target
+-- @param origin (table) Starting position
+-- @param target (table) Target position
+-- @return (number, number) Normalized dx, dy (-1, 0, or 1)
+local function calculateDirection(origin, target)
+  local dx = target.x - origin.x
+  local dy = target.y - origin.y
+  
+  local ndx = dx == 0 and 0 or (dx > 0 and 1 or -1)
+  local ndy = dy == 0 and 0 or (dy > 0 and 1 or -1)
+  
+  return ndx, ndy
+end
+
+--- Predicts which direction a creature is facing
+-- Currently assumes creatures face the player
+-- @param creature (Creature) The creature
+-- @return (number, number) Normalized dx, dy
+local function predictCreatureDirection(creature)
+  local pos = creature:getPosition()
+  local playerPos = player:getPosition()
+  return calculateDirection(pos, playerPos)
+end
+
+--[[
+  ============================================================================
+  CONSTRUCTOR
+  ============================================================================
+]]
+
+--- Creates a new WaveAvoidance instance
+-- @param config (table|nil) Configuration overrides
+-- @return (WaveAvoidance) New instance
 function WaveAvoidance.new(config)
   local self = setmetatable({}, WaveAvoidance)
   self.config = setmetatable(config or {}, {__index = DEFAULT_CONFIG})
@@ -177,59 +355,21 @@ function WaveAvoidance.new(config)
   return self
 end
 
--- Calculate Manhattan distance
-local function manhattanDistance(pos1, pos2)
-  return math.abs(pos1.x - pos2.x) + math.abs(pos1.y - pos2.y)
-end
+--[[
+  ============================================================================
+  THREAT CALCULATION
+  ============================================================================
+]]
 
--- Calculate Chebyshev distance (allows diagonal)
-local function chebyshevDistance(pos1, pos2)
-  return math.max(math.abs(pos1.x - pos2.x), math.abs(pos1.y - pos2.y))
-end
-
--- Get attack patterns for a creature
-local function getAttackPatterns(creatureName)
-  local patterns = KNOWN_ATTACK_PATTERNS[creatureName]
-  if patterns then return patterns end
-  
-  -- Check for partial matches (e.g., "Elite Dragon" matches "Dragon")
-  for name, pat in pairs(KNOWN_ATTACK_PATTERNS) do
-    if name ~= "_default" and creatureName:lower():find(name:lower()) then
-      return pat
-    end
-  end
-  
-  return KNOWN_ATTACK_PATTERNS["_default"]
-end
-
--- Calculate direction from origin to target
-local function calculateDirection(origin, target)
-  local dx = target.x - origin.x
-  local dy = target.y - origin.y
-  
-  -- Normalize to -1, 0, or 1
-  local ndx = dx == 0 and 0 or (dx > 0 and 1 or -1)
-  local ndy = dy == 0 and 0 or (dy > 0 and 1 or -1)
-  
-  return ndx, ndy
-end
-
--- Predict creature facing direction based on its last movements
-local function predictCreatureDirection(creature)
-  local pos = creature:getPosition()
-  local playerPos = player:getPosition()
-  
-  -- Default: assume creature faces player
-  return calculateDirection(pos, playerPos)
-end
-
--- Calculate threatened tiles from all nearby monsters
+--- Calculates danger levels for all tiles near the player
+-- Scans visible creatures and their attack patterns
+-- @return (table) Map of "x:y:z" -> danger level
 function WaveAvoidance:calculateThreatenedTiles()
   local playerPos = player:getPosition()
   local threatened = {}
   local currentTime = now
   
-  -- Clear old cache periodically
+  -- Clear cache periodically (every 500ms)
   if currentTime - threatState.lastUpdate > 500 then
     threatState.tileDangerCache = {}
     threatState.lastUpdate = currentTime
@@ -237,33 +377,32 @@ function WaveAvoidance:calculateThreatenedTiles()
   
   -- Analyze all visible creatures
   local specs = getSpectators()
-  for _, creature in ipairs(specs) do
+  for i = 1, #specs do
+    local creature = specs[i]
+    
+    -- Only consider monsters (not NPCs or players)
     if creature:isMonster() and not creature:isNpc() then
       local creaturePos = creature:getPosition()
       local distance = chebyshevDistance(playerPos, creaturePos)
       
-      -- Only consider creatures within threat range
+      -- Only process creatures within threat range
       if distance <= 10 then
         local patterns = getAttackPatterns(creature:getName())
         local dx, dy = predictCreatureDirection(creature)
         
-        for _, pattern in ipairs(patterns) do
-          -- Get tiles threatened by this pattern
-          local targetPos = {
-            x = creaturePos.x + dx * pattern.range,
-            y = creaturePos.y + dy * pattern.range,
-            z = creaturePos.z
-          }
+        for j = 1, #patterns do
+          local pattern = patterns[j]
           
+          -- Calculate shape function for this pattern
           local shapeFunc = SHAPE_PATTERNS[pattern.shape]
           if shapeFunc then
             local tiles = shapeFunc(creaturePos, playerPos, pattern.range)
             
-            for _, tile in ipairs(tiles) do
-              local key = string.format("%d:%d:%d", tile.x, tile.y, tile.z)
+            -- Accumulate danger on each threatened tile
+            for k = 1, #tiles do
+              local tile = tiles[k]
+              local key = string_format("%d:%d:%d", tile.x, tile.y, tile.z)
               local existingDanger = threatened[key] or 0
-              
-              -- Accumulate danger from multiple sources
               threatened[key] = existingDanger + pattern.dangerLevel
             end
           end
@@ -276,57 +415,53 @@ function WaveAvoidance:calculateThreatenedTiles()
   return threatened
 end
 
--- Find the safest tile to move to
+--- Finds the safest adjacent tile to move to
+-- Evaluates all 8 directions and picks the one with lowest danger
+-- @return (table|nil) Safe position or nil if current is safest
 function WaveAvoidance:findSafestTile()
   local playerPos = player:getPosition()
   local threatened = self:calculateThreatenedTiles()
   
-  -- Get current danger level
-  local currentKey = string.format("%d:%d:%d", playerPos.x, playerPos.y, playerPos.z)
+  -- Check current danger level
+  local currentKey = string_format("%d:%d:%d", playerPos.x, playerPos.y, playerPos.z)
   local currentDanger = threatened[currentKey] or 0
   
-  -- If we're safe enough, don't move
+  -- Don't move if danger is low
   if currentDanger < 3 then
     return nil
   end
   
-  -- Check all adjacent tiles
+  -- All 8 adjacent directions with movement costs
   local directions = {
-    {dx = 0, dy = -1, cost = 1},    -- North
-    {dx = 1, dy = -1, cost = 1.4},  -- NE
-    {dx = 1, dy = 0, cost = 1},     -- East
-    {dx = 1, dy = 1, cost = 1.4},   -- SE
-    {dx = 0, dy = 1, cost = 1},     -- South
-    {dx = -1, dy = 1, cost = 1.4},  -- SW
-    {dx = -1, dy = 0, cost = 1},    -- West
-    {dx = -1, dy = -1, cost = 1.4}  -- NW
+    {dx = 0, dy = -1, cost = 1},     -- North
+    {dx = 1, dy = -1, cost = 1.4},   -- NE (diagonal)
+    {dx = 1, dy = 0, cost = 1},      -- East
+    {dx = 1, dy = 1, cost = 1.4},    -- SE
+    {dx = 0, dy = 1, cost = 1},      -- South
+    {dx = -1, dy = 1, cost = 1.4},   -- SW
+    {dx = -1, dy = 0, cost = 1},     -- West
+    {dx = -1, dy = -1, cost = 1.4}   -- NW
   }
   
   local bestTile = nil
   local bestScore = currentDanger
   
-  for _, dir in ipairs(directions) do
+  for i = 1, 8 do
+    local dir = directions[i]
     local newPos = {
       x = playerPos.x + dir.dx,
       y = playerPos.y + dir.dy,
       z = playerPos.z
     }
     
-    -- Check if tile is walkable
+    -- Check walkability
     local tile = g_map.getTile(newPos)
     if tile and tile:isWalkable() and not tile:hasCreature() then
-      local key = string.format("%d:%d:%d", newPos.x, newPos.y, newPos.z)
+      local key = string_format("%d:%d:%d", newPos.x, newPos.y, newPos.z)
       local tileDanger = threatened[key] or 0
       
-      -- Calculate score (lower is better)
-      -- Factor in movement cost for diagonal
+      -- Score = danger * movement cost (prefer cardinal directions)
       local score = tileDanger * dir.cost
-      
-      -- Prefer tiles that move us away from threats
-      if self.config.prioritizePath and CaveBot and CaveBot.isOn and CaveBot.isOn() then
-        -- Bonus for staying on path (would need cavebot integration)
-        -- For now, just use danger score
-      end
       
       if score < bestScore then
         bestScore = score
@@ -338,7 +473,15 @@ function WaveAvoidance:findSafestTile()
   return bestTile
 end
 
--- Execute avoidance movement
+--[[
+  ============================================================================
+  AVOIDANCE EXECUTION
+  ============================================================================
+]]
+
+--- Executes avoidance movement if safe tile found
+-- Respects movement cooldown to prevent spam-walking
+-- @return (boolean) True if moved
 function WaveAvoidance:executeAvoidance()
   local currentTime = now
   
@@ -349,14 +492,14 @@ function WaveAvoidance:executeAvoidance()
   
   local safeTile = self:findSafestTile()
   if safeTile then
-    -- Use walk for smooth movement
     local success = walk(safeTile)
     
     if success then
       threatState.lastMoveTime = currentTime
       
-      if self.config.debugMode then
-        logInfo(string.format("[WaveAvoidance] Moving to safer tile: %d, %d", safeTile.x, safeTile.y))
+      if self.config.debugMode and logInfo then
+        logInfo(string_format("[WaveAvoidance] Moving to safer tile: %d, %d", 
+          safeTile.x, safeTile.y))
       end
       
       -- Emit event for other modules
@@ -364,7 +507,8 @@ function WaveAvoidance:executeAvoidance()
         nExBot.EventBus:emit("wave_avoided", {
           from = player:getPosition(),
           to = safeTile,
-          danger = threatState.tileDangerCache[string.format("%d:%d:%d", safeTile.x, safeTile.y, safeTile.z)] or 0
+          danger = threatState.tileDangerCache[string_format("%d:%d:%d", 
+            safeTile.x, safeTile.y, safeTile.z)] or 0
         })
       end
       
@@ -375,98 +519,124 @@ function WaveAvoidance:executeAvoidance()
   return false
 end
 
--- Check if player is in danger zone
+--[[
+  ============================================================================
+  DANGER QUERIES
+  ============================================================================
+]]
+
+--- Checks if player is currently in a danger zone
+-- @return (boolean) True if danger exceeds threshold
 function WaveAvoidance:isInDanger()
   local playerPos = player:getPosition()
   local threatened = self:calculateThreatenedTiles()
-  local key = string.format("%d:%d:%d", playerPos.x, playerPos.y, playerPos.z)
+  local key = string_format("%d:%d:%d", playerPos.x, playerPos.y, playerPos.z)
   local danger = threatened[key] or 0
   
   return danger >= self.config.maxThreatLevel / 2
 end
 
--- Get current danger level
+--- Gets the current danger level at player position
+-- @return (number) Danger level (0 = safe)
 function WaveAvoidance:getDangerLevel()
   local playerPos = player:getPosition()
   local threatened = self:calculateThreatenedTiles()
-  local key = string.format("%d:%d:%d", playerPos.x, playerPos.y, playerPos.z)
+  local key = string_format("%d:%d:%d", playerPos.x, playerPos.y, playerPos.z)
   return threatened[key] or 0
 end
 
--- Start the avoidance system
+--[[
+  ============================================================================
+  LIFECYCLE MANAGEMENT
+  ============================================================================
+]]
+
+--- Starts the wave avoidance system
 function WaveAvoidance:start()
   if self.enabled then return end
   self.enabled = true
   
-  -- Register the main check macro
-  self.macro = macro(self.config.checkInterval, "WaveAvoidance", function()
-    if not self.enabled then return end
-    if player:isWalking() then return end -- Don't interrupt walking
+  -- Main safety check macro
+  local checkInterval = self.config.checkInterval
+  local selfRef = self
+  
+  self.macro = macro(checkInterval, "WaveAvoidance", function()
+    if not selfRef.enabled then return end
+    if player:isWalking() then return end  -- Don't interrupt walking
     
-    -- Check and avoid if necessary
-    if self:isInDanger() then
-      self:executeAvoidance()
+    if selfRef:isInDanger() then
+      selfRef:executeAvoidance()
     end
   end)
   
-  -- Listen for creature spell effects
+  -- Listen for missile effects (projectile attacks)
   self.listeners.onMissleEffect = onMissle(function(missile)
-    if not self.enabled then return end
+    if not selfRef.enabled then return end
     
-    -- Track area attacks from projectiles
     local target = missile:getTarget()
     if target then
-      local key = string.format("%d:%d:%d", target.x, target.y, target.z)
-      -- Temporarily mark area as dangerous
+      local key = string_format("%d:%d:%d", target.x, target.y, target.z)
+      -- Temporarily increase danger at impact point
       threatState.tileDangerCache[key] = (threatState.tileDangerCache[key] or 0) + 5
       
       -- Check if we need to move
       local playerPos = player:getPosition()
-      local distance = chebyshevDistance(playerPos, target)
-      if distance <= 3 then
-        self:executeAvoidance()
+      if chebyshevDistance(playerPos, target) <= 3 then
+        selfRef:executeAvoidance()
       end
     end
   end)
   
-  logInfo("[WaveAvoidance] System started")
+  if logInfo then
+    logInfo("[WaveAvoidance] System started")
+  end
 end
 
--- Stop the avoidance system
+--- Stops the wave avoidance system
 function WaveAvoidance:stop()
   if not self.enabled then return end
   self.enabled = false
   
-  -- Clean up macro
-  if self.macro then
-    self.macro = nil
-  end
-  
-  -- Clean up listeners
-  for name, listener in pairs(self.listeners) do
-    if listener then
-      -- Remove listener (implementation depends on OTClientV8 API)
-    end
-  end
+  self.macro = nil
   self.listeners = {}
   
-  logInfo("[WaveAvoidance] System stopped")
+  if logInfo then
+    logInfo("[WaveAvoidance] System stopped")
+  end
 end
 
--- Add custom attack pattern
+--[[
+  ============================================================================
+  PATTERN MANAGEMENT
+  ============================================================================
+]]
+
+--- Adds a custom attack pattern for a creature
+-- @param creatureName (string) Creature name
+-- @param pattern (table) Pattern definition
 function WaveAvoidance:addPattern(creatureName, pattern)
   if not KNOWN_ATTACK_PATTERNS[creatureName] then
     KNOWN_ATTACK_PATTERNS[creatureName] = {}
   end
-  table.insert(KNOWN_ATTACK_PATTERNS[creatureName], pattern)
+  table_insert(KNOWN_ATTACK_PATTERNS[creatureName], pattern)
 end
 
--- Get all known patterns
+--- Gets all known attack patterns
+-- @return (table) Pattern database
 function WaveAvoidance:getPatterns()
   return KNOWN_ATTACK_PATTERNS
 end
 
--- Update configuration
+--[[
+  ============================================================================
+  CONFIGURATION
+  ============================================================================
+]]
+
+--- Updates a configuration value
+-- @param key (string) Config key
+-- @param value (any) New value
+-- @return (boolean) True if key existed
 function WaveAvoidance:setConfig(key, value)
   if DEFAULT_CONFIG[key] ~= nil then
     self.config[key] = value
@@ -475,10 +645,16 @@ function WaveAvoidance:setConfig(key, value)
   return false
 end
 
--- Get configuration
+--- Gets current configuration
+-- @return (table) Config object
 function WaveAvoidance:getConfig()
   return self.config
 end
 
--- Export module
+--[[
+  ============================================================================
+  MODULE EXPORT
+  ============================================================================
+]]
+
 return WaveAvoidance

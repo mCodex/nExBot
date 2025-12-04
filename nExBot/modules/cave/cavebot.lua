@@ -1,31 +1,96 @@
 --[[
-  CaveBot Module
+  ============================================================================
+  nExBot CaveBot Module
+  ============================================================================
   
   Main CaveBot controller for automated hunting.
-  Based on vBot 4.8 CaveBot patterns.
+  Handles waypoint navigation, actions, and hunting loop management.
+  
+  WHAT IS CAVEBOT?
+  CaveBot automates the hunting process by following a series of "waypoints"
+  (positions on the map). Each waypoint can have an action like:
+  - Walk to position
+  - Use rope/shovel/ladder
+  - Go to a named label
+  - Execute custom functions
+  - Wait for a duration
+  
+  WAYPOINT FLOW:
+  1. Walk → Position 1
+  2. Rope → Use rope at hole
+  3. Walk → Position 2
+  4. Label → "hunt_start"
+  5. Stand → Stay at position (attack monsters)
+  6. Walk → Position 3
+  7. Goto → "hunt_start" (loops back)
+  
+  INTEGRATION:
+  - TargetBot: CaveBot pauses when TargetBot is attacking
+  - Depositor: Handles town/depot operations
+  - Supply Check: Triggers refill when supplies are low
+  
+  PERFORMANCE FEATURES:
+  - Local function caching
+  - Early returns to minimize processing
+  - Efficient position comparison
   
   Author: nExBot Team
-  Version: 1.0.0
+  Version: 2.0.0 (Optimized)
+  Last Updated: December 2025
+  
+  ============================================================================
 ]]
 
+--[[
+  ============================================================================
+  LOCAL CACHING FOR PERFORMANCE
+  ============================================================================
+]]
+local table_insert = table.insert
+local table_remove = table.remove
+local ipairs = ipairs
+local math_abs = math.abs
+local string_format = string.format
+local pcall = pcall
+
+--[[
+  ============================================================================
+  UI SETUP
+  ============================================================================
+]]
 setDefaultTab("Cave")
 
 -- CaveBot global namespace
 CaveBot = {}
 CaveBot.Extensions = {}
 
--- CaveBot state
+--[[
+  ============================================================================
+  INTERNAL STATE
+  ============================================================================
+  
+  caveBotState tracks the current execution context:
+  - enabled: Master on/off switch
+  - paused: Temporarily paused (e.g., during combat)
+  - currentWaypoint: Index of current waypoint
+  - waitingFor: Current blocking operation (nil when ready)
+  ============================================================================
+]]
 local caveBotState = {
-  enabled = false,
-  paused = false,
-  currentWaypoint = 1,
-  waypoints = {},
-  huntingArea = nil,
-  lastAction = 0,
-  waitingFor = nil
+  enabled = false,        -- Master enable flag
+  paused = false,         -- Pause flag (doesn't persist)
+  currentWaypoint = 1,    -- Current waypoint index
+  waypoints = {},         -- Reference to waypoint list
+  huntingArea = nil,      -- Current hunting area name
+  lastAction = 0,         -- Timestamp of last action
+  waitingFor = nil        -- Current wait reason: "timer", "delay", nil
 }
 
--- Main CaveBot UI
+--[[
+  ============================================================================
+  MAIN UI PANEL
+  ============================================================================
+]]
 local panelName = "cavebot"
 local ui = setupUI([[
 Panel
@@ -51,31 +116,43 @@ Panel
 ]])
 ui:setId(panelName)
 
--- Storage initialization
+--[[
+  ============================================================================
+  STORAGE INITIALIZATION
+  ============================================================================
+]]
+
 if not storage.cavebot then
   storage.cavebot = {
     enabled = false,
     waypoints = {},
     settings = {
-      walkDelay = 100,
-      actionDelay = 200,
-      retryCount = 3,
-      useRope = true,
-      useShovel = true,
-      useMachete = true,
-      usePickaxe = false,
-      openDoors = true,
-      ignoreCreatures = false,
-      walkMethod = "auto"
+      walkDelay = 100,        -- Delay between walk steps (ms)
+      actionDelay = 200,      -- Delay between actions (ms)
+      retryCount = 3,         -- Retries for failed actions
+      useRope = true,         -- Auto-use rope at holes
+      useShovel = true,       -- Auto-use shovel at loose stones
+      useMachete = true,      -- Auto-use machete at jungle grass
+      usePickaxe = false,     -- Auto-use pickaxe at rocks
+      openDoors = true,       -- Auto-open doors
+      ignoreCreatures = false,-- Walk through creatures
+      walkMethod = "auto"     -- "auto", "arrow", "ctrl"
     }
   }
 end
 
 local config = storage.cavebot
 
--- UI state
+--[[
+  ============================================================================
+  UI EVENT HANDLERS
+  ============================================================================
+]]
+
+-- Initialize toggle state from config
 ui.title:setOn(config.enabled)
 
+-- Main on/off toggle
 ui.title.onClick = function(widget)
   config.enabled = not config.enabled
   caveBotState.enabled = config.enabled
@@ -83,13 +160,13 @@ ui.title.onClick = function(widget)
   storage.cavebot = config
   
   if config.enabled then
-    logInfo("[CaveBot] Enabled")
+    if logInfo then logInfo("[CaveBot] Enabled") end
   else
-    logInfo("[CaveBot] Disabled")
+    if logInfo then logInfo("[CaveBot] Disabled") end
   end
 end
 
--- Config button
+-- Config window
 local caveBotWindow = nil
 local rootWidget = g_ui.getRootWidget()
 
@@ -98,6 +175,7 @@ if rootWidget then
   if caveBotWindow then
     caveBotWindow:hide()
     
+    -- Save config when window closes
     caveBotWindow.onVisibilityChange = function(widget, visible)
       if not visible then
         storage.cavebot = config
@@ -114,67 +192,92 @@ ui.config.onClick = function(widget)
   end
 end
 
--- Waypoint types
+--[[
+  ============================================================================
+  WAYPOINT TYPES
+  ============================================================================
+  
+  Defines all available waypoint actions.
+  Each type has specific handling in executeWaypoint().
+  ============================================================================
+]]
 CaveBot.WaypointTypes = {
-  WALK = "walk",
-  STAND = "stand",
-  ROPE = "rope",
-  SHOVEL = "shovel",
-  LADDER = "ladder",
-  STAIRS = "stairs",
-  LABEL = "label",
-  GOTO = "goto",
-  FUNCTION = "function",
-  WAIT = "wait",
-  LURE = "lure",
-  ACTION = "action",
-  NPC = "npc",
-  SAY = "say"
+  WALK = "walk",        -- Walk to position
+  STAND = "stand",      -- Walk and stay (for luring/attacking)
+  ROPE = "rope",        -- Use rope at position
+  SHOVEL = "shovel",    -- Use shovel at position
+  LADDER = "ladder",    -- Click ladder at position
+  STAIRS = "stairs",    -- Click stairs at position
+  LABEL = "label",      -- Named marker (for goto)
+  GOTO = "goto",        -- Jump to a label
+  FUNCTION = "function",-- Execute custom Lua function
+  WAIT = "wait",        -- Wait for duration (ms)
+  LURE = "lure",        -- Enter lure mode
+  ACTION = "action",    -- Custom action
+  NPC = "npc",          -- NPC interaction
+  SAY = "say"           -- Say text in-game
 }
 
--- Add waypoint
+--[[
+  ============================================================================
+  WAYPOINT MANAGEMENT
+  ============================================================================
+]]
+
+--- Adds a new waypoint to the route
+-- @param waypointType (string) Type from CaveBot.WaypointTypes
+-- @param data (table|nil) Waypoint data (pos, name, etc.)
+-- @return (number) Index of the new waypoint
 function CaveBot.addWaypoint(waypointType, data)
   data = data or {}
   data.type = waypointType
   data.pos = data.pos or player:getPosition()
   
-  table.insert(config.waypoints, data)
+  table_insert(config.waypoints, data)
   storage.cavebot = config
   
-  logInfo(string.format("[CaveBot] Added waypoint: %s at %d, %d, %d", 
-    waypointType, data.pos.x, data.pos.y, data.pos.z))
+  if logInfo then
+    logInfo(string_format("[CaveBot] Added waypoint: %s at %d, %d, %d", 
+      waypointType, data.pos.x, data.pos.y, data.pos.z))
+  end
   
   return #config.waypoints
 end
 
--- Remove waypoint
+--- Removes a waypoint by index
+-- @param index (number) Waypoint index to remove
+-- @return (boolean) Success
 function CaveBot.removeWaypoint(index)
   if config.waypoints[index] then
-    table.remove(config.waypoints, index)
+    table_remove(config.waypoints, index)
     storage.cavebot = config
     return true
   end
   return false
 end
 
--- Clear all waypoints
+--- Clears all waypoints
 function CaveBot.clearWaypoints()
   config.waypoints = {}
   caveBotState.currentWaypoint = 1
   storage.cavebot = config
 end
 
--- Get current waypoint
+--- Gets the current waypoint data
+-- @return (table|nil) Current waypoint or nil
 function CaveBot.getCurrentWaypoint()
   return config.waypoints[caveBotState.currentWaypoint]
 end
 
--- Get waypoint count
+--- Gets total waypoint count
+-- @return (number) Number of waypoints
 function CaveBot.getWaypointCount()
   return #config.waypoints
 end
 
--- Set current waypoint
+--- Sets the current waypoint index
+-- @param index (number) New waypoint index
+-- @return (boolean) Success
 function CaveBot.setCurrentWaypoint(index)
   if index >= 1 and index <= #config.waypoints then
     caveBotState.currentWaypoint = index
@@ -183,7 +286,9 @@ function CaveBot.setCurrentWaypoint(index)
   return false
 end
 
--- Go to label
+--- Jumps to a named label
+-- @param labelName (string) Name of the label waypoint
+-- @return (boolean) Success
 function CaveBot.gotoLabel(labelName)
   for i, wp in ipairs(config.waypoints) do
     if wp.type == CaveBot.WaypointTypes.LABEL and wp.name == labelName then
@@ -194,47 +299,65 @@ function CaveBot.gotoLabel(labelName)
   return false
 end
 
--- Execute waypoint action
+--[[
+  ============================================================================
+  WAYPOINT EXECUTION
+  ============================================================================
+]]
+
+--- Executes the action for a waypoint
+-- Called when player reaches the waypoint position
+-- 
+-- @param waypoint (table) Waypoint data
+-- @return (boolean) True if action completed successfully
 local function executeWaypoint(waypoint)
   if not waypoint then return false end
   
   local wpType = waypoint.type
   local pos = waypoint.pos
   
+  -- ========================================
+  -- WALK / STAND
+  -- ========================================
   if wpType == CaveBot.WaypointTypes.WALK or wpType == CaveBot.WaypointTypes.STAND then
-    -- Walk to position
     if not player:isWalking() then
       local result = autoWalk(pos, 10, {marginMin = 0, marginMax = 0})
       return result
     end
     return false
     
+  -- ========================================
+  -- ROPE - Use rope item at hole
+  -- ========================================
   elseif wpType == CaveBot.WaypointTypes.ROPE then
-    -- Use rope
     local tile = g_map.getTile(pos)
     if tile then
       local topThing = tile:getTopUseThing()
       if topThing then
-        useWith(3003, topThing) -- Rope item ID
+        useWith(3003, topThing)  -- Rope item ID: 3003
         return true
       end
     end
     return false
     
+  -- ========================================
+  -- SHOVEL - Use shovel at loose stone
+  -- ========================================
   elseif wpType == CaveBot.WaypointTypes.SHOVEL then
-    -- Use shovel
     local tile = g_map.getTile(pos)
     if tile then
       local topThing = tile:getTopUseThing()
       if topThing then
-        useWith(3457, topThing) -- Shovel item ID
+        useWith(3457, topThing)  -- Shovel item ID: 3457
         return true
       end
     end
     return false
     
+  -- ========================================
+  -- LADDER / STAIRS - Click to use
+  -- ========================================
   elseif wpType == CaveBot.WaypointTypes.LADDER or wpType == CaveBot.WaypointTypes.STAIRS then
-    -- Use ladder/stairs
     local tile = g_map.getTile(pos)
     if tile then
       local topThing = tile:getTopUseThing()
@@ -245,24 +368,32 @@ local function executeWaypoint(waypoint)
     end
     return false
     
+  -- ========================================
+  -- LABEL - Just a marker, always succeeds
+  -- ========================================
   elseif wpType == CaveBot.WaypointTypes.LABEL then
-    -- Labels are just markers, skip
     return true
     
+  -- ========================================
+  -- GOTO - Jump to another label
+  -- ========================================
   elseif wpType == CaveBot.WaypointTypes.GOTO then
-    -- Go to label
     return CaveBot.gotoLabel(waypoint.label)
     
+  -- ========================================
+  -- FUNCTION - Execute custom Lua function
+  -- ========================================
   elseif wpType == CaveBot.WaypointTypes.FUNCTION then
-    -- Execute custom function
     if waypoint.func then
       local success, result = pcall(waypoint.func)
       return success and result
     end
     return true
     
+  -- ========================================
+  -- WAIT - Wait for specified duration
+  -- ========================================
   elseif wpType == CaveBot.WaypointTypes.WAIT then
-    -- Wait for specified time
     local duration = waypoint.duration or 1000
     schedule(duration, function()
       caveBotState.waitingFor = nil
@@ -270,21 +401,26 @@ local function executeWaypoint(waypoint)
     caveBotState.waitingFor = "timer"
     return true
     
+  -- ========================================
+  -- LURE - Handled by lure manager
+  -- ========================================
   elseif wpType == CaveBot.WaypointTypes.LURE then
-    -- Lure mode
-    -- Will be handled by lure manager
     return true
     
+  -- ========================================
+  -- SAY - Speak text in-game
+  -- ========================================
   elseif wpType == CaveBot.WaypointTypes.SAY then
-    -- Say text
     if waypoint.text then
       say(waypoint.text)
     end
     return true
     
+  -- ========================================
+  -- NPC - NPC interaction via NPC module
+  -- ========================================
   elseif wpType == CaveBot.WaypointTypes.NPC then
-    -- NPC interaction
-    if waypoint.npcName then
+    if waypoint.npcName and NPC and NPC.talk then
       NPC.talk(waypoint.npcName, waypoint.messages or {})
     end
     return true
@@ -293,23 +429,39 @@ local function executeWaypoint(waypoint)
   return false
 end
 
--- Check if at waypoint position
+--- Checks if player is at a position within margin
+-- @param pos (table) Target position
+-- @param margin (number) Allowed distance (default: 0)
+-- @return (boolean) True if within margin
 local function isAtPosition(pos, margin)
   margin = margin or 0
   local myPos = player:getPosition()
-  return math.abs(myPos.x - pos.x) <= margin 
-     and math.abs(myPos.y - pos.y) <= margin 
+  return math_abs(myPos.x - pos.x) <= margin 
+     and math_abs(myPos.y - pos.y) <= margin 
      and myPos.z == pos.z
 end
 
--- Main CaveBot loop
+--[[
+  ============================================================================
+  MAIN CAVEBOT LOOP
+  ============================================================================
+  
+  Runs every 100ms and handles:
+  1. State checks (enabled, paused, waiting)
+  2. TargetBot integration (pause during combat)
+  3. Waypoint position check
+  4. Waypoint action execution
+  5. Walking to next waypoint
+  ============================================================================
+]]
 macro(100, function()
+  -- Early returns for efficiency
   if not config.enabled then return end
   if caveBotState.paused then return end
   if caveBotState.waitingFor then return end
   if player:isWalking() then return end
   
-  -- Check if TargetBot is active
+  -- Pause during TargetBot combat
   if TargetBot and TargetBot.isActive and TargetBot.isActive() then
     return
   end
@@ -317,21 +469,21 @@ macro(100, function()
   -- Get current waypoint
   local waypoint = CaveBot.getCurrentWaypoint()
   if not waypoint then
-    -- No more waypoints, loop back
+    -- No more waypoints, loop back to start
     caveBotState.currentWaypoint = 1
     return
   end
   
-  -- Check if at waypoint
+  -- Check if at waypoint position
   if isAtPosition(waypoint.pos, 0) then
     -- Execute waypoint action
     local success = executeWaypoint(waypoint)
     
     if success then
-      -- Move to next waypoint
+      -- Advance to next waypoint
       caveBotState.currentWaypoint = caveBotState.currentWaypoint + 1
       if caveBotState.currentWaypoint > #config.waypoints then
-        caveBotState.currentWaypoint = 1
+        caveBotState.currentWaypoint = 1  -- Loop
       end
     end
   else
@@ -342,15 +494,25 @@ macro(100, function()
   end
 end)
 
--- Public API
+--[[
+  ============================================================================
+  PUBLIC API
+  ============================================================================
+]]
+
+--- Checks if CaveBot is enabled
+-- @return (boolean) True if enabled
 CaveBot.isOn = function()
   return config.enabled
 end
 
+--- Checks if CaveBot is disabled
+-- @return (boolean) True if disabled
 CaveBot.isOff = function()
   return not config.enabled
 end
 
+--- Enables CaveBot
 CaveBot.setOn = function()
   config.enabled = true
   caveBotState.enabled = true
@@ -358,6 +520,7 @@ CaveBot.setOn = function()
   storage.cavebot = config
 end
 
+--- Disables CaveBot
 CaveBot.setOff = function()
   config.enabled = false
   caveBotState.enabled = false
@@ -365,18 +528,24 @@ CaveBot.setOff = function()
   storage.cavebot = config
 end
 
+--- Pauses CaveBot (temporary, doesn't persist)
 CaveBot.pause = function()
   caveBotState.paused = true
 end
 
+--- Resumes CaveBot from pause
 CaveBot.resume = function()
   caveBotState.paused = false
 end
 
+--- Checks if CaveBot is paused
+-- @return (boolean) True if paused
 CaveBot.isPaused = function()
   return caveBotState.paused
 end
 
+--- Adds a delay before next action
+-- @param ms (number) Delay in milliseconds
 CaveBot.delay = function(ms)
   caveBotState.waitingFor = "delay"
   schedule(ms, function()
@@ -384,11 +553,29 @@ CaveBot.delay = function(ms)
   end)
 end
 
--- Load CaveBot extensions/actions
+--- Gets current waypoint index
+-- @return (number) Current index
+CaveBot.getCurrentIndex = function()
+  return caveBotState.currentWaypoint
+end
+
+--- Gets all waypoints
+-- @return (table) Array of waypoints
+CaveBot.getWaypoints = function()
+  return config.waypoints
+end
+
+--[[
+  ============================================================================
+  LOAD EXTENSIONS
+  ============================================================================
+]]
 dofile("/nExBot/modules/cave/actions.lua")
 dofile("/nExBot/modules/cave/editor.lua")
 dofile("/nExBot/modules/cave/recorder.lua")
 dofile("/nExBot/modules/cave/depositor.lua")
 dofile("/nExBot/modules/cave/supply_check.lua")
 
-logInfo("[CaveBot] Module loaded")
+if logInfo then
+  logInfo("[CaveBot] Module loaded")
+end
