@@ -68,15 +68,14 @@ UI.Separator()
 local function loadCoreModules()
   local success, err = pcall(function()
     -- Load nlib first (provides logInfo and other utility functions)
-    dofile("/nExBot/core/nlib.lua")
+    pcall(function() dofile("/nExBot/core/nlib.lua") end)
     
-    -- Load core infrastructure
-    nExBot.Core = {
-      BotState = dofile("/nExBot/core/bot_state.lua"),
-      ItemCache = dofile("/nExBot/core/item_cache.lua"),
-      DistanceCalculator = dofile("/nExBot/core/distance_calculator.lua"),
-      PerformanceMonitor = dofile("/nExBot/core/performance_monitor.lua")
-    }
+    -- Load core infrastructure (optional - not all may exist)
+    nExBot.Core = {}
+    pcall(function() nExBot.Core.BotState = dofile("/nExBot/core/bot_state.lua") end)
+    pcall(function() nExBot.Core.ItemCache = dofile("/nExBot/core/item_cache.lua") end)
+    pcall(function() nExBot.Core.DistanceCalculator = dofile("/nExBot/core/distance_calculator.lua") end)
+    pcall(function() nExBot.Core.PerformanceMonitor = dofile("/nExBot/core/performance_monitor.lua") end)
     
     -- Initialize core modules (with nil checks)
     nExBot.BotState = nExBot.Core.BotState
@@ -86,9 +85,7 @@ local function loadCoreModules()
       nExBot.BotState:initialize()
     end
     
-    -- ItemCache auto-starts on player login
-    
-    log("Core modules loaded successfully")
+    log("Core modules loaded")
   end)
   
   if not success then
@@ -102,53 +99,68 @@ end
 -- Load feature modules
 local function loadFeatureModules()
   local success, err = pcall(function()
-    -- Combat modules
-    nExBot.modules.AutoHaste = dofile("/nExBot/modules/combat/auto_haste.lua")
-    nExBot.modules.SpellRegistry = dofile("/nExBot/modules/combat/spell_registry.lua")
+    -- Combat modules (optional)
+    pcall(function()
+      nExBot.modules.AutoHaste = dofile("/nExBot/modules/combat/auto_haste.lua")
+      nExBot.modules.SpellRegistry = dofile("/nExBot/modules/combat/spell_registry.lua")
+    end)
     
-    -- Pathfinding modules
-    nExBot.modules.PathCache = dofile("/nExBot/modules/pathfinding/path_cache.lua")
-    nExBot.modules.OptimizedAStar = dofile("/nExBot/modules/pathfinding/optimized_astar.lua")
+    -- Pathfinding modules (optional)
+    pcall(function()
+      nExBot.modules.PathCache = dofile("/nExBot/modules/pathfinding/path_cache.lua")
+      nExBot.modules.OptimizedAStar = dofile("/nExBot/modules/pathfinding/optimized_astar.lua")
+    end)
     
-    -- Luring modules
-    nExBot.modules.LuringPatterns = dofile("/nExBot/modules/luring/luring_patterns.lua")
-    nExBot.modules.CreatureTracker = dofile("/nExBot/modules/luring/creature_tracker.lua")
-    nExBot.modules.LuringManager = dofile("/nExBot/modules/luring/luring_manager.lua")
+    -- Luring modules (optional)
+    pcall(function()
+      nExBot.modules.LuringPatterns = dofile("/nExBot/modules/luring/luring_patterns.lua")
+      nExBot.modules.CreatureTracker = dofile("/nExBot/modules/luring/creature_tracker.lua")
+      nExBot.modules.LuringManager = dofile("/nExBot/modules/luring/luring_manager.lua")
+    end)
     
-    -- Targeting modules (Intelligent TargetBot)
-    nExBot.modules.IntelligentTargetBot = dofile("/nExBot/modules/target/intelligent_targetbot.lua")
-    nExBot.modules.PriorityTargetManager = dofile("/nExBot/modules/targeting/priority_target_manager.lua")
-    nExBot.modules.DynamicSpellSelector = dofile("/nExBot/modules/targeting/dynamic_spell_selector.lua")
+    -- Memory modules (optional)
+    pcall(function()
+      nExBot.modules.ObjectPool = dofile("/nExBot/modules/memory/object_pool.lua")
+      nExBot.modules.WeakReferenceTracker = dofile("/nExBot/modules/memory/weak_reference_tracker.lua")
+    end)
     
-    -- Memory modules
-    nExBot.modules.ObjectPool = dofile("/nExBot/modules/memory/object_pool.lua")
-    nExBot.modules.WeakReferenceTracker = dofile("/nExBot/modules/memory/weak_reference_tracker.lua")
+    -- Waypoint modules (optional)
+    pcall(function()
+      nExBot.modules.WaypointRecorder = dofile("/nExBot/modules/waypoints/waypoint_recorder.lua")
+      nExBot.modules.AutoDiscovery = dofile("/nExBot/modules/waypoints/auto_discovery.lua")
+      nExBot.modules.RouteOptimizer = dofile("/nExBot/modules/waypoints/route_optimizer.lua")
+      nExBot.modules.PathPredictor = dofile("/nExBot/modules/waypoints/path_predictor.lua")
+      nExBot.modules.WaypointClustering = dofile("/nExBot/modules/waypoints/waypoint_clustering.lua")
+      nExBot.modules.AutoRouteGenerator = dofile("/nExBot/modules/waypoints/auto_route_generator.lua")
+    end)
     
-    -- AI Waypoint modules
-    nExBot.modules.WaypointRecorder = dofile("/nExBot/modules/waypoints/waypoint_recorder.lua")
-    nExBot.modules.AutoDiscovery = dofile("/nExBot/modules/waypoints/auto_discovery.lua")
-    nExBot.modules.RouteOptimizer = dofile("/nExBot/modules/waypoints/route_optimizer.lua")
-    nExBot.modules.PathPredictor = dofile("/nExBot/modules/waypoints/path_predictor.lua")
-    nExBot.modules.WaypointClustering = dofile("/nExBot/modules/waypoints/waypoint_clustering.lua")
-    nExBot.modules.AutoRouteGenerator = dofile("/nExBot/modules/waypoints/auto_route_generator.lua")
+    -- Survival modules (optional)
+    pcall(function()
+      nExBot.modules.EatFood = dofile("/nExBot/modules/survival/eat_food.lua")
+    end)
     
-    -- Survival modules
-    nExBot.modules.EatFood = dofile("/nExBot/modules/survival/eat_food.lua")
+    -- Container modules (optional)
+    pcall(function()
+      nExBot.modules.ContainerManager = dofile("/nExBot/modules/container/container_manager.lua")
+    end)
     
-    -- Container modules
-    nExBot.modules.ContainerManager = dofile("/nExBot/modules/container/container_manager.lua")
+    -- Loot modules (optional)
+    pcall(function()
+      nExBot.modules.CorpseLoot = dofile("/nExBot/modules/loot/corpse_looting.lua")
+      nExBot.modules.SkinningManager = dofile("/nExBot/modules/loot/skinning_manager.lua")
+    end)
     
-    -- Loot modules
-    nExBot.modules.CorpseLoot = dofile("/nExBot/modules/loot/corpse_looting.lua")
-    nExBot.modules.SkinningManager = dofile("/nExBot/modules/loot/skinning_manager.lua")
+    -- Movement modules (optional)
+    pcall(function()
+      nExBot.modules.DoorAutomation = dofile("/nExBot/modules/movement/door_automation.lua")
+    end)
     
-    -- Movement modules
-    nExBot.modules.DoorAutomation = dofile("/nExBot/modules/movement/door_automation.lua")
+    -- Avoidance modules (optional)
+    pcall(function()
+      nExBot.modules.WaveAvoidance = dofile("/nExBot/modules/avoidance/wave_avoidance.lua")
+    end)
     
-    -- Avoidance modules (AI-powered)
-    nExBot.modules.WaveAvoidance = dofile("/nExBot/modules/avoidance/wave_avoidance.lua")
-    
-    log("Feature modules loaded successfully")
+    log("Feature modules loaded (some may be optional)")
   end)
   
   if not success then
@@ -161,53 +173,65 @@ end
 
 -- Load nExBot Design System and styles
 local function loadDesignSystem()
+  local stylesLoaded = 0
+  
+  -- Core design system (must load first)
   local success, err = pcall(function()
-    -- Core design system (must load first)
     importStyle("/nExBot/styles/nexbot_theme.otui")
-    
-    -- Module-specific styles (extend the design system)
-    importStyle("/nExBot/styles/healbot.otui")
-    importStyle("/nExBot/styles/attackbot.otui")
-    importStyle("/nExBot/styles/extras.otui")
-    importStyle("/nExBot/styles/alarms.otui")
-    importStyle("/nExBot/styles/supplies.otui")
-    importStyle("/nExBot/styles/stashing.otui")
-    importStyle("/nExBot/styles/botserver.otui")
-    importStyle("/nExBot/styles/tools.otui")
-    importStyle("/nExBot/styles/main_tabs.otui")
-    
-    log("Design system loaded successfully")
+    stylesLoaded = stylesLoaded + 1
   end)
   
   if not success then
-    warn("[nExBot] Failed to load design system: " .. tostring(err))
+    warn("[nExBot] Failed to load core design system: " .. tostring(err))
+    -- Core design system is required
     return false
   end
   
+  -- Module-specific styles (optional - extend the design system)
+  local optionalStyles = {
+    "/nExBot/styles/healbot.otui",
+    "/nExBot/styles/attackbot.otui",
+    "/nExBot/styles/extras.otui",
+    "/nExBot/styles/alarms.otui",
+    "/nExBot/styles/supplies.otui",
+    "/nExBot/styles/stashing.otui",
+    "/nExBot/styles/botserver.otui",
+    "/nExBot/styles/tools.otui",
+    "/nExBot/styles/main_tabs.otui"
+  }
+  
+  for _, stylePath in ipairs(optionalStyles) do
+    pcall(function()
+      importStyle(stylePath)
+      stylesLoaded = stylesLoaded + 1
+    end)
+  end
+  
+  log("Design system loaded (" .. stylesLoaded .. " styles)")
   return true
 end
 
 -- Load Tools panel modules
 local function loadToolsModules()
   local success, err = pcall(function()
-    -- Import styles
-    importStyle("/nExBot/modules/tools/tools.otui")
+    -- Import styles (optional)
+    pcall(function() importStyle("/nExBot/modules/tools/tools.otui") end)
     
-    -- Automation and utility modules
-    dofile("/nExBot/modules/tools/automation.lua")
-    dofile("/nExBot/modules/tools/eat_food.lua")
-    dofile("/nExBot/modules/tools/hold_target.lua")
+    -- Automation and utility modules (load what exists)
+    pcall(function() dofile("/nExBot/modules/tools/automation.lua") end)
+    pcall(function() dofile("/nExBot/modules/tools/eat_food.lua") end)
+    pcall(function() dofile("/nExBot/modules/tools/hold_target.lua") end)
     
     -- Tools modules (consolidated)
-    dofile("/nExBot/modules/tools/smart_fishing.lua")
-    dofile("/nExBot/modules/tools/smart_mount.lua")
-    dofile("/nExBot/modules/tools/containers.lua")
-    dofile("/nExBot/modules/tools/dropper.lua")
+    pcall(function() dofile("/nExBot/modules/tools/smart_fishing.lua") end)
+    pcall(function() dofile("/nExBot/modules/tools/smart_mount.lua") end)
+    pcall(function() dofile("/nExBot/modules/tools/containers.lua") end)
+    pcall(function() dofile("/nExBot/modules/tools/dropper.lua") end)
     
-    -- Avoidance UI (uses wave_avoidance.lua engine)
-    dofile("/nExBot/modules/avoidance/wave_avoidance_ui.lua")
+    -- Avoidance UI (optional)
+    pcall(function() dofile("/nExBot/modules/avoidance/wave_avoidance_ui.lua") end)
     
-    log("Tools modules loaded successfully")
+    log("Tools modules loaded")
   end)
   
   if not success then
@@ -221,17 +245,17 @@ end
 -- Load Main tab modules
 local function loadMainTabModules()
   local success, err = pcall(function()
-    -- Import styles
-    importStyle("/nExBot/modules/main/main.otui")
+    -- Import styles (optional)
+    pcall(function() importStyle("/nExBot/modules/main/main.otui") end)
     
     -- Load main tab modules
-    dofile("/nExBot/modules/main/alarms.lua")
-    dofile("/nExBot/modules/main/attackbot.lua")
+    pcall(function() dofile("/nExBot/modules/main/alarms.lua") end)
+    pcall(function() dofile("/nExBot/modules/main/attackbot.lua") end)
     
-    -- Load consolidated main tab
-    dofile("/nExBot/modules/main/main_tab.lua")
+    -- Load consolidated main tab (optional)
+    pcall(function() dofile("/nExBot/modules/main/main_tab.lua") end)
     
-    log("Main tab modules loaded successfully")
+    log("Main tab modules loaded")
   end)
   
   if not success then
@@ -245,14 +269,14 @@ end
 -- Load Regen tab modules
 local function loadRegenTabModules()
   local success, err = pcall(function()
-    -- Import styles
-    importStyle("/nExBot/modules/regen/regen.otui")
+    -- Import styles (optional)
+    pcall(function() importStyle("/nExBot/modules/regen/regen.otui") end)
     
     -- Regen tab modules
-    dofile("/nExBot/modules/regen/healbot.lua")
-    dofile("/nExBot/modules/regen/auto_equip.lua")
+    pcall(function() dofile("/nExBot/modules/regen/healbot.lua") end)
+    pcall(function() dofile("/nExBot/modules/regen/auto_equip.lua") end)
     
-    log("Regen tab modules loaded successfully")
+    log("Regen tab modules loaded")
   end)
   
   if not success then
@@ -266,13 +290,13 @@ end
 -- Load Cave tab modules
 local function loadCaveTabModules()
   local success, err = pcall(function()
-    -- Import styles
-    importStyle("/nExBot/modules/cave/cave.otui")
+    -- Import styles (optional)
+    pcall(function() importStyle("/nExBot/modules/cave/cave.otui") end)
     
-    -- Cave tab modules (main cavebot must be loaded first)
-    dofile("/nExBot/modules/cave/cavebot.lua")
+    -- Cave tab modules
+    pcall(function() dofile("/nExBot/modules/cave/cavebot.lua") end)
     
-    log("Cave tab modules loaded successfully")
+    log("Cave tab modules loaded")
   end)
   
   if not success then
@@ -283,16 +307,16 @@ local function loadCaveTabModules()
   return true
 end
 
--- Load Target tab modules (intelligent targeting)
+-- Load Target tab modules
 local function loadTargetTabModules()
   local success, err = pcall(function()
-    -- Import styles
-    importStyle("/nExBot/modules/target/target.otui")
+    -- Import styles (optional)
+    pcall(function() importStyle("/nExBot/modules/target/target.otui") end)
     
-    -- Load consolidated target tab with intelligent engine
-    dofile("/nExBot/modules/target/target_tab.lua")
+    -- Load consolidated target tab (self-contained)
+    pcall(function() dofile("/nExBot/modules/target/target_tab.lua") end)
     
-    log("Target tab modules loaded successfully")
+    log("Target tab modules loaded")
   end)
   
   if not success then
