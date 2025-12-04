@@ -1,9 +1,9 @@
 --[[
-  NexBot Weak Reference Tracker
+  nExBot Weak Reference Tracker
   Memory-efficient creature and object tracking
   Uses weak references for automatic cleanup
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

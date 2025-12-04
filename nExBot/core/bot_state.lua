@@ -1,9 +1,9 @@
 --[[
-  NexBot Bot State Manager
+  nExBot Bot State Manager
   Centralized state management for all bot components
   Replaces scattered global variables with organized state
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

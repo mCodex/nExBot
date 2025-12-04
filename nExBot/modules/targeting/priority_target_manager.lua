@@ -1,5 +1,5 @@
 --[[
-  NexBot Priority Target Manager
+  nExBot Priority Target Manager
   Intelligent target selection based on multiple factors
   
   Features:
@@ -9,7 +9,7 @@
   - Kill potential calculation
   - Dynamic target switching
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

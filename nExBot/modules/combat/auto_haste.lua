@@ -1,5 +1,5 @@
 --[[
-  NexBot Auto Haste Module
+  nExBot Auto Haste Module
   Automatically casts haste spells based on character vocation
   
   Features:
@@ -8,7 +8,7 @@
   - Cooldown tracking
   - Configurable toggle and settings
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

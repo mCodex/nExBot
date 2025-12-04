@@ -1,8 +1,8 @@
 --[[
-  NexBot Route Optimizer
+  nExBot Route Optimizer
   Path smoothing and optimization using Douglas-Peucker and Catmull-Rom
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

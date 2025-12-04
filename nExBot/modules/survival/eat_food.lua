@@ -1,8 +1,13 @@
 --[[
-  NexBot Food System
-  Intelligent food and potion management
+  nExBot Food System
+  Intelligent food and potion management with event-driven architecture
   
-  Author: NexBot Team
+  Features:
+  - Event-driven food consumption
+  - Subscribes to health/mana change events
+  - Emits food consumed events
+  
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 
@@ -11,7 +16,8 @@ local EatFood = {
   eatCooldown = 1000,
   enabled = false,
   healthThreshold = 50,
-  manaThreshold = 40
+  manaThreshold = 40,
+  subscriptions = {}
 }
 
 -- Food database with type and regeneration value
@@ -55,7 +61,8 @@ function EatFood:new()
     eatCooldown = 1000,
     enabled = false,
     healthThreshold = 50,
-    manaThreshold = 40
+    manaThreshold = 40,
+    subscriptions = {}
   }
   setmetatable(instance, { __index = self })
   return instance
@@ -63,6 +70,43 @@ end
 
 function EatFood:initialize()
   self.enabled = true
+  
+  -- Subscribe to health/mana change events if EventBus available
+  if nExBot and nExBot.EventBus then
+    local eventBus = nExBot.EventBus
+    
+    -- Subscribe to health changes
+    self.subscriptions.health = eventBus:subscribe(
+      eventBus.Events.PLAYER_HEALTH_CHANGED,
+      function(newHealth, oldHealth)
+        if self.enabled and self:shouldEatHealth() then
+          self:eat()
+        end
+      end,
+      10 -- Priority
+    )
+    
+    -- Subscribe to mana changes
+    self.subscriptions.mana = eventBus:subscribe(
+      eventBus.Events.PLAYER_MANA_CHANGED,
+      function(newMana, oldMana)
+        if self.enabled and self:shouldEatMana() then
+          self:eat()
+        end
+      end,
+      10
+    )
+  end
+end
+
+function EatFood:destroy()
+  -- Unsubscribe from events
+  if nExBot and nExBot.EventBus and self.subscriptions then
+    for _, subId in pairs(self.subscriptions) do
+      nExBot.EventBus:unsubscribe(subId)
+    end
+  end
+  self.subscriptions = {}
 end
 
 function EatFood:canEat()
@@ -152,6 +196,12 @@ function EatFood:eat()
   if item then
     use(item)
     self.lastEatTime = now or os.time() * 1000
+    
+    -- Emit food consumed event
+    if nExBot and nExBot.EventBus then
+      nExBot.EventBus:emit("food:consumed", food.type, food.name, food.value)
+    end
+    
     return true
   end
   

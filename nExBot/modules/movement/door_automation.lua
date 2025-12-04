@@ -1,8 +1,8 @@
 --[[
-  NexBot Door Automation
+  nExBot Door Automation
   Automatic door detection and opening
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

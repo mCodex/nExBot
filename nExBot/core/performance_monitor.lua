@@ -1,8 +1,8 @@
 --[[
-  NexBot Performance Monitor
+  nExBot Performance Monitor
   Tools for profiling and monitoring bot performance
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 
@@ -103,7 +103,7 @@ end
 -- Get formatted report
 -- @return string - Formatted performance report
 function PerformanceMonitor:getReport()
-  local lines = {"=== NexBot Performance Report ==="}
+  local lines = {"=== nExBot Performance Report ==="}
   
   -- Sort by total time
   local sorted = {}

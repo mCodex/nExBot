@@ -1,9 +1,9 @@
 --[[
-  NexBot Core Module Tests
+  nExBot Core Module Tests
   Tests for event_bus, bot_state, and distance_calculator
 ]]
 
-local TestFramework = dofile("/NexBot/tests/test_framework.lua")
+local TestFramework = dofile("/nExBot/tests/test_framework.lua")
 
 -- Mock player object for testing
 local mockPlayer = {

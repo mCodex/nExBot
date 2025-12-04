@@ -1,16 +1,16 @@
 --[[
-  NexBot Auto Route Generator
+  nExBot Auto Route Generator
   Complete auto-generation pipeline for routes
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 
-local WaypointRecorder = dofile("/NexBot/modules/waypoints/waypoint_recorder.lua")
-local AutoDiscovery = dofile("/NexBot/modules/waypoints/auto_discovery.lua")
-local RouteOptimizer = dofile("/NexBot/modules/waypoints/route_optimizer.lua")
-local PathPredictor = dofile("/NexBot/modules/waypoints/path_predictor.lua")
-local WaypointClustering = dofile("/NexBot/modules/waypoints/waypoint_clustering.lua")
+local WaypointRecorder = dofile("/nExBot/modules/waypoints/waypoint_recorder.lua")
+local AutoDiscovery = dofile("/nExBot/modules/waypoints/auto_discovery.lua")
+local RouteOptimizer = dofile("/nExBot/modules/waypoints/route_optimizer.lua")
+local PathPredictor = dofile("/nExBot/modules/waypoints/path_predictor.lua")
+local WaypointClustering = dofile("/nExBot/modules/waypoints/waypoint_clustering.lua")
 
 local AutoRouteGenerator = {
   recorder = nil,

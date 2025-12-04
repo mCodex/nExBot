@@ -1,5 +1,5 @@
 --[[
-  NexBot Creature Tracker
+  nExBot Creature Tracker
   Tracks creature positions and detects respawns
   
   Features:
@@ -8,7 +8,7 @@
   - Respawn detection
   - Weak reference tracking for GC efficiency
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

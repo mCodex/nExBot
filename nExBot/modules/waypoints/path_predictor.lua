@@ -1,8 +1,8 @@
 --[[
-  NexBot Path Predictor
+  nExBot Path Predictor
   Pattern recognition for common routes using ML-style algorithms
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

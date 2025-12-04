@@ -1,9 +1,9 @@
 --[[
-  NexBot Spell Registry
+  nExBot Spell Registry
   Open/Closed Principle implementation for spell management
   Extensible without modification
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

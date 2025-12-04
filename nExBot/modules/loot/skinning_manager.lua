@@ -1,8 +1,8 @@
 --[[
-  NexBot Skinning Manager
+  nExBot Skinning Manager
   Improved skinning with pathability and LOS checks
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

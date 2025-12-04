@@ -1,8 +1,8 @@
 --[[
-  NexBot Waypoint Clustering
+  nExBot Waypoint Clustering
   K-Means style clustering for smart waypoint grouping
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

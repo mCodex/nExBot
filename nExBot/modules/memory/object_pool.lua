@@ -1,9 +1,9 @@
 --[[
-  NexBot Object Pool
+  nExBot Object Pool
   Memory optimization through object reuse
   Reduces garbage collection pressure
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

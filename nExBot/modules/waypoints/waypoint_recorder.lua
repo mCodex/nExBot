@@ -1,8 +1,8 @@
 --[[
-  NexBot Waypoint Recorder
+  nExBot Waypoint Recorder
   Passive movement tracking for route learning
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

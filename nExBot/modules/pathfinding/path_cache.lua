@@ -1,9 +1,9 @@
 --[[
-  NexBot Path Cache
+  nExBot Path Cache
   Caches calculated paths to reduce CPU usage
   Implements TTL-based cache eviction
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

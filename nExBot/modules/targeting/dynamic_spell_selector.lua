@@ -1,5 +1,5 @@
 --[[
-  NexBot Dynamic Spell Selector
+  nExBot Dynamic Spell Selector
   Intelligently selects optimal spell/rune based on situation
   
   Features:
@@ -9,7 +9,7 @@
   - Cooldown awareness
   - Resource availability check
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

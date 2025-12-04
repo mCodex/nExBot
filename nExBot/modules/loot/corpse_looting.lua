@@ -1,8 +1,13 @@
 --[[
-  NexBot Corpse Looting System
-  Automatic looting from killed creatures
+  nExBot Corpse Looting System
+  Event-driven automatic looting from killed creatures
   
-  Author: NexBot Team
+  Features:
+  - Subscribes to creature death events
+  - Emits loot collected events
+  - Priority-based loot filtering
+  
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 
@@ -13,7 +18,8 @@ local CorpseLoot = {
   lastLootTime = 0,
   lootCooldown = 500,
   lootGold = true,
-  lootAll = false
+  lootAll = false,
+  subscriptions = {}
 }
 
 -- Common valuable items to auto-loot
@@ -36,7 +42,8 @@ function CorpseLoot:new()
     lastLootTime = 0,
     lootCooldown = 500,
     lootGold = true,
-    lootAll = false
+    lootAll = false,
+    subscriptions = {}
   }
   
   -- Add default loot items
@@ -46,6 +53,52 @@ function CorpseLoot:new()
   
   setmetatable(instance, { __index = self })
   return instance
+end
+
+-- Initialize with event subscriptions
+function CorpseLoot:initialize()
+  self.enabled = true
+  
+  -- Subscribe to creature death events
+  if nExBot and nExBot.EventBus then
+    local eventBus = nExBot.EventBus
+    
+    self.subscriptions.creatureDeath = eventBus:subscribe(
+      eventBus.Events.CREATURE_DIED,
+      function(creature, position)
+        if self.enabled then
+          -- Schedule loot attempt after brief delay
+          schedule(200, function()
+            self:lootAtPosition(position)
+          end)
+        end
+      end,
+      5 -- Priority
+    )
+  end
+end
+
+function CorpseLoot:destroy()
+  if nExBot and nExBot.EventBus and self.subscriptions then
+    for _, subId in pairs(self.subscriptions) do
+      nExBot.EventBus:unsubscribe(subId)
+    end
+  end
+  self.subscriptions = {}
+end
+
+function CorpseLoot:lootAtPosition(position)
+  if not position or not g_map then return 0 end
+  
+  local tile = g_map.getTile(position)
+  if not tile then return 0 end
+  
+  local topThing = tile:getTopUseThing()
+  if topThing and topThing:isContainer() then
+    return self:lootFromCorpse({item = topThing, pos = position, distance = 0})
+  end
+  
+  return 0
 end
 
 function CorpseLoot:addToLootList(itemId)

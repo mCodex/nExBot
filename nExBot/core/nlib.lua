@@ -1,34 +1,34 @@
--- Author: NexBot Team (Based on original by Vithrax)
+-- Author: nExBot Team (Based on original by Vithrax)
 -- contains mostly basic function shortcuts and code shorteners
--- Refactored for NexBot with improved structure and compatibility
+-- Refactored for nExBot with improved structure and compatibility
 
 -- initial global variables declaration
-NexBot = NexBot or {} -- global namespace for bot variables
-NexBot.BotServerMembers = {}
-NexBot.standTime = now
-NexBot.isUsingPotion = false
-NexBot.isUsing = false
-NexBot.customCooldowns = {}
-NexBot.lastLabel = ""
-NexBot.CaveBotData = {}
-NexBot.lootContainers = {}
-NexBot.lootItems = {}
+nExBot = nExBot or {} -- global namespace for bot variables
+nExBot.BotServerMembers = {}
+nExBot.standTime = now
+nExBot.isUsingPotion = false
+nExBot.isUsing = false
+nExBot.customCooldowns = {}
+nExBot.lastLabel = ""
+nExBot.CaveBotData = {}
+nExBot.lootContainers = {}
+nExBot.lootItems = {}
 
 function logInfo(text)
     local timestamp = os.date("%H:%M:%S")
     text = tostring(text)
-    local start = timestamp.." [NexBot]: "
+    local start = timestamp.." [nExBot]: "
 
     return modules.client_terminal.addLine(start..text, "orange") 
 end
 
 -- scripts / functions
 onPlayerPositionChange(function(x,y)
-    NexBot.standTime = now
+    nExBot.standTime = now
 end)
 
 function standTime()
-    return now - NexBot.standTime
+    return now - nExBot.standTime
 end
 
 function relogOnCharacter(charName)
@@ -232,7 +232,7 @@ function killsToRs()
 end
 
 -- calculates exhaust for potions based on "Aaaah..." message
--- changes state of NexBot variable, can be used in other scripts
+-- changes state of nExBot variable, can be used in other scripts
 -- already used in pushmax, healbot, etc
 
 onTalk(function(name, level, mode, text, channelId, pos)
@@ -240,8 +240,8 @@ onTalk(function(name, level, mode, text, channelId, pos)
     if mode ~= 34 then return end
 
     if text == "Aaaah..." then
-        NexBot.isUsingPotion = true
-        schedule(950, function() NexBot.isUsingPotion = false end)
+        nExBot.isUsingPotion = true
+        schedule(950, function() nExBot.isUsingPotion = false end)
     end
 end)
 
@@ -314,16 +314,16 @@ end)
 if onSpellCooldown and onGroupSpellCooldown then
     onSpellCooldown(function(iconId, duration)
         schedule(1, function()
-            if not NexBot.customCooldowns[lastPhrase] then
-                NexBot.customCooldowns[lastPhrase] = {id = iconId}
+            if not nExBot.customCooldowns[lastPhrase] then
+                nExBot.customCooldowns[lastPhrase] = {id = iconId}
             end
         end)
     end)
 
     onGroupSpellCooldown(function(iconId, duration)
         schedule(2, function()
-            if NexBot.customCooldowns[lastPhrase] then
-                NexBot.customCooldowns[lastPhrase] = {id = NexBot.customCooldowns[lastPhrase].id, group = {[iconId] = duration}}
+            if nExBot.customCooldowns[lastPhrase] then
+                nExBot.customCooldowns[lastPhrase] = {id = nExBot.customCooldowns[lastPhrase].id, group = {[iconId] = duration}}
             end
         end)
     end)
@@ -347,7 +347,7 @@ function getSpellData(spell)
         end
     end
     if not t then
-        for k, v in pairs(NexBot.customCooldowns) do
+        for k, v in pairs(nExBot.customCooldowns) do
             if k == spell then
                 c = {id = v.id, mana = 1, level = 1, group = v.group}
                 break
@@ -390,7 +390,7 @@ end
 -- below callbacks are triggers to changing the var state
 local isUsingTime = now
 macro(100, function()
-    NexBot.isUsing = now < isUsingTime and true or false
+    nExBot.isUsing = now < isUsingTime and true or false
 end)
 onUse(function(pos, itemId, stackPos, subType)
     if pos.x > 65000 then return end
@@ -432,7 +432,7 @@ function isFriend(c)
     if table.find(storage.playerList.friendList, name) then
         CachedFriends[c] = true
         return true
-    elseif NexBot.BotServerMembers[name] ~= nil then
+    elseif nExBot.BotServerMembers[name] ~= nil then
         CachedFriends[c] = true
         return true
     elseif storage.playerList.groupMembers then
@@ -1179,8 +1179,8 @@ diamondArrowArea = [[
     01110
 ]]
 
--- NexBot save function
-function nexBotConfigSave(section, data)
+-- nExBot save function
+function nExBotConfigSave(section, data)
     if section and data then
         storage[section] = data
     end

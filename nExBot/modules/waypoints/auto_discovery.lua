@@ -1,8 +1,8 @@
 --[[
-  NexBot Auto Discovery
+  nExBot Auto Discovery
   Intelligent route discovery and area analysis
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

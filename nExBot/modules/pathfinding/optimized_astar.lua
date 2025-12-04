@@ -1,5 +1,5 @@
 --[[
-  NexBot Optimized A* Pathfinder
+  nExBot Optimized A* Pathfinder
   Improved pathfinding with caching and performance optimizations
   
   Features:
@@ -9,11 +9,11 @@
   - Diagonal movement support
   - Priority queue using binary heap
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 
-local PathCache = dofile("/NexBot/modules/pathfinding/path_cache.lua")
+local PathCache = dofile("/nExBot/modules/pathfinding/path_cache.lua")
 
 local OptimizedAStar = {
   cache = nil,

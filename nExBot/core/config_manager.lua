@@ -1,5 +1,5 @@
 --[[
-  NexBot Configuration System
+  nExBot Configuration System
   Centralized configuration management with persistence
   
   Features:
@@ -8,7 +8,7 @@
   - Auto-save functionality
   - Migration support
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 
@@ -190,8 +190,8 @@ function ConfigManager:set(path, value)
   self.dirty = true
   
   -- Emit change event
-  if NexBot and NexBot.EventBus then
-    NexBot.EventBus:emit("CONFIG_CHANGED", path, value, oldValue)
+  if nExBot and nExBot.EventBus then
+    nExBot.EventBus:emit("CONFIG_CHANGED", path, value, oldValue)
   end
   
   return self
@@ -268,7 +268,7 @@ function ConfigManager:load()
   end)
   
   if not success then
-    warn("[NexBot Config] Failed to load configuration: " .. tostring(err))
+    warn("[nExBot Config] Failed to load configuration: " .. tostring(err))
     self.configs = self:deepCopy(self.defaults)
   end
   
@@ -285,15 +285,15 @@ function ConfigManager:save()
   end)
   
   if not success then
-    warn("[NexBot Config] Failed to save configuration: " .. tostring(err))
+    warn("[nExBot Config] Failed to save configuration: " .. tostring(err))
     return false
   end
   
   self.lastSave = os.time()
   self.dirty = false
   
-  if NexBot and NexBot.EventBus then
-    NexBot.EventBus:emit("CONFIG_SAVED")
+  if nExBot and nExBot.EventBus then
+    nExBot.EventBus:emit("CONFIG_SAVED")
   end
   
   return true
@@ -392,8 +392,8 @@ function ConfigManager:switchProfile(name)
   
   self.dirty = true
   
-  if NexBot and NexBot.EventBus then
-    NexBot.EventBus:emit("PROFILE_CHANGED", name)
+  if nExBot and nExBot.EventBus then
+    nExBot.EventBus:emit("PROFILE_CHANGED", name)
   end
   
   return true
@@ -454,8 +454,8 @@ function ConfigManager:import(jsonString)
   return true
 end
 
--- Legacy compatibility - nexBotConfigSave function
-function nexBotConfigSave(section, data)
+-- Legacy compatibility - nExBotConfigSave function
+function nExBotConfigSave(section, data)
   if section and data then
     ConfigManager:set(section, data)
   end

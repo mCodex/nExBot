@@ -1,5 +1,5 @@
 --[[
-  NexBot Luring Manager
+  nExBot Luring Manager
   Orchestrates smart luring behavior with patterns and tracking
   
   Features:
@@ -8,12 +8,12 @@
   - Automatic respawn prevention
   - Integration with pathfinding
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 
-local LuringPatterns = dofile("/NexBot/modules/luring/luring_patterns.lua")
-local CreatureTracker = dofile("/NexBot/modules/luring/creature_tracker.lua")
+local LuringPatterns = dofile("/nExBot/modules/luring/luring_patterns.lua")
+local CreatureTracker = dofile("/nExBot/modules/luring/creature_tracker.lua")
 
 local LuringManager = {
   patterns = nil,

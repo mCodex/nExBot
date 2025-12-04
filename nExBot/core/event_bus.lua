@@ -1,9 +1,9 @@
 --[[
-  NexBot Event Bus
+  nExBot Event Bus
   Decoupled event-driven communication between modules
   Implements Observer pattern for loose coupling
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

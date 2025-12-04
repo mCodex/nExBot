@@ -1,9 +1,9 @@
 --[[
-  NexBot Distance Calculator
+  nExBot Distance Calculator
   DRY implementation - centralized distance calculations
   Eliminates duplicate distance code across modules
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

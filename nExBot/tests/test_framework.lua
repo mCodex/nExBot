@@ -1,8 +1,8 @@
 --[[
-  NexBot Test Framework
+  nExBot Test Framework
   Unit testing infrastructure for the bot
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

@@ -1,8 +1,8 @@
 --[[
-  NexBot Container Manager
+  nExBot Container Manager
   Recursive backpack management and item searching
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 

@@ -1,5 +1,5 @@
 --[[
-  NexBot Luring Patterns
+  nExBot Luring Patterns
   Generates movement patterns for creature luring
   
   Patterns:
@@ -8,7 +8,7 @@
   - Figure Eight: Infinity pattern
   - Random Walk: Unpredictable movement
   
-  Author: NexBot Team
+  Author: nExBot Team
   Version: 1.0.0
 ]]
 
