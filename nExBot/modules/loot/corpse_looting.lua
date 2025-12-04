@@ -183,6 +183,11 @@ function CorpseLoot:lootFromCorpse(corpseInfo)
         if targetContainer then
           g_game.move(item, targetContainer:getSlotPosition(targetContainer:getItemsCount()), item:getCount())
           itemsLooted = itemsLooted + 1
+          
+          -- Emit loot collected event
+          if nExBot and nExBot.EventBus then
+            nExBot.EventBus:emit(nExBot.EventBus.Events.LOOT_COLLECTED, item:getId(), item:getCount(), item:getName())
+          end
         end
       end
     end
