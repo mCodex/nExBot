@@ -11,6 +11,15 @@ local version = "1.0.0"
 local currentVersion
 local available = false
 
+-- Safe logging helper (uses logInfo if available, otherwise print)
+local function log(message)
+  if logInfo then
+    logInfo(message)
+  elseif print then
+    print("[nExBot] " .. message)
+  end
+end
+
 -- Initialize global nExBot namespace
 nExBot = {
   version = version,
@@ -29,16 +38,6 @@ storage.checkVersion = storage.checkVersion or 0
 -- Version check (once per 12 hours)
 if os.time() > storage.checkVersion + (12 * 60 * 60) then
   storage.checkVersion = os.time()
-  
-  -- Note: Update URL for your repository
-  -- HTTP.get("https://raw.githubusercontent.com/mcodex/nExBot/main/nExBot/version.txt", function(data, err)
-  --   if err then
-  --     warn("[nExBot updater]: Unable to check version:\n" .. err)
-  --     return
-  --   end
-  --   currentVersion = data
-  --   available = true
-  -- end)
 end
 
 -- Display header
@@ -48,6 +47,9 @@ UI.Separator()
 -- Load core modules
 local function loadCoreModules()
   local success, err = pcall(function()
+    -- Load nlib first (provides logInfo and other utility functions)
+    dofile("/nExBot/core/nlib.lua")
+    
     -- Load core infrastructure
     nExBot.Core = {
       EventBus = dofile("/nExBot/core/event_bus.lua"),
@@ -68,7 +70,7 @@ local function loadCoreModules()
       nExBot.BotState:initialize()
     end
     
-    logInfo("nExBot core modules loaded successfully")
+    log("Core modules loaded successfully")
   end)
   
   if not success then
@@ -124,7 +126,7 @@ local function loadFeatureModules()
     -- Movement modules
     nExBot.modules.DoorAutomation = dofile("/nExBot/modules/movement/door_automation.lua")
     
-    logInfo("nExBot feature modules loaded successfully")
+    log("Feature modules loaded successfully")
   end)
   
   if not success then
@@ -151,7 +153,7 @@ local function loadToolsModules()
     -- Avoidance modules (AI-powered)
     dofile("/nExBot/modules/avoidance/wave_avoidance_ui.lua")
     
-    logInfo("nExBot Tools modules loaded successfully")
+    log("Tools modules loaded successfully")
   end)
   
   if not success then
@@ -173,7 +175,7 @@ local function loadMainTabModules()
     dofile("/nExBot/modules/main/friend_healer.lua")
     dofile("/nExBot/modules/main/pushmax.lua")
     
-    logInfo("nExBot Main tab modules loaded successfully")
+    log("Main tab modules loaded successfully")
   end)
   
   if not success then
@@ -194,7 +196,7 @@ local function loadRegenTabModules()
     dofile("/nExBot/modules/regen/healbot.lua")
     dofile("/nExBot/modules/regen/auto_equip.lua")
     
-    logInfo("nExBot Regen tab modules loaded successfully")
+    log("Regen tab modules loaded successfully")
   end)
   
   if not success then
@@ -214,7 +216,7 @@ local function loadCaveTabModules()
     -- Cave tab modules (main cavebot must be loaded first)
     dofile("/nExBot/modules/cave/cavebot.lua")
     
-    logInfo("nExBot Cave tab modules loaded successfully")
+    log("Cave tab modules loaded successfully")
   end)
   
   if not success then
@@ -234,7 +236,7 @@ local function loadTargetTabModules()
     -- Target tab modules (main targetbot loads creature editor and looting)
     dofile("/nExBot/modules/target/targetbot.lua")
     
-    logInfo("nExBot Target tab modules loaded successfully")
+    log("Target tab modules loaded successfully")
   end)
   
   if not success then
@@ -290,7 +292,7 @@ local function initializenExBot()
   end
   
   nExBot.initialized = true
-  logInfo("nExBot initialization complete")
+  log("Initialization complete")
   
   return true
 end
