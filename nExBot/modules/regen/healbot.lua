@@ -7,10 +7,15 @@
   Provides automatic health and mana restoration based on configurable
   thresholds and priorities.
   
+  NEW IN V2.0: Uses ItemCache for intelligent potion consumption
+  - Works even with closed backpacks
+  - Recursive scanning of all nested containers
+  - Event-driven cache updates
+  
   FEATURES:
   - 5 switchable profiles for different hunting situations
   - Spell-based healing with mana/cooldown checks
-  - Potion/item-based healing
+  - Potion/item-based healing (using ItemCache)
   - HP% / MP% / flat HP / flat MP threshold triggers
   - Priority ordering (first matching rule executes)
   - Standby modes for coordination with other modules
@@ -20,11 +25,13 @@
   2. Items are checked every 250ms (4 times/second) - slower due to exhaustion
   3. Rules are evaluated in order - first matching rule triggers
   4. Standby flags allow other modules to temporarily pause healing
+  5. ItemCache provides O(1) potion lookups even in closed backpacks
   
   PERFORMANCE NOTES:
   - Local caching of frequently accessed functions
   - Early returns prevent unnecessary iterations
   - Profile switching is O(1)
+  - ItemCache reduces container scanning overhead
   
   USAGE:
     -- Programmatic control
@@ -49,6 +56,19 @@ local table_insert = table.insert
 local pairs = pairs
 local tonumber = tonumber
 local tostring = tostring
+
+-- Reference to ItemCache (loaded after nExBot init)
+local itemCache = nil
+
+-- Lazy load ItemCache
+local function getItemCache()
+  if itemCache then return itemCache end
+  if nExBot and nExBot.ItemCache then
+    itemCache = nExBot.ItemCache
+    return itemCache
+  end
+  return nil
+end
 
 --[[
   ============================================================================
@@ -406,6 +426,7 @@ end)
 
 --- Item/Potion healing macro
 -- Iterates through itemTable and uses first matching item
+-- Uses ItemCache for intelligent potion lookup in closed backpacks
 -- 
 -- Rule structure:
 -- {
@@ -424,6 +445,9 @@ macro(250, function()
   local currentHp = hppercent()
   local currentMp = manapercent()
   
+  -- Try to get ItemCache for intelligent potion use
+  local cache = getItemCache()
+  
   for _, entry in pairs(currentSettings.itemTable) do
     if entry.enabled then
       local shouldUse = false
@@ -436,7 +460,13 @@ macro(250, function()
       end
       
       if shouldUse then
-        useWith(entry.itemId, player)
+        -- Use ItemCache if available (works with closed backpacks)
+        if cache and cache:hasItem(entry.itemId) then
+          cache:usePotion(entry.itemId)
+        else
+          -- Fallback to standard method
+          useWith(entry.itemId, player)
+        end
         return  -- Only one item per tick
       end
     end
@@ -557,5 +587,22 @@ HealBot = {
   -- @return (table) Current profile configuration
   getSettings = function()
     return currentSettings
+  end,
+  
+  --- Checks if ItemCache is available for intelligent potion use
+  -- @return (boolean) True if ItemCache is available
+  hasItemCache = function()
+    return getItemCache() ~= nil
+  end,
+  
+  --- Gets potion count from ItemCache (works with closed backpacks)
+  -- @param itemId (number) Potion item ID
+  -- @return (number) Count of potions available
+  getPotionCount = function(itemId)
+    local cache = getItemCache()
+    if cache then
+      return cache:getItemCount(itemId)
+    end
+    return itemAmount(itemId)  -- Fallback
   end
 }

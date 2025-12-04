@@ -40,7 +40,8 @@ Panel
 ui:setId(panelName)
 
 -- Settings window
-local settingsWindow = UI.createWindow('SmartMountWindow', rootWidget)
+local rootWidget = g_ui.getRootWidget()
+local settingsWindow = rootWidget and UI.createWindow('SmartMountWindow', rootWidget) or nil
 if not settingsWindow then
   g_ui.loadUIFromString([[
 SmartMountWindow < MainWindow

@@ -1,4 +1,4 @@
- SmartFishingWindow < MainWindow
+SmartFishingWindow < MainWindow
   size: 280 280
   padding: 20
   !text: tr('Smart Fishing Settings')

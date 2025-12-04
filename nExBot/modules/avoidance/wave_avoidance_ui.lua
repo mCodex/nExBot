@@ -61,14 +61,19 @@ local rootWidget = g_ui.getRootWidget()
 local settingsWindow = nil
 
 if rootWidget then
-  settingsWindow = UI.createWindow('WaveAvoidanceWindow', rootWidget)
-  settingsWindow:hide()
-  
-  -- Close handler
-  settingsWindow.onVisibilityChange = function(widget, visible)
-    if not visible then
-      -- Save config
-      storage[panelName] = config
+  local success, result = pcall(function()
+    return UI.createWindow('WaveAvoidanceWindow', rootWidget)
+  end)
+  if success and result then
+    settingsWindow = result
+    settingsWindow:hide()
+    
+    -- Close handler
+    settingsWindow.onVisibilityChange = function(widget, visible)
+      if not visible then
+        -- Save config
+        storage[panelName] = config
+      end
     end
   end
 end

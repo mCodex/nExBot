@@ -1,13 +1,32 @@
 --[[
+  ============================================================================
   nExBot Main Entry Point
-  Loads and initializes all modules
+  ============================================================================
+  
+  Loads and initializes all modules with optimized loading order.
+  
+  LOADING ORDER:
+  1. Core utilities (nlib.lua) - Provides logging and helpers
+  2. Core infrastructure (BotState, ItemCache) - Foundation
+  3. Tab modules (Main, Regen, Cave, Target, Tools) - UI
+  4. Feature modules (Pathfinding, Combat, etc.) - Optional
+  
+  TAB ORGANIZATION:
+  ─────────────────────────────────────────────────────────────────────────────
+  Main:    ComboBot, Friend Healer, PushMax
+  Regen:   HealBot, Conditions, Auto Equip
+  Cave:    CaveBot, Depositor, Supply Check
+  Target:  TargetBot, Creature Editor, Looting
+  Tools:   Fishing, Mount, Containers, Dropper, Wave Avoidance
   
   Author: nExBot Team
-  Version: 1.0.0
+  Version: 2.0.0 (Optimized)
   Date: December 2025
+  
+  ============================================================================
 ]]
 
-local version = "1.0.0"
+local version = "2.0.0"
 local currentVersion
 local available = false
 
@@ -31,6 +50,7 @@ nExBot = {
 nExBot.Core = nil
 nExBot.EventBus = nil
 nExBot.BotState = nil
+nExBot.ItemCache = nil
 
 -- Storage check and initialization
 storage.checkVersion = storage.checkVersion or 0
@@ -52,23 +72,21 @@ local function loadCoreModules()
     
     -- Load core infrastructure
     nExBot.Core = {
-      EventBus = dofile("/nExBot/core/event_bus.lua"),
       BotState = dofile("/nExBot/core/bot_state.lua"),
+      ItemCache = dofile("/nExBot/core/item_cache.lua"),
       DistanceCalculator = dofile("/nExBot/core/distance_calculator.lua"),
       PerformanceMonitor = dofile("/nExBot/core/performance_monitor.lua")
     }
     
     -- Initialize core modules (with nil checks)
-    nExBot.EventBus = nExBot.Core.EventBus
     nExBot.BotState = nExBot.Core.BotState
-    
-    if nExBot.EventBus and nExBot.EventBus.initialize then
-      nExBot.EventBus:initialize()
-    end
+    nExBot.ItemCache = nExBot.Core.ItemCache
     
     if nExBot.BotState and nExBot.BotState.initialize then
       nExBot.BotState:initialize()
     end
+    
+    -- ItemCache auto-starts on player login
     
     log("Core modules loaded successfully")
   end)
@@ -97,7 +115,8 @@ local function loadFeatureModules()
     nExBot.modules.CreatureTracker = dofile("/nExBot/modules/luring/creature_tracker.lua")
     nExBot.modules.LuringManager = dofile("/nExBot/modules/luring/luring_manager.lua")
     
-    -- Targeting modules
+    -- Targeting modules (Intelligent TargetBot)
+    nExBot.modules.IntelligentTargetBot = dofile("/nExBot/modules/target/intelligent_targetbot.lua")
     nExBot.modules.PriorityTargetManager = dofile("/nExBot/modules/targeting/priority_target_manager.lua")
     nExBot.modules.DynamicSpellSelector = dofile("/nExBot/modules/targeting/dynamic_spell_selector.lua")
     
@@ -126,6 +145,9 @@ local function loadFeatureModules()
     -- Movement modules
     nExBot.modules.DoorAutomation = dofile("/nExBot/modules/movement/door_automation.lua")
     
+    -- Avoidance modules (AI-powered)
+    nExBot.modules.WaveAvoidance = dofile("/nExBot/modules/avoidance/wave_avoidance.lua")
+    
     log("Feature modules loaded successfully")
   end)
   
@@ -143,14 +165,14 @@ local function loadToolsModules()
     -- Import styles
     importStyle("/nExBot/modules/tools/tools.otui")
     
-    -- Tools modules
+    -- Tools modules (consolidated)
     dofile("/nExBot/modules/tools/smart_fishing.lua")
     dofile("/nExBot/modules/tools/smart_mount.lua")
     dofile("/nExBot/modules/tools/containers.lua")
     dofile("/nExBot/modules/tools/dropper.lua")
     dofile("/nExBot/modules/tools/extras.lua")
     
-    -- Avoidance modules (AI-powered)
+    -- Avoidance UI (uses wave_avoidance.lua engine)
     dofile("/nExBot/modules/avoidance/wave_avoidance_ui.lua")
     
     log("Tools modules loaded successfully")
@@ -164,16 +186,14 @@ local function loadToolsModules()
   return true
 end
 
--- Load Main tab modules (vBot-style)
+-- Load Main tab modules (simplified)
 local function loadMainTabModules()
   local success, err = pcall(function()
     -- Import styles
     importStyle("/nExBot/modules/main/main.otui")
     
-    -- Main tab modules
-    dofile("/nExBot/modules/main/combo_bot.lua")
-    dofile("/nExBot/modules/main/friend_healer.lua")
-    dofile("/nExBot/modules/main/pushmax.lua")
+    -- Load consolidated main tab
+    dofile("/nExBot/modules/main/main_tab.lua")
     
     log("Main tab modules loaded successfully")
   end)
@@ -227,14 +247,14 @@ local function loadCaveTabModules()
   return true
 end
 
--- Load Target tab modules (vBot-style)
+-- Load Target tab modules (intelligent targeting)
 local function loadTargetTabModules()
   local success, err = pcall(function()
     -- Import styles
     importStyle("/nExBot/modules/target/target.otui")
     
-    -- Target tab modules (main targetbot loads creature editor and looting)
-    dofile("/nExBot/modules/target/targetbot.lua")
+    -- Load consolidated target tab with intelligent engine
+    dofile("/nExBot/modules/target/target_tab.lua")
     
     log("Target tab modules loaded successfully")
   end)
@@ -286,11 +306,6 @@ local function initializenExBot()
     warn("[nExBot] Some Tools modules failed to load, continuing with available modules")
   end
   
-  -- Emit initialization event (only if EventBus loaded successfully)
-  if nExBot.EventBus then
-    nExBot.EventBus:emit(nExBot.EventBus.Events.MODULE_ENABLED, "nExBot", version)
-  end
-  
   nExBot.initialized = true
   log("Initialization complete")
   
@@ -310,12 +325,82 @@ nExBot.getVersion = function()
   return version
 end
 
-nExBot.getEventBus = function()
-  return nExBot.EventBus
-end
-
 nExBot.getState = function()
   return nExBot.BotState
+end
+
+--- Gets the Item Cache for inventory management
+-- @return (ItemCache) The item cache instance
+nExBot.getItemCache = function()
+  return nExBot.ItemCache
+end
+
+--- Counts items using the intelligent cache (works with closed backpacks)
+-- @param itemId (number) Item ID to count
+-- @return (number) Total count across all containers
+nExBot.countItem = function(itemId)
+  if nExBot.ItemCache then
+    return nExBot.ItemCache:getItemCount(itemId)
+  end
+  return itemAmount(itemId)  -- Fallback to standard function
+end
+
+--- Uses an item from the cache (works with closed backpacks)
+-- @param itemId (number) Item ID to use
+-- @param target (Creature|table|nil) Optional target
+-- @return (boolean) True if item was used
+nExBot.useItem = function(itemId, target)
+  if nExBot.ItemCache then
+    return nExBot.ItemCache:useItem(itemId, target)
+  end
+  return false
+end
+
+--- Uses a potion on the player (works with closed backpacks)
+-- @param itemId (number) Potion item ID
+-- @return (boolean) True if potion was used
+nExBot.usePotion = function(itemId)
+  if nExBot.ItemCache then
+    return nExBot.ItemCache:usePotion(itemId)
+  end
+  return false
+end
+
+--- Uses a rune on a target (works with closed backpacks)
+-- @param itemId (number) Rune item ID
+-- @param target (Creature) Target creature
+-- @return (boolean) True if rune was used
+nExBot.useRune = function(itemId, target)
+  if nExBot.ItemCache then
+    return nExBot.ItemCache:useRune(itemId, target)
+  end
+  return false
+end
+
+--- Checks if an item exists in any container
+-- @param itemId (number) Item ID to check
+-- @return (boolean) True if item exists
+nExBot.hasItem = function(itemId)
+  if nExBot.ItemCache then
+    return nExBot.ItemCache:hasItem(itemId)
+  end
+  return itemAmount(itemId) > 0
+end
+
+--- Refreshes the item cache (forces full rescan)
+nExBot.refreshItemCache = function()
+  if nExBot.ItemCache then
+    nExBot.ItemCache:refresh()
+  end
+end
+
+--- Gets item cache statistics
+-- @return (table) Cache statistics
+nExBot.getItemCacheStats = function()
+  if nExBot.ItemCache then
+    return nExBot.ItemCache:getStats()
+  end
+  return {}
 end
 
 -- Initialize

@@ -40,7 +40,8 @@ Panel
 ui:setId(panelName)
 
 -- Settings window
-local settingsWindow = UI.createWindow('SmartFishingWindow', rootWidget)
+local rootWidget = g_ui.getRootWidget()
+local settingsWindow = rootWidget and UI.createWindow('SmartFishingWindow', rootWidget) or nil
 if not settingsWindow then
   g_ui.loadUIFromString([[
 SmartFishingWindow < MainWindow
