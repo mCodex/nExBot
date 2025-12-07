@@ -1,19 +1,24 @@
--- tools tab
+-- Tools tab widgets and macros
 setDefaultTab("Tools")
 
+-- Money exchanger -----------------------------------------------------------
 if type(storage.moneyItems) ~= "table" then
-  storage.moneyItems = {3031, 3035}
+  storage.moneyItems = {
+    { id = 3031 }, -- gold coin
+    { id = 3035 }  -- platinum coin
+  }
 end
+
 macro(1000, "Exchange money", function()
   if not storage.moneyItems[1] then return end
-  local containers = g_game.getContainers()
-  for index, container in pairs(containers) do
-    if not container.lootContainer then -- ignore monster containers
-      for i, item in ipairs(container:getItems()) do
+  for _, container in pairs(g_game.getContainers()) do
+    if not container.lootContainer then
+      for _, item in ipairs(container:getItems()) do
         if item:getCount() == 100 then
-          for m, moneyId in ipairs(storage.moneyItems) do
+          for _, moneyId in ipairs(storage.moneyItems) do
             if item:getId() == moneyId.id then
-              return g_game.use(item)            
+              g_game.use(item)
+              return
             end
           end
         end
@@ -22,165 +27,121 @@ macro(1000, "Exchange money", function()
   end
 end)
 
-local moneyContainer = UI.Container(function(widget, items)
+UI.Container(function(widget, items)
   storage.moneyItems = items
-end, true)
-moneyContainer:setHeight(35)
-moneyContainer:setItems(storage.moneyItems)
+end, true):setHeight(35)
 
 UI.Separator()
 
-macro(60000, "Send message on trade", function()
-  local trade = getChannelId("advertising")
-  if not trade then
-    trade = getChannelId("trade")
-  end
-  if trade and storage.autoTradeMessage:len() > 0 then    
-    sayChannel(trade, storage.autoTradeMessage)
+-- Auto trade message --------------------------------------------------------
+macro(60 * 1000, "Send message on trade", function()
+  local trade = getChannelId("advertising") or getChannelId("trade")
+  local message = storage.autoTradeMessage or "nExBot is online!"
+  if trade and message:len() > 0 then
+    sayChannel(trade, message)
   end
 end)
-UI.TextEdit(storage.autoTradeMessage or "nExBot has arrived!", function(widget, text)    
+
+UI.TextEdit(storage.autoTradeMessage or "nExBot is online!", function(widget, text)
   storage.autoTradeMessage = text
 end)
 
 UI.Separator()
 
--- Auto Haste Function
--- Detects vocation and uses appropriate haste spell
--- Knights/Paladins: utani hur  
--- Sorcerers/Druids: utani gran hur
-
--- Vocation IDs:
--- 0 = No vocation, 1 = Knight, 2 = Paladin, 3 = Sorcerer, 4 = Druid
--- 11 = Elite Knight, 12 = Royal Paladin, 13 = Master Sorcerer, 14 = Elder Druid
-
+-- Auto haste ---------------------------------------------------------------
 local HASTE_SPELLS = {
-  [1] = { spell = "utani hur", mana = 60 },      -- Knight
-  [2] = { spell = "utani hur", mana = 60 },      -- Paladin
-  [3] = { spell = "utani gran hur", mana = 100 }, -- Sorcerer
-  [4] = { spell = "utani gran hur", mana = 100 }, -- Druid
-  [11] = { spell = "utani hur", mana = 60 },     -- Elite Knight
-  [12] = { spell = "utani hur", mana = 60 },     -- Royal Paladin
-  [13] = { spell = "utani gran hur", mana = 100 }, -- Master Sorcerer
-  [14] = { spell = "utani gran hur", mana = 100 }, -- Elder Druid
+  [1]  = { spell = "utani hur",      mana = 60  }, -- Knight
+  [2]  = { spell = "utani hur",      mana = 60  }, -- Paladin
+  [3]  = { spell = "utani gran hur", mana = 100 }, -- Sorcerer
+  [4]  = { spell = "utani gran hur", mana = 100 }, -- Druid
+  [11] = { spell = "utani hur",      mana = 60  },
+  [12] = { spell = "utani hur",      mana = 60  },
+  [13] = { spell = "utani gran hur", mana = 100 },
+  [14] = { spell = "utani gran hur", mana = 100 },
 }
 
 macro(100, "Auto Haste", function()
-  -- Get current vocation
-  local voc = player:getVocation()
-  local hasteData = HASTE_SPELLS[voc]
-  
-  -- No haste spell for this vocation
-  if not hasteData then return end
-  
-  -- Check if in protection zone
-  if isInPz() then return end
-  
-  -- Check mana requirement (use mana() helper function)
-  if mana() < hasteData.mana then return end
-  
-  -- Check if already hasted (hasHaste is OTClientV8 built-in)
-  if hasHaste() then return end
-  
-  -- Check spell cooldown
-  if getSpellCoolDown(hasteData.spell) then return end
-  
-  -- Check if support spell group is on cooldown
-  if modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive and 
-     modules.game_cooldown.isGroupCooldownIconActive(2) then 
-    return 
-  end
-  
-  -- Cast haste spell
-  say(hasteData.spell)
+  if not player then return end
+  local vocation = player:getVocation()
+  local haste = HASTE_SPELLS[vocation]
+  if not haste then return end
+  if hasHaste and hasHaste() then return end
+  if mana() < haste.mana then return end
+  if getSpellCoolDown and getSpellCoolDown(haste.spell) then return end
+  say(haste.spell)
 end)
 
 UI.Separator()
 
--- Low Power Mode / FPS Reducer
--- Reduces FPS to save CPU/GPU power and reduce memory consumption
--- Useful when AFK botting or running multiple clients
--- Uses OTClientV8 APIs: g_app Pane FPS or Options module
+-- Low power / FPS reducer ---------------------------------------------------
+local normalFps = 0   -- 0 = unlimited
+local lowPowerFps = 5
 
--- FPS settings
-local normalFps = 0    -- 0 = unlimited/maximum FPS
-local lowPowerFps = 5  -- Low but still usable FPS
-
--- Helper function to set FPS using multiple approaches for compatibility
 local function setClientFps(fps)
-  local success = false
-  
-  -- Method 1: Direct g_app API (foreground + background panes)
+  local changed = false
   if g_app then
     if g_app.setForegroundPaneMaxFps then
       g_app.setForegroundPaneMaxFps(fps)
-      success = true
+      changed = true
     end
     if g_app.setBackgroundPaneMaxFps then
       g_app.setBackgroundPaneMaxFps(fps)
-      success = true
+      changed = true
     end
   end
-  
-  -- Method 2: Through modules.game_bot.g_app
+
   if modules and modules.game_bot and modules.game_bot.g_app then
     local app = modules.game_bot.g_app
     if app.setForegroundPaneMaxFps then
       app.setForegroundPaneMaxFps(fps)
-      success = true
+      changed = true
     end
     if app.setBackgroundPaneMaxFps then
       app.setBackgroundPaneMaxFps(fps)
-      success = true
+      changed = true
     end
   end
-  
-  -- Method 3: Through Options module (if available)
-  if modules and modules.client_options then
-    local options = modules.client_options
-    if options.setOption then
-      pcall(function() options.setOption('foregroundFrameRate', fps) end)
-      pcall(function() options.setOption('backgroundFrameRate', fps) end)
-      success = true
-    end
+
+  if modules and modules.client_options and modules.client_options.setOption then
+    pcall(function() modules.client_options.setOption('foregroundFrameRate', fps) end)
+    pcall(function() modules.client_options.setOption('backgroundFrameRate', fps) end)
+    changed = true
   end
-  
-  -- Method 4: Through g_settings
+
   if g_settings then
     pcall(function() g_settings.set('foregroundFrameRate', fps) end)
     pcall(function() g_settings.set('backgroundFrameRate', fps) end)
+    changed = true
   end
-  
-  return success
+
+  return changed
 end
 
-if not storage.lowPowerMode then
+if storage.lowPowerMode == nil then
   storage.lowPowerMode = false
 end
 
 local lowPowerSwitch = UI.Button("Low Power Mode: OFF", function(widget)
   storage.lowPowerMode = not storage.lowPowerMode
-  
-  if storage.lowPowerMode then
-    widget:setText("Low Power Mode: ON")
-    widget:setColor("#00ff00")
+  local enabled = storage.lowPowerMode
+  widget:setText(enabled and "Low Power Mode: ON" or "Low Power Mode: OFF")
+  widget:setColor(enabled and "#00ff00" or "#ffffff")
+
+  if enabled then
     if setClientFps(lowPowerFps) then
       info("Low Power Mode enabled - FPS limited to " .. lowPowerFps)
     else
-      warn("Low Power Mode: Could not change FPS settings")
+      warn("Low Power Mode: could not change FPS settings")
     end
   else
-    widget:setText("Low Power Mode: OFF")
-    widget:setColor("#ffffff")
     if setClientFps(normalFps) then
       info("Low Power Mode disabled - FPS restored to maximum")
     else
-      warn("Low Power Mode: Could not restore FPS settings")
+      warn("Low Power Mode: could not restore FPS settings")
     end
   end
 end)
 
--- Initialize state on load
 if storage.lowPowerMode then
   lowPowerSwitch:setText("Low Power Mode: ON")
   lowPowerSwitch:setColor("#00ff00")
@@ -189,147 +150,75 @@ end
 
 UI.Separator()
 
--- Mana Training Macro
--- Trains magic level by casting a spell when mana is sufficient
--- Configurable spell, minimum mana %, and interval
-
--- Available training spells
-local TRAINING_SPELLS = {
-  { name = "Light", spell = "utevo lux", mana = 20 },
-  { name = "Magic Rope", spell = "exani tera", mana = 20 },
-  { name = "Find Person", spell = "exiva", mana = 20 },
-  { name = "Light Healing", spell = "exura", mana = 20 },
-  { name = "Intense Healing", spell = "exura gran", mana = 70 },
-  { name = "Food", spell = "exevo pan", mana = 120 },
-  { name = "Invisible", spell = "utana vid", mana = 440 },
-  { name = "Strong Haste", spell = "utani gran hur", mana = 100 },
-  { name = "Haste", spell = "utani hur", mana = 60 },
-  { name = "Magic Shield", spell = "utamo vita", mana = 50 },
-  { name = "Cancel Magic Shield", spell = "exana vita", mana = 50 },
-  { name = "Custom", spell = "", mana = 0 },
-}
-
--- Initialize storage
+-- Mana training -------------------------------------------------------------
 if storage.manaTraining == nil then
   storage.manaTraining = {
     enabled = false,
-    spellIndex = 1,
-    minManaPercent = 80,
-    customSpell = ""
+    spell = "exura",
+    minManaPercent = 80
   }
 end
 
--- Ensure spellIndex is valid
-if storage.manaTraining.spellIndex < 1 or storage.manaTraining.spellIndex > #TRAINING_SPELLS then
-  storage.manaTraining.spellIndex = 1
-end
-
--- Get current spell display text
-local function getCurrentSpellText()
-  local idx = storage.manaTraining.spellIndex or 1
-  local spell = TRAINING_SPELLS[idx]
-  if spell.name == "Custom" then
-    local custom = storage.manaTraining.customSpell or ""
-    if custom == "" then
-      return "Spell: Custom (not set)"
-    else
-      return "Spell: " .. custom
-    end
-  else
-    return "Spell: " .. spell.name .. " (" .. spell.mana .. "mp)"
+local function sanitizeSpell(text)
+  text = text or ""
+  text = text:match("^%s*(.-)%s*$")
+  if text == "" then
+    return "exura"
   end
+  return text
 end
 
--- Mana training state
-local manaTrainingEnabled = storage.manaTraining.enabled or false
-local lastTrainCast = 0
-local TRAIN_COOLDOWN = 1000  -- 1 second between casts
+local function getManaPercent()
+  if not player then return 0 end
+  local current = player.getMana and player:getMana() or 0
+  local maximum = player.getMaxMana and player:getMaxMana() or 0
+  if maximum <= 0 then return 0 end
+  return (current / maximum) * 100
+end
 
--- UI Label
 UI.Label("Mana Training:")
 
--- Spell selector button (cycles through spells on click)
-local spellButton = UI.Button(getCurrentSpellText(), function(widget)
-  -- Cycle to next spell
-  storage.manaTraining.spellIndex = storage.manaTraining.spellIndex + 1
-  if storage.manaTraining.spellIndex > #TRAINING_SPELLS then
-    storage.manaTraining.spellIndex = 1
-  end
-  widget:setText(getCurrentSpellText())
+UI.Label("Spell to cast (default: exura):")
+UI.TextEdit(storage.manaTraining.spell or "exura", function(widget, text)
+  storage.manaTraining.spell = sanitizeSpell(text)
 end)
 
--- Custom spell input
-UI.Label("Custom spell:")
-UI.TextEdit(storage.manaTraining.customSpell or "", function(widget, text)
-  storage.manaTraining.customSpell = text
-  -- Update spell button if custom is selected
-  if TRAINING_SPELLS[storage.manaTraining.spellIndex].name == "Custom" then
-    spellButton:setText(getCurrentSpellText())
-  end
-end)
-
--- Min mana % input (using TextEdit since UI.Scroll doesn't exist)
 UI.Label("Min mana % to train (10-100):")
 UI.TextEdit(tostring(storage.manaTraining.minManaPercent or 80), function(widget, text)
   local value = tonumber(text)
-  if value then
-    -- Clamp between 10 and 100
-    if value < 10 then value = 10 end
-    if value > 100 then value = 100 end
-    storage.manaTraining.minManaPercent = value
-  end
+  if not value then return end
+  if value < 10 then value = 10 end
+  if value > 100 then value = 100 end
+  storage.manaTraining.minManaPercent = value
 end)
 
--- Toggle button
-local manaTrainSwitch = UI.Button("Mana Training: OFF", function(widget)
-  manaTrainingEnabled = not manaTrainingEnabled
-  storage.manaTraining.enabled = manaTrainingEnabled
-  
-  if manaTrainingEnabled then
-    widget:setText("Mana Training: ON")
-    widget:setColor("#00ff00")
-    info("Mana Training enabled")
-  else
-    widget:setText("Mana Training: OFF")
-    widget:setColor("#ffffff")
-    info("Mana Training disabled")
-  end
+local manaTrainSwitch = UI.Button("Mana Training: OFF", function()
+  storage.manaTraining.enabled = not storage.manaTraining.enabled
+  manaTrainSwitch:setText(storage.manaTraining.enabled and "Mana Training: ON" or "Mana Training: OFF")
+  manaTrainSwitch:setColor(storage.manaTraining.enabled and "#00ff00" or "#ffffff")
+  info(storage.manaTraining.enabled and "Mana Training enabled" or "Mana Training disabled")
 end)
 
--- Initialize state on load
 if storage.manaTraining.enabled then
   manaTrainSwitch:setText("Mana Training: ON")
   manaTrainSwitch:setColor("#00ff00")
-  manaTrainingEnabled = true
 end
 
--- Mana training macro
+local lastTrainCast = 0
+local TRAIN_COOLDOWN = 1000
+
 macro(500, function()
-  if not manaTrainingEnabled then return end
+  if not storage.manaTraining.enabled then return end
   if not player then return end
   if (now - lastTrainCast) < TRAIN_COOLDOWN then return end
-  
-  -- Check mana percentage
-  local manaPercent = (mana() / maxMana()) * 100
-  local minMana = storage.manaTraining.minManaPercent or 80
-  
-  if manaPercent < minMana then return end
-  
-  -- Get the spell to cast
-  local spellIndex = storage.manaTraining.spellIndex or 1
-  local spellData = TRAINING_SPELLS[spellIndex]
-  local spellToCast = nil
-  
-  if spellData.name == "Custom" then
-    spellToCast = storage.manaTraining.customSpell
-  else
-    spellToCast = spellData.spell
-  end
-  
-  if not spellToCast or spellToCast == "" then return end
-  
-  -- Cast the spell
-  say(spellToCast)
+
+  local manaPercent = getManaPercent()
+  if manaPercent < (storage.manaTraining.minManaPercent or 80) then return end
+
+  local spell = sanitizeSpell(storage.manaTraining.spell)
+  if not spell or spell == "" then return end
+
+  say(spell)
   lastTrainCast = now
 end)
 
