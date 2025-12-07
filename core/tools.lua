@@ -39,7 +39,7 @@ macro(60000, "Send message on trade", function()
     sayChannel(trade, storage.autoTradeMessage)
   end
 end)
-UI.TextEdit(storage.autoTradeMessage or "I'm using OTClientV8!", function(widget, text)    
+UI.TextEdit(storage.autoTradeMessage or "nExBot has arrived!", function(widget, text)    
   storage.autoTradeMessage = text
 end)
 
@@ -206,6 +206,7 @@ local TRAINING_SPELLS = {
   { name = "Haste", spell = "utani hur", mana = 60 },
   { name = "Magic Shield", spell = "utamo vita", mana = 50 },
   { name = "Cancel Magic Shield", spell = "exana vita", mana = 50 },
+  { name = "Custom", spell = "", mana = 0 },
 }
 
 -- Initialize storage
@@ -218,14 +219,25 @@ if storage.manaTraining == nil then
   }
 end
 
--- Get spell names for dropdown
-local function getSpellNames()
-  local names = {}
-  for i, spell in ipairs(TRAINING_SPELLS) do
-    table.insert(names, spell.name .. " (" .. spell.mana .. " mana)")
+-- Ensure spellIndex is valid
+if storage.manaTraining.spellIndex < 1 or storage.manaTraining.spellIndex > #TRAINING_SPELLS then
+  storage.manaTraining.spellIndex = 1
+end
+
+-- Get current spell display text
+local function getCurrentSpellText()
+  local idx = storage.manaTraining.spellIndex or 1
+  local spell = TRAINING_SPELLS[idx]
+  if spell.name == "Custom" then
+    local custom = storage.manaTraining.customSpell or ""
+    if custom == "" then
+      return "Spell: Custom (not set)"
+    else
+      return "Spell: " .. custom
+    end
+  else
+    return "Spell: " .. spell.name .. " (" .. spell.mana .. "mp)"
   end
-  table.insert(names, "Custom Spell")
-  return names
 end
 
 -- Mana training state
@@ -236,23 +248,36 @@ local TRAIN_COOLDOWN = 1000  -- 1 second between casts
 -- UI Label
 UI.Label("Mana Training:")
 
--- Spell dropdown
-local spellNames = getSpellNames()
-local spellDropdown = UI.ComboBox(spellNames, function(widget, selectedOption, selectedIndex)
-  storage.manaTraining.spellIndex = selectedIndex
+-- Spell selector button (cycles through spells on click)
+local spellButton = UI.Button(getCurrentSpellText(), function(widget)
+  -- Cycle to next spell
+  storage.manaTraining.spellIndex = storage.manaTraining.spellIndex + 1
+  if storage.manaTraining.spellIndex > #TRAINING_SPELLS then
+    storage.manaTraining.spellIndex = 1
+  end
+  widget:setText(getCurrentSpellText())
 end)
-spellDropdown:setCurrentIndex(storage.manaTraining.spellIndex or 1)
 
--- Custom spell input (only shown when "Custom Spell" is selected)
-UI.Label("Custom spell (if selected):")
+-- Custom spell input
+UI.Label("Custom spell:")
 UI.TextEdit(storage.manaTraining.customSpell or "", function(widget, text)
   storage.manaTraining.customSpell = text
+  -- Update spell button if custom is selected
+  if TRAINING_SPELLS[storage.manaTraining.spellIndex].name == "Custom" then
+    spellButton:setText(getCurrentSpellText())
+  end
 end)
 
--- Min mana % slider
-UI.Label("Min mana % to train:")
-local manaSlider = UI.Scroll(storage.manaTraining.minManaPercent or 80, 10, 100, function(widget, value)
-  storage.manaTraining.minManaPercent = value
+-- Min mana % input (using TextEdit since UI.Scroll doesn't exist)
+UI.Label("Min mana % to train (10-100):")
+UI.TextEdit(tostring(storage.manaTraining.minManaPercent or 80), function(widget, text)
+  local value = tonumber(text)
+  if value then
+    -- Clamp between 10 and 100
+    if value < 10 then value = 10 end
+    if value > 100 then value = 100 end
+    storage.manaTraining.minManaPercent = value
+  end
 end)
 
 -- Toggle button
@@ -284,9 +309,6 @@ macro(500, function()
   if not player then return end
   if (now - lastTrainCast) < TRAIN_COOLDOWN then return end
   
-  -- Don't train in protection zone or if in combat
-  -- (optional: remove isInPz check if you want to train in PZ)
-  
   -- Check mana percentage
   local manaPercent = (mana() / maxMana()) * 100
   local minMana = storage.manaTraining.minManaPercent or 80
@@ -295,13 +317,13 @@ macro(500, function()
   
   -- Get the spell to cast
   local spellIndex = storage.manaTraining.spellIndex or 1
+  local spellData = TRAINING_SPELLS[spellIndex]
   local spellToCast = nil
   
-  if spellIndex <= #TRAINING_SPELLS then
-    spellToCast = TRAINING_SPELLS[spellIndex].spell
-  else
-    -- Custom spell
+  if spellData.name == "Custom" then
     spellToCast = storage.manaTraining.customSpell
+  else
+    spellToCast = spellData.spell
   end
   
   if not spellToCast or spellToCast == "" then return end
