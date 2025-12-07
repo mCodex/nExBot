@@ -1126,6 +1126,8 @@ end
 
 -- Use rune on target - works even with closed backpack (hotkey-style)
 local function useRuneOnTarget(runeId, targetCreatureOrTile)
+  lastAttackTime = now -- Update attack time for non-blocking cooldown
+  
   -- Method 1: Use inventory item with target (works without open backpack - like hotkeys)
   if g_game.useInventoryItemWith then
     g_game.useInventoryItemWith(runeId, targetCreatureOrTile)
@@ -1144,6 +1146,7 @@ end
 
 function executeAttackBotAction(categoryOrPos, idOrFormula, cooldown)
   cooldown = cooldown or 0
+  lastAttackTime = now -- Update attack time for non-blocking cooldown
   if categoryOrPos == 4 or categoryOrPos == 5 or categoryOrPos == 1 then
     cast(idOrFormula, cooldown)
   elseif categoryOrPos == 3 then 
@@ -1152,14 +1155,19 @@ function executeAttackBotAction(categoryOrPos, idOrFormula, cooldown)
 end
 
 -- support function covered, now the main loop
+-- State for non-blocking delay
+local lastAttackTime = 0
+local ATTACK_COOLDOWN = 100
+
 macro(100, function()
   if not currentSettings.enabled then return end
   if #currentSettings.attackTable == 0 or isInPz() or not target() or modules.game_cooldown.isGroupCooldownIconActive(1) then return end
 
   if currentSettings.Training and target() and target():getName():lower():find("training") then return end
 
+  -- Non-blocking cooldown for older clients (instead of delay(400) which blocks)
   if g_game.getClientVersion() < 960 or not currentSettings.Cooldown then
-    delay(400)
+    if (now - lastAttackTime) < 400 then return end
   end
 
   local monstersN = 0

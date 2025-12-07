@@ -352,6 +352,8 @@ end)
 
 local toFollow
 local toFollowPos = {}
+local lastFollowWalk = 0
+local FOLLOW_WALK_COOLDOWN = 100
 
 macro(100, function()
   toFollow = nil
@@ -380,8 +382,12 @@ macro(100, function()
   if player:isWalking() then return end
   local p = toFollowPos[posz()]
   if not p then return end
+  
+  -- Non-blocking cooldown check
+  if (now - lastFollowWalk) < FOLLOW_WALK_COOLDOWN then return end
+  
   if CaveBot.walkTo(p, 20, {ignoreNonPathable=true, precision=1, ignoreStairs=false}) then
-    delay(100)
+    lastFollowWalk = now
   end
 end)
 

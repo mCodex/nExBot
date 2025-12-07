@@ -5,6 +5,8 @@
   - Moves correct ammo type (arrows/bolts) into quiver based on equipped weapon
   - Clears wrong ammo from quiver
   - Uses O(1) lookups and smart cooldowns for performance
+  - Only works with open containers (no auto-opening)
+  - Uses EventBus equipment:change for reactive weapon detection
 ]]
 
 if voc() == 2 or voc() == 12 then
@@ -30,6 +32,24 @@ if voc() == 2 or voc() == 12 then
     local lastMoveTime = 0
     local MOVE_COOLDOWN = 300 -- ms between moves to prevent spam
     local lastQuiverId = nil
+    
+    -- Find ammo item in OPEN containers only (simple and reliable)
+    local function findAmmoItem(ammoIds)
+        for _, container in pairs(g_game.getContainers()) do
+            local cname = container:getName():lower()
+            if not cname:find("quiver") then
+                for _, item in ipairs(container:getItems()) do
+                    local itemId = item:getId()
+                    for _, ammoId in ipairs(ammoIds) do
+                        if itemId == ammoId then
+                            return item, ammoId
+                        end
+                    end
+                end
+            end
+        end
+        return nil, nil
+    end
     
     -- Only reset check flag when relevant containers change
     local function onContainerChange(container)
@@ -89,9 +109,10 @@ if voc() == 2 or voc() == 12 then
         return nil
     end
 
-    -- Main quiver management logic
+    -- Main quiver management logic (only uses open containers)
     local function manageQuiver(isBowEquipped, quiverContainer)
         local ammoLookup = isBowEquipped and arrowLookup or boltLookup
+        local ammoList = isBowEquipped and arrows or bolts
         
         -- First pass: Clear wrong ammo from quiver
         local destContainer = nil
@@ -110,19 +131,13 @@ if voc() == 2 or voc() == 12 then
             end
         end
 
-        -- Second pass: Fill quiver if not full
+        -- Second pass: Fill quiver if not full (only from open containers)
         if not containerIsFull(quiverContainer) then
-            for _, container in pairs(g_game.getContainers()) do
-                if container ~= quiverContainer then
-                    for _, item in ipairs(container:getItems()) do
-                        local itemId = item:getId()
-                        if ammoLookup[itemId] then
-                            local pos = quiverContainer:getSlotPosition(quiverContainer:getItemsCount())
-                            g_game.move(item, pos, item:getCount())
-                            return false -- Moved something, not done yet
-                        end
-                    end
-                end
+            local ammoItem, ammoId = findAmmoItem(ammoList)
+            if ammoItem then
+                local pos = quiverContainer:getSlotPosition(quiverContainer:getItemsCount())
+                g_game.move(ammoItem, pos, ammoItem:getCount())
+                return false -- Moved something, not done yet
             end
         end
         
@@ -136,6 +151,19 @@ if voc() == 2 or voc() == 12 then
     local cachedRightId = nil
     local cachedWeaponType = nil -- 1 = bow, 2 = xbow, nil = none
     local cachedQuiverContainer = nil
+    
+    -- EventBus integration for equipment changes (reactive weapon detection)
+    if EventBus and EventBus.on then
+        EventBus.on("equipment:change", function(slotId, slotName, currentId, lastId, item)
+            -- React to weapon or shield slot changes
+            if slotName == "left" or slotName == "right" then
+                needsCheck = true
+                -- Clear cached equipment to force recalculation
+                cachedLeftId = nil
+                cachedRightId = nil
+            end
+        end)
+    end
     
     -- Update equipment cache (called less frequently)
     local function updateEquipmentCache()
@@ -169,8 +197,11 @@ if voc() == 2 or voc() == 12 then
             else
                 cachedWeaponType = nil
             end
-            
-            cachedQuiverContainer = getContainerByItem(rightId)
+        end
+        
+        -- Always try to get the quiver container (it may have been opened since last check)
+        if cachedWeaponType then
+            cachedQuiverContainer = getContainerByItem(cachedRightId)
         end
         
         return cachedWeaponType ~= nil and cachedQuiverContainer ~= nil
@@ -185,15 +216,47 @@ if voc() == 2 or voc() == 12 then
         local currentTime = now
         if (currentTime - lastMoveTime) < MOVE_COOLDOWN then return end
         
-        -- Quick equipment check with caching
-        if not updateEquipmentCache() then
+        -- Check if we have a bow/xbow equipped
+        local leftItem = getLeft()
+        local rightItem = getRight()
+        
+        if not leftItem or not rightItem then
             needsCheck = false
             return
         end
         
+        local leftId = leftItem:getId()
+        
+        -- Determine weapon type
+        local weaponType = nil
+        if bowLookup[leftId] then
+            weaponType = 1 -- bow
+        elseif xbowLookup[leftId] then
+            weaponType = 2 -- xbow
+        end
+        
+        if not weaponType then
+            needsCheck = false
+            return
+        end
+        
+        -- Check if right hand is a quiver (container)
+        if not rightItem:isContainer() then
+            needsCheck = false
+            return
+        end
+        
+        -- Try to get the quiver container (only works if quiver is open)
+        local quiverContainer = getContainerByItem(rightItem:getId())
+        
+        -- If quiver is not open, skip (user must open it manually)
+        if not quiverContainer then
+            return -- Quiver not open, wait for user to open it
+        end
+        
         -- Manage the quiver
-        local isBowEquipped = cachedWeaponType == 1
-        local done = manageQuiver(isBowEquipped, cachedQuiverContainer)
+        local isBowEquipped = weaponType == 1
+        local done = manageQuiver(isBowEquipped, quiverContainer)
         
         if done then
             needsCheck = false -- Nothing more to do

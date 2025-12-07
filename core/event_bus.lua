@@ -241,6 +241,56 @@ if onRemoveThing then
   end)
 end
 
+-- Equipment change tracking
+-- Monitors player equipment slots and emits events when items change
+local lastEquipment = {}
+local EQUIPMENT_SLOTS = {
+  [1] = "head",
+  [2] = "neck",
+  [3] = "back",
+  [4] = "body",
+  [5] = "right",  -- Right hand (shield/quiver)
+  [6] = "left",   -- Left hand (weapon)
+  [7] = "legs",
+  [8] = "feet",
+  [9] = "finger",
+  [10] = "ammo"
+}
+
+-- Check if equipment changed
+local function checkEquipmentChanges()
+  local localPlayer = g_game.getLocalPlayer()
+  if not localPlayer then return end
+  
+  for slotId, slotName in pairs(EQUIPMENT_SLOTS) do
+    local item = localPlayer:getInventoryItem(slotId)
+    local currentId = item and item:getId() or 0
+    local lastId = lastEquipment[slotId] or 0
+    
+    if currentId ~= lastId then
+      lastEquipment[slotId] = currentId
+      
+      -- Emit specific slot change event
+      EventBus.emit("equipment:" .. slotName, currentId, lastId, item)
+      
+      -- Emit generic equipment change event
+      EventBus.emit("equipment:change", slotId, slotName, currentId, lastId, item)
+      
+      -- Emit weapon-specific events for quiver manager
+      if slotId == 6 then -- Left hand (weapon)
+        EventBus.emit("equipment:weapon", currentId, lastId, item)
+      elseif slotId == 5 then -- Right hand (shield/quiver)
+        EventBus.emit("equipment:shield", currentId, lastId, item)
+      end
+    end
+  end
+end
+
+-- Equipment check macro (runs every 200ms, lightweight)
+macro(200, function()
+  checkEquipmentChanges()
+end)
+
 -- Periodic flush for queued events
 macro(50, function()
   EventBus.flush()

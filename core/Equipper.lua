@@ -708,13 +708,32 @@ local function markChild(child)
     end
 end
 
-
+-- Non-blocking equipment manager state
+local lastEquipAction = 0
+local EQUIP_COOLDOWN = 200 -- ms between equip actions (prevents flicker)
 local missingItem = false
 local lastRule = false
 local correctEq = false
-EquipManager = macro(50, function()
+local needsEquipCheck = true
+
+-- Subscribe to equipment change events from EventBus
+if EventBus then
+  EventBus.on("equipment:change", function(slotId, slotName, newId, oldId, item)
+    needsEquipCheck = true
+    correctEq = false
+  end, 50)
+end
+
+EquipManager = macro(100, function()
     if not config.enabled then return end
     if #config.rules == 0 then return end
+    
+    -- Non-blocking cooldown check (prevents flicker)
+    local currentTime = now
+    if (currentTime - lastEquipAction) < EQUIP_COOLDOWN then return end
+    
+    -- Skip if nothing changed and we're already correct
+    if not needsEquipCheck and correctEq then return end
 
     for i, widget in ipairs(listPanel.list:getChildren()) do
         local rule = widget.ruleData
@@ -731,15 +750,15 @@ EquipManager = macro(50, function()
             if finalCheck(firstCondition, rule.relation, optionalCondition) then
 
                 -- performance edits, loop reset
-                local resetLoop = not missingItem and correctEq and lastRule ==  rule
-                if resetLoop then return end
-
-                -- reset executed rule
-
+                local resetLoop = not missingItem and correctEq and lastRule == rule
+                if resetLoop then 
+                    needsEquipCheck = false
+                    return 
+                end
 
                 -- first check unequip
                 if unequipItem(rule.data) == true then
-                    delay(200)
+                    lastEquipAction = currentTime
                     return
                 end
 
@@ -750,14 +769,14 @@ EquipManager = macro(50, function()
                             if rule.visible then
                                 if findItem(item) then
                                     missingItem = false
-                                    delay(200)
+                                    lastEquipAction = currentTime
                                     return equipItem(item, slot)
                                 else
                                     missingItem = true
                                 end
                             else
                                 missingItem = false
-                                delay(200)
+                                lastEquipAction = currentTime
                                 return equipItem(item, slot)
                             end
                         end
@@ -765,11 +784,13 @@ EquipManager = macro(50, function()
                 end
 
                 correctEq = not missingItem and true or false
+                lastRule = rule
+                needsEquipCheck = false
                 -- even if nothing was done, exit function to hold rule
                 return
             end
-
-
         end
     end
+    
+    needsEquipCheck = false
 end)

@@ -2,6 +2,10 @@
 setDefaultTab("HP")
 local scripts = 2 -- if you want more auto equip panels you can change 2 to higher value
 
+-- Non-blocking cooldown state
+local lastEquipTime = 0
+local EQUIP_COOLDOWN = 1000
+
 -- script by kondrah, don't edit below unless you know what you are doing
 UI.Label("Auto equip")
 if type(storage.autoEquip) ~= "table" then
@@ -16,6 +20,9 @@ for i=1,scripts do
   end)
 end
 macro(250, function()
+  -- Non-blocking cooldown check
+  if (now - lastEquipTime) < EQUIP_COOLDOWN then return end
+  
   local containers = g_game.getContainers()
   for index, autoEquip in ipairs(storage.autoEquip) do
     if autoEquip.on then
@@ -25,7 +32,7 @@ macro(250, function()
           for __, item in ipairs(container:getItems()) do
             if item:getId() == autoEquip.item1 or item:getId() == autoEquip.item2 then
               g_game.move(item, {x=65535, y=autoEquip.slot, z=0}, item:getCount())
-              delay(1000) -- don't call it too often      
+              lastEquipTime = now -- Non-blocking cooldown
               return
             end
           end

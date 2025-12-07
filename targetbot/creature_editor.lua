@@ -63,12 +63,40 @@ TargetBot.Creature.edit = function(config, callback) -- callback = function(newC
     end
     if newConfig.name:len() < 1 then return end
 
-    newConfig.regex = ""
+    -- Parse patterns with exclusion support
+    -- Pattern format: "name1, name2, !exclude1, !exclude2"
+    -- * = all monsters, ! = exclude pattern
+    local includes = {}
+    local excludes = {}
+    
     for part in string.gmatch(newConfig.name, "[^,]+") do
-      if newConfig.regex:len() > 0 then
-        newConfig.regex = newConfig.regex .. "|"
+      local trimmed = part:trim():lower()
+      if trimmed:sub(1, 1) == "!" then
+        -- Exclusion pattern
+        local excludeName = trimmed:sub(2):trim()
+        if excludeName:len() > 0 then
+          local pattern = "^" .. excludeName:gsub("%*", ".*"):gsub("%?", ".?") .. "$"
+          table.insert(excludes, pattern)
+        end
+      else
+        -- Include pattern
+        local pattern = "^" .. trimmed:gsub("%*", ".*"):gsub("%?", ".?") .. "$"
+        table.insert(includes, pattern)
       end
-      newConfig.regex = newConfig.regex .. "^" .. part:trim():lower():gsub("%*", ".*"):gsub("%?", ".?") .. "$"    
+    end
+    
+    -- Build include regex
+    if #includes > 0 then
+      newConfig.regex = table.concat(includes, "|")
+    else
+      newConfig.regex = "^$"
+    end
+    
+    -- Build exclude regex
+    if #excludes > 0 then
+      newConfig.excludeRegex = table.concat(excludes, "|")
+    else
+      newConfig.excludeRegex = nil
     end
 
     editor:destroy()

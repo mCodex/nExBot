@@ -22,6 +22,42 @@ end
 -- Pre-compile regex patterns for faster matching
 local compiledPatterns = {}
 
+--[[
+  Pattern Matching System:
+  - Normal names: "Dragon", "Demon" - matches exactly
+  - Wildcards: "Dragon*" - matches names starting with Dragon
+  - All monsters: "*" - matches everything
+  - Exclusions: "!Dragon" - excludes Dragon from matching
+  - Combined: "*, !Dragon, !Demon" - all monsters except Dragon and Demon
+  
+  The exclusion patterns (!) are processed separately from include patterns.
+]]
+
+-- Parse name patterns into include and exclude lists
+local function parsePatterns(name)
+  local includes = {}
+  local excludes = {}
+  
+  for part in string.gmatch(name, "[^,]+") do
+    local trimmed = part:trim():lower()
+    if trimmed:sub(1, 1) == "!" then
+      -- Exclusion pattern
+      local excludeName = trimmed:sub(2):trim()
+      if excludeName:len() > 0 then
+        -- Convert to regex pattern
+        local pattern = "^" .. excludeName:gsub("%*", ".*"):gsub("%?", ".?") .. "$"
+        table.insert(excludes, pattern)
+      end
+    else
+      -- Include pattern
+      local pattern = "^" .. trimmed:gsub("%*", ".*"):gsub("%?", ".?") .. "$"
+      table.insert(includes, pattern)
+    end
+  end
+  
+  return includes, excludes
+end
+
 TargetBot.Creature.addConfig = function(config, focus)
   if type(config) ~= 'table' or type(config.name) ~= 'string' then
     return error("Invalid targetbot creature config (missing name)")
@@ -30,12 +66,21 @@ TargetBot.Creature.addConfig = function(config, focus)
   compiledPatterns = {}  -- Clear compiled patterns on config change
 
   if not config.regex then
-    config.regex = ""
-    for part in string.gmatch(config.name, "[^,]+") do
-      if config.regex:len() > 0 then
-        config.regex = config.regex .. "|"
-      end
-      config.regex = config.regex .. "^" .. part:trim():lower():gsub("%*", ".*"):gsub("%?", ".?") .. "$"
+    -- Parse patterns into include and exclude lists
+    local includes, excludes = parsePatterns(config.name)
+    
+    -- Build include regex (OR of all include patterns)
+    if #includes > 0 then
+      config.regex = table.concat(includes, "|")
+    else
+      config.regex = "^$"  -- Match nothing if no includes
+    end
+    
+    -- Store exclude patterns for later matching
+    if #excludes > 0 then
+      config.excludeRegex = table.concat(excludes, "|")
+    else
+      config.excludeRegex = nil
     end
   end
 
@@ -87,10 +132,24 @@ TargetBot.Creature.getConfigs = function(creature)
   for i = 1, #children do
     local config = children[i]
     local regex = config.value.regex
+    local excludeRegex = config.value.excludeRegex
+    
+    -- Check if name matches include pattern
     local match = regexMatch(name, regex)
     if match[1] then
-      configCount = configCount + 1
-      configs[configCount] = config.value
+      -- Check if name is excluded
+      local excluded = false
+      if excludeRegex then
+        local excludeMatch = regexMatch(name, excludeRegex)
+        if excludeMatch[1] then
+          excluded = true
+        end
+      end
+      
+      if not excluded then
+        configCount = configCount + 1
+        configs[configCount] = config.value
+      end
     end
   end
   

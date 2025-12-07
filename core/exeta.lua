@@ -16,11 +16,15 @@ if voc == 1 or voc == 11 then
         end
     end)
 
+    -- Non-blocking cooldown for exeta if player nearby
+    local lastExetaPlayer = 0
     macro(500, "ExetaIfPlayer", function()
         if CaveBot.isOff() then return end
+        -- Non-blocking cooldown check
+        if (now - lastExetaPlayer) < 6000 then return end
     	if getMonsters(1) >= 1 and getPlayers(6) > 0 then
     		say("exeta res")
-    		delay(6000)
+    		lastExetaPlayer = now
     	end
     end)
     UI.Separator()

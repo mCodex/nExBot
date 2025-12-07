@@ -25,6 +25,7 @@
 - **Advanced Wave Avoidance** - Intelligent positioning system that predicts monster attack patterns
 - **Multi-Monster Threat Analysis** - Evaluates danger from all nearby monsters simultaneously
 - **🎯 Hotkey-Style Runes** - Uses runes like hotkeys (no open backpack required)
+- **🆕 Exclusion Patterns** - Use `!` to exclude monsters (e.g., `*, !Dragon` = all except Dragon)
 - **Optimized Looting** - O(1) item lookup with reduced wait times
 - **🍖 Eat Food from Corpses** - Automatically eats food found in killed monster corpses for regeneration
 - **⚡ DASH Walking** - Arrow key simulation for maximum walking speed (chase/lure)
@@ -76,9 +77,12 @@
 - **New Window Mode** - Each container opens in its own window (no cascading issues)
 
 ### 🏹 Quiver Manager
+- **🎯 Hotkey-Style Ammo** - Finds ammo via `g_game.findPlayerItem` (no open backpack required)
 - **O(1) Hash Lookups** - Instant weapon/ammo detection (no linear searches)
 - **Smart Event Filtering** - Only triggers on relevant container changes
+- **📡 EventBus Integration** - Reacts to weapon/shield slot changes via `equipment:change` event
 - **Optimized Cooldowns** - 300ms interval with smart caching
+- **Auto Weapon Detection** - Detects bows vs crossbows and uses correct ammo type
 
 ### 🗑️ Dropper
 - **O(1) Hash Lookups** - Instant item detection using lookup tables
@@ -86,6 +90,12 @@
 - **Config Hash Detection** - Automatically rebuilds lookups when settings change
 - **Three Item Categories** - Trash (always drop), Use (auto-use), Cap (drop if low capacity)
 - **Smart Throttling** - 150ms cooldown between actions to prevent spam
+
+### 👔 Equipper (EQ Manager)
+- **📡 EventBus Integration** - Reacts to equipment slot changes via `equipment:change` event
+- **⚡ Non-Blocking Cooldowns** - Replaced `delay(200)` with time-based cooldowns (no UI flickering)
+- **100ms Macro Interval** - Responsive equipment swaps with smart throttling
+- **Smooth UI** - No more flickering on equipment changes
 
 ### ⚙️ Extras Panel (nExBot Settings)
 - **Tool Items** - Configure rope, shovel, machete, scythe items
@@ -145,6 +155,7 @@ nExBot/
 │   ├── configs.lua          # Configuration system
 │   ├── HealBot.lua          # Healing automation
 │   ├── AttackBot.lua        # Attack automation
+│   ├── Equipper.lua         # 🔄 Equipment manager (non-blocking)
 │   ├── tools.lua            # Utility tools & global settings UI
 │   └── ...
 ├── cavebot/                 # CaveBot system
@@ -186,6 +197,7 @@ Performance comparison between **vBot 4.8** and **nExBot 1.0.0**:
 | **Enemy Lookup** | O(n) linear | O(1) hash | **~95% faster** |
 | **Item Search (Looting)** | O(n) per item | O(1) hash set | **~90% faster** |
 | **Quiver Ammo Lookup** | O(n) per check | O(1) hash set | **~90% faster** |
+| **Quiver Ammo Fill** | Requires open BP | findPlayerItem | **Works always** |
 | **Dropper Item Detection** | O(n³) nested loops | O(1) hash lookup | **~95% faster** |
 | **HealBot Conditions** | if/elseif chains | O(1) lookup table | **~85% faster** |
 | **HealBot Potions** | Requires open BP | Hotkey-style | **Works always** |
@@ -202,6 +214,11 @@ Performance comparison between **vBot 4.8** and **nExBot 1.0.0**:
 | **Macro Interval (Looting)** | 100ms | 40ms | **2.5x faster** |
 | **Macro Interval (Dropper)** | 200ms | 250ms* | **Event-driven** |
 | **Macro Interval (Quiver)** | 100ms | 300ms* | **67% less CPU** |
+| **Macro Interval (Equipper)** | 50ms + delay(200) | 100ms non-blocking | **No UI flicker** |
+| **AttackBot Cooldown** | delay(400) blocking | Non-blocking check | **No macro freeze** |
+| **Equipper Cooldown** | delay(200) blocking | Non-blocking check | **No UI flicker** |
+| **Push Max Cooldown** | delay(2000) blocking | Non-blocking check | **No macro freeze** |
+| **Exeta Res Cooldown** | delay(6000) blocking | Non-blocking check | **No macro freeze** |
 
 ### Algorithmic Improvements
 
@@ -311,7 +328,27 @@ end
 if friendListLookup[playerName] then return true end
 ```
 
-### 3. Smart Caching System
+### 3. Glob-Style Target Patterns
+
+TargetBot supports powerful pattern matching for creature names:
+
+```lua
+-- Pattern Syntax:
+-- *         = Match all monsters
+-- Dragon    = Match exactly "Dragon"
+-- Dragon*   = Match names starting with "Dragon" (Dragon, Dragon Lord, etc.)
+-- !Dragon   = Exclude "Dragon" from matching
+-- *, !Dragon, !Demon = Match all EXCEPT Dragon and Demon
+
+-- Examples:
+"*"                     -- Target all monsters
+"Dragon, Demon"         -- Target only Dragons and Demons
+"Dragon*"               -- Target Dragon, Dragon Lord, Dragon Hatchling, etc.
+"*, !Rat, !Bug"         -- Target all monsters except Rats and Bugs
+"Demon*, !Demon Skeleton" -- Target Demon, Demonlord, but NOT Demon Skeleton
+```
+
+### 4. Smart Caching System
 
 Implemented TTL-based caching for expensive operations:
 
@@ -350,13 +387,30 @@ local DANGER_CACHE_TTL = 100
 - 🚀 **Module loading order** optimized in _Loader.lua
 - 🧹 **Removed BotServer** dependencies
 - 📦 **Container Panel** - Vertical layout, auto-minimize, improved compatibility
-- 🏹 **Quiver Manager Optimized** - O(1) lookups, smart event filtering, reduced CPU
+- 🏹 **Quiver Manager Optimized** - O(1) lookups, smart event filtering, reduced CPU, works with closed backpacks
 - 💊 **HealBot EventBus** - Event-driven healing with 50ms response, cached stats, OTClient native API
-- 🎯 **Hotkey-Style Items** - HealBot and TargetBot use items/runes without open backpacks
+- 🎯 **Hotkey-Style Items** - HealBot potions, AttackBot runes, Eat Food, and Quiver Manager work without open backpacks
+- ⚔️ **AttackBot Runes** - All rune types (targeted, area) use inventory methods like hotkeys
+- 🍽️ **Eat Food Optimized** - Works without open backpack, simplified loop with early exit
 - 🗑️ **Dropper Optimized** - O(1) hash lookups, event-driven, config hash detection
+- 👔 **Equipper Non-Blocking** - Replaced `delay(200)` with non-blocking cooldowns (no UI flickering)
+- 📡 **EventBus Equipment Events** - New `equipment:change` event fires on gear slot changes
+- ⚡ **Non-Blocking Cooldowns** - Replaced all blocking `delay()` calls with time-based checks:
+  - AttackBot: `delay(400)` → non-blocking `ATTACK_COOLDOWN = 400`
+  - Equipper: `delay(200)` → non-blocking `EQUIP_COOLDOWN = 200`
+  - equip.lua: `delay(1000)` → non-blocking cooldown
+  - exeta.lua: `delay(6000)` → non-blocking cooldown
+  - combo.lua: `delay(100)` → non-blocking cooldown
+  - pushmax.lua: `delay(2000)` → non-blocking cooldown
+- 🎯 **Exclusion Patterns** - TargetBot now supports `!` prefix to exclude monsters (e.g., `*, !Dragon, !Demon`)
+- 🐛 **CaveBot Walking Fix** - Added missing `CaveBot.doWalking()` function that was causing nil errors
 - 🗑️ **Removed** - Players List feature, redundant global settings panel
 
 > *Note: Quiver Manager and Dropper use longer intervals but with smart event filtering, only process when containers change - resulting in 60%+ less CPU usage overall.*
+> 
+> *Note: HealBot potions, AttackBot runes, and Eat Food now use `g_game.useInventoryItemWith()` which works like hotkeys - no open backpack required!*
+>
+> *Note: All blocking `delay()` calls replaced with non-blocking time checks. This prevents UI freezing and slow macro issues. Pattern: `if (now - lastActionTime) < COOLDOWN then return end`*
 
 ---
 

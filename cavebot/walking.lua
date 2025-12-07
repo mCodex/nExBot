@@ -19,6 +19,12 @@ CaveBot.resetWalking = function()
   isWalking = false
 end
 
+-- Check if cavebot is currently in walking state
+-- Returns true if walking (prevents action execution), false otherwise
+CaveBot.doWalking = function()
+  return isWalking
+end
+
 -- Called when player position changes (step confirmed by server)
 onPlayerPositionChange(function(newPos, oldPos)
   if not oldPos or not newPos then return end

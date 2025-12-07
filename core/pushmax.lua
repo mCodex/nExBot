@@ -191,8 +191,15 @@ onCreaturePositionChange(function(creature, newPos, oldPos)
   end
 end)
 
+-- Non-blocking cooldown state
+local lastPushTime = 0
+local PUSH_COOLDOWN = 2000
+
 macro(50, function()
   if not config.enabled then return end
+  
+  -- Non-blocking cooldown check
+  if (now - lastPushTime) < PUSH_COOLDOWN then return end
 
   local pushDelay = tonumber(config.pushDelay)
   local rune = tonumber(config.pushMaxRuneId)
@@ -244,7 +251,7 @@ macro(50, function()
     if parcel then
       test()
       g_game.move(parcel,destTile:getPosition())
-      delay(2000)
+      lastPushTime = now -- Non-blocking cooldown
     end
   else
     if not pushTarget or not targetTile then return end
@@ -282,6 +289,6 @@ macro(50, function()
       end
     end
       g_game.move(pushTarget,tilePos)
-      delay(2000)
+      lastPushTime = now -- Non-blocking cooldown
   end
 end)
