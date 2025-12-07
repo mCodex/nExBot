@@ -24,6 +24,11 @@ local function setCaveBotData(hunting)
     nExBot.CaveBotData.refills = nExBot.CaveBotData.refills + 1
   end
 
+  -- Record round time for SmartHunt analytics
+  if rawRound > 0 and nExBot.SmartHunt and nExBot.SmartHunt.Refill then
+    nExBot.SmartHunt.Refill.recordRound(rawRound)
+  end
+
   table.insert(nExBot.CaveBotData.time, rawRound)
   nExBot.CaveBotData.rounds = nExBot.CaveBotData.rounds + 1
   missedChecks = 0
@@ -115,6 +120,18 @@ CaveBot.Extensions.SupplyCheck.setup = function()
         setCaveBotData()
         return false
       else
+        -- SmartHunt: Check if we can complete one more round
+        local smartCheck = true
+        local smartReason = ""
+        if nExBot.SmartHunt and nExBot.SmartHunt.Refill then
+          smartCheck, smartReason = nExBot.SmartHunt.Refill.canCompleteRound()
+          if not smartCheck then
+            print("CaveBot[SupplyCheck]: SmartHunt says NO - " .. smartReason .. ". Last round took: " .. round)
+            setCaveBotData()
+            return false
+          end
+        end
+        
         print("CaveBot[SupplyCheck]: Enough supplies. Hunting. Round (" .. supplyRetries .. "/" .. (storage.extras.huntRoutes or 50) .. "). Last round took: " .. round)
         setCaveBotData(true)
         return CaveBot.gotoLabel(label)

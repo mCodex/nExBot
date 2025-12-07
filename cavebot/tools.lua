@@ -8,9 +8,13 @@ local function hasClassifier()
   return ItemClassifier and ItemClassifier.isDoor
 end
 
+local function hasDoorItems()
+  return DoorItems and DoorItems.isClosedDoor
+end
+
 local function applyUseDelay()
-  local baseDelay = CaveBot.Config and CaveBot.Config.get("useDelay") or 400
-  local ping = CaveBot.Config and CaveBot.Config.get("ping") or 0
+  local baseDelay = CaveBot.Config and CaveBot.Config.values and CaveBot.Config.values["useDelay"] or 400
+  local ping = CaveBot.Config and CaveBot.Config.values and CaveBot.Config.values["ping"] or 0
   CaveBot.delay(baseDelay + ping)
 end
 
@@ -54,14 +58,18 @@ local function getToolId(toolKey)
 end
 
 local function canUseTools()
-  if not CaveBot.Config or not CaveBot.Config.get("autoUseTools") then
-    return false
+  -- Default to true if config not available yet
+  if CaveBot.Config and CaveBot.Config.values then
+    local autoUse = CaveBot.Config.values["autoUseTools"]
+    if autoUse == false then
+      return false
+    end
   end
   return now - lastUseTime > USE_COOLDOWN
 end
 
 local function canUseDoor(tile)
-  if not hasClassifier() or not tile or tile:isWalkable() then
+  if not tile or tile:isWalkable() then
     return false
   end
 
@@ -69,8 +77,24 @@ local function canUseDoor(tile)
   if not thing then
     return false
   end
+  
+  local itemId = thing:getId()
 
-  return ItemClassifier.isDoor(thing:getId())
+  -- First try DoorItems database (more complete)
+  if hasDoorItems() then
+    if DoorItems.isClosedDoor(itemId) then
+      return true
+    end
+  end
+  
+  -- Fallback to ItemClassifier
+  if hasClassifier() then
+    if ItemClassifier.isDoor(itemId) then
+      return true
+    end
+  end
+
+  return false
 end
 
 local function shouldRopeTile(tilePos, dest)
@@ -192,7 +216,8 @@ local function openDoor(tile)
 end
 
 local function resolveDoors(tiles)
-  if not hasClassifier() then
+  -- Works with either DoorItems or ItemClassifier
+  if not hasClassifier() and not hasDoorItems() then
     return false
   end
 

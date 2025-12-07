@@ -30,7 +30,7 @@ local cachedCurrentAction = nil
 local lastActionCheck = 0
 local ACTION_CACHE_TTL = 50  -- Refresh cache every 50ms
 
-cavebotMacro = macro(20, function()
+cavebotMacro = macro(50, function()
   -- Early return checks first (most common case)
   if TargetBot and TargetBot.isActive() and not TargetBot.isCaveBotActionAllowed() then
     CaveBot.resetWalking()
@@ -221,7 +221,138 @@ CaveBot.lastReachedLabel = function()
   return nExBot.lastLabel
 end
 
+--[[
+  IMPROVED WAYPOINT FINDER
+  
+  Finds the best reachable waypoint considering:
+  1. Distance from player (within maxDist)
+  2. Path availability (can actually walk there)
+  3. Preference for closer waypoints to reduce travel time
+  4. Skip waypoints on different floors
+  
+  Uses tiered search: fast distance check first, then pathfinding only for candidates
+]]
+
+-- Pre-compute waypoint positions to avoid regex parsing every search
+local waypointPositionCache = {}
+local waypointCacheValid = false
+
+local function invalidateWaypointCache()
+  waypointPositionCache = {}
+  waypointCacheValid = false
+end
+
+local function buildWaypointCache()
+  if waypointCacheValid then return end
+  
+  waypointPositionCache = {}
+  local actions = ui.list:getChildren()
+  
+  for i, child in ipairs(actions) do
+    local text = child:getText()
+    if string.starts(text, "goto:") then
+      local re = regexMatch(text, [[(?:goto:)([^,]+),([^,]+),([^,]+)]])
+      if re and re[1] then
+        waypointPositionCache[i] = {
+          x = tonumber(re[1][2]),
+          y = tonumber(re[1][3]),
+          z = tonumber(re[1][4]),
+          child = child
+        }
+      end
+    end
+  end
+  
+  waypointCacheValid = true
+end
+
+-- Find the best waypoint to go to (optimized for long distances)
+CaveBot.findBestWaypoint = function(searchForward)
+  buildWaypointCache()
+  
+  local currentAction = ui.list:getFocusedChild()
+  local currentIndex = ui.list:getChildIndex(currentAction)
+  local actions = ui.list:getChildren()
+  local actionCount = #actions
+  
+  local playerPos = player:getPosition()
+  local maxDist = storage.extras.gotoMaxDistance or 30
+  local playerZ = playerPos.z
+  
+  -- Collect candidates: waypoints within distance on same floor
+  local candidates = {}
+  
+  -- Build search order based on direction
+  local searchOrder = {}
+  if searchForward then
+    -- Search forward first, then from start
+    for i = currentIndex + 1, actionCount do
+      table.insert(searchOrder, i)
+    end
+    for i = 1, currentIndex do
+      table.insert(searchOrder, i)
+    end
+  else
+    -- Search backward first
+    for i = currentIndex - 1, 1, -1 do
+      table.insert(searchOrder, i)
+    end
+  end
+  
+  -- Phase 1: Fast distance check (no pathfinding)
+  for _, i in ipairs(searchOrder) do
+    local waypoint = waypointPositionCache[i]
+    if waypoint and waypoint.z == playerZ then
+      local dx = math.abs(playerPos.x - waypoint.x)
+      local dy = math.abs(playerPos.y - waypoint.y)
+      local dist = math.max(dx, dy)
+      
+      if dist <= maxDist then
+        table.insert(candidates, {
+          index = i,
+          waypoint = waypoint,
+          distance = dist
+        })
+      end
+    end
+  end
+  
+  -- Sort by distance (closest first)
+  table.sort(candidates, function(a, b)
+    return a.distance < b.distance
+  end)
+  
+  -- Phase 2: Check pathfinding only for top candidates (limit to 5 for performance)
+  local maxCandidates = math.min(5, #candidates)
+  for i = 1, maxCandidates do
+    local candidate = candidates[i]
+    local wp = candidate.waypoint
+    local destPos = {x = wp.x, y = wp.y, z = wp.z}
+    
+    -- Check if path exists
+    local path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true })
+    if path then
+      -- Found a reachable waypoint
+      local prevChild = ui.list:getChildByIndex(candidate.index - 1)
+      if prevChild then
+        ui.list:focusChild(prevChild)
+      else
+        ui.list:focusChild(candidate.waypoint.child)
+      end
+      return true
+    end
+  end
+  
+  return false
+end
+
 CaveBot.gotoNextWaypointInRange = function()
+  -- Use optimized waypoint finder
+  return CaveBot.findBestWaypoint(true)
+end
+
+-- Original function for backward compatibility (redirects to optimized version)
+CaveBot.gotoNextWaypointInRangeLegacy = function()
   local currentAction = ui.list:getFocusedChild()
   local index = ui.list:getChildIndex(currentAction)
   local actions = ui.list:getChildren()
@@ -294,12 +425,18 @@ end
 CaveBot.gotoFirstPreviousReachableWaypoint = function()
   local currentAction = ui.list:getFocusedChild()
   local currentIndex = ui.list:getChildIndex(currentAction)
-  local index = ui.list:getChildIndex(currentAction)
+  local maxDist = storage.extras.gotoMaxDistance
+  local halfDist = maxDist / 2
+  local extendedDist = maxDist * 2 -- Extended range for finding waypoints
+  local playerPos = player:getPosition()
+  
+  -- Cache of candidates for extended range (in case we don't find anything in normal range)
+  local extendedCandidates = {}
 
-  -- check up to 100 childs
-  for i=0,100 do
-    index = index - i
-    if index <= 0 or index > currentIndex or math.abs(index-currentIndex) > 100 then
+  -- check up to 100 waypoints backwards
+  for i = 1, 100 do
+    local index = currentIndex - i
+    if index <= 0 then
       break
     end
 
@@ -309,20 +446,45 @@ CaveBot.gotoFirstPreviousReachableWaypoint = function()
       local text = child:getText()
       if string.starts(text, "goto:") then
         local re = regexMatch(text, [[(?:goto:)([^,]+),([^,]+),([^,]+)]])
-        local pos = {x = tonumber(re[1][2]), y = tonumber(re[1][3]), z = tonumber(re[1][4])}
+        if re and re[1] then
+          local pos = {x = tonumber(re[1][2]), y = tonumber(re[1][3]), z = tonumber(re[1][4])}
 
-        if posz() == pos.z then
-          if distanceFromPlayer(pos) <= storage.extras.gotoMaxDistance/2 then
-            print("found pos, going back "..currentIndex-index.. " waypoints.")
-            return ui.list:focusChild(child)
+          if posz() == pos.z then
+            local dist = distanceFromPlayer(pos)
+            
+            -- First priority: Normal range with path validation
+            if dist <= halfDist then
+              local path = findPath(playerPos, pos, halfDist, { ignoreNonPathable = true })
+              if path then
+                print("CaveBot: Found previous waypoint at distance " .. dist .. ", going back " .. i .. " waypoints.")
+                return ui.list:focusChild(child)
+              end
+            -- Second priority: Extended range candidates
+            elseif dist <= extendedDist then
+              table.insert(extendedCandidates, {child = child, pos = pos, dist = dist, steps = i})
+            end
           end
         end
       end
     end
   end
 
+  -- If we didn't find anything in normal range, try extended range
+  if #extendedCandidates > 0 then
+    -- Sort by distance (closest first)
+    table.sort(extendedCandidates, function(a, b) return a.dist < b.dist end)
+    
+    for _, candidate in ipairs(extendedCandidates) do
+      local path = findPath(playerPos, candidate.pos, extendedDist, { ignoreNonPathable = true })
+      if path then
+        print("CaveBot: Found previous waypoint at extended range (distance " .. candidate.dist .. "), going back " .. candidate.steps .. " waypoints.")
+        return ui.list:focusChild(candidate.child)
+      end
+    end
+  end
+
   -- not found
-  print("previous pos not found, proceeding")
+  print("CaveBot: Previous waypoint not found, proceeding")
   return false
 end
 
@@ -331,6 +493,10 @@ CaveBot.getFirstWaypointBeforeLabel = function(label)
   label = label:lower()
   local actions = ui.list:getChildren()
   local index
+  local maxDist = storage.extras.gotoMaxDistance
+  local halfDist = maxDist / 2
+  local extendedDist = maxDist * 2
+  local playerPos = player:getPosition()
 
   -- find index of label
   for i, child in pairs(actions) do
@@ -344,10 +510,11 @@ CaveBot.getFirstWaypointBeforeLabel = function(label)
   -- if there's no index then label was not found
   if not index then return false end
 
+  local extendedCandidates = {}
+
   for i=1,#actions do
-    if index - 1 < 1 then
-      -- did not found any waypoint in range before label 
-      return false
+    if index - i < 1 then
+      break
     end
 
     local child = ui.list:getChildByIndex(index-i)
@@ -355,16 +522,40 @@ CaveBot.getFirstWaypointBeforeLabel = function(label)
       local text = child:getText()
       if string.starts(text, "goto:") then
         local re = regexMatch(text, [[(?:goto:)([^,]+),([^,]+),([^,]+)]])
-        local pos = {x = tonumber(re[1][2]), y = tonumber(re[1][3]), z = tonumber(re[1][4])}
+        if re and re[1] then
+          local pos = {x = tonumber(re[1][2]), y = tonumber(re[1][3]), z = tonumber(re[1][4])}
 
-        if posz() == pos.z then
-          if distanceFromPlayer(pos) <= storage.extras.gotoMaxDistance/2 then
-            return ui.list:focusChild(child)
+          if posz() == pos.z then
+            local dist = distanceFromPlayer(pos)
+            
+            -- First priority: Normal range with path validation
+            if dist <= halfDist then
+              local path = findPath(playerPos, pos, halfDist, { ignoreNonPathable = true })
+              if path then
+                return ui.list:focusChild(child)
+              end
+            -- Second priority: Extended range candidates
+            elseif dist <= extendedDist then
+              table.insert(extendedCandidates, {child = child, pos = pos, dist = dist})
+            end
           end
         end
       end
     end
   end
+
+  -- Try extended range if nothing found
+  if #extendedCandidates > 0 then
+    table.sort(extendedCandidates, function(a, b) return a.dist < b.dist end)
+    for _, candidate in ipairs(extendedCandidates) do
+      local path = findPath(playerPos, candidate.pos, extendedDist, { ignoreNonPathable = true })
+      if path then
+        return ui.list:focusChild(candidate.child)
+      end
+    end
+  end
+
+  return false
 end
 
 CaveBot.getPreviousLabel = function()

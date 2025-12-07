@@ -26,15 +26,16 @@
 - **Multi-Monster Threat Analysis** - Evaluates danger from all nearby monsters simultaneously
 - **🎯 Hotkey-Style Runes** - Uses runes like hotkeys (no open backpack required)
 - **🆕 Exclusion Patterns** - Use `!` to exclude monsters (e.g., `*, !Dragon` = all except Dragon)
+- **🆕 Smart Pull** - Uses CaveBot to pull more monsters when pack is below threshold
 - **Optimized Looting** - O(1) item lookup with reduced wait times
 - **🍖 Eat Food from Corpses** - Automatically eats food found in killed monster corpses for regeneration
-- **⚡ DASH Walking** - Arrow key simulation for maximum walking speed (chase/lure)
 
 ### 🗺️ CaveBot  
-- **🆕 autoWalk Integration** - Uses OTClient's native `autoWalk()` for reliable pathfinding
+- **🔧 Native OTClient Walking** - Uses reliable `autoWalk()` function for pathfinding
+- **🚪 Automatic Door Opening** - Opens closed doors automatically during waypoint walking
 - **🖱️ Minimap Goto** - Right-click minimap to add CaveBot waypoints (works on current floor)
 - **Improved Pathfinding** - Smarter waypoint navigation with optimized algorithms  
-- **Smart Door Handling** - Uses door database from items.xml for accurate door detection
+- **🚪 Hardcoded Door Database** - 200+ door IDs built-in (no items.xml required)
 - **Auto Tool Usage** - Automatic rope, shovel, machete usage (configured in Extras)
 - **Skin Monster Enhancement** - More accurate and efficient skinning with configurable delays
 
@@ -105,6 +106,33 @@
 - **Anti-Kick** - Auto-turn every 10 minutes
 - **And more...** - Full configuration panel for all bot features
 
+### 🧠 SmartHunt Analytics (NEW!)
+- **📊 Supply Prediction** - Tracks consumption rates and predicts optimal supply amounts
+- **🗺️ Route Optimization** - Identifies "cold spots" with low XP/kill rates
+- **⚔️ Dynamic Lure Threshold** - Auto-adjusts max creatures based on damage taken
+- **🔄 Smart Refill Decision** - Calculates if one more round is possible before refill
+- **👹 Monster Database** - Learns danger levels per monster type automatically
+- **📈 Session Analytics** - Track round times, consumption, and efficiency
+
+### ⚔️ Combat Intelligence (NEW!)
+- **🎯 Multi-Target Wave Optimizer** - Calculates optimal wave spell position for max hits
+- **🔄 Combo Sequencer** - Auto-executes optimal combos based on target count and vocation
+- **⚠️ Threat Prediction** - Detects flankers, calculates threat levels (safe/moderate/high/critical)
+- **📊 Kill Priority Optimizer** - Factors HP, danger, loot value for optimal target selection
+- **⏱️ Area Spell Timing** - Waits for monsters to stack before AoE casting
+
+### ⚡ Performance Optimizer (NEW!)
+- **🗺️ Predictive Pathfinding** - Pre-caches waypoint paths with LRU cache
+- **💤 Lazy Evaluation** - Only recalculates when state actually changes
+- **📦 Batch Operations** - Queue multiple item operations for efficiency
+- **📂 Smart Container Caching** - Tracks container changes with fast item index
+
+### 🔧 State Machine Architecture (NEW!)
+- **🤖 CaveBot FSM** - Proper state machine (idle, hunting, refilling, banking, etc.)
+- **🎯 TargetBot FSM** - State-based targeting (scanning, attacking, chasing, looting)
+- **📊 State Coordinator** - Global state management and transitions
+- **🐛 Debug Info** - View current states, history, and transitions
+
 ---
 
 ## 🏗️ Architecture
@@ -132,7 +160,7 @@ nExBot features an **event-driven architecture** following SOLID principles:
 │         │                   │                   │                │
 │         ▼                   ▼                   ▼                │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │ DoorItems    │    │  DashWalk    │    │  Creature    │       │
+│  │ DoorItems    │    │   Walking    │    │  Creature    │       │
 │  │  Database    │    │   Module     │    │   Cache      │       │
 │  └──────────────┘    └──────────────┘    └──────────────┘       │
 │                                                                  │
@@ -144,11 +172,14 @@ nExBot features an **event-driven architecture** following SOLID principles:
 ```
 nExBot/
 ├── _Loader.lua              # Main entry point
-├── items.xml                # Item database (doors, tools, etc.)
+├── ROADMAP.md               # 🆕 Development roadmap with 35 features
 ├── core/                    # Core libraries and modules
 │   ├── event_bus.lua        # 🆕 Centralized event system
-│   ├── door_items.lua       # 🆕 Door database from items.xml
-│   ├── dash_walk.lua        # 🆕 DASH speed walking module
+│   ├── door_items.lua       # 🆕 Hardcoded door database (200+ door IDs)
+│   ├── smart_hunt.lua       # 🆕 SmartHunt analytics (Features 1-5)
+│   ├── combat_intelligence.lua # 🆕 Combat AI (Features 11-15)
+│   ├── performance_optimizer.lua # 🆕 Performance (Features 24-27)
+│   ├── state_machine.lua    # 🆕 FSM architecture (Feature 32)
 │   ├── global_config.lua    # Tool & door utilities
 │   ├── lib.lua              # Utility functions
 │   ├── main.lua             # Version info
@@ -161,7 +192,7 @@ nExBot/
 ├── cavebot/                 # CaveBot system
 │   ├── cavebot.lua          # Main cavebot logic
 │   ├── doors.lua            # 🔄 Enhanced door handling
-│   ├── walking.lua          # Pathfinding
+│   ├── walking.lua          # 🔄 Native OTClient autoWalk
 │   └── ...
 ├── targetbot/               # TargetBot system
 │   ├── target.lua           # 🔄 Target filtering
@@ -405,7 +436,36 @@ local DANGER_CACHE_TTL = 100
 - 🎯 **Exclusion Patterns** - TargetBot now supports `!` prefix to exclude monsters (e.g., `*, !Dragon, !Demon`)
 - 🐛 **CaveBot Walking Fix** - Added missing `CaveBot.doWalking()` function that was causing nil errors
 - 🚶 **CaveBot autoWalk Fix** - Replaced `g_game.walk()` with `autoWalk()` for reliable minimap goto waypoints
-- 🗑️ **Removed** - Players List feature, redundant global settings panel
+- 🧠 **SmartHunt Analytics** - New intelligent hunting system with 5 major features:
+  - Supply Prediction: Tracks consumption and predicts optimal amounts
+  - Route Optimization: Identifies cold spots with low XP/kill rates
+  - Dynamic Lure: Auto-adjusts max creatures based on damage taken
+  - Smart Refill: Calculates if one more round is possible
+  - Monster Database: Learns danger levels per monster automatically
+- ⚔️ **Combat Intelligence** - Advanced combat AI with 5 features:
+  - Multi-Target Wave Optimizer: Calculates optimal AoE position
+  - Combo Sequencer: Vocation-specific combo execution
+  - Threat Prediction: Flank detection, threat level analysis
+  - Kill Priority: HP/danger/loot-based target selection
+  - Area Spell Timing: Stack detection for optimal casting
+- ⚡ **Performance Optimizer** - 4 performance enhancement systems:
+  - Predictive Pathfinding: LRU path cache with prefetching
+  - Lazy Evaluation: Cached monster/container/tile data
+  - Batch Operations: Queued item operations
+  - Smart Container Caching: Item index for O(1) lookups
+- 🔧 **State Machine Architecture** - Proper FSM implementation:
+  - CaveBot states: idle, walking, hunting, looting, refilling, etc.
+  - TargetBot states: scanning, targeting, attacking, chasing
+  - Global coordinator with transition history
+- 🚪 **Hardcoded Door Database** - 200+ door IDs built into `door_items.lua`:
+  - No items.xml dependency required
+  - Includes modern doors (20xxx, 21xxx, 22xxx series)
+  - Automatic door opening during cavebot walking
+- 🚶 **Removed DASH Walking** - Simplified to native OTClient `autoWalk()` for reliability
+- 🎯 **Smart Pull System** - Replaced old lure system with intelligent monster pulling
+- 🧹 **Removed Unused UI Buttons** - Removed SmartHunt/Combat/Performance/StateMachine buttons
+  - These systems now run silently in background
+- 🗑️ **Removed** - Players List feature, redundant global settings panel, DASH walking
 
 > *Note: Quiver Manager and Dropper use longer intervals but with smart event filtering, only process when containers change - resulting in 60%+ less CPU usage overall.*
 > 

@@ -21,6 +21,8 @@ CaveBot.Config.setup = function()
   add("skipBlocked", "Skip blocked path", false)
   add("mapClick", "Map click walking", false)
   add("useDelay", "Delay after use", 400)
+  add("autoUseTools", "Auto use tools", true)
+  add("autoOpenDoors", "Auto open doors", true)
   add("ropeToolId", "Rope item id", defaultRope)
   add("shovelToolId", "Shovel item id", defaultShovel)
   add("macheteToolId", "Machete item id", defaultMachete)
@@ -98,9 +100,7 @@ CaveBot.Config.add = function(id, title, defaultValue)
 end
 
 CaveBot.Config.get = function(id)
-  if CaveBot.Config.values[id] == nil then
-    return warn("Invalid CaveBot.Config.get, id: " .. id)
-  end
+  -- Return value or nil if not found (no warning spam)
   return CaveBot.Config.values[id]
 end
 

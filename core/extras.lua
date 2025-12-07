@@ -726,3 +726,7 @@ if true then
       end
   end)
 end
+
+-- Note: SmartHunt, Combat Intelligence, Performance Optimizer, and State Machine
+-- modules run automatically in the background to improve bot accuracy.
+-- No UI buttons needed - they silently enhance targeting, pathfinding, and combat.

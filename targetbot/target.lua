@@ -25,9 +25,46 @@ local PATH_PARAMS = {
 -- Pre-allocated status strings (PERFORMANCE: avoid string concatenation)
 local STATUS_ATTACKING = "Attacking"
 local STATUS_ATTACKING_LURE_OFF = "Attacking (luring off)"
-local STATUS_LURING = "Luring using CaveBot"
+local STATUS_PULLING = "Pulling (using CaveBot)"
 local STATUS_WAITING = "Waiting"
 local STATUS_ATTACK_PREFIX = "Attack & "
+
+-- PERFORMANCE: Path cache to avoid recalculating paths every tick
+local PathCache = {
+  paths = {},           -- {creatureId -> {path, timestamp}}
+  TTL = 500,            -- Cache paths for 500ms
+  lastCleanup = 0,
+  cleanupInterval = 2000
+}
+
+local function getCachedPath(creatureId, fromPos, toPos)
+  local cached = PathCache.paths[creatureId]
+  if cached and (now - cached.timestamp) < PathCache.TTL then
+    return cached.path
+  end
+  return nil
+end
+
+local function setCachedPath(creatureId, path)
+  PathCache.paths[creatureId] = {
+    path = path,
+    timestamp = now
+  }
+end
+
+local function cleanupPathCache()
+  if now - PathCache.lastCleanup < PathCache.cleanupInterval then
+    return
+  end
+  
+  local cutoff = now - PathCache.TTL
+  for id, data in pairs(PathCache.paths) do
+    if data.timestamp < cutoff then
+      PathCache.paths[id] = nil
+    end
+  end
+  PathCache.lastCleanup = now
+end
 
 -- Helper function to check if creature is targetable
 local function isTargetableCreature(creature, oldTibia)
@@ -82,7 +119,11 @@ end
 local oldTibia = g_game.getClientVersion() < 960
 
 -- main loop, controlled by config
+-- OPTIMIZED: Uses path caching and reduced pathfinding calls
 targetbotMacro = macro(100, function()
+  -- Periodic cache cleanup
+  cleanupPathCache()
+  
   -- Cache player position once per tick (PERFORMANCE: avoid repeated API calls)
   local pos = player:getPosition()
   local specs = g_map.getSpectatorsInRange(pos, false, 6, 6) -- 12x12 area
@@ -133,7 +174,18 @@ targetbotMacro = macro(100, function()
       
       -- PERFORMANCE: Skip pathfinding for creatures too far away
       if dist <= 7 then
-        local path = findPath(pos, cpos, 7, PATH_PARAMS)
+        -- PERFORMANCE: Use cached path if available
+        local creatureId = creature:getId()
+        local path = getCachedPath(creatureId, pos, cpos)
+        
+        if not path then
+          -- Only calculate path if not in cache
+          path = findPath(pos, cpos, 7, PATH_PARAMS)
+          if path then
+            setCachedPath(creatureId, path)
+          end
+        end
+        
         if path then
           local params = TargetBot.Creature.calculateParams(creature, path)
           dangerLevel = dangerLevel + params.danger
@@ -169,7 +221,7 @@ targetbotMacro = macro(100, function()
     if lootingStatus:len() > 0 then
       TargetBot.setStatus(STATUS_ATTACK_PREFIX .. lootingStatus)
     elseif cavebotAllowance > now then
-      TargetBot.setStatus(STATUS_LURING)
+      TargetBot.setStatus(STATUS_PULLING)
     else
       if lureEnabled then
         TargetBot.setStatus(STATUS_ATTACKING)
@@ -218,6 +270,13 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
   targetbotMacro.delay = nil
   lureEnabled = true
 end)
+
+-- Setup UI tooltips
+ui.editor.buttons.add:setTooltip("Add a new creature targeting configuration.\nDefine which creatures to attack and how.")
+ui.editor.buttons.edit:setTooltip("Edit the selected creature targeting configuration.\nModify priority, distance, and behavior settings.")
+ui.editor.buttons.remove:setTooltip("Remove the selected creature targeting configuration.\nThis action cannot be undone.")
+ui.editor.debug:setTooltip("Show priority values on creatures in-game.\nUseful for debugging targeting decisions.")
+ui.configButton:setTooltip("Show/hide the target editor panel.\nUse to add, edit, or remove creature configurations.")
 
 -- setup ui
 ui.editor.buttons.add.onClick = function()

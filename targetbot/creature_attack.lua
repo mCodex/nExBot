@@ -476,30 +476,32 @@ TargetBot.Creature.walk = function(creature, config, targets)
   dynamicLureDelay = config.dynamicLureDelay
   delayFrom = config.delayFrom
 
-  -- luring
-  if config.closeLure and config.closeLureAmount <= getMonsters(1) then
+  -- Smart Pull system: Use CaveBot to pull more monsters when pack is below threshold
+  -- This replaces the old closeLure system with a more intelligent algorithm
+  if config.smartPull then
+    local pullRange = config.smartPullRange or 2
+    local pullMin = config.smartPullMin or 3
+    local nearbyMonsters = getMonsters(pullRange)
+    
+    -- If we have fewer monsters in close range than the threshold, use CaveBot to pull more
+    if nearbyMonsters < pullMin then
+      return TargetBot.allowCaveBot(150)
+    end
+  end
+  
+  -- Legacy closeLure support (for backward compatibility with old configs)
+  if config.closeLure and config.closeLureAmount and config.closeLureAmount <= getMonsters(1) then
     return TargetBot.allowCaveBot(150)
   end
   
   local creatureHealth = creature:getHealthPercent()
   local killUnder = storage.extras.killUnder or 30
   
-  if TargetBot.canLure() and (config.lure or config.lureCavebot or config.dynamicLure) and creatureHealth >= killUnder and not isTrapped then
+  -- Dynamic lure: Use CaveBot when we need more monsters
+  if TargetBot.canLure() and config.dynamicLure and creatureHealth >= killUnder and not isTrapped then
     if targetBotLure then
       anchorPosition = nil
       return TargetBot.allowCaveBot(150)
-    else
-      if targets < config.lureCount then
-        if config.lureCavebot then
-          anchorPosition = nil
-          return TargetBot.allowCaveBot(150)
-        else
-          local path = findPath(pos, cpos, 5, {ignoreNonPathable=true, precision=2})
-          if path then
-            return TargetBot.walkTo(cpos, 10, {marginMin=5, marginMax=6, ignoreNonPathable=true})
-          end
-        end
-      end
     end
   end
 

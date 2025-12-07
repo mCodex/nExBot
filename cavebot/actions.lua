@@ -215,6 +215,12 @@ end
 
 CaveBot.registerAction("label", "yellow", function(value, retries, prev)
   nExBot.lastLabel = value
+  
+  -- SmartHunt: Track waypoint entry for route optimization
+  if nExBot.SmartHunt and nExBot.SmartHunt.Routes then
+    nExBot.SmartHunt.Routes.enterWaypoint(value)
+  end
+  
   return true
 end)
 

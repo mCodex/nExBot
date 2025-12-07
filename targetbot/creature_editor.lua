@@ -7,7 +7,7 @@ TargetBot.Creature.edit = function(config, callback) -- callback = function(newC
   editor.name:setText(config.name or "")
   table.insert(values, {"name", function() return editor.name:getText() end})
 
-  local addScrollBar = function(id, title, min, max, defaultValue)
+  local addScrollBar = function(id, title, min, max, defaultValue, tooltip)
     local widget = UI.createWidget('TargetBotCreatureEditorScrollBar', editor.content.left)
     widget.scroll.onValueChange = function(scroll, value)
       widget.text:setText(title .. ": " .. value)
@@ -20,17 +20,23 @@ TargetBot.Creature.edit = function(config, callback) -- callback = function(newC
     end
     widget.scroll:setValue(config[id] or defaultValue)
     widget.scroll.onValueChange(widget.scroll, widget.scroll:getValue())
+    if tooltip then
+      widget:setTooltip(tooltip)
+    end
     table.insert(values, {id, function() return widget.scroll:getValue() end})
   end
 
-  local addTextEdit = function(id, title, defaultValue)
+  local addTextEdit = function(id, title, defaultValue, tooltip)
     local widget = UI.createWidget('TargetBotCreatureEditorTextEdit', editor.content.right)
     widget.text:setText(title)
     widget.textEdit:setText(config[id] or defaultValue or "")
+    if tooltip then
+      widget:setTooltip(tooltip)
+    end
     table.insert(values, {id, function() return widget.textEdit:getText() end})
   end
 
-  local addCheckBox = function(id, title, defaultValue)
+  local addCheckBox = function(id, title, defaultValue, tooltip)
     local widget = UI.createWidget('TargetBotCreatureEditorCheckBox', editor.content.right)
     widget.onClick = function()
       widget:setOn(not widget:isOn())
@@ -41,13 +47,19 @@ TargetBot.Creature.edit = function(config, callback) -- callback = function(newC
     else
       widget:setOn(config[id])
     end
+    if tooltip then
+      widget:setTooltip(tooltip)
+    end
     table.insert(values, {id, function() return widget:isOn() end})
   end
 
-  local addItem = function(id, title, defaultItem)
+  local addItem = function(id, title, defaultItem, tooltip)
     local widget = UI.createWidget('TargetBotCreatureEditorItem', editor.content.right)
     widget.text:setText(title)
     widget.item:setItemId(config[id] or defaultItem)
+    if tooltip then
+      widget:setTooltip(tooltip)
+    end
     table.insert(values, {id, function() return widget.item:getItemId() end})
   end
 
@@ -103,32 +115,30 @@ TargetBot.Creature.edit = function(config, callback) -- callback = function(newC
     callback(newConfig)
   end
 
-  -- values
-  addScrollBar("priority", "Priority", 0, 10, 1)
-  addScrollBar("danger", "Danger", 0, 10, 1)
-  addScrollBar("maxDistance", "Max distance", 1, 10, 10)
-  addScrollBar("keepDistanceRange", "Keep distance", 1, 5, 1)
-  addScrollBar("anchorRange", "Anchoring Range", 1, 10, 3)
-  addScrollBar("lureCount", "Classic Lure", 0, 5, 1)
-  addScrollBar("lureMin", "Dynamic lure min", 0, 29, 1)
-  addScrollBar("lureMax", "Dynamic lure max", 1, 30, 3)
-  addScrollBar("lureDelay", "Dynamic lure delay", 100, 1000, 250)
-  addScrollBar("delayFrom", "Start delay when monsters", 1, 29, 2)
-  addScrollBar("rePositionAmount", "Min tiles to rePosition", 0, 7, 5)
-  addScrollBar("closeLureAmount", "Close Pull Until", 0, 8, 3)
+  -- values with tooltips
+  addScrollBar("priority", "Priority", 0, 10, 1, "Higher priority = attack first. When multiple creatures match, highest priority wins.")
+  addScrollBar("danger", "Danger", 0, 10, 1, "Danger level contribution. Affects emergency decisions and healing priority.")
+  addScrollBar("maxDistance", "Max distance", 1, 10, 10, "Maximum distance to target this creature. Creatures beyond this range are ignored.")
+  addScrollBar("keepDistanceRange", "Keep distance", 1, 5, 1, "Preferred distance from target when 'Keep Distance' is enabled.")
+  addScrollBar("anchorRange", "Anchoring Range", 1, 10, 3, "Maximum distance from anchor point when 'Anchoring' is enabled.")
+  addScrollBar("lureMin", "Dynamic lure min", 0, 29, 1, "Start luring when monster count drops below this value.")
+  addScrollBar("lureMax", "Dynamic lure max", 1, 30, 3, "Stop luring when monster count reaches this value.")
+  addScrollBar("lureDelay", "Dynamic lure delay", 100, 1000, 250, "Delay in ms before CaveBot continues walking during lure.")
+  addScrollBar("delayFrom", "Start delay when monsters", 1, 29, 2, "Apply walking delay when monster count is at least this value.")
+  addScrollBar("rePositionAmount", "Min tiles to rePosition", 0, 7, 5, "Reposition when fewer than this many walkable tiles around you.")
+  addScrollBar("smartPullRange", "Smart Pull Range", 1, 5, 2, "Range to check for nearby monsters when Smart Pull is enabled.")
+  addScrollBar("smartPullMin", "Smart Pull Min Monsters", 1, 8, 3, "Minimum monsters needed within range to trigger Smart Pull.")
 
-  addCheckBox("chase", "Chase", true)
-  addCheckBox("keepDistance", "Keep Distance", false)
-  addCheckBox("anchor", "Anchoring", false)
-  addCheckBox("dontLoot", "Don't loot", false)
-  addCheckBox("lure", "Lure", false)
-  addCheckBox("lureCavebot", "Lure using cavebot", false)
-  addCheckBox("faceMonster", "Face monsters", false)
-  addCheckBox("avoidAttacks", "Avoid wave attacks", false)
-  addCheckBox("dynamicLure", "Dynamic lure", false)
-  addCheckBox("dynamicLureDelay", "Dynamic lure delay", false)
-  addCheckBox("diamondArrows", "D-Arrows priority", false)
-  addCheckBox("rePosition", "rePosition to better tile", false)
-  addCheckBox("closeLure", "Close Pulling Monsters", false)
-  addCheckBox("rpSafe", "RP PVP SAFE - (DA)", false)
+  addCheckBox("chase", "Chase", true, "Chase the target, walking towards it until adjacent.")
+  addCheckBox("keepDistance", "Keep Distance", false, "Maintain a specific distance from the target (set in Keep Distance slider).")
+  addCheckBox("anchor", "Anchoring", false, "Stay within a radius of your initial position (set in Anchoring Range slider).")
+  addCheckBox("dontLoot", "Don't loot", false, "Skip looting corpses of this creature type.")
+  addCheckBox("faceMonster", "Face monsters", false, "Turn to face diagonal monsters for better weapon/spell accuracy.")
+  addCheckBox("avoidAttacks", "Avoid wave attacks", false, "Intelligently move out of predicted wave/area attack zones.")
+  addCheckBox("dynamicLure", "Dynamic lure", false, "Lure using CaveBot when monster count is below min, stop when above max.")
+  addCheckBox("dynamicLureDelay", "Dynamic lure delay", false, "Add walking delay when enough monsters are around (reduces kiting speed).")
+  addCheckBox("diamondArrows", "D-Arrows priority", false, "Prioritize targets for Diamond Arrow AoE optimization.")
+  addCheckBox("rePosition", "rePosition to better tile", false, "Move to tiles with more open space when cornered.")
+  addCheckBox("smartPull", "Smart Pull", false, "Use CaveBot to pull more monsters when current pack is below threshold.")
+  addCheckBox("rpSafe", "RP PVP SAFE - (DA)", false, "Safety mode for Royal Paladins - prevents Diamond Arrow usage near players.")
 end
