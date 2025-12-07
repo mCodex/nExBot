@@ -296,6 +296,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Adaptive retry limits based on walking mode
   local maxRetries = CaveBot.Config.get("mapClick") and 8 or 50
   if retries >= maxRetries then
+    print("[CaveBot] goto: max retries reached (" .. maxRetries .. ")")
     noPath = noPath + 1
     pathfinder()
     return false
@@ -307,6 +308,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   
   -- Different floor check
   if pos.z ~= playerPos.z then 
+    print("[CaveBot] goto: floor mismatch - target z=" .. pos.z .. ", player z=" .. playerPos.z)
     noPath = noPath + 1
     pathfinder()
     return false
@@ -320,6 +322,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   local totalDist = distX + distY
   
   if totalDist > maxDist then
+    print("[CaveBot] goto: too far - distance=" .. totalDist .. ", max=" .. maxDist)
     noPath = noPath + 1
     pathfinder()
     return false

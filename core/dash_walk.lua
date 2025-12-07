@@ -131,8 +131,13 @@ function DashWalk.step(direction)
         return false
     end
     
-    -- Check if walkable
-    if not canWalkThrough(direction) then
+    -- Check if walkable (use same check as walkTo for consistency)
+    local pos = player:getPosition()
+    local dx, dy = getDirectionOffset(direction)
+    local targetPos = {x = pos.x + dx, y = pos.y + dy, z = pos.z}
+    local tile = g_map.getTile(targetPos)
+    
+    if not tile or not tile:isWalkable(false) then
         return false
     end
     

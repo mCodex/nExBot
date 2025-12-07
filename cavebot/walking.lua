@@ -45,36 +45,33 @@ onPlayerPositionChange(function(newPos, oldPos)
   CaveBot.delay(walkDelay + stepDuration)
 end)
 
--- Main walking function using DASH mode
+-- Main walking function - DASH mode with autoWalk fallback
 CaveBot.walkTo = function(dest, maxDist, params)
-  local playerPos = player:getPosition()
+  local precision = params and params.precision or 1
   
-  -- DASH MODE: Use direct walking for maximum speed
+  -- DASH MODE: Use direct walking for maximum speed (works for adjacent tiles)
   if DashWalk and DashWalk.walkTo then
-    local precision = params and params.precision or 0
     if DashWalk.walkTo(dest, precision) then
       isWalking = true
-      local stepDuration = player:getStepDuration(false, 0)
-      CaveBot.delay(walkDelay + stepDuration)
+      CaveBot.delay(walkDelay + player:getStepDuration(false, 0))
       return true
     end
   end
   
-  -- Fallback: Use pathfinding when DASH fails (blocked, complex routes)
-  local path = getPath(playerPos, dest, maxDist, params)
-  
-  if not path or not path[1] then
-    if CaveBot.Tools and CaveBot.Tools.handleObstacle(dest) then
-      return true
-    end
-    return false
+  -- FALLBACK: Use autoWalk for longer distances or when DASH fails
+  if autoWalk(dest, maxDist or 20, {
+    ignoreNonPathable = params and params.ignoreNonPathable or true,
+    precision = precision
+  }) then
+    isWalking = true
+    CaveBot.delay(walkDelay + player:getStepDuration(false, 0))
+    return true
   end
   
-  local dir = path[1]
-  local stepDuration = player:getStepDuration(false, dir)
+  -- Try obstacle handler as last resort
+  if CaveBot.Tools and CaveBot.Tools.handleObstacle(dest) then
+    return true
+  end
   
-  g_game.walk(dir, false)
-  isWalking = true
-  CaveBot.delay(walkDelay + stepDuration)
-  return true
+  return false
 end

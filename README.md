@@ -31,8 +31,8 @@
 - **⚡ DASH Walking** - Arrow key simulation for maximum walking speed (chase/lure)
 
 ### 🗺️ CaveBot  
-- **⚡ DASH Speed Walking** - Direct arrow key simulation for maximum walking speed
-- **🖱️ Map Click DASH** - Built-in map click walking uses DASH (always active)
+- **🆕 autoWalk Integration** - Uses OTClient's native `autoWalk()` for reliable pathfinding
+- **🖱️ Minimap Goto** - Right-click minimap to add CaveBot waypoints (works on current floor)
 - **Improved Pathfinding** - Smarter waypoint navigation with optimized algorithms  
 - **Smart Door Handling** - Uses door database from items.xml for accurate door detection
 - **Auto Tool Usage** - Automatic rope, shovel, machete usage (configured in Extras)
@@ -404,6 +404,7 @@ local DANGER_CACHE_TTL = 100
   - pushmax.lua: `delay(2000)` → non-blocking cooldown
 - 🎯 **Exclusion Patterns** - TargetBot now supports `!` prefix to exclude monsters (e.g., `*, !Dragon, !Demon`)
 - 🐛 **CaveBot Walking Fix** - Added missing `CaveBot.doWalking()` function that was causing nil errors
+- 🚶 **CaveBot autoWalk Fix** - Replaced `g_game.walk()` with `autoWalk()` for reliable minimap goto waypoints
 - 🗑️ **Removed** - Players List feature, redundant global settings panel
 
 > *Note: Quiver Manager and Dropper use longer intervals but with smart event filtering, only process when containers change - resulting in 60%+ less CPU usage overall.*
