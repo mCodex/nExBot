@@ -65,7 +65,7 @@ local HASTE_SPELLS = {
   [14] = { spell = "utani gran hur", mana = 100 }, -- Elder Druid
 }
 
-macro(500, "Auto Haste", function()
+macro(100, "Auto Haste", function()
   -- Get current vocation
   local voc = player:getVocation()
   local hasteData = HASTE_SPELLS[voc]
@@ -76,27 +76,20 @@ macro(500, "Auto Haste", function()
   -- Check if in protection zone
   if isInPz() then return end
   
-  -- Check mana requirement
-  if player:getMana() < hasteData.mana then return end
+  -- Check mana requirement (use mana() helper function)
+  if mana() < hasteData.mana then return end
   
-  -- Check if already hasted using hasHaste() if available, otherwise use speed comparison
-  if hasHaste and type(hasHaste) == "function" then
-    if hasHaste() then return end
-  else
-    -- Fallback: compare current speed vs base speed
-    -- Haste adds significant speed (~30% or more)
-    local baseSpeed = player:getBaseSpeed()
-    local currentSpeed = player:getSpeed()
-    if baseSpeed and currentSpeed and currentSpeed > baseSpeed * 1.2 then
-      return -- Already hasted
-    end
-  end
+  -- Check if already hasted (hasHaste is OTClientV8 built-in)
+  if hasHaste() then return end
   
   -- Check spell cooldown
-  if getSpellCoolDown and getSpellCoolDown(hasteData.spell) then return end
+  if getSpellCoolDown(hasteData.spell) then return end
   
-  -- Check if spell can be cast
-  if canCast and not canCast(hasteData.spell) then return end
+  -- Check if support spell group is on cooldown
+  if modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive and 
+     modules.game_cooldown.isGroupCooldownIconActive(2) then 
+    return 
+  end
   
   -- Cast haste spell
   say(hasteData.spell)
@@ -105,11 +98,61 @@ end)
 UI.Separator()
 
 -- Low Power Mode / FPS Reducer
--- Reduces FPS to 1 to save CPU/GPU power and reduce memory consumption
+-- Reduces FPS to save CPU/GPU power and reduce memory consumption
 -- Useful when AFK botting or running multiple clients
+-- Uses OTClientV8 APIs: g_app Pane FPS or Options module
 
-local normalFps = g_app and g_app.getMaxFps and g_app.getMaxFps() or 60
-local lowPowerFps = 1
+-- FPS settings
+local normalFps = 60
+local lowPowerFps = 5  -- Low but still usable FPS
+
+-- Helper function to set FPS using multiple approaches for compatibility
+local function setClientFps(fps)
+  local success = false
+  
+  -- Method 1: Direct g_app API (foreground + background panes)
+  if g_app then
+    if g_app.setForegroundPaneMaxFps then
+      g_app.setForegroundPaneMaxFps(fps)
+      success = true
+    end
+    if g_app.setBackgroundPaneMaxFps then
+      g_app.setBackgroundPaneMaxFps(fps)
+      success = true
+    end
+  end
+  
+  -- Method 2: Through modules.game_bot.g_app
+  if modules and modules.game_bot and modules.game_bot.g_app then
+    local app = modules.game_bot.g_app
+    if app.setForegroundPaneMaxFps then
+      app.setForegroundPaneMaxFps(fps)
+      success = true
+    end
+    if app.setBackgroundPaneMaxFps then
+      app.setBackgroundPaneMaxFps(fps)
+      success = true
+    end
+  end
+  
+  -- Method 3: Through Options module (if available)
+  if modules and modules.client_options then
+    local options = modules.client_options
+    if options.setOption then
+      pcall(function() options.setOption('foregroundFrameRate', fps) end)
+      pcall(function() options.setOption('backgroundFrameRate', fps) end)
+      success = true
+    end
+  end
+  
+  -- Method 4: Through g_settings
+  if g_settings then
+    pcall(function() g_settings.set('foregroundFrameRate', fps) end)
+    pcall(function() g_settings.set('backgroundFrameRate', fps) end)
+  end
+  
+  return success
+end
 
 if not storage.lowPowerMode then
   storage.lowPowerMode = false
@@ -121,16 +164,18 @@ local lowPowerSwitch = UI.Button("Low Power Mode: OFF", function(widget)
   if storage.lowPowerMode then
     widget:setText("Low Power Mode: ON")
     widget:setColor("#00ff00")
-    if g_app and g_app.setMaxFps then
-      g_app.setMaxFps(lowPowerFps)
-      logInfo("Low Power Mode enabled - FPS reduced to " .. lowPowerFps)
+    if setClientFps(lowPowerFps) then
+      info("Low Power Mode enabled - FPS limited to " .. lowPowerFps)
+    else
+      warn("Low Power Mode: Could not change FPS settings")
     end
   else
     widget:setText("Low Power Mode: OFF")
     widget:setColor("#ffffff")
-    if g_app and g_app.setMaxFps then
-      g_app.setMaxFps(normalFps)
-      logInfo("Low Power Mode disabled - FPS restored to " .. normalFps)
+    if setClientFps(normalFps) then
+      info("Low Power Mode disabled - FPS restored to " .. normalFps)
+    else
+      warn("Low Power Mode: Could not restore FPS settings")
     end
   end
 end)
@@ -139,9 +184,7 @@ end)
 if storage.lowPowerMode then
   lowPowerSwitch:setText("Low Power Mode: ON")
   lowPowerSwitch:setColor("#00ff00")
-  if g_app and g_app.setMaxFps then
-    g_app.setMaxFps(lowPowerFps)
-  end
+  setClientFps(lowPowerFps)
 end
 
 UI.Separator()

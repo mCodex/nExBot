@@ -35,8 +35,8 @@
 - **Smart Mana Management** - Efficient potion tracking to prevent spam
 
 ### 🛠️ Tools
-- **Auto Haste** - Automatic haste spell casting with vocation detection
-- **Low Power Mode** - Reduce FPS to 1 for multi-client setups
+- **Auto Haste** - Automatic haste spell casting with vocation detection (supports all vocations 1-14)
+- **Low Power Mode** - Reduces foreground FPS to 5 and background FPS to 1 for multi-client setups
 - **Exchange Money** - Automatic gold coin exchange
 
 ---
