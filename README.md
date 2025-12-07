@@ -24,6 +24,7 @@
 - **Advanced Wave Avoidance** - Intelligent positioning system that predicts monster attack patterns
 - **Multi-Monster Threat Analysis** - Evaluates danger from all nearby monsters simultaneously
 - **Optimized Looting** - O(1) item lookup with reduced wait times
+- **🍖 Eat Food from Corpses** - Automatically eats food found in killed monster corpses for regeneration
 
 ### 🗺️ CaveBot  
 - **Improved Pathfinding** - Smarter waypoint navigation with optimized algorithms

@@ -103,7 +103,7 @@ UI.Separator()
 -- Uses OTClientV8 APIs: g_app Pane FPS or Options module
 
 -- FPS settings
-local normalFps = 60
+local normalFps = 0    -- 0 = unlimited/maximum FPS
 local lowPowerFps = 5  -- Low but still usable FPS
 
 -- Helper function to set FPS using multiple approaches for compatibility
@@ -173,7 +173,7 @@ local lowPowerSwitch = UI.Button("Low Power Mode: OFF", function(widget)
     widget:setText("Low Power Mode: OFF")
     widget:setColor("#ffffff")
     if setClientFps(normalFps) then
-      info("Low Power Mode disabled - FPS restored to " .. normalFps)
+      info("Low Power Mode disabled - FPS restored to maximum")
     else
       warn("Low Power Mode: Could not restore FPS settings")
     end
@@ -186,5 +186,129 @@ if storage.lowPowerMode then
   lowPowerSwitch:setColor("#00ff00")
   setClientFps(lowPowerFps)
 end
+
+UI.Separator()
+
+-- Mana Training Macro
+-- Trains magic level by casting a spell when mana is sufficient
+-- Configurable spell, minimum mana %, and interval
+
+-- Available training spells
+local TRAINING_SPELLS = {
+  { name = "Light", spell = "utevo lux", mana = 20 },
+  { name = "Magic Rope", spell = "exani tera", mana = 20 },
+  { name = "Find Person", spell = "exiva", mana = 20 },
+  { name = "Light Healing", spell = "exura", mana = 20 },
+  { name = "Intense Healing", spell = "exura gran", mana = 70 },
+  { name = "Food", spell = "exevo pan", mana = 120 },
+  { name = "Invisible", spell = "utana vid", mana = 440 },
+  { name = "Strong Haste", spell = "utani gran hur", mana = 100 },
+  { name = "Haste", spell = "utani hur", mana = 60 },
+  { name = "Magic Shield", spell = "utamo vita", mana = 50 },
+  { name = "Cancel Magic Shield", spell = "exana vita", mana = 50 },
+}
+
+-- Initialize storage
+if storage.manaTraining == nil then
+  storage.manaTraining = {
+    enabled = false,
+    spellIndex = 1,
+    minManaPercent = 80,
+    customSpell = ""
+  }
+end
+
+-- Get spell names for dropdown
+local function getSpellNames()
+  local names = {}
+  for i, spell in ipairs(TRAINING_SPELLS) do
+    table.insert(names, spell.name .. " (" .. spell.mana .. " mana)")
+  end
+  table.insert(names, "Custom Spell")
+  return names
+end
+
+-- Mana training state
+local manaTrainingEnabled = storage.manaTraining.enabled or false
+local lastTrainCast = 0
+local TRAIN_COOLDOWN = 1000  -- 1 second between casts
+
+-- UI Label
+UI.Label("Mana Training:")
+
+-- Spell dropdown
+local spellNames = getSpellNames()
+local spellDropdown = UI.ComboBox(spellNames, function(widget, selectedOption, selectedIndex)
+  storage.manaTraining.spellIndex = selectedIndex
+end)
+spellDropdown:setCurrentIndex(storage.manaTraining.spellIndex or 1)
+
+-- Custom spell input (only shown when "Custom Spell" is selected)
+UI.Label("Custom spell (if selected):")
+UI.TextEdit(storage.manaTraining.customSpell or "", function(widget, text)
+  storage.manaTraining.customSpell = text
+end)
+
+-- Min mana % slider
+UI.Label("Min mana % to train:")
+local manaSlider = UI.Scroll(storage.manaTraining.minManaPercent or 80, 10, 100, function(widget, value)
+  storage.manaTraining.minManaPercent = value
+end)
+
+-- Toggle button
+local manaTrainSwitch = UI.Button("Mana Training: OFF", function(widget)
+  manaTrainingEnabled = not manaTrainingEnabled
+  storage.manaTraining.enabled = manaTrainingEnabled
+  
+  if manaTrainingEnabled then
+    widget:setText("Mana Training: ON")
+    widget:setColor("#00ff00")
+    info("Mana Training enabled")
+  else
+    widget:setText("Mana Training: OFF")
+    widget:setColor("#ffffff")
+    info("Mana Training disabled")
+  end
+end)
+
+-- Initialize state on load
+if storage.manaTraining.enabled then
+  manaTrainSwitch:setText("Mana Training: ON")
+  manaTrainSwitch:setColor("#00ff00")
+  manaTrainingEnabled = true
+end
+
+-- Mana training macro
+macro(500, function()
+  if not manaTrainingEnabled then return end
+  if not player then return end
+  if (now - lastTrainCast) < TRAIN_COOLDOWN then return end
+  
+  -- Don't train in protection zone or if in combat
+  -- (optional: remove isInPz check if you want to train in PZ)
+  
+  -- Check mana percentage
+  local manaPercent = (mana() / maxMana()) * 100
+  local minMana = storage.manaTraining.minManaPercent or 80
+  
+  if manaPercent < minMana then return end
+  
+  -- Get the spell to cast
+  local spellIndex = storage.manaTraining.spellIndex or 1
+  local spellToCast = nil
+  
+  if spellIndex <= #TRAINING_SPELLS then
+    spellToCast = TRAINING_SPELLS[spellIndex].spell
+  else
+    -- Custom spell
+    spellToCast = storage.manaTraining.customSpell
+  end
+  
+  if not spellToCast or spellToCast == "" then return end
+  
+  -- Cast the spell
+  say(spellToCast)
+  lastTrainCast = now
+end)
 
 UI.Separator()

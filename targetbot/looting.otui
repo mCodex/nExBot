@@ -20,6 +20,11 @@ TargetBotLootingPanel < Panel
     !text: tr("Loot every item")
     margin-top: 2
 
+  BotSwitch
+    id: eatFromCorpses
+    !text: tr("Eat food from corpses")
+    margin-top: 2
+
   Label
     margin-top: 5
     text: Containers for loot

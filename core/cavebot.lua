@@ -48,6 +48,7 @@ dofile("/targetbot/creature_attack.lua")
 dofile("/targetbot/creature_editor.lua")
 dofile("/targetbot/creature_priority.lua")
 dofile("/targetbot/looting.lua")
+dofile("/targetbot/eat_food.lua")  -- Eat food from corpses
 dofile("/targetbot/walking.lua")
 -- main targetbot file, must be last
 dofile("/targetbot/target.lua")

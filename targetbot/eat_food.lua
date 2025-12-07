@@ -1,0 +1,474 @@
+--[[
+  nExBot - Eat Food from Corpses (TargetBot Integration)
+  
+  Automatically opens recently killed monster corpses and eats food inside.
+  Uses the existing looting system's corpse tracking.
+  
+  Features:
+  - Uses looting system's monster death tracking
+  - Opens corpses automatically
+  - Eats food from any opened container
+  - Uses comprehensive food item list from items.xml
+  - Cooldown to prevent spam eating
+  - Toggle switch in TargetBot Looting panel
+]]
+
+TargetBot.EatFood = {}
+
+-- Food item IDs from items.xml
+local FOOD_IDS = {
+  -- Meats
+  [3577] = true,  -- meat
+  [3582] = true,  -- ham
+  [3583] = true,  -- dragon ham
+  
+  -- Fish
+  [3578] = true,  -- fish
+  [6984] = true,  -- fish (variant)
+  [7885] = true,  -- fish (variant)
+  [10245] = true, -- fish (variant)
+  
+  -- Fruits
+  [3584] = true,  -- pear
+  [3585] = true,  -- red apple
+  [3586] = true,  -- orange
+  [3587] = true,  -- banana
+  [3588] = true,  -- blueberry
+  [3589] = true,  -- coconut
+  [3590] = true,  -- cherry
+  [3591] = true,  -- strawberry
+  [3593] = true,  -- melon
+  [5096] = true,  -- mango
+  [8011] = true,  -- plum
+  [8012] = true,  -- raspberry
+  [8013] = true,  -- lemon
+  
+  -- Vegetables
+  [3594] = true,  -- pumpkin
+  [3595] = true,  -- carrot
+  [8015] = true,  -- onion
+  [15634] = true, -- carrot (variant)
+  [15636] = true, -- carrot (variant)
+  
+  -- Baked goods
+  [3598] = true,  -- cookie
+  [3600] = true,  -- bread
+  [3602] = true,  -- brown bread
+  
+  -- Other
+  [3606] = true,  -- egg
+  [3607] = true,  -- cheese
+  [3723] = true,  -- white mushroom
+  [3725] = true,  -- brown mushroom
+  [15700] = true, -- mushroom
+  [6277] = true,  -- cake
+  [6278] = true,  -- cake (variant)
+  [12147] = true, -- cake (variant)
+  [3592] = true,  -- grape
+}
+
+-- State variables
+local eatFromCorpsesEnabled = false
+local lastEatTime = 0
+local lastOpenTime = 0
+local foodCorpseQueue = {}     -- Independent corpse queue for food
+local EAT_COOLDOWN = 1000      -- 1 second between eating
+local OPEN_COOLDOWN = 200      -- 0.2 seconds between opening corpses
+local MAX_CORPSE_QUEUE = 30    -- Queue up to 30 corpses
+local CORPSE_MAX_AGE = 30000   -- Remove corpses older than 30 seconds
+local CORPSE_RANGE = 2         -- Must be within 2 tiles to open
+local CORPSE_WALK_RANGE = 6    -- Max distance to walk to corpse
+local FULL_REGEN_TIME = 600    -- Consider player full if regen > 10 minutes (600 seconds)
+local processedContainers = {} -- Track containers we've checked for food
+local walkingToCorpse = nil    -- Currently walking to this corpse
+
+-- Initialize storage
+if storage.eatFromCorpses == nil then
+  storage.eatFromCorpses = false
+end
+eatFromCorpsesEnabled = storage.eatFromCorpses
+
+-- Check if enabled
+TargetBot.EatFood.isEnabled = function()
+  return eatFromCorpsesEnabled
+end
+
+-- Set enabled state
+TargetBot.EatFood.setEnabled = function(enabled)
+  eatFromCorpsesEnabled = enabled
+  storage.eatFromCorpses = enabled
+end
+
+-- Toggle state
+TargetBot.EatFood.toggle = function()
+  eatFromCorpsesEnabled = not eatFromCorpsesEnabled
+  storage.eatFromCorpses = eatFromCorpsesEnabled
+  return eatFromCorpsesEnabled
+end
+
+-- Get food IDs table
+TargetBot.EatFood.getFoodIds = function()
+  return FOOD_IDS
+end
+
+-- Check if item is food
+TargetBot.EatFood.isFood = function(itemId)
+  return FOOD_IDS[itemId] == true
+end
+
+-- Add custom food ID
+TargetBot.EatFood.addFoodId = function(itemId)
+  FOOD_IDS[itemId] = true
+end
+
+-- Remove food ID  
+TargetBot.EatFood.removeFoodId = function(itemId)
+  FOOD_IDS[itemId] = nil
+end
+
+-- Check distance to position
+local function getDistance(pos1, pos2)
+  if pos1.z ~= pos2.z then return 999 end
+  return math.max(math.abs(pos1.x - pos2.x), math.abs(pos1.y - pos2.y))
+end
+
+-- Check if player needs food (not full)
+local function needsFood()
+  if not player then return false end
+  -- Get regeneration time in seconds
+  -- Player:getRegenerationTime() returns seconds of regeneration remaining
+  local regenTime = 0
+  if player.getRegenerationTime then
+    regenTime = player:getRegenerationTime() or 0
+  elseif player.regeneration then
+    regenTime = player:regeneration() or 0
+  end
+  -- Only eat if regeneration time is below threshold (not full)
+  return regenTime < FULL_REGEN_TIME
+end
+
+-- Clean old corpses from queue
+local function cleanCorpseQueue()
+  local currentTime = now
+  for i = #foodCorpseQueue, 1, -1 do
+    if currentTime - foodCorpseQueue[i].time > CORPSE_MAX_AGE then
+      table.remove(foodCorpseQueue, i)
+    end
+  end
+end
+
+-- Add corpse to food queue
+local function addCorpseToQueue(pos, name)
+  -- Check if already in queue
+  for _, corpse in ipairs(foodCorpseQueue) do
+    if corpse.pos.x == pos.x and corpse.pos.y == pos.y and corpse.pos.z == pos.z then
+      return
+    end
+  end
+  
+  if #foodCorpseQueue >= MAX_CORPSE_QUEUE then
+    -- Remove oldest done/failed corpse first, otherwise remove oldest
+    local removed = false
+    for i = 1, #foodCorpseQueue do
+      if foodCorpseQueue[i].state == "done" or foodCorpseQueue[i].state == "failed" then
+        table.remove(foodCorpseQueue, i)
+        removed = true
+        break
+      end
+    end
+    if not removed then
+      table.remove(foodCorpseQueue, 1)
+    end
+  end
+  
+  table.insert(foodCorpseQueue, {
+    pos = {x = pos.x, y = pos.y, z = pos.z},
+    name = name,
+    time = now,
+    state = "pending",  -- pending, opening, checking, done, failed
+    tries = 0,
+    containerIndex = nil
+  })
+end
+
+-- Find nearest corpse to open (within open range)
+local function findNearestCorpse()
+  local playerPos = player:getPosition()
+  local nearest = nil
+  local nearestDist = 999
+  local nearestIndex = nil
+  
+  for i, corpse in ipairs(foodCorpseQueue) do
+    -- Only process pending corpses that haven't failed too many times
+    if corpse.state == "pending" and corpse.tries < 3 then
+      local dist = getDistance(playerPos, corpse.pos)
+      if dist <= CORPSE_RANGE and dist < nearestDist then
+        nearestDist = dist
+        nearest = corpse
+        nearestIndex = i
+      end
+    end
+  end
+  
+  return nearest, nearestIndex
+end
+
+-- Find nearest corpse to walk to (within walk range but outside open range)
+local function findCorpseToWalkTo()
+  local playerPos = player:getPosition()
+  local nearest = nil
+  local nearestDist = 999
+  local nearestIndex = nil
+  
+  for i, corpse in ipairs(foodCorpseQueue) do
+    -- Only walk to pending corpses
+    if corpse.state == "pending" and corpse.tries < 3 then
+      local dist = getDistance(playerPos, corpse.pos)
+      -- Must be within walk range but outside open range
+      if dist > CORPSE_RANGE and dist <= CORPSE_WALK_RANGE and dist < nearestDist then
+        nearestDist = dist
+        nearest = corpse
+        nearestIndex = i
+      end
+    end
+  end
+  
+  return nearest, nearestIndex
+end
+
+-- Walk to a corpse position
+local function walkToCorpse(corpse)
+  if not corpse then return false end
+  if not player then return false end
+  
+  local playerPos = player:getPosition()
+  local dist = getDistance(playerPos, corpse.pos)
+  
+  -- Already close enough
+  if dist <= CORPSE_RANGE then
+    walkingToCorpse = nil
+    return false
+  end
+  
+  -- Use autoWalk if available
+  if autoWalk then
+    autoWalk(corpse.pos, 20, { ignoreNonPathable = true, precision = 1 })
+    walkingToCorpse = corpse
+    return true
+  end
+  
+  -- Fallback: use g_game.walk
+  if g_game.walk then
+    -- Calculate direction to walk
+    local dx = corpse.pos.x - playerPos.x
+    local dy = corpse.pos.y - playerPos.y
+    local dir = nil
+    
+    if math.abs(dx) >= math.abs(dy) then
+      dir = dx > 0 and East or West
+    else
+      dir = dy > 0 and South or North
+    end
+    
+    if dir then
+      g_game.walk(dir)
+      walkingToCorpse = corpse
+      return true
+    end
+  end
+  
+  return false
+end
+
+-- Eat food from any opened container (corpse containers)
+local function eatFromOpenContainers()
+  if (now - lastEatTime) < EAT_COOLDOWN then return false end
+  
+  local containers = g_game.getContainers()
+  for index, container in pairs(containers) do
+    -- Only check corpse containers (not backpacks)
+    local containerItem = container:getContainerItem()
+    if containerItem then
+      local itemId = containerItem:getId()
+      -- Corpse IDs are typically in certain ranges - we check all containers for now
+      -- and rely on the fact that player's loot containers won't have food
+      for _, item in ipairs(container:getItems()) do
+        if FOOD_IDS[item:getId()] then
+          g_game.use(item)
+          lastEatTime = now
+          -- Mark container for tracking
+          if not processedContainers[index] then
+            processedContainers[index] = true
+            -- Close corpse after a delay if not a backpack
+            schedule(500, function()
+              if container and not container:isClosed() then
+                -- Check if it's likely a corpse (single container, not linked to others)
+                local items = container:getItems()
+                local hasFood = false
+                for _, itm in ipairs(items) do
+                  if FOOD_IDS[itm:getId()] then
+                    hasFood = true
+                    break
+                  end
+                end
+                -- Close if no more food
+                if not hasFood then
+                  g_game.close(container)
+                  processedContainers[index] = nil
+                end
+              end
+            end)
+          end
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+-- Open a nearby corpse
+local function openNearbyCorpse()
+  if (now - lastOpenTime) < OPEN_COOLDOWN then return false end
+  
+  local corpse, index = findNearestCorpse()
+  if not corpse then return false end
+  
+  local tile = g_map.getTile(corpse.pos)
+  if not tile then
+    foodCorpseQueue[index].tries = foodCorpseQueue[index].tries + 1
+    if foodCorpseQueue[index].tries >= 3 then
+      foodCorpseQueue[index].state = "failed"
+    end
+    return false
+  end
+  
+  -- Find the top usable thing (corpse container)
+  local topThing = tile:getTopUseThing()
+  if not topThing then
+    foodCorpseQueue[index].tries = foodCorpseQueue[index].tries + 1
+    if foodCorpseQueue[index].tries >= 3 then
+      foodCorpseQueue[index].state = "failed"
+    end
+    return false
+  end
+  
+  -- Check if it's a container
+  if not topThing:isContainer() then
+    foodCorpseQueue[index].tries = foodCorpseQueue[index].tries + 1
+    if foodCorpseQueue[index].tries >= 3 then
+      foodCorpseQueue[index].state = "failed"
+    end
+    return false
+  end
+  
+  -- Open the corpse
+  g_game.open(topThing)
+  foodCorpseQueue[index].state = "opening"
+  lastOpenTime = now
+  
+  -- Schedule to mark as done after a delay (to allow container to open and food to be eaten)
+  local corpseIndex = index
+  schedule(1500, function()
+    if foodCorpseQueue[corpseIndex] and foodCorpseQueue[corpseIndex].state == "opening" then
+      foodCorpseQueue[corpseIndex].state = "done"
+    end
+  end)
+  
+  return true
+end
+
+-- Process: Open corpses and eat food
+TargetBot.EatFood.process = function()
+  if not eatFromCorpsesEnabled then return false end
+  if not player then return false end
+  if isInPz() then return false end
+  if not TargetBot.isOn() then return false end
+  
+  -- Clean old corpses
+  cleanCorpseQueue()
+  
+  -- Check if player needs food (not full)
+  if not needsFood() then
+    walkingToCorpse = nil
+    return false
+  end
+  
+  -- First, try to eat from already opened containers
+  if eatFromOpenContainers() then
+    return true
+  end
+  
+  -- Count pending corpses
+  local pendingCount = 0
+  for _, corpse in ipairs(foodCorpseQueue) do
+    if corpse.state == "pending" then
+      pendingCount = pendingCount + 1
+    end
+  end
+  
+  -- If no pending corpses, nothing to do
+  if pendingCount == 0 then
+    return false
+  end
+  
+  -- Try to open a nearby corpse
+  if openNearbyCorpse() then
+    return true
+  end
+  
+  -- If no corpse nearby, walk to one if available
+  -- Only walk if not in combat (no targets)
+  local targets = TargetBot.Creature and TargetBot.Creature.getTargets and TargetBot.Creature.getTargets() or {}
+  if #targets == 0 or (target() == nil) then
+    local corpseToWalk, walkIndex = findCorpseToWalkTo()
+    if corpseToWalk then
+      if walkToCorpse(corpseToWalk) then
+        return true
+      end
+    end
+  end
+  
+  return false
+end
+
+-- Hook: Track monster deaths for food corpses
+onCreatureDisappear(function(creature)
+  if not eatFromCorpsesEnabled then return end
+  if not player then return end
+  if isInPz() then return end
+  if not TargetBot.isOn() then return end
+  if not creature:isMonster() then return end
+  
+  local playerPos = player:getPosition()
+  local mpos = creature:getPosition()
+  
+  -- Check if on same floor
+  if playerPos.z ~= mpos.z then return end
+  
+  -- Check if within reasonable range  
+  local dist = getDistance(playerPos, mpos)
+  if dist > 8 then return end
+  
+  -- Schedule to allow corpse to appear on tile
+  schedule(100, function()
+    if not player then return end
+    
+    local tile = g_map.getTile(mpos)
+    if not tile then return end
+    
+    local topThing = tile:getTopUseThing()
+    if not topThing then return end
+    if not topThing:isContainer() then return end
+    
+    -- Add to corpse queue for food checking
+    addCorpseToQueue(mpos, creature:getName())
+  end)
+end)
+
+-- Macro to process eating (runs every 200ms)
+macro(200, function()
+  if eatFromCorpsesEnabled and TargetBot.isOn() and not isInPz() then
+    TargetBot.EatFood.process()
+  end
+end)

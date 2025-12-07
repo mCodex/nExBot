@@ -14,6 +14,11 @@ ui.list = ui.listPanel.list -- shortcut
 TargetBot.targetList = ui.list
 TargetBot.Looting.setup()
 
+-- Setup eat food feature if available
+if TargetBot.EatFood and TargetBot.EatFood.setup then
+  TargetBot.EatFood.setup()
+end
+
 ui.status.left:setText("Status:")
 ui.status.right:setText("Off")
 ui.target.left:setText("Target:")

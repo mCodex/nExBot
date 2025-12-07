@@ -16,6 +16,16 @@ TargetBot.Looting.setup = function()
     ui.everyItem:setOn(not ui.everyItem:isOn())
     TargetBot.save()
   end
+  
+  -- Eat food from corpses toggle
+  ui.eatFromCorpses.onClick = function()
+    ui.eatFromCorpses:setOn(not ui.eatFromCorpses:isOn())
+    if TargetBot.EatFood and TargetBot.EatFood.setEnabled then
+      TargetBot.EatFood.setEnabled(ui.eatFromCorpses:isOn())
+    end
+    TargetBot.save()
+  end
+  
   ui.maxDangerPanel.value.onTextChange = function()
     local value = tonumber(ui.maxDangerPanel.value:getText())
     if not value then
@@ -54,6 +64,14 @@ TargetBot.Looting.update = function(data)
   ui.everyItem:setOn(data['everyItem'])
   ui.maxDangerPanel.value:setText(data['maxDanger'] or 10)
   ui.minCapacityPanel.value:setText(data['minCapacity'] or 100)
+  
+  -- Eat food from corpses setting
+  local eatFromCorpses = data['eatFromCorpses'] or false
+  ui.eatFromCorpses:setOn(eatFromCorpses)
+  if TargetBot.EatFood and TargetBot.EatFood.setEnabled then
+    TargetBot.EatFood.setEnabled(eatFromCorpses)
+  end
+  
   TargetBot.Looting.updateItemsAndContainers()
   dontSave = false
   
@@ -74,6 +92,7 @@ TargetBot.Looting.save = function(data)
   data['maxDanger'] = tonumber(ui.maxDangerPanel.value:getText())
   data['minCapacity'] = tonumber(ui.minCapacityPanel.value:getText())
   data['everyItem'] = ui.everyItem:isOn()
+  data['eatFromCorpses'] = ui.eatFromCorpses:isOn()
 end
 
 TargetBot.Looting.updateItemsAndContainers = function()
@@ -237,6 +256,17 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
           lastFoodConsumption = now
           return
         end
+      end
+    end
+    
+    -- nExBot: Eat food from corpses feature
+    if TargetBot.EatFood and TargetBot.EatFood.isEnabled and TargetBot.EatFood.isEnabled() then
+      local itemId = item:getId()
+      local foodIds = TargetBot.EatFood.getFoodIds and TargetBot.EatFood.getFoodIds() or {}
+      if foodIds[itemId] and lastFoodConsumption + 3000 < now then
+        g_game.use(item)
+        lastFoodConsumption = now
+        return
       end
     end
   end
