@@ -258,9 +258,9 @@ macro(50, function()
       local topThing = targetTile:getTopUseThing():getId()
       if topThing == 2129 or topThing == 2130 or topThing == customMwall then
         if targetTile:getTimer() < pushDelay+500 then
-          vBot.isUsing = true
+          nExBot.isUsing = true
           schedule(pushDelay+700, function()
-            vBot.isUsing = false
+            nExBot.isUsing = false
           end)
         end
         if targetTile:getTimer() > pushDelay then

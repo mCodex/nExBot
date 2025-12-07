@@ -56,14 +56,15 @@ TargetBot.Looting.update = function(data)
   ui.minCapacityPanel.value:setText(data['minCapacity'] or 100)
   TargetBot.Looting.updateItemsAndContainers()
   dontSave = false
-  --vBot
-  vBot.lootConainers = {}
-  vBot.lootItems = {}
+  
+  -- nExBot loot tracking
+  nExBot.lootContainers = {}
+  nExBot.lootItems = {}
   for i, item in ipairs(ui.containers:getItems()) do
-    table.insert(vBot.lootConainers, item['id'])
+    table.insert(nExBot.lootContainers, item['id'])
   end
   for i, item in ipairs(ui.items:getItems()) do
-    table.insert(vBot.lootItems, item['id'])
+    table.insert(nExBot.lootItems, item['id'])
   end
 end
 

@@ -1,63 +1,86 @@
--- load all otui files, order doesn't matter
-local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
+--[[
+  nExBot - Tibia Bot for OTClientV8
+  Main Loader Script
+  
+  This file loads all UI styles and scripts in the correct order.
+  Core libraries must be loaded before dependent modules.
+]]--
 
-local configFiles = g_resources.listDirectoryFiles("/bot/" .. configName .. "/vBot", true, false)
-for i, file in ipairs(configFiles) do
-  local ext = file:split(".")
-  if ext[#ext]:lower() == "ui" or ext[#ext]:lower() == "otui" then
-    g_ui.importStyle(file)
+local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
+local CORE_PATH = "/bot/" .. configName .. "/core"
+
+-- Load all OTUI style files from the core directory
+local function loadStyles()
+  local configFiles = g_resources.listDirectoryFiles(CORE_PATH, true, false)
+  for i = 1, #configFiles do
+    local file = configFiles[i]
+    local ext = file:split(".")
+    local extension = ext[#ext]:lower()
+    if extension == "ui" or extension == "otui" then
+      g_ui.importStyle(file)
+    end
   end
 end
 
+-- Load a script from the core directory
 local function loadScript(name)
-  return dofile("/vBot/" .. name .. ".lua")
+  return dofile("/core/" .. name .. ".lua")
 end
 
--- here you can set manually order of scripts
--- libraries should be loaded first
-local luaFiles = {
-  "main",
-  "items",
-  "vlib",
-  "new_cavebot_lib",
-  "configs", -- do not change this and above
-  "extras",
-  "cavebot",
-  "playerlist",
-  "BotServer",
-  "alarms",
-  "Conditions",
-  "Equipper",
-  "pushmax",
-  "combo",
-  "HealBot",
-  "new_healer",
-  "AttackBot", -- last of major modules
-  "ingame_editor",
-  "Dropper",
-  "Containers",
-  "quiver_manager",
-  "quiver_label",
-  "tools",
-  "antiRs",
-  "depot_withdraw",
-  "eat_food",
-  "equip",
-  "exeta",
-  "analyzer",
-  "spy_level",
-  "supplies",
-  "depositer_config",
-  "npc_talk",
-  "xeno_menu",
-  "hold_target",
-  "cavebot_control_panel"
+-- Load styles first
+loadStyles()
+
+-- Script loading order - core libraries first, then dependent modules
+-- DO NOT change the order of the first 4 entries
+local scripts = {
+  -- Core Libraries (load first, order matters)
+  "main",           -- Main initialization
+  "items",          -- Item definitions
+  "lib",            -- Utility library (renamed from vlib)
+  "new_cavebot_lib", -- CaveBot library
+  "configs",        -- Configuration system
+  
+  -- Feature Modules
+  "extras",         -- Extra settings
+  "cavebot",        -- CaveBot integration
+  "playerlist",     -- Player list management
+  "alarms",         -- Alarm system
+  "Conditions",     -- Condition handlers
+  "Equipper",       -- Equipment manager
+  "pushmax",        -- Push maximizer
+  "combo",          -- Combo system
+  "HealBot",        -- Healing bot
+  "new_healer",     -- Friend healer
+  "AttackBot",      -- Attack bot
+  
+  -- Tools and Utilities
+  "ingame_editor",  -- In-game script editor
+  "Dropper",        -- Item dropper
+  "Containers",     -- Container manager
+  "quiver_manager", -- Quiver management
+  "quiver_label",   -- Quiver labels
+  "tools",          -- Miscellaneous tools
+  "antiRs",         -- Anti-RS protection
+  "depot_withdraw", -- Depot withdrawal
+  "eat_food",       -- Auto eat food
+  "equip",          -- Equipment utilities
+  "exeta",          -- Exeta res handler
+  "analyzer",       -- Session analyzer
+  "spy_level",      -- Spy level display
+  "supplies",       -- Supply management
+  "depositer_config", -- Depositer settings
+  "npc_talk",       -- NPC interaction
+  "xeno_menu",      -- Xeno-style menu
+  "hold_target",    -- Hold target feature
+  "cavebot_control_panel" -- CaveBot control panel
 }
 
-for i, file in ipairs(luaFiles) do
-  loadScript(file)
+-- Load all scripts
+for i = 1, #scripts do
+  loadScript(scripts[i])
 end
 
+-- Setup private scripts section
 setDefaultTab("Main")
 UI.Separator()
 UI.Label("Private Scripts:")

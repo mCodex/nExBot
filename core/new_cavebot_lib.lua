@@ -1,7 +1,7 @@
 CaveBot = {} -- global namespace
 
 -------------------------------------------------------------------
--- CaveBot lib 1.0
+-- CaveBot lib 1.0 - Optimized version
 -- Contains a universal set of functions to be used in CaveBot
 
 ----------------------[[ basic assumption ]]-----------------------
@@ -13,8 +13,9 @@ CaveBot = {} -- global namespace
 --   - extensions are controlled by retries var
 -------------------------------------------------------------------
 
--- local variables, constants and functions, used by global functions
+-- Pre-built lookup tables for O(1) access
 local LOCKERS_LIST = {3497, 3498, 3499, 3500}
+local LOCKERS_SET = { [3497] = true, [3498] = true, [3499] = true, [3500] = true }
 local LOCKER_ACCESSTILE_MODIFIERS = {
     [3497] = {0,-1},
     [3498] = {1,0},
@@ -22,15 +23,50 @@ local LOCKER_ACCESSTILE_MODIFIERS = {
     [3500] = {-1,0}
 }
 
+-- Cache for config parsing to avoid repeated file reads
+local configCache = {
+    data = nil,
+    name = nil,
+    lastParse = 0
+}
+local CONFIG_CACHE_TTL = 5000  -- 5 seconds
+
 local function CaveBotConfigParse()
-	local name = storage["_configs"]["targetbot_configs"]["selected"]
-    if not name then 
-        return warn("[vBot] Please create a new TargetBot config and reset bot")
+    local configs = storage["_configs"]
+    if not configs or not configs["targetbot_configs"] then
+        return nil
     end
-	local file = configDir .. "/targetbot_configs/" .. name .. ".json"
-	local data = g_resources.readFileContents(file)
-	return Config.parse(data)['looting']
+    
+    local name = configs["targetbot_configs"]["selected"]
+    if not name then 
+        return warn("[nExBot] Please create a new TargetBot config and reset bot")
+    end
+    
+    -- Use cache if valid
+    if configCache.name == name and now - configCache.lastParse < CONFIG_CACHE_TTL then
+        return configCache.data
+    end
+    
+    local file = configDir .. "/targetbot_configs/" .. name .. ".json"
+    local data = g_resources.readFileContents(file)
+    local parsed = Config.parse(data)
+    
+    if parsed then
+        configCache.data = parsed['looting']
+        configCache.name = name
+        configCache.lastParse = now
+        return configCache.data
+    end
+    
+    return nil
 end
+
+-- Pre-computed direction offsets (same as vlib but local for this module)
+local NEAR_DIRS = {
+    {-1, 1}, {0, 1}, {1, 1}, {-1, 0}, {1, 0}, {-1, -1}, {0, -1}, {1, -1}
+}
+local NEAR_DIRS_COUNT = 8
+local nearTilePos = { x = 0, y = 0, z = 0 }
 
 local function getNearTiles(pos)
     if type(pos) ~= "table" then
@@ -38,27 +74,19 @@ local function getNearTiles(pos)
     end
 
     local tiles = {}
-    local dirs = {
-        {-1, 1},
-        {0, 1},
-        {1, 1},
-        {-1, 0},
-        {1, 0},
-        {-1, -1},
-        {0, -1},
-        {1, -1}
-    }
-    for i = 1, #dirs do
-        local tile =
-            g_map.getTile(
-            {
-                x = pos.x - dirs[i][1],
-                y = pos.y - dirs[i][2],
-                z = pos.z
-            }
-        )
+    local tileCount = 0
+    local baseX, baseY, baseZ = pos.x, pos.y, pos.z
+    
+    for i = 1, NEAR_DIRS_COUNT do
+        local dir = NEAR_DIRS[i]
+        nearTilePos.x = baseX - dir[1]
+        nearTilePos.y = baseY - dir[2]
+        nearTilePos.z = baseZ
+        
+        local tile = g_map.getTile(nearTilePos)
         if tile then
-            table.insert(tiles, tile)
+            tileCount = tileCount + 1
+            tiles[tileCount] = tile
         end
     end
 
@@ -72,31 +100,68 @@ end
 --- global variable to reflect current CaveBot status
 CaveBot.Status = "waiting"
 
+-- Cache for loot items to avoid repeated parsing
+local lootItemsCache = nil
+local lootItemsCacheTime = 0
+local LOOT_CACHE_TTL = 3000
+
 --- Parses config and extracts loot list.
 -- @return table
 function CaveBot.GetLootItems()
-    local t = CaveBotConfigParse() and CaveBotConfigParse()["items"] or nil
+    -- Use cache if valid
+    if lootItemsCache and now - lootItemsCacheTime < LOOT_CACHE_TTL then
+        return lootItemsCache
+    end
+    
+    local t = CaveBotConfigParse()
+    local items = t and t["items"] or nil
 
     local returnTable = {}
-    if type(t) == "table" then
-        for i, item in pairs(t) do
-            table.insert(returnTable, item["id"])
+    local count = 0
+    if type(items) == "table" then
+        for i, item in pairs(items) do
+            count = count + 1
+            returnTable[count] = item["id"]
         end
     end
+    
+    lootItemsCache = returnTable
+    lootItemsCacheTime = now
 
     return returnTable
 end
 
+-- Pre-built lookup set for O(1) loot item check
+local lootItemsSet = nil
+local lootItemsSetTime = 0
+
+local function getLootItemsSet()
+    if lootItemsSet and now - lootItemsSetTime < LOOT_CACHE_TTL then
+        return lootItemsSet
+    end
+    
+    lootItemsSet = {}
+    for _, id in ipairs(CaveBot.GetLootItems()) do
+        lootItemsSet[id] = true
+    end
+    lootItemsSetTime = now
+    return lootItemsSet
+end
 
 --- Checks whether player has any visible items to be stashed
 -- @return boolean
 function CaveBot.HasLootItems()
+    local lootSet = getLootItemsSet()
+    if not next(lootSet) then return false end
+    
     for _, container in pairs(getContainers()) do
         local name = container:getName():lower()
-        if not name:find("depot") and not name:find("your inbox") then
-            for _, item in pairs(container:getItems()) do
-                local id = item:getId()
-                if table.find(CaveBot.GetLootItems(), id) then
+        -- Use plain string find for speed
+        if not name:find("depot", 1, true) and not name:find("your inbox", 1, true) then
+            local items = container:getItems()
+            for i = 1, #items do
+                local id = items[i]:getId()
+                if lootSet[id] then
                     return true
                 end
             end
@@ -106,34 +171,68 @@ end
 
 --- Parses config and extracts loot containers.
 -- @return table
+-- Cache for loot containers
+local lootContainersCache = nil
+local lootContainersCacheTime = 0
+
 function CaveBot.GetLootContainers()
-    local t = CaveBotConfigParse() and CaveBotConfigParse()["containers"] or nil
+    -- Use cache if valid
+    if lootContainersCache and now - lootContainersCacheTime < LOOT_CACHE_TTL then
+        return lootContainersCache
+    end
+    
+    local t = CaveBotConfigParse()
+    local containers = t and t["containers"] or nil
 
     local returnTable = {}
-    if type(t) == "table" then
-        for i, container in pairs(t) do
-            table.insert(returnTable, container["id"])
+    local count = 0
+    if type(containers) == "table" then
+        for i, container in pairs(containers) do
+            count = count + 1
+            returnTable[count] = container["id"]
         end
     end
+    
+    lootContainersCache = returnTable
+    lootContainersCacheTime = now
 
     return returnTable
+end
+
+-- Pre-built lookup set for O(1) container check
+local lootContainersSet = nil
+local lootContainersSetTime = 0
+
+local function getLootContainersSet()
+    if lootContainersSet and now - lootContainersSetTime < LOOT_CACHE_TTL then
+        return lootContainersSet
+    end
+    
+    lootContainersSet = {}
+    for _, id in ipairs(CaveBot.GetLootContainers()) do
+        lootContainersSet[id] = true
+    end
+    lootContainersSetTime = now
+    return lootContainersSet
 end
 
 --- Information about open containers.
 -- @param amount is boolean
 -- @return table or integer
 function CaveBot.GetOpenedLootContainers(containerTable)
-    local containers = CaveBot.GetLootContainers()
+    local containersSet = getLootContainersSet()
 
     local t = {}
+    local count = 0
     for i, container in pairs(getContainers()) do
         local containerId = container:getContainerItem():getId()
-        if table.find(containers, containerId) then
-            table.insert(t, container)
+        if containersSet[containerId] then
+            count = count + 1
+            t[count] = container
         end
     end
 
-    return containerTable and t or #t
+    return containerTable and t or count
 end
 
 --- Some actions needs to be additionally slowed down in case of high ping.
@@ -142,8 +241,9 @@ end
 -- @return void
 function CaveBot.PingDelay(multiplayer)
     multiplayer = multiplayer or 1
-    if ping() and ping() > 150 then -- in most cases ping above 150 affects CaveBot
-        local value = math.min(ping() * multiplayer, 2000)
+    local currentPing = ping()
+    if currentPing and currentPing > 150 then
+        local value = math.min(currentPing * multiplayer, 2000)
         return delay(value)
     end
 end

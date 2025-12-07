@@ -4,8 +4,8 @@ local supplyRetries = 0
 local missedChecks = 0
 local rawRound = 0
 local time = now
-vBot.CaveBotData =
-  vBot.CaveBotData or
+nExBot.CaveBotData =
+  nExBot.CaveBotData or
   {
     refills = 0,
     rounds = 0,
@@ -19,13 +19,13 @@ local function setCaveBotData(hunting)
     supplyRetries = supplyRetries + 1
   else
     supplyRetries = 0
-    table.insert(vBot.CaveBotData.refillTime, os.difftime(os.time() - vBot.CaveBotData.lastRefill))
-    vBot.CaveBotData.lastRefill = os.time()
-    vBot.CaveBotData.refills = vBot.CaveBotData.refills + 1
+    table.insert(nExBot.CaveBotData.refillTime, os.difftime(os.time() - nExBot.CaveBotData.lastRefill))
+    nExBot.CaveBotData.lastRefill = os.time()
+    nExBot.CaveBotData.refills = nExBot.CaveBotData.refills + 1
   end
 
-  table.insert(vBot.CaveBotData.time, rawRound)
-  vBot.CaveBotData.rounds = vBot.CaveBotData.rounds + 1
+  table.insert(nExBot.CaveBotData.time, rawRound)
+  nExBot.CaveBotData.rounds = nExBot.CaveBotData.rounds + 1
   missedChecks = 0
 end
 

@@ -97,7 +97,7 @@ local addScrollBar = function(id, title, min, max, defaultValue, dest, tooltip)
   widget.scroll.onValueChange(widget.scroll, widget.scroll:getValue())
 end
 
-UI.Button("vBot Settings and Scripts", function()
+UI.Button("nExBot Settings and Scripts", function()
   extrasWindow:show()
   extrasWindow:raise()
   extrasWindow:focus()
@@ -265,31 +265,115 @@ end
 
 addCheckBox("stake", "Skin Monsters", false, leftPanel, "Automatically skin & stake corpses when cavebot is enabled")
 if true then
-  local knifeBodies = {4286, 4272, 4173, 4011, 4025, 4047, 4052, 4057, 4062, 4112, 4212, 4321, 4324, 4327, 10352, 10356, 10360, 10364} 
+  -- Pre-built lookup sets for O(1) body type check
+  local knifeBodies = {4286, 4272, 4173, 4011, 4025, 4047, 4052, 4057, 4062, 4112, 4212, 4321, 4324, 4327, 10352, 10356, 10360, 10364}
   local stakeBodies = {4097, 4137, 8738, 18958}
   local fishingBodies = {9582}
-  macro(500, function()
-      if not CaveBot.isOn() or not settings.stake then return end
-      for i, tile in ipairs(g_map.getTiles(posz())) do
+  
+  local knifeBodiesSet = {}
+  local stakeBodiesSet = {}
+  local fishingBodiesSet = {}
+  
+  for _, id in ipairs(knifeBodies) do knifeBodiesSet[id] = true end
+  for _, id in ipairs(stakeBodies) do stakeBodiesSet[id] = true end
+  for _, id in ipairs(fishingBodies) do fishingBodiesSet[id] = true end
+  
+  -- Cache for recently failed positions to avoid repeated attempts
+  local failedPositions = {}
+  local FAILED_POS_TTL = 5000  -- 5 seconds cooldown for failed positions
+  
+  local function canReachTile(tilePos)
+    local playerPos = player:getPosition()
+    -- Check if on same floor
+    if tilePos.z ~= playerPos.z then return false end
+    -- Check distance first (cheap check)
+    local dx = math.abs(tilePos.x - playerPos.x)
+    local dy = math.abs(tilePos.y - playerPos.y)
+    local dist = math.max(dx, dy)
+    if dist > 7 then return false end  -- Too far
+    if dist <= 1 then return true end  -- Adjacent, always reachable
+    -- Check if path exists (more expensive)
+    local path = findPath(playerPos, tilePos, 7, {ignoreNonPathable = true, precision = 1, ignoreCreatures = true})
+    return path ~= nil and #path > 0
+  end
+  
+  local function getFailedPosKey(pos)
+    return pos.x .. "," .. pos.y .. "," .. pos.z
+  end
+  
+  macro(400, function()
+    if not CaveBot.isOn() or not settings.stake then return end
+    
+    local playerPos = player:getPosition()
+    local playerZ = playerPos.z
+    local hasKnife = findItem(5908)
+    local hasStake = findItem(5942)
+    local hasFishingRod = findItem(3483)
+    
+    -- Early exit if no tools
+    if not hasKnife and not hasStake and not hasFishingRod then return end
+    
+    local currentTime = now
+    local bestCandidate = nil
+    local bestDistance = 100
+    
+    -- Clean up old failed positions
+    for key, expireTime in pairs(failedPositions) do
+      if currentTime > expireTime then
+        failedPositions[key] = nil
+      end
+    end
+    
+    for i, tile in ipairs(g_map.getTiles(playerZ)) do
+      local tilePos = tile:getPosition()
+      local posKey = getFailedPosKey(tilePos)
+      
+      -- Skip recently failed positions
+      if not failedPositions[posKey] then
         local item = tile:getTopThing()
         if item and item:isContainer() then
-          if table.find(knifeBodies, item:getId()) and findItem(5908) then
-              CaveBot.delay(550)
-              useWith(5908, item)
-              return
+          local itemId = item:getId()
+          local toolId = nil
+          
+          if hasKnife and knifeBodiesSet[itemId] then
+            toolId = 5908
+          elseif hasStake and stakeBodiesSet[itemId] then
+            toolId = 5942
+          elseif hasFishingRod and fishingBodiesSet[itemId] then
+            toolId = 3483
           end
-          if table.find(stakeBodies, item:getId()) and findItem(5942) then
-              CaveBot.delay(550)
-              useWith(5942, item)
-              return
-          end
-          if table.find(fishingBodies, item:getId()) and findItem(3483) then
-              CaveBot.delay(550)
-              useWith(3483, item)
-              return
+          
+          if toolId then
+            -- Calculate distance
+            local dx = math.abs(tilePos.x - playerPos.x)
+            local dy = math.abs(tilePos.y - playerPos.y)
+            local dist = math.max(dx, dy)
+            
+            if dist < bestDistance then
+              if canReachTile(tilePos) then
+                bestCandidate = { item = item, toolId = toolId, pos = tilePos }
+                bestDistance = dist
+                if dist <= 1 then break end  -- Found adjacent, use immediately
+              else
+                -- Mark as failed to avoid rechecking
+                failedPositions[posKey] = currentTime + FAILED_POS_TTL
+              end
+            end
           end
         end
       end
+    end
+    
+    if bestCandidate then
+      if bestDistance <= 1 then
+        CaveBot.delay(450)
+        useWith(bestCandidate.toolId, bestCandidate.item)
+      else
+        -- Walk to the corpse first
+        CaveBot.walkTo(bestCandidate.pos, 7, {ignoreNonPathable = true, precision = 1})
+        CaveBot.delay(300)
+      end
+    end
   end)
 end
 

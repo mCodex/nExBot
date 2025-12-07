@@ -19,7 +19,7 @@ local BOSSES = {
   {"Urmahlulu", "Urmahlullu"}
 }
 
-vBot.CaveBotData = vBot.CaveBotData or {
+nExBot.CaveBotData = nExBot.CaveBotData or {
   refills = 0,
   rounds = 0,
   time = {},
@@ -197,7 +197,7 @@ if analyzerButton then
 end
 
 --button
-analyzerButton = modules.client_topmenu.addRightGameToggleButton('botAnalyzersButton', 'vBot Analyzers', '/images/topbuttons/analyzers', toggle, false, 999999)
+analyzerButton = modules.client_topmenu.addRightGameToggleButton('botAnalyzersButton', 'nExBot Analyzers', '/images/topbuttons/analyzers', toggle, false, 999999)
 analyzerButton:setOn(false)
 
 --toggles window
@@ -435,7 +435,7 @@ local function createTrackedItems()
       local itemName = id == 3031 and "gold coin" or id == 3035 and "platinum coin" or id == 3043 and "crystal coin" or Item.create(id):getMarketData().name
 
       if trackedLoot[tostring(id)] then
-        warn("vBot[Drop Tracker]: Item already added!")
+        warn("nExBot[Drop Tracker]: Item already added!")
         name:setText("Set Item to start track.")
         widget:setItemId(0)
         return 
@@ -491,7 +491,7 @@ UI.Button("Add item to track drops", function()
     local itemName = id == 3031 and "gold coin" or id == 3035 and "platinum coin" or id == 3043 and "crystal coin" or Item.create(id):getMarketData().name
 
     if trackedLoot[tostring(id)] then
-      warn("vBot[Drop Tracker]: Item already added!")
+      warn("nExBot[Drop Tracker]: Item already added!")
       name:setText("Set Item to start track.")
       widget:setItemId(0)
       return 
@@ -972,7 +972,7 @@ onTextMessage(function(mode, text)
     add(t, ")", "#FFFFFF", true)
 
     -- get/create tab and write raw message
-    local tabName = "vBot Loot"
+    local tabName = "nExBot Loot"
     local tab = console.getTab(tabName) or console.addTab(tabName, true)
     console.addText(text, console.SpeakTypesSettings, tabName, "")
 
@@ -1005,7 +1005,7 @@ local function niceFormat(v)
 end
 
 resetAnalyzerSessionData = function()
-    vBot.CaveBotData = vBot.CaveBotData or {
+    nExBot.CaveBotData = nExBot.CaveBotData or {
       refills = 0,
       rounds = 0,
       time = {},
@@ -1394,8 +1394,8 @@ function refreshWaste()
     for k,v in pairs(usedItems) do
       for i=1,#parents do
         local amount = i == 1 and v.count or 
-                       i == 2 and v.count/(vBot.CaveBotData.rounds + 1) or 
-                       i == 3 and v.count/(vBot.CaveBotData.refills + 1)
+                       i == 2 and v.count/(nExBot.CaveBotData.rounds + 1) or 
+                       i == 3 and v.count/(nExBot.CaveBotData.refills + 1)
         amount = math.floor(amount)
         local label1 = UI.createWidget("AnalyzerLootItem", parents[i])
         local price = amount and getPrice(v.name) * amount or getPrice(v.name)
@@ -1697,11 +1697,11 @@ macro(500, function()
 
 
     --stats
-    totalRounds:setText(vBot.CaveBotData.rounds)
-    avRoundTime:setText(niceTimeFormat(avgTable(vBot.CaveBotData.time),true))
-    totalRefills:setText(vBot.CaveBotData.refills)
-    avRefillTime:setText(niceTimeFormat(avgTable(vBot.CaveBotData.refillTime),true))
-    lastRefill:setText(niceTimeFormat(os.difftime(os.time()-vBot.CaveBotData.lastRefill),true))
+    totalRounds:setText(nExBot.CaveBotData.rounds)
+    avRoundTime:setText(niceTimeFormat(avgTable(nExBot.CaveBotData.time),true))
+    totalRefills:setText(nExBot.CaveBotData.refills)
+    avRefillTime:setText(niceTimeFormat(avgTable(nExBot.CaveBotData.refillTime),true))
+    lastRefill:setText(niceTimeFormat(os.difftime(os.time()-nExBot.CaveBotData.lastRefill),true))
 
 end)
 

@@ -4,14 +4,14 @@
 --]]
 local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
 
--- make vBot config dir
-if not g_resources.directoryExists("/bot/".. configName .."/vBot_configs/") then
-  g_resources.makeDir("/bot/".. configName .."/vBot_configs/")
+-- make nExBot config dir
+if not g_resources.directoryExists("/bot/".. configName .."/nExBot_configs/") then
+  g_resources.makeDir("/bot/".. configName .."/nExBot_configs/")
 end
 
 -- make profile dirs
 for i=1,10 do
-  local path = "/bot/".. configName .."/vBot_configs/profile_"..i
+  local path = "/bot/".. configName .."/nExBot_configs/profile_"..i
   if not g_resources.directoryExists(path) then
     g_resources.makeDir(path)
   end
@@ -20,11 +20,11 @@ end
 local profile = g_settings.getNumber('profile')
 
 HealBotConfig = {}
-local healBotFile = "/bot/" .. configName .. "/vBot_configs/profile_".. profile .. "/HealBot.json"
+local healBotFile = "/bot/" .. configName .. "/nExBot_configs/profile_".. profile .. "/HealBot.json"
 AttackBotConfig = {}
-local attackBotFile = "/bot/" .. configName .. "/vBot_configs/profile_".. profile .. "/AttackBot.json"
+local attackBotFile = "/bot/" .. configName .. "/nExBot_configs/profile_".. profile .. "/AttackBot.json"
 SuppliesConfig = {}
-local suppliesFile = "/bot/" .. configName .. "/vBot_configs/profile_".. profile .. "/Supplies.json"
+local suppliesFile = "/bot/" .. configName .. "/nExBot_configs/profile_".. profile .. "/Supplies.json"
 
 
 --healbot
@@ -60,7 +60,7 @@ if g_resources.fileExists(suppliesFile) then
     SuppliesConfig = result
 end
 
-function vBotConfigSave(file)
+function nExBotConfigSave(file)
   -- file can be either
   --- heal
   --- atk

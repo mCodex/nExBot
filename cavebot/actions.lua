@@ -1,5 +1,5 @@
 CaveBot.Actions = {}
-vBot.lastLabel = ""
+nExBot.lastLabel = ""
 local oldTibia = g_game.getClientVersion() < 960
 local nextTile = nil
 
@@ -214,7 +214,7 @@ CaveBot.registerAction = function(action, color, callback)
 end
 
 CaveBot.registerAction("label", "yellow", function(value, retries, prev)
-  vBot.lastLabel = value
+  nExBot.lastLabel = value
   return true
 end)
 
@@ -289,144 +289,225 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false
   end
 
-  -- reset pathfinder
+  -- reset pathfinder state
   nextPosF = nil
   nextPos = nil
   
-  if CaveBot.Config.get("mapClick") then
-    if retries >= 5 then
-      noPath = noPath + 1
-      pathfinder()
-      return false -- tried 5 times, can't get there
-    end
-  else
-    if retries >= 100 then
-      noPath = noPath + 1
-      pathfinder()
-      return false -- tried 100 times, can't get there
-    end  
+  -- Adaptive retry limits based on walking mode
+  local maxRetries = CaveBot.Config.get("mapClick") and 8 or 50
+  if retries >= maxRetries then
+    noPath = noPath + 1
+    pathfinder()
+    return false
   end
 
   local precision = tonumber(pos[1][5])
   pos = {x=tonumber(pos[1][2]), y=tonumber(pos[1][3]), z=tonumber(pos[1][4])}  
   local playerPos = player:getPosition()
+  
+  -- Different floor check
   if pos.z ~= playerPos.z then 
-    noPath = noPath + 1
-    pathfinder()
-    return false -- different floor
-  end
-
-  local maxDist = storage.extras.gotoMaxDistance or 40
-  
-  if math.abs(pos.x-playerPos.x) + math.abs(pos.y-playerPos.y) > maxDist then
-    noPath = noPath + 1
-    pathfinder()
-    return false -- too far way
-  end
-
-  local minimapColor = g_map.getMinimapColor(pos)
-  local stairs = (minimapColor >= 210 and minimapColor <= 213)
-  
-  if stairs then
-    if math.abs(pos.x-playerPos.x) == 0 and math.abs(pos.y-playerPos.y) <= 0 then
-      noPath = 0
-      return true -- already at position
-    end
-  elseif math.abs(pos.x-playerPos.x) == 0 and math.abs(pos.y-playerPos.y) <= (precision or 1) then
-      noPath = 0
-      return true -- already at position
-  end
-  -- check if there's a path to that place, ignore creatures and fields
-  local path = findPath(playerPos, pos, maxDist, { ignoreNonPathable = true, precision = 1, ignoreCreatures = true, allowUnseen = true, allowOnlyVisibleTiles = false  })
-  if not path then
-    if breakFurniture(pos, storage.extras.machete) then
-      CaveBot.delay(1000)
-      retries = 0
-      return "retry"
-    end
-    noPath = noPath + 1
-    pathfinder()
-    return false -- there's no way
-  end
-
-  -- check if there's a path to destination but consider Creatures (attack only if trapped)
-  local path2 = findPath(playerPos, pos, maxDist, { ignoreNonPathable = true, precision = 1 })
-  if not path2 then
-    local foundMonster = false
-    for i, dir in ipairs(path) do
-      local dirs = modPos(dir)
-      nextPos = nextPos or playerPos
-      nextPos.x = nextPos.x + dirs[1]
-      nextPos.y = nextPos.y + dirs[2]
-  
-      local tile = g_map.getTile(nextPos)
-      if tile then
-          if tile:hasCreature() then
-              local creature = tile:getCreatures()[1]
-              local hppc = creature:getHealthPercent()
-              if creature:isMonster() and (hppc and hppc > 0) and (oldTibia or creature:getType() < 3) then
-                  -- real blocking creature can not meet those conditions - ie. it could be player, so just in case check if the next creature is reachable
-                  local path = findPath(playerPos, creature:getPosition(), 7, { ignoreNonPathable = true, precision = 1 }) 
-                  if path then
-                      foundMonster = true
-                      if g_game.getAttackingCreature() ~= creature then
-                        if distanceFromPlayer(creature:getPosition()) > 3 then
-                          CaveBot.walkTo(creature:getPosition(), 7, { ignoreNonPathable = true, precision = 1 })
-                        else
-                          attack(creature)
-                        end
-                      end
-                      g_game.setChaseMode(1)
-                      CaveBot.delay(100)
-                      retries = 0 -- reset retries, we are trying to unclog the cavebot
-                      break
-                  end
-              end
-          end
-      end
-    end
-
-    if not foundMonster then
-      foundMonster = false
-      return false -- no other way
-    end
-  end
-  
-  -- try to find path, don't ignore creatures, don't ignore fields
-  if not CaveBot.Config.get("ignoreFields") and CaveBot.walkTo(pos, 40) then
-    return "retry"
-  end
-  
-  -- try to find path, don't ignore creatures, ignore fields
-  if CaveBot.walkTo(pos, maxDist, { ignoreNonPathable = true, allowUnseen = true, allowOnlyVisibleTiles = false }) then
-    return "retry"
-  end
-  
-  if retries >= 3 then
-    -- try to lower precision, find something close to final position
-    local precison = retries - 1
-    if stairs then
-      precison = 0
-    end
-    if CaveBot.walkTo(pos, 50, { ignoreNonPathable = true, precision = precison, allowUnseen = true, allowOnlyVisibleTiles = false }) then
-      return "retry"
-    end    
-  end
-  
-  if not CaveBot.Config.get("mapClick") and retries >= 5 then
     noPath = noPath + 1
     pathfinder()
     return false
   end
+
+  local maxDist = storage.extras.gotoMaxDistance or 40
   
+  -- Calculate actual distance (Manhattan)
+  local distX = math.abs(pos.x - playerPos.x)
+  local distY = math.abs(pos.y - playerPos.y)
+  local totalDist = distX + distY
+  
+  if totalDist > maxDist then
+    noPath = noPath + 1
+    pathfinder()
+    return false
+  end
+
+  -- Detect stairs/special tiles
+  local minimapColor = g_map.getMinimapColor(pos)
+  local stairs = (minimapColor >= 210 and minimapColor <= 213)
+  
+  -- Check if already at position
+  local targetPrecision = precision or (stairs and 0 or 1)
+  if distX <= targetPrecision and distY <= targetPrecision then
+    noPath = 0
+    return true
+  end
+  
+  -- ============================================
+  -- SMART PATHFINDING ALGORITHM v2.0
+  -- Uses multiple strategies with fallback
+  -- ============================================
+  
+  -- Strategy 1: Direct path (fastest, most common case)
+  local directPath = findPath(playerPos, pos, maxDist, {
+    ignoreNonPathable = true,
+    precision = 1
+  })
+  
+  if directPath and #directPath > 0 then
+    if CaveBot.walkTo(pos, maxDist, { ignoreNonPathable = true }) then
+      noPath = 0
+      return "retry"
+    end
+  end
+  
+  -- Strategy 2: Path ignoring creatures (when monsters block)
+  local pathIgnoreCreatures = findPath(playerPos, pos, maxDist, {
+    ignoreNonPathable = true,
+    precision = 1,
+    ignoreCreatures = true,
+    allowUnseen = true,
+    allowOnlyVisibleTiles = false
+  })
+  
+  if pathIgnoreCreatures and not directPath then
+    -- There's a path if we ignore creatures - find blocking monster
+    local foundMonster = false
+    local tempPos = { x = playerPos.x, y = playerPos.y, z = playerPos.z }
+    
+    for i, dir in ipairs(pathIgnoreCreatures) do
+      if i > 5 then break end  -- Only check first 5 steps
+      
+      local dirMod = DIR_MOD_LOOKUP[dir]
+      if dirMod then
+        tempPos.x = tempPos.x + dirMod.x
+        tempPos.y = tempPos.y + dirMod.y
+        
+        local tile = g_map.getTile(tempPos)
+        if tile and tile:hasCreature() then
+          local creatures = tile:getCreatures()
+          for _, creature in ipairs(creatures) do
+            local hppc = creature:getHealthPercent()
+            if creature:isMonster() and hppc and hppc > 0 and (oldTibia or creature:getType() < 3) then
+              local creaturePos = creature:getPosition()
+              local pathToCreature = findPath(playerPos, creaturePos, 7, { ignoreNonPathable = true, precision = 1 })
+              
+              if pathToCreature then
+                foundMonster = true
+                local currentTarget = g_game.getAttackingCreature()
+                
+                if currentTarget ~= creature then
+                  local creatureDist = math.max(math.abs(creaturePos.x - playerPos.x), math.abs(creaturePos.y - playerPos.y))
+                  if creatureDist > 3 then
+                    CaveBot.walkTo(creaturePos, 7, { ignoreNonPathable = true, precision = 1 })
+                  else
+                    attack(creature)
+                  end
+                end
+                
+                g_game.setChaseMode(1)
+                CaveBot.delay(150)
+                return "retry"
+              end
+            end
+          end
+        end
+      end
+    end
+    
+    -- No monster found but path exists ignoring creatures
+    -- Try to break furniture if that's blocking
+    if not foundMonster then
+      if breakFurniture(pos) then
+        CaveBot.delay(800)
+        return "retry"
+      end
+    end
+  end
+  
+  -- Strategy 3: Try without ignoring fields
+  if not CaveBot.Config.get("ignoreFields") then
+    if CaveBot.walkTo(pos, maxDist) then
+      return "retry"
+    end
+  end
+  
+  -- Strategy 4: Increased search area
+  if CaveBot.walkTo(pos, maxDist, { ignoreNonPathable = true, allowUnseen = true, allowOnlyVisibleTiles = false }) then
+    return "retry"
+  end
+  
+  -- Strategy 5: Adaptive precision (after few retries)
+  if retries >= 3 then
+    local adaptivePrecision = math.min(retries - 1, stairs and 0 or 3)
+    if CaveBot.walkTo(pos, maxDist + 10, { 
+      ignoreNonPathable = true, 
+      precision = adaptivePrecision, 
+      allowUnseen = true, 
+      allowOnlyVisibleTiles = false 
+    }) then
+      return "retry"
+    end
+  end
+  
+  -- Strategy 6: Intermediate waypoint (AI-like behavior)
+  -- Find a tile closer to destination that IS reachable
+  if retries >= 5 and retries % 3 == 0 then
+    local bestTile = nil
+    local bestScore = 999999
+    
+    -- Search nearby tiles for a good intermediate point
+    local searchRadius = math.min(7, maxDist / 2)
+    for dx = -searchRadius, searchRadius do
+      for dy = -searchRadius, searchRadius do
+        local testPos = { x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z }
+        local tile = g_map.getTile(testPos)
+        
+        if tile and tile:isWalkable() and not tile:hasCreature() then
+          local pathToTest = findPath(playerPos, testPos, searchRadius + 2, { ignoreNonPathable = true, precision = 0 })
+          if pathToTest then
+            -- Calculate how much closer this gets us to destination
+            local newDistToGoal = math.abs(testPos.x - pos.x) + math.abs(testPos.y - pos.y)
+            local pathFromTest = findPath(testPos, pos, maxDist, { ignoreNonPathable = true, precision = 1, ignoreCreatures = true })
+            
+            if pathFromTest then
+              local score = #pathToTest + newDistToGoal
+              if score < bestScore and newDistToGoal < totalDist then
+                bestScore = score
+                bestTile = testPos
+              end
+            end
+          end
+        end
+      end
+    end
+    
+    if bestTile then
+      if CaveBot.walkTo(bestTile, searchRadius + 2, { ignoreNonPathable = true, precision = 0 }) then
+        CaveBot.delay(50)
+        return "retry"
+      end
+    end
+  end
+  
+  -- Strategy 7: Skip if configured
   if CaveBot.Config.get("skipBlocked") then
     noPath = noPath + 1
     pathfinder()
     return false
   end
-
-  -- everything else failed, try to walk ignoring creatures, maybe will work
-  CaveBot.walkTo(pos, maxDist, { ignoreNonPathable = true, precision = 1, ignoreCreatures = true, allowUnseen = true, allowOnlyVisibleTiles = false })
+  
+  -- Strategy 8: Last resort - walk ignoring everything
+  if CaveBot.walkTo(pos, maxDist, { 
+    ignoreNonPathable = true, 
+    precision = 1, 
+    ignoreCreatures = true, 
+    allowUnseen = true, 
+    allowOnlyVisibleTiles = false 
+  }) then
+    return "retry"
+  end
+  
+  -- All strategies failed
+  if retries >= maxRetries - 1 then
+    noPath = noPath + 1
+    pathfinder()
+    return false
+  end
+  
   return "retry"
 end)
 

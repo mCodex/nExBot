@@ -611,7 +611,7 @@ end
 ui.title.onClick = function(widget)
   currentSettings.enabled = not currentSettings.enabled
   widget:setOn(currentSettings.enabled)
-  vBotConfigSave("atk")
+  nExBotConfigSave("atk")
 end
   
 ui.settings.onClick = function(widget)
@@ -632,7 +632,7 @@ end
       for i, child in ipairs(panel.entryList:getChildren()) do
         table.insert(currentSettings.attackTable, child.params)
       end
-      vBotConfigSave("atk")
+      nExBotConfigSave("atk")
     end
   end
 
@@ -996,7 +996,7 @@ end
     activeProfileColor()
     loadSettings()
     resetFields()
-    vBotConfigSave("atk")
+    nExBotConfigSave("atk")
   end
 
   for i=1,5 do
@@ -1021,13 +1021,13 @@ end
     AttackBot.setOff = function()
       currentSettings.enabled = false
       ui.title:setOn(currentSettings.enabled)
-      vBotConfigSave("atk")
+      nExBotConfigSave("atk")
     end
     
     AttackBot.setOn = function()
       currentSettings.enabled = true
       ui.title:setOn(currentSettings.enabled)
-      vBotConfigSave("atk")
+      nExBotConfigSave("atk")
     end
     
     AttackBot.getActiveProfile = function()

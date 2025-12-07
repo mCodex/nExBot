@@ -58,7 +58,7 @@ local refreshStatus = function()
             specOutfit.legs = 88
             specOutfit.feet = 88
             if storage.BOTserver.outfit then
-              local voc = vBot.BotServerMembers[spec:getName()]
+              local voc = nExBot.BotServerMembers[spec:getName()]
               specOutfit.addons = 3 
               if voc == 1 then
                 specOutfit.type = 131
@@ -103,7 +103,7 @@ local checkStatus = function(creature)
         specOutfit.legs = 88
         specOutfit.feet = 88
         if storage.BOTserver.outfit then
-          local voc = vBot.BotServerMembers[creature:getName()]
+          local voc = nExBot.BotServerMembers[creature:getName()]
           specOutfit.addons = 3 
           if voc == 1 then
             specOutfit.type = 131
@@ -237,14 +237,14 @@ if rootWidget then
             local names = string.split(nameTab:getText(), ",")
 
             if #names == 0 then
-              warn("vBot[PlayerList]: Name is missing!")
+              warn("nExBot[PlayerList]: Name is missing!")
               return
             end
 
             for i=1,#names do
               local name = names[i]:trim()
               if name:len() == 0 then
-                  warn("vBot[PlayerList]: Name is missing!")
+                  warn("nExBot[PlayerList]: Name is missing!")
               else
                   if not table.find(playerList, name) then
                       table.insert(playerList, name)
@@ -276,7 +276,7 @@ if rootWidget then
                       end
                       nameTab:setText("")
                   else
-                      warn("vBot[PlayerList]: Player ".. name .." is already added!")
+                      warn("nExBot[PlayerList]: Player ".. name .." is already added!")
                       nameTab:setText("")
                   end
                   clearCachedPlayers()

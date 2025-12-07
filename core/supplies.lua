@@ -72,7 +72,7 @@ end
 local currentProfile = SuppliesConfig[panelName].currentProfile
 local config = SuppliesConfig[panelName][currentProfile]
 
-vBotConfigSave("supply")
+nExBotConfigSave("supply")
 
 if not config then
   for k, v in pairs(SuppliesConfig[panelName]) do
@@ -147,7 +147,7 @@ function addItemPanel()
 
     -- check if isnt already added
     if config[tostring(id)] then
-      warn("vBot[Drop Tracker]: Item already added!")
+      warn("nExBot[Drop Tracker]: Item already added!")
       widget:setItemId(0)
       return
     end
@@ -219,7 +219,7 @@ SuppliesWindow.onVisibilityChange = function(widget, visible)
       end
     end
 
-    vBotConfigSave("supply")
+    nExBotConfigSave("supply")
   end
 end
 
@@ -235,11 +235,11 @@ local function refreshProfileList()
       label.remove.onClick = function()
         local childs = SuppliesWindow.profiles:getChildCount()
         if childs == 1 then
-          return info("vBot[Supplies] You need at least one profile!")
+          return info("nExBot[Supplies] You need at least one profile!")
         end
         profiles[k] = nil
         label:destroy()
-        vBotConfigSave("supply")
+        nExBotConfigSave("supply")
       end
       label.onDoubleClick = function(widget)
         local window =
@@ -259,14 +259,14 @@ local function refreshProfileList()
         SuppliesConfig[panelName].currentProfile = label:getText()
         config = SuppliesConfig[panelName][label:getText()]
         loadSettings()
-        vBotConfigSave("supply")
+        nExBotConfigSave("supply")
       end
       label.onTextChange = function(widget, text)
         currentProfile = text
         SuppliesConfig[panelName].currentProfile = text
         profiles[text] = profiles[k]
         profiles[k] = nil
-        vBotConfigSave("supply")
+        nExBotConfigSave("supply")
       end
     end
   end
@@ -286,13 +286,13 @@ setProfileFocus()
 SuppliesWindow.newProfile.onClick = function()
   local n = SuppliesWindow.profiles:getChildCount()
   if n > 6 then
-    return info("vBot[Supplies] - max profile count reached!")
+    return info("nExBot[Supplies] - max profile count reached!")
   end
   local name = "Profile #" .. n + 1
   SuppliesConfig[panelName][name] = {items = {}}
   refreshProfileList()
   setProfileFocus()
-  vBotConfigSave("supply")
+  nExBotConfigSave("supply")
 end
 
 SuppliesWindow.capSwitch.onClick = function(widget)

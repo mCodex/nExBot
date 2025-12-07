@@ -173,7 +173,7 @@ ui.title:setOn(currentSettings.enabled)
 ui.title.onClick = function(widget)
   currentSettings.enabled = not currentSettings.enabled
   widget:setOn(currentSettings.enabled)
-  vBotConfigSave("heal")
+  nExBotConfigSave("heal")
 end
 
 ui.settings.onClick = function(widget)
@@ -189,7 +189,7 @@ if rootWidget then
 
   healWindow.onVisibilityChange = function(widget, visible)
     if not visible then
-      vBotConfigSave("heal")
+      nExBotConfigSave("heal")
       healWindow.healer:show()
       healWindow.settings:hide()
       healWindow.settingsButton:setText("Settings")
@@ -468,7 +468,7 @@ if rootWidget then
     setActiveProfile()
     activeProfileColor()
     loadSettings()
-    vBotConfigSave("heal")
+    nExBotConfigSave("heal")
   end
 
   local resetSettings = function()
@@ -513,13 +513,13 @@ if rootWidget then
   HealBot.setOff = function()
     currentSettings.enabled = false
     ui.title:setOn(currentSettings.enabled)
-    vBotConfigSave("atk")
+    nExBotConfigSave("atk")
   end
 
   HealBot.setOn = function()
     currentSettings.enabled = true
     ui.title:setOn(currentSettings.enabled)
-    vBotConfigSave("atk")
+    nExBotConfigSave("atk")
   end
 
   HealBot.getActiveProfile = function()
@@ -621,8 +621,8 @@ end)
 macro(100, function()
   if standByItems then return end
   if not currentSettings.enabled or #currentSettings.itemTable == 0 then return end
-  if currentSettings.Delay and vBot.isUsing then return end
-  if currentSettings.MessageDelay and vBot.isUsingPotion then return end
+  if currentSettings.Delay and nExBot.isUsing then return end
+  if currentSettings.MessageDelay and nExBot.isUsingPotion then return end
 
   if not currentSettings.MessageDelay then
     delay(400)

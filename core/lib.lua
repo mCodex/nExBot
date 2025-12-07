@@ -1,29 +1,29 @@
--- Author: Vithrax
--- contains mostly basic function shortcuts and code shorteners
+-- nExBot Core Library
+-- Contains utility functions and code shorteners
 
--- initial global variables declaration
-vBot = {} -- global namespace for bot variables
-vBot.BotServerMembers = {}
-vBot.standTime = now
-vBot.isUsingPotion = false
-vBot.isUsing = false
-vBot.customCooldowns = {}
+-- Global namespace initialization
+nExBot = nExBot or {} -- global namespace for bot variables
+nExBot.standTime = now
+nExBot.isUsingPotion = false
+nExBot.isUsing = false
+nExBot.customCooldowns = {}
+nExBot.lastLabel = ""
 
 function logInfo(text)
     local timestamp = os.date("%H:%M:%S")
     text = tostring(text)
-    local start = timestamp.." [vBot]: "
+    local start = timestamp.." [nExBot]: "
 
     return modules.client_terminal.addLine(start..text, "orange") 
 end
 
 -- scripts / functions
 onPlayerPositionChange(function(x,y)
-    vBot.standTime = now
+    nExBot.standTime = now
 end)
 
 function standTime()
-    return now - vBot.standTime
+    return now - nExBot.standTime
 end
 
 function relogOnCharacter(charName)
@@ -227,7 +227,7 @@ function killsToRs()
 end
 
 -- calculates exhaust for potions based on "Aaaah..." message
--- changes state of vBot variable, can be used in other scripts
+-- changes state of nExBot variable, can be used in other scripts
 -- already used in pushmax, healbot, etc
 
 onTalk(function(name, level, mode, text, channelId, pos)
@@ -235,8 +235,8 @@ onTalk(function(name, level, mode, text, channelId, pos)
     if mode ~= 34 then return end
 
     if text == "Aaaah..." then
-        vBot.isUsingPotion = true
-        schedule(950, function() vBot.isUsingPotion = false end)
+        nExBot.isUsingPotion = true
+        schedule(950, function() nExBot.isUsingPotion = false end)
     end
 end)
 
@@ -309,16 +309,16 @@ end)
 if onSpellCooldown and onGroupSpellCooldown then
     onSpellCooldown(function(iconId, duration)
         schedule(1, function()
-            if not vBot.customCooldowns[lastPhrase] then
-                vBot.customCooldowns[lastPhrase] = {id = iconId}
+            if not nExBot.customCooldowns[lastPhrase] then
+                nExBot.customCooldowns[lastPhrase] = {id = iconId}
             end
         end)
     end)
 
     onGroupSpellCooldown(function(iconId, duration)
         schedule(2, function()
-            if vBot.customCooldowns[lastPhrase] then
-                vBot.customCooldowns[lastPhrase] = {id = vBot.customCooldowns[lastPhrase].id, group = {[iconId] = duration}}
+            if nExBot.customCooldowns[lastPhrase] then
+                nExBot.customCooldowns[lastPhrase] = {id = nExBot.customCooldowns[lastPhrase].id, group = {[iconId] = duration}}
             end
         end)
     end)
@@ -342,7 +342,7 @@ function getSpellData(spell)
         end
     end
     if not t then
-        for k, v in pairs(vBot.customCooldowns) do
+        for k, v in pairs(nExBot.customCooldowns) do
             if k == spell then
                 c = {id = v.id, mana = 1, level = 1, group = v.group}
                 break
@@ -385,7 +385,7 @@ end
 -- below callbacks are triggers to changing the var state
 local isUsingTime = now
 macro(100, function()
-    vBot.isUsing = now < isUsingTime and true or false
+    nExBot.isUsing = now < isUsingTime and true or false
 end)
 onUse(function(pos, itemId, stackPos, subType)
     if pos.x > 65000 then return end
@@ -466,13 +466,6 @@ function isFriend(c)
 
     -- O(1) lookup instead of table.find O(n)
     if friendListLookup[name] then
-        if creature then CachedFriends[creature] = true end
-        friendCacheByName[name] = true
-        return true
-    end
-    
-    -- BotServer members check
-    if vBot.BotServerMembers[name] then
         if creature then CachedFriends[creature] = true end
         friendCacheByName[name] = true
         return true

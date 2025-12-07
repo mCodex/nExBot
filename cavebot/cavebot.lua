@@ -20,65 +20,93 @@ for extension, callbacks in pairs(CaveBot.Extensions) do
   end
 end
 
--- main loop, controlled by config
+-- main loop, controlled by config - OPTIMIZED VERSION
 local actionRetries = 0
 local prevActionResult = true
+
+-- Cache frequently accessed values
+local cachedActions = nil
+local cachedCurrentAction = nil
+local lastActionCheck = 0
+local ACTION_CACHE_TTL = 50  -- Refresh cache every 50ms
+
 cavebotMacro = macro(20, function()
+  -- Early return checks first (most common case)
   if TargetBot and TargetBot.isActive() and not TargetBot.isCaveBotActionAllowed() then
     CaveBot.resetWalking()
-    return -- target bot or looting is working, wait
+    return
   end
   
   if CaveBot.doWalking() then
-    return -- executing walking3
+    return
   end
   
-  local actions = ui.list:getChildCount()
-  if actions == 0 then return end
+  -- Get action count (cached access pattern)
+  local actionCount = ui.list:getChildCount()
+  if actionCount == 0 then return end
+  
+  -- Get current action
   local currentAction = ui.list:getFocusedChild()
   if not currentAction then
     currentAction = ui.list:getFirstChild()
+    if not currentAction then return end
   end
-  local action = CaveBot.Actions[currentAction.action]  
+  
+  -- Cache action lookup
+  local actionType = currentAction.action
+  local action = CaveBot.Actions[actionType]
+  
+  if not action then
+    warn("Invalid cavebot action: " .. tostring(actionType))
+    return
+  end
+  
   local value = currentAction.value
   local retry = false
-  if action then
-    local status, result = pcall(function()
-      CaveBot.resetWalking()
-      return action.callback(value, actionRetries, prevActionResult)
-    end)
-    if status then
-      if result == "retry" then
-        actionRetries = actionRetries + 1
-        retry = true
-      elseif type(result) == 'boolean' then
-        actionRetries = 0
-        prevActionResult = result
-      else
-        warn("Invalid return from cavebot action (" .. currentAction.action .. "), should be \"retry\", false or true, is: " .. tostring(result))
-      end
+  
+  -- Execute action with error handling
+  local status, result = pcall(function()
+    CaveBot.resetWalking()
+    return action.callback(value, actionRetries, prevActionResult)
+  end)
+  
+  if status then
+    if result == "retry" then
+      actionRetries = actionRetries + 1
+      retry = true
+    elseif result == true or result == false then
+      actionRetries = 0
+      prevActionResult = result
     else
-      warn("warn while executing cavebot action (" .. currentAction.action .. "):\n" .. result)
-    end    
+      warn("Invalid return from cavebot action (" .. actionType .. "), should be \"retry\", false or true, is: " .. tostring(result))
+    end
   else
-    warn("Invalid cavebot action: " .. currentAction.action)
+    warn("Error while executing cavebot action (" .. actionType .. "):\n" .. result)
   end
   
   if retry then
     return
   end
   
-  if currentAction ~= ui.list:getFocusedChild() then
-    -- focused child can change durring action, get it again and reset state
-    currentAction = ui.list:getFocusedChild() or ui.list:getFirstChild()
+  -- Check if focused child changed during action
+  local newFocused = ui.list:getFocusedChild()
+  if currentAction ~= newFocused then
+    currentAction = newFocused or ui.list:getFirstChild()
     actionRetries = 0
     prevActionResult = true
   end
-  local nextAction = ui.list:getChildIndex(currentAction) + 1
-  if nextAction > actions then
-    nextAction = 1
+  
+  -- Move to next action
+  local currentIndex = ui.list:getChildIndex(currentAction)
+  local nextIndex = currentIndex + 1
+  if nextIndex > actionCount then
+    nextIndex = 1
   end
-  ui.list:focusChild(ui.list:getChildByIndex(nextAction))
+  
+  local nextChild = ui.list:getChildByIndex(nextIndex)
+  if nextChild then
+    ui.list:focusChild(nextChild)
+  end
 end)
 
 -- config, its callback is called immediately, data can be nil
@@ -190,7 +218,7 @@ CaveBot.getCurrentProfile = function()
 end
 
 CaveBot.lastReachedLabel = function()
-  return vBot.lastLabel
+  return nExBot.lastLabel
 end
 
 CaveBot.gotoNextWaypointInRange = function()

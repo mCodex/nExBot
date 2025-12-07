@@ -406,7 +406,7 @@ local function isCandidate(spec)
     local okParty = config.conditions.party and spec:isPartyMember()
     local okFriend = config.conditions.friends and isFriend(spec)
     local okGuild = config.conditions.guild and spec:getEmblem() == 1
-    local okBotServer = config.conditions.botserver and vBot.BotServerMembers[spec:getName()]
+    local okBotServer = config.conditions.botserver and nExBot.BotServerMembers[spec:getName()]
 
     if not (okParty or okFriend or okGuild or okBotServer) then
         return nil

@@ -464,12 +464,12 @@ inputPanel.add.onClick = function(widget)
     elseif conditionNumber == 8 then
         mainVal = inputPanel.condition.text:getText()
         if mainVal:len() == 0 then
-            return warn("[vBot Equipper] Please fill the name of the creature.")
+            return warn("[nExBot Equipper] Please fill the name of the creature.")
         end
     elseif conditionNumber == 9 then
         mainVal = inputPanel.condition.text:getText()
         if mainVal:len() == 0 then
-            return warn("[vBot Equipper] Please set correct hotkey.")
+            return warn("[nExBot Equipper] Please set correct hotkey.")
         end
     else
         mainVal = inputPanel.condition.spinbox:getValue()
@@ -481,12 +481,12 @@ inputPanel.add.onClick = function(widget)
         elseif optionalConditionNumber == 8 then
             optVal = inputPanel.optionalCondition.text:getText()
             if optVal:len() == 0 then
-                return warn("[vBot Equipper] Please fill the name of the creature.")
+                return warn("[nExBot Equipper] Please fill the name of the creature.")
             end
         elseif optionalConditionNumber == 9 then
             optVal = inputPanel.optionalCondition.text:getText()
             if optVal:len() == 0 then
-                return warn("[vBot Equipper] Please set correct hotkey.")
+                return warn("[nExBot Equipper] Please set correct hotkey.")
             end
         else
             optVal = inputPanel.optionalCondition.spinbox:getValue()

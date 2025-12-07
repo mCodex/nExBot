@@ -61,7 +61,7 @@ Panel
   ui.title.onClick = function(widget)
     config.enabled = not config.enabled
     widget:setOn(config.enabled)
-    vBotConfigSave("heal")
+    nExBotConfigSave("heal")
   end
   
   ui.conditionList.onClick = function(widget)
@@ -80,7 +80,7 @@ Panel
 
     conditionsWindow.onVisibilityChange = function(widget, visible)
       if not visible then
-        vBotConfigSave("heal")
+        nExBotConfigSave("heal")
       end
     end
 
