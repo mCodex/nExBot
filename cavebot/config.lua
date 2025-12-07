@@ -8,6 +8,12 @@ CaveBot.Config.setup = function()
   CaveBot.Config.ui = UI.createWidget("CaveBotConfigPanel")
   local ui = CaveBot.Config.ui
   local add = CaveBot.Config.add
+  local extras = storage.extras or {}
+
+  local defaultRope = tonumber(extras.rope) or 3003
+  local defaultShovel = tonumber(extras.shovel) or 3457
+  local defaultMachete = tonumber(extras.machete) or 3308
+  local defaultScythe = tonumber(extras.scythe) or 3453
   
   add("ping", "Server ping", 100)
   add("walkDelay", "Walk delay", 10)
@@ -16,6 +22,11 @@ CaveBot.Config.setup = function()
   add("ignoreFields", "Ignore fields", false)  
   add("skipBlocked", "Skip blocked path", false)  
   add("useDelay", "Delay after use", 400)
+  add("autoUseTools", "Auto use tools", true)
+  add("ropeToolId", "Rope item id", defaultRope)
+  add("shovelToolId", "Shovel item id", defaultShovel)
+  add("macheteToolId", "Machete item id", defaultMachete)
+  add("scytheToolId", "Scythe item id", defaultScythe)
 end
 
 CaveBot.Config.show = function()

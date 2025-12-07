@@ -120,6 +120,9 @@ CaveBot.walkTo = function(dest, maxDist, params)
   local path = getPath(playerPos, dest, maxDist, params)
   
   if not path or not path[1] then
+    if CaveBot.Tools and CaveBot.Tools.handleObstacle(dest) then
+      return true
+    end
     return false
   end
   

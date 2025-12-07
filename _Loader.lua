@@ -31,14 +31,20 @@ end
 loadStyles()
 
 -- Script loading order - core libraries first, then dependent modules
--- DO NOT change the order of the first 4 entries
+-- DO NOT change the order of core entries
 local scripts = {
   -- Core Libraries (load first, order matters)
   "main",           -- Main initialization
   "items",          -- Item definitions
+  "item_classifier", -- Item metadata index
   "lib",            -- Utility library (renamed from vlib)
   "new_cavebot_lib", -- CaveBot library
   "configs",        -- Configuration system
+  
+  -- Event-Driven Architecture (load before feature modules)
+  "event_bus",      -- Centralized event bus (Observer pattern)
+  "door_items",     -- Door item database from items.xml
+  "global_config",  -- Global tool/door configuration
   
   -- Feature Modules
   "extras",         -- Extra settings

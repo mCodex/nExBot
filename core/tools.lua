@@ -34,15 +34,19 @@ end, true):setHeight(35)
 UI.Separator()
 
 -- Auto trade message --------------------------------------------------------
+if storage.autoTradeMessage == nil then
+  storage.autoTradeMessage = "nExBot is online!"
+end
+
 macro(60 * 1000, "Send message on trade", function()
   local trade = getChannelId("advertising") or getChannelId("trade")
-  local message = storage.autoTradeMessage or "nExBot is online!"
+  local message = storage.autoTradeMessage or ""
   if trade and message:len() > 0 then
     sayChannel(trade, message)
   end
 end)
 
-UI.TextEdit(storage.autoTradeMessage or "nExBot is online!", function(widget, text)
+local tradeMessageEdit = UI.TextEdit(storage.autoTradeMessage, function(widget, text)
   storage.autoTradeMessage = text
 end)
 
@@ -69,6 +73,38 @@ macro(100, "Auto Haste", function()
   if mana() < haste.mana then return end
   if getSpellCoolDown and getSpellCoolDown(haste.spell) then return end
   say(haste.spell)
+end)
+
+UI.Separator()
+
+-- Auto Mount ----------------------------------------------------------------
+-- Automatically mounts player when outside of PZ
+-- Uses the player's default mount from client settings
+-- Does NOT attempt to mount in PZ (saves CPU/memory)
+
+local lastMountAttempt = 0
+local MOUNT_COOLDOWN = 2000 -- Don't spam mount attempts
+
+macro(500, "Auto Mount", function()
+  if not player then return end
+  
+  -- Skip if in protection zone - saves CPU/memory
+  if isInPz() then return end
+  
+  -- Cooldown to prevent spamming
+  if (now - lastMountAttempt) < MOUNT_COOLDOWN then return end
+  
+  -- Check if already mounted
+  local outfit = player:getOutfit()
+  if outfit and outfit.mount and outfit.mount > 0 then
+    return -- Already mounted
+  end
+  
+  -- Mount using default mount from client
+  if g_game.mount then
+    g_game.mount(true)
+    lastMountAttempt = now
+  end
 end)
 
 UI.Separator()
@@ -117,35 +153,23 @@ local function setClientFps(fps)
   return changed
 end
 
-if storage.lowPowerMode == nil then
-  storage.lowPowerMode = false
-end
+-- Low Power Mode macro with built-in toggle (like Hold Target)
+local lowPowerMacro = macro(1000, "Low Power Mode", function()
+  -- This runs when enabled - apply low FPS
+  setClientFps(lowPowerFps)
+end)
 
-local lowPowerSwitch = UI.Button("Low Power Mode: OFF", function(widget)
-  storage.lowPowerMode = not storage.lowPowerMode
-  local enabled = storage.lowPowerMode
-  widget:setText(enabled and "Low Power Mode: ON" or "Low Power Mode: OFF")
-  widget:setColor(enabled and "#00ff00" or "#ffffff")
-
+-- Handle state changes
+lowPowerMacro.onSwitch = function(macro, enabled)
   if enabled then
     if setClientFps(lowPowerFps) then
       info("Low Power Mode enabled - FPS limited to " .. lowPowerFps)
-    else
-      warn("Low Power Mode: could not change FPS settings")
     end
   else
     if setClientFps(normalFps) then
       info("Low Power Mode disabled - FPS restored to maximum")
-    else
-      warn("Low Power Mode: could not restore FPS settings")
     end
   end
-end)
-
-if storage.lowPowerMode then
-  lowPowerSwitch:setText("Low Power Mode: ON")
-  lowPowerSwitch:setColor("#00ff00")
-  setClientFps(lowPowerFps)
 end
 
 UI.Separator()
@@ -153,7 +177,6 @@ UI.Separator()
 -- Mana training -------------------------------------------------------------
 if storage.manaTraining == nil then
   storage.manaTraining = {
-    enabled = false,
     spell = "exura",
     minManaPercent = 80
   }
@@ -192,23 +215,11 @@ UI.TextEdit(tostring(storage.manaTraining.minManaPercent or 80), function(widget
   storage.manaTraining.minManaPercent = value
 end)
 
-local manaTrainSwitch = UI.Button("Mana Training: OFF", function()
-  storage.manaTraining.enabled = not storage.manaTraining.enabled
-  manaTrainSwitch:setText(storage.manaTraining.enabled and "Mana Training: ON" or "Mana Training: OFF")
-  manaTrainSwitch:setColor(storage.manaTraining.enabled and "#00ff00" or "#ffffff")
-  info(storage.manaTraining.enabled and "Mana Training enabled" or "Mana Training disabled")
-end)
-
-if storage.manaTraining.enabled then
-  manaTrainSwitch:setText("Mana Training: ON")
-  manaTrainSwitch:setColor("#00ff00")
-end
-
+-- Mana Training macro with built-in toggle (like Hold Target)
 local lastTrainCast = 0
 local TRAIN_COOLDOWN = 1000
 
-macro(500, function()
-  if not storage.manaTraining.enabled then return end
+macro(500, "Mana Training", function()
   if not player then return end
   if (now - lastTrainCast) < TRAIN_COOLDOWN then return end
 
@@ -223,3 +234,98 @@ macro(500, function()
 end)
 
 UI.Separator()
+
+-- Global Configuration Settings ---------------------------------------------
+UI.Label("== Global Settings ==")
+UI.Separator()
+
+-- Auto Open Doors toggle
+if storage.globalConfig == nil then
+  storage.globalConfig = {
+    autoOpenDoors = true,
+    autoUseTools = true,
+    targetOnlyTargetable = false
+  }
+end
+
+local doorToggle = UI.Button("Auto Open Doors: " .. (storage.globalConfig.autoOpenDoors and "ON" or "OFF"), function(widget)
+  storage.globalConfig.autoOpenDoors = not storage.globalConfig.autoOpenDoors
+  local enabled = storage.globalConfig.autoOpenDoors
+  widget:setText("Auto Open Doors: " .. (enabled and "ON" or "OFF"))
+  widget:setColor(enabled and "#00ff00" or "#ffffff")
+  if GlobalConfig then
+    GlobalConfig.setEnabled("autoOpenDoors", enabled)
+  end
+  info("Auto Open Doors: " .. (enabled and "enabled" or "disabled"))
+end)
+
+if storage.globalConfig.autoOpenDoors then
+  doorToggle:setColor("#00ff00")
+end
+
+-- Auto Use Tools toggle (rope, shovel, machete)
+local toolsToggle = UI.Button("Auto Use Tools: " .. (storage.globalConfig.autoUseTools and "ON" or "OFF"), function(widget)
+  storage.globalConfig.autoUseTools = not storage.globalConfig.autoUseTools
+  local enabled = storage.globalConfig.autoUseTools
+  widget:setText("Auto Use Tools: " .. (enabled and "ON" or "OFF"))
+  widget:setColor(enabled and "#00ff00" or "#ffffff")
+  if GlobalConfig then
+    GlobalConfig.setEnabled("autoUseTools", enabled)
+  end
+  info("Auto Use Tools: " .. (enabled and "enabled" or "disabled"))
+end)
+
+if storage.globalConfig.autoUseTools then
+  toolsToggle:setColor("#00ff00")
+end
+
+-- Target Only Targetable Monsters toggle
+local targetableToggle = UI.Button("Target Only Targetable: " .. (storage.globalConfig.targetOnlyTargetable and "ON" or "OFF"), function(widget)
+  storage.globalConfig.targetOnlyTargetable = not storage.globalConfig.targetOnlyTargetable
+  local enabled = storage.globalConfig.targetOnlyTargetable
+  widget:setText("Target Only Targetable: " .. (enabled and "ON" or "OFF"))
+  widget:setColor(enabled and "#00ff00" or "#ffffff")
+  if GlobalConfig then
+    GlobalConfig.setEnabled("targetOnlyTargetable", enabled)
+  end
+  info("Target Only Targetable Monsters: " .. (enabled and "enabled" or "disabled"))
+end)
+
+if storage.globalConfig.targetOnlyTargetable then
+  targetableToggle:setColor("#00ff00")
+end
+
+UI.Label("Tip: Target Only Targetable ignores")
+UI.Label("other players' summons")
+
+UI.Separator()
+
+-- Tool Item IDs Configuration
+UI.Label("Tool Item IDs (from items.xml):")
+
+UI.Label("Rope ID (default: 3003):")
+UI.TextEdit(tostring(storage.globalConfig.ropeId or 3003), function(widget, text)
+  local id = tonumber(text)
+  if id and id > 0 then
+    storage.globalConfig.ropeId = id
+    if GlobalConfig then GlobalConfig.setTool("rope", id) end
+  end
+end)
+
+UI.Label("Shovel ID (default: 3457):")
+UI.TextEdit(tostring(storage.globalConfig.shovelId or 3457), function(widget, text)
+  local id = tonumber(text)
+  if id and id > 0 then
+    storage.globalConfig.shovelId = id
+    if GlobalConfig then GlobalConfig.setTool("shovel", id) end
+  end
+end)
+
+UI.Label("Machete ID (default: 3308):")
+UI.TextEdit(tostring(storage.globalConfig.macheteId or 3308), function(widget, text)
+  local id = tonumber(text)
+  if id and id > 0 then
+    storage.globalConfig.macheteId = id
+    if GlobalConfig then GlobalConfig.setTool("machete", id) end
+  end
+end)

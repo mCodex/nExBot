@@ -6,6 +6,38 @@ local lureEnabled = true
 local dangerValue = 0
 local looterStatus = ""
 
+-- Creature type constants for clarity
+local CREATURE_TYPE = {
+  PLAYER = 0,
+  MONSTER = 1,      -- Targetable monster
+  NPC = 2,
+  SUMMON = 3        -- Non-targetable (other player's summons)
+}
+
+-- Helper function to check if creature is targetable
+-- Uses GlobalConfig if available for "target only targetable" option
+local function isTargetableCreature(creature, oldTibia)
+  if not creature:isMonster() then
+    return false
+  end
+  
+  -- Old Tibia clients don't have creature types
+  if oldTibia then
+    return true
+  end
+  
+  local creatureType = creature:getType()
+  
+  -- Check GlobalConfig for strict targetable-only mode
+  if GlobalConfig and GlobalConfig.isEnabled("targetOnlyTargetable") then
+    -- Strict mode: only target type 1 (real monsters)
+    return creatureType == CREATURE_TYPE.MONSTER
+  end
+  
+  -- Default behavior: target monsters and some summons (type < 3)
+  return creatureType < 3
+end
+
 -- ui
 local configWidget = UI.Config()
 local ui = UI.createWidget("TargetBotPanel")
@@ -63,7 +95,7 @@ targetbotMacro = macro(100, function()
     local hppc = creature:getHealthPercent()
     if hppc and hppc > 0 then
       local path = findPath(player:getPosition(), creature:getPosition(), 7, {ignoreLastCreature=true, ignoreNonPathable=true, ignoreCost=true, ignoreCreatures=true})
-      if creature:isMonster() and (oldTibia or creature:getType() < 3) and path then
+      if isTargetableCreature(creature, oldTibia) and path then
         local params = TargetBot.Creature.calculateParams(creature, path) -- return {craeture, config, danger, priority}
         dangerLevel = dangerLevel + params.danger
         if params.priority > 0 then

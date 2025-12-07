@@ -33,14 +33,39 @@ CaveBot.Extensions.OpenDoors.setup = function()
     end
   
     if not doorTile:isWalkable() then
-      if not key then
-        use(doorTile:getTopUseThing())
-        delay(200)
-        return "retry"
-      else
-        useWith(key, doorTile:getTopUseThing())
-        delay(200)
-        return "retry"
+      -- Use GlobalConfig for door handling if available
+      if GlobalConfig and GlobalConfig.openDoor then
+        if GlobalConfig.openDoor(doorTile, key) then
+          delay(200)
+          return "retry"
+        end
+      end
+      
+      -- Fallback to direct door handling using DoorItems
+      local topThing = doorTile:getTopUseThing()
+      if topThing then
+        local itemId = topThing:getId()
+        
+        -- Check if it's a locked door and we have a key
+        if key and DoorItems and DoorItems.isLockedDoor(itemId) then
+          useWith(key, topThing)
+          delay(200)
+          return "retry"
+        -- Check if it's a closed door (can open without key)
+        elseif DoorItems and DoorItems.isClosedDoor(itemId) then
+          use(topThing)
+          delay(200)
+          return "retry"
+        -- Original fallback behavior
+        elseif not key then
+          use(topThing)
+          delay(200)
+          return "retry"
+        else
+          useWith(key, topThing)
+          delay(200)
+          return "retry"
+        end
       end
     else
       print("CaveBot[OpenDoors]: possible to cross, proceeding")

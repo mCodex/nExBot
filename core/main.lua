@@ -1,4 +1,4 @@
-local version = "5.0"
+local version = "1.0.0"
 
-UI.Label("nExBot v".. version)
+UI.Label("nExBot v" .. version)
 UI.Separator()

@@ -1,49 +1,32 @@
+--[[
+  Container Panel - Simplified BFS Deep Search
+  
+  Features:
+  - Open BPs: Opens all nested containers using BFS
+  - Reopen: Closes all and reopens from back slot
+  - Close: Closes all open containers
+  - Min: Minimizes all open containers  
+  - Max: Maximizes all open containers
+  
+  All operations use BFS (Breadth-First Search) to find nested containers.
+]]
+
 setDefaultTab("Tools")
-local panelName = "renameContainers"
+local panelName = "containerPanel"
+
+-- Simple config - just purse setting
 if type(storage[panelName]) ~= "table" then
     storage[panelName] = {
-        enabled = false;
-        height = 170,
-        purse = true;
-        list = {
-            {
-                value = "Main Backpack",
-                enabled = true,
-                item = 9601,
-                min = false,
-                items = { 3081, 3048 }
-            },
-            {
-                value = "Runes",
-                enabled = true,
-                item = 2866,
-                min = true,
-                items = { 3161, 3180 }
-            },
-            {
-                value = "Money",
-                enabled = true,
-                item = 2871,
-                min = true,
-                items = { 3031, 3035, 3043 }
-            },
-            {
-                value = "Purse",
-                enabled = true,
-                item = 23396,
-                min = true,
-                items = {}
-            },
-        }
+        purse = true
     }
 end
 
 local config = storage[panelName]
 
 UI.Separator()
-local renameContui = setupUI([[
+local containerUI = setupUI([[
 Panel
-  height: 50
+  height: 55
 
   Label
     text-align: center
@@ -53,622 +36,249 @@ Panel
     anchors.top: parent.top
     font: verdana-11px-rounded
 
-  BotSwitch
-    id: title
+  Button
+    id: openBPs
+    !text: tr('Open BPs')
     anchors.top: prev.bottom
     anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('Open Minimised')
+    margin-top: 3
+    width: 60
+    height: 17
+    tooltip: Open all nested backpacks (BFS deep search)
     font: verdana-11px-rounded
 
   Button
-    id: editContList
+    id: reopenAll
+    !text: tr('Reopen')
     anchors.top: prev.top
     anchors.left: prev.right
-    anchors.right: parent.right
-    margin-left: 3
+    margin-left: 2
+    width: 50
     height: 17
-    text: Setup
+    tooltip: Close and reopen all backpacks from back slot
     font: verdana-11px-rounded
 
   Button
-    id: reopenCont
-    !text: tr('Reopen All')
-    anchors.left: parent.left
-    anchors.top: prev.bottom
-    anchors.right: parent.horizontalCenter
-    margin-right: 2
-    height: 17
-    margin-top: 3
-    font: verdana-11px-rounded
-
-  Button
-    id: minimiseCont
-    !text: tr('Minimise All')
+    id: closeAll
+    !text: tr('Close')
     anchors.top: prev.top
-    anchors.left: parent.horizontalCenter
-    anchors.right: parent.right
-    margin-right: 2
+    anchors.left: prev.right
+    margin-left: 2
+    width: 40
     height: 17
+    tooltip: Close all containers
+    font: verdana-11px-rounded
+
+  Button
+    id: minimizeAll
+    !text: tr('Min')
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 2
+    width: 30
+    height: 17
+    tooltip: Minimize all containers
+    font: verdana-11px-rounded
+
+  Button
+    id: maximizeAll
+    !text: tr('Max')
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 2
+    width: 30
+    height: 17
+    tooltip: Maximize all containers
+    font: verdana-11px-rounded
+
+  BotSwitch
+    id: purseSwitch
+    anchors.top: openBPs.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 3
+    text-align: center
+    !text: tr('Open Purse on Reopen')
+    tooltip: Also open the purse when reopening backpacks
     font: verdana-11px-rounded
   ]])
-renameContui:setId(panelName)
+containerUI:setId(panelName)
 
-g_ui.loadUIFromString([[
-BackpackName < Label
-  background-color: alpha
-  text-offset: 18 2
-  focusable: true
-  height: 17
-  font: verdana-11px-rounded
+--[[
+  Container Opening System - BFS (Breadth-First Search)
+  
+  Algorithm:
+  1. Track containers by their slot index
+  2. Open containers one at a time with proper delays
+  3. After each open, rescan for new nested containers
+  4. Opens each container in a NEW window (not cascading)
+]]
 
-  CheckBox
-    id: enabled
-    anchors.left: parent.left
-    anchors.verticalCenter: parent.verticalCenter
-    width: 15
-    height: 15
-    margin-top: 1
-    margin-left: 3
+-- Container opening state
+local isProcessingQueue = false
+local processedContainerSlots = {}
+local containersToOpen = {}
+local lastOpenTime = 0
+local OPEN_DELAY = 350 -- ms between container opens
 
-  $focus:
-    background-color: #00000055
-
-  Button
-    id: state
-    !text: tr('M')
-    anchors.right: remove.left
-    anchors.verticalCenter: parent.verticalCenter
-    margin-right: 1
-    width: 15
-    height: 15
-
-  Button
-    id: remove
-    !text: tr('X')
-    !tooltip: tr('Remove')
-    anchors.right: parent.right
-    anchors.verticalCenter: parent.verticalCenter
-    margin-right: 15
-    width: 15
-    height: 15
-
-  Button
-    id: openNext
-    !text: tr('N')
-    anchors.right: state.left
-    anchors.verticalCenter: parent.verticalCenter
-    margin-right: 1
-    width: 15
-    height: 15
-    tooltip: Open container inside with the same ID.
-
-ContListsWindow < MainWindow
-  !text: tr('Container Names')
-  size: 465 170
-  @onEscape: self:hide()
-
-  TextList
-    id: itemList
-    anchors.left: parent.left
-    anchors.top: parent.top
-    anchors.bottom: separator.top
-    width: 200
-    margin-bottom: 6
-    margin-top: 3
-    margin-left: 3
-    vertical-scrollbar: itemListScrollBar
-
-  VerticalScrollBar
-    id: itemListScrollBar
-    anchors.top: itemList.top
-    anchors.bottom: itemList.bottom
-    anchors.right: itemList.right
-    step: 14
-    pixels-scroll: true
-
-  VerticalSeparator
-    id: sep
-    anchors.top: parent.top
-    anchors.left: itemList.right
-    anchors.bottom: separator.top
-    margin-top: 3
-    margin-bottom: 6
-    margin-left: 10
-
-  Label
-    id: lblName
-    anchors.left: sep.right
-    anchors.top: sep.top
-    width: 70
-    text: Name:
-    margin-left: 10
-    margin-top: 3
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: contName
-    anchors.left: lblName.right
-    anchors.top: sep.top
-    anchors.right: parent.right
-    font: verdana-11px-rounded
-
-  Label
-    id: lblCont
-    anchors.left: lblName.left
-    anchors.verticalCenter: contId.verticalCenter
-    width: 70
-    text: Container:
-    font: verdana-11px-rounded
-
-  BotItem
-    id: contId
-    anchors.left: contName.left
-    anchors.top: contName.bottom
-    margin-top: 3
-
-  BotContainer
-    id: sortList
-    anchors.left: prev.left
-    anchors.right: parent.right
-    anchors.top: prev.bottom
-    anchors.bottom: separator.top
-    margin-bottom: 6
-    margin-top: 3
-
-  Label
-    anchors.left: lblCont.left
-    anchors.verticalCenter: sortList.verticalCenter
-    width: 70
-    text: Items: 
-    font: verdana-11px-rounded
-
-  Button
-    id: addItem
-    anchors.right: contName.right
-    anchors.top: contName.bottom
-    margin-top: 5
-    text: Add
-    width: 40
-    font: cipsoftFont
-
-  HorizontalSeparator
-    id: separator
-    anchors.right: parent.right
-    anchors.left: parent.left
-    anchors.bottom: closeButton.top
-    margin-bottom: 8
-
-  CheckBox
-    id: purse
-    anchors.left: parent.left
-    anchors.bottom: parent.bottom
-    text: Open Purse
-    tooltip: Opens Store/Charm Purse
-    width: 85
-    height: 15
-    margin-top: 2
-    margin-left: 3
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: sort
-    anchors.left: prev.right
-    anchors.bottom: parent.bottom
-    text: Sort Items
-    tooltip: Sort items based on items widget
-    width: 85
-    height: 15
-    margin-top: 2
-    margin-left: 15
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: forceOpen
-    anchors.left: prev.right
-    anchors.bottom: parent.bottom
-    text: Keep Open
-    tooltip: Will keep open containers all the time
-    width: 85
-    height: 15
-    margin-top: 2
-    margin-left: 15
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: lootBag
-    anchors.left: prev.right
-    anchors.bottom: parent.bottom
-    text: Loot Bag
-    tooltip: Open Loot Bag (gunzodus franchaise)
-    width: 85
-    height: 15
-    margin-top: 2
-    margin-left: 15
-    font: verdana-11px-rounded
-
-  Button
-    id: closeButton
-    !text: tr('Close')
-    font: cipsoftFont
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 45 21
-    margin-top: 15
-
-  ResizeBorder
-    id: bottomResizeBorder
-    anchors.fill: separator
-    height: 3
-    minimum: 170
-    maximum: 245
-    margin-left: 3
-    margin-right: 3
-    background: #ffffff88
-]])
-
-function findItemsInArray(t, tfind)
-    local tArray = {}
-    for x,v in pairs(t) do
-        if type(v) == "table" then
-            local aItem = t[x].item
-            local aEnabled = t[x].enabled
-                if aItem then
-                    if tfind and aItem == tfind then
-                        return x
-                    elseif not tfind then
-                        if aEnabled then
-                            table.insert(tArray, aItem)
-                        end
-                    end
+-- Scan all open containers for nested containers we haven't opened yet
+local function scanForNestedContainers()
+    local found = {}
+    local containers = g_game.getContainers()
+    
+    for containerIndex, container in pairs(containers) do
+        local items = container:getItems()
+        for itemIndex, item in ipairs(items) do
+            if item and item:isContainer() then
+                local slotKey = containerIndex .. "_" .. itemIndex
+                if not processedContainerSlots[slotKey] then
+                    processedContainerSlots[slotKey] = true
+                    table.insert(found, {
+                        item = item,
+                        containerIndex = containerIndex,
+                        itemIndex = itemIndex
+                    })
                 end
             end
         end
-    if not tfind then return tArray end
+    end
+    
+    return found
 end
 
-local lstBPs
-
-
-local openContainer = function(id)
-    local t = {getRight(), getLeft(), getAmmo()} -- if more slots needed then add them here
-    for i=1,#t do
-        local slotItem = t[i]
-        if slotItem and slotItem:getId() == id then
-            return g_game.open(slotItem, nil)
-        end
+-- Process the container opening queue
+local function processContainerQueue()
+    if not isProcessingQueue then return end
+    
+    -- Scan for new containers to open
+    local newContainers = scanForNestedContainers()
+    for _, entry in ipairs(newContainers) do
+        table.insert(containersToOpen, entry)
     end
-
-    for i, container in pairs(g_game.getContainers()) do
-        for i, item in ipairs(container:getItems()) do
-            if item:isContainer() and item:getId() == id then
-                return g_game.open(item, nil)
-            end
-        end
+    
+    -- Check if we have anything to open
+    if #containersToOpen == 0 then
+        isProcessingQueue = false
+        info("[Container Panel] BFS Complete - All containers opened")
+        return
     end
+    
+    -- Cooldown check
+    if (now - lastOpenTime) < OPEN_DELAY then
+        schedule(OPEN_DELAY - (now - lastOpenTime) + 50, processContainerQueue)
+        return
+    end
+    
+    -- Get next container to open
+    local entry = table.remove(containersToOpen, 1)
+    if not entry or not entry.item then
+        schedule(100, processContainerQueue)
+        return
+    end
+    
+    -- Verify the item is still valid and is a container
+    local item = entry.item
+    if not item or not item:isContainer() then
+        schedule(100, processContainerQueue)
+        return
+    end
+    
+    lastOpenTime = now
+    
+    -- Open the container in a NEW WINDOW
+    g_game.open(item, nil)
+    
+    -- Continue processing after delay
+    schedule(OPEN_DELAY + 100, processContainerQueue)
 end
 
+-- Start the BFS container opening process
+local function startContainerBFS()
+    containersToOpen = {}
+    processedContainerSlots = {}
+    isProcessingQueue = true
+    lastOpenTime = 0
+    
+    info("[Container Panel] Starting BFS Deep Search...")
+    schedule(200, processContainerQueue)
+end
+
+-- Hook into container open events to continue BFS
+onContainerOpen(function(container, previousContainer)
+    if not container then return end
+    
+    -- If BFS is active, trigger rescan
+    if isProcessingQueue then
+        schedule(150, processContainerQueue)
+    end
+end)
+
+-- Reopen all backpacks from back slot
 function reopenBackpacks()
-    lstBPs = findItemsInArray(config.list)
-
-    for _, container in pairs(g_game.getContainers()) do g_game.close(container) end
-    bpItem = getBack()
-    if bpItem ~= nil then
+    -- Close all containers first
+    for _, container in pairs(g_game.getContainers()) do 
+        g_game.close(container) 
+    end
+    
+    -- Open main backpack from back slot
+    local bpItem = getBack()
+    if bpItem then
         g_game.open(bpItem)
     end
-
-    schedule(500, function()
-        local delay = 200
-
-        if config.purse then
-            local item = getPurse()
-            if item then
-                use(item)
+    
+    -- Handle purse if enabled
+    if config.purse then
+        schedule(300, function()
+            local purseItem = getPurse()
+            if purseItem then
+                use(purseItem)
             end
-        end
-        for i=1,#lstBPs do
-            schedule(delay, function()
-                openContainer(lstBPs[i])
-            end)
-            delay = delay + 250
-        end
+        end)
+    end
+    
+    -- Start BFS after a small delay to let main backpack open
+    schedule(600, function()
+        startContainerBFS()
     end)
-    
 end
 
-rootWidget = g_ui.getRootWidget()
-if rootWidget then
-    contListWindow = UI.createWindow('ContListsWindow', rootWidget)
-    contListWindow:hide()
-
-    contListWindow.onGeometryChange = function(widget, old, new)
-        if old.height == 0 then return end
-        
-        config.height = new.height
-    end
-
-    contListWindow:setHeight(config.height or 170)
-
-    renameContui.editContList.onClick = function(widget)
-        contListWindow:show()
-        contListWindow:raise()
-        contListWindow:focus()
-    end
-
-    renameContui.reopenCont.onClick = function(widget)
-        reopenBackpacks()
-    end
-
-    renameContui.minimiseCont.onClick = function(widget)
-        for i, container in ipairs(getContainers()) do
-            local containerWindow = container.window
-            containerWindow:setContentHeight(34)
-        end
-    end
-
-    renameContui.title:setOn(config.enabled)
-    renameContui.title.onClick = function(widget)
-        config.enabled = not config.enabled
-        widget:setOn(config.enabled)
-    end
-
-    contListWindow.closeButton.onClick = function(widget)
-        contListWindow:hide()
-    end
-
-    contListWindow.purse.onClick = function(widget)
-        config.purse = not config.purse
-        contListWindow.purse:setChecked(config.purse)
-    end
-    contListWindow.purse:setChecked(config.purse)
-
-    contListWindow.sort.onClick = function(widget)
-        config.sort = not config.sort
-        contListWindow.sort:setChecked(config.sort)
-    end
-    contListWindow.sort:setChecked(config.sort)
-
-    contListWindow.forceOpen.onClick = function(widget)
-        config.forceOpen = not config.forceOpen
-        contListWindow.forceOpen:setChecked(config.forceOpen)
-    end
-    contListWindow.forceOpen:setChecked(config.forceOpen)
-    
-    contListWindow.lootBag.onClick = function(widget)
-        config.lootBag = not config.lootBag
-        contListWindow.lootBag:setChecked(config.lootBag)
-    end
-    contListWindow.lootBag:setChecked(config.lootBag)
-
-    local function refreshSortList(k, t)
-        t = t or {}
-        UI.Container(function()
-            t = contListWindow.sortList:getItems()
-            config.list[k].items = t
-            end, true, nil, contListWindow.sortList) 
-        contListWindow.sortList:setItems(t)
-    end
-    refreshSortList(t)
-
-    local refreshContNames = function(tFocus)
-        local storageVal = config.list
-        if storageVal and #storageVal > 0 then
-            for i, child in pairs(contListWindow.itemList:getChildren()) do
-                child:destroy()
-            end
-            for k, entry in pairs(storageVal) do
-                local label = g_ui.createWidget("BackpackName", contListWindow.itemList)
-                label.onMouseRelease = function()
-                    contListWindow.contId:setItemId(entry.item)
-                    contListWindow.contName:setText(entry.value)
-                    if not entry.items then
-                        entry.items = {}
-                    end
-                    contListWindow.sortList:setItems(entry.items)
-                    refreshSortList(k, entry.items)
-                end
-                label.enabled.onClick = function(widget)
-                    entry.enabled = not entry.enabled
-                    label.enabled:setChecked(entry.enabled)
-                    label.enabled:setTooltip(entry.enabled and 'Disable' or 'Enable')
-                    label.enabled:setImageColor(entry.enabled and '#00FF00' or '#FF0000')
-                end
-                label.remove.onClick = function(widget)
-                    table.removevalue(config.list, entry)
-                    label:destroy()
-                end
-                label.state:setChecked(entry.min)
-                label.state.onClick = function(widget)
-                    entry.min = not entry.min
-                    label.state:setChecked(entry.min)
-                    label.state:setColor(entry.min and '#00FF00' or '#FF0000')
-                    label.state:setTooltip(entry.min and 'Open Minimised' or 'Do not minimise')
-                end
-                label.openNext.onClick = function(widget)
-                    entry.openNext = not entry.openNext
-                    label.openNext:setChecked(entry.openNext)
-                    label.openNext:setColor(entry.openNext and '#00FF00' or '#FF0000')
-                end
-                label:setText(entry.value)
-                label.enabled:setChecked(entry.enabled)
-                label.enabled:setTooltip(entry.enabled and 'Disable' or 'Enable')
-                label.enabled:setImageColor(entry.enabled and '#00FF00' or '#FF0000')
-                label.state:setColor(entry.min and '#00FF00' or '#FF0000')
-                label.state:setTooltip(entry.min and 'Open Minimised' or 'Do not minimise')
-                label.openNext:setColor(entry.openNext and '#00FF00' or '#FF0000')
-
-                if tFocus and entry.item == tFocus then
-                    tFocus = label
-                end
-            end
-            if tFocus then contListWindow.itemList:focusChild(tFocus) end
-        end
-    end
-    contListWindow.addItem.onClick = function(widget)
-        local id = contListWindow.contId:getItemId()
-        local trigger = contListWindow.contName:getText()
-
-        if id > 100 and trigger:len() > 0 then
-            local ifind = findItemsInArray(config.list, id)
-            if ifind then
-                config.list[ifind] = { item = id, value = trigger, enabled = config.list[ifind].enabled, min = config.list[ifind].min, items = config.list[ifind].items}
-            else
-                table.insert(config.list, { item = id, value = trigger, enabled = true, min = false, items = {} })
-            end
-            contListWindow.contId:setItemId(0)
-            contListWindow.contName:setText('')
-            contListWindow.contName:setColor('white')
-            contListWindow.contName:setImageColor('#ffffff')
-            contListWindow.contId:setImageColor('#ffffff')
-            refreshContNames(id)
-        else
-            contListWindow.contId:setImageColor('red')
-            contListWindow.contName:setImageColor('red')
-            contListWindow.contName:setColor('red')
-        end
-    end
-    refreshContNames()
+-- Button handlers
+containerUI.openBPs.onClick = function(widget)
+    info("[Container Panel] Opening all nested backpacks...")
+    startContainerBFS()
 end
 
-onContainerOpen(function(container, previousContainer)
-    if not container.window then return end
-    local containerWindow = container.window
-    if not previousContainer then
-        containerWindow:setContentHeight(34)
-    end
+containerUI.reopenAll.onClick = function(widget)
+    info("[Container Panel] Reopening all backpacks...")
+    reopenBackpacks()
+end
 
-    local storageVal = config.list
-    if storageVal and #storageVal > 0 then
-        for _, entry in pairs(storageVal) do
-            if entry.enabled and string.find(container:getContainerItem():getId(), entry.item) then
-                if entry.min then
-                    containerWindow:minimize()
-                end
-                if renameContui.title:isOn() then
-                    containerWindow:setText(entry.value)
-                end
-                if entry.openNext then
-                    for i, item in ipairs(container:getItems()) do
-                        if item:getId() == entry.item then
-                            local time = #storageVal * 250
-                            schedule(time, function()
-                                time = time + 250
-                                g_game.open(item)
-                            end)
-                        end
-                    end
-                end
-            end
-        end
+containerUI.closeAll.onClick = function(widget)
+    info("[Container Panel] Closing all containers...")
+    for _, container in pairs(g_game.getContainers()) do
+        g_game.close(container)
     end
-end)
+end
 
-local function nameContainersOnLogin()
-    for i, container in ipairs(getContainers()) do
-        if renameContui.title:isOn() then
-            if not container.window then return end
-            local containerWindow = container.window
-            local storageVal = config.list
-            if storageVal and #storageVal > 0 then
-                for _, entry in pairs(storageVal) do
-                    if entry.enabled and string.find(container:getContainerItem():getId(), entry.item) then
-                        containerWindow:setText(entry.value)
-                    end
-                end
-            end
+containerUI.minimizeAll.onClick = function(widget)
+    for _, container in pairs(g_game.getContainers()) do
+        if container.window then
+            container.window:minimize()
         end
     end
 end
-nameContainersOnLogin()
 
-local function moveItem(item, destination)
-    return g_game.move(item, destination:getSlotPosition(destination:getItemsCount()), item:getCount())
+containerUI.maximizeAll.onClick = function(widget)
+    for _, container in pairs(g_game.getContainers()) do
+        if container.window then
+            container.window:maximize()
+        end
+    end
 end
 
-local function properTable(t)
-    local r = {}
-    for _, entry in pairs(t) do
-      if type(entry) == "number" then
-        table.insert(r, entry)
-      else
-        table.insert(r, entry.id)
-      end
-    end
-    return r
+-- Purse switch
+containerUI.purseSwitch:setOn(config.purse)
+containerUI.purseSwitch.onClick = function(widget)
+    config.purse = not config.purse
+    widget:setOn(config.purse)
 end
-
-local mainLoop = macro(150, function(macro)
-    if not config.sort and not config.purse then return end
-
-    local storageVal = config.list
-    for _, entry in pairs(storageVal) do
-        local dId = entry.item
-        local items = properTable(entry.items)
-        -- sorting
-        if config.sort then
-            for _, container in pairs(getContainers()) do
-                local cName = container:getName():lower()
-                if not cName:find("depot") and not cName:find("depot") and not cName:find("quiver") then
-                    local cId = container:getContainerItem():getId()
-                    for __, item in ipairs(container:getItems()) do
-                        local id = item:getId()
-                        if table.find(items, id) and cId ~= dId then
-                            local destination = getContainerByItem(dId, true)
-                            if destination and not containerIsFull(destination) then
-                                return moveItem(item, destination)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        -- keep open / purse 23396
-        if config.forceOpen then
-            local container = getContainerByItem(dId)
-            if not container then
-                local t = {getBack(), getAmmo(), getFinger(), getNeck(), getLeft(), getRight()}
-                for i=1,#t do
-                    local slot = t[i]
-                    if slot and slot:getId() == dId then
-                        return g_game.open(slot)
-                    end
-                end
-                local cItem = findItem(dId)
-                if cItem then
-                    return g_game.open(cItem)
-                end
-            end
-        end
-    end
-    if config.purse and config.forceOpen and not getContainerByItem(23396) then
-        return use(getPurse())
-    end
-    if config.lootBag and config.forceOpen and not getContainerByItem(23721) then
-        if findItem(23721) then
-            g_game.open(findItem(23721), getContainerByItem(23396))
-        else
-            return use(getPurse())
-        end
-    end
-    macro:setOff()
-end)
-
-
-onContainerOpen(function(container, previousContainer)
-    mainLoop:setOn()
-end)
-  
-onAddItem(function(container, slot, item, oldItem)
-    mainLoop:setOn()
-end)
-
-onPlayerInventoryChange(function(slot, item, oldItem)
-    mainLoop:setOn()
-end)
-
-onContainerClose(function(container)
-    if not container.lootContainer then
-        mainLoop:setOn()
-    end
-end)
