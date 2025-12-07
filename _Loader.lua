@@ -45,11 +45,11 @@ local scripts = {
   "event_bus",      -- Centralized event bus (Observer pattern)
   "door_items",     -- Door item database from items.xml
   "global_config",  -- Global tool/door configuration
+  "dash_walk",      -- DASH speed walking module (arrow key simulation)
   
   -- Feature Modules
   "extras",         -- Extra settings
   "cavebot",        -- CaveBot integration
-  "playerlist",     -- Player list management
   "alarms",         -- Alarm system
   "Conditions",     -- Condition handlers
   "Equipper",       -- Equipment manager

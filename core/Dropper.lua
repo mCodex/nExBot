@@ -115,32 +115,155 @@ UI.Container(function()
     end, true, nil, edit.CapItems) 
 edit.CapItems:setItems(config.capItems)
 
-local function properTable(t)
-    local r = {}
+--[[
+  Optimized Dropper Engine
   
-    for _, entry in pairs(t) do
-      table.insert(r, entry.id)
+  Uses O(1) hash lookups and event-driven processing.
+  Can drop items from anywhere in inventory (not just open backpacks).
+]]
+
+-- Build O(1) lookup tables from config
+local trashLookup = {}
+local useLookup = {}
+local capLookup = {}
+local lastConfigHash = ""
+
+local function getConfigHash()
+    -- Simple hash to detect config changes
+    local hash = ""
+    for _, entry in pairs(config.trashItems or {}) do
+        local id = type(entry) == "table" and entry.id or entry
+        if id then hash = hash .. "t" .. id end
     end
-    return r
+    for _, entry in pairs(config.useItems or {}) do
+        local id = type(entry) == "table" and entry.id or entry
+        if id then hash = hash .. "u" .. id end
+    end
+    for _, entry in pairs(config.capItems or {}) do
+        local id = type(entry) == "table" and entry.id or entry
+        if id then hash = hash .. "c" .. id end
+    end
+    return hash
 end
 
-macro(200, function()
-    if not config.enabled then return end
-    local tables = {properTable(config.capItems), properTable(config.useItems), properTable(config.trashItems)}
+local function rebuildLookupTables()
+    trashLookup = {}
+    useLookup = {}
+    capLookup = {}
+    
+    for _, entry in pairs(config.trashItems or {}) do
+        local id = type(entry) == "table" and entry.id or entry
+        if id then trashLookup[id] = true end
+    end
+    
+    for _, entry in pairs(config.useItems or {}) do
+        local id = type(entry) == "table" and entry.id or entry
+        if id then useLookup[id] = true end
+    end
+    
+    for _, entry in pairs(config.capItems or {}) do
+        local id = type(entry) == "table" and entry.id or entry
+        if id then capLookup[id] = true end
+    end
+    
+    lastConfigHash = getConfigHash()
+end
 
-    local containers = getContainers()
-    for i=1,3 do
-        for _, container in pairs(containers) do
-            for __, item in ipairs(container:getItems()) do
-                for ___, userItem in ipairs(tables[i]) do
-                    if item:getId() == userItem then
-                        return i == 1 and freecap() < 150 and dropItem(item) or
-                               i == 2 and use(item) or
-                               i == 3 and dropItem(item)
+-- State for throttling
+local lastDropTime = 0
+local DROP_COOLDOWN = 150 -- ms between drops
+local needsCheck = true
+
+-- Subscribe to container events for smart triggering
+if EventBus then
+    EventBus.on("container:open", function()
+        needsCheck = true
+    end)
+    
+    EventBus.on("container:update", function()
+        needsCheck = true
+    end)
+end
+
+-- Fallback event handlers
+onContainerOpen(function(container, previousContainer)
+    needsCheck = true
+end)
+
+onAddItem(function(container, slot, item, oldItem)
+    needsCheck = true
+end)
+
+-- Process a single item (returns true if action taken)
+local function processItem(item)
+    if not item then return false end
+    local itemId = item:getId()
+    
+    -- Priority 1: Trash items (always drop)
+    if trashLookup[itemId] then
+        g_game.move(item, player:getPosition(), item:getCount())
+        return true
+    end
+    
+    -- Priority 2: Use items
+    if useLookup[itemId] then
+        g_game.use(item)
+        return true
+    end
+    
+    -- Priority 3: Cap items (drop only if low cap)
+    if capLookup[itemId] and freecap() < 150 then
+        g_game.move(item, player:getPosition(), item:getCount())
+        return true
+    end
+    
+    return false
+end
+
+-- Main dropper macro - optimized with O(1) lookups
+macro(250, function()
+    if not config.enabled then return end
+    if not needsCheck then return end
+    
+    -- Cooldown check
+    local currentTime = now
+    if (currentTime - lastDropTime) < DROP_COOLDOWN then return end
+    
+    -- Rebuild lookup tables if config changed
+    local currentHash = getConfigHash()
+    if currentHash ~= lastConfigHash then
+        rebuildLookupTables()
+    end
+    
+    -- Check if any lookup tables have items
+    local hasTrash = next(trashLookup) ~= nil
+    local hasUse = next(useLookup) ~= nil
+    local hasCap = next(capLookup) ~= nil
+    
+    if not hasTrash and not hasUse and not hasCap then
+        needsCheck = false
+        return
+    end
+    
+    -- Scan all open containers
+    local containers = g_game.getContainers()
+    for _, container in pairs(containers) do
+        local items = container:getItems()
+        for i = 1, #items do
+            local item = items[i]
+            if item then
+                local itemId = item:getId()
+                -- O(1) lookup instead of nested loops
+                if trashLookup[itemId] or useLookup[itemId] or (capLookup[itemId] and freecap() < 150) then
+                    if processItem(item) then
+                        lastDropTime = currentTime
+                        return -- One action per tick
                     end
                 end
             end
         end
     end
-
+    
+    -- Nothing found to process
+    needsCheck = false
 end)

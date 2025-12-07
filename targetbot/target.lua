@@ -14,8 +14,22 @@ local CREATURE_TYPE = {
   SUMMON = 3        -- Non-targetable (other player's summons)
 }
 
+-- Pre-allocated constants for pathfinding (PERFORMANCE: avoid table creation in loop)
+local PATH_PARAMS = {
+  ignoreLastCreature = true,
+  ignoreNonPathable = true,
+  ignoreCost = true,
+  ignoreCreatures = true
+}
+
+-- Pre-allocated status strings (PERFORMANCE: avoid string concatenation)
+local STATUS_ATTACKING = "Attacking"
+local STATUS_ATTACKING_LURE_OFF = "Attacking (luring off)"
+local STATUS_LURING = "Luring using CaveBot"
+local STATUS_WAITING = "Waiting"
+local STATUS_ATTACK_PREFIX = "Attack & "
+
 -- Helper function to check if creature is targetable
--- Uses GlobalConfig if available for "target only targetable" option
 local function isTargetableCreature(creature, oldTibia)
   if not creature:isMonster() then
     return false
@@ -28,13 +42,7 @@ local function isTargetableCreature(creature, oldTibia)
   
   local creatureType = creature:getType()
   
-  -- Check GlobalConfig for strict targetable-only mode
-  if GlobalConfig and GlobalConfig.isEnabled("targetOnlyTargetable") then
-    -- Strict mode: only target type 1 (real monsters)
-    return creatureType == CREATURE_TYPE.MONSTER
-  end
-  
-  -- Default behavior: target monsters and some summons (type < 3)
+  -- Target monsters and some summons (type < 3)
   return creatureType < 3
 end
 
@@ -64,8 +72,9 @@ ui.editor.debug.onClick = function()
   local on = ui.editor.debug:isOn()
   ui.editor.debug:setOn(not on)
   if on then
-    for _, spec in ipairs(getSpectators()) do
-      spec:clearText()
+    local specs = getSpectators()
+    for i = 1, #specs do
+      specs[i]:clearText()
     end
   end
 end
@@ -74,38 +83,69 @@ local oldTibia = g_game.getClientVersion() < 960
 
 -- main loop, controlled by config
 targetbotMacro = macro(100, function()
+  -- Cache player position once per tick (PERFORMANCE: avoid repeated API calls)
   local pos = player:getPosition()
   local specs = g_map.getSpectatorsInRange(pos, false, 6, 6) -- 12x12 area
-  local creatures = 0
-  for i, spec in ipairs(specs) do
+  
+  -- PERFORMANCE: Count monsters and filter in single pass (avoid second API call)
+  local monsterCount = 0
+  local creatures = {}
+  local creatureCount = 0
+  
+  for i = 1, #specs do
+    local spec = specs[i]
     if spec:isMonster() then
-      creatures = creatures + 1
+      monsterCount = monsterCount + 1
+      creatureCount = creatureCount + 1
+      creatures[creatureCount] = spec
     end
   end
-  if creatures > 10 then -- if there are too many monsters around, limit area
-    creatures = g_map.getSpectatorsInRange(pos, false, 3, 3) -- 6x6 area
-  else
-    creatures = specs
+  
+  -- If too many monsters, filter to 6x6 area in Lua (PERFORMANCE: avoid second API call)
+  if monsterCount > 10 then
+    local filtered = {}
+    local filteredCount = 0
+    for i = 1, creatureCount do
+      local spec = creatures[i]
+      local spos = spec:getPosition()
+      if math.abs(pos.x - spos.x) <= 3 and math.abs(pos.y - spos.y) <= 3 then
+        filteredCount = filteredCount + 1
+        filtered[filteredCount] = spec
+      end
+    end
+    creatures = filtered
+    creatureCount = filteredCount
   end
+  
   local highestPriority = 0
   local dangerLevel = 0
   local targets = 0
   local highestPriorityParams = nil
-  for i, creature in ipairs(creatures) do
+  local debugMode = ui.editor.debug:isOn()  -- Cache debug check outside loop
+  
+  for i = 1, creatureCount do
+    local creature = creatures[i]
     local hppc = creature:getHealthPercent()
-    if hppc and hppc > 0 then
-      local path = findPath(player:getPosition(), creature:getPosition(), 7, {ignoreLastCreature=true, ignoreNonPathable=true, ignoreCost=true, ignoreCreatures=true})
-      if isTargetableCreature(creature, oldTibia) and path then
-        local params = TargetBot.Creature.calculateParams(creature, path) -- return {craeture, config, danger, priority}
-        dangerLevel = dangerLevel + params.danger
-        if params.priority > 0 then
-          targets = targets + 1
-          if params.priority > highestPriority then
-            highestPriority = params.priority
-            highestPriorityParams = params
-          end
-          if ui.editor.debug:isOn() then
-            creature:setText(params.config.name .. "\n" .. params.priority)
+    if hppc and hppc > 0 and isTargetableCreature(creature, oldTibia) then
+      -- PERFORMANCE: Use cached pos and pre-allocated PATH_PARAMS
+      local cpos = creature:getPosition()
+      local dist = math.max(math.abs(pos.x - cpos.x), math.abs(pos.y - cpos.y))
+      
+      -- PERFORMANCE: Skip pathfinding for creatures too far away
+      if dist <= 7 then
+        local path = findPath(pos, cpos, 7, PATH_PARAMS)
+        if path then
+          local params = TargetBot.Creature.calculateParams(creature, path)
+          dangerLevel = dangerLevel + params.danger
+          if params.priority > 0 then
+            targets = targets + 1
+            if params.priority > highestPriority then
+              highestPriority = params.priority
+              highestPriorityParams = params
+            end
+            if debugMode then
+              creature:setText(params.config.name .. "\n" .. params.priority)
+            end
           end
         end
       end
@@ -118,7 +158,7 @@ targetbotMacro = macro(100, function()
   -- looting
   local looting = TargetBot.Looting.process(targets, dangerLevel)
   local lootingStatus = TargetBot.Looting.getStatus()
-  looterStatus = TargetBot.Looting.getStatus()
+  looterStatus = lootingStatus
   dangerValue = dangerLevel
 
   ui.danger.right:setText(dangerLevel)
@@ -127,13 +167,14 @@ targetbotMacro = macro(100, function()
     ui.config.right:setText(highestPriorityParams.config.name)
     TargetBot.Creature.attack(highestPriorityParams, targets, looting)    
     if lootingStatus:len() > 0 then
-      TargetBot.setStatus("Attack & " .. lootingStatus)
+      TargetBot.setStatus(STATUS_ATTACK_PREFIX .. lootingStatus)
     elseif cavebotAllowance > now then
-      TargetBot.setStatus("Luring using CaveBot")
+      TargetBot.setStatus(STATUS_LURING)
     else
-      TargetBot.setStatus("Attacking")
-      if not lureEnabled then
-        TargetBot.setStatus("Attacking (luring off)")      
+      if lureEnabled then
+        TargetBot.setStatus(STATUS_ATTACKING)
+      else
+        TargetBot.setStatus(STATUS_ATTACKING_LURE_OFF)
       end
     end
     TargetBot.walk()
@@ -150,7 +191,7 @@ targetbotMacro = macro(100, function()
   if lootingStatus:len() > 0 then
     TargetBot.setStatus(lootingStatus)
   else
-    TargetBot.setStatus("Waiting")
+    TargetBot.setStatus(STATUS_WAITING)
   end
 end)
 
@@ -324,40 +365,53 @@ end
 local lastItemUse = 0
 local lastRuneAttack = 0
 
+-- Use item on target like hotkey (doesn't require open backpack)
+-- Tries multiple methods for maximum compatibility and speed
+local function useItemOnTargetLikeHotkey(item, target, subType)
+  -- Determine subType based on client version
+  local thing = g_things.getThingType(item)
+  if not thing or not thing:isFluidContainer() then
+    subType = g_game.getClientVersion() >= 860 and 0 or 1
+  end
+  
+  -- Method 1: Modern clients (780+) - use inventory item directly (like hotkey)
+  if g_game.getClientVersion() >= 780 then
+    if g_game.useInventoryItemWith then
+      g_game.useInventoryItemWith(item, target, subType)
+      return true
+    end
+  end
+  
+  -- Method 2: Legacy clients - find item and use with target
+  local tmpItem = g_game.findPlayerItem(item, subType)
+  if tmpItem then
+    g_game.useWith(tmpItem, target, subType)
+    return true
+  end
+  
+  return false
+end
+
 TargetBot.useItem = function(item, subType, target, delay)
   if not delay then delay = 200 end
   if lastItemUse + delay < now then
-    local thing = g_things.getThingType(item)
-    if not thing or not thing:isFluidContainer() then
-      subType = g_game.getClientVersion() >= 860 and 0 or 1
+    if useItemOnTargetLikeHotkey(item, target, subType) then
+      lastItemUse = now
+      return true
     end
-    if g_game.getClientVersion() < 780 then
-      local tmpItem = g_game.findPlayerItem(item, subType)
-      if not tmpItem then return end
-      g_game.useWith(tmpItem, target, subType) -- using item from bp
-    else
-      g_game.useInventoryItemWith(item, target, subType) -- hotkey
-    end
-    lastItemUse = now
   end
+  return false
 end
 
 TargetBot.useAttackItem = function(item, subType, target, delay)
   if not delay then delay = 2000 end
   if lastRuneAttack + delay < now then
-    local thing = g_things.getThingType(item)
-    if not thing or not thing:isFluidContainer() then
-      subType = g_game.getClientVersion() >= 860 and 0 or 1
+    if useItemOnTargetLikeHotkey(item, target, subType) then
+      lastRuneAttack = now
+      return true
     end
-    if g_game.getClientVersion() < 780 then
-      local tmpItem = g_game.findPlayerItem(item, subType)
-      if not tmpItem then return end
-      g_game.useWith(tmpItem, target, subType) -- using item from bp  
-    else
-      g_game.useInventoryItemWith(item, target, subType) -- hotkey
-    end
-    lastRuneAttack = now
   end
+  return false
 end
 
 TargetBot.canLure = function()

@@ -245,5 +245,3 @@ end
 macro(50, function()
   EventBus.flush()
 end)
-
-info("[nExBot] EventBus initialized")

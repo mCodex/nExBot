@@ -131,40 +131,74 @@ if voc() == 2 or voc() == 12 then
 
     UI.Separator()
     
+    -- Pre-cached equipment check to avoid repeated calls
+    local cachedLeftId = nil
+    local cachedRightId = nil
+    local cachedWeaponType = nil -- 1 = bow, 2 = xbow, nil = none
+    local cachedQuiverContainer = nil
+    
+    -- Update equipment cache (called less frequently)
+    local function updateEquipmentCache()
+        local leftItem = getLeft()
+        local rightItem = getRight()
+        
+        if not leftItem or not rightItem then
+            cachedWeaponType = nil
+            cachedQuiverContainer = nil
+            return false
+        end
+        
+        local leftId = leftItem:getId()
+        local rightId = rightItem:getId()
+        
+        -- Only recalculate if equipment changed
+        if leftId ~= cachedLeftId or rightId ~= cachedRightId then
+            cachedLeftId = leftId
+            cachedRightId = rightId
+            
+            if not rightItem:isContainer() then
+                cachedWeaponType = nil
+                cachedQuiverContainer = nil
+                return false
+            end
+            
+            if bowLookup[leftId] then
+                cachedWeaponType = 1
+            elseif xbowLookup[leftId] then
+                cachedWeaponType = 2
+            else
+                cachedWeaponType = nil
+            end
+            
+            cachedQuiverContainer = getContainerByItem(rightId)
+        end
+        
+        return cachedWeaponType ~= nil and cachedQuiverContainer ~= nil
+    end
+    
     -- Main macro - runs less frequently, with cooldown protection
-    macro(250, "Quiver Manager", function()
+    macro(300, "Quiver Manager", function()
         -- Skip if nothing changed
         if not needsCheck then return end
         
         -- Cooldown between moves
-        if (now - lastMoveTime) < MOVE_COOLDOWN then return end
+        local currentTime = now
+        if (currentTime - lastMoveTime) < MOVE_COOLDOWN then return end
         
-        -- Check equipment
-        local leftItem = getLeft()
-        local rightItem = getRight()
-        
-        if not leftItem then return end
-        if not rightItem or not rightItem:isContainer() then return end
-        
-        local handId = leftItem:getId()
-        local quiverContainer = getContainerByItem(rightItem:getId())
-        if not quiverContainer then return end
-        
-        -- Determine weapon type using O(1) lookup
-        local isBowEquipped = bowLookup[handId] == true
-        local isXbowEquipped = xbowLookup[handId] == true
-        
-        if not isBowEquipped and not isXbowEquipped then
-            return -- No ranged weapon equipped
+        -- Quick equipment check with caching
+        if not updateEquipmentCache() then
+            needsCheck = false
+            return
         end
         
         -- Manage the quiver
-        local done = manageQuiver(isBowEquipped, quiverContainer)
+        local isBowEquipped = cachedWeaponType == 1
+        local done = manageQuiver(isBowEquipped, cachedQuiverContainer)
         
         if done then
             needsCheck = false -- Nothing more to do
         else
-            lastMoveTime = now -- Just moved something, apply cooldown
+            lastMoveTime = currentTime -- Just moved something, apply cooldown
         end
     end)
 end

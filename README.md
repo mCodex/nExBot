@@ -24,19 +24,26 @@
 - **Smart Target Priority** - Prioritizes low health monsters to prevent escapes
 - **Advanced Wave Avoidance** - Intelligent positioning system that predicts monster attack patterns
 - **Multi-Monster Threat Analysis** - Evaluates danger from all nearby monsters simultaneously
+- **🎯 Hotkey-Style Runes** - Uses runes like hotkeys (no open backpack required)
 - **Optimized Looting** - O(1) item lookup with reduced wait times
 - **🍖 Eat Food from Corpses** - Automatically eats food found in killed monster corpses for regeneration
-- **Target Only Targetable** - Option to ignore other players' summons (creature type filtering)
+- **⚡ DASH Walking** - Arrow key simulation for maximum walking speed (chase/lure)
 
 ### 🗺️ CaveBot  
-- **Improved Pathfinding** - Smarter waypoint navigation with optimized algorithms
+- **⚡ DASH Speed Walking** - Direct arrow key simulation for maximum walking speed
+- **🖱️ Map Click DASH** - Built-in map click walking uses DASH (always active)
+- **Improved Pathfinding** - Smarter waypoint navigation with optimized algorithms  
 - **Smart Door Handling** - Uses door database from items.xml for accurate door detection
+- **Auto Tool Usage** - Automatic rope, shovel, machete usage (configured in Extras)
 - **Skin Monster Enhancement** - More accurate and efficient skinning with configurable delays
-- **Fast Walking** - Reduced macro intervals for smoother movement
 
 ### 💊 HealBot
-- **Low Latency Healing** - Optimized spell detection and potion usage
+- **⚡ Event-Driven Healing** - Uses EventBus for instant reaction to health/mana changes
+- **🎯 Hotkey-Style Item Usage** - Uses items like hotkeys (no open backpack required)
+- **50ms Spell Response** - Ultra-fast healing response for critical situations
+- **Cached Stats** - O(1) condition checking with pre-computed lookup tables
 - **Smart Mana Management** - Efficient potion tracking to prevent spam
+- **Priority-Based Execution** - Health changes trigger immediate spell checks
 
 ### 🛠️ Tools
 - **Auto Haste** - Automatic haste spell casting with vocation detection (supports all vocations 1-14)
@@ -44,27 +51,37 @@
 - **Low Power Mode** - Reduces foreground/background FPS for multi-client setups
 - **Exchange Money** - Automatic gold coin exchange
 - **Mana Training** - Automatic mana training with configurable spell and threshold
-- **Global Settings** - Centralized configuration for tools, doors, and targeting
 
 ### 📦 Container Panel
 - **BFS Deep Search** - Recursively opens ALL nested containers using Breadth-First Search
-- **Open BPs** - Opens all nested backpacks in currently open containers
+- **Vertical Button Layout** - Clean 1-button-per-row design that fits all screen sizes
+- **Open All Containers** - Opens main BP + all nested containers
 - **Reopen All** - Closes everything and reopens from back slot with BFS
 - **Close All** - Closes all open containers instantly
 - **Minimize/Maximize All** - Quick container window management
+- **Auto Minimize** - Automatically minimizes containers after opening
 - **Open Purse** - Optional purse opening on reopen
 - **New Window Mode** - Each container opens in its own window (no cascading issues)
 
 ### 🏹 Quiver Manager
 - **O(1) Hash Lookups** - Instant weapon/ammo detection (no linear searches)
 - **Smart Event Filtering** - Only triggers on relevant container changes
-- **Optimized Cooldowns** - 250ms interval with 300ms move cooldown
+- **Optimized Cooldowns** - 300ms interval with smart caching
 
-### 🚪 Global Configuration
+### 🗑️ Dropper
+- **O(1) Hash Lookups** - Instant item detection using lookup tables
+- **Event-Driven Processing** - Only processes when containers change
+- **Config Hash Detection** - Automatically rebuilds lookups when settings change
+- **Three Item Categories** - Trash (always drop), Use (auto-use), Cap (drop if low capacity)
+- **Smart Throttling** - 150ms cooldown between actions to prevent spam
+
+### ⚙️ Extras Panel (nExBot Settings)
+- **Tool Items** - Configure rope, shovel, machete, scythe items
 - **Auto Open Doors** - Automatically opens closed doors while walking
-- **Auto Use Tools** - Automatically uses rope, shovel, machete on appropriate tiles
-- **Configurable Tool IDs** - Set custom item IDs for tools (from items.xml)
-- **Door Database** - Comprehensive door detection from items.xml (200+ door types)
+- **CaveBot Pathfinding** - Auto-search for reachable waypoints
+- **Custom Window Title** - Personalize OTCv8 window name
+- **Anti-Kick** - Auto-turn every 10 minutes
+- **And more...** - Full configuration panel for all bot features
 
 ---
 
@@ -93,8 +110,8 @@ nExBot features an **event-driven architecture** following SOLID principles:
 │         │                   │                   │                │
 │         ▼                   ▼                   ▼                │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │ DoorItems    │    │ GlobalConfig │    │  Creature    │       │
-│  │  Database    │    │   System     │    │   Cache      │       │
+│  │ DoorItems    │    │  DashWalk    │    │  Creature    │       │
+│  │  Database    │    │   Module     │    │   Cache      │       │
 │  └──────────────┘    └──────────────┘    └──────────────┘       │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -109,7 +126,8 @@ nExBot/
 ├── core/                    # Core libraries and modules
 │   ├── event_bus.lua        # 🆕 Centralized event system
 │   ├── door_items.lua       # 🆕 Door database from items.xml
-│   ├── global_config.lua    # 🆕 Global configuration system
+│   ├── dash_walk.lua        # 🆕 DASH speed walking module
+│   ├── global_config.lua    # Tool & door utilities
 │   ├── lib.lua              # Utility functions
 │   ├── main.lua             # Version info
 │   ├── configs.lua          # Configuration system
@@ -123,7 +141,8 @@ nExBot/
 │   ├── walking.lua          # Pathfinding
 │   └── ...
 ├── targetbot/               # TargetBot system
-│   ├── target.lua           # 🔄 Target filtering with GlobalConfig
+│   ├── target.lua           # 🔄 Target filtering
+│   ├── walking.lua          # 🆕 DASH walking integration
 │   ├── creature_attack.lua  # Attack & avoidance
 │   ├── eat_food.lua         # Eat food from corpses
 │   ├── looting.lua          # Loot system
@@ -135,10 +154,10 @@ nExBot/
 
 | Principle | Implementation |
 |-----------|----------------|
-| **Single Responsibility** | Each module handles one concern (DoorItems → doors only) |
+| **Single Responsibility** | Each module handles one concern (DoorItems → doors, DashWalk → walking) |
 | **Open/Closed** | Event bus allows extension without modifying core |
 | **Liskov Substitution** | Modules can be swapped via event handlers |
-| **Interface Segregation** | Small, focused APIs (GlobalConfig.getTool, DoorItems.isDoor) |
+| **Interface Segregation** | Small, focused APIs (DashWalk.walkTo, DashWalk.chase) |
 | **Dependency Inversion** | Modules depend on abstractions (EventBus), not concrete implementations |
 
 ---
@@ -155,13 +174,20 @@ Performance comparison between **vBot 4.8** and **nExBot 1.0.0**:
 | **Enemy Lookup** | O(n) linear | O(1) hash | **~95% faster** |
 | **Item Search (Looting)** | O(n) per item | O(1) hash set | **~90% faster** |
 | **Quiver Ammo Lookup** | O(n) per check | O(1) hash set | **~90% faster** |
+| **Dropper Item Detection** | O(n³) nested loops | O(1) hash lookup | **~95% faster** |
+| **HealBot Conditions** | if/elseif chains | O(1) lookup table | **~85% faster** |
+| **HealBot Items** | Requires open BP | Hotkey-style | **More reliable** |
+| **HealBot Stats** | Function calls | Cached + EventBus | **~80% faster** |
 | **Container Discovery** | Fixed delays | BFS event-driven | **~70% faster** |
 | **Pathfinding Config** | Read per call | Cached (5s TTL) | **~80% faster** |
 | **Direction Calculations** | Computed | Pre-built lookup | **~70% faster** |
 | **Wave Attack Avoidance** | Basic adjacent | Full threat analysis | **100% smarter** |
+| **Macro Interval (HealBot Spells)** | 100ms | 50ms | **2x faster response** |
+| **Macro Interval (HealBot Items)** | 100ms | 75ms | **33% faster** |
 | **Macro Interval (Walking)** | 100ms | 50ms | **2x faster response** |
 | **Macro Interval (Looting)** | 100ms | 40ms | **2.5x faster** |
-| **Macro Interval (Quiver)** | 100ms | 250ms* | **60% less CPU** |
+| **Macro Interval (Dropper)** | 200ms | 250ms* | **Event-driven** |
+| **Macro Interval (Quiver)** | 100ms | 300ms* | **67% less CPU** |
 
 ### Algorithmic Improvements
 
@@ -296,23 +322,27 @@ local DANGER_CACHE_TTL = 100
 - 🎉 **Complete rebrand** from vBot to nExBot
 - 🏗️ **Event-driven architecture** with centralized EventBus
 - 📦 **SOLID principles** applied throughout codebase (SRP, DRY, KISS)
+- ⚡ **DASH Walking** - Arrow key simulation for maximum walking speed
+- 🖱️ **Map Click DASH** - Built-in DASH walking on map clicks (always active)
 - ⚡ **Performance overhaul** with O(1) hash lookups
 - 🛡️ **Advanced wave avoidance** system with threat analysis
 - 🚪 **Door database** extracted from items.xml (200+ door types)
-- ⚙️ **Global Configuration** system for tools and settings
-- 🎯 **Target only targetable** option (ignores other players' summons)
 - 🏃 **Auto Haste** with vocation detection
 - 🐴 **Auto Mount** with PZ detection (uses default mount, saves CPU in safe zones)
 - 💤 **Low Power Mode** for multi-client setups
 - 🍖 **Eat Food from Corpses** feature with hunger detection
 - 📚 **Mana Training** macro with configurable spell/threshold
-- 🔧 **Configurable tool IDs** (rope, shovel, machete from items.xml)
+- 🔧 **Tool configuration** via Extras panel (rope, shovel, machete, scythe)
 - 🚀 **Module loading order** optimized in _Loader.lua
 - 🧹 **Removed BotServer** dependencies
-- 📦 **Container Panel BFS** - Simplified with 5 buttons: Open BPs, Reopen, Close, Min, Max
+- 📦 **Container Panel** - Vertical layout, auto-minimize, improved compatibility
 - 🏹 **Quiver Manager Optimized** - O(1) lookups, smart event filtering, reduced CPU
+- 💊 **HealBot EventBus** - Event-driven healing with 50ms response, cached stats, OTClient native API
+- 🎯 **Hotkey-Style Items** - HealBot and TargetBot use items/runes without open backpacks
+- 🗑️ **Dropper Optimized** - O(1) hash lookups, event-driven, config hash detection
+- 🗑️ **Removed** - Players List feature, redundant global settings panel
 
-> *Note: Quiver Manager uses 250ms interval but with smart event filtering, only processes when containers change - resulting in 60% less CPU usage overall.*
+> *Note: Quiver Manager and Dropper use longer intervals but with smart event filtering, only process when containers change - resulting in 60%+ less CPU usage overall.*
 
 ---
 

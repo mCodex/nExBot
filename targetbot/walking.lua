@@ -1,3 +1,10 @@
+--[[
+  TargetBot Walking Module - DASH Speed Optimized
+  
+  Uses direct arrow key simulation for maximum walking speed.
+  Falls back to pathfinding only when DASH fails.
+]]
+
 local dest
 local maxDist
 local params
@@ -8,7 +15,7 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
   params = _params
 end
 
--- called every 100ms if targeting or looting is active
+-- Called every 100ms if targeting or looting is active
 TargetBot.walk = function()
   if not dest then return end
   if player:isWalking() then return end
@@ -21,6 +28,16 @@ TargetBot.walk = function()
       return
     end
   end
+  
+  -- DASH MODE: Use direct walking for maximum speed
+  if DashWalk and DashWalk.walkTo then
+    local precision = params and params.precision or 0
+    if DashWalk.walkTo(dest, precision) then
+      return
+    end
+  end
+  
+  -- Fallback: Use pathfinding when DASH fails
   local path = getPath(pos, dest, maxDist, params)
   if path then
     walk(path[1])

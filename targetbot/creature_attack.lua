@@ -11,8 +11,9 @@ local dynamicLureDelay = false
 local WALK_DIRS = {{-1,1}, {0,1}, {1,1}, {-1, 0}, {1, 0}, {-1, -1}, {0, -1}, {1, -1}}
 local WALK_DIRS_COUNT = 8
 
--- Reusable position table for walkable tile checks
+-- Reusable position table for walkable tile checks (PERFORMANCE: avoid table allocation)
 local walkCheckPos = { x = 0, y = 0, z = 0 }
+local dangerCheckPos = { x = 0, y = 0, z = 0 }
 
 --------------------------------------------------------------------------------
 -- Advanced Wave/Area Attack Avoidance System
@@ -142,28 +143,36 @@ end
 -- @return number: danger score (0 = safe)
 local function calculateDangerScore(pos, monsters)
   local score = 0
+  local posX, posY = pos.x, pos.y
   
   for i = 1, #monsters do
     local monster = monsters[i]
     if monster and not monster:isDead() then
       local mpos = monster:getPosition()
-      local mdir = monster:getDirection()
-      local distance = getDistanceBetween(pos, mpos)
       
-      -- Wave attack danger (highest priority)
-      if isInWavePath(pos, mpos, mdir, DEFAULT_WAVE_LENGTH, DEFAULT_WAVE_SPREAD) then
-        -- Closer = more dangerous, facing directly = most dangerous
-        score = score + 100 + (DEFAULT_WAVE_LENGTH - distance) * 10
-      end
+      -- PERFORMANCE: Early exit for distant monsters
+      local dx = math.abs(posX - mpos.x)
+      local dy = math.abs(posY - mpos.y)
+      local distance = math.max(dx, dy)
       
-      -- Area attack danger around monster
-      if isInAreaRadius(pos, mpos, DEFAULT_AREA_RADIUS) then
-        score = score + 50 + (DEFAULT_AREA_RADIUS - distance) * 5
-      end
-      
-      -- Adjacent tiles are most dangerous (melee + immediate wave)
-      if distance == 1 then
-        score = score + 75
+      if distance <= DEFAULT_WAVE_LENGTH + 1 then
+        local mdir = monster:getDirection()
+        
+        -- Wave attack danger (highest priority)
+        if isInWavePath(pos, mpos, mdir, DEFAULT_WAVE_LENGTH, DEFAULT_WAVE_SPREAD) then
+          -- Closer = more dangerous, facing directly = most dangerous
+          score = score + 100 + (DEFAULT_WAVE_LENGTH - distance) * 10
+        end
+        
+        -- Area attack danger around monster
+        if distance <= DEFAULT_AREA_RADIUS then
+          score = score + 50 + (DEFAULT_AREA_RADIUS - distance) * 5
+        end
+        
+        -- Adjacent tiles are most dangerous (melee + immediate wave)
+        if distance == 1 then
+          score = score + 75
+        end
       end
     end
   end
@@ -215,29 +224,32 @@ local function findSafestTile(monsters)
   local candidates = {}
   local candidateCount = 0
   
+  -- PERFORMANCE: Reuse position table instead of creating new ones
   -- Check all adjacent tiles
   for i = 1, WALK_DIRS_COUNT do
     local dir = WALK_DIRS[i]
-    local checkPos = {
-      x = pos.x - dir[1],
-      y = pos.y - dir[2],
-      z = pos.z
-    }
+    dangerCheckPos.x = pos.x - dir[1]
+    dangerCheckPos.y = pos.y - dir[2]
+    dangerCheckPos.z = pos.z
     
-    local tile = g_map.getTile(checkPos)
+    local tile = g_map.getTile(dangerCheckPos)
     if tile and tile:isWalkable() and not tile:hasCreature() then
-      local score = calculateDangerScore(checkPos, monsters)
+      local score = calculateDangerScore(dangerCheckPos, monsters)
       
       -- Prefer tiles that are safer
       if score < bestScore then
         bestScore = score
-        bestPos = checkPos
+        -- Need to copy position since we're reusing dangerCheckPos
+        bestPos = {x = dangerCheckPos.x, y = dangerCheckPos.y, z = dangerCheckPos.z}
       end
       
       -- Collect all safe candidates for secondary sorting
       if score == 0 then
         candidateCount = candidateCount + 1
-        candidates[candidateCount] = {pos = checkPos, score = score}
+        candidates[candidateCount] = {
+          pos = {x = dangerCheckPos.x, y = dangerCheckPos.y, z = dangerCheckPos.z}, 
+          score = score
+        }
       end
     end
   end

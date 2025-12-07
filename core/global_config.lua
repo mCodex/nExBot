@@ -2,18 +2,18 @@
   nExBot Global Configuration
   
   Centralized configuration for global bot settings.
-  Follows Single Responsibility Principle - only handles global settings.
+  Reads tool IDs from storage.extras (set in Extras panel).
+  Auto doors and auto tools are always enabled by default.
   
   Features:
-  - Default tool items (rope, shovel, machete, scythe)
-  - Auto door opening toggle
-  - Auto use tools on terrain
-  - Targetable monsters filter
+  - Default tool items from Extras panel (rope, shovel, machete, scythe)
+  - Auto door opening (always enabled)
+  - Auto use tools on terrain (always enabled)
 ]]
 
 GlobalConfig = {}
 
--- Default item IDs from items.xml
+-- Default item IDs (fallback if not set in extras)
 local DEFAULT_ITEMS = {
   rope = 3003,      -- Rope
   shovel = 3457,    -- Shovel
@@ -49,70 +49,37 @@ local TILE_ACTIONS = {
 
 -- Door IDs that can be opened (parsed from items.xml)
 local DOOR_IDS = {
-  -- Closed doors (will be populated from items.xml)
   closed = {},
-  -- Open doors (for reference)
   open = {},
-  -- Locked doors (require key)
   locked = {},
-  -- Quest doors
   quest = {},
 }
-
--- Initialize storage with defaults
-local function initStorage()
-  if not storage.globalConfig then
-    storage.globalConfig = {
-      -- Tool item IDs
-      ropeId = DEFAULT_ITEMS.rope,
-      shovelId = DEFAULT_ITEMS.shovel,
-      macheteId = DEFAULT_ITEMS.machete,
-      scytheId = DEFAULT_ITEMS.scythe,
-      pickId = DEFAULT_ITEMS.pick,
-      
-      -- Feature toggles
-      autoOpenDoors = true,
-      autoUseTools = true,
-      targetOnlyTargetable = false,
-      
-      -- Advanced
-      toolUseDelay = 500,  -- Delay between tool uses (ms)
-    }
-  end
-  return storage.globalConfig
-end
-
-local config = initStorage()
 
 --------------------------------------------------------------------------------
 -- Public API
 --------------------------------------------------------------------------------
 
--- Get a tool item ID
+-- Get a tool item ID (reads from storage.extras)
 function GlobalConfig.getTool(toolName)
-  local key = toolName .. "Id"
-  return config[key] or DEFAULT_ITEMS[toolName]
+  local extras = storage.extras or {}
+  return extras[toolName] or DEFAULT_ITEMS[toolName]
 end
 
--- Set a tool item ID
-function GlobalConfig.setTool(toolName, itemId)
-  local key = toolName .. "Id"
-  config[key] = itemId
-end
-
--- Get a feature toggle
+-- Auto open doors and auto use tools are always enabled
 function GlobalConfig.isEnabled(feature)
-  return config[feature] == true
-end
-
--- Set a feature toggle
-function GlobalConfig.setEnabled(feature, enabled)
-  config[feature] = enabled
+  if feature == "autoOpenDoors" then
+    -- Check extras panel setting if available
+    local extras = storage.extras or {}
+    return extras.autoOpenDoors ~= false  -- Default true
+  elseif feature == "autoUseTools" then
+    return true  -- Always enabled
+  end
+  return false
 end
 
 -- Get the delay for tool usage
 function GlobalConfig.getToolDelay()
-  return config.toolUseDelay or 500
+  return 500
 end
 
 --------------------------------------------------------------------------------
@@ -188,14 +155,14 @@ end
 --------------------------------------------------------------------------------
 
 local lastToolUse = 0
+local TOOL_DELAY = 500
 
 -- Use a tool on a tile/thing
 -- @param toolName string: Tool name (rope, shovel, machete, scythe, pick)
 -- @param target: Target tile or thing
 -- @return boolean: Success
 function GlobalConfig.useTool(toolName, target)
-  if not config.autoUseTools then return false end
-  if (now - lastToolUse) < config.toolUseDelay then return false end
+  if (now - lastToolUse) < TOOL_DELAY then return false end
   
   local toolId = GlobalConfig.getTool(toolName)
   if not toolId then return false end
@@ -203,7 +170,6 @@ function GlobalConfig.useTool(toolName, target)
   -- Find the tool in inventory
   local tool = findItem(toolId)
   if not tool then
-    warn("[GlobalConfig] Tool not found: " .. toolName .. " (ID: " .. toolId .. ")")
     return false
   end
   
@@ -223,7 +189,6 @@ end
 -- @return boolean: True if handled
 function GlobalConfig.handleTile(tile)
   if not tile then return false end
-  if not config.autoUseTools then return false end
   
   local topThing = tile:getTopUseThing()
   if not topThing then return false end
@@ -238,13 +203,12 @@ function GlobalConfig.handleTile(tile)
   return false
 end
 
--- Auto-open a door
+-- Auto-open a door (always enabled)
 -- @param tile: The tile with the door
 -- @param keyId: Optional key item ID for locked doors
 -- @return boolean: True if handled
 function GlobalConfig.openDoor(tile, keyId)
   if not tile then return false end
-  if not config.autoOpenDoors then return false end
   
   local topThing = tile:getTopUseThing()
   if not topThing then return false end
@@ -320,5 +284,3 @@ end
 
 -- Initialize door IDs
 populateDoorIds()
-
-info("[nExBot] GlobalConfig initialized")

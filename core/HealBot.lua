@@ -542,171 +542,255 @@ if rootWidget then
   end
 end
 
--- spells
-macro(100, function()
-  if standBySpells then return end
-  if not currentSettings.enabled then return end
-  local somethingIsOnCooldown = false
+--[[
+  Optimized HealBot Engine
+  
+  Uses EventBus for event-driven healing instead of polling.
+  Pre-caches stat functions and uses O(1) condition lookups.
+]]
 
-  for _, entry in pairs(currentSettings.spellTable) do
-    if entry.enabled and entry.cost < mana() then
+-- Cached player stats (updated on change events)
+local cachedStats = {
+  hp = 0,
+  maxHp = 0,
+  hpPercent = 0,
+  mp = 0,
+  maxMp = 0,
+  mpPercent = 0,
+  burst = 0,
+  lastUpdate = 0
+}
+
+-- Flag to trigger immediate heal check
+local needsHealCheck = true
+local needsItemCheck = true
+
+-- Pre-built condition checkers for O(1) evaluation
+local conditionCheckers = {
+  ["HP%"] = function(sign, value)
+    if sign == "=" then return cachedStats.hpPercent == value
+    elseif sign == ">" then return cachedStats.hpPercent >= value
+    else return cachedStats.hpPercent <= value end
+  end,
+  ["HP"] = function(sign, value)
+    if sign == "=" then return cachedStats.hp == value
+    elseif sign == ">" then return cachedStats.hp >= value
+    else return cachedStats.hp <= value end
+  end,
+  ["MP%"] = function(sign, value)
+    if sign == "=" then return cachedStats.mpPercent == value
+    elseif sign == ">" then return cachedStats.mpPercent >= value
+    else return cachedStats.mpPercent <= value end
+  end,
+  ["MP"] = function(sign, value)
+    if sign == "=" then return cachedStats.mp == value
+    elseif sign == ">" then return cachedStats.mp >= value
+    else return cachedStats.mp <= value end
+  end,
+  ["burst"] = function(sign, value)
+    if sign == "=" then return cachedStats.burst == value
+    elseif sign == ">" then return cachedStats.burst >= value
+    else return cachedStats.burst <= value end
+  end
+}
+
+-- Update cached stats using correct OTClient API
+local function updateCachedStats()
+  -- Use player object methods (OTClient native API)
+  local localPlayer = g_game.getLocalPlayer()
+  if not localPlayer then return end
+  
+  local currentHp = localPlayer:getHealth()
+  local currentMaxHp = localPlayer:getMaxHealth()
+  local currentMp = localPlayer:getMana()
+  local currentMaxMp = localPlayer:getMaxMana()
+  
+  cachedStats.hp = currentHp
+  cachedStats.maxHp = currentMaxHp
+  cachedStats.hpPercent = currentMaxHp > 0 and math.floor((currentHp / currentMaxHp) * 100) or 0
+  cachedStats.mp = currentMp
+  cachedStats.maxMp = currentMaxMp
+  cachedStats.mpPercent = currentMaxMp > 0 and math.floor((currentMp / currentMaxMp) * 100) or 0
+  cachedStats.burst = burstDamageValue and burstDamageValue() or 0
+  cachedStats.lastUpdate = now
+end
+
+-- Check if condition is met using cached stats
+local function checkCondition(origin, sign, value)
+  local checker = conditionCheckers[origin]
+  if checker then
+    return checker(sign, value)
+  end
+  return false
+end
+
+-- Process spell healing (high priority, runs on events)
+local function processSpellHealing()
+  if standBySpells then return false end
+  if not currentSettings.enabled then return false end
+  
+  local somethingIsOnCooldown = false
+  local currentMp = cachedStats.mp
+  
+  for i = 1, #currentSettings.spellTable do
+    local entry = currentSettings.spellTable[i]
+    if entry.enabled and entry.cost < currentMp then
       if canCast(entry.spell, not currentSettings.Conditions, not currentSettings.Cooldown) then
-        if entry.origin == "HP%" then
-          if entry.sign == "=" and hppercent() == entry.value then
-            say(entry.spell)
-            return
-          elseif entry.sign == ">" and hppercent() >= entry.value then
-            say(entry.spell)
-            return
-          elseif entry.sign == "<" and hppercent() <= entry.value then
-            say(entry.spell)
-            return
-          end
-        elseif entry.origin == "HP" then
-          if entry.sign == "=" and hp() == entry.value then
-            say(entry.spell)
-            return
-          elseif entry.sign == ">" and hp() >= entry.value then
-            say(entry.spell)
-            return
-          elseif entry.sign == "<" and hp() <= entry.value then
-            say(entry.spell)
-            return
-          end
-        elseif entry.origin == "MP%" then
-          if entry.sign == "=" and manapercent() == entry.value then
-            say(entry.spell)
-            return
-          elseif entry.sign == ">" and manapercent() >= entry.value then
-            say(entry.spell)
-            return
-          elseif entry.sign == "<" and manapercent() <= entry.value then
-            say(entry.spell)
-            return
-          end
-        elseif entry.origin == "MP" then
-          if entry.sign == "=" and mana() == entry.value then
-            say(entry.spell)
-            return
-          elseif entry.sign == ">" and mana() >= entry.value then
-            say(entry.spell)
-            return
-          elseif entry.sign == "<" and mana() <= entry.value then
-            say(entry.spell)
-            return
-          end    
-        elseif entry.origin == "burst" then
-          if entry.sign == "=" and burstDamageValue() == entry.value then
-            say(entry.spell)
-            return
-          elseif entry.sign == ">" and burstDamageValue() >= entry.value then
-            say(entry.spell)
-            return
-          elseif entry.sign == "<" and burstDamageValue() <= entry.value then
-            say(entry.spell)
-            return
-          end    
+        if checkCondition(entry.origin, entry.sign, entry.value) then
+          say(entry.spell)
+          return true
         end
       else
         somethingIsOnCooldown = true
       end
     end
   end
+  
   if not somethingIsOnCooldown then
-    standBySpells = true 
+    standBySpells = true
+  end
+  return false
+end
+
+-- Use item like hotkey (doesn't require open backpack)
+-- Tries multiple methods for maximum compatibility
+local function useItemLikeHotkey(itemId)
+  -- Method 1: g_game.useInventoryItem (works like hotkeys, no open BP needed)
+  if g_game.useInventoryItem then
+    g_game.useInventoryItem(itemId)
+    return true
+  end
+  
+  -- Method 2: Use with player target (standard method)
+  if g_game.useInventoryItemWith then
+    g_game.useInventoryItemWith(itemId, player)
+    return true
+  end
+  
+  -- Method 3: Find item and use directly
+  local item = findItem(itemId)
+  if item then
+    g_game.use(item)
+    return true
+  end
+  
+  return false
+end
+
+-- Process item healing (slightly lower priority)
+local function processItemHealing()
+  if standByItems then return false end
+  if not currentSettings.enabled or #currentSettings.itemTable == 0 then return false end
+  if currentSettings.Delay and nExBot.isUsing then return false end
+  if currentSettings.MessageDelay and nExBot.isUsingPotion then return false end
+  
+  -- Check if looting (delay if needed)
+  if TargetBot and TargetBot.isOn and TargetBot.isOn() and 
+     TargetBot.Looting and TargetBot.Looting.getStatus and 
+     TargetBot.Looting.getStatus():len() > 0 and currentSettings.Interval then
+    return false -- Skip this tick, let looting finish
+  end
+  
+  for i = 1, #currentSettings.itemTable do
+    local entry = currentSettings.itemTable[i]
+    if entry.enabled then
+      -- Skip visibility check if using hotkey-style (works without open BP)
+      -- Only check visibility if the setting requires it AND we can't use hotkey method
+      local canUse = true
+      if currentSettings.Visible and not g_game.useInventoryItem then
+        canUse = findItem(entry.item) ~= nil
+      end
+      
+      if canUse and checkCondition(entry.origin, entry.sign, entry.value) then
+        useItemLikeHotkey(entry.item)
+        return true
+      end
+    end
+  end
+  
+  standByItems = true
+  return false
+end
+
+-- Subscribe to EventBus for instant reaction to stat changes
+if EventBus then
+  -- High priority health change handler (priority 100 = runs first)
+  EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMaxHealth)
+    cachedStats.hp = health
+    cachedStats.maxHp = maxHealth
+    cachedStats.hpPercent = math.floor((health / maxHealth) * 100)
+    
+    -- Reset standby flags - health changed, need to recheck
+    standByItems = false
+    standBySpells = false
+    needsHealCheck = true
+    needsItemCheck = true
+    
+    -- CRITICAL: If health dropped significantly, process immediately
+    if health < oldHealth then
+      -- Immediate spell check for emergency healing
+      processSpellHealing()
+    end
+  end, 100)
+  
+  -- Mana change handler
+  EventBus.on("player:mana", function(mp, maxMp, oldMp, oldMaxMp)
+    cachedStats.mp = mp
+    cachedStats.maxMp = maxMp
+    cachedStats.mpPercent = math.floor((mp / maxMp) * 100)
+    
+    standByItems = false
+    standBySpells = false
+    needsHealCheck = true
+    needsItemCheck = true
+  end, 90)
+  end
+
+-- Fast spell macro (50ms for critical healing response)
+macro(50, function()
+  if not needsHealCheck then return end
+  if standBySpells then return end
+  if not currentSettings.enabled then return end
+  
+  -- Update burst damage (not tracked by events)
+  if burstDamageValue then
+    cachedStats.burst = burstDamageValue()
+  end
+  
+  if processSpellHealing() then
+    needsHealCheck = false
   end
 end)
 
--- items
-macro(100, function()
+-- Item macro (75ms - slightly slower, items have cooldown anyway)
+macro(75, function()
+  if not needsItemCheck then return end
   if standByItems then return end
   if not currentSettings.enabled or #currentSettings.itemTable == 0 then return end
   if currentSettings.Delay and nExBot.isUsing then return end
   if currentSettings.MessageDelay and nExBot.isUsingPotion then return end
-
-  if not currentSettings.MessageDelay then
-    delay(400)
+  
+  if processItemHealing() then
+    needsItemCheck = false
   end
-
-  if TargetBot.isOn() and TargetBot.Looting.getStatus():len() > 0 and currentSettings.Interval then
-    if not currentSettings.MessageDelay then
-      delay(700)
-    else
-      delay(200)
-    end
-  end
-
-  for _, entry in pairs(currentSettings.itemTable) do
-    local item = findItem(entry.item)
-    if (not currentSettings.Visible or item) and entry.enabled then
-      if entry.origin == "HP%" then
-        if entry.sign == "=" and hppercent() == entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        elseif entry.sign == ">" and hppercent() >= entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        elseif entry.sign == "<" and hppercent() <= entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        end
-      elseif entry.origin == "HP" then
-        if entry.sign == "=" and hp() == tonumberentry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        elseif entry.sign == ">" and hp() >= entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        elseif entry.sign == "<" and hp() <= entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        end
-      elseif entry.origin == "MP%" then
-        if entry.sign == "=" and manapercent() == entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        elseif entry.sign == ">" and manapercent() >= entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        elseif entry.sign == "<" and manapercent() <= entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        end
-      elseif entry.origin == "MP" then
-        if entry.sign == "=" and mana() == entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        elseif entry.sign == ">" and mana() >= entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        elseif entry.sign == "<" and mana() <= entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        end   
-      elseif entry.origin == "burst" then
-        if entry.sign == "=" and burstDamageValue() == entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        elseif entry.sign == ">" and burstDamageValue() >= entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        elseif entry.sign == "<" and burstDamageValue() <= entry.value then
-          g_game.useInventoryItemWith(entry.item, player)
-          return
-        end   
-      end
-    end
-  end
-  standByItems = true
 end)
-UI.Separator()
 
+-- Keep the original event handlers as fallback (they just set flags now)
 onPlayerHealthChange(function(healthPercent)
   standByItems = false
   standBySpells = false
+  needsHealCheck = true
+  needsItemCheck = true
 end)
 
-onManaChange(function(player, mana, maxMana, oldMana, oldMaxMana)
+onManaChange(function(localPlayer, mp, maxMp, oldMp, oldMaxMp)
   standByItems = false
   standBySpells = false
+  needsHealCheck = true
+  needsItemCheck = true
 end)
+
+-- Initialize cached stats on load
+updateCachedStats()
+
+UI.Separator()
