@@ -108,28 +108,40 @@ UI.Separator()
 -- Reduces FPS to 1 to save CPU/GPU power and reduce memory consumption
 -- Useful when AFK botting or running multiple clients
 
-local normalFps = 60
+local normalFps = g_app and g_app.getMaxFps and g_app.getMaxFps() or 60
 local lowPowerFps = 1
-local isLowPowerMode = false
 
-macro(1000, "Low Power Mode", function()
-  -- This macro just maintains the state
-  -- The actual toggle happens in the checkbox callback
-end, function(macro)
-  -- On enable
-  isLowPowerMode = true
-  if g_app and g_app.setMaxFps then
-    normalFps = g_app.getMaxFps and g_app.getMaxFps() or 60
-    g_app.setMaxFps(lowPowerFps)
-    logInfo("Low Power Mode enabled - FPS reduced to " .. lowPowerFps)
-  end
-end, function(macro)
-  -- On disable
-  isLowPowerMode = false
-  if g_app and g_app.setMaxFps then
-    g_app.setMaxFps(normalFps)
-    logInfo("Low Power Mode disabled - FPS restored to " .. normalFps)
+if not storage.lowPowerMode then
+  storage.lowPowerMode = false
+end
+
+local lowPowerSwitch = UI.Button("Low Power Mode: OFF", function(widget)
+  storage.lowPowerMode = not storage.lowPowerMode
+  
+  if storage.lowPowerMode then
+    widget:setText("Low Power Mode: ON")
+    widget:setColor("#00ff00")
+    if g_app and g_app.setMaxFps then
+      g_app.setMaxFps(lowPowerFps)
+      logInfo("Low Power Mode enabled - FPS reduced to " .. lowPowerFps)
+    end
+  else
+    widget:setText("Low Power Mode: OFF")
+    widget:setColor("#ffffff")
+    if g_app and g_app.setMaxFps then
+      g_app.setMaxFps(normalFps)
+      logInfo("Low Power Mode disabled - FPS restored to " .. normalFps)
+    end
   end
 end)
+
+-- Initialize state on load
+if storage.lowPowerMode then
+  lowPowerSwitch:setText("Low Power Mode: ON")
+  lowPowerSwitch:setColor("#00ff00")
+  if g_app and g_app.setMaxFps then
+    g_app.setMaxFps(lowPowerFps)
+  end
+end
 
 UI.Separator()
