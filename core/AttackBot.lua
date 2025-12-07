@@ -1124,12 +1124,30 @@ function getBestTileByPattern(pattern, minHp, maxHp, safePattern, monsterNamesTa
   return targetTile.amount > 0 and targetTile or false
 end
 
+-- Use rune on target - works even with closed backpack (hotkey-style)
+local function useRuneOnTarget(runeId, targetCreatureOrTile)
+  -- Method 1: Use inventory item with target (works without open backpack - like hotkeys)
+  if g_game.useInventoryItemWith then
+    g_game.useInventoryItemWith(runeId, targetCreatureOrTile)
+    return true
+  end
+  
+  -- Method 2: Fallback - find rune in open containers and use with target
+  local rune = findItem(runeId)
+  if rune then
+    g_game.useWith(rune, targetCreatureOrTile)
+    return true
+  end
+  
+  return false
+end
+
 function executeAttackBotAction(categoryOrPos, idOrFormula, cooldown)
   cooldown = cooldown or 0
   if categoryOrPos == 4 or categoryOrPos == 5 or categoryOrPos == 1 then
     cast(idOrFormula, cooldown)
   elseif categoryOrPos == 3 then 
-    useWith(idOrFormula, target())
+    useRuneOnTarget(idOrFormula, target())
   end
 end
 
@@ -1200,7 +1218,9 @@ macro(100, function()
     local entry = child.params
     local attackData = entry.itemId > 100 and entry.itemId or entry.spell
     if entry.enabled and manapercent() >= entry.mana then
-      if (type(attackData) == "string" and canCast(entry.spell, not currentSettings.ignoreMana, not currentSettings.Cooldown)) or (entry.itemId > 100 and (not currentSettings.Visible or findItem(entry.itemId))) then 
+      -- For runes: skip visibility check if using inventory method (works without open BP)
+      local runeAvailable = entry.itemId > 100 and (not currentSettings.Visible or g_game.useInventoryItemWith or findItem(entry.itemId))
+      if (type(attackData) == "string" and canCast(entry.spell, not currentSettings.ignoreMana, not currentSettings.Cooldown)) or runeAvailable then 
         -- first PVP scenario
         if currentSettings.pvpMode and target():getHealthPercent() >= entry.minHp and target():getHealthPercent() <= entry.maxHp and target():canShoot() then
           if entry.category == 2 then
@@ -1244,7 +1264,7 @@ macro(100, function()
           end
           if monsterAmount and (entry.orMore and monsterAmount >= entry.count or not entry.orMore and monsterAmount == entry.count) then
             if (not currentSettings.BlackListSafe or not isBlackListedPlayerInRange(currentSettings.AntiRsRange)) and (not currentSettings.Kills or killsToRs() > currentSettings.KillsAmount) then
-              return useWith(attackData, g_map.getTile(pos):getTopUseThing())
+              return useRuneOnTarget(attackData, g_map.getTile(pos):getTopUseThing())
             end
           end
         end

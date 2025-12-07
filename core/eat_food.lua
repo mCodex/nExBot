@@ -32,16 +32,32 @@ end, true)
 foodContainer:setHeight(35)
 foodContainer:setItems(storage.foodItems)
 
+-- Use food item - works even with closed backpack (hotkey-style)
+local function eatFood(foodId)
+  -- Method 1: Use inventory item directly (works without open backpack)
+  if g_game.useInventoryItem then
+    g_game.useInventoryItem(foodId)
+    return true
+  end
+  
+  -- Method 2: Fallback - find food in open containers
+  local food = findItem(foodId)
+  if food then
+    g_game.use(food)
+    return true
+  end
+  
+  return false
+end
+
 macro(500, "Eat Food", function()
   if player:getRegenerationTime() > 400 or not storage.foodItems[1] then return end
-  -- search for food in containers
-  for _, container in pairs(g_game.getContainers()) do
-    for __, item in ipairs(container:getItems()) do
-      for i, foodItem in ipairs(storage.foodItems) do
-        if item:getId() == foodItem.id then
-          return g_game.use(item)
-        end
-      end
+  
+  -- Try each configured food item
+  for _, foodItem in ipairs(storage.foodItems) do
+    local foodId = type(foodItem) == "table" and foodItem.id or foodItem
+    if foodId and eatFood(foodId) then
+      return
     end
   end
 end)

@@ -652,25 +652,28 @@ local function processSpellHealing()
   return false
 end
 
--- Use item like hotkey (doesn't require open backpack)
--- Tries multiple methods for maximum compatibility
+-- Use item for healing - works even with closed backpack
 local function useItemLikeHotkey(itemId)
-  -- Method 1: g_game.useInventoryItem (works like hotkeys, no open BP needed)
-  if g_game.useInventoryItem then
-    g_game.useInventoryItem(itemId)
-    return true
-  end
+  local localPlayer = g_game.getLocalPlayer()
+  if not localPlayer then return false end
   
-  -- Method 2: Use with player target (standard method)
+  -- Method 1: Use inventory item with player (works without open backpack - like hotkeys)
+  -- This is the preferred method as it works exactly like hotkey usage
   if g_game.useInventoryItemWith then
-    g_game.useInventoryItemWith(itemId, player)
+    g_game.useInventoryItemWith(itemId, localPlayer)
     return true
   end
   
-  -- Method 3: Find item and use directly
+  -- Method 2: Fallback - find item in open containers and use WITH player
   local item = findItem(itemId)
   if item then
-    g_game.use(item)
+    g_game.useWith(item, localPlayer)
+    return true
+  end
+  
+  -- Method 3: Try simple inventory use (some items don't need target)
+  if g_game.useInventoryItem then
+    g_game.useInventoryItem(itemId)
     return true
   end
   
@@ -680,7 +683,8 @@ end
 -- Process item healing (slightly lower priority)
 local function processItemHealing()
   if standByItems then return false end
-  if not currentSettings.enabled or #currentSettings.itemTable == 0 then return false end
+  if not currentSettings.enabled then return false end
+  if not currentSettings.itemTable or #currentSettings.itemTable == 0 then return false end
   if currentSettings.Delay and nExBot.isUsing then return false end
   if currentSettings.MessageDelay and nExBot.isUsingPotion then return false end
   
@@ -693,17 +697,18 @@ local function processItemHealing()
   
   for i = 1, #currentSettings.itemTable do
     local entry = currentSettings.itemTable[i]
-    if entry.enabled then
-      -- Skip visibility check if using hotkey-style (works without open BP)
-      -- Only check visibility if the setting requires it AND we can't use hotkey method
+    if entry and entry.enabled then
+      -- Skip visibility check entirely when using inventory methods (works without open BP)
+      -- Only check visibility if the setting requires it AND we must use findItem fallback
       local canUse = true
-      if currentSettings.Visible and not g_game.useInventoryItem then
+      if currentSettings.Visible and not g_game.useInventoryItemWith then
         canUse = findItem(entry.item) ~= nil
       end
       
       if canUse and checkCondition(entry.origin, entry.sign, entry.value) then
-        useItemLikeHotkey(entry.item)
-        return true
+        if useItemLikeHotkey(entry.item) then
+          return true
+        end
       end
     end
   end
@@ -748,31 +753,31 @@ if EventBus then
 
 -- Fast spell macro (50ms for critical healing response)
 macro(50, function()
-  if not needsHealCheck then return end
-  if standBySpells then return end
   if not currentSettings.enabled then return end
   
-  -- Update burst damage (not tracked by events)
-  if burstDamageValue then
-    cachedStats.burst = burstDamageValue()
-  end
+  -- Always update stats to ensure accuracy
+  updateCachedStats()
   
-  if processSpellHealing() then
-    needsHealCheck = false
-  end
+  -- Reset standby on each tick (simple polling approach)
+  standBySpells = false
+  
+  processSpellHealing()
 end)
 
--- Item macro (75ms - slightly slower, items have cooldown anyway)
-macro(75, function()
-  if not needsItemCheck then return end
-  if standByItems then return end
-  if not currentSettings.enabled or #currentSettings.itemTable == 0 then return end
+-- Item macro (100ms - potions have 1s cooldown anyway)
+macro(100, function()
+  if not currentSettings.enabled then return end
+  if not currentSettings.itemTable or #currentSettings.itemTable == 0 then return end
   if currentSettings.Delay and nExBot.isUsing then return end
   if currentSettings.MessageDelay and nExBot.isUsingPotion then return end
   
-  if processItemHealing() then
-    needsItemCheck = false
-  end
+  -- Always update stats
+  updateCachedStats()
+  
+  -- Reset standby on each tick
+  standByItems = false
+  
+  processItemHealing()
 end)
 
 -- Keep the original event handlers as fallback (they just set flags now)

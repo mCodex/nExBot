@@ -39,11 +39,23 @@
 
 ### 💊 HealBot
 - **⚡ Event-Driven Healing** - Uses EventBus for instant reaction to health/mana changes
-- **🎯 Hotkey-Style Item Usage** - Uses items like hotkeys (no open backpack required)
+- **🎯 Hotkey-Style Potions** - Drinks potions like hotkeys (no open backpack required)
 - **50ms Spell Response** - Ultra-fast healing response for critical situations
 - **Cached Stats** - O(1) condition checking with pre-computed lookup tables
 - **Smart Mana Management** - Efficient potion tracking to prevent spam
 - **Priority-Based Execution** - Health changes trigger immediate spell checks
+
+### ⚔️ AttackBot
+- **🎯 Hotkey-Style Runes** - Uses runes like hotkeys (no open backpack required)
+- **Smart Visibility Check** - Bypasses visibility when inventory methods available
+- **All Rune Categories** - Targeted runes, area runes (GFB, Avalanche) work without open BP
+- **Efficient Pattern Matching** - Pre-computed spell patterns for optimal targeting
+
+### 🍽️ Eat Food
+- **🎯 Hotkey-Style Eating** - Eats food like hotkeys (no open backpack required)
+- **Regeneration Detection** - Only eats when regeneration time is low
+- **Multiple Food Types** - Supports configurable list of food items
+- **O(n) to O(1)** - Simplified loop with early exit on success
 
 ### 🛠️ Tools
 - **Auto Haste** - Automatic haste spell casting with vocation detection (supports all vocations 1-14)
@@ -176,14 +188,16 @@ Performance comparison between **vBot 4.8** and **nExBot 1.0.0**:
 | **Quiver Ammo Lookup** | O(n) per check | O(1) hash set | **~90% faster** |
 | **Dropper Item Detection** | O(n³) nested loops | O(1) hash lookup | **~95% faster** |
 | **HealBot Conditions** | if/elseif chains | O(1) lookup table | **~85% faster** |
-| **HealBot Items** | Requires open BP | Hotkey-style | **More reliable** |
+| **HealBot Potions** | Requires open BP | Hotkey-style | **Works always** |
+| **AttackBot Runes** | Requires open BP | Hotkey-style | **Works always** |
+| **Eat Food** | Requires open BP | Hotkey-style | **Works always** |
 | **HealBot Stats** | Function calls | Cached + EventBus | **~80% faster** |
 | **Container Discovery** | Fixed delays | BFS event-driven | **~70% faster** |
 | **Pathfinding Config** | Read per call | Cached (5s TTL) | **~80% faster** |
 | **Direction Calculations** | Computed | Pre-built lookup | **~70% faster** |
 | **Wave Attack Avoidance** | Basic adjacent | Full threat analysis | **100% smarter** |
 | **Macro Interval (HealBot Spells)** | 100ms | 50ms | **2x faster response** |
-| **Macro Interval (HealBot Items)** | 100ms | 75ms | **33% faster** |
+| **Macro Interval (HealBot Items)** | 100ms | 100ms | **Same speed** |
 | **Macro Interval (Walking)** | 100ms | 50ms | **2x faster response** |
 | **Macro Interval (Looting)** | 100ms | 40ms | **2.5x faster** |
 | **Macro Interval (Dropper)** | 200ms | 250ms* | **Event-driven** |

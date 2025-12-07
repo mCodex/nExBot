@@ -117,153 +117,83 @@ edit.CapItems:setItems(config.capItems)
 
 --[[
   Optimized Dropper Engine
-  
-  Uses O(1) hash lookups and event-driven processing.
-  Can drop items from anywhere in inventory (not just open backpacks).
+  Uses O(1) hash lookups for fast item detection.
 ]]
 
--- Build O(1) lookup tables from config
-local trashLookup = {}
-local useLookup = {}
-local capLookup = {}
-local lastConfigHash = ""
-
-local function getConfigHash()
-    -- Simple hash to detect config changes
-    local hash = ""
-    for _, entry in pairs(config.trashItems or {}) do
+-- Build lookup tables from config items
+local function buildLookupTable(items)
+    local lookup = {}
+    if not items then return lookup end
+    for _, entry in pairs(items) do
         local id = type(entry) == "table" and entry.id or entry
-        if id then hash = hash .. "t" .. id end
+        if id then lookup[id] = true end
     end
-    for _, entry in pairs(config.useItems or {}) do
-        local id = type(entry) == "table" and entry.id or entry
-        if id then hash = hash .. "u" .. id end
-    end
-    for _, entry in pairs(config.capItems or {}) do
-        local id = type(entry) == "table" and entry.id or entry
-        if id then hash = hash .. "c" .. id end
-    end
-    return hash
+    return lookup
 end
 
-local function rebuildLookupTables()
-    trashLookup = {}
-    useLookup = {}
-    capLookup = {}
-    
-    for _, entry in pairs(config.trashItems or {}) do
-        local id = type(entry) == "table" and entry.id or entry
-        if id then trashLookup[id] = true end
-    end
-    
-    for _, entry in pairs(config.useItems or {}) do
-        local id = type(entry) == "table" and entry.id or entry
-        if id then useLookup[id] = true end
-    end
-    
-    for _, entry in pairs(config.capItems or {}) do
-        local id = type(entry) == "table" and entry.id or entry
-        if id then capLookup[id] = true end
-    end
-    
-    lastConfigHash = getConfigHash()
-end
+-- State
+local lastActionTime = 0
+local ACTION_COOLDOWN = 200
 
--- State for throttling
-local lastDropTime = 0
-local DROP_COOLDOWN = 150 -- ms between drops
-local needsCheck = true
-
--- Subscribe to container events for smart triggering
-if EventBus then
-    EventBus.on("container:open", function()
-        needsCheck = true
-    end)
-    
-    EventBus.on("container:update", function()
-        needsCheck = true
-    end)
-end
-
--- Fallback event handlers
-onContainerOpen(function(container, previousContainer)
-    needsCheck = true
-end)
-
-onAddItem(function(container, slot, item, oldItem)
-    needsCheck = true
-end)
-
--- Process a single item (returns true if action taken)
-local function processItem(item)
-    if not item then return false end
-    local itemId = item:getId()
-    
-    -- Priority 1: Trash items (always drop)
-    if trashLookup[itemId] then
-        g_game.move(item, player:getPosition(), item:getCount())
-        return true
-    end
-    
-    -- Priority 2: Use items
-    if useLookup[itemId] then
-        g_game.use(item)
-        return true
-    end
-    
-    -- Priority 3: Cap items (drop only if low cap)
-    if capLookup[itemId] and freecap() < 150 then
-        g_game.move(item, player:getPosition(), item:getCount())
-        return true
-    end
-    
+-- Check if table has any entries (safe check without using next())
+local function hasItems(tbl)
+    if not tbl then return false end
+    for _ in pairs(tbl) do return true end
     return false
 end
 
--- Main dropper macro - optimized with O(1) lookups
+-- Main dropper macro
 macro(250, function()
     if not config.enabled then return end
-    if not needsCheck then return end
     
-    -- Cooldown check
-    local currentTime = now
-    if (currentTime - lastDropTime) < DROP_COOLDOWN then return end
+    -- Cooldown between actions
+    if (now - lastActionTime) < ACTION_COOLDOWN then return end
     
-    -- Rebuild lookup tables if config changed
-    local currentHash = getConfigHash()
-    if currentHash ~= lastConfigHash then
-        rebuildLookupTables()
-    end
-    
-    -- Check if any lookup tables have items
-    local hasTrash = next(trashLookup) ~= nil
-    local hasUse = next(useLookup) ~= nil
-    local hasCap = next(capLookup) ~= nil
+    -- Check if anything is configured (simple length check)
+    local hasTrash = config.trashItems and #config.trashItems > 0
+    local hasUse = config.useItems and #config.useItems > 0
+    local hasCap = config.capItems and #config.capItems > 0
     
     if not hasTrash and not hasUse and not hasCap then
-        needsCheck = false
         return
     end
     
+    -- Build lookup tables only if needed
+    local trashLookup = hasTrash and buildLookupTable(config.trashItems) or {}
+    local useLookup = hasUse and buildLookupTable(config.useItems) or {}
+    local capLookup = hasCap and buildLookupTable(config.capItems) or {}
+    
+    -- Get player position for dropping
+    local playerPos = player:getPosition()
+    local currentCap = freecap()
+    
     -- Scan all open containers
-    local containers = g_game.getContainers()
-    for _, container in pairs(containers) do
-        local items = container:getItems()
-        for i = 1, #items do
-            local item = items[i]
+    for _, container in pairs(g_game.getContainers()) do
+        for _, item in ipairs(container:getItems()) do
             if item then
                 local itemId = item:getId()
-                -- O(1) lookup instead of nested loops
-                if trashLookup[itemId] or useLookup[itemId] or (capLookup[itemId] and freecap() < 150) then
-                    if processItem(item) then
-                        lastDropTime = currentTime
-                        return -- One action per tick
-                    end
+                
+                -- Priority 1: Trash items (always drop)
+                if hasTrash and trashLookup[itemId] then
+                    g_game.move(item, playerPos, item:getCount())
+                    lastActionTime = now
+                    return
+                end
+                
+                -- Priority 2: Use items
+                if hasUse and useLookup[itemId] then
+                    g_game.use(item)
+                    lastActionTime = now
+                    return
+                end
+                
+                -- Priority 3: Cap items (drop only if low capacity)
+                if hasCap and capLookup[itemId] and currentCap < 150 then
+                    g_game.move(item, playerPos, item:getCount())
+                    lastActionTime = now
+                    return
                 end
             end
         end
     end
-    
-    -- Nothing found to process
-    needsCheck = false
 end)
