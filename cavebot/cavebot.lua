@@ -25,34 +25,48 @@ local actionRetries = 0
 local prevActionResult = true
 
 -- Cache frequently accessed values
-local cachedActions = nil
+local cachedActionCount = 0
 local cachedCurrentAction = nil
-local lastActionCheck = 0
-local ACTION_CACHE_TTL = 50  -- Refresh cache every 50ms
+local lastCacheUpdate = 0
+local CACHE_TTL = 100  -- Update cache every 100ms
 
-cavebotMacro = macro(50, function()
+-- Cached UI list reference (avoid repeated lookups)
+local uiList = nil
+
+local function updateCache()
+  if (now - lastCacheUpdate) < CACHE_TTL then return end
+  lastCacheUpdate = now
+  uiList = uiList or ui.list
+  cachedActionCount = uiList:getChildCount()
+end
+
+cavebotMacro = macro(1000, function()
+  -- Skip if player is walking (let the walk complete first)
+  if player and player:isWalking() then
+    return
+  end
+
   -- Early return checks first (most common case)
-  if TargetBot and TargetBot.isActive() and not TargetBot.isCaveBotActionAllowed() then
+  if TargetBot and TargetBot.isActive and TargetBot.isCaveBotActionAllowed and TargetBot.isActive() and not TargetBot.isCaveBotActionAllowed() then
     CaveBot.resetWalking()
     return
   end
   
-  if CaveBot.doWalking() then
-    return
-  end
+  -- Use cached UI list reference
+  uiList = uiList or ui.list
   
-  -- Get action count (cached access pattern)
-  local actionCount = ui.list:getChildCount()
+  -- Get action count (use direct call, it's fast)
+  local actionCount = uiList:getChildCount()
   if actionCount == 0 then return end
   
   -- Get current action
-  local currentAction = ui.list:getFocusedChild()
+  local currentAction = uiList:getFocusedChild()
   if not currentAction then
-    currentAction = ui.list:getFirstChild()
+    currentAction = uiList:getFirstChild()
     if not currentAction then return end
   end
   
-  -- Cache action lookup
+  -- Direct property access (already cached on widget)
   local actionType = currentAction.action
   local action = CaveBot.Actions[actionType]
   
@@ -64,24 +78,16 @@ cavebotMacro = macro(50, function()
   local value = currentAction.value
   local retry = false
   
-  -- Execute action with error handling
-  local status, result = pcall(function()
-    CaveBot.resetWalking()
-    return action.callback(value, actionRetries, prevActionResult)
-  end)
+  -- Execute action (removed pcall for performance, errors will propagate)
+  CaveBot.resetWalking()
+  local result = action.callback(value, actionRetries, prevActionResult)
   
-  if status then
-    if result == "retry" then
-      actionRetries = actionRetries + 1
-      retry = true
-    elseif result == true or result == false then
-      actionRetries = 0
-      prevActionResult = result
-    else
-      warn("Invalid return from cavebot action (" .. actionType .. "), should be \"retry\", false or true, is: " .. tostring(result))
-    end
-  else
-    warn("Error while executing cavebot action (" .. actionType .. "):\n" .. result)
+  if result == "retry" then
+    actionRetries = actionRetries + 1
+    retry = true
+  elseif result == true or result == false then
+    actionRetries = 0
+    prevActionResult = result
   end
   
   if retry then
@@ -89,23 +95,23 @@ cavebotMacro = macro(50, function()
   end
   
   -- Check if focused child changed during action
-  local newFocused = ui.list:getFocusedChild()
+  local newFocused = uiList:getFocusedChild()
   if currentAction ~= newFocused then
-    currentAction = newFocused or ui.list:getFirstChild()
+    currentAction = newFocused or uiList:getFirstChild()
     actionRetries = 0
     prevActionResult = true
   end
   
   -- Move to next action
-  local currentIndex = ui.list:getChildIndex(currentAction)
+  local currentIndex = uiList:getChildIndex(currentAction)
   local nextIndex = currentIndex + 1
   if nextIndex > actionCount then
     nextIndex = 1
   end
   
-  local nextChild = ui.list:getChildByIndex(nextIndex)
+  local nextChild = uiList:getChildByIndex(nextIndex)
   if nextChild then
-    ui.list:focusChild(nextChild)
+    uiList:focusChild(nextChild)
   end
 end)
 

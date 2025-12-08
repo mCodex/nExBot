@@ -521,7 +521,7 @@ if true then
   local wgHot
 
   local candidates = {}
-  local m = macro(20, function()
+  local m = macro(100, function()
     mwHot = settings.holdMwHot
     wgHot = settings.holdWgHot
     

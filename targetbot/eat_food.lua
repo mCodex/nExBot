@@ -157,6 +157,21 @@ local function cleanCorpseQueue()
   end
 end
 
+-- Eat food directly from inventory/hotkey API (works with closed backpacks)
+local function eatFromInventory()
+  if (now - lastEatTime) < EAT_COOLDOWN then return false end
+  if not g_game.useInventoryItem then return false end
+
+  for itemId, _ in pairs(FOOD_IDS) do
+    -- useInventoryItem works like hotkeys and can access closed backpacks
+    g_game.useInventoryItem(itemId)
+    lastEatTime = now
+    return true
+  end
+
+  return false
+end
+
 -- Add corpse to food queue
 local function addCorpseToQueue(pos, name)
   -- Check if already in queue
@@ -324,6 +339,10 @@ local function eatFromOpenContainers()
       end
     end
   end
+  -- If no food in open containers, try inventory-based eating (closed BP friendly)
+  if eatFromInventory() then
+    return true
+  end
   return false
 end
 
@@ -468,7 +487,7 @@ end)
 
 -- Macro to process eating (runs every 200ms)
 macro(200, function()
-  if eatFromCorpsesEnabled and TargetBot.isOn() and not isInPz() then
+  if eatFromCorpsesEnabled and TargetBot and TargetBot.isOn and TargetBot.isOn() and not isInPz() then
     TargetBot.EatFood.process()
   end
 end)

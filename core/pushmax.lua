@@ -195,100 +195,103 @@ end)
 local lastPushTime = 0
 local PUSH_COOLDOWN = 2000
 
-macro(50, function()
-  if not config.enabled then return end
-  
-  -- Non-blocking cooldown check
-  if (now - lastPushTime) < PUSH_COOLDOWN then return end
+-- TEMPORARILY DISABLED FOR DEBUGGING PERFORMANCE ISSUES
+-- macro(100, function()
+--   if not config.enabled then return end
+--   
+--   -- Non-blocking cooldown check
+--   if (now - lastPushTime) < PUSH_COOLDOWN then return end
 
-  local pushDelay = tonumber(config.pushDelay)
-  local rune = tonumber(config.pushMaxRuneId)
-  local customMwall = config.mwallBlockId
+--   local pushDelay = tonumber(config.pushDelay)
+--   local rune = tonumber(config.pushMaxRuneId)
+--   local customMwall = config.mwallBlockId
 
-  if cleanTile then
-    local tilePos = cleanTile:getPosition()
-    local pPos = player:getPosition()
-    if not isOk(tilePos, pPos) then
-      resetData()
-      return
-    end
+--   if cleanTile then
+--     local tilePos = cleanTile:getPosition()
+--     local pPos = player:getPosition()
+--     if not isOk(tilePos, pPos) then
+--       resetData()
+--       return
+--     end
 
-    if not cleanTile:hasCreature() then return end
-    local tiles = getNearTiles(tilePos)
-    local destTile
-    local forbidden = {}
-    -- unfortunately double loop
-    for i, tile in pairs(tiles) do
-      local minimapColor = g_map.getMinimapColor(tile:getPosition())
-      local stairs = (minimapColor >= 210 and minimapColor <= 213)
-      if stairs then
-        table.insert(forbidden, tile:getPosition())
-      end
-    end
-    for i, tile in pairs(tiles) do
-      local minimapColor = g_map.getMinimapColor(tile:getPosition())
-      local stairs = (minimapColor >= 210 and minimapColor <= 213)
-      if tile:isWalkable() and not isNotOk(fieldTable, tile) and not tile:hasCreature() and not stairs then
-        local tooClose = false
-        if #forbidden ~= 0 then
-          for i=1,#forbidden do
-            local pos = forbidden[i]
-            if isOk(pos, tile:getPosition()) then
-              tooClose = true
-              break
-            end
-          end
-        end
-        if not tooClose then
-          destTile = tile
-          break
-        end
-      end
-    end
+--     if not cleanTile:hasCreature() then return end
+--     local tiles = getNearTiles(tilePos)
+--     local destTile
+--     local forbidden = {}
+--     -- unfortunately double loop
+--     for i, tile in pairs(tiles) do
+--       local minimapColor = g_map.getMinimapColor(tile:getPosition())
+--       local stairs = (minimapColor >= 210 and minimapColor <= 213)
+--       if stairs then
+--         table.insert(forbidden, tile:getPosition())
+--       end
+--     end
+--     for i, tile in pairs(tiles) do
+--       local minimapColor = g_map.getMinimapColor(tile:getPosition())
+--       local stairs = (minimapColor >= 210 and minimapColor <= 213)
+--       if tile:isWalkable() and not isNotOk(fieldTable, tile) and not tile:hasCreature() and not stairs then
+--         local tooClose = false
+--         if #forbidden ~= 0 then
+--           for i=1,#forbidden do
+--             local pos = forbidden[i]
+--             if isOk(pos, tile:getPosition()) then
+--               tooClose = true
+--               break
+--             end
+--           end
+--         end
+--         if not tooClose then
+--           destTile = tile
+--           break
+--         end
+--       end
+--     end
 
-    if not destTile then return end
-    local parcel = cleanTile:getCreatures()[1]
-    if parcel then
-      test()
-      g_game.move(parcel,destTile:getPosition())
-      lastPushTime = now -- Non-blocking cooldown
-    end
-  else
-    if not pushTarget or not targetTile then return end
-    local tilePos = targetTile:getPosition()
-    local targetPos = pushTarget:getPosition()
-    if not isOk(tilePos,targetPos) then return end
-    
-    local tileOfTarget = g_map.getTile(targetPos)
-    
-    if not targetTile:isWalkable() then
-      local topThing = targetTile:getTopUseThing():getId()
-      if topThing == 2129 or topThing == 2130 or topThing == customMwall then
-        if targetTile:getTimer() < pushDelay+500 then
-          nExBot.isUsing = true
-          schedule(pushDelay+700, function()
-            nExBot.isUsing = false
-          end)
-        end
-        if targetTile:getTimer() > pushDelay then
-          return
-        end
-      else
-        return resetData()
-      end
-    end
+--     if not destTile then return end
+--     local parcel = cleanTile:getCreatures()[1]
+--     if not destTile then return end
+--     local parcel = cleanTile:getCreatures()[1]
+--     if parcel then
+--       test()
+--       g_game.move(parcel,destTile:getPosition())
+--       lastPushTime = now -- Non-blocking cooldown
+--     end
+--   else
+--     if not pushTarget or not targetTile then return end
+--     local tilePos = targetTile:getPosition()
+--     local targetPos = pushTarget:getPosition()
+--     if not isOk(tilePos,targetPos) then return end
+--     
+--     local tileOfTarget = g_map.getTile(targetPos)
+--     
+--     if not targetTile:isWalkable() then
+--       local topThing = targetTile:getTopUseThing():getId()
+--       if topThing == 2129 or topThing == 2130 or topThing == customMwall then
+--         if targetTile:getTimer() < pushDelay+500 then
+--           nExBot.isUsing = true
+--           schedule(pushDelay+700, function()
+--             nExBot.isUsing = false
+--           end)
+--         end
+--         if targetTile:getTimer() > pushDelay then
+--           return
+--         end
+--       else
+--         return resetData()
+--       end
+--     end
 
-    if not tileOfTarget:getTopUseThing():isNotMoveable() and targetTile:getTimer() < pushDelay+500 then
-      return useWith(rune, pushTarget)
-    end
-    if isNotOk(fieldTable, targetTile) then
-      if targetTile:canShoot() then
-        return useWith(3148, targetTile:getTopUseThing())
-      else
-        return
-      end
-    end
-      g_game.move(pushTarget,tilePos)
-      lastPushTime = now -- Non-blocking cooldown
-  end
-end)
+--     if not tileOfTarget:getTopUseThing():isNotMoveable() and targetTile:getTimer() < pushDelay+500 then
+--       return useWith(rune, pushTarget)
+--     end
+--     if isNotOk(fieldTable, targetTile) then
+--       if targetTile:canShoot() then
+--         return useWith(3148, targetTile:getTopUseThing())
+--       else
+--         return
+--       end
+--     end
+--       g_game.move(pushTarget,tilePos)
+--       lastPushTime = now -- Non-blocking cooldown
+--   end
+-- end)

@@ -289,7 +289,7 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
 end
 
 onTextMessage(function(mode, text)
-  if TargetBot.isOff() then return end
+  if not TargetBot or not TargetBot.isOff or TargetBot.isOff() then return end
   local listCount = #TargetBot.Looting.list
   if listCount == 0 then return end
   -- Use pattern matching for faster check

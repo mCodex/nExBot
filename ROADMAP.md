@@ -4,6 +4,24 @@
 
 ---
 
+## 🚀 **PERFORMANCE OPTIMIZATIONS** (Latest Updates)
+
+### Critical Performance Fixes ⭐⭐⭐ ✅ IMPLEMENTED
+- [x] **CaveBot Macro Interval**: Increased from 50ms → 250ms → 500ms to prevent slow macro warnings
+- [x] **Pathfinding Timeout Protection**: Added 50ms execution timeout to goto actions to prevent hanging
+- [x] **Macro Load Reduction**: Temporarily disabled high-frequency macros (HealBot 75ms, Pushmax 100ms, TargetBot 100ms) for debugging
+- [x] **Error Handling**: Wrapped cavebot actions in pcall with execution time monitoring
+- [x] **Pathfinding Optimization**: Reduced goto strategies from 8 to 3, added early returns
+- **Status**: Client freezing and slow macro warnings should be resolved. Test with minimal macro set first.
+
+### Performance Monitoring
+- [x] Execution time logging for actions >100ms
+- [x] Macro performance monitor (5-second intervals)
+- [x] Automatic warning when slow macro count >10
+- **Files**: `cavebot/cavebot.lua`, `cavebot/actions.lua`, `_Loader.lua`
+
+---
+
 ## 🧠 **AUTONOMY & SMART DECISION MAKING**
 
 ### 1. Smart Supply Prediction System ⭐⭐⭐ ✅ IMPLEMENTED
@@ -255,10 +273,16 @@
 - [x] Global state coordinator
 - **Files**: `core/state_machine.lua`
 
-### 33. Module Hot-Reload ⭐
-- [ ] Reload individual modules without restart
-- [ ] Faster development/testing
+### 33. Module Hot-Reload ⭐ ✅ IMPLEMENTED
+- [x] Reload individual modules without restart
+- [x] Faster development/testing
+- [x] Track module load times and status
+- [x] Core module protection warnings
 - **Files**: `_Loader.lua`
+- **Usage**:
+  - `nExBot.reloadModule("module_name")` - Reload specific module
+  - `nExBot.reloadAll()` - Reload all non-core modules
+  - `nExBot.listModules()` - List all loaded modules with status
 
 ### 34. Error Recovery System ⭐⭐
 - [ ] Graceful handling of edge cases
@@ -286,7 +310,7 @@
 
 | Phase | Features | Impact | Status |
 |-------|----------|--------|--------|
-| **Phase 0** | #1, #2, #3, #4, #5, #11-15, #24-27, #32, #36 | Smart Autonomy + Combat + Performance | ✅ Complete |
+| **Phase 0** | #1, #2, #3, #4, #5, #11-15, #24-27, #32, #33, #36 | Smart Autonomy + Combat + Performance + Hot-Reload | ✅ Complete |
 | **Phase 1** | #6, #7, #16, #19, #20 | Safety + Waste reduction | 🔲 Pending |
 | **Phase 2** | #8, #14 | Smart decision making | 🔲 Pending |
 | **Phase 3** | #21, #23, #30 | Analytics + Monitoring | 🔲 Pending |

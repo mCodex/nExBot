@@ -133,9 +133,9 @@ CaveBot.resetWalking = function()
 end
 
 -- Check if cavebot is currently in walking state
--- Returns true if walking (prevents action execution), false otherwise
+-- Uses native player:isWalking() for accurate detection
 CaveBot.doWalking = function()
-  return isWalking
+  return player and player:isWalking()
 end
 
 -- Set expected floor (call when starting to walk to a waypoint)
@@ -173,22 +173,6 @@ onPlayerPositionChange(function(newPos, oldPos)
     -- Reset expected floor to prevent repeated warnings
     expectedFloor = nil
   end
-  
-  if not isWalking then return end
-  
-  local dy = newPos.y - oldPos.y
-  local dx = newPos.x - oldPos.x
-  
-  local dir = 8
-  if dy >= -1 and dy <= 1 and dx >= -1 and dx <= 1 then
-    local row = DIR_LOOKUP[dy]
-    if row then
-      dir = row[dx] or 8
-    end
-  end
-
-  local stepDuration = player:getStepDuration(false, dir)
-  CaveBot.delay(walkDelay + stepDuration)
 end)
 
 -- Main walking function - uses native OTClient autoWalk
@@ -227,8 +211,9 @@ CaveBot.walkTo = function(dest, maxDist, params)
     ignoreNonPathable = params and params.ignoreNonPathable or true,
     precision = precision
   }) then
-    isWalking = true
-    CaveBot.delay(walkDelay + player:getStepDuration(false, 0))
+    -- Delay cavebot macro to allow walking to complete
+    local stepDuration = player:getStepDuration(false, 0) or 100
+    CaveBot.delay(walkDelay + stepDuration)
     return true
   end
   

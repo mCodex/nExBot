@@ -120,132 +120,133 @@ local oldTibia = g_game.getClientVersion() < 960
 
 -- main loop, controlled by config
 -- OPTIMIZED: Uses path caching and reduced pathfinding calls
-targetbotMacro = macro(100, function()
-  -- Periodic cache cleanup
-  cleanupPathCache()
-  
-  -- Cache player position once per tick (PERFORMANCE: avoid repeated API calls)
-  local pos = player:getPosition()
-  local specs = g_map.getSpectatorsInRange(pos, false, 6, 6) -- 12x12 area
-  
-  -- PERFORMANCE: Count monsters and filter in single pass (avoid second API call)
-  local monsterCount = 0
-  local creatures = {}
-  local creatureCount = 0
-  
-  for i = 1, #specs do
-    local spec = specs[i]
-    if spec:isMonster() then
-      monsterCount = monsterCount + 1
-      creatureCount = creatureCount + 1
-      creatures[creatureCount] = spec
-    end
-  end
-  
-  -- If too many monsters, filter to 6x6 area in Lua (PERFORMANCE: avoid second API call)
-  if monsterCount > 10 then
-    local filtered = {}
-    local filteredCount = 0
-    for i = 1, creatureCount do
-      local spec = creatures[i]
-      local spos = spec:getPosition()
-      if math.abs(pos.x - spos.x) <= 3 and math.abs(pos.y - spos.y) <= 3 then
-        filteredCount = filteredCount + 1
-        filtered[filteredCount] = spec
-      end
-    end
-    creatures = filtered
-    creatureCount = filteredCount
-  end
-  
-  local highestPriority = 0
-  local dangerLevel = 0
-  local targets = 0
-  local highestPriorityParams = nil
-  local debugMode = ui.editor.debug:isOn()  -- Cache debug check outside loop
-  
-  for i = 1, creatureCount do
-    local creature = creatures[i]
-    local hppc = creature:getHealthPercent()
-    if hppc and hppc > 0 and isTargetableCreature(creature, oldTibia) then
-      -- PERFORMANCE: Use cached pos and pre-allocated PATH_PARAMS
-      local cpos = creature:getPosition()
-      local dist = math.max(math.abs(pos.x - cpos.x), math.abs(pos.y - cpos.y))
-      
-      -- PERFORMANCE: Skip pathfinding for creatures too far away
-      if dist <= 7 then
-        -- PERFORMANCE: Use cached path if available
-        local creatureId = creature:getId()
-        local path = getCachedPath(creatureId, pos, cpos)
-        
-        if not path then
-          -- Only calculate path if not in cache
-          path = findPath(pos, cpos, 7, PATH_PARAMS)
-          if path then
-            setCachedPath(creatureId, path)
-          end
-        end
-        
-        if path then
-          local params = TargetBot.Creature.calculateParams(creature, path)
-          dangerLevel = dangerLevel + params.danger
-          if params.priority > 0 then
-            targets = targets + 1
-            if params.priority > highestPriority then
-              highestPriority = params.priority
-              highestPriorityParams = params
-            end
-            if debugMode then
-              creature:setText(params.config.name .. "\n" .. params.priority)
-            end
-          end
-        end
-      end
-    end
-  end
+-- TEMPORARILY DISABLED FOR DEBUGGING PERFORMANCE ISSUES
+-- targetbotMacro = macro(100, function()
+--   -- Periodic cache cleanup
+--   cleanupPathCache()
+--   
+--   -- Cache player position once per tick (PERFORMANCE: avoid repeated API calls)
+--   local pos = player:getPosition()
+--   local specs = g_map.getSpectatorsInRange(pos, false, 6, 6) -- 12x12 area
+--   
+--   -- PERFORMANCE: Count monsters and filter in single pass (avoid second API call)
+--   local monsterCount = 0
+--   local creatures = {}
+--   local creatureCount = 0
+--   
+--   for i = 1, #specs do
+--     local spec = specs[i]
+--     if spec:isMonster() then
+--       monsterCount = monsterCount + 1
+--       creatureCount = creatureCount + 1
+--       creatures[creatureCount] = spec
+--     end
+--   end
+--   
+--   -- If too many monsters, filter to 6x6 area in Lua (PERFORMANCE: avoid second API call)
+--   if monsterCount > 10 then
+--     local filtered = {}
+--     local filteredCount = 0
+--     for i = 1, creatureCount do
+--       local spec = creatures[i]
+--       local spos = spec:getPosition()
+--       if math.abs(pos.x - spos.x) <= 3 and math.abs(pos.y - spos.y) <= 3 then
+--         filteredCount = filteredCount + 1
+--         filtered[filteredCount] = spec
+--       end
+--     end
+--     creatures = filtered
+--     creatureCount = filteredCount
+--   end
+--   
+--   local highestPriority = 0
+--   local dangerLevel = 0
+--   local targets = 0
+--   local highestPriorityParams = nil
+--   local debugMode = ui.editor.debug:isOn()  -- Cache debug check outside loop
+--   
+--   for i = 1, creatureCount do
+--     local creature = creatures[i]
+--     local hppc = creature:getHealthPercent()
+--     if hppc and hppc > 0 and isTargetableCreature(creature, oldTibia) then
+--       -- PERFORMANCE: Use cached pos and pre-allocated PATH_PARAMS
+--       local cpos = creature:getPosition()
+--       local dist = math.max(math.abs(pos.x - cpos.x), math.abs(pos.y - cpos.y))
+--       
+--       -- PERFORMANCE: Skip pathfinding for creatures too far away
+--       if dist <= 7 then
+--         -- PERFORMANCE: Use cached path if available
+--         local creatureId = creature:getId()
+--         local path = getCachedPath(creatureId, pos, cpos)
+--         
+--         if not path then
+--           -- Only calculate path if not in cache
+--           path = findPath(pos, cpos, 7, PATH_PARAMS)
+--           if path then
+--             setCachedPath(creatureId, path)
+--           end
+--         end
+--         
+--         if path then
+--           local params = TargetBot.Creature.calculateParams(creature, path)
+--           dangerLevel = dangerLevel + params.danger
+--           if params.priority > 0 then
+--             targets = targets + 1
+--             if params.priority > highestPriority then
+--               highestPriority = params.priority
+--               highestPriorityParams = params
+--             end
+--             if debugMode then
+--               creature:setText(params.config.name .. "\n" .. params.priority)
+--             end
+--           end
+--         end
+--       end
+--     end
+--   end
 
-  -- reset walking
-  TargetBot.walkTo(nil)
+--   -- reset walking
+--   TargetBot.walkTo(nil)
 
-  -- looting
-  local looting = TargetBot.Looting.process(targets, dangerLevel)
-  local lootingStatus = TargetBot.Looting.getStatus()
-  looterStatus = lootingStatus
-  dangerValue = dangerLevel
+--   -- looting
+--   local looting = TargetBot.Looting.process(targets, dangerLevel)
+--   local lootingStatus = TargetBot.Looting.getStatus()
+--   looterStatus = lootingStatus
+--   dangerValue = dangerLevel
 
-  ui.danger.right:setText(dangerLevel)
-  if highestPriorityParams and not isInPz() then
-    ui.target.right:setText(highestPriorityParams.creature:getName())
-    ui.config.right:setText(highestPriorityParams.config.name)
-    TargetBot.Creature.attack(highestPriorityParams, targets, looting)    
-    if lootingStatus:len() > 0 then
-      TargetBot.setStatus(STATUS_ATTACK_PREFIX .. lootingStatus)
-    elseif cavebotAllowance > now then
-      TargetBot.setStatus(STATUS_PULLING)
-    else
-      if lureEnabled then
-        TargetBot.setStatus(STATUS_ATTACKING)
-      else
-        TargetBot.setStatus(STATUS_ATTACKING_LURE_OFF)
-      end
-    end
-    TargetBot.walk()
-    lastAction = now
-    return
-  end
+--   ui.danger.right:setText(dangerLevel)
+--   if highestPriorityParams and not isInPz() then
+--     ui.target.right:setText(highestPriorityParams.creature:getName())
+--     ui.config.right:setText(highestPriorityParams.config.name)
+--     TargetBot.Creature.attack(highestPriorityParams, targets, looting)    
+--     if lootingStatus:len() > 0 then
+--       TargetBot.setStatus(STATUS_ATTACK_PREFIX .. lootingStatus)
+--     elseif cavebotAllowance > now then
+--       TargetBot.setStatus(STATUS_PULLING)
+--     else
+--       if lureEnabled then
+--         TargetBot.setStatus(STATUS_ATTACKING)
+--       else
+--         TargetBot.setStatus(STATUS_ATTACKING_LURE_OFF)
+--       end
+--     end
+--     TargetBot.walk()
+--     lastAction = now
+--     return
+--   end
 
-  ui.target.right:setText("-")
-  ui.config.right:setText("-")
-  if looting then
-    TargetBot.walk()
-    lastAction = now
-  end
-  if lootingStatus:len() > 0 then
-    TargetBot.setStatus(lootingStatus)
-  else
-    TargetBot.setStatus(STATUS_WAITING)
-  end
-end)
+--   ui.target.right:setText("-")
+--   ui.config.right:setText("-")
+--   if looting then
+--     TargetBot.walk()
+--     lastAction = now
+--   end
+--   if lootingStatus:len() > 0 then
+--     TargetBot.setStatus(lootingStatus)
+--   else
+--     TargetBot.setStatus(STATUS_WAITING)
+--   end
+-- end)
 
 -- config, its callback is called immediately, data can be nil
 config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
@@ -266,8 +267,10 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
     ui.status.right:setText("Off")
   end
 
-  targetbotMacro.setOn(enabled)
-  targetbotMacro.delay = nil
+  if targetbotMacro and targetbotMacro.setOn then
+    targetbotMacro.setOn(enabled)
+    targetbotMacro.delay = nil
+  end
   lureEnabled = true
 end)
 
@@ -323,10 +326,12 @@ TargetBot.getStatus = function()
 end
 
 TargetBot.isOn = function()
+  if not config or not config.isOn then return false end
   return config.isOn()
 end
 
 TargetBot.isOff = function()
+  if not config or not config.isOff then return true end
   return config.isOff()
 end
 

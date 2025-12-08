@@ -561,6 +561,16 @@ local cachedStats = {
   lastUpdate = 0
 }
 
+-- Lightweight analytics for mana/potion efficiency (Roadmap #6 and #7)
+local analytics = storage.healAnalytics or {
+  spellCasts = 0,
+  potionUses = 0,
+  potionWaste = 0,
+  manaWaste = 0,
+  log = {}
+}
+storage.healAnalytics = analytics
+
 -- Flag to trigger immediate heal check
 local needsHealCheck = true
 local needsItemCheck = true
@@ -624,6 +634,61 @@ local function checkCondition(origin, sign, value)
   return false
 end
 
+-- Analytics helpers
+local function appendLog(entry)
+  local log = analytics.log
+  if #log >= 50 then
+    table.remove(log, 1)
+  end
+  table.insert(log, entry)
+end
+
+local function recordSpell(entry, hpPercent, mpPercent)
+  analytics.spellCasts = analytics.spellCasts + 1
+  local wasted = false
+  if entry.cost and hpPercent and entry.value then
+    -- If we cast while already above the trigger threshold by 10%, count as waste
+    if hpPercent > (entry.value + 10) then
+      analytics.manaWaste = analytics.manaWaste + entry.cost
+      wasted = true
+    end
+  end
+  appendLog({
+    t = now,
+    kind = "spell",
+    name = entry.spell,
+    hp = hpPercent,
+    mp = mpPercent,
+    cost = entry.cost,
+    wasted = wasted
+  })
+end
+
+local function recordPotion(entry, hpPercent, mpPercent)
+  analytics.potionUses = analytics.potionUses + 1
+  local wasted = false
+  if entry.value then
+    -- If we potion when HP is already 10% above trigger, count as waste
+    if hpPercent > (entry.value + 10) then
+      analytics.potionWaste = analytics.potionWaste + 1
+      wasted = true
+    end
+  end
+  appendLog({
+    t = now,
+    kind = "potion",
+    name = entry.item,
+    hp = hpPercent,
+    mp = mpPercent,
+    wasted = wasted
+  })
+end
+
+HealBot = HealBot or {}
+HealBot.getAnalytics = function()
+  return analytics
+end
+
 -- Process spell healing (high priority, runs on events)
 local function processSpellHealing()
   if standBySpells then return false end
@@ -637,7 +702,10 @@ local function processSpellHealing()
     if entry.enabled and entry.cost < currentMp then
       if canCast(entry.spell, not currentSettings.Conditions, not currentSettings.Cooldown) then
         if checkCondition(entry.origin, entry.sign, entry.value) then
+          local beforeHp = cachedStats.hpPercent
+          local beforeMp = cachedStats.mpPercent
           say(entry.spell)
+          recordSpell(entry, beforeHp, beforeMp)
           return true
         end
       else
@@ -707,6 +775,9 @@ local function processItemHealing()
       
       if canUse and checkCondition(entry.origin, entry.sign, entry.value) then
         if useItemLikeHotkey(entry.item) then
+          local beforeHp = cachedStats.hpPercent
+          local beforeMp = cachedStats.mpPercent
+          recordPotion(entry, beforeHp, beforeMp)
           return true
         end
       end
@@ -751,18 +822,18 @@ if EventBus then
   end, 90)
   end
 
--- Fast spell macro (50ms for critical healing response)
-macro(50, function()
-  if not currentSettings.enabled then return end
-  
-  -- Always update stats to ensure accuracy
-  updateCachedStats()
-  
-  -- Reset standby on each tick (simple polling approach)
-  standBySpells = false
-  
-  processSpellHealing()
-end)
+-- Fast spell macro (75ms for critical healing response) - TEMPORARILY DISABLED FOR DEBUGGING
+-- macro(75, function()
+--   if not currentSettings.enabled then return end
+--   
+--   -- Always update stats to ensure accuracy
+--   updateCachedStats()
+--   
+--   -- Reset standby on each tick (simple polling approach)
+--   standBySpells = false
+--   
+--   processSpellHealing()
+-- end)
 
 -- Item macro (100ms - potions have 1s cooldown anyway)
 macro(100, function()
