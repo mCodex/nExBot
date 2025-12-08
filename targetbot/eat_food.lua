@@ -2,20 +2,22 @@
   nExBot - Eat Food from Corpses (TargetBot Integration)
   
   Automatically opens recently killed monster corpses and eats food inside.
-  Uses the existing looting system's corpse tracking.
+  This feature ONLY handles eating from monster corpses while TargetBot is active.
+  
+  For eating food from inventory, use the "Eat Food" macro in the HP tab.
   
   Features:
   - Uses looting system's monster death tracking
   - Opens corpses automatically
-  - Eats food from any opened container
-  - Uses comprehensive food item list from items.xml
+  - Eats food from any opened container (corpses)
+  - Uses comprehensive food item list
   - Cooldown to prevent spam eating
   - Toggle switch in TargetBot Looting panel
 ]]
 
 TargetBot.EatFood = {}
 
--- Food item IDs from items.xml
+-- Food item IDs
 local FOOD_IDS = {
   -- Meats
   [3577] = true,  -- meat
@@ -155,21 +157,6 @@ local function cleanCorpseQueue()
       table.remove(foodCorpseQueue, i)
     end
   end
-end
-
--- Eat food directly from inventory/hotkey API (works with closed backpacks)
-local function eatFromInventory()
-  if (now - lastEatTime) < EAT_COOLDOWN then return false end
-  if not g_game.useInventoryItem then return false end
-
-  for itemId, _ in pairs(FOOD_IDS) do
-    -- useInventoryItem works like hotkeys and can access closed backpacks
-    g_game.useInventoryItem(itemId)
-    lastEatTime = now
-    return true
-  end
-
-  return false
 end
 
 -- Add corpse to food queue
@@ -485,21 +472,14 @@ onCreatureDisappear(function(creature)
   end)
 end)
 
--- Macro to process eating (runs every 200ms)
+-- Macro to process corpse eating (runs every 200ms)
+-- NOTE: For eating food from inventory, use the "Eat Food" macro in the HP tab
 macro(200, function()
+  if not eatFromCorpsesEnabled then return end
   if not TargetBot or not TargetBot.isOn or not TargetBot.isOn() then return end
   if isInPz() then return end
   if not player then return end
   
-  -- Always try to eat from inventory if player needs food (works with closed backpacks)
-  if needsFood() then
-    if eatFromInventory() then
-      return
-    end
-  end
-  
-  -- Process corpse eating if enabled
-  if eatFromCorpsesEnabled then
-    TargetBot.EatFood.process()
-  end
+  -- Process corpse eating
+  TargetBot.EatFood.process()
 end)

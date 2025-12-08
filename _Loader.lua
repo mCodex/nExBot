@@ -48,14 +48,13 @@ local scripts = {
   -- Core Libraries (load first, order matters)
   "main",           -- Main initialization
   "items",          -- Item definitions
-  "item_classifier", -- Item metadata index
   "lib",            -- Utility library (renamed from vlib)
   "new_cavebot_lib", -- CaveBot library
   "configs",        -- Configuration system
   
   -- Event-Driven Architecture (load before feature modules)
   "event_bus",      -- Centralized event bus (Observer pattern)
-  "door_items",     -- Door item database from items.xml
+  "door_items",     -- Door item database
   "global_config",  -- Global tool/door configuration
   "state_machine",  -- Finite State Machine architecture (Feature 32)
   "performance_optimizer", -- Performance optimizations (Features 24-27)

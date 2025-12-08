@@ -604,10 +604,23 @@ local conditionCheckers = {
   end
 }
 
+-- Cached player reference (avoid repeated lookups)
+local cachedLocalPlayer = nil
+local lastPlayerCheck = 0
+local PLAYER_CHECK_INTERVAL = 1000  -- Revalidate player reference every 1s
+
+-- Get cached local player (with periodic revalidation)
+local function getLocalPlayerCached()
+  if not cachedLocalPlayer or (now - lastPlayerCheck) > PLAYER_CHECK_INTERVAL then
+    cachedLocalPlayer = g_game.getLocalPlayer()
+    lastPlayerCheck = now
+  end
+  return cachedLocalPlayer
+end
+
 -- Update cached stats using correct OTClient API
 local function updateCachedStats()
-  -- Use player object methods (OTClient native API)
-  local localPlayer = g_game.getLocalPlayer()
+  local localPlayer = getLocalPlayerCached()
   if not localPlayer then return end
   
   local currentHp = localPlayer:getHealth()
@@ -615,12 +628,19 @@ local function updateCachedStats()
   local currentMp = localPlayer:getMana()
   local currentMaxMp = localPlayer:getMaxMana()
   
-  cachedStats.hp = currentHp
-  cachedStats.maxHp = currentMaxHp
-  cachedStats.hpPercent = currentMaxHp > 0 and math.floor((currentHp / currentMaxHp) * 100) or 0
-  cachedStats.mp = currentMp
-  cachedStats.maxMp = currentMaxMp
-  cachedStats.mpPercent = currentMaxMp > 0 and math.floor((currentMp / currentMaxMp) * 100) or 0
+  -- Only update if values changed (reduce memory writes)
+  if cachedStats.hp ~= currentHp or cachedStats.maxHp ~= currentMaxHp then
+    cachedStats.hp = currentHp
+    cachedStats.maxHp = currentMaxHp
+    cachedStats.hpPercent = currentMaxHp > 0 and math.floor((currentHp / currentMaxHp) * 100) or 0
+  end
+  
+  if cachedStats.mp ~= currentMp or cachedStats.maxMp ~= currentMaxMp then
+    cachedStats.mp = currentMp
+    cachedStats.maxMp = currentMaxMp
+    cachedStats.mpPercent = currentMaxMp > 0 and math.floor((currentMp / currentMaxMp) * 100) or 0
+  end
+  
   cachedStats.burst = burstDamageValue and burstDamageValue() or 0
   cachedStats.lastUpdate = now
 end
@@ -694,13 +714,19 @@ local function processSpellHealing()
   if standBySpells then return false end
   if not currentSettings.enabled then return false end
   
+  local spellTable = currentSettings.spellTable
+  local spellCount = spellTable and #spellTable or 0
+  if spellCount == 0 then return false end
+  
   local somethingIsOnCooldown = false
   local currentMp = cachedStats.mp
+  local ignoreConditions = not currentSettings.Conditions
+  local ignoreCooldown = not currentSettings.Cooldown
   
-  for i = 1, #currentSettings.spellTable do
-    local entry = currentSettings.spellTable[i]
+  for i = 1, spellCount do
+    local entry = spellTable[i]
     if entry.enabled and entry.cost < currentMp then
-      if canCast(entry.spell, not currentSettings.Conditions, not currentSettings.Cooldown) then
+      if canCast(entry.spell, ignoreConditions, ignoreCooldown) then
         if checkCondition(entry.origin, entry.sign, entry.value) then
           local beforeHp = cachedStats.hpPercent
           local beforeMp = cachedStats.mpPercent
@@ -748,30 +774,36 @@ local function useItemLikeHotkey(itemId)
   return false
 end
 
--- Process item healing (slightly lower priority)
+-- Process item healing (slightly lower priority) - optimized
 local function processItemHealing()
   if standByItems then return false end
   if not currentSettings.enabled then return false end
-  if not currentSettings.itemTable or #currentSettings.itemTable == 0 then return false end
+  
+  local itemTable = currentSettings.itemTable
+  local itemCount = itemTable and #itemTable or 0
+  if itemCount == 0 then return false end
+  
   if currentSettings.Delay and nExBot.isUsing then return false end
   if currentSettings.MessageDelay and nExBot.isUsingPotion then return false end
   
-  -- Check if looting (delay if needed)
-  if TargetBot and TargetBot.isOn and TargetBot.isOn() and 
-     TargetBot.Looting and TargetBot.Looting.getStatus and 
-     TargetBot.Looting.getStatus():len() > 0 and currentSettings.Interval then
-    return false -- Skip this tick, let looting finish
+  -- Check if looting (delay if needed) - cache TargetBot references
+  if TargetBot and TargetBot.isOn and TargetBot.isOn() and currentSettings.Interval then
+    local looting = TargetBot.Looting
+    if looting and looting.getStatus then
+      local status = looting.getStatus()
+      if status and status:len() > 0 then
+        return false -- Skip this tick, let looting finish
+      end
+    end
   end
   
-  for i = 1, #currentSettings.itemTable do
-    local entry = currentSettings.itemTable[i]
+  local checkVisibility = currentSettings.Visible and not g_game.useInventoryItemWith
+  
+  for i = 1, itemCount do
+    local entry = itemTable[i]
     if entry and entry.enabled then
-      -- Skip visibility check entirely when using inventory methods (works without open BP)
-      -- Only check visibility if the setting requires it AND we must use findItem fallback
-      local canUse = true
-      if currentSettings.Visible and not g_game.useInventoryItemWith then
-        canUse = findItem(entry.item) ~= nil
-      end
+      -- Only check visibility if required and no inventory method available
+      local canUse = not checkVisibility or findItem(entry.item) ~= nil
       
       if canUse and checkCondition(entry.origin, entry.sign, entry.value) then
         if useItemLikeHotkey(entry.item) then
@@ -822,18 +854,18 @@ if EventBus then
   end, 90)
   end
 
--- Fast spell macro (75ms for critical healing response) - TEMPORARILY DISABLED FOR DEBUGGING
--- macro(75, function()
---   if not currentSettings.enabled then return end
---   
---   -- Always update stats to ensure accuracy
---   updateCachedStats()
---   
---   -- Reset standby on each tick (simple polling approach)
---   standBySpells = false
---   
---   processSpellHealing()
--- end)
+-- Fast spell macro (75ms for critical healing response)
+macro(75, function()
+  if not currentSettings.enabled then return end
+  
+  -- Always update stats to ensure accuracy
+  updateCachedStats()
+  
+  -- Reset standby on each tick (simple polling approach)
+  standBySpells = false
+  
+  processSpellHealing()
+end)
 
 -- Item macro (100ms - potions have 1s cooldown anyway)
 macro(100, function()

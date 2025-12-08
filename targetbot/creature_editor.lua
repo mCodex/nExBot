@@ -126,8 +126,40 @@ TargetBot.Creature.edit = function(config, callback) -- callback = function(newC
   addScrollBar("lureDelay", "Dynamic lure delay", 100, 1000, 250, "Delay in ms before CaveBot continues walking during lure.")
   addScrollBar("delayFrom", "Start delay when monsters", 1, 29, 2, "Apply walking delay when monster count is at least this value.")
   addScrollBar("rePositionAmount", "Min tiles to rePosition", 0, 7, 5, "Reposition when fewer than this many walkable tiles around you.")
-  addScrollBar("smartPullRange", "Smart Pull Range", 1, 5, 2, "Range to check for nearby monsters when Smart Pull is enabled.")
-  addScrollBar("smartPullMin", "Smart Pull Min Monsters", 1, 8, 3, "Minimum monsters needed within range to trigger Smart Pull.")
+  addScrollBar("smartPullRange", "Smart Pull Range", 1, 5, 2, "Range (in tiles) to check for nearby monsters. Works with the selected Shape.")
+  addScrollBar("smartPullMin", "Smart Pull Min Monsters", 1, 8, 3, "Minimum monsters needed within range. If fewer are present, CaveBot walks to pull more.")
+  
+  -- Special scrollbar for Shape with name display
+  do
+    local shapeNames = {
+      [1] = "SQUARE",
+      [2] = "CIRCLE", 
+      [3] = "DIAMOND",
+      [4] = "CROSS"
+    }
+    local widget = UI.createWidget('TargetBotCreatureEditorScrollBar', editor.content.left)
+    widget.scroll.onValueChange = function(scroll, value)
+      local shapeName = shapeNames[value] or "UNKNOWN"
+      widget.text:setText("Smart Pull Shape: " .. shapeName)
+    end
+    widget.scroll:setRange(1, 4)
+    widget.scroll:setValue(config.smartPullShape or 2)
+    widget.scroll.onValueChange(widget.scroll, widget.scroll:getValue())
+    widget:setTooltip([[Shape for monster distance calculation:
+
+SQUARE (1): Chebyshev distance - includes diagonal tiles equally.
+    Default Tibia-style range check. Fast computation.
+    
+CIRCLE (2): Euclidean distance - true circular area.
+    Most accurate for AoE spells. Recommended.
+    
+DIAMOND (3): Manhattan distance - cross/plus pattern.
+    Counts only horizontal + vertical steps.
+    
+CROSS (4): Cardinal directions only (N/E/S/W).
+    Very narrow, line-of-sight style.]])
+    table.insert(values, {"smartPullShape", function() return widget.scroll:getValue() end})
+  end
 
   addCheckBox("chase", "Chase", true, "Chase the target, walking towards it until adjacent.")
   addCheckBox("keepDistance", "Keep Distance", false, "Maintain a specific distance from the target (set in Keep Distance slider).")
@@ -139,6 +171,8 @@ TargetBot.Creature.edit = function(config, callback) -- callback = function(newC
   addCheckBox("dynamicLureDelay", "Dynamic lure delay", false, "Add walking delay when enough monsters are around (reduces kiting speed).")
   addCheckBox("diamondArrows", "D-Arrows priority", false, "Prioritize targets for Diamond Arrow AoE optimization.")
   addCheckBox("rePosition", "rePosition to better tile", false, "Move to tiles with more open space when cornered.")
-  addCheckBox("smartPull", "Smart Pull", false, "Use CaveBot to pull more monsters when current pack is below threshold.")
+  addCheckBox("smartPull", "Smart Pull", false, [[When enabled, uses CaveBot to walk and pull more monsters if the current pack is too small.
+Configure with: Smart Pull Range (how far to check), Min Monsters (threshold), and Shape (accuracy).
+Useful for AoE hunting - ensures you always have enough monsters grouped before attacking.]])
   addCheckBox("rpSafe", "RP PVP SAFE - (DA)", false, "Safety mode for Royal Paladins - prevents Diamond Arrow usage near players.")
 end

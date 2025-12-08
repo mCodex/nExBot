@@ -4,9 +4,13 @@ TargetBot.Creature.configsCache = {}
 TargetBot.Creature.cached = 0
 TargetBot.Creature.lastCacheClear = 0
 
--- Cache configuration for better performance
-local CACHE_MAX_SIZE = 500  -- Reduced from 1000 for faster iteration
-local CACHE_TTL = 60000  -- Clear cache every 60 seconds
+-- Cache configuration optimized for memory efficiency
+local CACHE_MAX_SIZE = 200   -- Reduced for better memory management
+local CACHE_TTL = 30000      -- Clear cache every 30 seconds (reduced from 60)
+local CACHE_LRU_SIZE = 50    -- Keep only 50 most recent entries when pruning
+
+-- LRU tracking for smart cache eviction
+local cacheAccessOrder = {}  -- Array of {name, accessTime}
 
 TargetBot.Creature.resetConfigs = function()
   TargetBot.targetList:destroyChildren()
@@ -17,6 +21,35 @@ TargetBot.Creature.resetConfigsCache = function()
   TargetBot.Creature.configsCache = {}
   TargetBot.Creature.cached = 0
   TargetBot.Creature.lastCacheClear = now
+  cacheAccessOrder = {}
+end
+
+-- LRU cache eviction - keeps most recently used entries
+local function evictOldCacheEntries()
+  if TargetBot.Creature.cached < CACHE_MAX_SIZE then return end
+  
+  -- Sort by access time (most recent first)
+  table.sort(cacheAccessOrder, function(a, b)
+    return a.time > b.time
+  end)
+  
+  -- Keep only CACHE_LRU_SIZE most recent entries
+  local newCache = {}
+  local newOrder = {}
+  local kept = 0
+  
+  for i = 1, math.min(CACHE_LRU_SIZE, #cacheAccessOrder) do
+    local entry = cacheAccessOrder[i]
+    if entry and TargetBot.Creature.configsCache[entry.name] then
+      newCache[entry.name] = TargetBot.Creature.configsCache[entry.name]
+      newOrder[#newOrder + 1] = entry
+      kept = kept + 1
+    end
+  end
+  
+  TargetBot.Creature.configsCache = newCache
+  cacheAccessOrder = newOrder
+  TargetBot.Creature.cached = kept
 end
 
 -- Pre-compile regex patterns for faster matching
@@ -107,7 +140,7 @@ TargetBot.Creature.addConfig = function(config, focus)
   return widget
 end
 
--- Optimized config lookup with TTL-based cache invalidation
+-- Optimized config lookup with TTL-based cache invalidation and LRU eviction
 TargetBot.Creature.getConfigs = function(creature)
   if not creature then return {} end
   
@@ -121,6 +154,13 @@ TargetBot.Creature.getConfigs = function(creature)
   -- Fast path: check cache first
   local cached = TargetBot.Creature.configsCache[name]
   if cached then
+    -- Update LRU access time
+    for i = 1, #cacheAccessOrder do
+      if cacheAccessOrder[i].name == name then
+        cacheAccessOrder[i].time = now
+        break
+      end
+    end
     return cached
   end
   
@@ -153,12 +193,11 @@ TargetBot.Creature.getConfigs = function(creature)
     end
   end
   
-  -- Cache management with size limit
-  if TargetBot.Creature.cached >= CACHE_MAX_SIZE then
-    TargetBot.Creature.resetConfigsCache()
-  end
+  -- Cache management with LRU eviction
+  evictOldCacheEntries()
   
   TargetBot.Creature.configsCache[name] = configs
+  cacheAccessOrder[#cacheAccessOrder + 1] = { name = name, time = now }
   TargetBot.Creature.cached = TargetBot.Creature.cached + 1
   return configs
 end

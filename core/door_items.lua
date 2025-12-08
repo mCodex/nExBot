@@ -3,7 +3,6 @@
   ===========================
   
   Comprehensive door item IDs - hardcoded for reliability.
-  No external items.xml dependency required.
   
   Architecture: Single Responsibility - Door identification only
   Pattern: Data-driven configuration

@@ -23,7 +23,7 @@ end
 
 UI.Label("Eatable items:")
 if type(storage.foodItems) ~= "table" then
-  storage.foodItems = {3582, 3577}
+  storage.foodItems = {3582, 3577, 3585, 3600, 3578}  -- ham, meat, apple, bread, fish
 end
 
 local foodContainer = UI.Container(function(widget, items)
@@ -34,6 +34,8 @@ foodContainer:setItems(storage.foodItems)
 
 -- Use food item - works even with closed backpack (hotkey-style)
 local function eatFood(foodId)
+  if not foodId or foodId == 0 then return false end
+  
   -- Method 1: Use inventory item directly (works without open backpack)
   if g_game.useInventoryItem then
     g_game.useInventoryItem(foodId)
@@ -51,13 +53,26 @@ local function eatFood(foodId)
 end
 
 macro(500, "Eat Food", function()
-  if player:getRegenerationTime() > 400 or not storage.foodItems[1] then return end
+  if not player then return end
+  if player:getRegenerationTime() > 400 then return end
+  if not storage.foodItems then return end
+  
+  -- Handle both array and table formats
+  local items = storage.foodItems
+  if type(items) ~= "table" then return end
   
   -- Try each configured food item
-  for _, foodItem in ipairs(storage.foodItems) do
-    local foodId = type(foodItem) == "table" and foodItem.id or foodItem
-    if foodId and eatFood(foodId) then
-      return
+  for k, foodItem in pairs(items) do
+    local foodId = nil
+    if type(foodItem) == "table" then
+      foodId = foodItem.id or foodItem[1]
+    elseif type(foodItem) == "number" then
+      foodId = foodItem
+    end
+    if foodId and foodId > 0 then
+      if eatFood(foodId) then
+        return
+      end
     end
   end
 end)

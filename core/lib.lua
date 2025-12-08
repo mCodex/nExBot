@@ -9,6 +9,147 @@ nExBot.isUsing = false
 nExBot.customCooldowns = {}
 nExBot.lastLabel = ""
 
+--------------------------------------------------------------------------------
+-- OBJECT POOL - Memory-efficient table reuse
+-- Reduces garbage collection pressure for frequently created/destroyed tables
+--------------------------------------------------------------------------------
+local ObjectPool = {
+  pools = {},      -- {poolName -> {objects}}
+  maxSize = 100,   -- Max objects per pool
+  stats = {
+    hits = 0,
+    misses = 0,
+    returns = 0
+  }
+}
+
+-- Get or create a table from pool
+-- @param poolName: string identifier for the pool
+-- @param initialData: optional table to copy values from
+-- @return table
+function nExBot.acquireTable(poolName, initialData)
+  poolName = poolName or "default"
+  local pool = ObjectPool.pools[poolName]
+  
+  local obj
+  if pool and #pool > 0 then
+    obj = table.remove(pool)
+    ObjectPool.stats.hits = ObjectPool.stats.hits + 1
+  else
+    obj = {}
+    ObjectPool.stats.misses = ObjectPool.stats.misses + 1
+  end
+  
+  -- Copy initial data if provided
+  if initialData then
+    for k, v in pairs(initialData) do
+      obj[k] = v
+    end
+  end
+  
+  return obj
+end
+
+-- Return a table to the pool for reuse
+-- @param poolName: string identifier for the pool
+-- @param obj: the table to return
+function nExBot.releaseTable(poolName, obj)
+  if not obj then return end
+  
+  poolName = poolName or "default"
+  local pool = ObjectPool.pools[poolName]
+  
+  if not pool then
+    pool = {}
+    ObjectPool.pools[poolName] = pool
+  end
+  
+  -- Clear the table for reuse
+  for k in pairs(obj) do
+    obj[k] = nil
+  end
+  
+  -- Only keep up to maxSize objects
+  if #pool < ObjectPool.maxSize then
+    pool[#pool + 1] = obj
+    ObjectPool.stats.returns = ObjectPool.stats.returns + 1
+  end
+end
+
+-- Get pool statistics
+function nExBot.getPoolStats()
+  local totalPooled = 0
+  for _, pool in pairs(ObjectPool.pools) do
+    totalPooled = totalPooled + #pool
+  end
+  
+  return {
+    hits = ObjectPool.stats.hits,
+    misses = ObjectPool.stats.misses,
+    returns = ObjectPool.stats.returns,
+    totalPooled = totalPooled,
+    hitRate = ObjectPool.stats.hits / math.max(1, ObjectPool.stats.hits + ObjectPool.stats.misses)
+  }
+end
+
+-- Alias for common position table acquisition
+function nExBot.acquirePos(x, y, z)
+  local p = nExBot.acquireTable("position")
+  p.x = x or 0
+  p.y = y or 0
+  p.z = z or 0
+  return p
+end
+
+-- Release position table
+function nExBot.releasePos(p)
+  nExBot.releaseTable("position", p)
+end
+
+--------------------------------------------------------------------------------
+-- MEMOIZATION - Cache function results for pure functions
+--------------------------------------------------------------------------------
+local MemoCache = {}
+
+-- Create a memoized version of a pure function
+-- @param fn: the function to memoize
+-- @param ttl: optional time-to-live in ms (nil = forever)
+-- @return memoized function
+function nExBot.memoize(fn, ttl)
+  local cache = {}
+  local timestamps = {}
+  
+  return function(...)
+    local key = ""
+    for i = 1, select("#", ...) do
+      local v = select(i, ...)
+      key = key .. tostring(v) .. "|"
+    end
+    
+    local cached = cache[key]
+    local timestamp = timestamps[key]
+    
+    -- Check if cache is valid
+    if cached ~= nil then
+      if not ttl or (now - timestamp) < ttl then
+        return cached
+      end
+    end
+    
+    -- Compute and cache result
+    local result = fn(...)
+    cache[key] = result
+    timestamps[key] = now
+    return result
+  end
+end
+
+-- Clear memoization cache for a specific function (if stored externally)
+function nExBot.clearMemo(memoizedFn)
+  -- This requires the user to store the cache reference
+  -- For now, just document that memoized functions can't be cleared easily
+end
+
 function logInfo(text)
     local timestamp = os.date("%H:%M:%S")
     text = tostring(text)
@@ -721,10 +862,139 @@ end
 -- Cache client version check (doesn't change during session)
 local isOldTibia = g_game.getClientVersion() < 960
 
+--------------------------------------------------------------------------------
+-- ADVANCED MONSTER COUNTING SYSTEM
+-- Supports multiple mathematical shapes for accurate counting:
+-- - SQUARE: Chebyshev distance (max(dx, dy)) - default, fastest
+-- - CIRCLE: Euclidean distance (sqrt(dx² + dy²)) - most accurate
+-- - DIAMOND: Manhattan distance (dx + dy) - cross pattern
+-- - CROSS: Only cardinal directions (N/E/S/W)
+-- - CONE: Directional cone in front of player
+--------------------------------------------------------------------------------
+
+-- Shape type enum for cleaner code
+local SHAPE = {
+  SQUARE = 1,   -- Chebyshev distance (default Tibia range)
+  CIRCLE = 2,   -- Euclidean distance (true circle)
+  DIAMOND = 3,  -- Manhattan distance (rotated square)
+  CROSS = 4,    -- Cardinal directions only
+  CONE = 5      -- Directional cone
+}
+
+-- Export shape constants
+nExBot.SHAPE = SHAPE
+
+-- Pre-computed direction vectors for cone calculations
+local CONE_DIRECTIONS = {
+  [0] = {x = 0, y = -1},  -- North
+  [1] = {x = 1, y = 0},   -- East
+  [2] = {x = 0, y = 1},   -- South
+  [3] = {x = -1, y = 0}   -- West
+}
+
+-- Pure function: Check if position is within shape
+-- @param dx: x distance from center
+-- @param dy: y distance from center
+-- @param range: maximum range
+-- @param shape: shape type (SHAPE enum)
+-- @param direction: player direction (0-3) for cone shape
+-- @param coneAngle: cone half-angle in tiles (default 1)
+-- @return boolean
+local function isInShape(dx, dy, range, shape, direction, coneAngle)
+  shape = shape or SHAPE.SQUARE
+  
+  if shape == SHAPE.SQUARE then
+    -- Chebyshev distance: max(|dx|, |dy|) <= range
+    return math.max(dx, dy) <= range
+    
+  elseif shape == SHAPE.CIRCLE then
+    -- Euclidean distance: sqrt(dx² + dy²) <= range
+    -- Use squared comparison to avoid sqrt
+    return (dx * dx + dy * dy) <= (range * range)
+    
+  elseif shape == SHAPE.DIAMOND then
+    -- Manhattan distance: |dx| + |dy| <= range
+    return (dx + dy) <= range
+    
+  elseif shape == SHAPE.CROSS then
+    -- Only cardinal directions (exactly on X or Y axis)
+    return (dx == 0 or dy == 0) and math.max(dx, dy) <= range
+    
+  elseif shape == SHAPE.CONE then
+    -- Cone in front of player
+    direction = direction or 0
+    coneAngle = coneAngle or 1
+    
+    local dir = CONE_DIRECTIONS[direction]
+    if not dir then return false end
+    
+    -- Check if in front (positive dot product with direction)
+    local dotX = dx * dir.x
+    local dotY = dy * dir.y
+    
+    -- For North/South, check Y direction and X spread
+    -- For East/West, check X direction and Y spread
+    if dir.y ~= 0 then
+      -- North (y = -1) or South (y = 1)
+      local inFront = (dy * dir.y) > 0  -- Moving in correct direction
+      local withinSpread = dx <= coneAngle
+      local withinRange = dy <= range
+      return inFront and withinSpread and withinRange
+    else
+      -- East (x = 1) or West (x = -1)
+      local inFront = (dx * dir.x) > 0
+      local withinSpread = dy <= coneAngle
+      local withinRange = dx <= range
+      return inFront and withinSpread and withinRange
+    end
+  end
+  
+  return false
+end
+
+-- Advanced monster counting with shape support
+-- @param range: maximum range (default 10)
+-- @param shape: shape type from SHAPE enum (default SQUARE)
+-- @param options: optional table {multifloor, direction, coneAngle, center, filter}
+-- @return number of monsters
+function getMonstersAdvanced(range, shape, options)
+  range = range or 10
+  shape = shape or SHAPE.SQUARE
+  options = options or {}
+  
+  local multifloor = options.multifloor
+  local direction = options.direction or (player and player:getDirection())
+  local coneAngle = options.coneAngle or 1
+  local center = options.center or (player and player:getPosition())
+  local filter = options.filter  -- Optional filter function(creature) -> boolean
+  
+  if not center then return 0 end
+  
+  local mobs = 0
+  local px, py = center.x, center.y
+  
+  for _, spec in pairs(getSpectators(multifloor)) do
+    if spec:isMonster() and (isOldTibia or spec:getType() < 3) then
+      -- Apply custom filter if provided
+      if not filter or filter(spec) then
+        local specPos = spec:getPosition()
+        local dx = math.abs(specPos.x - px)
+        local dy = math.abs(specPos.y - py)
+        
+        if isInShape(dx, dy, range, shape, direction, coneAngle) then
+          mobs = mobs + 1
+        end
+      end
+    end
+  end
+  
+  return mobs
+end
+
 -- Optimized getMonsters with cached version check and pre-fetched player position
+-- Backward compatible - uses SQUARE shape (Chebyshev distance)
 function getMonsters(range, multifloor)
     range = range or 10
-    local rangeSq = range * range  -- Use squared distance to avoid sqrt
     local mobs = 0
     local playerPos = player:getPosition()
     local px, py, pz = playerPos.x, playerPos.y, playerPos.z
@@ -742,6 +1012,27 @@ function getMonsters(range, multifloor)
     end
     return mobs
 end
+
+-- Get monsters in a circular area (true distance)
+function getMonstersCircle(range, multifloor)
+  return getMonstersAdvanced(range, SHAPE.CIRCLE, {multifloor = multifloor})
+end
+
+-- Get monsters in diamond/cross pattern
+function getMonstersDiamond(range, multifloor)
+  return getMonstersAdvanced(range, SHAPE.DIAMOND, {multifloor = multifloor})
+end
+
+-- Get monsters in cone in front of player
+function getMonstersCone(range, spread, multifloor)
+  return getMonstersAdvanced(range, SHAPE.CONE, {
+    multifloor = multifloor,
+    coneAngle = spread or 1
+  })
+end
+
+-- Export isInShape for other modules
+nExBot.isInShape = isInShape
 
 -- Optimized getPlayers with reduced function calls
 function getPlayers(range, multifloor)

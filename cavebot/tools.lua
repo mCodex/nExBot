@@ -4,10 +4,6 @@ local Tools = CaveBot.Tools
 local USE_COOLDOWN = 600
 local lastUseTime = 0
 
-local function hasClassifier()
-  return ItemClassifier and ItemClassifier.isDoor
-end
-
 local function hasDoorItems()
   return DoorItems and DoorItems.isClosedDoor
 end
@@ -80,18 +76,9 @@ local function canUseDoor(tile)
   
   local itemId = thing:getId()
 
-  -- First try DoorItems database (more complete)
+  -- Use DoorItems database for door detection
   if hasDoorItems() then
-    if DoorItems.isClosedDoor(itemId) then
-      return true
-    end
-  end
-  
-  -- Fallback to ItemClassifier
-  if hasClassifier() then
-    if ItemClassifier.isDoor(itemId) then
-      return true
-    end
+    return DoorItems.isClosedDoor(itemId)
   end
 
   return false
@@ -216,8 +203,8 @@ local function openDoor(tile)
 end
 
 local function resolveDoors(tiles)
-  -- Works with either DoorItems or ItemClassifier
-  if not hasClassifier() and not hasDoorItems() then
+  -- Uses DoorItems for door detection
+  if not hasDoorItems() then
     return false
   end
 

@@ -6,6 +6,10 @@ local lureEnabled = true
 local dangerValue = 0
 local looterStatus = ""
 
+-- Smart Pull state (shared with CaveBot)
+TargetBot = TargetBot or {}
+TargetBot.smartPullActive = false  -- When true, CaveBot pauses waypoint walking
+
 -- Creature type constants for clarity
 local CREATURE_TYPE = {
   PLAYER = 0,
@@ -29,13 +33,173 @@ local STATUS_PULLING = "Pulling (using CaveBot)"
 local STATUS_WAITING = "Waiting"
 local STATUS_ATTACK_PREFIX = "Attack & "
 
--- PERFORMANCE: Path cache to avoid recalculating paths every tick
-local PathCache = {
-  paths = {},           -- {creatureId -> {path, timestamp}}
-  TTL = 500,            -- Cache paths for 500ms
+--------------------------------------------------------------------------------
+-- PERFORMANCE: Optimized Creature Cache with EventBus Integration
+-- Uses event-driven updates instead of constant polling
+--------------------------------------------------------------------------------
+local CreatureCache = {
+  monsters = {},          -- {id -> {creature, path, params, lastUpdate}}
+  monsterCount = 0,
+  bestTarget = nil,
+  bestPriority = 0,
+  totalDanger = 0,
+  dirty = true,           -- Flag to recalculate on next tick
+  lastFullUpdate = 0,
+  FULL_UPDATE_INTERVAL = 500,  -- Full recalculation every 500ms
+  PATH_TTL = 300,         -- Path cache valid for 300ms
   lastCleanup = 0,
-  cleanupInterval = 2000
+  CLEANUP_INTERVAL = 2000
 }
+
+-- Mark cache as dirty (needs recalculation)
+local function invalidateCache()
+  CreatureCache.dirty = true
+end
+
+-- Clean up stale cache entries
+local function cleanupCache()
+  if now - CreatureCache.lastCleanup < CreatureCache.CLEANUP_INTERVAL then
+    return
+  end
+  
+  local cutoff = now - 5000  -- Remove entries older than 5 seconds
+  local newMonsters = {}
+  local count = 0
+  
+  for id, data in pairs(CreatureCache.monsters) do
+    if data.lastUpdate > cutoff then
+      newMonsters[id] = data
+      count = count + 1
+    end
+  end
+  
+  CreatureCache.monsters = newMonsters
+  CreatureCache.monsterCount = count
+  CreatureCache.lastCleanup = now
+end
+
+-- Update a single creature in cache (called on events)
+local function updateCreatureInCache(creature)
+  if not creature or creature:isDead() then
+    local id = creature and creature:getId()
+    if id and CreatureCache.monsters[id] then
+      CreatureCache.monsters[id] = nil
+      CreatureCache.monsterCount = CreatureCache.monsterCount - 1
+    end
+    invalidateCache()
+    return
+  end
+  
+  if not creature:isMonster() then return end
+  
+  local id = creature:getId()
+  local pos = player:getPosition()
+  local cpos = creature:getPosition()
+  
+  -- Skip if too far
+  if math.abs(pos.x - cpos.x) > 10 or math.abs(pos.y - cpos.y) > 10 then
+    if CreatureCache.monsters[id] then
+      CreatureCache.monsters[id] = nil
+      CreatureCache.monsterCount = CreatureCache.monsterCount - 1
+    end
+    return
+  end
+  
+  local entry = CreatureCache.monsters[id]
+  if not entry then
+    entry = { creature = creature, lastUpdate = now }
+    CreatureCache.monsters[id] = entry
+    CreatureCache.monsterCount = CreatureCache.monsterCount + 1
+  else
+    entry.creature = creature
+    entry.lastUpdate = now
+  end
+  
+  -- Recalculate path if needed
+  if not entry.path or now - (entry.pathTime or 0) > CreatureCache.PATH_TTL then
+    entry.path = findPath(pos, cpos, 10, PATH_PARAMS)
+    entry.pathTime = now
+  end
+  
+  invalidateCache()
+end
+
+-- Remove creature from cache
+local function removeCreatureFromCache(creature)
+  if not creature then return end
+  local id = creature:getId()
+  if CreatureCache.monsters[id] then
+    CreatureCache.monsters[id] = nil
+    CreatureCache.monsterCount = CreatureCache.monsterCount - 1
+    invalidateCache()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- EventBus Integration for Event-Driven Targeting
+--------------------------------------------------------------------------------
+if EventBus then
+  -- Monster appears - add to cache
+  EventBus.on("monster:appear", function(creature)
+    updateCreatureInCache(creature)
+  end, 50)
+  
+  -- Monster disappears - remove from cache
+  EventBus.on("monster:disappear", function(creature)
+    removeCreatureFromCache(creature)
+  end, 50)
+  
+  -- Monster health changes - update priority (high priority for targeting decisions)
+  EventBus.on("monster:health", function(creature, percent)
+    if percent <= 0 then
+      removeCreatureFromCache(creature)
+    else
+      -- Invalidate to recalculate priority for wounded monsters
+      invalidateCache()
+    end
+  end, 80)
+  
+  -- Player moves - need to recalculate paths
+  EventBus.on("player:move", function(newPos, oldPos)
+    -- Invalidate all paths on player movement
+    for id, data in pairs(CreatureCache.monsters) do
+      data.path = nil
+      data.pathTime = nil
+    end
+    invalidateCache()
+  end, 60)
+  
+  -- Target changes
+  EventBus.on("combat:target", function(creature, oldCreature)
+    invalidateCache()
+  end, 70)
+end
+
+-- PERFORMANCE: Path cache for backward compatibility (optimized)
+local PathCache = {
+  paths = {},
+  TTL = 500,
+  lastCleanup = 0,
+  cleanupInterval = 2000,
+  size = 0,
+  maxSize = 100
+}
+
+-- Pre-allocated cache entry to reduce GC
+local cacheEntryPool = {}
+
+local function acquireCacheEntry()
+  local entry = table.remove(cacheEntryPool)
+  return entry or { path = nil, timestamp = 0 }
+end
+
+local function releaseCacheEntry(entry)
+  if #cacheEntryPool < 20 then
+    entry.path = nil
+    entry.timestamp = 0
+    cacheEntryPool[#cacheEntryPool + 1] = entry
+  end
+end
 
 local function getCachedPath(creatureId, fromPos, toPos)
   local cached = PathCache.paths[creatureId]
@@ -46,10 +210,32 @@ local function getCachedPath(creatureId, fromPos, toPos)
 end
 
 local function setCachedPath(creatureId, path)
-  PathCache.paths[creatureId] = {
-    path = path,
-    timestamp = now
-  }
+  local existing = PathCache.paths[creatureId]
+  if existing then
+    existing.path = path
+    existing.timestamp = now
+  else
+    if PathCache.size >= PathCache.maxSize then
+      -- Evict oldest entry
+      local oldest, oldestId = now, nil
+      for id, data in pairs(PathCache.paths) do
+        if data.timestamp < oldest then
+          oldest = data.timestamp
+          oldestId = id
+        end
+      end
+      if oldestId then
+        releaseCacheEntry(PathCache.paths[oldestId])
+        PathCache.paths[oldestId] = nil
+        PathCache.size = PathCache.size - 1
+      end
+    end
+    local entry = acquireCacheEntry()
+    entry.path = path
+    entry.timestamp = now
+    PathCache.paths[creatureId] = entry
+    PathCache.size = PathCache.size + 1
+  end
 end
 
 local function cleanupPathCache()
@@ -60,27 +246,12 @@ local function cleanupPathCache()
   local cutoff = now - PathCache.TTL
   for id, data in pairs(PathCache.paths) do
     if data.timestamp < cutoff then
+      releaseCacheEntry(data)
       PathCache.paths[id] = nil
+      PathCache.size = PathCache.size - 1
     end
   end
   PathCache.lastCleanup = now
-end
-
--- Helper function to check if creature is targetable
-local function isTargetableCreature(creature, oldTibia)
-  if not creature:isMonster() then
-    return false
-  end
-  
-  -- Old Tibia clients don't have creature types
-  if oldTibia then
-    return true
-  end
-  
-  local creatureType = creature:getType()
-  
-  -- Target monsters and some summons (type < 3)
-  return creatureType < 3
 end
 
 -- ui
@@ -118,16 +289,14 @@ end
 
 local oldTibia = g_game.getClientVersion() < 960
 
--- NOTE: TargetBot main loop is currently disabled pending performance optimization.
--- The targeting system uses path caching and reduced API calls for better performance.
--- TODO: Re-enable after completing macro performance tuning.
--- See PathCache implementation above for the optimized approach.
-
 -- config, its callback is called immediately, data can be nil
 config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
   if not data then
     ui.status.right:setText("Off")
-    return targetbotMacro.setOff() 
+    if targetbotMacro and targetbotMacro.setOff then
+      return targetbotMacro.setOff() 
+    end
+    return
   end
   TargetBot.Creature.resetConfigs()
   for _, value in ipairs(data["targeting"] or {}) do
@@ -356,3 +525,202 @@ end
 TargetBot.canLure = function()
   return lureEnabled
 end
+
+-- Helper function to check if creature is targetable
+local function isTargetableCreature(creature)
+  if not creature or creature:isDead() then
+    return false
+  end
+  
+  if not creature:isMonster() then
+    return false
+  end
+  
+  -- Old Tibia clients don't have creature types
+  if oldTibia then
+    return true
+  end
+  
+  local creatureType = creature:getType()
+  -- Target monsters (type 1) and some summons (type < 3)
+  return creatureType < 3
+end
+
+--------------------------------------------------------------------------------
+-- Optimized Main TargetBot Loop
+-- Uses EventBus-driven cache for reduced CPU usage and better accuracy
+-- Only recalculates when cache is dirty (events occurred)
+--------------------------------------------------------------------------------
+
+-- Recalculate best target from cache
+local function recalculateBestTarget()
+  local pos = player:getPosition()
+  if not pos then return end
+  
+  local bestTarget = nil
+  local bestPriority = 0
+  local totalDanger = 0
+  local targetCount = 0
+  local debugEnabled = ui.editor.debug:isOn()
+  
+  -- Use cached creatures if available, otherwise fetch fresh
+  local useCache = CreatureCache.monsterCount > 0 and not CreatureCache.dirty
+  
+  if useCache and now - CreatureCache.lastFullUpdate < CreatureCache.FULL_UPDATE_INTERVAL then
+    -- Fast path: use cached data
+    for id, data in pairs(CreatureCache.monsters) do
+      local creature = data.creature
+      if creature and not creature:isDead() and isTargetableCreature(creature) then
+        local path = data.path
+        if not path then
+          local cpos = creature:getPosition()
+          path = findPath(pos, cpos, 10, PATH_PARAMS)
+          data.path = path
+          data.pathTime = now
+        end
+        
+        if path then
+          local params = TargetBot.Creature.calculateParams(creature, path)
+          
+          if params.config then
+            targetCount = targetCount + 1
+            totalDanger = totalDanger + (params.danger or 0)
+            
+            if debugEnabled then
+              creature:setText(tostring(math.floor(params.priority * 10) / 10))
+            end
+            
+            if params.priority > bestPriority then
+              bestPriority = params.priority
+              bestTarget = params
+            end
+          end
+        end
+      end
+    end
+  else
+    -- Slow path: full refresh from getSpectators
+    local creatures = g_map.getSpectatorsInRange(pos, false, 10, 10)
+    
+    -- Clear and rebuild cache
+    CreatureCache.monsters = {}
+    CreatureCache.monsterCount = 0
+    
+    if creatures then
+      for i = 1, #creatures do
+        local creature = creatures[i]
+        if isTargetableCreature(creature) then
+          local id = creature:getId()
+          local cpos = creature:getPosition()
+          local path = findPath(pos, cpos, 10, PATH_PARAMS)
+          
+          -- Add to cache
+          CreatureCache.monsters[id] = {
+            creature = creature,
+            path = path,
+            pathTime = now,
+            lastUpdate = now
+          }
+          CreatureCache.monsterCount = CreatureCache.monsterCount + 1
+          
+          if path then
+            local params = TargetBot.Creature.calculateParams(creature, path)
+            
+            if params.config then
+              targetCount = targetCount + 1
+              totalDanger = totalDanger + (params.danger or 0)
+              
+              if debugEnabled then
+                creature:setText(tostring(math.floor(params.priority * 10) / 10))
+              end
+              
+              if params.priority > bestPriority then
+                bestPriority = params.priority
+                bestTarget = params
+              end
+            end
+          end
+        end
+      end
+    end
+    
+    CreatureCache.lastFullUpdate = now
+  end
+  
+  -- Update cache state
+  CreatureCache.bestTarget = bestTarget
+  CreatureCache.bestPriority = bestPriority
+  CreatureCache.totalDanger = totalDanger
+  CreatureCache.dirty = false
+  
+  return bestTarget, targetCount, totalDanger
+end
+
+-- Main TargetBot loop - optimized with EventBus caching
+targetbotMacro = macro(100, function()
+  if not config or not config.isOn or not config.isOn() then
+    return
+  end
+  
+  local pos = player:getPosition()
+  if not pos then return end
+  
+  -- Periodic cache cleanup
+  cleanupCache()
+  cleanupPathCache()
+  
+  -- Handle walking if destination is set
+  TargetBot.walk()
+  
+  -- Check for looting first
+  local lootResult = TargetBot.Looting.process()
+  if lootResult then
+    lastAction = now
+    looterStatus = TargetBot.Looting.getStatus and TargetBot.Looting.getStatus() or "Looting"
+    return
+  else
+    looterStatus = ""
+  end
+  
+  -- Get best target (uses cache when possible)
+  local bestTarget, targetCount, totalDanger = recalculateBestTarget()
+  
+  if not bestTarget then
+    ui.target.right:setText("-")
+    ui.danger.right:setText("0")
+    ui.config.right:setText("-")
+    dangerValue = 0
+    cavebotAllowance = now + 100
+    ui.status.right:setText(STATUS_WAITING)
+    return
+  end
+  
+  -- Update danger value
+  dangerValue = totalDanger
+  ui.danger.right:setText(tostring(totalDanger))
+  
+  -- Attack best target
+  if bestTarget.creature and bestTarget.config then
+    lastAction = now
+    ui.target.right:setText(bestTarget.creature:getName())
+    ui.config.right:setText(bestTarget.config.name or "-")
+    
+    -- Pass lure status for status display
+    local isLooting = false
+    TargetBot.Creature.attack(bestTarget, targetCount, isLooting)
+    
+    -- Update status
+    if lureEnabled then
+      ui.status.right:setText(STATUS_ATTACKING)
+    else
+      ui.status.right:setText(STATUS_ATTACKING_LURE_OFF)
+    end
+  else
+    ui.target.right:setText("-")
+    ui.config.right:setText("-")
+    
+    -- No target, allow cavebot
+    cavebotAllowance = now + 100
+    ui.status.right:setText(STATUS_WAITING)
+  end
+end)

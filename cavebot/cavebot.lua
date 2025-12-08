@@ -40,61 +40,78 @@ local function updateCache()
   cachedActionCount = uiList:getChildCount()
 end
 
-cavebotMacro = macro(1000, function()
-  -- Skip if player is walking (let the walk complete first)
-  if player and player:isWalking() then
-    return
-  end
+-- Cache TargetBot function references (avoid repeated table lookups)
+local targetBotIsActive = nil
+local targetBotIsCaveBotAllowed = nil
 
-  -- Early return checks first (most common case)
-  if TargetBot and TargetBot.isActive and TargetBot.isCaveBotActionAllowed and TargetBot.isActive() and not TargetBot.isCaveBotActionAllowed() then
-    CaveBot.resetWalking()
-    return
+local function initTargetBotCache()
+  if TargetBot then
+    targetBotIsActive = TargetBot.isActive
+    targetBotIsCaveBotAllowed = TargetBot.isCaveBotActionAllowed
+  end
+end
+
+cavebotMacro = macro(250, function()
+  -- Skip if player is walking (let walk complete)
+  if player:isWalking() then return end
+  
+  -- Lazy-init TargetBot cache
+  if not targetBotIsActive and TargetBot then
+    initTargetBotCache()
+  end
+  
+  -- Check TargetBot allows CaveBot action (cached function refs)
+  if targetBotIsActive and targetBotIsActive() then
+    if targetBotIsCaveBotAllowed and not targetBotIsCaveBotAllowed() then
+      CaveBot.resetWalking()
+      return
+    end
+    
+    -- SMART PULL PAUSE: If smartPull is active, pause waypoint walking
+    -- This prevents running to next waypoint when we have monsters to kill
+    if TargetBot.smartPullActive then
+      CaveBot.resetWalking()
+      return  -- Stay here and fight, don't walk to waypoint
+    end
   end
   
   -- Use cached UI list reference
   uiList = uiList or ui.list
   
-  -- Get action count (use direct call, it's fast)
+  -- Get action count
   local actionCount = uiList:getChildCount()
   if actionCount == 0 then return end
   
-  -- Get current action
-  local currentAction = uiList:getFocusedChild()
-  if not currentAction then
-    currentAction = uiList:getFirstChild()
-    if not currentAction then return end
-  end
+  -- Get current action (single call pattern)
+  local currentAction = uiList:getFocusedChild() or uiList:getFirstChild()
+  if not currentAction then return end
   
-  -- Direct property access (already cached on widget)
+  -- Direct table access (O(1))
   local actionType = currentAction.action
-  local action = CaveBot.Actions[actionType]
+  local actionDef = CaveBot.Actions[actionType]
   
-  if not action then
-    warn("Invalid cavebot action: " .. tostring(actionType))
+  if not actionDef then
+    warn("[CaveBot] Invalid action: " .. tostring(actionType))
     return
   end
   
-  local value = currentAction.value
-  local retry = false
-  
-  -- Execute action (removed pcall for performance, errors will propagate)
+  -- Execute action (inline for performance)
   CaveBot.resetWalking()
-  local result = action.callback(value, actionRetries, prevActionResult)
+  local result = actionDef.callback(currentAction.value, actionRetries, prevActionResult)
   
+  -- Handle result (simplified flow)
   if result == "retry" then
     actionRetries = actionRetries + 1
-    retry = true
-  elseif result == true or result == false then
-    actionRetries = 0
+    return  -- Early exit for retry
+  end
+  
+  -- Reset for next action
+  actionRetries = 0
+  if result == true or result == false then
     prevActionResult = result
   end
   
-  if retry then
-    return
-  end
-  
-  -- Check if focused child changed during action
+  -- Check if action changed focus during execution
   local newFocused = uiList:getFocusedChild()
   if currentAction ~= newFocused then
     currentAction = newFocused or uiList:getFirstChild()
@@ -631,6 +648,34 @@ end
 
 CaveBot.delay = function(value)
   cavebotMacro.delay = math.max(cavebotMacro.delay or 0, now + value)
+end
+
+-- Direct walk to position (used by other modules like clear_tile, imbuing)
+-- More efficient than goto action as it doesn't have retry logic overhead
+CaveBot.GoTo = function(dest, precision)
+  if not dest then return false end
+  
+  precision = precision or 1
+  local playerPos = player:getPosition()
+  if not playerPos then return false end
+  
+  -- Already at destination
+  local distX = math.abs(dest.x - playerPos.x)
+  local distY = math.abs(dest.y - playerPos.y)
+  if distX <= precision and distY <= precision and dest.z == playerPos.z then
+    return true
+  end
+  
+  -- Different floor
+  if dest.z ~= playerPos.z then
+    return false
+  end
+  
+  -- Use optimized walkTo
+  return CaveBot.walkTo(dest, storage.extras.gotoMaxDistance or 40, {
+    precision = precision,
+    ignoreNonPathable = true
+  })
 end
 
 CaveBot.gotoLabel = function(label)

@@ -47,7 +47,7 @@ local TILE_ACTIONS = {
   },
 }
 
--- Door IDs that can be opened (parsed from items.xml)
+-- Door IDs that can be opened
 local DOOR_IDS = {
   closed = {},
   open = {},
@@ -230,7 +230,7 @@ function GlobalConfig.openDoor(tile, keyId)
 end
 
 --------------------------------------------------------------------------------
--- Door ID Population from items.xml
+-- Door ID Population
 -- This runs once on load to build the door database
 --------------------------------------------------------------------------------
 

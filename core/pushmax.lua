@@ -195,7 +195,59 @@ end)
 local lastPushTime = 0
 local PUSH_COOLDOWN = 2000
 
--- NOTE: Push macro is currently disabled pending performance optimization.
--- The feature works via keyboard events (onKeyDown/onKeyPress) for marking,
--- but the automatic pushing functionality is disabled.
--- TODO: Re-enable with optimized pathfinding once performance issues are resolved.
+-- Automatic push macro - executes the push when target and destination are set
+macro(200, function()
+  if not config.enabled then return end
+  if not pushTarget or not targetTile then return end
+  if now - lastPushTime < PUSH_COOLDOWN then return end
+  
+  -- Verify target still exists and is valid
+  local creature = pushTarget
+  if not creature or not creature:getPosition() then
+    resetData()
+    return
+  end
+  
+  local creaturePos = creature:getPosition()
+  local targetPos = targetTile:getPosition()
+  
+  -- Check if we can push (adjacent)
+  if not isOk(creaturePos, targetPos) then
+    resetData()
+    return
+  end
+  
+  -- Check if target tile is walkable and not blocked
+  if isNotOk(fieldTable, targetTile) or targetTile:hasCreature() then
+    return -- Wait for tile to be clear
+  end
+  
+  -- Execute the push
+  if config.pushMaxRuneId and config.pushMaxRuneId > 0 then
+    local rune = findItem(config.pushMaxRuneId)
+    if rune then
+      g_game.useWith(rune, creature)
+      lastPushTime = now
+    end
+  end
+end)
+
+-- Clear tile macro - removes items from marked tile
+macro(300, function()
+  if not config.enabled then return end
+  if not cleanTile then return end
+  
+  local items = cleanTile:getItems()
+  if not items or #items == 0 then
+    cleanTile:setText('')
+    cleanTile = nil
+    return
+  end
+  
+  -- Move the top item
+  local topItem = items[#items]
+  if topItem and topItem:isMoveable() then
+    local playerPos = player:getPosition()
+    g_game.move(topItem, playerPos, topItem:getCount())
+  end
+end)

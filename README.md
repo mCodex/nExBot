@@ -6,13 +6,10 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![OTClientV8](https://img.shields.io/badge/OTClientV8-compatible-orange.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1+-purple.svg)
-![Architecture](https://img.shields.io/badge/architecture-event--driven-yellow.svg)
 
 **A high-performance, event-driven automation bot for OTClientV8**
 
-*Forked from vBot with major performance improvements, SOLID architecture, and new features*
-
-[Features](#-features) • [Architecture](#-architecture) • [Installation](#-installation) • [Performance](#-performance) • [Changelog](#-changelog)
+[Features](#-features) • [Architecture](#-architecture) • [Installation](#-installation) • [Performance](#-performance)
 
 </div>
 
@@ -21,530 +18,235 @@
 ## ✨ Features
 
 ### 🎯 TargetBot
-- **Smart Target Priority** - Prioritizes low health monsters to prevent escapes
-- **Advanced Wave Avoidance** - Intelligent positioning system that predicts monster attack patterns
-- **Multi-Monster Threat Analysis** - Evaluates danger from all nearby monsters simultaneously
-- **🎯 Hotkey-Style Runes** - Uses runes like hotkeys (no open backpack required)
-- **🆕 Exclusion Patterns** - Use `!` to exclude monsters (e.g., `*, !Dragon` = all except Dragon)
-- **🆕 Smart Pull** - Uses CaveBot to pull more monsters when pack is below threshold
-- **Optimized Looting** - O(1) item lookup with reduced wait times
-- **🍖 Eat Food from Corpses** - Automatically eats food found in killed monster corpses for regeneration
+- **Smart Target Priority** - Weighted scoring with health, distance, and danger factors
+- **Wave Attack Avoidance** - Front-arc detection with anti-oscillation (300ms cooldown)
+- **Smart Pull with Pause** - Pauses waypoint walking to maximize exp/hour (prevents respawn loss)
+- **Tactical Reposition** - Multi-factor tile scoring (escape routes, danger zones, target distance)
+- **Dynamic Lure** - Pull more monsters when pack is below threshold
+- **Priority Movement System** - Safety → Survival → Positioning → Combat
+- **Exclusion Patterns** - Use `!` prefix to exclude monsters (e.g., `*, !Dragon`)
 
 ### 🗺️ CaveBot  
-- **🔧 Native OTClient Walking** - Uses reliable `autoWalk()` function for pathfinding
-- **🚪 Automatic Door Opening** - Opens closed doors automatically during waypoint walking
-- **🖱️ Minimap Goto** - Right-click minimap to add CaveBot waypoints (works on current floor)
-- **Improved Pathfinding** - Smarter waypoint navigation with optimized algorithms  
-- **🚪 Hardcoded Door Database** - 200+ door IDs built-in (no items.xml required)
-- **Auto Tool Usage** - Automatic rope, shovel, machete usage (configured in Extras)
-- **Skin Monster Enhancement** - More accurate and efficient skinning with configurable delays
+- **250ms Macro Interval** - Fast response with cached function references
+- **Path Caching** - LRU cache with 2-second TTL and smart invalidation
+- **Smart Pull Integration** - Automatically pauses when TargetBot is pulling
+- **Floor Change Prevention** - Detects stairs/ladders to prevent accidental floor changes
+- **Automatic Door Opening** - Opens closed doors during waypoint walking
+- **Native autoWalk** - Uses reliable OTClient pathfinding
 
 ### 💊 HealBot
-- **⚡ Event-Driven Healing** - Uses EventBus for instant reaction to health/mana changes
-- **🎯 Hotkey-Style Potions** - Drinks potions like hotkeys (no open backpack required)
-- **50ms Spell Response** - Ultra-fast healing response for critical situations
-- **Cached Stats** - O(1) condition checking with pre-computed lookup tables
-- **Smart Mana Management** - Efficient potion tracking to prevent spam
-- **Priority-Based Execution** - Health changes trigger immediate spell checks
+- **75ms Spell Response** - Ultra-fast healing for critical situations
+- **Cached LocalPlayer** - 1-second revalidation interval reduces API calls
+- **Conditional Stat Updates** - Only writes when values actually change
+- **O(1) Condition Checking** - Pre-built lookup tables for instant evaluation
+- **Hotkey-Style Potions** - Works without open backpack
 
 ### ⚔️ AttackBot
-- **🎯 Hotkey-Style Runes** - Uses runes like hotkeys (no open backpack required)
-- **Smart Visibility Check** - Bypasses visibility when inventory methods available
-- **All Rune Categories** - Targeted runes, area runes (GFB, Avalanche) work without open BP
-- **Efficient Pattern Matching** - Pre-computed spell patterns for optimal targeting
-
-### 🍽️ Eat Food
-- **🎯 Hotkey-Style Eating** - Eats food like hotkeys (no open backpack required)
-- **Regeneration Detection** - Only eats when regeneration time is low
-- **Multiple Food Types** - Supports configurable list of food items
-- **O(n) to O(1)** - Simplified loop with early exit on success
-
-### 🛠️ Tools
-- **Auto Haste** - Automatic haste spell casting with vocation detection (supports all vocations 1-14)
-- **Auto Mount** - Automatically mounts when outside PZ (uses default mount from client)
-- **Low Power Mode** - Reduces foreground/background FPS for multi-client setups
-- **Exchange Money** - Automatic gold coin exchange
-- **Mana Training** - Automatic mana training with configurable spell and threshold
+- **Monster Count Caching** - 100ms TTL reduces redundant calculations
+- **Attack Entry Caching** - 500ms cache for UI children list
+- **Lazy Safety Evaluation** - Only checks PvP/blacklist when needed
+- **Pre-cached Target Data** - Single target info fetch per tick
+- **Conditional Direction Calc** - Only calculates when Rotate is enabled
+- **Hotkey-Style Runes** - All rune types work without open backpack
+- **Non-Blocking Cooldowns** - No UI freezing
 
 ### 📦 Container Panel
-- **BFS Deep Search** - Recursively opens ALL nested containers using Breadth-First Search
-- **Vertical Button Layout** - Clean 1-button-per-row design that fits all screen sizes
-- **Open All Containers** - Opens main BP + all nested containers
-- **Reopen All** - Closes everything and reopens from back slot with BFS
-- **Close All** - Closes all open containers instantly
-- **Minimize/Maximize All** - Quick container window management
-- **Auto Minimize** - Automatically minimizes containers after opening
-- **Open Purse** - Optional purse opening on reopen
-- **New Window Mode** - Each container opens in its own window (no cascading issues)
+- **Auto Open on Login** - Toggle to automatically open all containers when logging in
+- **Slot-Based Tracking** - Accurate nested container detection (no infinite loops)
+- **Quiver Support** - Opens equipped quiver from right hand slot
+- **Purse Support** - Opens purse alongside backpacks
+- **Auto Minimize** - Keeps UI clean by minimizing opened containers
 
-### 🏹 Quiver Manager
-- **🎯 Hotkey-Style Ammo** - Finds ammo via `g_game.findPlayerItem` (no open backpack required)
-- **O(1) Hash Lookups** - Instant weapon/ammo detection (no linear searches)
-- **Smart Event Filtering** - Only triggers on relevant container changes
-- **📡 EventBus Integration** - Reacts to weapon/shield slot changes via `equipment:change` event
-- **Optimized Cooldowns** - 300ms interval with smart caching
-- **Auto Weapon Detection** - Detects bows vs crossbows and uses correct ammo type
-
-### 🗑️ Dropper
-- **O(1) Hash Lookups** - Instant item detection using lookup tables
-- **Event-Driven Processing** - Only processes when containers change
-- **Config Hash Detection** - Automatically rebuilds lookups when settings change
-- **Three Item Categories** - Trash (always drop), Use (auto-use), Cap (drop if low capacity)
-- **Smart Throttling** - 150ms cooldown between actions to prevent spam
-
-### 👔 Equipper (EQ Manager)
-- **📡 EventBus Integration** - Reacts to equipment slot changes via `equipment:change` event
-- **⚡ Non-Blocking Cooldowns** - Replaced `delay(200)` with time-based cooldowns (no UI flickering)
-- **100ms Macro Interval** - Responsive equipment swaps with smart throttling
-- **Smooth UI** - No more flickering on equipment changes
-
-### ⚙️ Extras Panel (nExBot Settings)
-- **Tool Items** - Configure rope, shovel, machete, scythe items
-- **Auto Open Doors** - Automatically opens closed doors while walking
-- **CaveBot Pathfinding** - Auto-search for reachable waypoints
-- **Custom Window Title** - Personalize OTCv8 window name
-- **Anti-Kick** - Auto-turn every 10 minutes
-- **And more...** - Full configuration panel for all bot features
-
-### 🧠 SmartHunt Analytics (NEW!)
-- **📊 Supply Prediction** - Tracks consumption rates and predicts optimal supply amounts
-- **🗺️ Route Optimization** - Identifies "cold spots" with low XP/kill rates
-- **⚔️ Dynamic Lure Threshold** - Auto-adjusts max creatures based on damage taken
-- **🔄 Smart Refill Decision** - Calculates if one more round is possible before refill
-- **👹 Monster Database** - Learns danger levels per monster type automatically
-- **📈 Session Analytics** - Track round times, consumption, and efficiency
-
-### ⚔️ Combat Intelligence (NEW!)
-- **🎯 Multi-Target Wave Optimizer** - Calculates optimal wave spell position for max hits
-- **🔄 Combo Sequencer** - Auto-executes optimal combos based on target count and vocation
-- **⚠️ Threat Prediction** - Detects flankers, calculates threat levels (safe/moderate/high/critical)
-- **📊 Kill Priority Optimizer** - Factors HP, danger, loot value for optimal target selection
-- **⏱️ Area Spell Timing** - Waits for monsters to stack before AoE casting
-
-### ⚡ Performance Optimizer (NEW!)
-- **🗺️ Predictive Pathfinding** - Pre-caches waypoint paths with LRU cache
-- **💤 Lazy Evaluation** - Only recalculates when state actually changes
-- **📦 Batch Operations** - Queue multiple item operations for efficiency
-- **📂 Smart Container Caching** - Tracks container changes with fast item index
-
-### 🔧 State Machine Architecture (NEW!)
-- **🤖 CaveBot FSM** - Proper state machine (idle, hunting, refilling, banking, etc.)
-- **🎯 TargetBot FSM** - State-based targeting (scanning, attacking, chasing, looting)
-- **📊 State Coordinator** - Global state management and transitions
-- **🐛 Debug Info** - View current states, history, and transitions
+### 🛠️ Core Utilities
+- **Object Pool** (`nExBot.acquireTable/releaseTable`) - Reusable tables to reduce GC
+- **Memoization** (`nExBot.memoize`) - Cache pure function results with optional TTL
+- **EventBus** - Centralized event system for decoupled modules
+- **Shape Distance** - Circle/Square/Diamond/Cross distance calculations
 
 ---
 
 ## 🏗️ Architecture
-
-### Event-Driven Design
-
-nExBot features an **event-driven architecture** following SOLID principles:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    EVENT BUS ARCHITECTURE                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │   CaveBot    │    │  TargetBot   │    │   HealBot    │       │
-│  │   Module     │    │   Module     │    │   Module     │       │
-│  └──────┬───────┘    └──────┬───────┘    └──────┬───────┘       │
-│         │                   │                   │                │
-│         ▼                   ▼                   ▼                │
-│  ┌────────────────────────────────────────────────────────┐     │
-│  │                      EVENT BUS                         │     │
-│  │  • on(event, callback)   • emit(event, data)           │     │
-│  │  • off(event, callback)  • Event batching              │     │
-│  └────────────────────────────────────────────────────────┘     │
-│         │                   │                   │                │
-│         ▼                   ▼                   ▼                │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │ DoorItems    │    │   Walking    │    │  Creature    │       │
-│  │  Database    │    │   Module     │    │   Cache      │       │
-│  └──────────────┘    └──────────────┘    └──────────────┘       │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
 
 ### Module Structure
 
 ```
 nExBot/
 ├── _Loader.lua              # Main entry point
-├── ROADMAP.md               # 🆕 Development roadmap with 35 features
-├── core/                    # Core libraries and modules
-│   ├── event_bus.lua        # 🆕 Centralized event system
-│   ├── door_items.lua       # 🆕 Hardcoded door database (200+ door IDs)
-│   ├── smart_hunt.lua       # 🆕 SmartHunt analytics (Features 1-5)
-│   ├── combat_intelligence.lua # 🆕 Combat AI (Features 11-15)
-│   ├── performance_optimizer.lua # 🆕 Performance (Features 24-27)
-│   ├── state_machine.lua    # 🆕 FSM architecture (Feature 32)
-│   ├── global_config.lua    # Tool & door utilities
-│   ├── lib.lua              # Utility functions
-│   ├── main.lua             # Version info
-│   ├── configs.lua          # Configuration system
+├── core/                    # Core libraries
+│   ├── lib.lua              # Utilities + Object Pool + Memoization + Shapes
+│   ├── event_bus.lua        # Centralized event system
+│   ├── Containers.lua       # Container panel with slot-based tracking
 │   ├── HealBot.lua          # Healing automation
 │   ├── AttackBot.lua        # Attack automation
-│   ├── Equipper.lua         # 🔄 Equipment manager (non-blocking)
-│   ├── tools.lua            # Utility tools & global settings UI
 │   └── ...
 ├── cavebot/                 # CaveBot system
-│   ├── cavebot.lua          # Main cavebot logic
-│   ├── doors.lua            # 🔄 Enhanced door handling
-│   ├── walking.lua          # 🔄 Native OTClient autoWalk
+│   ├── cavebot.lua          # Main loop (250ms interval)
+│   ├── walking.lua          # Path caching + floor prevention
+│   ├── actions.lua          # Waypoint actions
 │   └── ...
 ├── targetbot/               # TargetBot system
-│   ├── target.lua           # 🔄 Target filtering
-│   ├── walking.lua          # 🆕 DASH walking integration
-│   ├── creature_attack.lua  # Attack & avoidance
-│   ├── eat_food.lua         # Eat food from corpses
-│   ├── looting.lua          # Loot system
+│   ├── target.lua           # Creature cache + EventBus
+│   ├── creature_attack.lua  # Movement priority system + reposition
+│   ├── creature.lua         # Config lookup with LRU cache
 │   └── ...
-└── storage/                 # User profiles and settings
+└── storage/                 # User settings
 ```
 
-### SOLID Principles Applied
+### TargetBot Movement Priority
 
-| Principle | Implementation |
-|-----------|----------------|
-| **Single Responsibility** | Each module handles one concern (DoorItems → doors, DashWalk → walking) |
-| **Open/Closed** | Event bus allows extension without modifying core |
-| **Liskov Substitution** | Modules can be swapped via event handlers |
-| **Interface Segregation** | Small, focused APIs (DashWalk.walkTo, DashWalk.chase) |
-| **Dependency Inversion** | Modules depend on abstractions (EventBus), not concrete implementations |
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║           UNIFIED MOVEMENT SYSTEM v3 - Feature Integration                ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║                                                                           ║
+║  PHASE 1: CONTEXT GATHERING                                               ║
+║  ├─ Health status (targetIsLowHealth = health < killUnder)               ║
+║  ├─ Trapped detection (no walkable adjacent tiles)                       ║
+║  ├─ Anchor position management                                           ║
+║  └─ Path distance calculation                                            ║
+║                                                                           ║
+║  PHASE 2: LURE DECISIONS (CaveBot delegation)                            ║
+║  ├─ SKIP if target has low health! (prevents abandoning kills)           ║
+║  ├─ SKIP if player is trapped                                            ║
+║  ├─ smartPull → shape-based monster counting                             ║
+║  ├─ dynamicLure → target count threshold                                 ║
+║  └─ closeLure → legacy support                                           ║
+║                                                                           ║
+║  PHASE 3: MOVEMENT PRIORITY                                               ║
+║  ├─ 1. SAFETY: avoidAttacks (wave avoidance)                             ║
+║  ├─ 2. SURVIVAL: Chase low-health targets (override all)                 ║
+║  ├─ 3. DISTANCE: keepDistance (ranged positioning + anchor)              ║
+║  ├─ 4. TACTICAL: rePosition (better tile + anchor)                       ║
+║  ├─ 5. MELEE: chase (close gap + anchor)                                 ║
+║  └─ 6. FACING: faceMonster (diagonal correction + anchor)                ║
+║                                                                           ║
+║  INTEGRATIONS:                                                            ║
+║  • anchor respected by: keepDistance, rePosition, chase, faceMonster     ║
+║  • targetIsLowHealth checked by: smartPull, dynamicLure, closeLure       ║
+║  • isTrapped checked by: dynamicLure, rePosition                         ║
+║  • danger zones considered by: rePosition scoring                        ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+```
+
+### Key Design Patterns
+
+| Pattern | Usage |
+|---------|-------|
+| **Object Pool** | Path cache entries, position tables |
+| **LRU Cache** | Creature configs, path calculations |
+| **Event-Driven** | Health/mana changes, creature updates, container opens |
+| **Slot Tracking** | Container opening without duplicates |
+| **Multi-Factor Scoring** | Tile evaluation for repositioning |
 
 ---
 
 ## 📊 Performance
 
-### Benchmark Results
+### Optimization Summary
 
-Performance comparison between **vBot 4.8** and **nExBot 1.0.0**:
+| Component | Technique | Benefit |
+|-----------|-----------|---------|
+| **CaveBot** | Cached TargetBot refs | Avoid repeated table lookups |
+| **CaveBot** | 250ms interval | Responsive yet efficient |
+| **HealBot** | Cached LocalPlayer | 1s revalidation vs every tick |
+| **HealBot** | Conditional updates | Only write when values change |
+| **AttackBot** | Pre-allocated arrays | Zero per-tick allocations |
+| **AttackBot** | Unrolled loops | Direct comparisons |
+| **TargetBot** | Object pooling | Reuse cache entries |
+| **TargetBot** | Multi-factor scoring | Optimal tile selection |
+| **Containers** | Slot-based tracking | No infinite loops |
+| **Containers** | Event-driven opens | Responsive feedback |
 
-| Metric | vBot 4.8 | nExBot 1.0.0 | Improvement |
-|--------|----------|------------|-------------|
-| **Friend Lookup** | O(n) linear | O(1) hash | **~95% faster** |
-| **Enemy Lookup** | O(n) linear | O(1) hash | **~95% faster** |
-| **Item Search (Looting)** | O(n) per item | O(1) hash set | **~90% faster** |
-| **Quiver Ammo Lookup** | O(n) per check | O(1) hash set | **~90% faster** |
-| **Quiver Ammo Fill** | Requires open BP | findPlayerItem | **Works always** |
-| **Dropper Item Detection** | O(n³) nested loops | O(1) hash lookup | **~95% faster** |
-| **HealBot Conditions** | if/elseif chains | O(1) lookup table | **~85% faster** |
-| **HealBot Potions** | Requires open BP | Hotkey-style | **Works always** |
-| **AttackBot Runes** | Requires open BP | Hotkey-style | **Works always** |
-| **Eat Food** | Requires open BP | Hotkey-style | **Works always** |
-| **HealBot Stats** | Function calls | Cached + EventBus | **~80% faster** |
-| **Container Discovery** | Fixed delays | BFS event-driven | **~70% faster** |
-| **Pathfinding Config** | Read per call | Cached (5s TTL) | **~80% faster** |
-| **Direction Calculations** | Computed | Pre-built lookup | **~70% faster** |
-| **Wave Attack Avoidance** | Basic adjacent | Full threat analysis | **100% smarter** |
-| **Macro Interval (HealBot Spells)** | 100ms | 50ms | **2x faster response** |
-| **Macro Interval (HealBot Items)** | 100ms | 100ms | **Same speed** |
-| **Macro Interval (Walking)** | 100ms | 150ms* | **Event-driven** |
-| **CaveBot Macro Interval** | 50ms | 1000ms* | **95% less CPU** |
-| **CaveBot Pathfinding** | 8 strategies (120ms) | A* state machine (50ms) | **~60% faster** |
-| **CaveBot Waypoint Advancement** | Blocked by doWalking() | Direct action advancement | **Fixed** |
-| **Macro Interval (Looting)** | 100ms | 40ms | **2.5x faster** |
-| **Macro Interval (Dropper)** | 200ms | 250ms* | **Event-driven** |
-| **Macro Interval (Quiver)** | 100ms | 300ms* | **67% less CPU** |
-| **Macro Interval (Equipper)** | 50ms + delay(200) | 100ms non-blocking | **No UI flicker** |
-| **AttackBot Cooldown** | delay(400) blocking | Non-blocking check | **No macro freeze** |
-| **Equipper Cooldown** | delay(200) blocking | Non-blocking check | **No UI flicker** |
-| **Push Max Cooldown** | delay(2000) blocking | Non-blocking check | **No macro freeze** |
-| **Exeta Res Cooldown** | delay(6000) blocking | Non-blocking check | **No macro freeze** |
+### Memory Management
 
-### Algorithmic Improvements
+```lua
+-- Object Pool usage
+local pos = nExBot.acquireTable("position")
+pos.x, pos.y, pos.z = 100, 200, 7
+-- ... use pos ...
+nExBot.releaseTable("position", pos)
 
+-- Memoization
+local cachedFn = nExBot.memoize(expensiveFunction, 5000) -- 5s TTL
+
+-- Shape-based monster counting
+local count = getMonstersAdvanced(range, nExBot.SHAPE.CIRCLE)
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    LOOKUP PERFORMANCE                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  vBot (Linear Search O(n))                                      │
-│  ████████████████████████████████████████ 100ms (1000 items)    │
-│                                                                 │
-│  nExBot (Hash Lookup O(1))                                      │
-│  ██ 5ms (1000 items)                                            │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Memory Optimizations
-
-- **Reusable Position Tables** - Eliminates garbage collection overhead
-- **Pre-computed Direction Vectors** - No runtime calculations needed
-- **TTL-based Caching** - Smart cache invalidation prevents stale data
-- **Creature Object Caching** - Reduces repeated API calls
 
 ---
 
 ## 🚀 Installation
 
-### Requirements
-- OTClientV8 (latest version recommended)
-- Tibia Open Server (OTServ)
-
-### Quick Start
-
-1. **Download** the nExBot folder
-2. **Copy** to your OTClientV8 bot directory:
+1. **Copy** nExBot folder to:
    ```
    %APPDATA%/OTClientV8/<your-config>/bot/
    ```
-3. **Load** the bot in OTClientV8:
-   - Open OTClientV8
-   - Go to Bot settings
-   - Select `nExBot` as your bot configuration
-
-### Directory Structure
-
-```
-nExBot/
-├── _Loader.lua          # Main entry point
-├── core/                # Core libraries and modules
-│   ├── lib.lua          # Utility functions
-│   ├── main.lua         # Version info
-│   ├── configs.lua      # Configuration system
-│   ├── HealBot.lua      # Healing automation
-│   ├── AttackBot.lua    # Attack automation
-│   ├── tools.lua        # Utility tools
-│   └── ...
-├── cavebot/             # CaveBot system
-│   ├── cavebot.lua      # Main cavebot logic
-│   ├── walking.lua      # Pathfinding
-│   ├── actions.lua      # Waypoint actions
-│   └── ...
-├── targetbot/           # TargetBot system
-│   ├── creature_attack.lua  # Attack & avoidance
-│   ├── looting.lua      # Loot system
-│   └── ...
-├── cavebot_configs/     # Saved cavebot configs
-├── targetbot_configs/   # Saved targetbot configs
-└── nExBot_configs/      # Bot settings
-```
+2. **Load** in OTClientV8 Bot settings
+3. **Configure** via in-game panels
 
 ---
 
-## 🔧 Key Improvements
+## 📝 Recent Changes (v1.0.0)
 
-### 1. Advanced Wave Attack Avoidance
+### TargetBot Unified Movement System v3
+- **Complete feature integration**: All features work together seamlessly
+- **Three-phase execution**: Context → Lure → Movement
+- **Priority-based movement**: Safety → Survival → Distance → Tactical → Melee → Facing
+- **Anchor integration**: All movement features respect anchor constraint
+- **Low-health protection**: Lure features won't trigger when target is almost dead
+- **Trapped detection**: Prevents lure when stuck
 
-The new wave avoidance system analyzes monster attack patterns in real-time:
+### Tactical Reposition
+- **2-tile search radius** with multi-factor scoring
+- **Escape routes** (+10 per walkable tile)
+- **Danger zones** (-15 per monster front arc)
+- **Target distance** (stay in attack range)
+- **Movement cost** (prefer closer tiles)
+- **Anchor constraint** (skip tiles outside anchor range)
 
-```lua
--- Features:
--- ✓ Wave/Beam detection (length + spread)
--- ✓ Area attack detection (radius)
--- ✓ Multi-monster threat zones
--- ✓ Danger scoring algorithm
--- ✓ Smart tile selection
--- ✓ Attack range maintenance
-```
+### Smart Pull Improvements
+- **Shape-based counting**: Circle, Square, Diamond, Cross
+- **Health check first**: Never abandon low-health targets
+- **Visual shape labels**: Slider shows shape name instead of number
 
-**How it works:**
-- Calculates cone-shaped wave attack paths based on monster facing direction
-- Evaluates circular AoE danger zones around all monsters
-- Assigns weighted danger scores to each adjacent tile
-- Moves to the safest tile while maintaining attack range
+### Container Panel v4
+- **Slot-based tracking**: Prevents infinite open/close loops
+- **Auto-open on login**: Toggle switch with `onPlayerHealthChange` detection
+- **Quiver support**: Opens equipped quiver from right hand slot
+- **Improved timing**: 250ms open delay, 400ms verification
 
-### 2. O(1) Lookup Tables
+### Performance
+- CaveBot macro: 1000ms → 250ms with cached function refs
+- HealBot: Cached LocalPlayer with conditional stat updates
+- AttackBot: Pre-allocated direction arrays, unrolled loops
+- TargetBot: Object pooling for path cache entries
 
-Replaced all linear searches with hash-based lookups:
-
-```lua
--- Before (vBot):
-for _, name in ipairs(friendList) do
-  if name == playerName then return true end
-end
-
--- After (nExBot):
-if friendListLookup[playerName] then return true end
-```
-
-### 3. Glob-Style Target Patterns
-
-TargetBot supports powerful pattern matching for creature names:
-
-```lua
--- Pattern Syntax:
--- *         = Match all monsters
--- Dragon    = Match exactly "Dragon"
--- Dragon*   = Match names starting with "Dragon" (Dragon, Dragon Lord, etc.)
--- !Dragon   = Exclude "Dragon" from matching
--- *, !Dragon, !Demon = Match all EXCEPT Dragon and Demon
-
--- Examples:
-"*"                     -- Target all monsters
-"Dragon, Demon"         -- Target only Dragons and Demons
-"Dragon*"               -- Target Dragon, Dragon Lord, Dragon Hatchling, etc.
-"*, !Rat, !Bug"         -- Target all monsters except Rats and Bugs
-"Demon*, !Demon Skeleton" -- Target Demon, Demonlord, but NOT Demon Skeleton
-```
-
-### 4. Smart Caching System
-
-Implemented TTL-based caching for expensive operations:
-
-```lua
--- Config cache with 5-second TTL
-local configCache = {
-  data = nil,
-  lastParse = 0
-}
-local CONFIG_CACHE_TTL = 5000
-
--- Danger calculation cache (100ms TTL)
-local dangerCacheTime = 0
-local DANGER_CACHE_TTL = 100
-```
-
----
-
-## 📝 Changelog
-
-### v1.0.0 (December 2025) - Initial Release
-- 🎉 **Complete rebrand** from vBot to nExBot
-- 🏗️ **Event-driven architecture** with centralized EventBus
-- 📦 **SOLID principles** applied throughout codebase (SRP, DRY, KISS)
-- ⚡ **DASH Walking** - Arrow key simulation for maximum walking speed
-- 🖱️ **Map Click DASH** - Built-in DASH walking on map clicks (always active)
-- ⚡ **Performance overhaul** with O(1) hash lookups
-- 🛡️ **Advanced wave avoidance** system with threat analysis
-- 🚪 **Door database** extracted from items.xml (200+ door types)
-- 🏃 **Auto Haste** with vocation detection
-- 🐴 **Auto Mount** with PZ detection (uses default mount, saves CPU in safe zones)
-- 💤 **Low Power Mode** for multi-client setups
-- 🍖 **Eat Food from Corpses** feature with hunger detection
-- 📚 **Mana Training** macro with configurable spell/threshold
-- 🔧 **Tool configuration** via Extras panel (rope, shovel, machete, scythe)
-- 🚀 **Module loading order** optimized in _Loader.lua
-- 🧹 **Removed BotServer** dependencies
-- 📦 **Container Panel** - Vertical layout, auto-minimize, improved compatibility
-- 🏹 **Quiver Manager Optimized** - O(1) lookups, smart event filtering, reduced CPU, works with closed backpacks
-- 💊 **HealBot EventBus** - Event-driven healing with 50ms response, cached stats, OTClient native API
-- 🎯 **Hotkey-Style Items** - HealBot potions, AttackBot runes, Eat Food, and Quiver Manager work without open backpacks
-- ⚔️ **AttackBot Runes** - All rune types (targeted, area) use inventory methods like hotkeys
-- 🍽️ **Eat Food Optimized** - Works without open backpack, simplified loop with early exit
-- 🗑️ **Dropper Optimized** - O(1) hash lookups, event-driven, config hash detection
-- 👔 **Equipper Non-Blocking** - Replaced `delay(200)` with non-blocking cooldowns (no UI flickering)
-- 📡 **EventBus Equipment Events** - New `equipment:change` event fires on gear slot changes
-- ⚡ **Non-Blocking Cooldowns** - Replaced all blocking `delay()` calls with time-based checks:
-  - AttackBot: `delay(400)` → non-blocking `ATTACK_COOLDOWN = 400`
-  - Equipper: `delay(200)` → non-blocking `EQUIP_COOLDOWN = 200`
-  - equip.lua: `delay(1000)` → non-blocking cooldown
-  - exeta.lua: `delay(6000)` → non-blocking cooldown
-  - combo.lua: `delay(100)` → non-blocking cooldown
-  - pushmax.lua: `delay(2000)` → non-blocking cooldown
-- 🎯 **Exclusion Patterns** - TargetBot now supports `!` prefix to exclude monsters (e.g., `*, !Dragon, !Demon`)
-- 🐛 **CaveBot Walking Fix** - Added missing `CaveBot.doWalking()` function that was causing nil errors
-- 🚶 **CaveBot autoWalk Fix** - Replaced `g_game.walk()` with `autoWalk()` for reliable minimap goto waypoints
-- 🧠 **SmartHunt Analytics** - New intelligent hunting system with 5 major features:
-  - Supply Prediction: Tracks consumption and predicts optimal amounts
-  - Route Optimization: Identifies cold spots with low XP/kill rates
-  - Dynamic Lure: Auto-adjusts max creatures based on damage taken
-  - Smart Refill: Calculates if one more round is possible
-  - Monster Database: Learns danger levels per monster automatically
-- ⚔️ **Combat Intelligence** - Advanced combat AI with 5 features:
-  - Multi-Target Wave Optimizer: Calculates optimal AoE position
-  - Combo Sequencer: Vocation-specific combo execution
-  - Threat Prediction: Flank detection, threat level analysis
-  - Kill Priority: HP/danger/loot-based target selection
-  - Area Spell Timing: Stack detection for optimal casting
-- ⚡ **Performance Optimizer** - 4 performance enhancement systems:
-  - Predictive Pathfinding: LRU path cache with prefetching
-  - Lazy Evaluation: Cached monster/container/tile data
-  - Batch Operations: Queued item operations
-  - Smart Container Caching: Item index for O(1) lookups
-- 🔧 **State Machine Architecture** - Proper FSM implementation:
-  - CaveBot states: idle, walking, hunting, looting, refilling, etc.
-  - TargetBot states: scanning, targeting, attacking, chasing
-  - Global coordinator with transition history
-- 🚪 **Hardcoded Door Database** - 200+ door IDs built into `door_items.lua`:
-  - No items.xml dependency required
-  - Includes modern doors (20xxx, 21xxx, 22xxx series)
-  - Automatic door opening during cavebot walking
-- 🚶 **Removed DASH Walking** - Simplified to native OTClient `autoWalk()` for reliability
-- 🎯 **Smart Pull System** - Replaced old lure system with intelligent monster pulling
-- 🧹 **Removed Unused UI Buttons** - Removed SmartHunt/Combat/Performance/StateMachine buttons
-  - These systems now run silently in background
-- 🗑️ **Removed** - Players List feature, redundant global settings panel, DASH walking
-- 🐛 **CaveBot Waypoint Fix** - Fixed cavebot not advancing to next waypoint:
-  - Removed blocking `doWalking()` check that prevented action advancement
-  - Simplified walking timing to use `CaveBot.delay()` mechanism
-  - Fixed walking state management for proper waypoint progression
-- ⚡ **CaveBot A* Pathfinding** - Replaced waterfall if-else with clean A* state machine:
-  - New `determineWalkStrategy()` returns optimal single strategy (DIRECT, ATTACK_BLOCKER, IGNORE_CREATURES, FAILED)
-  - Path caching with 800ms TTL and 2-tile drift tolerance
-  - Execution time reduced from 120ms to ~30-50ms per tick
-- ⚡ **Performance Optimization** - Fixed slow macro warnings:
-  - CaveBot macro interval: 50ms → 1000ms (event-driven, only runs when needed)
-  - Removed double pathfinding (walkTo handles paths internally)
-  - Non-blocking cooldowns throughout codebase
-- 💊 **HealBot Analytics** - Mana efficiency and potion usage tracking:
-  - Tracks mana waste (healing over max HP/MP)
-  - Potion and spell usage logging with timestamps
-  - Helps optimize healing configuration
-- 🍖 **Eat Food Fix** - Fixed inventory eating not working:
-  - Inventory eating now works independently of corpse eating toggle
-  - Uses `g_game.useInventoryItem()` for closed backpack support
-
-> *Note: Hot Reload feature was removed due to instability. For script changes, restart the bot.*
->
-> *Note: Quiver Manager and Dropper use longer intervals but with smart event filtering, only process when containers change - resulting in 60%+ less CPU usage overall.*
-> 
-> *Note: HealBot potions, AttackBot runes, and Eat Food now use `g_game.useInventoryItemWith()` which works like hotkeys - no open backpack required!*
->
-> *Note: All blocking `delay()` calls replaced with non-blocking time checks. This prevents UI freezing and slow macro issues. Pattern: `if (now - lastActionTime) < COOLDOWN then return end`*
+### Memory Management
+- Added `nExBot.acquireTable/releaseTable` object pool
+- Added `nExBot.memoize` for pure function caching
+- LRU eviction in creature config cache
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-### Development Guidelines
-
-1. **DRY** - Don't Repeat Yourself
-2. **SRP** - Single Responsibility Principle  
-3. **KISS** - Keep It Simple, Stupid
-4. **Performance** - Always consider algorithmic complexity
-5. **Caching** - Use TTL-based caching for expensive operations
-
-### Code Style
-
-```lua
--- Use descriptive variable names
-local monsterDangerScore = calculateDangerScore(pos, monsters)
-
--- Add comments for complex logic
--- Check if position is within wave attack cone
-local function isInWavePath(playerPos, monsterPos, monsterDir, length, spread)
-
--- Use local functions to avoid global pollution
-local function getMonstersInRange(range)
-```
+### Guidelines
+- **DRY** - Don't Repeat Yourself
+- **KISS** - Keep It Simple
+- **SRP** - Single Responsibility
+- **Cache** - Use TTL-based caching for expensive operations
+- **Pool** - Reuse tables instead of creating new ones
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Credits
-
-- **Original vBot** - Vithrax
-- **nExBot Optimizations** - Community Contributors
-- **OTClientV8** - The OTClient team
+MIT License - see [LICENSE](LICENSE) file.
 
 ---
 
 <div align="center">
 
 **Made with ❤️ for the Tibia community**
-
-⭐ Star this repo if you find it useful!
 
 </div>
