@@ -601,6 +601,4 @@ end
 -- ============================================================================
 -- INITIALIZATION
 -- ============================================================================
-info("[StateMachine] Architecture loaded - Feature 32 active")
-info("[StateMachine] CaveBot states: " .. #StateMachine.CaveBot.states)
-info("[StateMachine] TargetBot states: " .. #StateMachine.TargetBot.states)
+-- Initialization messages removed for clean output

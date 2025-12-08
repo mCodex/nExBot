@@ -487,7 +487,19 @@ end)
 
 -- Macro to process eating (runs every 200ms)
 macro(200, function()
-  if eatFromCorpsesEnabled and TargetBot and TargetBot.isOn and TargetBot.isOn() and not isInPz() then
+  if not TargetBot or not TargetBot.isOn or not TargetBot.isOn() then return end
+  if isInPz() then return end
+  if not player then return end
+  
+  -- Always try to eat from inventory if player needs food (works with closed backpacks)
+  if needsFood() then
+    if eatFromInventory() then
+      return
+    end
+  end
+  
+  -- Process corpse eating if enabled
+  if eatFromCorpsesEnabled then
     TargetBot.EatFood.process()
   end
 end)

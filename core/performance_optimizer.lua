@@ -764,4 +764,4 @@ end
 -- ============================================================================
 -- INITIALIZATION
 -- ============================================================================
-info("[PerformanceOptimizer] Module loaded - Features 24-27 active")
+-- Initialization messages removed for clean output

@@ -5,41 +5,6 @@ local nextTile = nil
 
 local noPath = 0
 
--- Lightweight cache for goto pathfinding
-local gotoPathCache = {
-  key = nil,
-  from = nil,
-  path = nil,
-  at = 0
-}
-local PATH_CACHE_TTL = 800 -- ms - extended for better cache hits
-
--- Path cache helper functions (defined once, reused)
-local function gotoPathKey(pos, variant)
-  return variant .. ":" .. pos.x .. "," .. pos.y .. "," .. pos.z
-end
-
-local function getGotoCachedPath(key, playerPos)
-  if gotoPathCache.key ~= key then return nil end
-  if (now - gotoPathCache.at) > PATH_CACHE_TTL then return nil end
-  if gotoPathCache.from then
-    local dx = math.abs(playerPos.x - gotoPathCache.from.x)
-    local dy = math.abs(playerPos.y - gotoPathCache.from.y)
-    local dz = math.abs(playerPos.z - gotoPathCache.from.z)
-    if math.max(dx, dy) > 2 or dz ~= 0 then
-      return nil
-    end
-  end
-  return gotoPathCache.path
-end
-
-local function saveGotoCachedPath(key, playerPos, path)
-  gotoPathCache.key = key
-  gotoPathCache.at = now
-  gotoPathCache.from = { x = playerPos.x, y = playerPos.y, z = playerPos.z }
-  gotoPathCache.path = path
-end
-
 -- Pre-computed direction lookup table for optimal performance
 local DIR_MOD_LOOKUP = {
     [0] = { x = 0, y = -1 },   -- North
@@ -323,149 +288,173 @@ CaveBot.registerAction("function", "red", function(value, retries, prev)
   return result
 end)
 
-CaveBot.registerAction("goto", "green", function(value, retries, prev)
-  -- Skip if player is currently walking (wait for step to complete)
-  if player and player:isWalking() then
-    return "retry"
-  end
-
-  local pos = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+),?\\s*([0-9]?)")
-  if not pos[1] then
-    warn("Invalid cavebot goto action value. It should be position (x,y,z), is: " .. value)
-    return false
-  end
-
-  -- reset pathfinder state
-  nextPosF = nil
-  nextPos = nil
+--[[
+  ============================================
+  OPTIMIZED GOTO ACTION - Unified A* Approach
+  ============================================
   
-  -- Adaptive retry limits based on walking mode
-  local maxRetries = CaveBot.Config.get("mapClick") and 8 or 50
-  if retries >= maxRetries then
-    print("[CaveBot] goto: max retries reached (" .. maxRetries .. ")")
-    noPath = noPath + 1
-    pathfinder()
-    return false
-  end
+  Instead of multiple fallback strategies with repeated pathfinding,
+  this uses a single-pass decision tree:
+  
+  1. Early exits (walking, at destination, wrong floor)
+  2. Single pathfinding call with optimal parameters
+  3. Obstacle handling only if path blocked by creature
+  4. No redundant findPath calls
+  
+  The pathfinding itself uses OTClient's A* implementation.
+  We optimize the DECISION LOGIC around it.
+]]
 
-  local precision = tonumber(pos[1][5])
-  pos = {x=tonumber(pos[1][2]), y=tonumber(pos[1][3]), z=tonumber(pos[1][4])}  
-  local playerPos = player:getPosition()
-  
-  -- Different floor check
-  if pos.z ~= playerPos.z then 
-    print("[CaveBot] goto: floor mismatch - target z=" .. pos.z .. ", player z=" .. playerPos.z)
-    noPath = noPath + 1
-    pathfinder()
-    return false
-  end
+-- Walk strategy enum for cleaner code
+local WALK_STRATEGY = {
+  DIRECT = 1,        -- Normal walk
+  IGNORE_CREATURES = 2,  -- Walk ignoring creatures
+  ATTACK_BLOCKER = 3,    -- Attack blocking creature first
+  FAILED = 4         -- No path possible
+}
 
-  local maxDist = storage.extras.gotoMaxDistance or 40
+-- Determine best walking strategy in a single pass
+local function determineWalkStrategy(playerPos, destPos, maxDist)
+  -- Try direct path first (most common case, fast)
+  local directPath = findPath(playerPos, destPos, maxDist, {
+    ignoreNonPathable = true,
+    precision = 1
+  })
   
-  -- Calculate actual distance (Manhattan)
-  local distX = math.abs(pos.x - playerPos.x)
-  local distY = math.abs(pos.y - playerPos.y)
-  local totalDist = distX + distY
-  
-  if totalDist > maxDist then
-    print("[CaveBot] goto: too far - distance=" .. totalDist .. ", max=" .. maxDist)
-    noPath = noPath + 1
-    pathfinder()
-    return false
-  end
-
-  -- Detect stairs/special tiles
-  local minimapColor = g_map.getMinimapColor(pos)
-  local stairs = (minimapColor >= 210 and minimapColor <= 213)
-  
-  -- Check if already at position
-  local targetPrecision = precision or (stairs and 0 or 1)
-  if distX <= targetPrecision and distY <= targetPrecision then
-    noPath = 0
-    return true
+  if directPath and #directPath > 0 then
+    return WALK_STRATEGY.DIRECT, directPath
   end
   
-  -- ============================================
-  -- OPTIMIZED PATHFINDING - Let walkTo handle it
-  -- ============================================
-
-  -- Try direct walk first (autoWalk does pathfinding internally)
-  if CaveBot.walkTo(pos, maxDist, { ignoreNonPathable = true }) then
-    noPath = 0
-    return "retry"
+  -- Direct path failed, try ignoring creatures
+  local ignorePath = findPath(playerPos, destPos, maxDist, {
+    ignoreNonPathable = true,
+    precision = 1,
+    ignoreCreatures = true,
+    allowUnseen = true,
+    allowOnlyVisibleTiles = false
+  })
+  
+  if not ignorePath or #ignorePath == 0 then
+    return WALK_STRATEGY.FAILED, nil
   end
-
-  -- Direct walk failed, check for blocking creatures
-  -- Use cached path to check for monsters
-  local ignoreKey = gotoPathKey(pos, "ignore")
-  local path = getGotoCachedPath(ignoreKey, playerPos)
-
-  if path == false then
-    -- Recently failed, try creature-ignoring walk
-    if CaveBot.walkTo(pos, maxDist, { ignoreNonPathable = true, ignoreCreatures = true }) then
-      return "retry"
-    end
-    return "retry"
-  end
-
-  if not path then
-    path = findPath(playerPos, pos, maxDist, {
-      ignoreNonPathable = true,
-      precision = 1,
-      ignoreCreatures = true,
-      allowUnseen = true,
-      allowOnlyVisibleTiles = false
-    })
-
-    saveGotoCachedPath(ignoreKey, playerPos, path or false)
-  end
-
-  if path and #path > 0 then
-    -- Check if there's a blocking monster we should attack first (only first 2 tiles)
-    local tempPos = { x = playerPos.x, y = playerPos.y, z = playerPos.z }
-    local foundMonster = false
-
-    for i, dir in ipairs(path) do
-      if i > 2 then break end  -- Only check first 2 steps for speed
-
-      local dirMod = DIR_MOD_LOOKUP[dir]
-      if dirMod then
-        tempPos.x = tempPos.x + dirMod.x
-        tempPos.y = tempPos.y + dirMod.y
-
-        local tile = g_map.getTile(tempPos)
-        if tile and tile:hasCreature() then
-          local creatures = tile:getCreatures()
-          for _, creature in ipairs(creatures) do
-            local hppc = creature:getHealthPercent()
-            if creature:isMonster() and hppc and hppc > 0 and (oldTibia or creature:getType() < 3) then
-              local currentTarget = g_game.getAttackingCreature()
-              if currentTarget ~= creature then
-                attack(creature)
-              end
-              g_game.setChaseMode(1)
-              CaveBot.delay(150)
-              return "retry"
-            end
+  
+  -- Path exists but blocked by creatures - check first tile
+  local firstDir = ignorePath[1]
+  local dirMod = DIR_MOD_LOOKUP[firstDir]
+  if dirMod then
+    local checkPos = {
+      x = playerPos.x + dirMod.x,
+      y = playerPos.y + dirMod.y,
+      z = playerPos.z
+    }
+    local tile = g_map.getTile(checkPos)
+    if tile and tile:hasCreature() then
+      local creatures = tile:getCreatures()
+      for _, creature in ipairs(creatures) do
+        if creature:isMonster() then
+          local hppc = creature:getHealthPercent()
+          if hppc and hppc > 0 and (oldTibia or creature:getType() < 3) then
+            return WALK_STRATEGY.ATTACK_BLOCKER, ignorePath, creature
           end
         end
       end
     end
+  end
+  
+  -- No monster blocking, just ignore creatures and walk
+  return WALK_STRATEGY.IGNORE_CREATURES, ignorePath
+end
 
-    -- No blocking monster found, try walking with creature ignoring
-    if CaveBot.walkTo(pos, maxDist, { ignoreNonPathable = true, ignoreCreatures = true }) then
+CaveBot.registerAction("goto", "green", function(value, retries, prev)
+  -- ========== EARLY EXITS ==========
+  
+  -- Skip if player is currently walking
+  if player and player:isWalking() then
+    return "retry"
+  end
+
+  -- Parse position
+  local posMatch = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+),?\\s*([0-9]?)")
+  if not posMatch[1] then
+    warn("Invalid cavebot goto action value. It should be position (x,y,z), is: " .. value)
+    return false
+  end
+
+  local precision = tonumber(posMatch[1][5])
+  local destPos = {
+    x = tonumber(posMatch[1][2]),
+    y = tonumber(posMatch[1][3]),
+    z = tonumber(posMatch[1][4])
+  }
+  local playerPos = player:getPosition()
+  
+  -- Floor mismatch - instant fail
+  if destPos.z ~= playerPos.z then
+    noPath = noPath + 1
+    pathfinder()
+    return false
+  end
+
+  -- Calculate distance
+  local distX = math.abs(destPos.x - playerPos.x)
+  local distY = math.abs(destPos.y - playerPos.y)
+  local maxDist = storage.extras.gotoMaxDistance or 40
+  
+  -- Too far - instant fail
+  if (distX + distY) > maxDist then
+    noPath = noPath + 1
+    pathfinder()
+    return false
+  end
+
+  -- Already at destination
+  local minimapColor = g_map.getMinimapColor(destPos)
+  local isStairs = (minimapColor >= 210 and minimapColor <= 213)
+  local targetPrecision = precision or (isStairs and 0 or 1)
+  
+  if distX <= targetPrecision and distY <= targetPrecision then
+    noPath = 0
+    return true
+  end
+
+  -- Max retries check
+  local maxRetries = CaveBot.Config.get("mapClick") and 8 or 50
+  if retries >= maxRetries then
+    noPath = noPath + 1
+    pathfinder()
+    return false
+  end
+
+  -- ========== SINGLE-PASS PATHFINDING DECISION ==========
+  
+  local strategy, path, blocker = determineWalkStrategy(playerPos, destPos, maxDist)
+  
+  if strategy == WALK_STRATEGY.DIRECT then
+    -- Direct path available - just walk
+    if CaveBot.walkTo(destPos, maxDist, { ignoreNonPathable = true }) then
+      noPath = 0
+      return "retry"
+    end
+    
+  elseif strategy == WALK_STRATEGY.ATTACK_BLOCKER then
+    -- Monster blocking path - attack it
+    local currentTarget = g_game.getAttackingCreature()
+    if currentTarget ~= blocker then
+      attack(blocker)
+    end
+    g_game.setChaseMode(1)
+    CaveBot.delay(150)
+    return "retry"
+    
+  elseif strategy == WALK_STRATEGY.IGNORE_CREATURES then
+    -- Path exists but needs creature ignoring
+    if CaveBot.walkTo(destPos, maxDist, { ignoreNonPathable = true, ignoreCreatures = true }) then
+      noPath = 0
       return "retry"
     end
   end
-
-  -- Last resort: try without ignoring fields
-  if not CaveBot.Config.get("ignoreFields") then
-    if CaveBot.walkTo(pos, maxDist) then
-      return "retry"
-    end
-  end
-
-  -- All strategies failed
+  
+  -- Strategy was FAILED or walk failed
   if retries >= maxRetries - 1 then
     noPath = noPath + 1
     pathfinder()

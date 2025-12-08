@@ -4,11 +4,6 @@
   
   This file loads all UI styles and scripts in the correct order.
   Core libraries must be loaded before dependent modules.
-  
-  HOT-RELOAD SYSTEM:
-  - nExBot.reloadModule("module_name") - Reload a specific module
-  - nExBot.reloadAll() - Reload all non-core modules
-  - nExBot.listModules() - List all loaded modules
 ]]--
 
 local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
@@ -16,26 +11,6 @@ local CORE_PATH = "/bot/" .. configName .. "/core"
 
 -- Initialize global nExBot namespace if not exists
 nExBot = nExBot or {}
-
--- ============================================
--- MODULE HOT-RELOAD SYSTEM (Feature 33)
--- ============================================
-
--- Track loaded modules for hot-reload
-local loadedModules = {}
-local moduleLoadOrder = {}
-local coreModules = {
-  ["main"] = true,
-  ["items"] = true,
-  ["item_classifier"] = true,
-  ["lib"] = true,
-  ["new_cavebot_lib"] = true,
-  ["configs"] = true,
-  ["event_bus"] = true,
-  ["door_items"] = true,
-  ["global_config"] = true,
-  ["state_machine"] = true,
-}
 
 -- Load all OTUI style files from the core directory
 local function loadStyles()
@@ -50,123 +25,18 @@ local function loadStyles()
   end
 end
 
--- Safe timing function (works before main.lua loads)
-local function getTime()
-  return (now and now) or (os.clock() * 1000)
-end
-
--- Load a script from the core directory with tracking
-local function loadScript(name, isReload)
-  local startTime = getTime()
+-- Load a script from the core directory
+local function loadScript(name)
   local status, result = pcall(function()
     return dofile("/core/" .. name .. ".lua")
   end)
   
-  local loadTime = getTime() - startTime
-  
-  if status then
-    loadedModules[name] = {
-      loaded = true,
-      loadTime = loadTime,
-      lastReload = getTime(),
-      isCore = coreModules[name] or false,
-      result = result
-    }
-    
-    if not isReload then
-      table.insert(moduleLoadOrder, name)
-    end
-    
-    if isReload then
-      info("[HotReload] Module '" .. name .. "' reloaded successfully (" .. loadTime .. "ms)")
-    end
-    
-    return result
-  else
-    warn("[HotReload] Failed to load module '" .. name .. "': " .. tostring(result))
-    loadedModules[name] = {
-      loaded = false,
-      error = result,
-      lastAttempt = getTime()
-    }
+  if not status then
+    warn("[nExBot] Failed to load module '" .. name .. "': " .. tostring(result))
     return nil
   end
-end
-
--- Reload a specific module by name
-nExBot.reloadModule = function(moduleName)
-  if not moduleName or type(moduleName) ~= "string" then
-    warn("[HotReload] Invalid module name")
-    return false
-  end
   
-  moduleName = moduleName:lower()
-  
-  -- Check if module exists
-  if not loadedModules[moduleName] then
-    warn("[HotReload] Module '" .. moduleName .. "' not found. Use nExBot.listModules() to see available modules.")
-    return false
-  end
-  
-  -- Warn about core modules
-  if coreModules[moduleName] then
-    warn("[HotReload] Warning: Reloading core module '" .. moduleName .. "' may cause instability. Proceeding anyway...")
-  end
-  
-  -- Attempt reload
-  info("[HotReload] Reloading module: " .. moduleName)
-  local result = loadScript(moduleName, true)
-  
-  -- Fire event for listeners
-  if nExBot.EventBus and nExBot.EventBus.emit then
-    nExBot.EventBus.emit("module:reloaded", { name = moduleName, success = result ~= nil })
-  end
-  
-  return result ~= nil
-end
-
--- Reload all non-core modules
-nExBot.reloadAll = function(includeCore)
-  info("[HotReload] Reloading all " .. (includeCore and "" or "non-core ") .. "modules...")
-  local reloaded = 0
-  local failed = 0
-  
-  for _, moduleName in ipairs(moduleLoadOrder) do
-    if includeCore or not coreModules[moduleName] then
-      if nExBot.reloadModule(moduleName) then
-        reloaded = reloaded + 1
-      else
-        failed = failed + 1
-      end
-    end
-  end
-  
-  info("[HotReload] Reload complete: " .. reloaded .. " succeeded, " .. failed .. " failed")
-  return reloaded, failed
-end
-
--- List all loaded modules
-nExBot.listModules = function()
-  info("[HotReload] Loaded modules:")
-  for _, moduleName in ipairs(moduleLoadOrder) do
-    local info_data = loadedModules[moduleName]
-    local status = info_data.loaded and "✓" or "✗"
-    local core = info_data.isCore and " [CORE]" or ""
-    local time = info_data.loadTime and (" (" .. info_data.loadTime .. "ms)") or ""
-    print("  " .. status .. " " .. moduleName .. core .. time)
-  end
-  return loadedModules
-end
-
--- Get module info
-nExBot.getModuleInfo = function(moduleName)
-  return loadedModules[moduleName:lower()]
-end
-
--- Check if module is loaded
-nExBot.isModuleLoaded = function(moduleName)
-  local info_data = loadedModules[moduleName:lower()]
-  return info_data and info_data.loaded or false
+  return result
 end
 
 -- Load styles first
@@ -226,9 +96,9 @@ local scripts = {
   "cavebot_control_panel" -- CaveBot control panel
 }
 
--- Load all scripts with tracking
+-- Load all scripts
 for i = 1, #scripts do
-  loadScript(scripts[i], false)
+  loadScript(scripts[i])
 end
 
 -- Setup private scripts section
@@ -238,14 +108,13 @@ UI.Label("Private Scripts:")
 UI.Separator()
 
 -- ============================================
--- MACRO PERFORMANCE MONITOR (Performance Fix)
+-- MACRO PERFORMANCE MONITOR
 -- ============================================
 
 -- Global macro performance tracking
 nExBot.macroStats = {
   slowWarnings = 0,
-  lastSlowWarning = 0,
-  performanceLog = {}
+  lastSlowWarning = 0
 }
 
 -- Monitor for slow macros and provide warnings

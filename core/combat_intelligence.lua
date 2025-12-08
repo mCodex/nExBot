@@ -901,4 +901,4 @@ end
 -- ============================================================================
 -- INITIALIZATION
 -- ============================================================================
-info("[CombatIntelligence] Module loaded - Features 11-15 active")
+-- Initialization messages removed for clean output

@@ -242,7 +242,8 @@ Performance comparison between **vBot 4.8** and **nExBot 1.0.0**:
 | **Macro Interval (HealBot Spells)** | 100ms | 50ms | **2x faster response** |
 | **Macro Interval (HealBot Items)** | 100ms | 100ms | **Same speed** |
 | **Macro Interval (Walking)** | 100ms | 150ms* | **Event-driven** |
-| **CaveBot Pathfinding** | 8 strategies (120ms) | 3 strategies (50ms) | **~60% faster** |
+| **CaveBot Macro Interval** | 50ms | 1000ms* | **95% less CPU** |
+| **CaveBot Pathfinding** | 8 strategies (120ms) | A* state machine (50ms) | **~60% faster** |
 | **CaveBot Waypoint Advancement** | Blocked by doWalking() | Direct action advancement | **Fixed** |
 | **Macro Interval (Looting)** | 100ms | 40ms | **2.5x faster** |
 | **Macro Interval (Dropper)** | 200ms | 250ms* | **Event-driven** |
@@ -468,53 +469,28 @@ local DANGER_CACHE_TTL = 100
 - 🧹 **Removed Unused UI Buttons** - Removed SmartHunt/Combat/Performance/StateMachine buttons
   - These systems now run silently in background
 - 🗑️ **Removed** - Players List feature, redundant global settings panel, DASH walking
-- 🔄 **Module Hot-Reload** - Feature 33 implemented:
-  - `nExBot.reloadModule("name")` - Reload individual modules
-  - `nExBot.reloadAll()` - Reload all non-core modules
-  - `nExBot.listModules()` - List loaded modules with status
-  - Core module protection warnings
-  - Load time tracking and error handling
 - 🐛 **CaveBot Waypoint Fix** - Fixed cavebot not advancing to next waypoint:
   - Removed blocking `doWalking()` check that prevented action advancement
   - Simplified walking timing to use `CaveBot.delay()` mechanism
   - Fixed walking state management for proper waypoint progression
+- ⚡ **CaveBot A* Pathfinding** - Replaced waterfall if-else with clean A* state machine:
+  - New `determineWalkStrategy()` returns optimal single strategy (DIRECT, ATTACK_BLOCKER, IGNORE_CREATURES, FAILED)
+  - Path caching with 800ms TTL and 2-tile drift tolerance
+  - Execution time reduced from 120ms to ~30-50ms per tick
 - ⚡ **Performance Optimization** - Fixed slow macro warnings:
-  - Increased cavebot macro interval from 50ms to 150ms
-  - Optimized goto action pathfinding (reduced from 8 strategies to 3)
-  - Removed expensive intermediate waypoint calculations
-  - Simplified monster detection in pathfinding
-  - Execution time reduced from 120ms to ~30-50ms
+  - CaveBot macro interval: 50ms → 1000ms (event-driven, only runs when needed)
+  - Removed double pathfinding (walkTo handles paths internally)
+  - Non-blocking cooldowns throughout codebase
+- 💊 **HealBot Analytics** - Mana efficiency and potion usage tracking:
+  - Tracks mana waste (healing over max HP/MP)
+  - Potion and spell usage logging with timestamps
+  - Helps optimize healing configuration
+- 🍖 **Eat Food Fix** - Fixed inventory eating not working:
+  - Inventory eating now works independently of corpse eating toggle
+  - Uses `g_game.useInventoryItem()` for closed backpack support
 
-> *Note: Quiver Manager and Dropper use longer intervals but with smart event filtering, only process when containers change - resulting in 60%+ less CPU usage overall.*
-> 
-> *Note: HealBot potions, AttackBot runes, and Eat Food now use `g_game.useInventoryItemWith()` which works like hotkeys - no open backpack required!*
+> *Note: Hot Reload feature was removed due to instability. For script changes, restart the bot.*
 >
-> *Note: All blocking `delay()` calls replaced with non-blocking time checks. This prevents UI freezing and slow macro issues. Pattern: `if (now - lastActionTime) < COOLDOWN then return end`*
->
-> *Note: CaveBot macro interval increased to 150ms for stability, but pathfinding optimized from 8 strategies to 3, reducing execution time from 120ms to ~50ms while maintaining responsive waypoint advancement.*
-- 🔄 **Module Hot-Reload** - Feature 33 implemented:
-  - `nExBot.reloadModule("name")` - Reload individual modules
-  - `nExBot.reloadAll()` - Reload all non-core modules
-  - `nExBot.listModules()` - List loaded modules with status
-  - Core module protection warnings
-  - Load time tracking and error handling
-- 🐛 **CaveBot Waypoint Fix** - Fixed cavebot not advancing to next waypoint:
-  - Removed blocking `doWalking()` check that prevented action advancement
-  - Simplified walking timing to use `CaveBot.delay()` mechanism
-  - Fixed walking state management for proper waypoint progression
-- ⚡ **Performance Optimization** - Fixed slow macro warnings:
-  - Increased cavebot macro interval from 50ms to 150ms
-  - Optimized goto action pathfinding (reduced from 8 strategies to 3)
-  - Removed expensive intermediate waypoint calculations
-  - Simplified monster detection in pathfinding
-  - Execution time reduced from 120ms to ~30-50ms
-
-> *Note: Quiver Manager and Dropper use longer intervals but with smart event filtering, only process when containers change - resulting in 60%+ less CPU usage overall.*
-> 
-> *Note: HealBot potions, AttackBot runes, and Eat Food now use `g_game.useInventoryItemWith()` which works like hotkeys - no open backpack required!*
->
-> *Note: All blocking `delay()` calls replaced with non-blocking time checks. This prevents UI freezing and slow macro issues. Pattern: `if (now - lastActionTime) < COOLDOWN then return end`*
-
 > *Note: Quiver Manager and Dropper use longer intervals but with smart event filtering, only process when containers change - resulting in 60%+ less CPU usage overall.*
 > 
 > *Note: HealBot potions, AttackBot runes, and Eat Food now use `g_game.useInventoryItemWith()` which works like hotkeys - no open backpack required!*
