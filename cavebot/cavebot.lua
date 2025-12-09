@@ -374,6 +374,11 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
     return    
   end
 
+  -- Save character's profile preference when profile changes (multi-client support)
+  if enabled and name and name ~= "" and setCharacterProfile then
+    setCharacterProfile("cavebotProfile", name)
+  end
+
   local currentActionIndex = ui.list:getChildIndex(ui.list:getFocusedChild())
   ui.list:destroyChildren()
   if not data then return cavebotMacro.setOff() end
@@ -869,7 +874,8 @@ CaveBot.getNextLabel = function()
   end
 end
 
-local botConfigName = modules.game_bot.contentsPanel.config:getCurrentOption().text
+-- Use shared BotConfigName from configs.lua (DRY)
+local botConfigName = BotConfigName or modules.game_bot.contentsPanel.config:getCurrentOption().text
 CaveBot.setCurrentProfile = function(name)
   if not g_resources.fileExists("/bot/"..botConfigName.."/cavebot_configs/"..name..".cfg") then
     return warn("there is no cavebot profile with that name!")
@@ -881,16 +887,6 @@ CaveBot.setCurrentProfile = function(name)
     setCharacterProfile("cavebotProfile", name)
   end
   CaveBot.setOn()
-end
-
--- Restore character's last used profile on load (multi-client support)
-if getCharacterProfile then
-  local charProfile = getCharacterProfile("cavebotProfile")
-  if charProfile and type(charProfile) == "string" and g_resources.fileExists("/bot/"..botConfigName.."/cavebot_configs/"..charProfile..".cfg") then
-    if storage._configs and storage._configs.cavebot_configs then
-      storage._configs.cavebot_configs.selected = charProfile
-    end
-  end
 end
 
 CaveBot.delay = function(value)
@@ -962,3 +958,6 @@ end
 CaveBotList = function()
   return ui.list
 end
+
+-- Note: Profile restoration is handled early in configs.lua
+-- before Config.setup() is called, so the dropdown loads correctly

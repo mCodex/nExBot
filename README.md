@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![OTClientV8](https://img.shields.io/badge/OTClientV8-compatible-orange.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1+-purple.svg)
@@ -204,64 +204,21 @@ local count = getMonstersAdvanced(range, nExBot.SHAPE.CIRCLE)
 
 ---
 
-## 📝 Recent Changes (v1.2.0)
+## 📝 Recent Changes (v1.0.0)
 
 ### Multi-Client Profile Persistence
 - **Character-Based Storage** - Each character remembers their own active profiles
-- **Supported Bots**:
-  - HealBot profiles (1-5)
-  - AttackBot profiles (1-5)
-  - CaveBot profiles (by config name)
-  - TargetBot profiles (by config name)
+- **Supported Bots**: HealBot, AttackBot, CaveBot, TargetBot profiles
 - **Auto-Restore** - Profiles automatically load when switching characters
-- **Stored in** `character_profiles.json` per bot config
-
-### SmartHunt Analytics v3.1
-- **Damage Output Section** - Tracks total damage dealt from Analyzer
-  - Total Damage Dealt
-  - Damage/Hour
-  - Avg Damage/Kill
-  - Avg Damage/Attack
-- **Enhanced AI Insights for AttackBot**:
-  - Damage efficiency analysis (avg damage per attack)
-  - One-shot detection (efficient damage setup)
-  - Attack diversity recommendations
-  - Rune cost analysis (warns about expensive SD usage)
-  - Missing empowerment buff suggestions
-
-### v1.1.0 Changes
 
 ### SmartHunt Analytics v3.0
 - **Complete Rewrite** - Event-driven architecture using EventBus pattern
 - **Bot Integration** - Pulls real data from HealBot and AttackBot analytics APIs
-- **Detailed Tracking**:
-  - Individual spell counts (e.g., "1543x exura gran", "2000x exori gran ico")
-  - Individual potion/rune usage with item names
-  - Mana waste and potion waste detection
-  - Death and near-death event tracking
-  - Peak performance metrics (best XP/h, kills/h)
-  - Economic data from Analyzer (loot/waste/profit)
-- **AI Insights Engine**:
-  - Survivability analysis with HealBot recommendations
-  - Attack efficiency analysis with AttackBot recommendations
-  - Resource waste detection and suggestions
-  - Movement efficiency analysis
-  - Multi-factor scoring algorithm
-- **Efficiency Score** (0-100) based on:
-  - Efficiency factors (40 pts): XP/hour, kills/hour, movement
-  - Survivability factors (30 pts): deaths, damage ratio, near-death events
-  - Resource factors (20 pts): potion efficiency, mana waste
-  - Economic factors (10 pts): profit/hour
-
-### Auto Eat Food Improvements
-- **Trigger on Enable** - Immediately eats food when macro is enabled
-- **Eat Until Full** - Continues eating with 200ms delays until "You are full"
-- **Renamed Button** - Cleaner "Eat Food" label with tooltip
-
-### Documentation Button
-- **Main Tab Integration** - Beautiful button opens GitHub docs in browser
-
-### v1.0.0 Changes
+- **Damage Output Section** - Tracks damage dealt, damage/hour, damage per kill/attack
+- **Detailed Tracking**: Individual spell counts, potion/rune usage, waste detection
+- **Survivability Metrics**: Death count, near-death events, lowest HP, damage ratio
+- **AI Insights Engine**: Damage efficiency, attack diversity, resource optimization
+- **Efficiency Score** (0-100) with multi-factor scoring
 
 ### TargetBot Unified Movement System v3
 - **Complete feature integration**: All features work together seamlessly

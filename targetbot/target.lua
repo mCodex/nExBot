@@ -291,6 +291,11 @@ local oldTibia = g_game.getClientVersion() < 960
 
 -- config, its callback is called immediately, data can be nil
 config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
+  -- Save character's profile preference when profile changes (multi-client support)
+  if enabled and name and name ~= "" and setCharacterProfile then
+    setCharacterProfile("targetbotProfile", name)
+  end
+
   if not data then
     ui.status.right:setText("Off")
     if targetbotMacro and targetbotMacro.setOff then
@@ -397,7 +402,8 @@ TargetBot.getCurrentProfile = function()
   return storage._configs.targetbot_configs.selected
 end
 
-local botConfigName = modules.game_bot.contentsPanel.config:getCurrentOption().text
+-- Use shared BotConfigName from configs.lua (DRY)
+local botConfigName = BotConfigName or modules.game_bot.contentsPanel.config:getCurrentOption().text
 TargetBot.setCurrentProfile = function(name)
   if not g_resources.fileExists("/bot/"..botConfigName.."/targetbot_configs/"..name..".json") then
     return warn("there is no targetbot profile with that name!")
@@ -409,16 +415,6 @@ TargetBot.setCurrentProfile = function(name)
     setCharacterProfile("targetbotProfile", name)
   end
   TargetBot.setOn()
-end
-
--- Restore character's last used profile on load (multi-client support)
-if getCharacterProfile then
-  local charProfile = getCharacterProfile("targetbotProfile")
-  if charProfile and type(charProfile) == "string" and g_resources.fileExists("/bot/"..botConfigName.."/targetbot_configs/"..charProfile..".json") then
-    if storage._configs and storage._configs.targetbot_configs then
-      storage._configs.targetbot_configs.selected = charProfile
-    end
-  end
 end
 
 TargetBot.delay = function(value)
@@ -738,3 +734,6 @@ targetbotMacro = macro(100, function()
     ui.status.right:setText(STATUS_WAITING)
   end
 end)
+
+-- Note: Profile restoration is handled early in configs.lua
+-- before Config.setup() is called, so the dropdown loads correctly

@@ -1,4 +1,4 @@
-# 📊 SmartHunt Analytics v3.1
+# 📊 SmartHunt Analytics
 
 SmartHunt is an advanced hunting analytics system that provides real-time insights, detailed tracking, and AI-powered recommendations to optimize your hunting sessions.
 

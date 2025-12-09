@@ -95,7 +95,17 @@ nExBot/
 ## 🖥️ Multi-Client Support
 
 > [!TIP]
-> nExBot v1.2.0+ supports running multiple clients with independent configurations!
+> nExBot supports running multiple clients with independent configurations!
+
+### Per-Character Profile Persistence
+
+Each character automatically remembers their own active profiles. When you run multiple clients simultaneously, each character loads their own saved configuration.
+
+**How It Works:**
+- Profiles are saved per-character in `character_profiles.json`
+- When you select a profile, it's saved for **your current character**
+- On login, each character's profiles are restored **before** the UI loads
+- No manual switching needed - just log in and your settings are ready!
 
 ### Per-Character Profile Persistence
 
