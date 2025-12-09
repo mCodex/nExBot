@@ -124,6 +124,22 @@ local function getElapsed()
   return now - analytics.session.startTime
 end
 
+-- Get analytics from HealBot if available
+local function getHealBotData()
+  if HealBot and HealBot.getAnalytics then
+    return HealBot.getAnalytics()
+  end
+  return nil
+end
+
+-- Get analytics from AttackBot if available
+local function getAttackBotData()
+  if AttackBot and AttackBot.getAnalytics then
+    return AttackBot.getAnalytics()
+  end
+  return nil
+end
+
 -- Check if table has any items
 local function hasData(tbl)
   if not tbl then return false end
@@ -1084,22 +1100,6 @@ local function getItemName(itemId)
   local item = Item.create(itemId)
   if item then return item:getName() end
   return "Item #" .. tostring(itemId)
-end
-
--- Get analytics from HealBot if available
-local function getHealBotData()
-  if HealBot and HealBot.getAnalytics then
-    return HealBot.getAnalytics()
-  end
-  return nil
-end
-
--- Get analytics from AttackBot if available
-local function getAttackBotData()
-  if AttackBot and AttackBot.getAnalytics then
-    return AttackBot.getAnalytics()
-  end
-  return nil
 end
 
 local function buildSummary()

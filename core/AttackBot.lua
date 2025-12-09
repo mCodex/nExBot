@@ -1418,6 +1418,8 @@ macro(100, function()
             killsCheck = killsCheck or killsToRs()
             if killsCheck <= currentSettings.KillsAmount then goto continue end
           end
+          -- Record area rune analytics (category 2 bypasses executeAttackBotAction)
+          recordAttackAction(2, attackData)
           return useRuneOnTarget(attackData, g_map.getTile(data.pos):getTopUseThing())
         end
       end
