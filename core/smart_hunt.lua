@@ -736,7 +736,8 @@ function Insights.analyze()
   -- Get damage data from analyzer
   local totalDmgDealt = 0
   if getHuntingData then
-    totalDmgDealt = select(1, getHuntingData()) or 0
+    local dmg = getHuntingData()
+    totalDmgDealt = dmg or 0
   end
   
   if attackData and m.kills > 10 then

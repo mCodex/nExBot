@@ -1069,8 +1069,8 @@ end
     end
   end
 
-    -- public functions
-    AttackBot = {} -- global table
+    -- public functions (preserve existing analytics API)
+    AttackBot = AttackBot or {}
   
     AttackBot.isOn = function()
       return currentSettings.enabled
