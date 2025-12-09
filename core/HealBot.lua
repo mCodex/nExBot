@@ -551,69 +551,66 @@ end
 --[[
   Optimized HealBot Engine
   
-  Uses EventBus for event-driven healing instead of polling.
+  Uses BotCore for unified stats, conditions, and analytics.
   Pre-caches stat functions and uses O(1) condition lookups.
 ]]
 
--- Cached player stats (updated on change events)
-local cachedStats = {
-  hp = 0,
-  maxHp = 0,
-  hpPercent = 0,
-  mp = 0,
-  maxMp = 0,
-  mpPercent = 0,
-  burst = 0,
-  lastUpdate = 0
-}
+-- ============================================================================
+-- BOTCORE INTEGRATION
+-- ============================================================================
 
--- Lightweight analytics for mana/potion efficiency (Roadmap #6 and #7)
-local analytics = storage.healAnalytics or {
+-- Use BotCore for stats (single source of truth)
+local function getStats()
+  if BotCore and BotCore.Stats then
+    return BotCore.Stats.getAll()
+  end
+  -- Fallback for standalone testing
+  local localPlayer = g_game.getLocalPlayer()
+  if not localPlayer then return { hp = 0, maxHp = 1, hpPercent = 0, mp = 0, maxMp = 1, mpPercent = 0, burst = 0 } end
+  local hp = localPlayer:getHealth()
+  local maxHp = localPlayer:getMaxHealth()
+  local mp = localPlayer:getMana()
+  local maxMp = localPlayer:getMaxMana()
+  return {
+    hp = hp, maxHp = maxHp, hpPercent = math.floor((hp / maxHp) * 100),
+    mp = mp, maxMp = maxMp, mpPercent = math.floor((mp / maxMp) * 100),
+    burst = burstDamageValue and burstDamageValue() or 0
+  }
+end
+
+-- Legacy analytics wrapper (redirects to BotCore.Analytics)
+local analytics = {
   spellCasts = 0,
   potionUses = 0,
   potionWaste = 0,
   manaWaste = 0,
-  spells = {},    -- { [spellName] = count }
-  potions = {},   -- { [itemId] = count }
+  spells = {},
+  potions = {},
   log = {}
 }
--- Ensure new fields exist for existing storage
-analytics.spells = analytics.spells or {}
-analytics.potions = analytics.potions or {}
-storage.healAnalytics = analytics
 
 -- Flag to trigger immediate heal check
 local needsHealCheck = true
 local needsItemCheck = true
 
--- Pre-built condition checkers for O(1) evaluation
-local conditionCheckers = {
-  ["HP%"] = function(sign, value)
-    if sign == "=" then return cachedStats.hpPercent == value
-    elseif sign == ">" then return cachedStats.hpPercent >= value
-    else return cachedStats.hpPercent <= value end
-  end,
-  ["HP"] = function(sign, value)
-    if sign == "=" then return cachedStats.hp == value
-    elseif sign == ">" then return cachedStats.hp >= value
-    else return cachedStats.hp <= value end
-  end,
-  ["MP%"] = function(sign, value)
-    if sign == "=" then return cachedStats.mpPercent == value
-    elseif sign == ">" then return cachedStats.mpPercent >= value
-    else return cachedStats.mpPercent <= value end
-  end,
-  ["MP"] = function(sign, value)
-    if sign == "=" then return cachedStats.mp == value
-    elseif sign == ">" then return cachedStats.mp >= value
-    else return cachedStats.mp <= value end
-  end,
-  ["burst"] = function(sign, value)
-    if sign == "=" then return cachedStats.burst == value
-    elseif sign == ">" then return cachedStats.burst >= value
-    else return cachedStats.burst <= value end
+-- Use BotCore.Condition for checks (pure functions)
+local function checkCondition(origin, sign, value)
+  if BotCore and BotCore.Condition then
+    return BotCore.Condition.check(origin, sign, value, getStats())
   end
-}
+  -- Fallback
+  local stats = getStats()
+  local current = nil
+  if origin == "HP%" then current = stats.hpPercent
+  elseif origin == "HP" then current = stats.hp
+  elseif origin == "MP%" then current = stats.mpPercent
+  elseif origin == "MP" then current = stats.mp
+  elseif origin == "burst" then current = stats.burst end
+  if not current then return false end
+  if sign == "=" then return current == value end
+  if sign == ">" then return current >= value end
+  return current <= value
+end
 
 -- Cached player reference (avoid repeated lookups)
 local cachedLocalPlayer = nil
@@ -629,44 +626,21 @@ local function getLocalPlayerCached()
   return cachedLocalPlayer
 end
 
--- Update cached stats using correct OTClient API
+-- Update stats (delegates to BotCore if available)
 local function updateCachedStats()
-  local localPlayer = getLocalPlayerCached()
-  if not localPlayer then return end
-  
-  local currentHp = localPlayer:getHealth()
-  local currentMaxHp = localPlayer:getMaxHealth()
-  local currentMp = localPlayer:getMana()
-  local currentMaxMp = localPlayer:getMaxMana()
-  
-  -- Only update if values changed (reduce memory writes)
-  if cachedStats.hp ~= currentHp or cachedStats.maxHp ~= currentMaxHp then
-    cachedStats.hp = currentHp
-    cachedStats.maxHp = currentMaxHp
-    cachedStats.hpPercent = currentMaxHp > 0 and math.floor((currentHp / currentMaxHp) * 100) or 0
+  if BotCore and BotCore.Stats then
+    BotCore.Stats.update()
+    return
   end
-  
-  if cachedStats.mp ~= currentMp or cachedStats.maxMp ~= currentMaxMp then
-    cachedStats.mp = currentMp
-    cachedStats.maxMp = currentMaxMp
-    cachedStats.mpPercent = currentMaxMp > 0 and math.floor((currentMp / currentMaxMp) * 100) or 0
-  end
-  
-  cachedStats.burst = burstDamageValue and burstDamageValue() or 0
-  cachedStats.lastUpdate = now
+  -- Fallback handled by getStats()
 end
 
--- Check if condition is met using cached stats
-local function checkCondition(origin, sign, value)
-  local checker = conditionCheckers[origin]
-  if checker then
-    return checker(sign, value)
-  end
-  return false
-end
-
--- Analytics helpers
+-- Analytics helpers (redirect to BotCore.Analytics if available)
 local function appendLog(entry)
+  if BotCore and BotCore.Analytics then
+    -- BotCore handles logging internally
+    return
+  end
   local log = analytics.log
   if #log >= 50 then
     table.remove(log, 1)
@@ -675,6 +649,13 @@ local function appendLog(entry)
 end
 
 local function recordSpell(entry, hpPercent, mpPercent)
+  -- Use BotCore.Analytics if available
+  if BotCore and BotCore.Analytics then
+    BotCore.Analytics.recordHealSpell(entry.spell, entry.cost, hpPercent, mpPercent)
+    return
+  end
+  
+  -- Fallback to local analytics
   analytics.spellCasts = analytics.spellCasts + 1
   
   -- Track individual spell usage
@@ -701,6 +682,13 @@ local function recordSpell(entry, hpPercent, mpPercent)
 end
 
 local function recordPotion(entry, hpPercent, mpPercent)
+  -- Use BotCore.Analytics if available
+  if BotCore and BotCore.Analytics then
+    BotCore.Analytics.recordPotion(entry.item, hpPercent, mpPercent)
+    return
+  end
+  
+  -- Fallback to local analytics
   analytics.potionUses = analytics.potionUses + 1
   
   -- Track individual potion usage
@@ -726,10 +714,20 @@ local function recordPotion(entry, hpPercent, mpPercent)
 end
 
 HealBot = HealBot or {}
+
+-- Redirect to BotCore.Analytics if available
 HealBot.getAnalytics = function()
+  if BotCore and BotCore.Analytics then
+    return BotCore.Analytics.HealBot.getAnalytics()
+  end
   return analytics
 end
+
 HealBot.resetAnalytics = function()
+  if BotCore and BotCore.Analytics then
+    BotCore.Analytics.HealBot.resetAnalytics()
+    return
+  end
   analytics.spellCasts = 0
   analytics.potionUses = 0
   analytics.potionWaste = 0
@@ -748,8 +746,11 @@ local function processSpellHealing()
   local spellCount = spellTable and #spellTable or 0
   if spellCount == 0 then return false end
   
+  -- Get stats from BotCore (single source of truth)
+  local stats = getStats()
+  
   local somethingIsOnCooldown = false
-  local currentMp = cachedStats.mp
+  local currentMp = stats.mp
   local ignoreConditions = not currentSettings.Conditions
   local ignoreCooldown = not currentSettings.Cooldown
   
@@ -758,8 +759,8 @@ local function processSpellHealing()
     if entry.enabled and entry.cost < currentMp then
       if canCast(entry.spell, ignoreConditions, ignoreCooldown) then
         if checkCondition(entry.origin, entry.sign, entry.value) then
-          local beforeHp = cachedStats.hpPercent
-          local beforeMp = cachedStats.mpPercent
+          local beforeHp = stats.hpPercent
+          local beforeMp = stats.mpPercent
           say(entry.spell)
           recordSpell(entry, beforeHp, beforeMp)
           return true
@@ -776,28 +777,25 @@ local function processSpellHealing()
   return false
 end
 
--- Use item for healing - works even with closed backpack
+-- Use BotCore.Items for hotkey-style item usage (works even with closed backpack)
 local function useItemLikeHotkey(itemId)
+  -- Use BotCore.Items if available
+  if BotCore and BotCore.Items and BotCore.Items.useSelf then
+    return BotCore.Items.useSelf(itemId)
+  end
+  
+  -- Fallback: direct implementation
   local localPlayer = g_game.getLocalPlayer()
   if not localPlayer then return false end
   
-  -- Method 1: Use inventory item with player (works without open backpack - like hotkeys)
-  -- This is the preferred method as it works exactly like hotkey usage
   if g_game.useInventoryItemWith then
     g_game.useInventoryItemWith(itemId, localPlayer)
     return true
   end
   
-  -- Method 2: Fallback - find item in open containers and use WITH player
   local item = findItem(itemId)
   if item then
     g_game.useWith(item, localPlayer)
-    return true
-  end
-  
-  -- Method 3: Try simple inventory use (some items don't need target)
-  if g_game.useInventoryItem then
-    g_game.useInventoryItem(itemId)
     return true
   end
   
@@ -827,6 +825,8 @@ local function processItemHealing()
     end
   end
   
+  -- Get stats from BotCore (single source of truth)
+  local stats = getStats()
   local checkVisibility = currentSettings.Visible and not g_game.useInventoryItemWith
   
   for i = 1, itemCount do
@@ -837,8 +837,8 @@ local function processItemHealing()
       
       if canUse and checkCondition(entry.origin, entry.sign, entry.value) then
         if useItemLikeHotkey(entry.item) then
-          local beforeHp = cachedStats.hpPercent
-          local beforeMp = cachedStats.mpPercent
+          local beforeHp = stats.hpPercent
+          local beforeMp = stats.mpPercent
           recordPotion(entry, beforeHp, beforeMp)
           return true
         end
@@ -851,14 +851,12 @@ local function processItemHealing()
 end
 
 -- Subscribe to EventBus for instant reaction to stat changes
+-- Note: BotCore handles event-driven stat updates, we just need to reset flags
 if EventBus then
   -- High priority health change handler (priority 100 = runs first)
   EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMaxHealth)
-    cachedStats.hp = health
-    cachedStats.maxHp = maxHealth
-    cachedStats.hpPercent = math.floor((health / maxHealth) * 100)
-    
-    -- Reset standby flags - health changed, need to recheck
+    -- BotCore.Stats handles the actual stat update
+    -- We just reset standby flags
     standByItems = false
     standBySpells = false
     needsHealCheck = true
@@ -873,25 +871,20 @@ if EventBus then
   
   -- Mana change handler
   EventBus.on("player:mana", function(mp, maxMp, oldMp, oldMaxMp)
-    cachedStats.mp = mp
-    cachedStats.maxMp = maxMp
-    cachedStats.mpPercent = math.floor((mp / maxMp) * 100)
-    
+    -- BotCore.Stats handles the actual stat update
     standByItems = false
     standBySpells = false
     needsHealCheck = true
     needsItemCheck = true
   end, 90)
-  end
+end
 
 -- Fast spell macro (75ms for critical healing response)
 macro(75, function()
   if not currentSettings.enabled then return end
   
-  -- Always update stats to ensure accuracy
-  updateCachedStats()
-  
-  -- Reset standby on each tick (simple polling approach)
+  -- BotCore.Stats.update() is called by BotCore tick handler
+  -- Just reset standby and process
   standBySpells = false
   
   processSpellHealing()
@@ -903,9 +896,6 @@ macro(100, function()
   if not currentSettings.itemTable or #currentSettings.itemTable == 0 then return end
   if currentSettings.Delay and nExBot.isUsing then return end
   if currentSettings.MessageDelay and nExBot.isUsingPotion then return end
-  
-  -- Always update stats
-  updateCachedStats()
   
   -- Reset standby on each tick
   standByItems = false
@@ -928,7 +918,9 @@ onManaChange(function(localPlayer, mp, maxMp, oldMp, oldMaxMp)
   needsItemCheck = true
 end)
 
--- Initialize cached stats on load
-updateCachedStats()
+-- Initialize stats on load (BotCore handles this if available)
+if BotCore and BotCore.Stats then
+  BotCore.Stats.update()
+end
 
 UI.Separator()
