@@ -93,7 +93,6 @@ local function earlyRestoreProfiles()
     if g_resources.fileExists(cavebotFile) then
       storage._configs.cavebot_configs = storage._configs.cavebot_configs or {}
       storage._configs.cavebot_configs.selected = charProfiles.cavebotProfile
-      info("[nExBot] Pre-loaded CaveBot profile: " .. charProfiles.cavebotProfile .. " for " .. charName)
     end
   end
   
@@ -103,7 +102,6 @@ local function earlyRestoreProfiles()
     if g_resources.fileExists(targetFile) then
       storage._configs.targetbot_configs = storage._configs.targetbot_configs or {}
       storage._configs.targetbot_configs.selected = charProfiles.targetbotProfile
-      info("[nExBot] Pre-loaded TargetBot profile: " .. charProfiles.targetbotProfile .. " for " .. charName)
     end
   end
 end
@@ -129,7 +127,6 @@ function setCharacterProfile(botType, profileNum)
   CharacterProfiles[charName] = CharacterProfiles[charName] or {}
   CharacterProfiles[charName][botType] = profileNum
   saveCharacterProfiles()
-  info("[nExBot] Saved " .. botType .. " = " .. tostring(profileNum) .. " for " .. charName)
 end
 
 --[[
