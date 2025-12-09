@@ -33,6 +33,229 @@ local CACHE_TTL = 100  -- Update cache every 100ms
 -- Cached UI list reference (avoid repeated lookups)
 local uiList = nil
 
+--[[
+  SMART EXECUTION SYSTEM
+  Reduces unnecessary macro executions by tracking walk state and using delays.
+  
+  Key optimizations:
+  1. Skip execution while player is walking (wait for walk to complete)
+  2. Skip execution if a delay is active (from previous action)
+  3. Track last action to avoid redundant recalculations
+  4. Only execute when there's actual work to do
+]]
+local walkState = {
+  isWalkingToWaypoint = false,  -- Currently walking to a waypoint
+  targetPos = nil,              -- Target position we're walking to
+  lastActionTime = 0,           -- When we last executed an action
+  delayUntil = 0,               -- Don't execute until this time
+  lastPlayerPos = nil,          -- Last known player position
+  stuckCheckTime = 0,           -- When to check if stuck
+  STUCK_TIMEOUT = 3000          -- Consider stuck after 3 seconds of no movement
+}
+
+-- Check if player has moved since last check
+local function hasPlayerMoved()
+  local currentPos = pos()
+  if not currentPos or not walkState.lastPlayerPos then
+    walkState.lastPlayerPos = currentPos
+    return true
+  end
+  
+  local moved = (currentPos.x ~= walkState.lastPlayerPos.x or
+                 currentPos.y ~= walkState.lastPlayerPos.y or
+                 currentPos.z ~= walkState.lastPlayerPos.z)
+  
+  if moved then
+    walkState.lastPlayerPos = currentPos
+    walkState.stuckCheckTime = now + walkState.STUCK_TIMEOUT
+  end
+  
+  return moved
+end
+
+-- Check if we're stuck (no movement for too long)
+local function isStuck()
+  if not walkState.isWalkingToWaypoint then return false end
+  return now > walkState.stuckCheckTime
+end
+
+-- Set a delay before next execution
+local function setExecutionDelay(delayMs)
+  walkState.delayUntil = now + delayMs
+end
+
+-- Check if we should skip execution
+-- SIMPLIFIED: Only skip during active walking, don't block on walk state tracking
+local function shouldSkipExecution()
+  -- Active delay from previous action
+  if now < walkState.delayUntil then
+    return true
+  end
+  
+  -- Player is actively walking - wait for walk to complete
+  -- This is the only reliable check - player:isWalking() is definitive
+  if player:isWalking() then
+    return true
+  end
+  
+  -- If player stopped walking, clear the walking state
+  if walkState.isWalkingToWaypoint then
+    walkState.isWalkingToWaypoint = false
+    walkState.targetPos = nil
+  end
+  
+  return false
+end
+
+-- Mark that we're walking to a waypoint
+CaveBot.setWalkingToWaypoint = function(targetPos)
+  walkState.isWalkingToWaypoint = true
+  walkState.targetPos = targetPos
+  walkState.stuckCheckTime = now + walkState.STUCK_TIMEOUT
+  walkState.lastPlayerPos = pos()
+end
+
+-- Clear walking state
+CaveBot.clearWalkingState = function()
+  walkState.isWalkingToWaypoint = false
+  walkState.targetPos = nil
+end
+
+--[[
+  SMART WAYPOINT GUARD
+  Detects when player is impossibly far from CURRENT waypoint (not first waypoint!)
+  
+  This handles edge cases like:
+  - Player got teleported by trap/magic
+  - Player died and respawned at temple
+  - Script was loaded while player is in a different area
+  
+  Key difference from old guard:
+  - Checks CURRENT focused waypoint, not first waypoint
+  - Only triggers on floor mismatch OR extreme distance (>100 tiles)
+  - Skips check entirely if player is making progress
+  - Uses rate limiting to avoid performance impact
+]]
+local WaypointGuard = {
+  lastCheckTime = 0,
+  CHECK_INTERVAL = 5000,      -- Only check every 5 seconds (rare event detection)
+  EXTREME_DISTANCE = 100,     -- Only trigger if >100 tiles away
+  lastTriggeredTime = 0,
+  TRIGGER_COOLDOWN = 10000,   -- Don't re-trigger for 10 seconds
+  consecutiveFailures = 0,
+  MAX_FAILURES = 3            -- Skip waypoint after 3 consecutive failures
+}
+
+-- Parse position from waypoint value string
+local function parseWaypointValue(value)
+  if not value or type(value) ~= "string" then return nil end
+  local parts = value:split(",")
+  if #parts >= 3 then
+    local x, y, z = tonumber(parts[1]), tonumber(parts[2]), tonumber(parts[3])
+    if x and y and z then
+      return {x = x, y = y, z = z}
+    end
+  end
+  return nil
+end
+
+-- Get CURRENT waypoint position (not first!)
+local function getCurrentWaypointPos()
+  if not ui or not ui.list then return nil end
+  
+  local focused = ui.list:getFocusedChild()
+  if not focused then return nil end
+  
+  -- Only check "goto" or "walk" actions
+  local actionType = focused.action
+  if actionType ~= "goto" and actionType ~= "walk" then
+    return nil  -- Not a movement waypoint, skip guard
+  end
+  
+  return parseWaypointValue(focused.value)
+end
+
+-- Smart guard check - only runs every 5 seconds
+local function checkWaypointGuard()
+  -- Rate limit: only check every 5 seconds
+  if now - WaypointGuard.lastCheckTime < WaypointGuard.CHECK_INTERVAL then
+    return false  -- No action needed
+  end
+  WaypointGuard.lastCheckTime = now
+  
+  -- Cooldown: don't trigger too frequently
+  if now - WaypointGuard.lastTriggeredTime < WaypointGuard.TRIGGER_COOLDOWN then
+    return false
+  end
+  
+  -- Skip if we're actively walking (making progress)
+  if walkState.isWalkingToWaypoint and not isStuck() then
+    WaypointGuard.consecutiveFailures = 0  -- Reset on progress
+    return false
+  end
+  
+  local playerPos = pos()
+  if not playerPos then return false end
+  
+  local waypointPos = getCurrentWaypointPos()
+  if not waypointPos then return false end  -- No movement waypoint focused
+  
+  -- Check floor mismatch (definite problem)
+  if playerPos.z ~= waypointPos.z then
+    WaypointGuard.consecutiveFailures = WaypointGuard.consecutiveFailures + 1
+    
+    if WaypointGuard.consecutiveFailures >= WaypointGuard.MAX_FAILURES then
+      -- Skip this waypoint - can't reach it
+      warn("[CaveBot] Floor mismatch for " .. WaypointGuard.MAX_FAILURES .. " checks. Skipping waypoint.")
+      WaypointGuard.consecutiveFailures = 0
+      return "skip"
+    end
+    return false
+  end
+  
+  -- Check extreme distance
+  local dist = math.abs(playerPos.x - waypointPos.x) + math.abs(playerPos.y - waypointPos.y)
+  
+  if dist > WaypointGuard.EXTREME_DISTANCE then
+    WaypointGuard.consecutiveFailures = WaypointGuard.consecutiveFailures + 1
+    
+    if WaypointGuard.consecutiveFailures >= WaypointGuard.MAX_FAILURES then
+      -- Skip this waypoint - too far to reach reasonably
+      warn("[CaveBot] Waypoint too far (" .. dist .. " tiles) for " .. WaypointGuard.MAX_FAILURES .. " checks. Skipping.")
+      WaypointGuard.consecutiveFailures = 0
+      return "skip"
+    end
+    return false
+  end
+  
+  -- Everything normal
+  WaypointGuard.consecutiveFailures = 0
+  return false
+end
+
+-- Skip to next waypoint (used when guard detects unreachable waypoint)
+local function skipCurrentWaypoint()
+  if not ui or not ui.list then return end
+  
+  local actionCount = ui.list:getChildCount()
+  if actionCount == 0 then return end
+  
+  local current = ui.list:getFocusedChild()
+  if not current then return end
+  
+  local currentIndex = ui.list:getChildIndex(current)
+  local nextIndex = currentIndex + 1
+  if nextIndex > actionCount then
+    nextIndex = 1
+  end
+  
+  local nextChild = ui.list:getChildByIndex(nextIndex)
+  if nextChild then
+    ui.list:focusChild(nextChild)
+    info("[CaveBot] Skipped to waypoint " .. nextIndex)
+  end
+end
+
 local function updateCache()
   if (now - lastCacheUpdate) < CACHE_TTL then return end
   lastCacheUpdate = now
@@ -52,8 +275,18 @@ local function initTargetBotCache()
 end
 
 cavebotMacro = macro(250, function()
-  -- Skip if player is walking (let walk complete)
-  if player:isWalking() then return end
+  -- SMART EXECUTION: Skip if we shouldn't execute this tick
+  if shouldSkipExecution() then return end
+  
+  -- Update player position tracking
+  hasPlayerMoved()
+  
+  -- SMART WAYPOINT GUARD: Check if current waypoint is unreachable (rate-limited)
+  local guardResult = checkWaypointGuard()
+  if guardResult == "skip" then
+    skipCurrentWaypoint()
+    return  -- Let next tick handle the new waypoint
+  end
   
   -- Lazy-init TargetBot cache
   if not targetBotIsActive and TargetBot then
@@ -643,7 +876,21 @@ CaveBot.setCurrentProfile = function(name)
   end
   CaveBot.setOff()
   storage._configs.cavebot_configs.selected = name
+  -- Save character's profile preference for multi-client support
+  if setCharacterProfile then
+    setCharacterProfile("cavebotProfile", name)
+  end
   CaveBot.setOn()
+end
+
+-- Restore character's last used profile on load (multi-client support)
+if getCharacterProfile then
+  local charProfile = getCharacterProfile("cavebotProfile")
+  if charProfile and type(charProfile) == "string" and g_resources.fileExists("/bot/"..botConfigName.."/cavebot_configs/"..charProfile..".cfg") then
+    if storage._configs and storage._configs.cavebot_configs then
+      storage._configs.cavebot_configs.selected = charProfile
+    end
+  end
 end
 
 CaveBot.delay = function(value)

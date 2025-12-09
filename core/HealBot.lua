@@ -146,7 +146,11 @@ if not HealBotConfig[healPanelName] or not HealBotConfig[healPanelName][1] or #H
   }
 end
 
-if not HealBotConfig.currentHealBotProfile or HealBotConfig.currentHealBotProfile == 0 or HealBotConfig.currentHealBotProfile > 5 then 
+-- Load character-specific profile if available
+local charProfile = getCharacterProfile("healProfile")
+if charProfile and charProfile >= 1 and charProfile <= 5 then
+  HealBotConfig.currentHealBotProfile = charProfile
+elseif not HealBotConfig.currentHealBotProfile or HealBotConfig.currentHealBotProfile == 0 or HealBotConfig.currentHealBotProfile > 5 then 
   HealBotConfig.currentHealBotProfile = 1
 end
 
@@ -155,6 +159,8 @@ local currentSettings
 local setActiveProfile = function()
   local n = HealBotConfig.currentHealBotProfile
   currentSettings = HealBotConfig[healPanelName][n]
+  -- Save character's profile preference
+  setCharacterProfile("healProfile", n)
 end
 setActiveProfile()
 
@@ -567,8 +573,13 @@ local analytics = storage.healAnalytics or {
   potionUses = 0,
   potionWaste = 0,
   manaWaste = 0,
+  spells = {},    -- { [spellName] = count }
+  potions = {},   -- { [itemId] = count }
   log = {}
 }
+-- Ensure new fields exist for existing storage
+analytics.spells = analytics.spells or {}
+analytics.potions = analytics.potions or {}
 storage.healAnalytics = analytics
 
 -- Flag to trigger immediate heal check
@@ -665,6 +676,11 @@ end
 
 local function recordSpell(entry, hpPercent, mpPercent)
   analytics.spellCasts = analytics.spellCasts + 1
+  
+  -- Track individual spell usage
+  local spellName = entry.spell or "unknown"
+  analytics.spells[spellName] = (analytics.spells[spellName] or 0) + 1
+  
   local wasted = false
   if entry.cost and hpPercent and entry.value then
     -- If we cast while already above the trigger threshold by 10%, count as waste
@@ -686,6 +702,11 @@ end
 
 local function recordPotion(entry, hpPercent, mpPercent)
   analytics.potionUses = analytics.potionUses + 1
+  
+  -- Track individual potion usage
+  local itemId = entry.item or 0
+  analytics.potions[itemId] = (analytics.potions[itemId] or 0) + 1
+  
   local wasted = false
   if entry.value then
     -- If we potion when HP is already 10% above trigger, count as waste
@@ -707,6 +728,15 @@ end
 HealBot = HealBot or {}
 HealBot.getAnalytics = function()
   return analytics
+end
+HealBot.resetAnalytics = function()
+  analytics.spellCasts = 0
+  analytics.potionUses = 0
+  analytics.potionWaste = 0
+  analytics.manaWaste = 0
+  analytics.spells = {}
+  analytics.potions = {}
+  analytics.log = {}
 end
 
 -- Process spell healing (high priority, runs on events)

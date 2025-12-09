@@ -255,7 +255,12 @@ end)
 --------------------------------------------------------------------------------
 -- OPTIMIZED WALKING FUNCTION
 -- Uses progressive pathfinding: simple -> complex -> fallback
+-- PERFORMANCE: Limits pathfinding distance to prevent client freeze
 --------------------------------------------------------------------------------
+
+-- Maximum pathfinding calculation distance (prevents freeze on long paths)
+local MAX_PATHFIND_DIST = 50  -- Limit pathfinding to 50 tiles
+
 CaveBot.walkTo = function(dest, maxDist, params)
   local playerPos = pos()
   if not playerPos then return false end
@@ -264,12 +269,16 @@ CaveBot.walkTo = function(dest, maxDist, params)
   local allowFloorChange = params and params.allowFloorChange or false
   maxDist = maxDist or 20
   
+  -- PERFORMANCE: Clamp maxDist to prevent expensive pathfinding
+  local clampedMaxDist = math.min(maxDist, MAX_PATHFIND_DIST)
+  
   -- Set expected floor for tracking
   expectedFloor = dest.z
   
   -- Quick distance check
   local distX = math.abs(dest.x - playerPos.x)
   local distY = math.abs(dest.y - playerPos.y)
+  local totalDist = distX + distY
   
   -- Already at destination
   if distX <= precision and distY <= precision and dest.z == playerPos.z then
@@ -324,27 +333,57 @@ CaveBot.walkTo = function(dest, maxDist, params)
     PathCache.cache[getCacheKey(dest)] = nil
   end
   
+  -- PERFORMANCE: For very long distances, use autoWalk directly (let client handle it)
+  -- This avoids expensive progressive pathfinding
+  if totalDist > MAX_PATHFIND_DIST then
+    if autoWalk(dest, maxDist, {
+      ignoreNonPathable = params and params.ignoreNonPathable or true,
+      ignoreCreatures = params and params.ignoreCreatures or false,
+      precision = precision
+    }) then
+      local stepDuration = player:getStepDuration(false, 0) or 100
+      CaveBot.delay(walkDelay + stepDuration)
+      return true
+    end
+    -- autoWalk failed, skip progressive pathfinding (would freeze client)
+    return false
+  end
+  
   -- Progressive pathfinding: try simple first (faster), then complex
+  -- Only used for short/medium distances
+  -- OPTIMIZED: Use autoWalk first (fastest), only fall back to manual pathfinding if needed
   local path = nil
   
-  -- Stage 1: Simple pathfinding (most common case)
-  path = findPath(playerPos, dest, maxDist, {
+  -- Try autoWalk first (most efficient - uses client's pathfinding)
+  if autoWalk(dest, clampedMaxDist, {
+    ignoreNonPathable = params and params.ignoreNonPathable or true,
+    ignoreCreatures = params and params.ignoreCreatures or false,
+    precision = precision
+  }) then
+    local stepDuration = player:getStepDuration(false, 0) or 100
+    CaveBot.delay(walkDelay + stepDuration)
+    return true
+  end
+  
+  -- autoWalk failed - try manual pathfinding (Stage 1: Simple)
+  path = findPath(playerPos, dest, clampedMaxDist, {
     ignoreNonPathable = true,
     precision = precision
   })
   
-  if not path then
+  -- Only try more complex pathfinding if simple failed AND we're close enough
+  if not path and totalDist <= 30 then
     -- Stage 2: Try with creature ignoring
-    path = findPath(playerPos, dest, maxDist, {
+    path = findPath(playerPos, dest, clampedMaxDist, {
       ignoreNonPathable = true,
       ignoreCreatures = true,
       precision = precision
     })
   end
   
-  if not path then
-    -- Stage 3: Try with allowUnseen for unexplored areas
-    path = findPath(playerPos, dest, maxDist, {
+  -- Stage 3 is expensive - only try if really close and previous stages failed
+  if not path and totalDist <= 15 then
+    path = findPath(playerPos, dest, clampedMaxDist, {
       ignoreNonPathable = true,
       ignoreCreatures = true,
       allowUnseen = true,

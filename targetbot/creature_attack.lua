@@ -588,30 +588,38 @@ TargetBot.Creature.walk = function(creature, config, targets)
     -- Smart Pull: Pause CaveBot when monster pack is too small but we have targets
     -- This prevents running to next waypoint and losing the respawn
     if config.smartPull then
-      local pullRange = config.smartPullRange or 2
-      local pullMin = config.smartPullMin or 3
-      local pullShape = config.smartPullShape or (nExBot.SHAPE and nExBot.SHAPE.CIRCLE) or 2
-      
-      local nearbyMonsters
-      if getMonstersAdvanced then
-        nearbyMonsters = getMonstersAdvanced(pullRange, pullShape)
-      else
-        nearbyMonsters = getMonsters(pullRange)
-      end
-      
-      -- If we have fewer monsters than minimum, PAUSE waypoint movement
-      -- but keep attacking current targets (don't walk to next waypoint!)
-      if nearbyMonsters < pullMin then
-        -- Signal to CaveBot that smartPull is active (pause waypoints)
-        -- But DON'T call allowCaveBot - we want to FIGHT, not walk away
-        TargetBot.smartPullActive = true
-        
-        -- Stay here and fight - don't walk to waypoint
-        -- Return nil to continue with normal attack/positioning below
-      else
-        -- Enough monsters - clear the pause
+      -- SAFEGUARD: Only try to pull if there are ANY monsters on screen
+      -- No point in pausing waypoints if there's nothing to fight
+      local screenMonsters = getMonsters(7)  -- Check entire visible range first
+      if screenMonsters == 0 then
+        -- No monsters on screen - don't activate smart pull, let CaveBot work
         TargetBot.smartPullActive = false
-      end
+      else
+        local pullRange = config.smartPullRange or 2
+        local pullMin = config.smartPullMin or 3
+        local pullShape = config.smartPullShape or (nExBot.SHAPE and nExBot.SHAPE.CIRCLE) or 2
+        
+        local nearbyMonsters
+        if getMonstersAdvanced then
+          nearbyMonsters = getMonstersAdvanced(pullRange, pullShape)
+        else
+          nearbyMonsters = getMonsters(pullRange)
+        end
+        
+        -- If we have fewer monsters than minimum, PAUSE waypoint movement
+        -- but keep attacking current targets (don't walk to next waypoint!)
+        if nearbyMonsters < pullMin then
+          -- Signal to CaveBot that smartPull is active (pause waypoints)
+          -- But DON'T call allowCaveBot - we want to FIGHT, not walk away
+          TargetBot.smartPullActive = true
+        
+          -- Stay here and fight - don't walk to waypoint
+          -- Return nil to continue with normal attack/positioning below
+        else
+          -- Enough monsters - clear the pause
+          TargetBot.smartPullActive = false
+        end
+      end  -- end screenMonsters check
     else
       TargetBot.smartPullActive = false
     end

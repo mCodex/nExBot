@@ -452,8 +452,17 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
   
   if CaveBot.walkTo(destPos, maxDist, walkParams) then
+    -- Mark that we're walking to this waypoint (reduces unnecessary re-execution)
+    if CaveBot.setWalkingToWaypoint then
+      CaveBot.setWalkingToWaypoint(destPos)
+    end
     noPath = 0
     return "retry"
+  end
+  
+  -- Walk failed - clear walking state
+  if CaveBot.clearWalkingState then
+    CaveBot.clearWalkingState()
   end
   
   -- Walk failed

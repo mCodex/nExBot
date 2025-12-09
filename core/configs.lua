@@ -1,6 +1,9 @@
 --[[ 
     Configs for modules
     Based on Kondrah storage method  
+    
+    Multi-client support: Stores per-character profile preferences
+    so each character remembers their last active profile.
 --]]
 local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
 
@@ -18,6 +21,63 @@ for i=1,10 do
 end
 
 local profile = g_settings.getNumber('profile')
+
+--[[
+  Character Profile Manager
+  
+  Stores which profile each character was using, so when running
+  multiple clients, each character remembers their own settings.
+]]
+local charProfileFile = "/bot/" .. configName .. "/nExBot_configs/character_profiles.json"
+CharacterProfiles = {} -- {characterName = {healProfile = 1, attackProfile = 1, supplyProfile = 1}}
+
+-- Load character profiles mapping
+if g_resources.fileExists(charProfileFile) then
+  local status, result = pcall(function()
+    return json.decode(g_resources.readFileContents(charProfileFile))
+  end)
+  if status and result then
+    CharacterProfiles = result
+  end
+end
+
+-- Save character profiles mapping
+function saveCharacterProfiles()
+  local status, result = pcall(function()
+    return json.encode(CharacterProfiles, 2)
+  end)
+  if status then
+    g_resources.writeFileContents(charProfileFile, result)
+  end
+end
+
+-- Get current character name (with safety check)
+function getCharacterName()
+  local localPlayer = g_game.getLocalPlayer()
+  if localPlayer then
+    return localPlayer:getName()
+  end
+  return "Unknown"
+end
+
+-- Get character's last used profile for a specific bot
+function getCharacterProfile(botType)
+  local charName = getCharacterName()
+  if CharacterProfiles[charName] and CharacterProfiles[charName][botType] then
+    return CharacterProfiles[charName][botType]
+  end
+  return 1 -- default to profile 1
+end
+
+-- Save character's current profile for a specific bot
+function setCharacterProfile(botType, profileNum)
+  local charName = getCharacterName()
+  if not CharacterProfiles[charName] then
+    CharacterProfiles[charName] = {}
+  end
+  CharacterProfiles[charName][botType] = profileNum
+  saveCharacterProfiles()
+end
 
 HealBotConfig = {}
 local healBotFile = "/bot/" .. configName .. "/nExBot_configs/profile_".. profile .. "/HealBot.json"

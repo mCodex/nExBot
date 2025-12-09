@@ -1083,8 +1083,17 @@ displayCondition = function(menuPosition, lookThing, useThing, creatureThing)
 end
 local interface = modules.game_interface
 
+-- Throttle setFrames to prevent slow macro warnings
+local lastSetFramesTime = 0
+local SET_FRAMES_THROTTLE = 200 -- ms between updates
+
 local function setFrames()
   if not storage.analyzers.rarityFrames then return end
+  
+  -- Throttle to prevent excessive calls
+  if now - lastSetFramesTime < SET_FRAMES_THROTTLE then return end
+  lastSetFramesTime = now
+  
   for _, container in pairs(getContainers()) do
       local window = container.itemsPanel
       for i, child in pairs(window:getChildren()) do

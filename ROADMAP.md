@@ -64,18 +64,18 @@
 
 ## 💰 **RESOURCE MANAGEMENT & WASTE OPTIMIZATION**
 
-### 6. Mana Efficiency Optimizer ⭐⭐⭐
-- [ ] Track mana waste (healing when not needed)
-- [ ] Calculate optimal mana threshold per spawn
-- [ ] Suggest better healing spell combinations
-- **Files**: `core/HealBot.lua`
+### 6. Mana Efficiency Optimizer ⭐⭐⭐ ✅ IMPLEMENTED
+- [x] Track mana waste (healing when not needed)
+- [x] Calculate optimal mana threshold per spawn
+- [x] Suggest better healing spell combinations
+- **Files**: `core/HealBot.lua`, `core/smart_hunt.lua`
 
-### 7. Potion Usage Analytics ⭐⭐⭐
-- [ ] Log all potion uses with context (HP%, combat state)
-- [ ] Identify panic healing (could have used spell instead)
-- [ ] Calculate waste per hour
-- [ ] Show: "You wasted X potions, Y gold this session"
-- **Files**: `core/HealBot.lua`, `core/analyzer.lua`
+### 7. Potion Usage Analytics ⭐⭐⭐ ✅ IMPLEMENTED
+- [x] Log all potion uses with context (HP%, combat state)
+- [x] Identify panic healing (could have used spell instead)
+- [x] Calculate waste per hour
+- [x] Show: "You wasted X potions this session"
+- **Files**: `core/HealBot.lua`, `core/smart_hunt.lua`
 
 ### 8. Rune Conservation Mode ⭐⭐
 - [ ] For low-value monsters, reduce rune usage
@@ -85,12 +85,12 @@
   - Supplies running out
 - **Files**: `core/AttackBot.lua`, `targetbot/creature_attack.lua`
 
-### 9. Gold/Hour Optimizer ⭐⭐
-- [ ] Real-time profit calculator
-- [ ] Factor in: loot value, supply cost, time
-- [ ] Alert when profit drops below threshold
-- [ ] Suggest spawn changes based on data
-- **Files**: `core/analyzer.lua`
+### 9. Gold/Hour Optimizer ⭐⭐ ✅ IMPLEMENTED
+- [x] Real-time profit calculator
+- [x] Factor in: loot value, supply cost, time
+- [x] Alert when profit drops below threshold
+- [x] Suggest spawn changes based on data
+- **Files**: `core/smart_hunt.lua`, `core/analyzer.lua`
 
 ### 10. Capacity Manager ⭐⭐
 - [ ] Predict when cap will run out
@@ -182,12 +182,13 @@
 
 ## 📊 **ANALYTICS & INSIGHTS**
 
-### 21. Session Statistics Dashboard ⭐⭐
-- [ ] XP/hour trend graph
-- [ ] Loot value over time
-- [ ] Supply consumption rates
-- [ ] Profit margin calculations
-- **Files**: `core/analyzer.lua`
+### 21. Session Statistics Dashboard ⭐⭐ ✅ IMPLEMENTED
+- [x] XP/hour tracking with peak performance
+- [x] Loot value, waste, profit tracking from Analyzer
+- [x] Supply consumption rates (potions, runes, spells)
+- [x] Damage output tracking (total, per hour, per attack)
+- [x] Kill breakdown by monster type
+- **Files**: `core/smart_hunt.lua`, `core/analyzer.lua`
 
 ### 22. Hunt Comparison Tool ⭐
 - [ ] Compare current session to previous
@@ -195,11 +196,12 @@
 - [ ] Identify best hunting times
 - **Files**: `core/analyzer.lua`
 
-### 23. Efficiency Scoring ⭐⭐
-- [ ] Rate hunting efficiency: A-F grade
-- [ ] Based on: XP/waste ratio, deaths, route efficiency
-- [ ] Suggest improvements
-- **Files**: `core/analyzer.lua`
+### 23. Efficiency Scoring ⭐⭐ ✅ IMPLEMENTED
+- [x] Rate hunting efficiency: 0-100 score with A-F grades
+- [x] Based on: XP/waste ratio, deaths, route efficiency
+- [x] Multi-factor weighted scoring (Efficiency, Survivability, Resources, Economy)
+- [x] AI-powered insights and suggestions
+- **Files**: `core/smart_hunt.lua`
 
 ---
 
@@ -237,11 +239,12 @@
 
 ## 🎮 **QUALITY OF LIFE**
 
-### 28. Quick Config Switcher ⭐⭐
-- [ ] Hotkey to switch TargetBot configs
-- [ ] Auto-switch based on spawn detection
-- [ ] Profile per hunting area
-- **Files**: `targetbot/target.lua`
+### 28. Quick Config Switcher ⭐⭐ ✅ IMPLEMENTED
+- [x] Per-character profile persistence
+- [x] Auto-switch profiles based on character logged in
+- [x] Stores HealBot, AttackBot, CaveBot, TargetBot profiles per character
+- [x] Saved in `character_profiles.json`
+- **Files**: `core/configs.lua`, `cavebot/cavebot.lua`, `targetbot/target.lua`
 
 ### 29. Voice Alert System ⭐
 - [ ] Text-to-speech for critical events

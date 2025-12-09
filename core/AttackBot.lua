@@ -9,6 +9,62 @@ local patternCategory = 1
 local pattern = 1
 local mainWindow
 
+-- ============================================================================
+-- ANALYTICS SYSTEM
+-- ============================================================================
+
+-- Initialize or restore analytics from storage
+local attackAnalytics = storage.attackAnalytics or {
+  spells = {},      -- { [spellName] = count }
+  runes = {},       -- { [runeId] = count }
+  empowerments = 0, -- Total buff casts
+  totalAttacks = 0, -- Total attacks executed
+  log = {}          -- Recent actions log (last 50)
+}
+storage.attackAnalytics = attackAnalytics
+
+-- Record an attack action
+local function recordAttackAction(category, idOrFormula)
+  attackAnalytics.totalAttacks = attackAnalytics.totalAttacks + 1
+  
+  -- Category 1, 4, 5 = spells (targeted, empowerment, absolute)
+  if category == 1 or category == 4 or category == 5 then
+    local spellName = tostring(idOrFormula)
+    attackAnalytics.spells[spellName] = (attackAnalytics.spells[spellName] or 0) + 1
+    if category == 4 then
+      attackAnalytics.empowerments = attackAnalytics.empowerments + 1
+    end
+  -- Category 2, 3 = runes (area, targeted)
+  elseif category == 2 or category == 3 then
+    local runeId = tonumber(idOrFormula) or 0
+    attackAnalytics.runes[runeId] = (attackAnalytics.runes[runeId] or 0) + 1
+  end
+  
+  -- Keep recent log (last 50)
+  local log = attackAnalytics.log
+  if #log >= 50 then
+    table.remove(log, 1)
+  end
+  table.insert(log, {
+    t = now,
+    cat = category,
+    action = tostring(idOrFormula)
+  })
+end
+
+-- Public API for SmartHunt
+AttackBot = AttackBot or {}
+AttackBot.getAnalytics = function()
+  return attackAnalytics
+end
+AttackBot.resetAnalytics = function()
+  attackAnalytics.spells = {}
+  attackAnalytics.runes = {}
+  attackAnalytics.empowerments = 0
+  attackAnalytics.totalAttacks = 0
+  attackAnalytics.log = {}
+end
+
 -- label library
 
 local categories = {
@@ -584,8 +640,12 @@ if not AttackBotConfig[panelName] or not AttackBotConfig[panelName][1] or #Attac
     },
   }
 end
-  
-if not AttackBotConfig.currentBotProfile or AttackBotConfig.currentBotProfile == 0 or AttackBotConfig.currentBotProfile > 5 then 
+
+-- Load character-specific profile if available
+local charProfile = getCharacterProfile("attackProfile")
+if charProfile and charProfile >= 1 and charProfile <= 5 then
+  AttackBotConfig.currentBotProfile = charProfile
+elseif not AttackBotConfig.currentBotProfile or AttackBotConfig.currentBotProfile == 0 or AttackBotConfig.currentBotProfile > 5 then 
   AttackBotConfig.currentBotProfile = 1
 end
 
@@ -596,6 +656,8 @@ ui = UI.createWidget("AttackBotBotPanel")
 local setActiveProfile = function()
   local n = AttackBotConfig.currentBotProfile
   currentSettings = AttackBotConfig[panelName][n]
+  -- Save character's profile preference
+  setCharacterProfile("attackProfile", n)
 end
 setActiveProfile()
 
@@ -1147,6 +1209,10 @@ end
 function executeAttackBotAction(categoryOrPos, idOrFormula, cooldown)
   cooldown = cooldown or 0
   lastAttackTime = now -- Update attack time for non-blocking cooldown
+  
+  -- Record analytics before executing
+  recordAttackAction(categoryOrPos, idOrFormula)
+  
   if categoryOrPos == 4 or categoryOrPos == 5 or categoryOrPos == 1 then
     cast(idOrFormula, cooldown)
   elseif categoryOrPos == 3 then 

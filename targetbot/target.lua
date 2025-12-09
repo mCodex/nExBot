@@ -404,7 +404,21 @@ TargetBot.setCurrentProfile = function(name)
   end
   TargetBot.setOff()
   storage._configs.targetbot_configs.selected = name
+  -- Save character's profile preference for multi-client support
+  if setCharacterProfile then
+    setCharacterProfile("targetbotProfile", name)
+  end
   TargetBot.setOn()
+end
+
+-- Restore character's last used profile on load (multi-client support)
+if getCharacterProfile then
+  local charProfile = getCharacterProfile("targetbotProfile")
+  if charProfile and type(charProfile) == "string" and g_resources.fileExists("/bot/"..botConfigName.."/targetbot_configs/"..charProfile..".json") then
+    if storage._configs and storage._configs.targetbot_configs then
+      storage._configs.targetbot_configs.selected = charProfile
+    end
+  end
 end
 
 TargetBot.delay = function(value)

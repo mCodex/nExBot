@@ -102,6 +102,15 @@ UI.Button("nExBot Settings and Scripts", function()
   extrasWindow:raise()
   extrasWindow:focus()
 end)
+
+-- Documentation Button - Opens GitHub docs
+local docBtn = UI.Button("Documentation", function()
+  g_platform.openUrl("https://github.com/mcodex/nExBot/tree/main/docs")
+end)
+if docBtn then
+  docBtn:setTooltip("Opens nExBot documentation on GitHub.\nContains guides for CaveBot, TargetBot, HealBot, and more.")
+end
+
 UI.Separator()
 
 ---- to maintain order, add options right after another:

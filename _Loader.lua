@@ -105,30 +105,3 @@ setDefaultTab("Main")
 UI.Separator()
 UI.Label("Private Scripts:")
 UI.Separator()
-
--- ============================================
--- MACRO PERFORMANCE MONITOR
--- ============================================
-
--- Global macro performance tracking
-nExBot.macroStats = {
-  slowWarnings = 0,
-  lastSlowWarning = 0
-}
-
--- Monitor for slow macros and provide warnings
-macro(5000, "Macro Performance Monitor", function()
-  local currentTime = now
-  
-  -- Reset slow warning counter every 5 minutes
-  if currentTime - nExBot.macroStats.lastSlowWarning > 300000 then
-    nExBot.macroStats.slowWarnings = 0
-    nExBot.macroStats.lastSlowWarning = currentTime
-  end
-  
-  -- If we have too many slow warnings, suggest optimizations
-  if nExBot.macroStats.slowWarnings > 10 then
-    warn("[nExBot] High macro load detected. Consider disabling unused features or increasing macro intervals.")
-    nExBot.macroStats.slowWarnings = 0 -- Reset to avoid spam
-  end
-end)
