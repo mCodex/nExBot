@@ -11,7 +11,7 @@ TargetBot = TargetBot or {}
 TargetBot.smartPullActive = false  -- When true, CaveBot pauses waypoint walking
 
 -- Use TargetBotCore if available (DRY principle)
-local Core = TargetBotCore or {}
+local Core = TargetCore or {}
 
 -- Creature type constants for clarity
 local CREATURE_TYPE = {
