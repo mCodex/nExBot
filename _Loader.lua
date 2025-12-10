@@ -59,6 +59,7 @@ local scripts = {
   "state_machine",  -- Finite State Machine architecture (Feature 32)
   "performance_optimizer", -- Performance optimizations (Features 24-27)
   "combat_intelligence",   -- Combat AI system (Features 11-15)
+  "bot_core/init",  -- Unified BotCore system (stats, cooldowns, analytics)
   
   -- Feature Modules
   "extras",         -- Extra settings

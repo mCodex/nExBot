@@ -394,9 +394,9 @@ containerUI.openAll.onClick = function(widget)
     config.autoOpenOnLogin = not config.autoOpenOnLogin
     widget:setOn(config.autoOpenOnLogin)
     if config.autoOpenOnLogin then
-        info("[Container Panel] Auto-open on login: ENABLED")
+        -- Auto-open on login enabled
     else
-        info("[Container Panel] Auto-open on login: DISABLED")
+        -- Auto-open on login disabled
     end
 end
 
@@ -484,7 +484,7 @@ onPlayerHealthChange(function(healthPercent)
         
         -- Delay to let game fully load
         schedule(1500, function()
-            info("[Container Panel] Auto-opening containers on login...")
+            -- Auto-opening containers on login
             openAllContainers()
         end)
     end

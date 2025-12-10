@@ -10,54 +10,59 @@ local pattern = 1
 local mainWindow
 
 -- ============================================================================
--- ANALYTICS SYSTEM
+-- BOTCORE INTEGRATION
 -- ============================================================================
 
--- Initialize or restore analytics from storage
+-- Local analytics wrapper (for fallback if BotCore not available)
 local attackAnalytics = storage.attackAnalytics or {
-  spells = {},      -- { [spellName] = count }
-  runes = {},       -- { [runeId] = count }
-  empowerments = 0, -- Total buff casts
-  totalAttacks = 0, -- Total attacks executed
-  log = {}          -- Recent actions log (last 50)
+  spells = {},
+  runes = {},
+  empowerments = 0,
+  totalAttacks = 0,
+  log = {}
 }
 storage.attackAnalytics = attackAnalytics
 
--- Record an attack action
-local function recordAttackAction(category, idOrFormula)
+-- Record an attack action (delegates to BotCore.Analytics if available)
+local function recordAttackAction(cat, idOrFormula)
+  -- Use BotCore.Analytics if available
+  if BotCore and BotCore.Analytics then
+    BotCore.Analytics.recordAttack(cat, idOrFormula)
+    return
+  end
+  
+  -- Fallback to local analytics
   attackAnalytics.totalAttacks = attackAnalytics.totalAttacks + 1
   
-  -- Category 1, 4, 5 = spells (targeted, empowerment, absolute)
-  if category == 1 or category == 4 or category == 5 then
+  if cat == 1 or cat == 4 or cat == 5 then
     local spellName = tostring(idOrFormula)
     attackAnalytics.spells[spellName] = (attackAnalytics.spells[spellName] or 0) + 1
-    if category == 4 then
+    if cat == 4 then
       attackAnalytics.empowerments = attackAnalytics.empowerments + 1
     end
-  -- Category 2, 3 = runes (area, targeted)
-  elseif category == 2 or category == 3 then
+  elseif cat == 2 or cat == 3 then
     local runeId = tonumber(idOrFormula) or 0
     attackAnalytics.runes[runeId] = (attackAnalytics.runes[runeId] or 0) + 1
   end
   
-  -- Keep recent log (last 50)
   local log = attackAnalytics.log
-  if #log >= 50 then
-    table.remove(log, 1)
-  end
-  table.insert(log, {
-    t = now,
-    cat = category,
-    action = tostring(idOrFormula)
-  })
+  if #log >= 50 then table.remove(log, 1) end
+  table.insert(log, { t = now, cat = cat, action = tostring(idOrFormula) })
 end
 
--- Public API for SmartHunt
+-- Public API for SmartHunt (redirects to BotCore.Analytics if available)
 AttackBot = AttackBot or {}
 AttackBot.getAnalytics = function()
+  if BotCore and BotCore.Analytics then
+    return BotCore.Analytics.AttackBot.getAnalytics()
+  end
   return attackAnalytics
 end
 AttackBot.resetAnalytics = function()
+  if BotCore and BotCore.Analytics then
+    BotCore.Analytics.AttackBot.resetAnalytics()
+    return
+  end
   attackAnalytics.spells = {}
   attackAnalytics.runes = {}
   attackAnalytics.empowerments = 0
@@ -1187,16 +1192,21 @@ function getBestTileByPattern(pattern, minHp, maxHp, safePattern, monsterNamesTa
 end
 
 -- Use rune on target - works even with closed backpack (hotkey-style)
+-- Uses BotCore.Items for consolidated item usage
 local function useRuneOnTarget(runeId, targetCreatureOrTile)
   lastAttackTime = now -- Update attack time for non-blocking cooldown
   
-  -- Method 1: Use inventory item with target (works without open backpack - like hotkeys)
+  -- Use BotCore.Items if available
+  if BotCore and BotCore.Items and BotCore.Items.useOn then
+    return BotCore.Items.useOn(runeId, targetCreatureOrTile)
+  end
+  
+  -- Fallback: direct implementation
   if g_game.useInventoryItemWith then
     g_game.useInventoryItemWith(runeId, targetCreatureOrTile)
     return true
   end
   
-  -- Method 2: Fallback - find rune in open containers and use with target
   local rune = findItem(runeId)
   if rune then
     g_game.useWith(rune, targetCreatureOrTile)
@@ -1265,11 +1275,27 @@ end
 macro(100, function()
   if not currentSettings.enabled then return end
   
+  -- SAFETY: Check if healing priority should block attacks
+  -- This is non-configurable - healing ALWAYS takes priority
+  if BotCore and BotCore.Priority then
+    if not BotCore.Priority.canAttack() then
+      return  -- Healing has priority, skip attack
+    end
+  elseif BotCore and BotCore.shouldHealNow and BotCore.shouldHealNow() then
+    return  -- Fallback safety check
+  end
+  
   -- Early exits (ordered by likelihood/speed)
   local currentTarget = target()
   if not currentTarget then return end
   if isInPz() then return end
-  if modules.game_cooldown.isGroupCooldownIconActive(1) then return end
+  
+  -- Cooldown check (use Priority engine which includes exhausted handling)
+  if BotCore and BotCore.Cooldown then
+    if BotCore.Cooldown.isAttackOnCooldown() then return end
+  else
+    if modules.game_cooldown.isGroupCooldownIconActive(1) then return end
+  end
 
   -- Cache attack entries (avoid repeated getChildren calls)
   if now - lastEntryCacheTime > ENTRY_CACHE_TTL then
@@ -1314,8 +1340,13 @@ macro(100, function()
     end
   end
 
-  -- Cache current mana percent (avoid repeated calls)
-  local currentMana = manapercent()
+  -- Cache current mana percent (use BotCore if available)
+  local currentMana
+  if BotCore and BotCore.Stats then
+    currentMana = BotCore.Stats.getMpPercent()
+  else
+    currentMana = manapercent()
+  end
   
   -- Cache target data
   local targetHp = currentTarget:getHealthPercent()

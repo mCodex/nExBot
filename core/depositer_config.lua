@@ -125,12 +125,33 @@ end
 UI.Separator()
 UI.Label("Sell Exeptions")
 
-if type(storage.cavebotSell) ~= "table" then
-  storage.cavebotSell = {23544, 3081}
+-- Profile storage helpers
+local function getProfileSetting(key)
+  if ProfileStorage then
+    return ProfileStorage.get(key)
+  end
+  return storage[key]
 end
 
+local function setProfileSetting(key, value)
+  if ProfileStorage then
+    ProfileStorage.set(key, value)
+  else
+    storage[key] = value
+  end
+end
+
+-- Load from profile storage
+local cavebotSell = getProfileSetting("cavebotSell") or {23544, 3081}
+
 local sellContainer = UI.Container(function(widget, items)
-  storage.cavebotSell = items
+  cavebotSell = items
+  setProfileSetting("cavebotSell", items)
 end, true)
 sellContainer:setHeight(35)
-sellContainer:setItems(storage.cavebotSell)
+sellContainer:setItems(cavebotSell)
+
+-- Export for other modules to access
+function getCavebotSellItems()
+  return cavebotSell
+end

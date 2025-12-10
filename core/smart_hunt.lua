@@ -1,1465 +1,1058 @@
 --[[
-  SmartHunt Analytics Module v2.0
+  SmartHunt Analytics Module v4.0 (Advanced AI)
   
-  Event-driven hunting analytics using EventBus pattern.
+  Features:
+  - Statistical analysis (standard deviation, trends, confidence)
+  - Trend tracking with rolling window analysis
+  - Weighted scoring with time-decay
+  - Confidence-based insights prioritization
+  - Advanced metrics: efficiency index, survivability index, combat uptime
   
-  Principles Applied:
-  - SRP: Each function has a single responsibility
-  - DRY: Shared utilities, no code duplication
-  - KISS: Simple, readable implementation
-  - Pure Functions: Calculations don't modify state
-  
-  Events Used (from OTClient):
-  - onWalk: Track movement
-  - onCreatureHealthPercentChange: Track kills
-  - onManaChange: Detect mana usage
-  - onSpellCooldown: Track spell casts
-  - onUse: Track item usage
-  - onTextMessage: Detect "You are full" etc.
+  OTClient Functions: getLevel, getLevelPercent, getStamina, getSoul,
+  getBlessings, getSpeed, getSkillLevel/Percent, getMagicLevel
 ]]
 
 setDefaultTab("Main")
 
 -- ============================================================================
--- STORAGE INITIALIZATION
+-- CONSTANTS & CONFIGURATION
 -- ============================================================================
 
-local function initStorage()
-  if not storage.analytics then
-    storage.analytics = {
-      session = {
-        startTime = 0,
-        startXp = 0,
-        startSkills = {},
-        startCap = 0,
-        startStamina = 0,
-        startBalance = 0,
-        active = false
-      },
-      metrics = {
-        tilesWalked = 0,
-        kills = 0,
-        spellsCast = 0,
-        potionsUsed = 0,
-        runesUsed = 0,
-        damageTaken = 0,
-        healingDone = 0,
-        deathCount = 0,
-        nearDeathCount = 0,  -- HP dropped below 20%
-        idleTime = 0,        -- Time spent not moving/fighting
-        combatTime = 0       -- Time in combat
-      },
-      skills = {},
-      supplies = {},
-      monsters = {},
-      peakStats = {
-        maxXpPerHour = 0,
-        maxKillsPerHour = 0,
-        lowestHpPercent = 100,
-        highestDamageHit = 0
-      }
-    }
-  end
-  -- Ensure new fields exist for existing storage
-  analytics = storage.analytics
-  analytics.session.startCap = analytics.session.startCap or 0
-  analytics.session.startStamina = analytics.session.startStamina or 0
-  analytics.session.startBalance = analytics.session.startBalance or 0
-  analytics.metrics.deathCount = analytics.metrics.deathCount or 0
-  analytics.metrics.nearDeathCount = analytics.metrics.nearDeathCount or 0
-  analytics.metrics.idleTime = analytics.metrics.idleTime or 0
-  analytics.metrics.combatTime = analytics.metrics.combatTime or 0
-  analytics.peakStats = analytics.peakStats or {
-    maxXpPerHour = 0,
-    maxKillsPerHour = 0,
-    lowestHpPercent = 100,
-    highestDamageHit = 0
-  }
-  return storage.analytics
-end
+local SEVERITY = { INFO = "INFO", TIP = "TIP", WARNING = "WARN", CRITICAL = "CRIT" }
 
-local analytics = initStorage()
+local SKILL_NAMES = {
+  [0] = "Fist", [1] = "Club", [2] = "Sword", [3] = "Axe",
+  [4] = "Distance", [5] = "Shielding", [6] = "Fishing", [7] = "Magic Level"
+}
+
+local CONDITION_MAP = {
+  { check = "isPoisioned", key = "timePoisoned", name = "poisoned" },
+  { check = "isBurning", key = "timeBurning", name = "burning" },
+  { check = "isParalyzed", key = "timeParalyzed", name = "paralyzed" },
+  { check = "hasManaShield", key = "timeManaShield", name = "manaShield" },
+  { check = "hasHaste", key = "timeHasted", name = "hasted" },
+  { check = "isInFight", key = "timeInCombat", name = "inCombat" }
+}
 
 -- ============================================================================
 -- PURE UTILITY FUNCTIONS
 -- ============================================================================
 
--- Format number with thousands separator
+-- Safe get with default value
+local function safeGet(fn, default)
+  if type(fn) == "function" then
+    local ok, result = pcall(fn)
+    return ok and result or default
+  end
+  return default
+end
+
+-- Safe player method call (supports optional arguments)
+local function playerGet(method, default, ...)
+  if player and player[method] then
+    local ok, result = pcall(player[method], player, ...)
+    if ok then return result or default end
+  end
+  return default
+end
+
+-- Format number with thousands separator (pure function)
 local function formatNum(n)
   if not n or n == 0 then return "0" end
-  local s = tostring(math.floor(n))
-  local result = ""
-  local len = #s
-  for i = 1, len do
-    if i > 1 and (len - i + 1) % 3 == 0 then
-      result = result .. ","
+  return tostring(math.floor(n)):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+end
+
+-- Format duration in ms to readable string (pure function)
+local function formatDuration(ms)
+  if not ms or ms <= 0 then return "0m" end
+  local mins = math.floor(ms / 60000)
+  local hrs = math.floor(mins / 60)
+  return hrs > 0 and string.format("%dh %dm", hrs, mins % 60) or string.format("%dm", mins)
+end
+
+-- Calculate per-hour rate (pure function)
+local function perHour(value, elapsedMs)
+  return (elapsedMs and elapsedMs > 0) and (value / (elapsedMs / 3600000)) or 0
+end
+
+-- XP formula for level (pure function) 
+local function expForLevel(lvl)
+  return math.floor((50 * lvl^3) / 3 - 100 * lvl^2 + (850 * lvl) / 3 - 200)
+end
+
+-- Check if table has data (pure function)
+local function hasData(tbl)
+  if not tbl then return false end
+  return next(tbl) ~= nil
+end
+
+-- Clamp value between min and max (pure function)
+local function clamp(value, min, max)
+  return math.max(min, math.min(max, value))
+end
+
+-- ============================================================================
+-- PLAYER DATA ACCESSORS (Single Responsibility)
+-- ============================================================================
+
+local Player = {}
+
+function Player.level() return safeGet(lvl, 0) or safeGet(level, 1) end
+function Player.exp() return safeGet(exp, 0) end
+function Player.hp() return safeGet(hp, 0), safeGet(maxhp, 1) end
+function Player.mana() return safeGet(mana, 0), safeGet(maxmana, 1) end
+function Player.cap() return safeGet(freecap, 0) or playerGet("getFreeCapacity", 0) end
+function Player.stamina() return playerGet("getStamina", 0) or safeGet(stamina, 0) end
+function Player.soul() return safeGet(soul, 0) or playerGet("getSoul", 0) end
+function Player.speed() return safeGet(speed, 0) or playerGet("getSpeed", 0) end
+function Player.blessings() return safeGet(bless, 0) or playerGet("getBlessings", 0) end
+function Player.mlevel() return safeGet(mlevel, 0) or playerGet("getMagicLevel", 0) end
+function Player.isPremium() return playerGet("isPremium", false) end
+
+function Player.staminaInfo()
+  local mins = Player.stamina()
+  local hrs = mins / 60
+  local status, bonus, warning = "Normal", 0, 0
+  
+  if hrs >= 39 then status, bonus = "Green Bonus", 50
+  elseif hrs < 14 then status, bonus, warning = hrs >= 1 and "Orange Penalty" or "DEPLETED", hrs >= 1 and -50 or -100, hrs >= 1 and 1 or 2
+  end
+  
+  return { minutes = mins, hours = hrs, status = status, bonusPercent = bonus, warningLevel = warning,
+           greenRemaining = math.max(0, hrs - 39), untilOrange = math.max(0, hrs - 14) }
+end
+
+function Player.skill(id)
+  return {
+    current = playerGet("getSkillLevel", 0, id),
+    base = playerGet("getSkillBaseLevel", 0, id),
+    percent = playerGet("getSkillLevelPercent", 0, id),
+    name = SKILL_NAMES[id] or ("Skill " .. id)
+  }
+end
+
+function Player.magicLevel()
+  return {
+    current = Player.mlevel(),
+    base = playerGet("getBaseMagicLevel", 0) or Player.mlevel(),
+    percent = playerGet("getMagicLevelPercent", 0)
+  }
+end
+
+function Player.conditions()
+  local result = {}
+  -- Direct function references instead of _G lookup (OTClient sandbox may not have _G)
+  local conditionChecks = {
+    { fn = isPoisioned, name = "poisoned" },
+    { fn = isBurning, name = "burning" },
+    { fn = isParalyzed, name = "paralyzed" },
+    { fn = hasManaShield, name = "manaShield" },
+    { fn = hasHaste, name = "hasted" },
+    { fn = isInFight, name = "inCombat" }
+  }
+  
+  for _, c in ipairs(conditionChecks) do
+    if c.fn and type(c.fn) == "function" then
+      local ok, val = pcall(c.fn)
+      if ok and val then result[c.name] = true end
     end
-    result = result .. s:sub(i, i)
   end
   return result
 end
 
--- Format duration in minutes to readable string
-local function formatDuration(ms)
-  if not ms or ms <= 0 then return "0m" end
-  local seconds = math.floor(ms / 1000)
-  local minutes = math.floor(seconds / 60)
-  local hours = math.floor(minutes / 60)
-  minutes = minutes % 60
-  if hours > 0 then
-    return string.format("%dh %dm", hours, minutes)
-  end
-  return string.format("%dm", minutes)
-end
-
--- Calculate per-hour rate
-local function perHour(value, elapsedMs)
-  if not elapsedMs or elapsedMs <= 0 then return 0 end
-  return value / (elapsedMs / 1000 / 3600)
-end
-
--- Get current session elapsed time in ms
-local function getElapsed()
-  if not analytics.session.active then return 0 end
-  return now - analytics.session.startTime
-end
-
--- Get analytics from HealBot if available
-local function getHealBotData()
-  if HealBot and HealBot.getAnalytics then
-    return HealBot.getAnalytics()
-  end
-  return nil
-end
-
--- Get analytics from AttackBot if available
-local function getAttackBotData()
-  if AttackBot and AttackBot.getAnalytics then
-    return AttackBot.getAnalytics()
-  end
-  return nil
-end
-
--- Check if table has any items
-local function hasData(tbl)
-  if not tbl then return false end
-  for _ in pairs(tbl) do return true end
-  return false
+function Player.levelProgress()
+  local lvl = Player.level()
+  local currentXp = Player.exp()
+  local xpCurrent = expForLevel(lvl)
+  local xpNext = expForLevel(lvl + 1)
+  local xpNeeded = xpNext - xpCurrent
+  local pct = playerGet("getLevelPercent", 0) or ((xpNeeded > 0) and ((currentXp - xpCurrent) / xpNeeded * 100) or 0)
+  return { level = lvl, percent = pct, xpNeeded = xpNeeded, xpRemaining = xpNext - currentXp }
 end
 
 -- ============================================================================
--- SKILL TRACKING
+-- STORAGE & SESSION (Single Responsibility)
 -- ============================================================================
 
-local SKILL_NAMES = {
-  [0] = "Fist",
-  [1] = "Club", 
-  [2] = "Sword",
-  [3] = "Axe",
-  [4] = "Distance",
-  [5] = "Shielding",
-  [6] = "Fishing",
-  [7] = "Magic Level"
+local DEFAULT_METRICS = {
+  tilesWalked = 0, kills = 0, spellsCast = 0, potionsUsed = 0, runesUsed = 0,
+  damageTaken = 0, healingDone = 0, deathCount = 0, nearDeathCount = 0,
+  timePoisoned = 0, timeBurning = 0, timeParalyzed = 0, timeManaShield = 0,
+  timeHasted = 0, greenStaminaTime = 0, orangeStaminaTime = 0, timeInCombat = 0
 }
 
-local function captureSkills()
-  local skills = {}
-  if player then
-    for id = 0, 6 do
-      skills[id] = player:getSkillLevel(id) or 0
-    end
-    skills[7] = mlevel() or 0
-  end
-  return skills
+local DEFAULT_PEAKS = { maxXpPerHour = 0, maxKillsPerHour = 0, lowestHpPercent = 100, highestDamageHit = 0, maxSpeed = 0 }
+
+local function ensureDefaults(tbl, defaults)
+  for k, v in pairs(defaults) do tbl[k] = tbl[k] or v end
+  return tbl
 end
 
-local function calculateSkillGains(startSkills, currentSkills)
-  local gains = {}
-  for id, startLevel in pairs(startSkills or {}) do
-    local current = currentSkills[id] or 0
-    local gain = current - startLevel
-    if gain > 0 then
-      gains[id] = { start = startLevel, current = current, gain = gain }
-    end
-  end
-  return gains
+local function initStorage()
+  storage.analytics = storage.analytics or { session = {}, metrics = {}, monsters = {}, peakStats = {} }
+  local a = storage.analytics
+  ensureDefaults(a.metrics, DEFAULT_METRICS)
+  ensureDefaults(a.peakStats, DEFAULT_PEAKS)
+  return a
 end
 
--- ============================================================================
--- SESSION MANAGEMENT
--- ============================================================================
+local analytics = initStorage()
 
--- Get current balance from Analyzer if available
-local function getCurrentBalance()
-  if bottingStats then
-    local loot, waste, balance = bottingStats()
-    return balance or 0
-  end
-  return 0
-end
-
--- Get stamina in minutes
-local function getStaminaMinutes()
-  if player and player.getStamina then
-    return player:getStamina() or 0
-  end
-  if stamina then
-    return stamina() or 0
-  end
-  return 0
-end
-
--- Get free capacity
-local function getFreeCap()
-  if freecap then
-    return freecap() or 0
-  end
-  if player and player.getFreeCapacity then
-    return player:getFreeCapacity() or 0
-  end
-  return 0
-end
-
-local function startSession()
-  -- Capture starting values
-  local startBalance = getCurrentBalance()
-  local startStamina = getStaminaMinutes()
-  local startCap = getFreeCap()
-  
-  analytics.session = {
-    startTime = now,
-    startXp = exp() or 0,
-    startSkills = captureSkills(),
-    startCap = startCap,
-    startStamina = startStamina,
-    startBalance = startBalance,
-    active = true
-  }
-  analytics.metrics = {
-    tilesWalked = 0,
-    kills = 0,
-    spellsCast = 0,
-    potionsUsed = 0,
-    runesUsed = 0,
-    damageTaken = 0,
-    healingDone = 0,
-    deathCount = 0,
-    nearDeathCount = 0,
-    idleTime = 0,
-    combatTime = 0
-  }
-  analytics.supplies = {}
-  analytics.monsters = {}
-  analytics.peakStats = {
-    maxXpPerHour = 0,
-    maxKillsPerHour = 0,
-    lowestHpPercent = 100,
-    highestDamageHit = 0
-  }
-  
-  -- Reset HealBot analytics if available
-  if HealBot and HealBot.resetAnalytics then
-    HealBot.resetAnalytics()
-  end
-  
-  -- Reset AttackBot analytics if available
-  if AttackBot and AttackBot.resetAnalytics then
-    AttackBot.resetAnalytics()
-  end
-  
-  EventBus.emit("analytics:session:start")
-end
-
-local function endSession()
-  analytics.session.active = false
-  EventBus.emit("analytics:session:end")
+local function getElapsed()
+  return analytics.session.active and (now - analytics.session.startTime) or 0
 end
 
 local function isSessionActive()
   return analytics.session.active == true
 end
 
+local function captureSkills()
+  local skills = {}
+  for id = 0, 6 do skills[id] = Player.skill(id).current end
+  skills[7] = Player.mlevel()
+  return skills
+end
+
+local function startSession()
+  local stamInfo = Player.staminaInfo()
+  local levelInfo = Player.levelProgress()
+  
+  analytics.session = {
+    startTime = now, startXp = Player.exp(), startSkills = captureSkills(),
+    startCap = Player.cap(), startStamina = stamInfo.minutes,
+    startLevelPercent = levelInfo.percent, startSpeed = Player.speed(),
+    active = true
+  }
+  
+  for k, v in pairs(DEFAULT_METRICS) do analytics.metrics[k] = v end
+  for k, v in pairs(DEFAULT_PEAKS) do analytics.peakStats[k] = v end
+  analytics.monsters = {}
+  analytics.peakStats.maxSpeed = Player.speed()
+  
+  if HealBot and HealBot.resetAnalytics then HealBot.resetAnalytics() end
+  if AttackBot and AttackBot.resetAnalytics then AttackBot.resetAnalytics() end
+  if EventBus then EventBus.emit("analytics:session:start") end
+end
+
+local function endSession()
+  analytics.session.active = false
+  if EventBus then EventBus.emit("analytics:session:end") end
+end
+
 -- ============================================================================
--- METRICS COLLECTION (Event Handlers)
+-- EVENT HANDLERS (Metrics Collection)
 -- ============================================================================
 
--- Track player movement
-onWalk(function(creature, oldPos, newPos)
+onWalk(function(creature)
   if creature == player and isSessionActive() then
     analytics.metrics.tilesWalked = analytics.metrics.tilesWalked + 1
   end
 end)
 
--- Track monster kills
 onCreatureHealthPercentChange(function(creature, healthPercent)
-  if not isSessionActive() then return end
-  if creature:isMonster() and healthPercent == 0 then
+  if isSessionActive() and creature:isMonster() and healthPercent == 0 then
     analytics.metrics.kills = analytics.metrics.kills + 1
-    
     local name = creature:getName()
     analytics.monsters[name] = (analytics.monsters[name] or 0) + 1
   end
 end)
 
--- Track spell casts via cooldown
-onSpellCooldown(function(iconId, duration)
+onSpellCooldown(function(_, duration)
   if isSessionActive() and duration > 0 then
     analytics.metrics.spellsCast = analytics.metrics.spellsCast + 1
   end
 end)
 
--- Track item usage (potions, runes)
-onUse(function(pos, itemId, stackPos, subType)
-  if not isSessionActive() then return end
-  
-  -- Potion IDs (health, mana, spirit)
-  local potionIds = {
-    266, 236, 239, 7643, 23373, 23375, 35302,  -- Health
-    268, 237, 238, 7642, 23374, 23376,         -- Mana
-    7642                                        -- Spirit
-  }
-  
-  -- Rune IDs (attack runes)
-  local runeIds = {
-    3155, 3161, 3164, 3174, 3180, 3191, 3198, 3200, 3202
-  }
-  
-  for _, id in ipairs(potionIds) do
-    if itemId == id then
-      analytics.metrics.potionsUsed = analytics.metrics.potionsUsed + 1
-      analytics.supplies[itemId] = (analytics.supplies[itemId] or 0) + 1
-      return
-    end
-  end
-  
-  for _, id in ipairs(runeIds) do
-    if itemId == id then
-      analytics.metrics.runesUsed = analytics.metrics.runesUsed + 1
-      analytics.supplies[itemId] = (analytics.supplies[itemId] or 0) + 1
-      return
-    end
-  end
-end)
-
--- Track health changes for damage/healing and peak stats
-local lastHP = 0
-local lastHpPercent = 100
+local lastHP, lastHpPercent = 0, 100
 onPlayerHealthChange(function(healthPercent)
   if not isSessionActive() then return end
+  local currentHP = safeGet(hp, 0)
   
-  local currentHP = hp() or 0
-  local currentPercent = hppercent() or 100
-  
-  -- Track damage/healing
   if lastHP > 0 then
     local diff = currentHP - lastHP
     if diff < 0 then
-      local damageAmount = math.abs(diff)
-      analytics.metrics.damageTaken = analytics.metrics.damageTaken + damageAmount
-      
-      -- Track highest damage hit
-      if damageAmount > analytics.peakStats.highestDamageHit then
-        analytics.peakStats.highestDamageHit = damageAmount
+      analytics.metrics.damageTaken = analytics.metrics.damageTaken + math.abs(diff)
+      if math.abs(diff) > analytics.peakStats.highestDamageHit then
+        analytics.peakStats.highestDamageHit = math.abs(diff)
       end
     elseif diff > 0 then
       analytics.metrics.healingDone = analytics.metrics.healingDone + diff
     end
   end
   
-  -- Track lowest HP percent (near death tracking)
-  if currentPercent < analytics.peakStats.lowestHpPercent then
-    analytics.peakStats.lowestHpPercent = currentPercent
+  if healthPercent < analytics.peakStats.lowestHpPercent then
+    analytics.peakStats.lowestHpPercent = healthPercent
   end
-  
-  -- Track near-death events (HP drops below 20%)
-  if lastHpPercent >= 20 and currentPercent < 20 then
+  if lastHpPercent >= 20 and healthPercent < 20 then
     analytics.metrics.nearDeathCount = analytics.metrics.nearDeathCount + 1
   end
-  
-  -- Track deaths (HP drops to 0 or very low from a higher value)
-  if lastHpPercent > 5 and currentPercent <= 0 then
+  if lastHpPercent > 5 and healthPercent <= 0 then
     analytics.metrics.deathCount = analytics.metrics.deathCount + 1
   end
   
-  lastHP = currentHP
-  lastHpPercent = currentPercent
+  lastHP, lastHpPercent = currentHP, healthPercent
 end)
 
--- Peak stats tracking (XP/hour, kills/hour) - updated periodically
-local lastPeakCheck = 0
-local PEAK_CHECK_INTERVAL = 60000 -- Check every minute
+-- ============================================================================
+-- PERIODIC UPDATES
+-- ============================================================================
 
-local function updatePeakStats()
+local lastConditionCheck = 0
+
+local function updateTracking()
   if not isSessionActive() then return end
-  if now - lastPeakCheck < PEAK_CHECK_INTERVAL then return end
-  lastPeakCheck = now
+  
+  local deltaMs = now - lastConditionCheck
+  if deltaMs < 1000 then return end
+  lastConditionCheck = now
+  
+  -- Condition tracking using map
+  local conditions = Player.conditions()
+  for _, c in ipairs(CONDITION_MAP) do
+    if conditions[c.name] then
+      analytics.metrics[c.key] = (analytics.metrics[c.key] or 0) + deltaMs
+    end
+  end
+  
+  -- Stamina bonus tracking
+  local stamInfo = Player.staminaInfo()
+  if stamInfo.status == "Green Bonus" then
+    analytics.metrics.greenStaminaTime = analytics.metrics.greenStaminaTime + deltaMs
+  elseif stamInfo.warningLevel > 0 then
+    analytics.metrics.orangeStaminaTime = analytics.metrics.orangeStaminaTime + deltaMs
+  end
+  
+  -- Peak stats
+  local spd = Player.speed()
+  if spd > (analytics.peakStats.maxSpeed or 0) then analytics.peakStats.maxSpeed = spd end
   
   local elapsed = getElapsed()
-  if elapsed < 60000 then return end -- Need at least 1 minute
-  
-  local elapsedHour = elapsed / 3600000
-  local xpGained = (exp() or 0) - (analytics.session.startXp or 0)
-  local xpPerHour = xpGained / math.max(0.1, elapsedHour)
-  local killsPerHour = analytics.metrics.kills / math.max(0.1, elapsedHour)
-  
-  if xpPerHour > analytics.peakStats.maxXpPerHour then
-    analytics.peakStats.maxXpPerHour = xpPerHour
-  end
-  if killsPerHour > analytics.peakStats.maxKillsPerHour then
-    analytics.peakStats.maxKillsPerHour = killsPerHour
+  if elapsed >= 60000 then
+    local elapsedHour = elapsed / 3600000
+    local xpGained = Player.exp() - (analytics.session.startXp or 0)
+    local xpPerHour = xpGained / math.max(0.1, elapsedHour)
+    local killsPerHour = analytics.metrics.kills / math.max(0.1, elapsedHour)
+    
+    if xpPerHour > analytics.peakStats.maxXpPerHour then analytics.peakStats.maxXpPerHour = xpPerHour end
+    if killsPerHour > analytics.peakStats.maxKillsPerHour then analytics.peakStats.maxKillsPerHour = killsPerHour end
   end
 end
 
 -- ============================================================================
--- INSIGHTS ENGINE - Intelligent Analysis & Recommendations
+-- INSIGHTS ENGINE (Advanced AI Analysis)
+-- Uses: Weighted scoring, trend analysis, statistical methods, correlation
 -- ============================================================================
-
---[[
-  The Insights Engine analyzes hunting metrics to provide actionable suggestions.
-  
-  Analysis Categories:
-  1. Efficiency Analysis - XP/hour, kills/hour optimization
-  2. Survivability Analysis - Damage taken vs healing patterns
-  3. Resource Efficiency - Potion/rune usage optimization
-  4. Combat Analysis - Spell usage patterns
-  5. Movement Analysis - Walking efficiency
-  6. Economic Analysis - Loot/waste/profit tracking
-  7. Peak Performance - Best rates achieved
-]]
 
 local Insights = {}
 
--- Severity levels for insights
-local SEVERITY = {
-  INFO = "INFO",
-  TIP = "TIP", 
-  WARNING = "WARN",
-  CRITICAL = "CRIT"
+-- Insight builder (DRY - single function for all insights)
+local function addInsight(results, severity, category, message, confidence)
+  table.insert(results, { 
+    severity = severity, 
+    category = category, 
+    message = message,
+    confidence = confidence or 1.0  -- 0.0 to 1.0 confidence score
+  })
+end
+
+-- ============================================================================
+-- STATISTICAL HELPERS (Pure Functions)
+-- ============================================================================
+
+-- Calculate weighted average with time decay (recent data matters more)
+local function weightedAverage(values, decayFactor)
+  if not values or #values == 0 then return 0 end
+  decayFactor = decayFactor or 0.9
+  local sum, weightSum = 0, 0
+  for i, v in ipairs(values) do
+    local weight = decayFactor ^ (#values - i)  -- More recent = higher weight
+    sum = sum + (v * weight)
+    weightSum = weightSum + weight
+  end
+  return weightSum > 0 and (sum / weightSum) or 0
+end
+
+-- Calculate standard deviation (consistency measure)
+local function standardDeviation(values, mean)
+  if not values or #values < 2 then return 0 end
+  mean = mean or 0
+  local sum = 0
+  for _, v in ipairs(values) do
+    sum = sum + (v - mean) ^ 2
+  end
+  return math.sqrt(sum / (#values - 1))
+end
+
+-- Normalize value to 0-1 range
+local function normalize(value, min, max)
+  if max <= min then return 0.5 end
+  return clamp((value - min) / (max - min), 0, 1)
+end
+
+-- Calculate percentile rank
+local function percentileRank(value, thresholds)
+  for i, threshold in ipairs(thresholds) do
+    if value <= threshold then return (i - 1) / #thresholds end
+  end
+  return 1.0
+end
+
+-- Sigmoid function for smooth scoring transitions
+local function sigmoid(x, midpoint, steepness)
+  midpoint = midpoint or 0
+  steepness = steepness or 1
+  return 1 / (1 + math.exp(-steepness * (x - midpoint)))
+end
+
+-- ============================================================================
+-- TREND TRACKING (Rolling Window Analysis)
+-- ============================================================================
+
+local trendData = {
+  xpPerHour = {},
+  killsPerHour = {},
+  damageRatio = {},
+  maxSamples = 12  -- Track last 12 samples (1 per 5 min = 1 hour of data)
 }
 
--- Generate all insights based on current data
+local lastTrendUpdate = 0
+local TREND_UPDATE_INTERVAL = 300000  -- 5 minutes
+
+local function updateTrends(metrics)
+  if now - lastTrendUpdate < TREND_UPDATE_INTERVAL then return end
+  lastTrendUpdate = now
+  
+  -- Add new samples
+  table.insert(trendData.xpPerHour, metrics.xpPerHour)
+  table.insert(trendData.killsPerHour, metrics.killsPerHour)
+  table.insert(trendData.damageRatio, metrics.damageRatio)
+  
+  -- Trim to max samples
+  while #trendData.xpPerHour > trendData.maxSamples do table.remove(trendData.xpPerHour, 1) end
+  while #trendData.killsPerHour > trendData.maxSamples do table.remove(trendData.killsPerHour, 1) end
+  while #trendData.damageRatio > trendData.maxSamples do table.remove(trendData.damageRatio, 1) end
+end
+
+-- Calculate trend direction: -1 (declining), 0 (stable), 1 (improving)
+local function calculateTrend(values)
+  if #values < 3 then return 0, 0 end  -- Need at least 3 samples
+  
+  -- Compare recent average vs older average
+  local mid = math.floor(#values / 2)
+  local oldSum, newSum = 0, 0
+  
+  for i = 1, mid do oldSum = oldSum + values[i] end
+  for i = mid + 1, #values do newSum = newSum + values[i] end
+  
+  local oldAvg = oldSum / mid
+  local newAvg = newSum / (#values - mid)
+  
+  if oldAvg == 0 then return 0, 0 end
+  
+  local changePercent = ((newAvg - oldAvg) / oldAvg) * 100
+  local direction = changePercent > 5 and 1 or changePercent < -5 and -1 or 0
+  
+  return direction, changePercent
+end
+
+-- ============================================================================
+-- ADVANCED METRICS CALCULATION
+-- ============================================================================
+
+local function calculateMetrics()
+  local m = analytics.metrics
+  local elapsed = getElapsed()
+  local elapsedHour = elapsed / 3600000
+  local xpGained = Player.exp() - (analytics.session.startXp or 0)
+  local levelInfo = Player.levelProgress()
+  
+  -- Base metrics
+  local metrics = {
+    elapsed = elapsed,
+    elapsedHour = elapsedHour,
+    elapsedMin = elapsed / 60000,
+    xpGained = xpGained,
+    xpPerHour = perHour(xpGained, elapsed),
+    killsPerHour = perHour(m.kills, elapsed),
+    levelPercentPerHour = (levelInfo.xpNeeded > 0) and (perHour(xpGained, elapsed) / levelInfo.xpNeeded * 100) or 0,
+    damageRatio = m.healingDone > 0 and (m.damageTaken / m.healingDone) or 0,
+    potionsPerKill = m.kills > 0 and (m.potionsUsed / m.kills) or 0,
+    tilesPerKill = m.kills > 0 and (m.tilesWalked / m.kills) or 0,
+    spellsPerKill = m.kills > 0 and (m.spellsCast / m.kills) or 0
+  }
+  
+  -- Advanced derived metrics
+  metrics.efficiency = 0
+  if metrics.killsPerHour > 0 and metrics.tilesPerKill > 0 then
+    -- Efficiency = kills per tile walked (higher = better spawn density)
+    metrics.efficiency = 1 / metrics.tilesPerKill * 100
+  end
+  
+  -- Survivability index (0-100, higher = safer)
+  metrics.survivabilityIndex = 100
+  if m.healingDone > 0 then
+    metrics.survivabilityIndex = clamp(100 - (metrics.damageRatio * 50), 0, 100)
+  end
+  if m.deathCount > 0 then
+    metrics.survivabilityIndex = metrics.survivabilityIndex * (0.5 ^ m.deathCount)
+  end
+  
+  -- Combat uptime (time in combat vs total time)
+  metrics.combatUptime = elapsed > 0 and ((m.timeInCombat or 0) / elapsed * 100) or 0
+  
+  -- Haste uptime
+  metrics.hasteUptime = elapsed > 0 and ((m.timeHasted or 0) / elapsed * 100) or 0
+  
+  -- Near death frequency (per hour)
+  metrics.nearDeathPerHour = perHour(m.nearDeathCount, elapsed)
+  
+  -- Stamina efficiency (XP per minute of stamina)
+  local staminaUsed = (analytics.session.startStamina or 0) - (Player.stamina() or 0)
+  metrics.xpPerStaminaMin = staminaUsed > 0 and (xpGained / staminaUsed) or 0
+  
+  return metrics
+end
+
+-- ============================================================================
+-- AI INSIGHTS ANALYSIS
+-- ============================================================================
+
 function Insights.analyze()
   local results = {}
   local elapsed = getElapsed()
   local m = analytics.metrics
   
-  -- Need at least 5 minutes of data for meaningful analysis
-  if elapsed < 300000 then
-    table.insert(results, {
-      severity = SEVERITY.INFO,
-      category = "Session",
-      message = "Need 5+ minutes of data for accurate insights"
-    })
+  -- Minimum session time check with progressive confidence
+  local sessionConfidence = clamp(elapsed / 600000, 0.3, 1.0)  -- 0.3 at start, 1.0 at 10+ min
+  
+  if elapsed < 120000 then  -- Less than 2 minutes
+    addInsight(results, SEVERITY.INFO, "Session", "Gathering data... (2+ min for initial insights)", 0.5)
     return results
   end
   
-  local elapsedMin = elapsed / 60000
-  local elapsedHour = elapsed / 3600000
+  local metrics = calculateMetrics()
+  local stamInfo = Player.staminaInfo()
   
-  -- ==================== EFFICIENCY ANALYSIS ====================
+  -- Update trend tracking
+  updateTrends(metrics)
   
-  local xpGained = (exp() or 0) - (analytics.session.startXp or 0)
-  local xpPerHour = xpGained / math.max(0.1, elapsedHour)
-  local killsPerHour = m.kills / math.max(0.1, elapsedHour)
+  -- ========== EFFICIENCY ANALYSIS ==========
   
-  -- XP per kill ratio
-  if m.kills > 10 then
-    local xpPerKill = xpGained / m.kills
-    if xpPerKill < 100 then
-      table.insert(results, {
-        severity = SEVERITY.TIP,
-        category = "Efficiency",
-        message = string.format("Low XP/kill (%.0f). Consider hunting stronger monsters for better XP.", xpPerKill)
-      })
-    elseif xpPerKill > 1000 then
-      table.insert(results, {
-        severity = SEVERITY.INFO,
-        category = "Efficiency", 
-        message = string.format("Excellent XP/kill ratio (%.0f). Good monster selection!", xpPerKill)
-      })
+  -- XP Rate Analysis with contextual thresholds
+  local lvlPct = metrics.levelPercentPerHour
+  local xpConfidence = clamp(elapsed / 900000, 0.5, 1.0)  -- Higher confidence after 15 min
+  
+  if lvlPct >= 5 then 
+    addInsight(results, SEVERITY.INFO, "XP Rate", string.format("Excellent! %.1f%% level/hour", lvlPct), xpConfidence)
+  elseif lvlPct >= 2 then
+    addInsight(results, SEVERITY.INFO, "XP Rate", string.format("Good: %.2f%%/h (~%.0fh to level)", lvlPct, 100/lvlPct), xpConfidence)
+  elseif lvlPct >= 0.5 then
+    addInsight(results, SEVERITY.TIP, "XP Rate", string.format("Moderate: %.2f%%/h. Consider stronger spawns.", lvlPct), xpConfidence)
+  elseif lvlPct > 0 and metrics.elapsedHour >= 0.25 then
+    addInsight(results, SEVERITY.WARNING, "XP Rate", string.format("Slow: %.2f%%/h. Spawn may be too weak.", lvlPct), xpConfidence)
+  end
+  
+  -- Trend analysis for XP
+  if #trendData.xpPerHour >= 3 then
+    local trend, changePercent = calculateTrend(trendData.xpPerHour)
+    if trend == 1 and changePercent > 10 then
+      addInsight(results, SEVERITY.INFO, "Trend", string.format("XP rate improving! +%.0f%% trend", changePercent), 0.8)
+    elseif trend == -1 and changePercent < -15 then
+      addInsight(results, SEVERITY.WARNING, "Trend", string.format("XP rate declining: %.0f%%. Check respawn.", changePercent), 0.8)
     end
   end
   
-  -- Kill rate analysis
-  if m.kills > 0 and killsPerHour < 50 then
-    table.insert(results, {
-      severity = SEVERITY.WARNING,
-      category = "Efficiency",
-      message = string.format("Low kill rate (%.0f/h). Consider: faster targeting, better luring, or easier spawn.", killsPerHour)
-    })
-  elseif killsPerHour > 200 then
-    table.insert(results, {
-      severity = SEVERITY.INFO,
-      category = "Efficiency",
-      message = string.format("High kill rate (%.0f/h). Excellent hunting speed!", killsPerHour)
-    })
-  end
-  
-  -- ==================== SURVIVABILITY ANALYSIS ====================
-  
-  local damageRatio = 0
-  if m.healingDone > 0 then
-    damageRatio = m.damageTaken / m.healingDone
-  end
-  
-  -- Damage vs Healing balance
-  if m.damageTaken > 0 and m.healingDone > 0 then
-    if damageRatio > 1.2 then
-      table.insert(results, {
-        severity = SEVERITY.CRITICAL,
-        category = "Survivability",
-        message = string.format("Taking more damage than healing (%.1fx). Risk of death! Check HealBot thresholds.", damageRatio)
-      })
-    elseif damageRatio > 0.9 then
-      table.insert(results, {
-        severity = SEVERITY.WARNING,
-        category = "Survivability",
-        message = "Damage nearly equals healing. Consider lowering HP trigger in HealBot."
-      })
-    elseif damageRatio < 0.3 then
-      table.insert(results, {
-        severity = SEVERITY.TIP,
-        category = "Survivability",
-        message = "Very safe hunting (low damage ratio). You could handle stronger monsters or larger pulls."
-      })
+  -- Kill Rate Analysis
+  if m.kills >= 10 then
+    if metrics.killsPerHour < 30 then
+      addInsight(results, SEVERITY.WARNING, "Kill Rate", string.format("Low: %.0f/h. Improve targeting or find denser spawn.", metrics.killsPerHour), sessionConfidence)
+    elseif metrics.killsPerHour >= 250 then
+      addInsight(results, SEVERITY.INFO, "Kill Rate", string.format("Excellent! %.0f kills/hour", metrics.killsPerHour), sessionConfidence)
+    elseif metrics.killsPerHour >= 150 then
+      addInsight(results, SEVERITY.INFO, "Kill Rate", string.format("Good: %.0f/h", metrics.killsPerHour), sessionConfidence)
     end
   end
   
-  -- Damage per minute analysis
-  local dmgPerMin = m.damageTaken / math.max(1, elapsedMin)
-  if dmgPerMin > 500 then
-    table.insert(results, {
-      severity = SEVERITY.WARNING,
-      category = "Survivability",
-      message = string.format("High damage intake (%.0f/min). Consider better equipment or smaller pulls.", dmgPerMin)
-    })
-  end
-  
-  -- ==================== RESOURCE EFFICIENCY ====================
-  
-  local potionsPerHour = m.potionsUsed / math.max(0.1, elapsedHour)
-  local potionsPerKill = m.kills > 0 and (m.potionsUsed / m.kills) or 0
-  
-  -- Potion efficiency
-  if m.potionsUsed > 10 then
-    if potionsPerKill > 2 then
-      table.insert(results, {
-        severity = SEVERITY.WARNING,
-        category = "Resources",
-        message = string.format("High potion usage (%.1f per kill). Consider: mana shield, better healing spells, or weaker monsters.", potionsPerKill)
-      })
-    elseif potionsPerKill < 0.3 and m.kills > 20 then
-      table.insert(results, {
-        severity = SEVERITY.INFO,
-        category = "Resources",
-        message = "Excellent potion efficiency! Your sustain is very good."
-      })
+  -- Spawn Density Analysis
+  if m.kills >= 20 and m.tilesWalked >= 100 then
+    local density = metrics.efficiency
+    if density < 2 then
+      addInsight(results, SEVERITY.TIP, "Spawn", string.format("Sparse (%.0f tiles/kill). Consider tighter routes.", metrics.tilesPerKill), sessionConfidence)
+    elseif density >= 10 then
+      addInsight(results, SEVERITY.INFO, "Spawn", "Dense spawn! Efficient pathing.", sessionConfidence)
     end
   end
   
-  -- Rune efficiency for mages
-  if m.runesUsed > 10 then
-    local runesPerKill = m.runesUsed / math.max(1, m.kills)
-    if runesPerKill > 1.5 then
-      table.insert(results, {
-        severity = SEVERITY.TIP,
-        category = "Resources",
-        message = string.format("Using %.1f runes per kill. Consider AOE runes for multi-target or spell attacks.", runesPerKill)
-      })
-    end
-  end
+  -- ========== SURVIVABILITY ANALYSIS ==========
   
-  -- ==================== COMBAT ANALYSIS ====================
-  
-  local spellsPerKill = m.kills > 0 and (m.spellsCast / m.kills) or 0
-  
-  -- Spell usage patterns
-  if m.spellsCast > 0 and m.kills > 10 then
-    if spellsPerKill < 1 then
-      table.insert(results, {
-        severity = SEVERITY.TIP,
-        category = "Combat",
-        message = "Low spell usage. Consider adding attack spells to AttackBot for faster kills."
-      })
-    elseif spellsPerKill > 10 then
-      table.insert(results, {
-        severity = SEVERITY.TIP,
-        category = "Combat",
-        message = string.format("High spell usage (%.1f/kill). Check for spell spam or consider stronger single spells.", spellsPerKill)
-      })
-    end
-  end
-  
-  -- ==================== MOVEMENT ANALYSIS ====================
-  
-  local tilesPerKill = m.kills > 0 and (m.tilesWalked / m.kills) or 0
-  
-  -- Walking efficiency
-  if m.tilesWalked > 100 and m.kills > 10 then
-    if tilesPerKill > 50 then
-      table.insert(results, {
-        severity = SEVERITY.TIP,
-        category = "Movement",
-        message = string.format("Walking %.0f tiles per kill. Spawn may be sparse - consider denser hunting ground.", tilesPerKill)
-      })
-    elseif tilesPerKill < 5 then
-      table.insert(results, {
-        severity = SEVERITY.INFO,
-        category = "Movement",
-        message = "Excellent spawn density! Minimal walking between kills."
-      })
-    end
-  end
-  
-  -- ==================== MONSTER ANALYSIS ====================
-  
-  if hasData(analytics.monsters) then
-    local monsterCount = 0
-    local topMonster = nil
-    local topCount = 0
+  -- Damage/Healing Ratio with nuanced thresholds
+  if m.healingDone > 1000 then  -- Enough data to analyze
+    local dr = metrics.damageRatio
+    local survConfidence = clamp(m.healingDone / 10000, 0.5, 1.0)
     
-    for name, count in pairs(analytics.monsters) do
-      monsterCount = monsterCount + 1
-      if count > topCount then
-        topCount = count
-        topMonster = name
-      end
-    end
-    
-    -- Diversity analysis
-    if monsterCount == 1 and m.kills > 50 then
-      table.insert(results, {
-        severity = SEVERITY.INFO,
-        category = "Hunting",
-        message = string.format("Single target focus on %s. Good for specific loot/bestiary.", topMonster)
-      })
-    elseif monsterCount > 5 then
-      local topPercent = (topCount / m.kills) * 100
-      if topPercent < 30 then
-        table.insert(results, {
-          severity = SEVERITY.TIP,
-          category = "Hunting",
-          message = string.format("Diverse monster kills (%d types). Consider focusing TargetBot priority on best XP monsters.", monsterCount)
-        })
-      end
+    if dr > 1.3 then 
+      addInsight(results, SEVERITY.CRITICAL, "Survival", "DANGER! Taking 30%+ more damage than healing. Risk of death!", survConfidence)
+    elseif dr > 1.0 then
+      addInsight(results, SEVERITY.WARNING, "Survival", string.format("Risky: %.0f%% damage vs healing. Lower HP threshold.", dr * 100), survConfidence)
+    elseif dr > 0.8 then
+      addInsight(results, SEVERITY.TIP, "Survival", "Damage close to healing. Consider safer play.", survConfidence)
+    elseif dr < 0.3 and dr > 0 then
+      addInsight(results, SEVERITY.TIP, "Survival", string.format("Very safe (%.0f%% ratio). Could handle harder content.", dr * 100), survConfidence)
     end
   end
   
-  -- ==================== GENERAL RECOMMENDATIONS ====================
-  
-  -- Session length check
-  if elapsedHour > 2 then
-    table.insert(results, {
-      severity = SEVERITY.INFO,
-      category = "Session",
-      message = string.format("Long session (%.1fh). Remember to check supplies and take breaks!", elapsedHour)
-    })
-  end
-  
-  -- No kills warning
-  if m.kills == 0 and elapsedMin > 5 then
-    table.insert(results, {
-      severity = SEVERITY.WARNING,
-      category = "Hunting",
-      message = "No kills recorded. Check if TargetBot is enabled and configured."
-    })
-  end
-  
-  -- No spells warning
-  if m.spellsCast == 0 and elapsedMin > 5 then
-    table.insert(results, {
-      severity = SEVERITY.TIP,
-      category = "Combat",
-      message = "No spells detected. Consider adding attack spells to HealBot/AttackBot."
-    })
-  end
-  
-  -- ==================== HEALBOT DEEP ANALYSIS ====================
-  
-  local healData = nil
-  if HealBot and HealBot.getAnalytics then
-    healData = HealBot.getAnalytics()
-  end
-  
-  if healData then
-    -- Mana waste analysis
-    if healData.manaWaste and healData.manaWaste > 1000 then
-      local wastePercent = 0
-      if healData.spellCasts and healData.spellCasts > 0 then
-        -- Rough estimate: assume avg 50 mana per spell
-        local estimatedManaUsed = healData.spellCasts * 50
-        wastePercent = (healData.manaWaste / math.max(1, estimatedManaUsed)) * 100
-      end
-      if wastePercent > 20 then
-        table.insert(results, {
-          severity = SEVERITY.WARNING,
-          category = "HealBot",
-          message = string.format("High mana waste (%.0f%%). Lower HP trigger threshold to avoid overhealing.", wastePercent)
-        })
-      end
-    end
-    
-    -- Potion waste analysis
-    if healData.potionWaste and healData.potionUses and healData.potionUses > 10 then
-      local wastePercent = (healData.potionWaste / healData.potionUses) * 100
-      if wastePercent > 15 then
-        table.insert(results, {
-          severity = SEVERITY.TIP,
-          category = "HealBot",
-          message = string.format("%.0f%% of potions wasted (used when healthy). Lower HP trigger threshold.", wastePercent)
-        })
-      end
-    end
-    
-    -- Healing spell diversity
-    if hasData(healData.spells) then
-      local spellCount = 0
-      for _ in pairs(healData.spells) do spellCount = spellCount + 1 end
-      
-      if spellCount == 1 and healData.spellCasts and healData.spellCasts > 50 then
-        table.insert(results, {
-          severity = SEVERITY.TIP,
-          category = "HealBot",
-          message = "Using only 1 healing spell. Consider adding weaker spell for minor damage (mana efficient)."
-        })
-      end
+  -- Near-death analysis with frequency consideration
+  if m.nearDeathCount > 0 then
+    local ndRate = metrics.nearDeathPerHour
+    if ndRate > 3 then
+      addInsight(results, SEVERITY.CRITICAL, "Survival", string.format("High risk! %.1f near-deaths/hour. Increase heal threshold!", ndRate), 0.95)
+    elseif ndRate > 1 then
+      addInsight(results, SEVERITY.WARNING, "Survival", string.format("%.1f near-deaths/hour. Consider adjusting healer.", ndRate), 0.85)
     end
   end
   
-  -- ==================== ATTACKBOT DEEP ANALYSIS ====================
-  
-  local attackData = nil
-  if AttackBot and AttackBot.getAnalytics then
-    attackData = AttackBot.getAnalytics()
+  -- Death penalty tracking
+  if m.deathCount > 0 then
+    addInsight(results, SEVERITY.CRITICAL, "Survival", string.format("%d death(s)! Check equipment, supplies, and heal settings.", m.deathCount), 1.0)
   end
   
-  -- Get damage data from analyzer
-  local totalDmgDealt = 0
-  if getHuntingData then
-    local dmg = getHuntingData()
-    totalDmgDealt = dmg or 0
+  -- ========== STAMINA ANALYSIS ==========
+  
+  if stamInfo.warningLevel == 2 then 
+    addInsight(results, SEVERITY.CRITICAL, "Stamina", "DEPLETED! 0% XP from kills. Stop hunting!", 1.0)
+  elseif stamInfo.warningLevel == 1 then
+    addInsight(results, SEVERITY.WARNING, "Stamina", string.format("Orange (%.1fh). 50%% XP penalty active!", stamInfo.hours), 1.0)
+  elseif stamInfo.greenRemaining > 0 and stamInfo.greenRemaining < 1 then
+    addInsight(results, SEVERITY.WARNING, "Stamina", string.format("Green ending soon! %.0fm left.", stamInfo.greenRemaining * 60), 1.0)
+  elseif stamInfo.greenRemaining >= 1 then
+    addInsight(results, SEVERITY.INFO, "Stamina", string.format("Green bonus active. %.1fh remaining.", stamInfo.greenRemaining), 0.9)
   end
   
-  if attackData and m.kills > 10 then
-    -- Attack spell usage analysis
-    local totalAttacks = attackData.totalAttacks or 0
-    local attacksPerKill = totalAttacks / m.kills
-    
-    if attacksPerKill > 5 then
-      table.insert(results, {
-        severity = SEVERITY.TIP,
-        category = "AttackBot",
-        message = string.format("High attacks/kill (%.1f). Consider stronger spells or single-target focus.", attacksPerKill)
-      })
-    elseif attacksPerKill < 0.5 and totalAttacks > 0 then
-      table.insert(results, {
-        severity = SEVERITY.INFO,
-        category = "AttackBot",
-        message = "Efficient attack usage! Good spell power for this spawn."
-      })
-    end
-    
-    -- Rune vs Spell preference
-    local spellUses = 0
-    local runeUses = 0
-    if hasData(attackData.spells) then
-      for _, count in pairs(attackData.spells) do
-        spellUses = spellUses + count
-      end
-    end
-    if hasData(attackData.runes) then
-      for _, count in pairs(attackData.runes) do
-        runeUses = runeUses + count
-      end
-    end
-    
-    if spellUses > 0 and runeUses > 0 then
-      local spellRatio = spellUses / (spellUses + runeUses)
-      if spellRatio < 0.2 then
-        table.insert(results, {
-          severity = SEVERITY.TIP,
-          category = "AttackBot",
-          message = "Mostly using runes. Attack spells are often cheaper long-term if mana is available."
-        })
-      elseif spellRatio > 0.9 and runeUses > 10 then
-        table.insert(results, {
-          severity = SEVERITY.INFO,
-          category = "AttackBot",
-          message = "Good spell-based attack rotation. Mana efficient!"
-        })
-      end
-    end
-    
-    -- Empowerment usage
-    if attackData.empowerments and attackData.empowerments > 0 then
-      local empPerHour = attackData.empowerments / math.max(0.1, elapsedHour)
-      if empPerHour < 10 and totalAttacks > 100 then
-        table.insert(results, {
-          severity = SEVERITY.TIP,
-          category = "AttackBot",
-          message = "Low empowerment usage. Keep utito/utamo active for faster kills."
-        })
-      end
-    elseif totalAttacks > 50 and attackData.empowerments == 0 then
-      table.insert(results, {
-        severity = SEVERITY.TIP,
-        category = "AttackBot",
-        message = "No empowerment buffs detected. Consider adding utito tempo or utamo vita for faster/safer hunts."
-      })
-    end
-    
-    -- ===== DAMAGE EFFICIENCY ANALYSIS =====
-    if totalDmgDealt > 0 and totalAttacks > 0 then
-      local avgDmgPerAttack = totalDmgDealt / totalAttacks
-      
-      -- Compare damage per attack to expected values
-      if avgDmgPerAttack < 50 then
-        table.insert(results, {
-          severity = SEVERITY.WARNING,
-          category = "AttackBot",
-          message = string.format("Low avg damage/attack (%.0f). Consider stronger spells or higher magic level.", avgDmgPerAttack)
-        })
-      elseif avgDmgPerAttack > 300 then
-        table.insert(results, {
-          severity = SEVERITY.INFO,
-          category = "AttackBot",
-          message = string.format("Excellent damage output (%.0f avg/attack)! Great spell power.", avgDmgPerAttack)
-        })
-      end
-      
-      -- Damage per kill analysis
-      local dmgPerKill = totalDmgDealt / m.kills
-      local attacksNeeded = dmgPerKill / math.max(1, avgDmgPerAttack)
-      
-      if attacksNeeded > 8 then
-        table.insert(results, {
-          severity = SEVERITY.TIP,
-          category = "AttackBot",
-          message = string.format("Taking ~%.0f attacks per kill. Consider AOE attacks for multi-target or stronger single-target spells.", attacksNeeded)
-        })
-      elseif attacksNeeded < 2 and m.kills > 20 then
-        table.insert(results, {
-          severity = SEVERITY.INFO,
-          category = "AttackBot",
-          message = "One-shotting most monsters. Efficient damage setup!"
-        })
-      end
-    end
-    
-    -- ===== ATTACK DIVERSITY ANALYSIS =====
-    local totalSpellTypes = 0
-    local totalRuneTypes = 0
-    if hasData(attackData.spells) then
-      for _ in pairs(attackData.spells) do totalSpellTypes = totalSpellTypes + 1 end
-    end
-    if hasData(attackData.runes) then
-      for _ in pairs(attackData.runes) do totalRuneTypes = totalRuneTypes + 1 end
-    end
-    
-    if totalSpellTypes == 1 and spellUses > 100 then
-      table.insert(results, {
-        severity = SEVERITY.TIP,
-        category = "AttackBot",
-        message = "Using only 1 attack spell. Consider adding AOE for groups or single-target for bosses."
-      })
-    end
-    
-    -- ===== RUNE EFFICIENCY (cost analysis) =====
-    if runeUses > 50 then
-      -- Check if using expensive runes
-      local usingExpensiveRunes = false
-      for runeId, count in pairs(attackData.runes or {}) do
-        -- Sudden Death (3155), Thunderstorm (3202), Avalanche (3161), Great Fireball (3191)
-        if runeId == 3155 and count > 20 then
-          usingExpensiveRunes = true
-          local sdPerKill = count / math.max(1, m.kills)
-          if sdPerKill > 1.5 then
-            table.insert(results, {
-              severity = SEVERITY.WARNING,
-              category = "AttackBot",
-              message = string.format("Using %.1f Sudden Death runes per kill. SDs are expensive - consider AOE runes or attack spells for regular monsters.", sdPerKill)
-            })
-          end
-        end
-      end
+  -- Stamina efficiency
+  if metrics.xpPerStaminaMin > 0 and metrics.elapsedHour >= 0.5 then
+    addInsight(results, SEVERITY.INFO, "Stamina", string.format("%.0f XP per stamina minute used.", metrics.xpPerStaminaMin), sessionConfidence)
+  end
+  
+  -- ========== RESOURCE ANALYSIS ==========
+  
+  if m.potionsUsed >= 20 then
+    local ppk = metrics.potionsPerKill
+    if ppk > 3 then
+      addInsight(results, SEVERITY.WARNING, "Resources", string.format("High potion use: %.1f/kill. Check mana efficiency.", ppk), sessionConfidence)
+    elseif ppk < 0.5 and m.kills > 30 then
+      addInsight(results, SEVERITY.INFO, "Resources", "Efficient potion usage!", sessionConfidence)
     end
   end
   
-  -- Check if AttackBot is not being used at all
-  if not attackData or (attackData.totalAttacks or 0) == 0 then
-    if m.kills > 20 and elapsedMin > 10 then
-      table.insert(results, {
-        severity = SEVERITY.TIP,
-        category = "AttackBot",
-        message = "No AttackBot activity detected. Enable attack spells/runes for faster kills."
-      })
+  -- ========== COMBAT UPTIME ANALYSIS ==========
+  
+  if elapsed >= 600000 then  -- At least 10 min
+    if metrics.combatUptime < 30 then
+      addInsight(results, SEVERITY.TIP, "Uptime", string.format("Low combat time (%.0f%%). More aggressive luring?", metrics.combatUptime), sessionConfidence)
+    elseif metrics.combatUptime >= 70 then
+      addInsight(results, SEVERITY.INFO, "Uptime", string.format("High combat uptime: %.0f%%", metrics.combatUptime), sessionConfidence)
+    end
+  end
+  
+  -- ========== CONDITION ANALYSIS ==========
+  
+  -- Paralysis impact
+  if m.timeParalyzed > 60000 then
+    local paraPct = (m.timeParalyzed / elapsed) * 100
+    addInsight(results, SEVERITY.WARNING, "Conditions", string.format("Paralyzed %.0f%% of time. Use anti-paralyze.", paraPct), 0.9)
+  end
+  
+  -- Haste efficiency
+  if elapsed >= 600000 and m.tilesWalked > 500 then
+    if metrics.hasteUptime < 40 then
+      addInsight(results, SEVERITY.TIP, "Conditions", string.format("Haste only %.0f%%. Enable auto-haste.", metrics.hasteUptime), sessionConfidence)
+    end
+  end
+  
+  -- ========== PROTECTION ANALYSIS ==========
+  
+  local blessCount = Player.blessings()
+  if blessCount < 5 then
+    if m.nearDeathCount >= 2 or m.deathCount > 0 then
+      addInsight(results, SEVERITY.WARNING, "Protection", string.format("Only %d blessings with %d close calls. Get full bless!", blessCount, m.nearDeathCount), 0.95)
+    elseif metrics.damageRatio > 0.7 then
+      addInsight(results, SEVERITY.TIP, "Protection", string.format("%d/5 blessings. Recommend full protection.", blessCount), 0.7)
+    end
+  end
+  
+  -- ========== CONSISTENCY ANALYSIS ==========
+  
+  if #trendData.killsPerHour >= 4 then
+    local avg = 0
+    for _, v in ipairs(trendData.killsPerHour) do avg = avg + v end
+    avg = avg / #trendData.killsPerHour
+    
+    local stdDev = standardDeviation(trendData.killsPerHour, avg)
+    local cv = avg > 0 and (stdDev / avg * 100) or 0  -- Coefficient of variation
+    
+    if cv > 40 then
+      addInsight(results, SEVERITY.TIP, "Consistency", string.format("Kill rate varies %.0f%%. Inconsistent spawn or path.", cv), 0.75)
+    elseif cv < 15 and avg > 100 then
+      addInsight(results, SEVERITY.INFO, "Consistency", "Very consistent performance!", 0.8)
     end
   end
   
   return results
 end
 
--- Format insights for display
-function Insights.format(insightsList)
+function Insights.format(list)
   local lines = {}
+  local icons = { 
+    [SEVERITY.CRITICAL] = "[!]", 
+    [SEVERITY.WARNING] = "[*]", 
+    [SEVERITY.TIP] = "[>]", 
+    [SEVERITY.INFO] = "[i]" 
+  }
+  local byPriority = { {}, {}, {}, {} }
+  local order = { [SEVERITY.CRITICAL] = 1, [SEVERITY.WARNING] = 2, [SEVERITY.TIP] = 3, [SEVERITY.INFO] = 4 }
   
-  if #insightsList == 0 then
-    table.insert(lines, "  No insights available yet.")
-    return lines
+  -- Sort by priority, then by confidence (higher confidence first)
+  for _, i in ipairs(list) do 
+    table.insert(byPriority[order[i.severity] or 4], i) 
   end
   
-  -- Group by severity
-  local critical = {}
-  local warnings = {}
-  local tips = {}
-  local info = {}
-  
-  for _, insight in ipairs(insightsList) do
-    if insight.severity == SEVERITY.CRITICAL then
-      table.insert(critical, insight)
-    elseif insight.severity == SEVERITY.WARNING then
-      table.insert(warnings, insight)
-    elseif insight.severity == SEVERITY.TIP then
-      table.insert(tips, insight)
-    else
-      table.insert(info, insight)
+  for _, group in ipairs(byPriority) do
+    -- Sort each group by confidence descending
+    table.sort(group, function(a, b) return (a.confidence or 0) > (b.confidence or 0) end)
+    for _, i in ipairs(group) do 
+      table.insert(lines, string.format("  %s %s", icons[i.severity] or "[?]", i.message))
     end
   end
-  
-  -- Display critical first
-  for _, i in ipairs(critical) do
-    table.insert(lines, string.format("  [!] %s", i.message))
-  end
-  for _, i in ipairs(warnings) do
-    table.insert(lines, string.format("  [*] %s", i.message))
-  end
-  for _, i in ipairs(tips) do
-    table.insert(lines, string.format("  [>] %s", i.message))
-  end
-  for _, i in ipairs(info) do
-    table.insert(lines, string.format("  [i] %s", i.message))
-  end
-  
   return lines
 end
 
--- Calculate efficiency score (0-100) using weighted multi-factor analysis
 function Insights.calculateScore()
   local elapsed = getElapsed()
-  if elapsed < 300000 then return 0 end
+  if elapsed < 180000 then return 0 end  -- Need 3 min minimum
   
   local m = analytics.metrics
+  local metrics = calculateMetrics()
+  
+  -- Confidence multiplier based on session length (more data = more accurate score)
+  local confidence = clamp(elapsed / 1800000, 0.5, 1.0)  -- 50% at start, 100% at 30 min
+  
   local score = 0
   local maxScore = 100
   
-  local elapsedHour = elapsed / 3600000
-  local xpGained = (exp() or 0) - (analytics.session.startXp or 0)
-  
-  -- ===== EFFICIENCY FACTORS (40 points max) =====
-  
-  -- XP/hour efficiency (max 20 points)
-  local xpPerHour = xpGained / math.max(0.1, elapsedHour)
-  if xpPerHour > 1000000 then score = score + 20
-  elseif xpPerHour > 500000 then score = score + 17
-  elseif xpPerHour > 200000 then score = score + 14
-  elseif xpPerHour > 100000 then score = score + 10
-  elseif xpPerHour > 50000 then score = score + 6
-  elseif xpPerHour > 20000 then score = score + 3
+  -- ========== XP EFFICIENCY (25 pts) ==========
+  local lvlPct = metrics.levelPercentPerHour
+  local xpScore = 0
+  if lvlPct >= 10 then xpScore = 25
+  elseif lvlPct >= 5 then xpScore = 22
+  elseif lvlPct >= 2 then xpScore = 18
+  elseif lvlPct >= 1 then xpScore = 14
+  elseif lvlPct >= 0.5 then xpScore = 10
+  elseif lvlPct >= 0.2 then xpScore = 6
+  elseif lvlPct > 0 then xpScore = 3
   end
+  score = score + xpScore
   
-  -- Kill rate efficiency (max 15 points)
-  local killsPerHour = m.kills / math.max(0.1, elapsedHour)
-  if killsPerHour > 300 then score = score + 15
-  elseif killsPerHour > 200 then score = score + 12
-  elseif killsPerHour > 100 then score = score + 9
-  elseif killsPerHour > 50 then score = score + 5
-  elseif killsPerHour > 20 then score = score + 2
+  -- ========== KILL EFFICIENCY (20 pts) ==========
+  local killScore = 0
+  if metrics.killsPerHour > 300 then killScore = 20
+  elseif metrics.killsPerHour > 200 then killScore = 16
+  elseif metrics.killsPerHour > 150 then killScore = 13
+  elseif metrics.killsPerHour > 100 then killScore = 10
+  elseif metrics.killsPerHour > 50 then killScore = 6
+  elseif metrics.killsPerHour > 20 then killScore = 3
   end
+  score = score + killScore
   
-  -- Movement efficiency (max 5 points)
+  -- ========== SPAWN DENSITY (10 pts) ==========
+  local densityScore = 0
   if m.kills > 10 and m.tilesWalked > 0 then
-    local tilesPerKill = m.tilesWalked / m.kills
-    if tilesPerKill < 10 then score = score + 5
-    elseif tilesPerKill < 20 then score = score + 3
-    elseif tilesPerKill < 40 then score = score + 1
+    local tpk = metrics.tilesPerKill
+    if tpk < 5 then densityScore = 10
+    elseif tpk < 10 then densityScore = 8
+    elseif tpk < 20 then densityScore = 6
+    elseif tpk < 35 then densityScore = 4
+    elseif tpk < 50 then densityScore = 2
     end
   end
+  score = score + densityScore
   
-  -- ===== SURVIVABILITY FACTORS (30 points max) =====
+  -- ========== SURVIVABILITY (25 pts) ==========
+  local survScore = 0
   
-  -- Damage/Healing ratio (max 15 points)
+  -- Damage ratio component (15 pts)
   if m.healingDone > 0 then
-    local damageRatio = m.damageTaken / m.healingDone
-    if damageRatio < 0.4 then score = score + 15
-    elseif damageRatio < 0.6 then score = score + 12
-    elseif damageRatio < 0.8 then score = score + 8
-    elseif damageRatio < 1.0 then score = score + 4
-    elseif damageRatio > 1.2 then score = score - 5
+    local dr = metrics.damageRatio
+    if dr < 0.3 then survScore = survScore + 15
+    elseif dr < 0.5 then survScore = survScore + 13
+    elseif dr < 0.7 then survScore = survScore + 10
+    elseif dr < 0.9 then survScore = survScore + 6
+    elseif dr < 1.0 then survScore = survScore + 3
+    elseif dr > 1.2 then survScore = survScore - 5  -- Penalty for dangerous
     end
   else
-    score = score + 10 -- No damage taken is good
+    survScore = survScore + 12  -- No damage taken = safe
   end
   
-  -- Death penalty (max -20 points)
+  -- Death penalty (up to -15 pts)
   if m.deathCount > 0 then
-    score = score - (m.deathCount * 10)
+    survScore = survScore - math.min(15, m.deathCount * 8)
   else
-    score = score + 10 -- No deaths bonus
+    survScore = survScore + 5  -- Bonus for no deaths
   end
   
-  -- Near-death events penalty (max -5 points)
-  local nearDeathRate = m.nearDeathCount / math.max(1, elapsedHour)
-  if nearDeathRate > 5 then score = score - 5
-  elseif nearDeathRate > 2 then score = score - 2
-  elseif nearDeathRate == 0 then score = score + 5
+  -- Near-death frequency (5 pts)
+  local ndRate = metrics.nearDeathPerHour
+  if ndRate == 0 then survScore = survScore + 5
+  elseif ndRate < 1 then survScore = survScore + 3
+  elseif ndRate < 2 then survScore = survScore + 1
+  elseif ndRate > 4 then survScore = survScore - 3
   end
   
-  -- ===== RESOURCE EFFICIENCY (20 points max) =====
+  score = score + math.max(0, survScore)
   
-  -- Get HealBot data for waste analysis
-  local healData = getHealBotData()
-  
-  -- Potion efficiency (max 10 points)
+  -- ========== RESOURCE EFFICIENCY (10 pts) ==========
+  local resScore = 0
   if m.kills > 10 then
-    local potionsPerKill = 0
-    if healData and healData.potionUses then
-      potionsPerKill = healData.potionUses / m.kills
-    else
-      potionsPerKill = m.potionsUsed / m.kills
-    end
-    
-    if potionsPerKill < 0.3 then score = score + 10
-    elseif potionsPerKill < 0.7 then score = score + 7
-    elseif potionsPerKill < 1.5 then score = score + 4
-    elseif potionsPerKill > 3 then score = score - 3
-    end
-  end
-  
-  -- Mana waste penalty (max 5 points)
-  if healData and healData.manaWaste and healData.spellCasts and healData.spellCasts > 10 then
-    local avgManaCost = 50 -- Assume avg 50 mana per spell
-    local estimatedMana = healData.spellCasts * avgManaCost
-    local wastePercent = healData.manaWaste / math.max(1, estimatedMana) * 100
-    if wastePercent < 5 then score = score + 5
-    elseif wastePercent < 15 then score = score + 3
-    elseif wastePercent > 30 then score = score - 2
+    local ppk = metrics.potionsPerKill
+    if ppk < 0.3 then resScore = 10
+    elseif ppk < 0.7 then resScore = 8
+    elseif ppk < 1.2 then resScore = 6
+    elseif ppk < 2.0 then resScore = 4
+    elseif ppk < 3.0 then resScore = 2
+    elseif ppk > 4.0 then resScore = -2  -- Penalty for excessive use
     end
   else
-    score = score + 3 -- Neutral if no data
+    resScore = 5  -- Neutral if not enough data
   end
+  score = score + math.max(0, resScore)
   
-  -- Potion waste penalty (max 5 points)
-  if healData and healData.potionWaste and healData.potionUses and healData.potionUses > 10 then
-    local wastePercent = (healData.potionWaste / healData.potionUses) * 100
-    if wastePercent < 5 then score = score + 5
-    elseif wastePercent < 15 then score = score + 2
-    elseif wastePercent > 25 then score = score - 2
+  -- ========== COMBAT UPTIME (5 pts) ==========
+  local uptimeScore = 0
+  if elapsed >= 300000 then
+    local uptime = metrics.combatUptime
+    if uptime >= 70 then uptimeScore = 5
+    elseif uptime >= 50 then uptimeScore = 4
+    elseif uptime >= 35 then uptimeScore = 3
+    elseif uptime >= 20 then uptimeScore = 2
     end
-  else
-    score = score + 3 -- Neutral if no data
   end
+  score = score + uptimeScore
   
-  -- ===== ECONOMIC FACTORS (10 points max) =====
-  
+  -- ========== ECONOMY BONUS (5 pts) ==========
   if bottingStats then
-    local loot, waste, balance = bottingStats()
-    local profitPerHour = balance / math.max(0.1, elapsedHour)
-    
-    if profitPerHour > 100000 then score = score + 10
-    elseif profitPerHour > 50000 then score = score + 7
-    elseif profitPerHour > 20000 then score = score + 4
-    elseif profitPerHour > 0 then score = score + 2
-    elseif profitPerHour < -20000 then score = score - 3
+    local ok, waste, loot, balance = pcall(bottingStats)
+    if ok and balance then
+      local profitPerHour = balance / math.max(0.1, metrics.elapsedHour)
+      if profitPerHour > 100000 then score = score + 5
+      elseif profitPerHour > 50000 then score = score + 4
+      elseif profitPerHour > 20000 then score = score + 3
+      elseif profitPerHour > 0 then score = score + 1
+      elseif profitPerHour < -30000 then score = score - 2
+      end
     end
   end
   
-  return math.max(0, math.min(100, score))
+  -- Apply confidence multiplier for short sessions
+  local finalScore = score * confidence
+  
+  return clamp(math.floor(finalScore), 0, 100)
 end
 
--- Generate score bar visualization
 function Insights.scoreBar(score)
   local filled = math.floor(score / 10)
-  local empty = 10 - filled
-  local bar = string.rep("#", filled) .. string.rep("-", empty)
-  
-  local rating = "Poor"
-  if score >= 80 then rating = "Excellent"
-  elseif score >= 60 then rating = "Good"
+  local rating
+  if score >= 85 then rating = "Excellent"
+  elseif score >= 70 then rating = "Great"
+  elseif score >= 55 then rating = "Good"
   elseif score >= 40 then rating = "Average"
-  elseif score >= 20 then rating = "Below Avg"
+  elseif score >= 25 then rating = "Below Avg"
+  else rating = "Poor"
   end
-  
-  return string.format("[%s] %d/100 (%s)", bar, score, rating)
+  return string.format("[%s%s] %d/100 (%s)", string.rep("#", filled), string.rep("-", 10 - filled), score, rating)
 end
 
 -- ============================================================================
--- ANALYTICS SUMMARY BUILDER
+-- SUMMARY BUILDER (Template Pattern)
 -- ============================================================================
 
--- Helper to get item name by ID
-local function getItemName(itemId)
-  local item = Item.create(itemId)
-  if item then return item:getName() end
-  return "Item #" .. tostring(itemId)
+local function addSection(lines, title, content)
+  table.insert(lines, "[" .. title .. "]")
+  table.insert(lines, "--------------------------------------------")
+  for _, line in ipairs(content) do table.insert(lines, "  " .. line) end
+  table.insert(lines, "")
 end
 
 local function buildSummary()
   local lines = {}
-  local elapsed = getElapsed()
   local m = analytics.metrics
-  local currentXp = exp() or 0
-  local xpGained = currentXp - (analytics.session.startXp or 0)
-  local xpPerHour = perHour(xpGained, elapsed)
-  
-  -- Get bot analytics
-  local healData = getHealBotData()
-  local attackData = getAttackBotData()
+  local elapsed = getElapsed()
+  local metrics = calculateMetrics()
+  local levelInfo = Player.levelProgress()
+  local stamInfo = Player.staminaInfo()
   
   -- Header
   table.insert(lines, "============================================")
-  table.insert(lines, "        SMARTHUNT ANALYTICS v3.0")
+  table.insert(lines, "        SMARTHUNT ANALYTICS v4.0")
   table.insert(lines, "============================================")
   table.insert(lines, "")
   
-  -- Session Info
-  table.insert(lines, "[SESSION]")
-  table.insert(lines, "--------------------------------------------")
-  table.insert(lines, "  Duration: " .. formatDuration(elapsed))
-  table.insert(lines, "  Status: " .. (isSessionActive() and "ACTIVE" or "STOPPED"))
-  table.insert(lines, "")
+  -- Session
+  addSection(lines, "SESSION", {
+    "Duration: " .. formatDuration(elapsed),
+    "Status: " .. (isSessionActive() and "ACTIVE" or "STOPPED"),
+    "Level: " .. levelInfo.level .. " (" .. string.format("%.1f%%", levelInfo.percent) .. ")"
+  })
   
   -- Experience
-  table.insert(lines, "[EXPERIENCE]")
-  table.insert(lines, "--------------------------------------------")
-  table.insert(lines, "  XP Gained: " .. formatNum(xpGained))
-  table.insert(lines, "  XP/Hour: " .. formatNum(math.floor(xpPerHour)))
-  table.insert(lines, "")
-  
-  -- Skills
-  local currentSkills = captureSkills()
-  local skillGains = calculateSkillGains(analytics.session.startSkills, currentSkills)
-  if hasData(skillGains) then
-    table.insert(lines, "[SKILL GAINS]")
-    table.insert(lines, "--------------------------------------------")
-    for id, data in pairs(skillGains) do
-      local name = SKILL_NAMES[id] or ("Skill " .. id)
-      table.insert(lines, string.format("  %s: %d -> %d (+%d)", name, data.start, data.current, data.gain))
-    end
-    table.insert(lines, "")
+  local xpLines = {
+    "XP Gained: " .. formatNum(metrics.xpGained),
+    "XP/Hour: " .. formatNum(math.floor(metrics.xpPerHour)),
+    "Progress/Hour: " .. string.format("%.2f%%", metrics.levelPercentPerHour)
+  }
+  local hoursToLevel = metrics.xpPerHour > 0 and levelInfo.xpRemaining / metrics.xpPerHour or 0
+  if hoursToLevel > 0 and hoursToLevel < 10000 then
+    table.insert(xpLines, "Time to Level: " .. string.format("%.1fh", hoursToLevel))
   end
+  addSection(lines, "EXPERIENCE", xpLines)
   
-  -- Combat Stats
-  table.insert(lines, "[COMBAT]")
-  table.insert(lines, "--------------------------------------------")
-  table.insert(lines, "  Total Kills: " .. formatNum(m.kills))
-  table.insert(lines, "  Kills/Hour: " .. formatNum(math.floor(perHour(m.kills, elapsed))))
-  table.insert(lines, "  Damage Taken: " .. formatNum(m.damageTaken))
-  table.insert(lines, "  Healing Done: " .. formatNum(m.healingDone))
-  table.insert(lines, "")
+  -- Combat
+  addSection(lines, "COMBAT", {
+    "Kills: " .. formatNum(m.kills) .. " (" .. formatNum(math.floor(metrics.killsPerHour)) .. "/h)",
+    "Damage Taken: " .. formatNum(m.damageTaken),
+    "Healing Done: " .. formatNum(m.healingDone),
+    "Deaths: " .. m.deathCount .. " | Near-Death: " .. m.nearDeathCount
+  })
   
-  -- Movement
-  table.insert(lines, "[MOVEMENT]")
-  table.insert(lines, "--------------------------------------------")
-  table.insert(lines, "  Tiles Walked: " .. formatNum(m.tilesWalked))
-  table.insert(lines, "  Tiles/Min: " .. string.format("%.1f", m.tilesWalked / math.max(1, elapsed / 60000)))
-  table.insert(lines, "")
+  -- Stamina
+  local startStaminaMins = analytics.session.startStamina or 0
+  local staminaUsedMins = startStaminaMins - stamInfo.minutes
+  if staminaUsedMins < 0 then staminaUsedMins = 0 end -- In case stamina was refilled
   
-  -- ==================== HEALBOT ANALYTICS ====================
-  if healData then
-    table.insert(lines, "[HEALBOT - HEALING SPELLS]")
-    table.insert(lines, "--------------------------------------------")
-    if hasData(healData.spells) then
-      local sortedSpells = {}
-      for spell, count in pairs(healData.spells) do
-        table.insert(sortedSpells, {name = spell, count = count})
-      end
-      table.sort(sortedSpells, function(a, b) return a.count > b.count end)
-      for _, s in ipairs(sortedSpells) do
-        table.insert(lines, string.format("  %dx %s", s.count, s.name))
-      end
+  -- Format stamina used as hours:minutes
+  local staminaUsedStr
+  if staminaUsedMins > 0 then
+    local usedHrs = math.floor(staminaUsedMins / 60)
+    local usedMins = staminaUsedMins % 60
+    if usedHrs > 0 then
+      staminaUsedStr = string.format("%dh %dm", usedHrs, usedMins)
     else
-      table.insert(lines, "  No healing spells used")
+      staminaUsedStr = string.format("%dm", usedMins)
     end
-    table.insert(lines, "  Total: " .. formatNum(healData.spellCasts or 0) .. " casts")
-    if healData.manaWaste and healData.manaWaste > 0 then
-      table.insert(lines, "  Mana Wasted: " .. formatNum(healData.manaWaste))
-    end
-    table.insert(lines, "")
-    
-    table.insert(lines, "[HEALBOT - POTIONS]")
-    table.insert(lines, "--------------------------------------------")
-    if hasData(healData.potions) then
-      local sortedPotions = {}
-      for itemId, count in pairs(healData.potions) do
-        table.insert(sortedPotions, {id = itemId, name = getItemName(itemId), count = count})
-      end
-      table.sort(sortedPotions, function(a, b) return a.count > b.count end)
-      for _, p in ipairs(sortedPotions) do
-        table.insert(lines, string.format("  %dx %s", p.count, p.name))
-      end
-    else
-      table.insert(lines, "  No potions used")
-    end
-    table.insert(lines, "  Total: " .. formatNum(healData.potionUses or 0) .. " used")
-    if healData.potionWaste and healData.potionWaste > 0 then
-      table.insert(lines, "  Wasted (used when already healthy): " .. formatNum(healData.potionWaste))
-    end
-    table.insert(lines, "")
   end
   
-  -- ==================== ATTACKBOT ANALYTICS ====================
-  if attackData then
-    table.insert(lines, "[ATTACKBOT - ATTACK SPELLS]")
-    table.insert(lines, "--------------------------------------------")
-    if hasData(attackData.spells) then
-      local sortedSpells = {}
-      for spell, count in pairs(attackData.spells) do
-        table.insert(sortedSpells, {name = spell, count = count})
-      end
-      table.sort(sortedSpells, function(a, b) return a.count > b.count end)
-      for _, s in ipairs(sortedSpells) do
-        table.insert(lines, string.format("  %dx %s", s.count, s.name))
-      end
-    else
-      table.insert(lines, "  No attack spells used")
-    end
-    if attackData.empowerments and attackData.empowerments > 0 then
-      table.insert(lines, "  Empowerment Buffs: " .. formatNum(attackData.empowerments))
-    end
-    table.insert(lines, "")
-    
-    table.insert(lines, "[ATTACKBOT - RUNES]")
-    table.insert(lines, "--------------------------------------------")
-    if hasData(attackData.runes) then
-      local sortedRunes = {}
-      for runeId, count in pairs(attackData.runes) do
-        table.insert(sortedRunes, {id = runeId, name = getItemName(runeId), count = count})
-      end
-      table.sort(sortedRunes, function(a, b) return a.count > b.count end)
-      for _, r in ipairs(sortedRunes) do
-        table.insert(lines, string.format("  %dx %s", r.count, r.name))
-      end
-    else
-      table.insert(lines, "  No attack runes used")
-    end
-    table.insert(lines, "  Total Attacks: " .. formatNum(attackData.totalAttacks or 0))
-    table.insert(lines, "")
-  end
+  local stamLines = {
+    "Current: " .. string.format("%.2fh (%s)", stamInfo.hours, stamInfo.status),
+    "Session Start: " .. string.format("%.2fh", startStaminaMins / 60),
+    staminaUsedStr and ("Spent: " .. staminaUsedStr) or nil,
+    stamInfo.greenRemaining > 0 and ("Green Left: " .. string.format("%.1fh", stamInfo.greenRemaining)) or nil
+  }
+  local filteredStam = {}
+  for _, l in ipairs(stamLines) do if l then table.insert(filteredStam, l) end end
+  addSection(lines, "STAMINA", filteredStam)
   
-  -- ==================== DAMAGE OUTPUT (from Analyzer) ====================
-  if getHuntingData then
-    local totalDmg, totalHeal, _, _, _ = getHuntingData()
-    local elapsedHour = elapsed / 3600000
-    
-    table.insert(lines, "[DAMAGE OUTPUT]")
-    table.insert(lines, "--------------------------------------------")
-    table.insert(lines, "  Total Damage Dealt: " .. formatNum(totalDmg or 0))
-    table.insert(lines, "  Damage/Hour: " .. formatNum(math.floor((totalDmg or 0) / math.max(0.1, elapsedHour))))
-    
-    -- Damage per kill
-    if m.kills > 0 then
-      local dmgPerKill = (totalDmg or 0) / m.kills
-      table.insert(lines, "  Avg Damage/Kill: " .. formatNum(math.floor(dmgPerKill)))
-    end
-    
-    -- Damage per attack (if AttackBot data available)
-    if attackData and attackData.totalAttacks and attackData.totalAttacks > 0 then
-      local dmgPerAttack = (totalDmg or 0) / attackData.totalAttacks
-      table.insert(lines, "  Avg Damage/Attack: " .. formatNum(math.floor(dmgPerAttack)))
-    end
-    
-    table.insert(lines, "")
-  end
+  -- Player
+  addSection(lines, "PLAYER", {
+    "Magic Level: " .. Player.mlevel(),
+    "Blessings: " .. Player.blessings(),
+    "Speed: " .. Player.speed()
+  })
   
-  -- Monster Breakdown
-  if hasData(analytics.monsters) then
-    table.insert(lines, "[MONSTER KILLS]")
-    table.insert(lines, "--------------------------------------------")
-    local sorted = {}
-    for name, count in pairs(analytics.monsters) do
-      table.insert(sorted, {name = name, count = count})
-    end
-    table.sort(sorted, function(a, b) return a.count > b.count end)
-    for i = 1, math.min(10, #sorted) do
-      local mon = sorted[i]
-      table.insert(lines, string.format("  %dx %s", mon.count, mon.name))
-    end
-    table.insert(lines, "")
-  end
-  
-  -- ==================== ECONOMY (from Analyzer) ====================
-  if bottingStats then
-    local loot, waste, balance = bottingStats()
-    local elapsedHour = elapsed / 3600000
-    
-    table.insert(lines, "[ECONOMY]")
-    table.insert(lines, "--------------------------------------------")
-    table.insert(lines, "  Loot Value: " .. formatNum(loot) .. " gp")
-    table.insert(lines, "  Waste Value: " .. formatNum(waste) .. " gp")
-    
-    local balanceColor = balance >= 0 and "+" or ""
-    table.insert(lines, "  Balance: " .. balanceColor .. formatNum(balance) .. " gp")
-    
-    local profitPerHour = balance / math.max(0.1, elapsedHour)
-    table.insert(lines, "  Profit/Hour: " .. formatNum(math.floor(profitPerHour)) .. " gp/h")
-    table.insert(lines, "")
-  end
-  
-  -- ==================== SURVIVABILITY ====================
-  table.insert(lines, "[SURVIVABILITY]")
-  table.insert(lines, "--------------------------------------------")
-  table.insert(lines, "  Deaths: " .. formatNum(m.deathCount))
-  table.insert(lines, "  Near-Death Events: " .. formatNum(m.nearDeathCount))
-  table.insert(lines, "  Lowest HP: " .. analytics.peakStats.lowestHpPercent .. "%")
-  table.insert(lines, "  Highest Hit Taken: " .. formatNum(analytics.peakStats.highestDamageHit))
-  
-  -- Damage ratio
-  if m.healingDone > 0 then
-    local ratio = m.damageTaken / m.healingDone
-    local ratioStatus = "Safe"
-    if ratio > 1.2 then ratioStatus = "DANGEROUS"
-    elseif ratio > 0.9 then ratioStatus = "Risky"
-    elseif ratio < 0.5 then ratioStatus = "Very Safe"
-    end
-    table.insert(lines, "  Damage Ratio: " .. string.format("%.2f", ratio) .. " (" .. ratioStatus .. ")")
-  end
-  table.insert(lines, "")
-  
-  -- ==================== PEAK PERFORMANCE ====================
-  -- Update peak stats before display
-  updatePeakStats()
-  
-  table.insert(lines, "[PEAK PERFORMANCE]")
-  table.insert(lines, "--------------------------------------------")
-  table.insert(lines, "  Best XP/Hour: " .. formatNum(math.floor(analytics.peakStats.maxXpPerHour)))
-  table.insert(lines, "  Best Kills/Hour: " .. formatNum(math.floor(analytics.peakStats.maxKillsPerHour)))
-  
-  -- Current vs Peak comparison
-  local currentXpH = perHour(xpGained, elapsed)
-  local currentKillsH = perHour(m.kills, elapsed)
-  if analytics.peakStats.maxXpPerHour > 0 then
-    local xpEfficiency = (currentXpH / analytics.peakStats.maxXpPerHour) * 100
-    table.insert(lines, "  Current vs Peak XP: " .. string.format("%.0f%%", xpEfficiency))
-  end
-  table.insert(lines, "")
-  
-  -- ==================== RESOURCE TRACKING ====================
-  local currentCap = getFreeCap()
-  local currentStamina = getStaminaMinutes()
-  local capUsed = analytics.session.startCap - currentCap
-  local staminaUsed = analytics.session.startStamina - currentStamina
-  
-  table.insert(lines, "[RESOURCES]")
-  table.insert(lines, "--------------------------------------------")
-  table.insert(lines, "  Capacity Used: " .. formatNum(capUsed) .. " oz")
-  table.insert(lines, "  Current Cap: " .. formatNum(currentCap) .. " oz")
-  if staminaUsed > 0 then
-    table.insert(lines, "  Stamina Used: " .. staminaUsed .. " minutes")
-  end
-  table.insert(lines, "  Current Stamina: " .. currentStamina .. " minutes")
-  table.insert(lines, "")
-  
-  -- ==================== EFFICIENCY SCORE ====================
+  -- Score
   local score = Insights.calculateScore()
-  table.insert(lines, "[HUNT EFFICIENCY SCORE]")
-  table.insert(lines, "--------------------------------------------")
-  table.insert(lines, "  " .. Insights.scoreBar(score))
-  table.insert(lines, "")
-  table.insert(lines, "  Score Factors:")
-  table.insert(lines, "    Efficiency (XP+Kills+Movement): 40 pts max")
-  table.insert(lines, "    Survivability (Deaths+Damage): 30 pts max")
-  table.insert(lines, "    Resources (Potions+Mana): 20 pts max")
-  table.insert(lines, "    Economy (Profit): 10 pts max")
-  table.insert(lines, "")
+  addSection(lines, "HUNT SCORE", { Insights.scoreBar(score) })
   
-  -- ==================== AI INSIGHTS ====================
+  -- Insights
   local insightsList = Insights.analyze()
-  table.insert(lines, "[AI INSIGHTS & RECOMMENDATIONS]")
+  table.insert(lines, "[AI INSIGHTS]")
   table.insert(lines, "--------------------------------------------")
   local insightLines = Insights.format(insightsList)
-  for _, line in ipairs(insightLines) do
-    table.insert(lines, line)
-  end
+  for _, line in ipairs(insightLines) do table.insert(lines, line) end
   table.insert(lines, "")
-  table.insert(lines, "  Legend: [!]=Critical [*]=Warning [>]=Tip [i]=Info")
-  
-  table.insert(lines, "")
+  table.insert(lines, "  [!]=Critical [*]=Warning [>]=Tip [i]=Info")
   table.insert(lines, "============================================")
   
   return table.concat(lines, "\n")
 end
 
 -- ============================================================================
--- UI WINDOW
+-- UI
 -- ============================================================================
 
 local analyticsWindow = nil
 
 local function showAnalytics()
-  if analyticsWindow then
-    analyticsWindow:destroy()
-    analyticsWindow = nil
+  if analyticsWindow then 
+    pcall(function() analyticsWindow:destroy() end)
+    analyticsWindow = nil 
   end
   
-  analyticsWindow = UI.createWindow('SmartHuntAnalyticsWindow')
-  if not analyticsWindow then
-    print(buildSummary())
-    info("[Analytics] Printed to console")
-    return
+  -- Try to create window, fall back to console output
+  local ok, win = pcall(function() return UI.createWindow('SmartHuntAnalyticsWindow') end)
+  if not ok or not win then 
+    print(buildSummary()) 
+    return 
   end
   
-  analyticsWindow.content.textContent:setText(buildSummary())
+  analyticsWindow = win
   
-  analyticsWindow.buttons.refreshButton.onClick = function()
+  -- Safely access window elements
+  if analyticsWindow.content and analyticsWindow.content.textContent then
     analyticsWindow.content.textContent:setText(buildSummary())
   end
   
-  analyticsWindow.buttons.closeButton.onClick = function()
-    analyticsWindow:destroy()
-    analyticsWindow = nil
+  if analyticsWindow.buttons then
+    if analyticsWindow.buttons.refreshButton then
+      analyticsWindow.buttons.refreshButton.onClick = function() 
+        if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
+          analyticsWindow.content.textContent:setText(buildSummary()) 
+        end
+      end
+    end
+    if analyticsWindow.buttons.closeButton then
+      analyticsWindow.buttons.closeButton.onClick = function() 
+        if analyticsWindow then pcall(function() analyticsWindow:destroy() end) end
+        analyticsWindow = nil 
+      end
+    end
+    if analyticsWindow.buttons.resetButton then
+      analyticsWindow.buttons.resetButton.onClick = function() 
+        startSession() 
+        if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
+          analyticsWindow.content.textContent:setText(buildSummary()) 
+        end
+      end
+    end
   end
   
-  analyticsWindow.buttons.resetButton.onClick = function()
-    startSession()
-    analyticsWindow.content.textContent:setText(buildSummary())
-    info("[Analytics] Session reset!")
-  end
-  
-  analyticsWindow:show()
-  analyticsWindow:raise()
-  analyticsWindow:focus()
+  -- Safely show window
+  pcall(function() analyticsWindow:show():raise():focus() end)
 end
 
 -- ============================================================================
--- AUTO-START SESSION WITH CAVEBOT
+-- MACROS (Hidden)
 -- ============================================================================
 
 UI.Separator()
 
 macro(5000, "SmartHunt Tracker", function()
-  if CaveBot and CaveBot.isOn() then
-    if not isSessionActive() then
-      startSession()
-      info("[Analytics] Session started automatically")
-    end
+  if CaveBot and CaveBot.isOn() and not isSessionActive() then
+    startSession()
+    -- Session started silently
   end
+  updateTracking()
 end)
+
+macro(1000, function() updateTracking() end)
 
 -- ============================================================================
 -- UI BUTTON
 -- ============================================================================
 
-local analyticsBtn = UI.Button("SmartHunt Analytics", function()
-  local status, err = pcall(showAnalytics)
-  if not status then
-    warn("[Analytics] Error: " .. tostring(err))
-    print(buildSummary())
-  end
+local btn = UI.Button("SmartHunt Analytics", function()
+  local ok, err = pcall(showAnalytics)
+  if not ok then warn("[SmartHunt] " .. tostring(err)) print(buildSummary()) end
 end)
-
-if analyticsBtn then
-  analyticsBtn:setTooltip("View hunting analytics:\n- Session duration and XP\n- Skill gains\n- Kill statistics\n- Supply consumption\n- Movement data")
-end
+if btn then btn:setTooltip("View hunting analytics") end
 
 -- ============================================================================
 -- PUBLIC API
@@ -1471,7 +1064,8 @@ nExBot.Analytics = {
   isActive = isSessionActive,
   getSummary = buildSummary,
   getMetrics = function() return analytics.metrics end,
-  getElapsed = getElapsed
+  getElapsed = getElapsed,
+  getTrends = function() return trendData end
 }
 
-print("[SmartHunt] Analytics v2.0 loaded (EventBus-driven)")
+print("[SmartHunt] v4.0 loaded (Advanced AI)")

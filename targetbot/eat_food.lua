@@ -84,11 +84,64 @@ local FULL_REGEN_TIME = 600    -- Consider player full if regen > 10 minutes (60
 local processedContainers = {} -- Track containers we've checked for food
 local walkingToCorpse = nil    -- Currently walking to this corpse
 
--- Initialize storage
-if storage.eatFromCorpses == nil then
-  storage.eatFromCorpses = false
+-- "You are full" detection state
+local isPlayerFull = false           -- Flag set when server says we're full
+local fullDetectedTime = 0           -- When we detected player is full
+local FULL_COOLDOWN = 60000          -- Don't retry eating for 60 seconds after "You are full"
+local FULL_MESSAGES = {              -- Server messages indicating player is full (case insensitive)
+  "you are full",
+  "you're full", 
+  "voce esta cheio",                 -- Portuguese
+  "estas lleno",                     -- Spanish
+}
+
+-- Pure function: Check if text contains a "full" message
+local function isFullMessage(text)
+  if not text then return false end
+  local lowerText = text:lower()
+  for _, pattern in ipairs(FULL_MESSAGES) do
+    if lowerText:find(pattern, 1, true) then
+      return true
+    end
+  end
+  return false
 end
-eatFromCorpsesEnabled = storage.eatFromCorpses
+
+-- Listen for server messages to detect "You are full"
+onTextMessage(function(mode, text)
+  if not eatFromCorpsesEnabled then return end
+  if isFullMessage(text) then
+    isPlayerFull = true
+    fullDetectedTime = now
+    -- Clear the corpse queue since we can't eat anyway
+    foodCorpseQueue = {}
+    walkingToCorpse = nil
+  end
+end)
+
+-- Pure function: Check if "full" cooldown has expired
+local function hasFullCooldownExpired()
+  return (now - fullDetectedTime) > FULL_COOLDOWN
+end
+
+-- Profile storage helpers
+local function getProfileSetting(key)
+  if ProfileStorage then
+    return ProfileStorage.get(key)
+  end
+  return storage[key]
+end
+
+local function setProfileSetting(key, value)
+  if ProfileStorage then
+    ProfileStorage.set(key, value)
+  else
+    storage[key] = value
+  end
+end
+
+-- Initialize from profile storage
+eatFromCorpsesEnabled = getProfileSetting("eatFromCorpses") or false
 
 -- Check if enabled
 TargetBot.EatFood.isEnabled = function()
@@ -98,13 +151,13 @@ end
 -- Set enabled state
 TargetBot.EatFood.setEnabled = function(enabled)
   eatFromCorpsesEnabled = enabled
-  storage.eatFromCorpses = enabled
+  setProfileSetting("eatFromCorpses", enabled)
 end
 
 -- Toggle state
 TargetBot.EatFood.toggle = function()
   eatFromCorpsesEnabled = not eatFromCorpsesEnabled
-  storage.eatFromCorpses = eatFromCorpsesEnabled
+  setProfileSetting("eatFromCorpses", eatFromCorpsesEnabled)
   return eatFromCorpsesEnabled
 end
 
@@ -128,6 +181,24 @@ TargetBot.EatFood.removeFoodId = function(itemId)
   FOOD_IDS[itemId] = nil
 end
 
+-- Check if player is marked as full (server said "You are full")
+TargetBot.EatFood.isPlayerFull = function()
+  return isPlayerFull and not hasFullCooldownExpired()
+end
+
+-- Reset the "full" flag (useful if player takes damage and loses regen)
+TargetBot.EatFood.resetFullStatus = function()
+  isPlayerFull = false
+  fullDetectedTime = 0
+end
+
+-- Get remaining cooldown time in seconds
+TargetBot.EatFood.getFullCooldownRemaining = function()
+  if not isPlayerFull then return 0 end
+  local remaining = FULL_COOLDOWN - (now - fullDetectedTime)
+  return remaining > 0 and math.floor(remaining / 1000) or 0
+end
+
 -- Check distance to position
 local function getDistance(pos1, pos2)
   if pos1.z ~= pos2.z then return 999 end
@@ -137,6 +208,18 @@ end
 -- Check if player needs food (not full)
 local function needsFood()
   if not player then return false end
+  
+  -- If server told us we're full, respect the cooldown
+  if isPlayerFull then
+    if hasFullCooldownExpired() then
+      -- Cooldown expired, reset the flag and try again
+      isPlayerFull = false
+    else
+      -- Still in cooldown, don't try to eat
+      return false
+    end
+  end
+  
   -- Get regeneration time in seconds
   -- Player:getRegenerationTime() returns seconds of regeneration remaining
   local regenTime = 0
@@ -282,6 +365,36 @@ local function walkToCorpse(corpse)
   return false
 end
 
+-- Eat food directly from player's inventory/backpacks (not corpses)
+local function eatFromInventory()
+  if (now - lastEatTime) < EAT_COOLDOWN then return false end
+  
+  -- Try findItem first (searches all open containers including backpacks)
+  if findItem then
+    for foodId, _ in pairs(FOOD_IDS) do
+      local food = findItem(foodId)
+      if food then
+        g_game.use(food)
+        lastEatTime = now
+        return true
+      end
+    end
+  end
+  
+  -- Fallback: use itemAmount and use() by ID
+  if itemAmount and use then
+    for foodId, _ in pairs(FOOD_IDS) do
+      if itemAmount(foodId) > 0 then
+        use(foodId)
+        lastEatTime = now
+        return true
+      end
+    end
+  end
+  
+  return false
+end
+
 -- Eat food from any opened container (corpse containers)
 local function eatFromOpenContainers()
   if (now - lastEatTime) < EAT_COOLDOWN then return false end
@@ -418,15 +531,15 @@ TargetBot.EatFood.process = function()
     return false
   end
   
-  -- Try to open a nearby corpse
+  -- Try to open a nearby corpse (works in parallel with combat)
   if openNearbyCorpse() then
     return true
   end
   
   -- If no corpse nearby, walk to one if available
-  -- Only walk if not in combat (no targets)
-  local targets = TargetBot.Creature and TargetBot.Creature.getTargets and TargetBot.Creature.getTargets() or {}
-  if #targets == 0 or (target() == nil) then
+  -- Only walk to corpses if not actively in combat
+  local currentTarget = target and target() or nil
+  if not currentTarget then
     local corpseToWalk, walkIndex = findCorpseToWalkTo()
     if corpseToWalk then
       if walkToCorpse(corpseToWalk) then

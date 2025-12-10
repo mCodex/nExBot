@@ -73,16 +73,34 @@ Panel
 ]])
 edit:hide()
 
-if not storage.dropper then
-    storage.dropper = {
-      enabled = false,
-      trashItems = { 283, 284, 285 },
-      useItems = { 21203, 14758 },
-      capItems = { 21175 }
-    }
+-- Profile storage helpers
+local function getProfileSetting(key)
+  if ProfileStorage then
+    return ProfileStorage.get(key)
+  end
+  return storage[key]
 end
 
-local config = storage.dropper
+local function setProfileSetting(key, value)
+  if ProfileStorage then
+    ProfileStorage.set(key, value)
+  else
+    storage[key] = value
+  end
+end
+
+-- Load dropper config from profile storage
+local config = getProfileSetting("dropper") or {
+  enabled = false,
+  trashItems = { 283, 284, 285 },
+  useItems = { 21203, 14758 },
+  capItems = { 21175 }
+}
+
+-- Helper to save config changes
+local function saveDropperConfig()
+  setProfileSetting("dropper", config)
+end
 
 local showEdit = false
 ui.edit.onClick = function(widget)
@@ -98,20 +116,24 @@ ui.title:setOn(config.enabled)
 ui.title.onClick = function(widget)
   config.enabled = not config.enabled
   ui.title:setOn(config.enabled)
+  saveDropperConfig()
 end
 
 UI.Container(function()
     config.trashItems = edit.TrashItems:getItems()
+    saveDropperConfig()
     end, true, nil, edit.TrashItems) 
 edit.TrashItems:setItems(config.trashItems)
 
 UI.Container(function()
     config.useItems = edit.UseItems:getItems()
+    saveDropperConfig()
     end, true, nil, edit.UseItems) 
 edit.UseItems:setItems(config.useItems)
 
 UI.Container(function()
     config.capItems = edit.CapItems:getItems()
+    saveDropperConfig()
     end, true, nil, edit.CapItems) 
 edit.CapItems:setItems(config.capItems)
 

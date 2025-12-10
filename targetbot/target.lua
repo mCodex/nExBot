@@ -484,15 +484,19 @@ local lastItemUse = 0
 local lastRuneAttack = 0
 
 -- Use item on target like hotkey (doesn't require open backpack)
--- Tries multiple methods for maximum compatibility and speed
+-- Uses BotCore.Items for consolidated item usage with fallback
 local function useItemOnTargetLikeHotkey(item, target, subType)
-  -- Determine subType based on client version
+  -- Use BotCore.Items if available (handles all client compatibility)
+  if BotCore and BotCore.Items and BotCore.Items.useOn then
+    return BotCore.Items.useOn(item, target, subType)
+  end
+  
+  -- Fallback: direct implementation
   local thing = g_things.getThingType(item)
   if not thing or not thing:isFluidContainer() then
     subType = g_game.getClientVersion() >= 860 and 0 or 1
   end
   
-  -- Method 1: Modern clients (780+) - use inventory item directly (like hotkey)
   if g_game.getClientVersion() >= 780 then
     if g_game.useInventoryItemWith then
       g_game.useInventoryItemWith(item, target, subType)
@@ -500,7 +504,6 @@ local function useItemOnTargetLikeHotkey(item, target, subType)
     end
   end
   
-  -- Method 2: Legacy clients - find item and use with target
   local tmpItem = g_game.findPlayerItem(item, subType)
   if tmpItem then
     g_game.useWith(tmpItem, target, subType)
