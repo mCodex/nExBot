@@ -172,7 +172,7 @@ Moves to tiles with better tactical advantage using multi-factor scoring.
 - Dynamic thresholds based on monster count
 - SpellOptimizer integration for AoE considerations
 - LRU creature config cache (50 entries max)
-- Pure function scoring via TargetBotCore
+- Pure function scoring via TargetCore
 - More reactive when surrounded, conservative when safe
 
 ---

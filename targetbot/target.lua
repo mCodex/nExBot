@@ -10,7 +10,7 @@ local looterStatus = ""
 TargetBot = TargetBot or {}
 TargetBot.smartPullActive = false  -- When true, CaveBot pauses waypoint walking
 
--- Use TargetBotCore if available (DRY principle)
+-- Use TargetCore if available (DRY principle)
 local Core = TargetCore or {}
 
 -- Creature type constants for clarity
@@ -143,7 +143,7 @@ local function updateCreatureInCache(creature)
   local pos = player:getPosition()
   local cpos = creature:getPosition()
   
-  -- Use TargetBotCore distance if available, otherwise calculate
+  -- Use TargetCore distance if available, otherwise calculate
   local dist
   if Core.Geometry and Core.Geometry.chebyshevDistance then
     dist = Core.Geometry.chebyshevDistance(pos, cpos)

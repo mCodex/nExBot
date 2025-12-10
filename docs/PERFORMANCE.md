@@ -356,14 +356,14 @@ end
 
 </details>
 
-### TargetBotCore Pure Functions
+### TargetCore Pure Functions
 
 <details>
 <summary><b>📊 Reusable Geometry Calculations</b></summary>
 
 ```lua
 -- All geometry functions are pure (no side effects)
-TargetBotCore.Geometry = {
+TargetCore.Geometry = {
   manhattan = function(p1, p2) return abs(p1.x - p2.x) + abs(p1.y - p2.y) end,
   chebyshev = function(p1, p2) return max(abs(p1.x - p2.x), abs(p1.y - p2.y)) end,
   euclidean = function(p1, p2) return sqrt((p1.x - p2.x)^2 + (p1.y - p2.y)^2) end,

@@ -153,7 +153,7 @@
   - Confidence voting system (0.0-1.0)
   - Anti-oscillation tracking
   - Emergency/wave_avoid/finish_kill/spell_position priorities
-- [x] **TargetBotCore** - Pure utility functions
+- [x] **TargetCore** - Pure utility functions
   - Geometry calculations (Manhattan, Chebyshev, Euclidean)
   - Combat helpers (danger zones, facing direction)
   - Monster utilities (target scoring, health checks)

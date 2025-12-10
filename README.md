@@ -177,7 +177,7 @@ nExBot/
 | **Multi-Factor Scoring** | Tile evaluation for repositioning |
 | **Intent Voting** | MovementCoordinator confidence-based decisions |
 | **Behavior Analysis** | Monster pattern recognition |
-| **Pure Functions** | TargetBotCore geometry/combat utilities |
+| **Pure Functions** | TargetCore geometry/combat utilities |
 
 ---
 

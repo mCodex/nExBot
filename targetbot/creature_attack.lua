@@ -1,6 +1,6 @@
 --------------------------------------------------------------------------------
 -- TARGETBOT CREATURE ATTACK v1.0
--- Uses TargetBotCore for shared pure functions (DRY, SRP)
+-- Uses TargetCore for shared pure functions (DRY, SRP)
 -- Dynamic scaling based on monster count for better reactivity
 --------------------------------------------------------------------------------
 
@@ -44,7 +44,7 @@ local DIR_VECTORS = Geometry.DIR_VECTORS or {
 --------------------------------------------------------------------------------
 -- IMPROVED WAVE AVOIDANCE SYSTEM
 -- 
--- Uses TargetBotCore pure functions and improved scoring algorithm.
+-- Uses TargetCore pure functions and improved scoring algorithm.
 -- Key improvements:
 -- 1. Dynamic scaling based on monster count (more reactive when surrounded)
 -- 2. Better front arc detection with configurable width
@@ -464,11 +464,11 @@ nExBot.analyzePositionDanger = analyzePositionDanger
 nExBot.findSafeAdjacentTile = findSafeAdjacentTile
 
 --------------------------------------------------------------------------------
--- UTILITY FUNCTIONS (Optimized with TargetBotCore integration)
+-- UTILITY FUNCTIONS (Optimized with TargetCore integration)
 --------------------------------------------------------------------------------
 
 -- Pure function: Count walkable tiles around a position
--- Uses TargetBotCore.Geometry if available
+-- Uses TargetCore.Geometry if available
 -- @param position: center position
 -- @return number
 local function countWalkableTiles(position)
