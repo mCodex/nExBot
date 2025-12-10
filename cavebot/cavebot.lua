@@ -545,337 +545,27 @@ local function resetWaypointEngine()
   cachedWaypointPos = nil
   cachedWaypointPosTime = 0
 end
-  end
-  return nil
-end
 
--- Get current waypoint ID for tracking
-local function getCurrentWaypointId()
-  if not ui or not ui.list then return nil end
-  local focused = ui.list:getFocusedChild()
-  if not focused then return nil end
-  return ui.list:getChildIndex(focused)
-end
-
--- Get CURRENT waypoint position (not first!)
-local function getCurrentWaypointPos()
-  if not ui or not ui.list then return nil end
-  
-  local focused = ui.list:getFocusedChild()
-  if not focused then return nil end
-  
-  -- Only check "goto" or "walk" actions
-  local actionType = focused.action
-  if actionType ~= "goto" and actionType ~= "walk" then
-    return nil  -- Not a movement waypoint, skip guard
-  end
-  
-  return parseWaypointValue(focused.value)
-end
-
--- ============================================================================
--- INFINITE LOOP DETECTION FUNCTIONS
--- ============================================================================
-
--- Record a waypoint visit
-local function recordWaypointVisit(waypointId)
-  if not waypointId then return end
-  
-  local playerPos = pos()
-  if not playerPos then return end
-  
-  -- Add to history
-  table.insert(LoopDetector.waypointHistory, 1, {
-    id = waypointId,
-    time = now,
-    pos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-  })
-  
-  -- Trim history
-  while #LoopDetector.waypointHistory > LoopDetector.maxHistorySize do
-    table.remove(LoopDetector.waypointHistory)
-  end
-end
-
--- Check for waypoint cycling (same waypoint visited too many times)
-local function detectWaypointCycle()
-  if #LoopDetector.waypointHistory < LoopDetector.cycleThreshold then
-    return false
-  end
-  
-  local cutoffTime = now - LoopDetector.cycleTimeWindow
-  local waypointCounts = {}
-  
-  for _, visit in ipairs(LoopDetector.waypointHistory) do
-    if visit.time >= cutoffTime then
-      waypointCounts[visit.id] = (waypointCounts[visit.id] or 0) + 1
-      
-      if waypointCounts[visit.id] >= LoopDetector.cycleThreshold then
-        return true, visit.id  -- Loop detected on this waypoint
-      end
-    end
-  end
-  
-  return false
-end
-
--- Sample player position for stagnation detection
-local function samplePosition()
-  if now - LoopDetector.lastPositionSample < LoopDetector.POSITION_SAMPLE_INTERVAL then
-    return
-  end
-  LoopDetector.lastPositionSample = now
-  
-  local playerPos = pos()
-  if not playerPos then return end
-  
-  table.insert(LoopDetector.positionHistory, 1, {
-    pos = {x = playerPos.x, y = playerPos.y, z = playerPos.z},
-    time = now
-  })
-  
-  -- Trim history
-  while #LoopDetector.positionHistory > LoopDetector.maxPositionHistory do
-    table.remove(LoopDetector.positionHistory)
-  end
-end
-
--- Detect position stagnation (player not moving significantly)
-local function detectPositionStagnation()
-  if #LoopDetector.positionHistory < 5 then
-    return false
-  end
-  
-  local cutoffTime = now - LoopDetector.stagnationTimeWindow
-  local oldestValidPos = nil
-  local newestPos = LoopDetector.positionHistory[1]
-  
-  if not newestPos then return false end
-  
-  -- Find oldest position within time window
-  for i = #LoopDetector.positionHistory, 1, -1 do
-    local sample = LoopDetector.positionHistory[i]
-    if sample.time >= cutoffTime then
-      oldestValidPos = sample
-      break
-    end
-  end
-  
-  if not oldestValidPos then return false end
-  
-  -- Calculate total movement
-  local dx = math.abs(newestPos.pos.x - oldestValidPos.pos.x)
-  local dy = math.abs(newestPos.pos.y - oldestValidPos.pos.y)
-  local totalMovement = dx + dy
-  
-  -- Floor change resets stagnation
-  if newestPos.pos.z ~= oldestValidPos.pos.z then
-    return false
-  end
-  
-  return totalMovement < LoopDetector.stagnationThreshold
-end
-
--- Record action success/failure
-local function recordActionResult(success)
-  if success then
-    LoopDetector.consecutiveFailures = 0
-    LoopDetector.lastSuccessTime = now
-    LoopDetector.isRecovering = false
-    LoopDetector.recoveryAttempts = 0
-  else
-    LoopDetector.consecutiveFailures = LoopDetector.consecutiveFailures + 1
-  end
-end
-
--- Attempt recovery from infinite loop
-local function attemptRecovery()
-  -- Cooldown check
-  if now - LoopDetector.lastRecoveryTime < LoopDetector.RECOVERY_COOLDOWN then
-    return false
-  end
-  
-  -- Max attempts check
-  if LoopDetector.recoveryAttempts >= LoopDetector.maxRecoveryAttempts then
-    -- Last resort: stop cavebot
-    warn("[CaveBot] Recovery failed after " .. LoopDetector.maxRecoveryAttempts .. " attempts. Stopping CaveBot.")
-    LoopDetector.totalLoopsDetected = LoopDetector.totalLoopsDetected + 1
-    config.setOff()
-    return false
-  end
-  
-  LoopDetector.isRecovering = true
-  LoopDetector.recoveryAttempts = LoopDetector.recoveryAttempts + 1
-  LoopDetector.lastRecoveryTime = now
-  
-  info("[CaveBot] Infinite loop detected. Recovery attempt " .. LoopDetector.recoveryAttempts .. "/" .. LoopDetector.maxRecoveryAttempts)
-  
-  -- Strategy 1: Find best reachable waypoint
-  if CaveBot.findBestWaypoint and CaveBot.findBestWaypoint(true) then
-    info("[CaveBot] Found reachable waypoint. Resuming.")
-    LoopDetector.totalRecoveries = LoopDetector.totalRecoveries + 1
-    LoopDetector.consecutiveFailures = 0
-    LoopDetector.waypointHistory = {}  -- Clear cycle history
-    LoopDetector.positionHistory = {}  -- Clear position history
-    return true
-  end
-  
-  -- Strategy 2: Try previous waypoints
-  if CaveBot.gotoFirstPreviousReachableWaypoint and CaveBot.gotoFirstPreviousReachableWaypoint() then
-    info("[CaveBot] Found previous reachable waypoint. Resuming.")
-    LoopDetector.totalRecoveries = LoopDetector.totalRecoveries + 1
-    LoopDetector.consecutiveFailures = 0
-    LoopDetector.waypointHistory = {}
-    LoopDetector.positionHistory = {}
-    return true
-  end
-  
-  -- Strategy 3: Skip current waypoint
-  if ui and ui.list then
-    local actionCount = ui.list:getChildCount()
-    if actionCount > 0 then
-      local current = ui.list:getFocusedChild()
-      if current then
-        local currentIndex = ui.list:getChildIndex(current)
-        local nextIndex = currentIndex + 1
-        if nextIndex > actionCount then nextIndex = 1 end
-        
-        local nextChild = ui.list:getChildByIndex(nextIndex)
-        if nextChild then
-          ui.list:focusChild(nextChild)
-          info("[CaveBot] Skipped waypoint " .. currentIndex .. ". Trying waypoint " .. nextIndex)
-          LoopDetector.consecutiveFailures = 0
-          return true
-        end
-      end
-    end
-  end
-  
-  return false
-end
-
--- Main loop detection check (called every tick)
-local function checkForInfiniteLoop()
-  -- Sample position periodically
-  samplePosition()
-  
-  -- Skip if in recovery mode
-  if LoopDetector.isRecovering then
-    return false
-  end
-  
-  -- Check 1: Too many consecutive failures
-  if LoopDetector.consecutiveFailures >= LoopDetector.maxConsecutiveFailures then
-    warn("[CaveBot] Detected " .. LoopDetector.consecutiveFailures .. " consecutive failures.")
-    return attemptRecovery()
-  end
-  
-  -- Check 2: Waypoint cycle detection
-  local isCycling, cycleWaypoint = detectWaypointCycle()
-  if isCycling then
-    warn("[CaveBot] Detected waypoint cycle on waypoint " .. tostring(cycleWaypoint))
-    return attemptRecovery()
-  end
-  
-  -- Check 3: Position stagnation (only if we have failures)
-  if LoopDetector.consecutiveFailures >= 5 and detectPositionStagnation() then
-    warn("[CaveBot] Detected position stagnation with failures.")
-    return attemptRecovery()
-  end
-  
-  return false
-end
-
--- Reset loop detector state (called when config changes or cavebot restarts)
-local function resetLoopDetector()
-  LoopDetector.waypointHistory = {}
-  LoopDetector.positionHistory = {}
-  LoopDetector.consecutiveFailures = 0
-  LoopDetector.isRecovering = false
-  LoopDetector.recoveryAttempts = 0
-  LoopDetector.lastSuccessTime = now
-  LoopDetector.lastPositionSample = 0
-end
-
--- Smart guard check - only runs every 5 seconds
-local function checkWaypointGuard()
-  -- Rate limit: only check every 5 seconds
-  if now - WaypointGuard.lastCheckTime < WaypointGuard.CHECK_INTERVAL then
-    return false  -- No action needed
-  end
-  WaypointGuard.lastCheckTime = now
-  
-  -- Cooldown: don't trigger too frequently
-  if now - WaypointGuard.lastTriggeredTime < WaypointGuard.TRIGGER_COOLDOWN then
-    return false
-  end
-  
-  -- Skip if we're actively walking (making progress)
-  if walkState.isWalkingToWaypoint and not isStuck() then
-    WaypointGuard.consecutiveFailures = 0  -- Reset on progress
-    return false
-  end
-  
-  local playerPos = pos()
-  if not playerPos then return false end
-  
-  local waypointPos = getCurrentWaypointPos()
-  if not waypointPos then return false end  -- No movement waypoint focused
-  
-  -- Check floor mismatch (definite problem)
-  if playerPos.z ~= waypointPos.z then
-    WaypointGuard.consecutiveFailures = WaypointGuard.consecutiveFailures + 1
-    
-    if WaypointGuard.consecutiveFailures >= WaypointGuard.MAX_FAILURES then
-      -- Skip this waypoint - can't reach it
-      warn("[CaveBot] Floor mismatch for " .. WaypointGuard.MAX_FAILURES .. " checks. Skipping waypoint.")
-      WaypointGuard.consecutiveFailures = 0
-      return "skip"
-    end
-    return false
-  end
-  
-  -- Check extreme distance
-  local dist = math.abs(playerPos.x - waypointPos.x) + math.abs(playerPos.y - waypointPos.y)
-  
-  if dist > WaypointGuard.EXTREME_DISTANCE then
-    WaypointGuard.consecutiveFailures = WaypointGuard.consecutiveFailures + 1
-    
-    if WaypointGuard.consecutiveFailures >= WaypointGuard.MAX_FAILURES then
-      -- Skip this waypoint - too far to reach reasonably
-      warn("[CaveBot] Waypoint too far (" .. dist .. " tiles) for " .. WaypointGuard.MAX_FAILURES .. " checks. Skipping.")
-      WaypointGuard.consecutiveFailures = 0
-      return "skip"
-    end
-    return false
-  end
-  
-  -- Everything normal
-  WaypointGuard.consecutiveFailures = 0
-  return false
-end
-
--- Skip to next waypoint (used when guard detects unreachable waypoint)
+-- Skip to next waypoint
 local function skipCurrentWaypoint()
-  if not ui or not ui.list then return end
+  if not ui or not ui.list then return false end
   
   local actionCount = ui.list:getChildCount()
-  if actionCount == 0 then return end
+  if actionCount == 0 then return false end
   
   local current = ui.list:getFocusedChild()
-  if not current then return end
+  if not current then return false end
   
   local currentIndex = ui.list:getChildIndex(current)
-  local nextIndex = currentIndex + 1
-  if nextIndex > actionCount then
-    nextIndex = 1
-  end
+  local nextIndex = (currentIndex % actionCount) + 1
   
   local nextChild = ui.list:getChildByIndex(nextIndex)
   if nextChild then
     ui.list:focusChild(nextChild)
-    info("[CaveBot] Skipped to waypoint " .. nextIndex)
+    return true
   end
+  
+  return false
 end
 
 local function updateCache()
@@ -903,17 +593,9 @@ cavebotMacro = macro(250, function()
   -- Update player position tracking
   hasPlayerMoved()
   
-  -- INFINITE LOOP DETECTION: Check for stuck states (runs every tick, internal rate limiting)
-  if checkForInfiniteLoop() then
-    return  -- Recovery was triggered, let it handle the next waypoint
-  end
-  
-  -- SMART WAYPOINT GUARD: Check if current waypoint is unreachable (rate-limited)
-  local guardResult = checkWaypointGuard()
-  if guardResult == "skip" then
-    skipCurrentWaypoint()
-    recordActionResult(false)  -- Track as failure
-    return  -- Let next tick handle the new waypoint
+  -- WAYPOINT ENGINE: High-performance stuck detection and recovery
+  if runWaypointEngine() then
+    return  -- Engine handled recovery, skip normal processing
   end
   
   -- Lazy-init TargetBot cache
@@ -929,10 +611,9 @@ cavebotMacro = macro(250, function()
     end
     
     -- SMART PULL PAUSE: If smartPull is active, pause waypoint walking
-    -- This prevents running to next waypoint when we have monsters to kill
     if TargetBot.smartPullActive then
       CaveBot.resetWalking()
-      return  -- Stay here and fight, don't walk to waypoint
+      return
     end
   end
   
@@ -947,12 +628,6 @@ cavebotMacro = macro(250, function()
   local currentAction = uiList:getFocusedChild() or uiList:getFirstChild()
   if not currentAction then return end
   
-  -- Record waypoint visit for cycle detection
-  local waypointId = getCurrentWaypointId()
-  if waypointId then
-    recordWaypointVisit(waypointId)
-  end
-  
   -- Direct table access (O(1))
   local actionType = currentAction.action
   local actionDef = CaveBot.Actions[actionType]
@@ -966,18 +641,21 @@ cavebotMacro = macro(250, function()
   CaveBot.resetWalking()
   local result = actionDef.callback(currentAction.value, actionRetries, prevActionResult)
   
-  -- Handle result (simplified flow)
+  -- Handle result
   if result == "retry" then
     actionRetries = actionRetries + 1
-    -- Track retries but don't count as failure yet
     if actionRetries > 20 then
-      recordActionResult(false)  -- Many retries = likely stuck
+      recordFailure()  -- Many retries = likely stuck
     end
-    return  -- Early exit for retry
+    return
   end
   
-  -- Track action success/failure for loop detection
-  recordActionResult(result == true)
+  -- Track success/failure for stuck detection
+  if result == true then
+    recordSuccess()
+  else
+    recordFailure()
+  end
   
   -- Reset for next action
   actionRetries = 0
@@ -1059,7 +737,7 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
   
   actionRetries = 0
   CaveBot.resetWalking()
-  resetLoopDetector()  -- Reset loop detection state on config change
+  resetWaypointEngine()  -- Reset waypoint engine state on config change
   prevActionResult = true
   cavebotMacro.setOn(enabled)
   cavebotMacro.delay = nil
@@ -1124,27 +802,26 @@ CaveBot.lastReachedLabel = function()
   return nExBot.lastLabel
 end
 
--- Get loop detection statistics
-CaveBot.getLoopStats = function()
+-- Get waypoint engine statistics
+CaveBot.getWaypointStats = function()
   return {
-    totalLoopsDetected = LoopDetector.totalLoopsDetected,
-    totalRecoveries = LoopDetector.totalRecoveries,
-    consecutiveFailures = LoopDetector.consecutiveFailures,
-    isRecovering = LoopDetector.isRecovering,
-    recoveryAttempts = LoopDetector.recoveryAttempts,
-    waypointHistorySize = #LoopDetector.waypointHistory,
-    positionHistorySize = #LoopDetector.positionHistory
+    state = WaypointEngine.state,
+    failureCount = WaypointEngine.failureCount,
+    recoveryAttempt = WaypointEngine.recoveryAttempt,
+    totalMovement = WaypointEngine.totalMovement,
+    progressSize = WaypointEngine.progressSize,
+    isRecovering = (WaypointEngine.state == "RECOVERING" or WaypointEngine.state == "STUCK")
   }
 end
 
--- Manually reset loop detector (useful for scripts that handle their own recovery)
-CaveBot.resetLoopDetector = function()
-  resetLoopDetector()
+-- Manually reset waypoint engine (useful for scripts that handle their own recovery)
+CaveBot.resetWaypointEngine = function()
+  resetWaypointEngine()
 end
 
 -- Check if CaveBot is currently in recovery mode
 CaveBot.isRecovering = function()
-  return LoopDetector.isRecovering
+  return WaypointEngine.state == "RECOVERING" or WaypointEngine.state == "STUCK"
 end
 
 --[[

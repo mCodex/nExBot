@@ -48,8 +48,17 @@ CaveBot.Extensions.SellAll.setup = function()
       sellAllCap = freecap()
     end
 
-    storage.cavebotSell = storage.cavebotSell or {}
-    for i, item in ipairs(storage.cavebotSell) do
+    -- Get sell exceptions from profile storage
+    local sellExceptions = {}
+    if getCavebotSellItems then
+      sellExceptions = getCavebotSellItems() or {}
+    elseif ProfileStorage then
+      sellExceptions = ProfileStorage.get("cavebotSell") or {}
+    else
+      sellExceptions = storage.cavebotSell or {}
+    end
+    
+    for i, item in ipairs(sellExceptions) do
       local data = type(item) == 'number' and item or item.id
       if not table.find(val, data) then
         table.insert(val, data)

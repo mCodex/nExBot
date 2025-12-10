@@ -1,3 +1,16 @@
+--[[
+  Friend Healer UI & Integration
+  
+  Uses BotCore.FriendHealer for high-performance healing logic.
+  This file handles UI and configuration only.
+  
+  Features:
+    - Shares exhaustion with HealBot via BotCore.Cooldown
+    - Priority-based: Self-healing ALWAYS takes precedence
+    - Event-driven for instant response to health changes
+    - Memoized target selection for performance
+]]
+
 setDefaultTab("Main")
 local panelName = "newHealer"
 local ui = setupUI([[
@@ -24,7 +37,11 @@ Panel
 ]])
 ui:setId(panelName)
 
--- validate current settings
+-- ============================================================================
+-- CONFIGURATION (persisted in storage)
+-- ============================================================================
+
+-- Validate and migrate old config
 if not storage[panelName] or not storage[panelName].priorities then
     storage[panelName] = nil
 end
@@ -36,26 +53,22 @@ if not storage[panelName] then
         vocations = {},
         groups = {},
         priorities = {
-
             {name="Custom Spell",           enabled=false, custom=true},
             {name="Exura Gran Sio",         enabled=true,              strong = true},
             {name="Exura Sio",              enabled=true,                            normal = true},
             {name="Exura Gran Mas Res",     enabled=true,                                          area = true},
             {name="Health Item",            enabled=true,                                                      health=true},
             {name="Mana Item",              enabled=true,                                                                  mana=true}
-
         },
         settings = {
-
             {type="HealItem",       text="Mana Item ",                   value=268},
             {type="HealScroll",     text="Item Range: ",                 value=6},
             {type="HealItem",       text="Health Item ",                 value=3160},
             {type="HealScroll",     text="Mas Res Players: ",            value=2},
             {type="HealScroll",     text="Heal Friend at: ",             value=80},
-            {type="HealScroll",     text="Use Gran Sio at: ",            value=80},
+            {type="HealScroll",     text="Use Gran Sio at: ",            value=40},
             {type="HealScroll",     text="Min Player HP%: ",             value=80},
             {type="HealScroll",     text="Min Player MP%: ",             value=50},
-
         },
         conditions = {
             knights = true,
@@ -71,6 +84,73 @@ if not storage[panelName] then
 end
 
 local config = storage[panelName]
+
+-- ============================================================================
+-- BOTCORE INTEGRATION: Build config for FriendHealer module
+-- ============================================================================
+
+-- Convert UI config to BotCore format (pure function)
+local function buildBotCoreConfig()
+  local bcConfig = {
+    enabled = config.enabled,
+    customPlayers = config.customPlayers or {},
+    conditions = config.conditions or {},
+    settings = {
+      manaItem = config.settings[1] and config.settings[1].value or 268,
+      itemRange = config.settings[2] and config.settings[2].value or 6,
+      healthItem = config.settings[3] and config.settings[3].value or 3160,
+      masResPlayers = config.settings[4] and config.settings[4].value or 2,
+      healAt = config.settings[5] and config.settings[5].value or 80,
+      granSioAt = config.settings[6] and config.settings[6].value or 40,
+      minPlayerHp = config.settings[7] and config.settings[7].value or 80,
+      minPlayerMp = config.settings[8] and config.settings[8].value or 50,
+    },
+    -- Priority actions (in order)
+    useSio = false,
+    useGranSio = false,
+    useMasRes = false,
+    useHealthItem = false,
+    useManaItem = false,
+    customSpell = false,
+    customSpellName = nil
+  }
+  
+  -- Map priorities
+  for _, p in ipairs(config.priorities or {}) do
+    if p.enabled then
+      if p.strong then bcConfig.useGranSio = true end
+      if p.normal then bcConfig.useSio = true end
+      if p.area then bcConfig.useMasRes = true end
+      if p.health then bcConfig.useHealthItem = true end
+      if p.mana then bcConfig.useManaItem = true end
+      if p.custom then 
+        bcConfig.customSpell = true 
+        bcConfig.customSpellName = p.name
+      end
+    end
+  end
+  
+  return bcConfig
+end
+
+-- Initialize BotCore FriendHealer if available
+local function initBotCoreHealer()
+  if BotCore and BotCore.FriendHealer then
+    local bcConfig = buildBotCoreConfig()
+    BotCore.FriendHealer.init(bcConfig)
+    BotCore.FriendHealer.setEnabled(config.enabled)
+    return true
+  end
+  return false
+end
+
+-- Update BotCore when config changes
+local function updateBotCoreConfig()
+  if BotCore and BotCore.FriendHealer then
+    local bcConfig = buildBotCoreConfig()
+    BotCore.FriendHealer.init(bcConfig)
+  end
+end
 local healerWindow = UI.createWindow('FriendHealer')
 healerWindow:hide()
 healerWindow:setId(panelName)
@@ -338,8 +418,26 @@ for i, action in ipairs(config.priorities) do
     end
 end
 
+-- ============================================================================
+-- BOTCORE-POWERED FRIEND HEALER
+-- Uses BotCore.FriendHealer for high-performance healing with shared exhaustion
+-- ============================================================================
+
+-- Track if BotCore is available
+local useBotCore = false
+
+-- Initialize on load
+schedule(100, function()
+  useBotCore = initBotCoreHealer()
+  if useBotCore then
+    -- BotCore high-performance mode enabled silently
+  end
+end)
+
+-- Legacy fallback functions (used when BotCore is not available)
 local lastItemUse = now
-local function friendHealerAction(spec, targetsInRange)
+
+local function legacyHealAction(spec, targetsInRange)
     local name = spec:getName()
     local health = spec:getHealthPercent()
     local mana = spec:getManaPercent()
@@ -353,6 +451,15 @@ local function friendHealerAction(spec, targetsInRange)
     local normalHeal = config.customPlayers[name] or config.settings[5].value
     local strongHeal = config.customPlayers[name] and normalHeal/2 or config.settings[6].value
 
+    -- Check healing cooldown (shared with HealBot via BotCore)
+    local canHeal = true
+    if BotCore and BotCore.Cooldown and BotCore.Cooldown.isHealingOnCooldown then
+        canHeal = not BotCore.Cooldown.isHealingOnCooldown()
+    elseif modules and modules.game_cooldown then
+        canHeal = not modules.game_cooldown.isGroupCooldownIconActive(2)
+    end
+    if not canHeal then return end
+
     for i, action in ipairs(config.priorities) do
         if action.enabled then
             if action.area and masResAmount <= targetsInRange and canCast("exura gran mas res") then
@@ -360,14 +467,22 @@ local function friendHealerAction(spec, targetsInRange)
             end
             if action.mana and findItem(manaItem) and mana <= normalHeal and dist <= itemRange and now - lastItemUse > 1000 then
                 lastItemUse = now
+                if BotCore and BotCore.Cooldown then BotCore.Cooldown.markPotionUsed() end
                 return useWith(manaItem, spec)
             end
             if action.health and findItem(healItem) and health <= normalHeal and dist <= itemRange and now - lastItemUse > 1000 then
                 lastItemUse = now
+                if BotCore and BotCore.Cooldown then BotCore.Cooldown.markPotionUsed() end
                 return useWith(healItem, spec)
             end
-            if action.strong and health <= strongHeal and not modules.game_cooldown.isCooldownIconActive(101) then
-                return say('exura gran sio "'..name)
+            if action.strong and health <= strongHeal then
+                local canCastGranSio = true
+                if modules and modules.game_cooldown then
+                    canCastGranSio = not modules.game_cooldown.isCooldownIconActive(131)
+                end
+                if canCastGranSio then
+                    return say('exura gran sio "'..name)
+                end
             end
             if (action.normal or action.custom) and health <= normalHeal and canCast('exura sio "'..name) then
                 return say('exura sio "'..name)
@@ -376,7 +491,7 @@ local function friendHealerAction(spec, targetsInRange)
     end
 end
 
-local function isCandidate(spec)
+local function legacyIsCandidate(spec)
     if spec:isLocalPlayer() or not spec:isPlayer() then 
         return nil 
     end
@@ -384,15 +499,15 @@ local function isCandidate(spec)
         return false
     end
     
+    local name = spec:getName()
     local curHp = spec:getHealthPercent()
     if curHp == 100 or (config.customPlayers[name] and curHp > config.customPlayers[name]) then
         return false
     end
 
-    local specText = spec:getText()
-    local name = spec:getName()
-    -- check players is enabled and spectator already verified
-    if storage.extras.checkPlayer and specText:len() > 0 then
+    local specText = spec:getText() or ""
+    -- Check vocation filter
+    if storage.extras and storage.extras.checkPlayer and specText:len() > 0 then
         if specText:find("EK") and not config.conditions.knights or
            specText:find("RP") and not config.conditions.paladins or
            specText:find("ED") and not config.conditions.druids or
@@ -404,11 +519,11 @@ local function isCandidate(spec)
     end
 
     local okParty = config.conditions.party and spec:isPartyMember()
-    local okFriend = config.conditions.friends and isFriend(spec)
+    local okFriend = config.conditions.friends and isFriend and isFriend(spec)
     local okGuild = config.conditions.guild and spec:getEmblem() == 1
-    local okBotServer = config.conditions.botserver and nExBot.BotServerMembers[spec:getName()]
+    local okBotServer = config.conditions.botserver and nExBot and nExBot.BotServerMembers and nExBot.BotServerMembers[name]
 
-    if not (okParty or okFriend or okGuild or okBotServer) then
+    if not (okParty or okFriend or okGuild or okBotServer) and not config.customPlayers[name] then
         return nil
     end
 
@@ -418,39 +533,73 @@ local function isCandidate(spec)
     return health, dist
 end
 
+-- ============================================================================
+-- MAIN MACRO: Uses BotCore when available, falls back to legacy
+-- ============================================================================
+
 macro(100, function()
     if not config.enabled then return end
-    if modules.game_cooldown.isGroupCooldownIconActive(2) then return end
+    
+    -- Update BotCore config on each tick (in case settings changed)
+    if useBotCore and BotCore and BotCore.FriendHealer then
+        BotCore.FriendHealer.setEnabled(config.enabled)
+        
+        -- Let BotCore handle everything
+        local actionTaken = BotCore.FriendHealer.tick()
+        if actionTaken then return end
+    end
+    
+    -- Legacy fallback (or if BotCore didn't take action)
+    
+    -- Check healing cooldown
+    if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive(2) then 
+        return 
+    end
 
     local minHp = config.settings[7].value
     local minMp = config.settings[8].value
 
+    -- Safety: Don't heal friends if self needs healing
+    if hppercent() <= minHp or manapercent() <= minMp then return end
+
     local healTarget = {creature=nil, hp=100}
     local inMasResRange = 0
 
-    -- check basic 
-    if hppercent() <= minHp or manapercent() <= minMp then return end
-
-    -- get all spectators
+    -- Scan spectators
     local spectators = getSpectators()
-
-    -- main check
-    local healtR
     for i, spec in ipairs(spectators) do
-        local health, dist = isCandidate(spec)
-        --mas san
+        local health, dist = legacyIsCandidate(spec)
         if dist then
             inMasResRange = dist <= 3 and inMasResRange+1 or inMasResRange
-
-            -- best target
             if health < healTarget.hp then
                 healTarget = {creature = spec, hp = health}
             end
         end
     end
 
-    -- action
+    -- Execute heal
     if healTarget.creature then
-        return friendHealerAction(healTarget.creature, inMasResRange)
+        return legacyHealAction(healTarget.creature, inMasResRange)
     end
 end)
+
+-- ============================================================================
+-- EVENT-DRIVEN HEALING (instant response to friend health drops)
+-- ============================================================================
+
+-- Hook into creature health changes for instant response
+if onCreatureHealthPercentChange then
+    onCreatureHealthPercentChange(function(creature, newHp, oldHp)
+        if not config.enabled then return end
+        if not creature or creature:isLocalPlayer() then return end
+        
+        -- Only react to significant health drops
+        local drop = (oldHp or 100) - newHp
+        if drop < 15 then return end
+        
+        -- Use BotCore event handler if available
+        if useBotCore and BotCore and BotCore.FriendHealer then
+            BotCore.FriendHealer.onFriendHealthChange(creature, newHp, oldHp)
+        end
+    end)
+end

@@ -56,6 +56,9 @@ dofile(basePath .. "creatures.lua")
 dofile(basePath .. "items.lua")
 dofile(basePath .. "position.lua")
 
+-- Friend Healer (depends on Stats, Cooldown, Priority)
+dofile(basePath .. "friend_healer.lua")
+
 -- ============================================================================
 -- HIGH-PERFORMANCE TICK HANDLER
 -- ============================================================================
@@ -68,9 +71,9 @@ local function onBotCoreTick()
   end
 end
 
--- Register tick handler
+-- Register tick handler (hidden - no UI button)
 if macro then
-  macro(50, "BotCore:Tick", onBotCoreTick)
+  macro(50, onBotCoreTick)
 end
 
 -- ============================================================================

@@ -5,6 +5,9 @@
     Multi-client support: Stores per-character profile preferences
     so each character remembers their last active profile.
     
+    Profile Storage: All bot input values are stored per-profile,
+    allowing different configurations for different hunting spots.
+    
     Design Principles Applied:
     - DRY: Shared helper functions for config loading/saving
     - SRP: Character profiles managed in one place
@@ -181,3 +184,183 @@ function nExBotConfigSave(file)
 
   g_resources.writeFileContents(config.file, result)
 end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PROFILE STORAGE SYSTEM
+-- Unified per-profile storage for all bot input values
+-- ═══════════════════════════════════════════════════════════════════════════
+
+--[[
+  ProfileStorage - Manages per-profile bot settings
+  
+  Unlike HealBot/AttackBot which use individual JSON files,
+  this handles miscellaneous settings (mana training, dropper, etc.)
+  that are stored in a single ToolsConfig.json per profile.
+  
+  Usage:
+    ProfileStorage.get("manaTraining")           -- Get a setting
+    ProfileStorage.set("manaTraining", value)    -- Set and auto-save
+    ProfileStorage.getDefault("manaTraining")    -- Get default value
+]]
+
+ProfileStorage = {}
+
+-- File path for tools config (per-profile)
+local toolsConfigFile = profilePath .. "ToolsConfig.json"
+
+-- Default values for all profile-based settings
+local DEFAULTS = {
+  manaTraining = {
+    spell = "exura",
+    minManaPercent = 80
+  },
+  autoTradeMessage = "nExBot is online!",
+  autoEquip = {},
+  dropper = {
+    enabled = false,
+    trashItems = { 283, 284, 285 },
+    useItems = { 21203, 14758 },
+    capItems = { 21175 }
+  },
+  eatFromCorpses = false,
+  cavebotSell = { 23544, 3081 }
+}
+
+-- Internal cache for profile settings
+local _profileData = nil
+
+-- Load profile tools config
+local function loadToolsConfig()
+  if _profileData then return _profileData end
+  
+  if not g_resources.fileExists(toolsConfigFile) then
+    _profileData = {}
+    return _profileData
+  end
+  
+  local status, result = pcall(function()
+    return json.decode(g_resources.readFileContents(toolsConfigFile))
+  end)
+  
+  if status and type(result) == "table" then
+    _profileData = result
+  else
+    _profileData = {}
+  end
+  
+  return _profileData
+end
+
+-- Save profile tools config
+local function saveToolsConfig()
+  if not _profileData then return end
+  
+  local status, result = pcall(function()
+    return json.encode(_profileData, 2)
+  end)
+  
+  if not status then
+    warn("[ProfileStorage] Error encoding config: " .. tostring(result))
+    return
+  end
+  
+  g_resources.writeFileContents(toolsConfigFile, result)
+end
+
+-- Get a setting value (with default fallback)
+function ProfileStorage.get(key)
+  local data = loadToolsConfig()
+  if data[key] ~= nil then
+    return data[key]
+  end
+  return DEFAULTS[key]
+end
+
+-- Set a setting value and auto-save
+function ProfileStorage.set(key, value)
+  local data = loadToolsConfig()
+  data[key] = value
+  saveToolsConfig()
+end
+
+-- Get default value for a key
+function ProfileStorage.getDefault(key)
+  return DEFAULTS[key]
+end
+
+-- Get all profile data
+function ProfileStorage.getAll()
+  return loadToolsConfig()
+end
+
+-- Force save (for batch updates)
+function ProfileStorage.save()
+  saveToolsConfig()
+end
+
+-- Force reload from disk
+function ProfileStorage.reload()
+  _profileData = nil
+  loadToolsConfig()
+end
+
+-- Initialize: Load profile data on startup
+loadToolsConfig()
+
+-- Migrate existing storage.* values to ProfileStorage if they exist
+-- This ensures backward compatibility with existing configs
+local function migrateFromStorage()
+  local migrated = false
+  local data = loadToolsConfig()
+  
+  -- Only migrate if ProfileStorage is empty (first run after update)
+  local hasData = false
+  for k, v in pairs(data) do
+    hasData = true
+    break
+  end
+  if hasData then return end
+  
+  -- Migrate manaTraining
+  if storage.manaTraining and type(storage.manaTraining) == "table" then
+    data.manaTraining = storage.manaTraining
+    migrated = true
+  end
+  
+  -- Migrate autoTradeMessage
+  if storage.autoTradeMessage and type(storage.autoTradeMessage) == "string" then
+    data.autoTradeMessage = storage.autoTradeMessage
+    migrated = true
+  end
+  
+  -- Migrate autoEquip
+  if storage.autoEquip and type(storage.autoEquip) == "table" then
+    data.autoEquip = storage.autoEquip
+    migrated = true
+  end
+  
+  -- Migrate dropper
+  if storage.dropper and type(storage.dropper) == "table" then
+    data.dropper = storage.dropper
+    migrated = true
+  end
+  
+  -- Migrate eatFromCorpses
+  if storage.eatFromCorpses ~= nil then
+    data.eatFromCorpses = storage.eatFromCorpses
+    migrated = true
+  end
+  
+  -- Migrate cavebotSell
+  if storage.cavebotSell and type(storage.cavebotSell) == "table" then
+    data.cavebotSell = storage.cavebotSell
+    migrated = true
+  end
+  
+  if migrated then
+    _profileData = data
+    saveToolsConfig()
+  end
+end
+
+migrateFromStorage()
