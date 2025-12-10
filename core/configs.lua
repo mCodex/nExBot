@@ -223,7 +223,8 @@ local DEFAULTS = {
     capItems = { 21175 }
   },
   eatFromCorpses = false,
-  cavebotSell = { 23544, 3081 }
+  cavebotSell = { 23544, 3081 },
+  fishingEnabled = false  -- Fishing macro state
 }
 
 -- Internal cache for profile settings

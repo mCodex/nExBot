@@ -122,6 +122,8 @@ end)
 
 UI.Separator()
 
+UI.Label("Tools:")
+
 -- Auto haste ---------------------------------------------------------------
 local HASTE_SPELLS = {
   [1]  = { spell = "utani hur",      mana = 60  }, -- Knight
@@ -134,18 +136,49 @@ local HASTE_SPELLS = {
   [14] = { spell = "utani gran hur", mana = 100 },
 }
 
-macro(100, "Auto Haste", function()
+local lastHasteCast = 0
+local HASTE_CAST_COOLDOWN = 2000
+
+-- Check if player is hasted (has speed buff)
+local function isHasted()
+  -- Use vLib hasHaste if available
+  if hasHaste then
+    return hasHaste()
+  end
+  
+  -- Fallback: Check player speed vs base speed
+  if player and player.getSpeed and player.getBaseSpeed then
+    local currentSpeed = player:getSpeed() or 0
+    local baseSpeed = player:getBaseSpeed() or 0
+    return currentSpeed > baseSpeed
+  end
+  
+  -- Can't determine, assume not hasted
+  return false
+end
+
+macro(500, "Auto Haste", function()
   if not player then return end
+  
+  -- Cast cooldown
+  if now - lastHasteCast < HASTE_CAST_COOLDOWN then return end
+  
   local vocation = player:getVocation()
   local haste = HASTE_SPELLS[vocation]
   if not haste then return end
-  if hasHaste and hasHaste() then return end
+  
+  -- Check if already hasted
+  if isHasted() then return end
+  
+  -- Check mana
   if mana() < haste.mana then return end
+  
+  -- Check spell cooldown
   if getSpellCoolDown and getSpellCoolDown(haste.spell) then return end
+  
   say(haste.spell)
+  lastHasteCast = now
 end)
-
-UI.Separator()
 
 -- Auto Mount ----------------------------------------------------------------
 -- Automatically mounts player when outside of PZ
@@ -223,6 +256,208 @@ schedule(1000, function()
   end
   autoMountInitialized = true
 end)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- FISHING (Optimized with Random Spot Selection + Auto Fish Drop)
+-- Automatically fishes on random water tiles within range
+-- Drops caught fish to random water tiles
+-- Uses per-character state persistence like Auto Mount
+-- ═══════════════════════════════════════════════════════════════════════════
+
+--[[
+  Fishing System - Pure Function Architecture
+  
+  Design Principles:
+  - SRP: Each function has one responsibility
+  - DRY: Reusable utility functions
+  - KISS: Simple, focused logic
+  - Pure Functions: No side effects in detection functions
+  
+  Features:
+  - Simple and reliable implementation
+  - Uses g_game.useWith() directly
+  - Random water tile selection
+  - Respects exhausted cooldown
+]]
+
+-- Water tile IDs that can be fished
+local WATER_TILES = {
+  -- Standard water (most common)
+  4597, 4598, 4599, 4600, 4601, 4602,
+  4603, 4604, 4605, 4606, 4607, 4608,
+  4609, 4610, 4611, 4612, 4613, 4614,
+  4615, 4616, 4617, 4618, 4619, 4620,
+  4621, 4622, 4623, 4624, 4625, 4626,
+  4627, 4628, 4629, 4630, 4631, 4632,
+  4633, 4634, 4635, 4636, 4637, 4638,
+  4639, 4640, 4641, 4642, 4643, 4644,
+  4645, 4646, 4647, 4648, 4649, 4650,
+  4651, 4652, 4653, 4654, 4655, 4656,
+  4657, 4658, 4659, 4660, 4661, 4662,
+  4663, 4664, 4665, 4666,
+  -- Fish in water
+  7236,
+  -- Swamp
+  4691, 4692, 4693, 4694, 4695, 4696,
+  4697, 4698, 4699, 4700, 4701, 4702,
+  4703, 4704, 4705, 4706, 4707, 4708,
+  4709, 4710, 4711, 4712, 4713, 4714,
+  4715, 4716, 4717, 4718, 4719, 4720,
+  4721, 4722, 4723, 4724, 4725, 4726,
+}
+
+local FISHING_ROD_ID = 3483
+local FISHING_RANGE = 3  -- Search radius for water tiles
+local lastFishTime = 0
+local lastDropTime = 0
+local fishingInitialized = false
+local fishingDebug = false -- Set to true to enable debug messages
+
+-- Items to drop into water when fishing
+local DROP_TO_WATER = {
+  [3578] = true,  -- Fish
+  [7159] = true,  -- Northern pike
+  [3041] = true,  -- Blue gem (?)
+  [1781] = true,  -- Unknown item
+}
+
+-- Find items to drop in containers
+local function findItemsToDrop()
+  for _, container in pairs(getContainers()) do
+    if container then
+      local items = container:getItems()
+      if items then
+        for _, item in ipairs(items) do
+          if item and DROP_TO_WATER[item:getId()] then
+            return item
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- Find water tile position for dropping
+local function findWaterTilePos(playerPos)
+  for dx = -FISHING_RANGE, FISHING_RANGE do
+    for dy = -FISHING_RANGE, FISHING_RANGE do
+      if dx ~= 0 or dy ~= 0 then
+        local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
+        local tile = g_map.getTile(checkPos)
+        if tile then
+          local ground = tile:getGround()
+          if ground then
+            local groundId = ground:getId()
+            for _, waterId in ipairs(WATER_TILES) do
+              if groundId == waterId then
+                return checkPos
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- Simple fishing macro (controlled by BotSwitch below)
+local fishingEnabled = false
+local fishingMacro = macro(1000, function()
+  if not fishingEnabled then return end
+  if not player then return end
+  
+  -- Get player position
+  local ppos = player:getPosition()
+  if not ppos then return end
+  
+  -- First: Drop fish/items to water (500ms cooldown)
+  if now - lastDropTime >= 500 then
+    local itemToDrop = findItemsToDrop()
+    if itemToDrop then
+      local waterPos = findWaterTilePos(ppos)
+      if waterPos then
+        g_game.move(itemToDrop, waterPos, itemToDrop:getCount())
+        lastDropTime = now
+        return -- One action per tick
+      end
+    end
+  end
+  
+  -- Second: Fish (1 second cooldown)
+  if now - lastFishTime < 1000 then return end
+  
+  -- Find all water tiles nearby
+  local waterTiles = {}
+  
+  for dx = -FISHING_RANGE, FISHING_RANGE do
+    for dy = -FISHING_RANGE, FISHING_RANGE do
+      if dx ~= 0 or dy ~= 0 then
+        local checkPos = {x = ppos.x + dx, y = ppos.y + dy, z = ppos.z}
+        local tile = g_map.getTile(checkPos)
+        
+        if tile then
+          local ground = tile:getGround()
+          if ground then
+            local groundId = ground:getId()
+            for _, waterId in ipairs(WATER_TILES) do
+              if groundId == waterId then
+                table.insert(waterTiles, ground)
+                break
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  
+  -- No water nearby
+  if #waterTiles == 0 then return end
+  
+  -- Pick random water tile
+  local target = waterTiles[math.random(1, #waterTiles)]
+  
+  -- Try to find fishing rod
+  local rod = findItem(FISHING_ROD_ID)
+  
+  if rod then
+    g_game.useWith(rod, target)
+    lastFishTime = now
+  elseif g_game.getClientVersion() >= 780 and g_game.useInventoryItemWith then
+    g_game.useInventoryItemWith(FISHING_ROD_ID, target, 0)
+    lastFishTime = now
+  end
+end)
+
+-- Fishing UI Switch (same pattern as Dropper)
+local fishingUI = setupUI([[
+Panel
+  height: 19
+
+  BotSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    !text: tr('Fishing')
+]])
+
+-- Load saved state from ProfileStorage
+local savedFishingState = getProfileSetting("fishingEnabled")
+if savedFishingState == true then
+  fishingEnabled = true
+  fishingUI.title:setOn(true)
+end
+
+-- Handle click - toggle and save
+fishingUI.title.onClick = function(widget)
+  fishingEnabled = not fishingEnabled
+  widget:setOn(fishingEnabled)
+  setProfileSetting("fishingEnabled", fishingEnabled)
+end
 
 UI.Separator()
 
