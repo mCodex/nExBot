@@ -1,13 +1,14 @@
 --[[
   State Machine Architecture for nExBot
-  Implements ROADMAP Feature 32:
+  
+  Provides FSM architecture:
   - Finite State Machine (FSM) for CaveBot and TargetBot
   - Clear state definitions and transitions
   - State-based decision making
   - Event-driven state changes
   
   Author: nExBot Team
-  Version: 1.0
+  Version: 1.1
 ]]
 
 StateMachine = {}

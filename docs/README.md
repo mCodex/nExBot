@@ -1,12 +1,22 @@
-# 📚 nExBot Documentation
+# 📚 nExBot Documentation v1.0
 
 <div align="center">
 
 **Complete guide to all nExBot features and configurations**
 
-[🎯 TargetBot](./TARGETBOT.md) • [🗺️ CaveBot](./CAVEBOT.md) • [💊 HealBot](./HEALBOT.md) • [⚔️ AttackBot](./ATTACKBOT.md) • [📊 SmartHunt](./SMARTHUNT.md)
+[🎯 TargetBot](./TARGETBOT.md) • [🗺️ CaveBot](./CAVEBOT.md) • [💊 HealBot](./HEALBOT.md) • [⚔️ AttackBot](./ATTACKBOT.md) • [📊 HuntAnalyzer](./SMARTHUNT.md)
 
 </div>
+
+---
+
+## 🆕 What's New in v1.0
+
+- **🎯 Dynamic Scaling** - Movement thresholds scale with monster count
+- **⚡ Adaptive Reactivity** - More reactive when surrounded (7+ monsters)
+- **🧠 Movement Coordinator** - Dynamic confidence thresholds
+- **🛡️ Balanced Behavior** - Conservative with few monsters, reactive with many
+- **📊 Hunt Analyzer** - Better insights and recommendations
 
 ---
 
@@ -14,12 +24,12 @@
 
 | Module | Description | Link |
 |--------|-------------|------|
-| 🎯 **TargetBot** | Smart creature targeting and combat | [View](./TARGETBOT.md) |
+| 🎯 **TargetBot** | Creature targeting and combat | [View](./TARGETBOT.md) |
 | 🗺️ **CaveBot** | Automated waypoint navigation | [View](./CAVEBOT.md) |
 | 💊 **HealBot** | Healing spells and potions | [View](./HEALBOT.md) |
 | ⚔️ **AttackBot** | Combo spells and AoE attacks | [View](./ATTACKBOT.md) |
 | 📦 **Containers** | Auto container management | [View](./CONTAINERS.md) |
-| 📊 **SmartHunt** | Analytics, insights & efficiency tracking | [View](./SMARTHUNT.md) |
+| 📊 **HuntAnalyzer** | Analytics, insights & efficiency tracking | [View](./SMARTHUNT.md) |
 | ⚡ **Performance** | Optimization guide | [View](./PERFORMANCE.md) |
 | ❓ **FAQ** | Common questions & answers | [View](./FAQ.md) |
 
@@ -58,6 +68,11 @@ nExBot/
 ├── 📁 core/           # Core modules (HealBot, AttackBot, etc.)
 ├── 📁 cavebot/        # CaveBot system
 ├── 📁 targetbot/      # TargetBot system
+│   ├── core.lua           # Pure utility functions
+│   ├── monster_behavior.lua   # Behavior pattern recognition
+│   ├── spell_optimizer.lua    # AoE position optimization
+│   ├── movement_coordinator.lua   # Unified movement decisions
+│   └── ...
 ├── 📁 cavebot_configs/    # Saved CaveBot scripts
 ├── 📁 targetbot_configs/  # Saved TargetBot configs
 ├── 📁 docs/           # This documentation
@@ -162,5 +177,7 @@ Each character remembers their own active profiles:
 <div align="center">
 
 **Made with ❤️ for the Tibia community**
+
+*Last updated: January 2025 - v1.0.0*
 
 </div>

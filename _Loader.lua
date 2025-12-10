@@ -56,9 +56,9 @@ local scripts = {
   "event_bus",      -- Centralized event bus (Observer pattern)
   "door_items",     -- Door item database
   "global_config",  -- Global tool/door configuration
-  "state_machine",  -- Finite State Machine architecture (Feature 32)
-  "performance_optimizer", -- Performance optimizations (Features 24-27)
-  "combat_intelligence",   -- Combat AI system (Features 11-15)
+  "state_machine",  -- Finite State Machine architecture
+  "performance_optimizer", -- Performance optimizations
+  "combat_intelligence",   -- Combat system
   "bot_core/init",  -- Unified BotCore system (stats, cooldowns, analytics)
   
   -- Feature Modules
@@ -86,7 +86,7 @@ local scripts = {
   "equip",          -- Equipment utilities
   "exeta",          -- Exeta res handler
   "analyzer",       -- Session analyzer
-  "smart_hunt",     -- Smart hunting analytics (supply prediction, route optimization)
+  "smart_hunt",     -- Hunt analytics (supply prediction, route optimization)
   "spy_level",      -- Spy level display
   "supplies",       -- Supply management
   "depositer_config", -- Depositer settings

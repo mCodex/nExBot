@@ -44,6 +44,16 @@ TargetBot = {} -- global namespace
 importStyle("/targetbot/looting.otui")
 importStyle("/targetbot/target.otui")
 importStyle("/targetbot/creature_editor.otui")
+
+-- Load TargetBot core module first (shared utilities)
+dofile("/targetbot/core.lua")
+
+-- Load AI and optimization modules (before creature_attack)
+dofile("/targetbot/monster_ai.lua")           -- Monster behavior analysis
+dofile("/targetbot/spell_optimizer.lua")      -- Spell position optimization
+dofile("/targetbot/movement_coordinator.lua") -- Coordinated movement system
+
+-- Load TargetBot modules
 dofile("/targetbot/creature.lua")
 dofile("/targetbot/creature_attack.lua")
 dofile("/targetbot/creature_editor.lua")

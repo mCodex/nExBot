@@ -8,7 +8,7 @@
 
 AttackBot automates your offensive abilities:
 - Cast attack spells and runes
-- Smart AoE decisions based on monster count
+- Optimized AoE decisions based on monster count
 - Combo rotations for maximum DPS
 - Safety checks to prevent waste
 
@@ -283,7 +283,7 @@ end
 
 ## 📊 Analytics Integration
 
-AttackBot tracks detailed usage statistics that are displayed in SmartHunt Analytics:
+AttackBot tracks detailed usage statistics that are displayed in Hunt Analyzer:
 
 ### Tracked Metrics
 - **Individual spell counts** - Each attack spell with exact usage count
@@ -300,12 +300,12 @@ local data = AttackBot.getAnalytics()
 -- data.empowerments = 45
 -- data.totalAttacks = 2650
 
--- Reset analytics (usually done by SmartHunt on session start)
+-- Reset analytics (usually done by Hunt Analyzer on session start)
 AttackBot.resetAnalytics()
 ```
 
-### SmartHunt Integration
-AttackBot analytics are automatically pulled by SmartHunt to provide:
+### Hunt Analyzer Integration
+AttackBot analytics are automatically pulled by Hunt Analyzer to provide:
 - Attacks per kill efficiency analysis
 - Spell vs rune usage balance recommendations
 - Empowerment uptime suggestions

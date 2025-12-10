@@ -140,6 +140,26 @@
 - [x] Stack ratio analysis
 - **Files**: `core/combat_intelligence.lua`
 
+### 15a. TargetBot AI Framework ⭐⭐⭐ ✅ IMPLEMENTED
+- [x] **MonsterAI** - Behavior pattern recognition
+  - Movement pattern analysis (static, chase, kite, erratic)
+  - Attack prediction with confidence scoring
+  - Wave cooldown estimation
+- [x] **SpellOptimizer** - AoE position optimization
+  - Pattern-based spell positioning (wave, beam, circle, square)
+  - Integration with AttackBot spell configs
+  - Multi-target damage calculation
+- [x] **MovementCoordinator** - Intent-based unified movement
+  - Confidence voting system (0.0-1.0)
+  - Anti-oscillation tracking
+  - Emergency/wave_avoid/finish_kill/spell_position priorities
+- [x] **TargetBotCore** - Pure utility functions
+  - Geometry calculations (Manhattan, Chebyshev, Euclidean)
+  - Combat helpers (danger zones, facing direction)
+  - Monster utilities (target scoring, health checks)
+  - Priority scoring with configurable weights
+- **Files**: `targetbot/core.lua`, `targetbot/monster_ai.lua`, `targetbot/spell_optimizer.lua`, `targetbot/movement_coordinator.lua`
+
 ---
 
 ## 🛡️ **SAFETY & ANTI-DETECTION**
@@ -313,7 +333,7 @@
 
 | Phase | Features | Impact | Status |
 |-------|----------|--------|--------|
-| **Phase 0** | #1, #2, #3, #4, #5, #11-15, #24-27, #32, #33, #36 | Smart Autonomy + Combat + Performance + Hot-Reload | ✅ Complete |
+| **Phase 0** | #1-5, #11-15, #15a, #24-27, #32, #33, #36 | Smart Autonomy + Combat + AI TargetBot + Hot-Reload | ✅ Complete |
 | **Phase 1** | #6, #7, #16, #19, #20 | Safety + Waste reduction | 🔲 Pending |
 | **Phase 2** | #8, #14 | Smart decision making | 🔲 Pending |
 | **Phase 3** | #21, #23, #30 | Analytics + Monitoring | 🔲 Pending |
@@ -329,4 +349,4 @@
 
 ---
 
-*Last updated: December 2025*
+*Last updated: January 2025*

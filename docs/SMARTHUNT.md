@@ -1,6 +1,6 @@
-# 📊 SmartHunt Analytics
+# 📊 Hunt Analyzer
 
-SmartHunt is an advanced hunting analytics system that provides real-time insights, detailed tracking, and AI-powered recommendations to optimize your hunting sessions.
+Hunt Analyzer is an advanced hunting analytics system that provides real-time insights, detailed tracking, and data-driven recommendations to optimize your hunting sessions.
 
 ## Features
 
@@ -13,7 +13,7 @@ SmartHunt is an advanced hunting analytics system that provides real-time insigh
 
 ### Bot Integration
 
-SmartHunt integrates directly with HealBot and AttackBot to collect accurate usage data:
+Hunt Analyzer integrates directly with HealBot and AttackBot to collect accurate usage data:
 
 #### HealBot Data
 - Individual healing spell counts (e.g., "1543x exura gran")
@@ -64,7 +64,7 @@ Tracks your best rates achieved during the session:
 
 ## Hunt Efficiency Score
 
-SmartHunt calculates a 0-100 efficiency score based on four weighted categories:
+Hunt Analyzer calculates a 0-100 efficiency score based on four weighted categories:
 
 ### Efficiency Factors (40 points max)
 | Metric | Points |
@@ -113,7 +113,7 @@ SmartHunt calculates a 0-100 efficiency score based on four weighted categories:
 
 ---
 
-## AI Insights Engine
+## Insights Engine
 
 The Insights Engine analyzes your hunting data and provides actionable recommendations:
 
@@ -160,7 +160,7 @@ The Insights Engine analyzes your hunting data and provides actionable recommend
 ## Usage
 
 ### Opening Analytics Window
-Click the **"SmartHunt Analytics"** button on the Main tab to open the analytics window.
+Click the **"Hunt Analyzer"** button on the Main tab to open the analytics window.
 
 ### Session Management
 - **Start Session** - Click "Start" to begin tracking
@@ -179,14 +179,14 @@ Click the **"SmartHunt Analytics"** button on the Main tab to open the analytics
 ## Technical Details
 
 ### Event-Driven Architecture
-SmartHunt uses the EventBus pattern for efficient data collection:
+Hunt Analyzer uses the EventBus pattern for efficient data collection:
 - `onWalk` - Tracks player movement
 - `onCreatureHealthPercentChange` - Tracks monster kills
 - `onPlayerHealthChange` - Tracks damage/healing and near-death events
 - `onDeath` - Tracks player deaths
 
 ### Bot API Integration
-SmartHunt accesses bot analytics through public APIs:
+Hunt Analyzer accesses bot analytics through public APIs:
 ```lua
 -- HealBot
 HealBot.getAnalytics() -- Returns spell/potion usage data
@@ -209,7 +209,7 @@ bottingStats() -- Returns loot, waste, balance
 
 ```
 ============================================
-        SMARTHUNT ANALYTICS v3.0
+        HUNT ANALYZER
 ============================================
 
 [SESSION]
@@ -285,7 +285,7 @@ bottingStats() -- Returns loot, waste, balance
     Resources (Potions+Mana): 20 pts max
     Economy (Profit): 10 pts max
 
-[AI INSIGHTS & RECOMMENDATIONS]
+[INSIGHTS & RECOMMENDATIONS]
 --------------------------------------------
   [>] 15% of potions wasted. Lower HP trigger threshold.
   [>] Using 0.8 runes per kill. Consider AOE for multi-target.

@@ -1,6 +1,6 @@
 # 📦 Containers Documentation
 
-**Smart container management and loot organization**
+**Automated container management and loot organization**
 
 ---
 
@@ -9,7 +9,7 @@
 The Container Panel automates container management:
 - Auto-open containers on login
 - Organize items between backpacks
-- Smart quiver arrow management
+- Automatic quiver arrow management
 - Drag-and-drop configuration
 
 ---

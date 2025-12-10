@@ -10,7 +10,7 @@
 <summary><b>What is nExBot?</b></summary>
 
 nExBot is an advanced automation bot for OTClient V8. It provides:
-- **TargetBot** - Smart targeting and combat
+- **TargetBot** - Intelligent targeting and combat
 - **CaveBot** - Waypoint navigation
 - **HealBot** - Healing automation  
 - **AttackBot** - Attack spell/rune automation
@@ -46,9 +46,9 @@ nExBot includes safety features like:
 ## 🎮 TargetBot Questions
 
 <details>
-<summary><b>How does Smart Pull work?</b></summary>
+<summary><b>How does Pull System work?</b></summary>
 
-Smart Pull makes your character:
+Pull System makes your character:
 1. Attack a monster at range
 2. Run backward to pull it
 3. Stack multiple monsters
@@ -56,7 +56,7 @@ Smart Pull makes your character:
 5. Only continue when monsters are killed
 
 > [!NOTE]
-> Smart Pull now pauses waypoints to prevent losing your respawn!
+> Pull System now pauses waypoints to prevent losing your respawn!
 
 </details>
 
@@ -97,14 +97,14 @@ The bot now:
 1. Uses **autoWalk first** (client's fast pathfinding)
 2. Limits manual pathfinding to 50 tiles max
 3. Only uses expensive pathfinding for short distances (≤30 tiles)
-4. **Smart Waypoint Guard** skips unreachable waypoints after 3 failures
+4. **Waypoint Guard** skips unreachable waypoints after 3 failures
 
 </details>
 
 <details>
 <summary><b>CaveBot gets stuck in the middle of the cave</b></summary>
 
-**Fixed with Smart Waypoint Guard!**
+**Fixed with Waypoint Guard!**
 
 Old problem: Bot checked distance from **first waypoint** (depot), which is always far when you're in the cave.
 

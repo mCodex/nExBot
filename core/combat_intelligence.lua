@@ -1,14 +1,15 @@
 --[[
   Combat Intelligence Module for nExBot
-  Implements ROADMAP Features 11-15:
-  - Feature 11: Multi-Target Wave Optimizer
-  - Feature 12: Combo Sequencer
-  - Feature 13: Threat Prediction System
-  - Feature 14: Kill Priority Optimizer
-  - Feature 15: Exori/Area Spell Timing
+  
+  Provides intelligent combat automation:
+  - Multi-Target Wave Optimizer
+  - Combo Sequencer
+  - Threat Prediction System
+  - Kill Priority Optimizer
+  - Exori/Area Spell Timing
   
   Author: nExBot Team
-  Version: 1.0
+  Version: 1.1
 ]]
 
 CombatIntelligence = {}
@@ -97,7 +98,7 @@ local State = {
 }
 
 -- ============================================================================
--- FEATURE 11: MULTI-TARGET WAVE OPTIMIZER
+-- MULTI-TARGET WAVE OPTIMIZER
 -- ============================================================================
 CombatIntelligence.WaveOptimizer = {}
 
@@ -258,7 +259,7 @@ function CombatIntelligence.WaveOptimizer.shouldReposition()
 end
 
 -- ============================================================================
--- FEATURE 12: COMBO SEQUENCER
+-- COMBO SEQUENCER
 -- ============================================================================
 CombatIntelligence.ComboSequencer = {}
 
@@ -382,7 +383,7 @@ function CombatIntelligence.ComboSequencer.recordExecution(spell)
 end
 
 -- ============================================================================
--- FEATURE 13: THREAT PREDICTION SYSTEM
+-- THREAT PREDICTION SYSTEM
 -- ============================================================================
 CombatIntelligence.ThreatPredictor = {}
 
@@ -534,7 +535,7 @@ function CombatIntelligence.ThreatPredictor.getFlankers()
 end
 
 -- ============================================================================
--- FEATURE 14: KILL PRIORITY OPTIMIZER
+-- KILL PRIORITY OPTIMIZER
 -- ============================================================================
 CombatIntelligence.KillPriority = {}
 
@@ -642,7 +643,7 @@ function CombatIntelligence.KillPriority.getFinisherTargets()
 end
 
 -- ============================================================================
--- FEATURE 15: EXORI/AREA SPELL TIMING
+-- EXORI/AREA SPELL TIMING
 -- ============================================================================
 CombatIntelligence.AreaTiming = {}
 

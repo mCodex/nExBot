@@ -1,6 +1,6 @@
 # ❤️ HealBot Documentation
 
-**Smart healing automation for survival**
+**Automated healing for survival**
 
 ---
 
@@ -248,7 +248,7 @@ The system tracks:
 
 ## 📊 Analytics Integration
 
-HealBot tracks detailed usage statistics that are displayed in SmartHunt Analytics:
+HealBot tracks detailed usage statistics that are displayed in Hunt Analyzer:
 
 ### Tracked Metrics
 - **Individual spell counts** - Each healing spell with exact usage count
@@ -267,7 +267,7 @@ local data = HealBot.getAnalytics()
 -- data.manaWaste = 12500
 -- data.potionWaste = 15
 
--- Reset analytics (usually done by SmartHunt on session start)
+-- Reset analytics (usually done by Hunt Analyzer on session start)
 HealBot.resetAnalytics()
 ```
 
