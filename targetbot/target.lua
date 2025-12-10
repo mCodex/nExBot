@@ -38,7 +38,7 @@ local STATUS_ATTACK_PREFIX = "Attack & "
 
 --------------------------------------------------------------------------------
 -- PERFORMANCE: Optimized Creature Cache
--- Uses event-driven updates with LRU eviction and TargetBotCore integration
+-- Uses event-driven updates with LRU eviction and TargetCore integration
 --------------------------------------------------------------------------------
 local CreatureCache = {
   monsters = {},          -- {id -> {creature, path, params, lastUpdate, priority}}
