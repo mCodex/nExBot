@@ -13,8 +13,8 @@ local lastCall = now
 local delayFrom = nil
 local dynamicLureDelay = false
 
--- Use TargetBotCore if available (DRY - avoid duplicate implementations)
-local Core = TargetBotCore or {}
+-- Use TargetCore if available (DRY - avoid duplicate implementations)
+local Core = TargetCore or {}
 local Geometry = Core.Geometry or {}
 
 -- Pre-computed direction offsets (fallback if Core not available)
