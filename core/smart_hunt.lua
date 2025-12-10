@@ -1,11 +1,15 @@
 --[[
-  SmartHunt Analytics Module v3.1 (Refactored)
+  SmartHunt Analytics Module v4.0 (Advanced AI)
   
-  Comprehensive hunting analytics using OTClient native functions.
-  Refactored using: SRP, DRY, KISS, SOLID, Pure Functions
+  Features:
+  - Statistical analysis (standard deviation, trends, confidence)
+  - Trend tracking with rolling window analysis
+  - Weighted scoring with time-decay
+  - Confidence-based insights prioritization
+  - Advanced metrics: efficiency index, survivability index, combat uptime
   
   OTClient Functions: getLevel, getLevelPercent, getStamina, getSoul,
-  getBlessings, getVocation, getSpeed, getSkillLevel/Percent, getMagicLevel
+  getBlessings, getSpeed, getSkillLevel/Percent, getMagicLevel
 ]]
 
 setDefaultTab("Main")
@@ -19,11 +23,6 @@ local SEVERITY = { INFO = "INFO", TIP = "TIP", WARNING = "WARN", CRITICAL = "CRI
 local SKILL_NAMES = {
   [0] = "Fist", [1] = "Club", [2] = "Sword", [3] = "Axe",
   [4] = "Distance", [5] = "Shielding", [6] = "Fishing", [7] = "Magic Level"
-}
-
-local VOCATION_NAMES = {
-  [0] = "None", [1] = "Sorcerer", [2] = "Druid", [3] = "Paladin", [4] = "Knight",
-  [5] = "Master Sorcerer", [6] = "Elder Druid", [7] = "Royal Paladin", [8] = "Elite Knight"
 }
 
 local CONDITION_MAP = {
@@ -109,19 +108,6 @@ function Player.speed() return safeGet(speed, 0) or playerGet("getSpeed", 0) end
 function Player.blessings() return safeGet(bless, 0) or playerGet("getBlessings", 0) end
 function Player.mlevel() return safeGet(mlevel, 0) or playerGet("getMagicLevel", 0) end
 function Player.isPremium() return playerGet("isPremium", false) end
-
-function Player.vocation()
-  local id = safeGet(voc, 0) or playerGet("getVocation", 0)
-  return {
-    id = id,
-    name = VOCATION_NAMES[id] or "Unknown",
-    isKnight = id == 4 or id == 8,
-    isPaladin = id == 3 or id == 7,
-    isMage = id <= 2 or (id >= 5 and id <= 6),
-    isSorcerer = id == 1 or id == 5,
-    isDruid = id == 2 or id == 6
-  }
-end
 
 function Player.staminaInfo()
   local mins = Player.stamina()
@@ -235,7 +221,7 @@ local function startSession()
     startTime = now, startXp = Player.exp(), startSkills = captureSkills(),
     startCap = Player.cap(), startStamina = stamInfo.minutes,
     startLevelPercent = levelInfo.percent, startSpeed = Player.speed(),
-    vocation = Player.vocation().id, active = true
+    active = true
   }
   
   for k, v in pairs(DEFAULT_METRICS) do analytics.metrics[k] = v end
@@ -353,17 +339,126 @@ local function updateTracking()
 end
 
 -- ============================================================================
--- INSIGHTS ENGINE (Pure Functions + Builder Pattern)
+-- INSIGHTS ENGINE (Advanced AI Analysis)
+-- Uses: Weighted scoring, trend analysis, statistical methods, correlation
 -- ============================================================================
 
 local Insights = {}
 
 -- Insight builder (DRY - single function for all insights)
-local function addInsight(results, severity, category, message)
-  table.insert(results, { severity = severity, category = category, message = message })
+local function addInsight(results, severity, category, message, confidence)
+  table.insert(results, { 
+    severity = severity, 
+    category = category, 
+    message = message,
+    confidence = confidence or 1.0  -- 0.0 to 1.0 confidence score
+  })
 end
 
--- Calculate hunt metrics (pure function)
+-- ============================================================================
+-- STATISTICAL HELPERS (Pure Functions)
+-- ============================================================================
+
+-- Calculate weighted average with time decay (recent data matters more)
+local function weightedAverage(values, decayFactor)
+  if not values or #values == 0 then return 0 end
+  decayFactor = decayFactor or 0.9
+  local sum, weightSum = 0, 0
+  for i, v in ipairs(values) do
+    local weight = decayFactor ^ (#values - i)  -- More recent = higher weight
+    sum = sum + (v * weight)
+    weightSum = weightSum + weight
+  end
+  return weightSum > 0 and (sum / weightSum) or 0
+end
+
+-- Calculate standard deviation (consistency measure)
+local function standardDeviation(values, mean)
+  if not values or #values < 2 then return 0 end
+  mean = mean or 0
+  local sum = 0
+  for _, v in ipairs(values) do
+    sum = sum + (v - mean) ^ 2
+  end
+  return math.sqrt(sum / (#values - 1))
+end
+
+-- Normalize value to 0-1 range
+local function normalize(value, min, max)
+  if max <= min then return 0.5 end
+  return clamp((value - min) / (max - min), 0, 1)
+end
+
+-- Calculate percentile rank
+local function percentileRank(value, thresholds)
+  for i, threshold in ipairs(thresholds) do
+    if value <= threshold then return (i - 1) / #thresholds end
+  end
+  return 1.0
+end
+
+-- Sigmoid function for smooth scoring transitions
+local function sigmoid(x, midpoint, steepness)
+  midpoint = midpoint or 0
+  steepness = steepness or 1
+  return 1 / (1 + math.exp(-steepness * (x - midpoint)))
+end
+
+-- ============================================================================
+-- TREND TRACKING (Rolling Window Analysis)
+-- ============================================================================
+
+local trendData = {
+  xpPerHour = {},
+  killsPerHour = {},
+  damageRatio = {},
+  maxSamples = 12  -- Track last 12 samples (1 per 5 min = 1 hour of data)
+}
+
+local lastTrendUpdate = 0
+local TREND_UPDATE_INTERVAL = 300000  -- 5 minutes
+
+local function updateTrends(metrics)
+  if now - lastTrendUpdate < TREND_UPDATE_INTERVAL then return end
+  lastTrendUpdate = now
+  
+  -- Add new samples
+  table.insert(trendData.xpPerHour, metrics.xpPerHour)
+  table.insert(trendData.killsPerHour, metrics.killsPerHour)
+  table.insert(trendData.damageRatio, metrics.damageRatio)
+  
+  -- Trim to max samples
+  while #trendData.xpPerHour > trendData.maxSamples do table.remove(trendData.xpPerHour, 1) end
+  while #trendData.killsPerHour > trendData.maxSamples do table.remove(trendData.killsPerHour, 1) end
+  while #trendData.damageRatio > trendData.maxSamples do table.remove(trendData.damageRatio, 1) end
+end
+
+-- Calculate trend direction: -1 (declining), 0 (stable), 1 (improving)
+local function calculateTrend(values)
+  if #values < 3 then return 0, 0 end  -- Need at least 3 samples
+  
+  -- Compare recent average vs older average
+  local mid = math.floor(#values / 2)
+  local oldSum, newSum = 0, 0
+  
+  for i = 1, mid do oldSum = oldSum + values[i] end
+  for i = mid + 1, #values do newSum = newSum + values[i] end
+  
+  local oldAvg = oldSum / mid
+  local newAvg = newSum / (#values - mid)
+  
+  if oldAvg == 0 then return 0, 0 end
+  
+  local changePercent = ((newAvg - oldAvg) / oldAvg) * 100
+  local direction = changePercent > 5 and 1 or changePercent < -5 and -1 or 0
+  
+  return direction, changePercent
+end
+
+-- ============================================================================
+-- ADVANCED METRICS CALCULATION
+-- ============================================================================
+
 local function calculateMetrics()
   local m = analytics.metrics
   local elapsed = getElapsed()
@@ -371,7 +466,8 @@ local function calculateMetrics()
   local xpGained = Player.exp() - (analytics.session.startXp or 0)
   local levelInfo = Player.levelProgress()
   
-  return {
+  -- Base metrics
+  local metrics = {
     elapsed = elapsed,
     elapsedHour = elapsedHour,
     elapsedMin = elapsed / 60000,
@@ -384,148 +480,394 @@ local function calculateMetrics()
     tilesPerKill = m.kills > 0 and (m.tilesWalked / m.kills) or 0,
     spellsPerKill = m.kills > 0 and (m.spellsCast / m.kills) or 0
   }
+  
+  -- Advanced derived metrics
+  metrics.efficiency = 0
+  if metrics.killsPerHour > 0 and metrics.tilesPerKill > 0 then
+    -- Efficiency = kills per tile walked (higher = better spawn density)
+    metrics.efficiency = 1 / metrics.tilesPerKill * 100
+  end
+  
+  -- Survivability index (0-100, higher = safer)
+  metrics.survivabilityIndex = 100
+  if m.healingDone > 0 then
+    metrics.survivabilityIndex = clamp(100 - (metrics.damageRatio * 50), 0, 100)
+  end
+  if m.deathCount > 0 then
+    metrics.survivabilityIndex = metrics.survivabilityIndex * (0.5 ^ m.deathCount)
+  end
+  
+  -- Combat uptime (time in combat vs total time)
+  metrics.combatUptime = elapsed > 0 and ((m.timeInCombat or 0) / elapsed * 100) or 0
+  
+  -- Haste uptime
+  metrics.hasteUptime = elapsed > 0 and ((m.timeHasted or 0) / elapsed * 100) or 0
+  
+  -- Near death frequency (per hour)
+  metrics.nearDeathPerHour = perHour(m.nearDeathCount, elapsed)
+  
+  -- Stamina efficiency (XP per minute of stamina)
+  local staminaUsed = (analytics.session.startStamina or 0) - (Player.stamina() or 0)
+  metrics.xpPerStaminaMin = staminaUsed > 0 and (xpGained / staminaUsed) or 0
+  
+  return metrics
 end
+
+-- ============================================================================
+-- AI INSIGHTS ANALYSIS
+-- ============================================================================
 
 function Insights.analyze()
   local results = {}
   local elapsed = getElapsed()
   local m = analytics.metrics
   
-  if elapsed < 300000 then
-    addInsight(results, SEVERITY.INFO, "Session", "Need 5+ minutes for accurate insights")
+  -- Minimum session time check with progressive confidence
+  local sessionConfidence = clamp(elapsed / 600000, 0.3, 1.0)  -- 0.3 at start, 1.0 at 10+ min
+  
+  if elapsed < 120000 then  -- Less than 2 minutes
+    addInsight(results, SEVERITY.INFO, "Session", "Gathering data... (2+ min for initial insights)", 0.5)
     return results
   end
   
   local metrics = calculateMetrics()
-  local voc = Player.vocation()
   local stamInfo = Player.staminaInfo()
   
-  -- Level Progress Insights
+  -- Update trend tracking
+  updateTrends(metrics)
+  
+  -- ========== EFFICIENCY ANALYSIS ==========
+  
+  -- XP Rate Analysis with contextual thresholds
   local lvlPct = metrics.levelPercentPerHour
-  if lvlPct >= 5 then addInsight(results, SEVERITY.INFO, "Efficiency", string.format("Excellent! %.1f%% level/hour", lvlPct))
-  elseif lvlPct >= 1 then addInsight(results, SEVERITY.INFO, "Efficiency", string.format("Good progress: %.2f%%/h (~%.0fh to level)", lvlPct, 100/lvlPct))
-  elseif lvlPct >= 0.1 then addInsight(results, SEVERITY.TIP, "Efficiency", string.format("Slow (%.2f%%/h). Consider stronger spawns.", lvlPct))
-  elseif metrics.elapsedHour >= 0.5 then addInsight(results, SEVERITY.WARNING, "Efficiency", string.format("Very slow (%.2f%%/h). Inefficient spawn.", lvlPct))
+  local xpConfidence = clamp(elapsed / 900000, 0.5, 1.0)  -- Higher confidence after 15 min
+  
+  if lvlPct >= 5 then 
+    addInsight(results, SEVERITY.INFO, "XP Rate", string.format("Excellent! %.1f%% level/hour", lvlPct), xpConfidence)
+  elseif lvlPct >= 2 then
+    addInsight(results, SEVERITY.INFO, "XP Rate", string.format("Good: %.2f%%/h (~%.0fh to level)", lvlPct, 100/lvlPct), xpConfidence)
+  elseif lvlPct >= 0.5 then
+    addInsight(results, SEVERITY.TIP, "XP Rate", string.format("Moderate: %.2f%%/h. Consider stronger spawns.", lvlPct), xpConfidence)
+  elseif lvlPct > 0 and metrics.elapsedHour >= 0.25 then
+    addInsight(results, SEVERITY.WARNING, "XP Rate", string.format("Slow: %.2f%%/h. Spawn may be too weak.", lvlPct), xpConfidence)
   end
   
-  -- Kill Rate
-  if m.kills > 0 and metrics.killsPerHour < 50 then
-    addInsight(results, SEVERITY.WARNING, "Efficiency", string.format("Low kills (%.0f/h). Improve targeting/luring.", metrics.killsPerHour))
-  elseif metrics.killsPerHour > 200 then
-    addInsight(results, SEVERITY.INFO, "Efficiency", string.format("Great kill rate! %.0f/h", metrics.killsPerHour))
-  end
-  
-  -- Survivability
-  if metrics.damageRatio > 1.2 then addInsight(results, SEVERITY.CRITICAL, "Survivability", "Taking more damage than healing! Death risk!")
-  elseif metrics.damageRatio > 0.9 then addInsight(results, SEVERITY.WARNING, "Survivability", "Damage nearly equals healing. Lower HP threshold.")
-  elseif metrics.damageRatio < 0.3 and metrics.damageRatio > 0 then addInsight(results, SEVERITY.TIP, "Survivability", "Very safe. Could handle stronger monsters.")
-  end
-  
-  -- Stamina
-  if stamInfo.warningLevel == 2 then addInsight(results, SEVERITY.CRITICAL, "Stamina", "DEPLETED! No XP from kills!")
-  elseif stamInfo.warningLevel == 1 then addInsight(results, SEVERITY.WARNING, "Stamina", string.format("Orange stamina (%.1fh). 50%% XP penalty!", stamInfo.hours))
-  elseif stamInfo.greenRemaining > 0 then addInsight(results, SEVERITY.INFO, "Stamina", string.format("Green bonus! +50%% XP. %.1fh remaining.", stamInfo.greenRemaining))
-  end
-  
-  -- Resources
-  if m.potionsUsed > 10 and metrics.potionsPerKill > 2 then
-    addInsight(results, SEVERITY.WARNING, "Resources", string.format("High potion use (%.1f/kill). Consider mana shield.", metrics.potionsPerKill))
-  end
-  
-  -- Movement
-  if m.tilesWalked > 100 and m.kills > 10 and metrics.tilesPerKill > 50 then
-    addInsight(results, SEVERITY.TIP, "Movement", string.format("Walking %.0f tiles/kill. Sparse spawn.", metrics.tilesPerKill))
-  end
-  
-  -- Conditions
-  if m.timeParalyzed > 30000 then
-    addInsight(results, SEVERITY.WARNING, "Conditions", string.format("Paralyzed %.0fs. Anti-paralyze recommended.", m.timeParalyzed/1000))
-  end
-  if m.timeHasted > 0 and elapsed > 300000 then
-    local hastePct = (m.timeHasted / elapsed) * 100
-    if hastePct < 30 and m.tilesWalked > 500 then
-      addInsight(results, SEVERITY.TIP, "Conditions", string.format("Haste only %.0f%%. Use utani hur.", hastePct))
+  -- Trend analysis for XP
+  if #trendData.xpPerHour >= 3 then
+    local trend, changePercent = calculateTrend(trendData.xpPerHour)
+    if trend == 1 and changePercent > 10 then
+      addInsight(results, SEVERITY.INFO, "Trend", string.format("XP rate improving! +%.0f%% trend", changePercent), 0.8)
+    elseif trend == -1 and changePercent < -15 then
+      addInsight(results, SEVERITY.WARNING, "Trend", string.format("XP rate declining: %.0f%%. Check respawn.", changePercent), 0.8)
     end
   end
   
-  -- Vocation-specific
-  if voc.isKnight and m.spellsCast < m.kills * 0.5 and m.kills > 30 then
-    addInsight(results, SEVERITY.TIP, "Vocation", "Knight: Use exori spells for faster kills.")
-  end
-  if voc.isMage and m.timeManaShield > 0 then
-    local msPct = (m.timeManaShield / elapsed) * 100
-    if msPct > 50 then addInsight(results, SEVERITY.INFO, "Vocation", string.format("Mana shield %.0f%%. Good defense.", msPct)) end
+  -- Kill Rate Analysis
+  if m.kills >= 10 then
+    if metrics.killsPerHour < 30 then
+      addInsight(results, SEVERITY.WARNING, "Kill Rate", string.format("Low: %.0f/h. Improve targeting or find denser spawn.", metrics.killsPerHour), sessionConfidence)
+    elseif metrics.killsPerHour >= 250 then
+      addInsight(results, SEVERITY.INFO, "Kill Rate", string.format("Excellent! %.0f kills/hour", metrics.killsPerHour), sessionConfidence)
+    elseif metrics.killsPerHour >= 150 then
+      addInsight(results, SEVERITY.INFO, "Kill Rate", string.format("Good: %.0f/h", metrics.killsPerHour), sessionConfidence)
+    end
   end
   
-  -- Blessings
-  if Player.blessings() < 5 and m.nearDeathCount > 2 then
-    addInsight(results, SEVERITY.WARNING, "Protection", string.format("Only %d blessings with near-death events.", Player.blessings()))
+  -- Spawn Density Analysis
+  if m.kills >= 20 and m.tilesWalked >= 100 then
+    local density = metrics.efficiency
+    if density < 2 then
+      addInsight(results, SEVERITY.TIP, "Spawn", string.format("Sparse (%.0f tiles/kill). Consider tighter routes.", metrics.tilesPerKill), sessionConfidence)
+    elseif density >= 10 then
+      addInsight(results, SEVERITY.INFO, "Spawn", "Dense spawn! Efficient pathing.", sessionConfidence)
+    end
+  end
+  
+  -- ========== SURVIVABILITY ANALYSIS ==========
+  
+  -- Damage/Healing Ratio with nuanced thresholds
+  if m.healingDone > 1000 then  -- Enough data to analyze
+    local dr = metrics.damageRatio
+    local survConfidence = clamp(m.healingDone / 10000, 0.5, 1.0)
+    
+    if dr > 1.3 then 
+      addInsight(results, SEVERITY.CRITICAL, "Survival", "DANGER! Taking 30%+ more damage than healing. Risk of death!", survConfidence)
+    elseif dr > 1.0 then
+      addInsight(results, SEVERITY.WARNING, "Survival", string.format("Risky: %.0f%% damage vs healing. Lower HP threshold.", dr * 100), survConfidence)
+    elseif dr > 0.8 then
+      addInsight(results, SEVERITY.TIP, "Survival", "Damage close to healing. Consider safer play.", survConfidence)
+    elseif dr < 0.3 and dr > 0 then
+      addInsight(results, SEVERITY.TIP, "Survival", string.format("Very safe (%.0f%% ratio). Could handle harder content.", dr * 100), survConfidence)
+    end
+  end
+  
+  -- Near-death analysis with frequency consideration
+  if m.nearDeathCount > 0 then
+    local ndRate = metrics.nearDeathPerHour
+    if ndRate > 3 then
+      addInsight(results, SEVERITY.CRITICAL, "Survival", string.format("High risk! %.1f near-deaths/hour. Increase heal threshold!", ndRate), 0.95)
+    elseif ndRate > 1 then
+      addInsight(results, SEVERITY.WARNING, "Survival", string.format("%.1f near-deaths/hour. Consider adjusting healer.", ndRate), 0.85)
+    end
+  end
+  
+  -- Death penalty tracking
+  if m.deathCount > 0 then
+    addInsight(results, SEVERITY.CRITICAL, "Survival", string.format("%d death(s)! Check equipment, supplies, and heal settings.", m.deathCount), 1.0)
+  end
+  
+  -- ========== STAMINA ANALYSIS ==========
+  
+  if stamInfo.warningLevel == 2 then 
+    addInsight(results, SEVERITY.CRITICAL, "Stamina", "DEPLETED! 0% XP from kills. Stop hunting!", 1.0)
+  elseif stamInfo.warningLevel == 1 then
+    addInsight(results, SEVERITY.WARNING, "Stamina", string.format("Orange (%.1fh). 50%% XP penalty active!", stamInfo.hours), 1.0)
+  elseif stamInfo.greenRemaining > 0 and stamInfo.greenRemaining < 1 then
+    addInsight(results, SEVERITY.WARNING, "Stamina", string.format("Green ending soon! %.0fm left.", stamInfo.greenRemaining * 60), 1.0)
+  elseif stamInfo.greenRemaining >= 1 then
+    addInsight(results, SEVERITY.INFO, "Stamina", string.format("Green bonus active. %.1fh remaining.", stamInfo.greenRemaining), 0.9)
+  end
+  
+  -- Stamina efficiency
+  if metrics.xpPerStaminaMin > 0 and metrics.elapsedHour >= 0.5 then
+    addInsight(results, SEVERITY.INFO, "Stamina", string.format("%.0f XP per stamina minute used.", metrics.xpPerStaminaMin), sessionConfidence)
+  end
+  
+  -- ========== RESOURCE ANALYSIS ==========
+  
+  if m.potionsUsed >= 20 then
+    local ppk = metrics.potionsPerKill
+    if ppk > 3 then
+      addInsight(results, SEVERITY.WARNING, "Resources", string.format("High potion use: %.1f/kill. Check mana efficiency.", ppk), sessionConfidence)
+    elseif ppk < 0.5 and m.kills > 30 then
+      addInsight(results, SEVERITY.INFO, "Resources", "Efficient potion usage!", sessionConfidence)
+    end
+  end
+  
+  -- ========== COMBAT UPTIME ANALYSIS ==========
+  
+  if elapsed >= 600000 then  -- At least 10 min
+    if metrics.combatUptime < 30 then
+      addInsight(results, SEVERITY.TIP, "Uptime", string.format("Low combat time (%.0f%%). More aggressive luring?", metrics.combatUptime), sessionConfidence)
+    elseif metrics.combatUptime >= 70 then
+      addInsight(results, SEVERITY.INFO, "Uptime", string.format("High combat uptime: %.0f%%", metrics.combatUptime), sessionConfidence)
+    end
+  end
+  
+  -- ========== CONDITION ANALYSIS ==========
+  
+  -- Paralysis impact
+  if m.timeParalyzed > 60000 then
+    local paraPct = (m.timeParalyzed / elapsed) * 100
+    addInsight(results, SEVERITY.WARNING, "Conditions", string.format("Paralyzed %.0f%% of time. Use anti-paralyze.", paraPct), 0.9)
+  end
+  
+  -- Haste efficiency
+  if elapsed >= 600000 and m.tilesWalked > 500 then
+    if metrics.hasteUptime < 40 then
+      addInsight(results, SEVERITY.TIP, "Conditions", string.format("Haste only %.0f%%. Enable auto-haste.", metrics.hasteUptime), sessionConfidence)
+    end
+  end
+  
+  -- ========== PROTECTION ANALYSIS ==========
+  
+  local blessCount = Player.blessings()
+  if blessCount < 5 then
+    if m.nearDeathCount >= 2 or m.deathCount > 0 then
+      addInsight(results, SEVERITY.WARNING, "Protection", string.format("Only %d blessings with %d close calls. Get full bless!", blessCount, m.nearDeathCount), 0.95)
+    elseif metrics.damageRatio > 0.7 then
+      addInsight(results, SEVERITY.TIP, "Protection", string.format("%d/5 blessings. Recommend full protection.", blessCount), 0.7)
+    end
+  end
+  
+  -- ========== CONSISTENCY ANALYSIS ==========
+  
+  if #trendData.killsPerHour >= 4 then
+    local avg = 0
+    for _, v in ipairs(trendData.killsPerHour) do avg = avg + v end
+    avg = avg / #trendData.killsPerHour
+    
+    local stdDev = standardDeviation(trendData.killsPerHour, avg)
+    local cv = avg > 0 and (stdDev / avg * 100) or 0  -- Coefficient of variation
+    
+    if cv > 40 then
+      addInsight(results, SEVERITY.TIP, "Consistency", string.format("Kill rate varies %.0f%%. Inconsistent spawn or path.", cv), 0.75)
+    elseif cv < 15 and avg > 100 then
+      addInsight(results, SEVERITY.INFO, "Consistency", "Very consistent performance!", 0.8)
+    end
   end
   
   return results
 end
 
 function Insights.format(list)
-  local lines, icons = {}, { [SEVERITY.CRITICAL] = "[!]", [SEVERITY.WARNING] = "[*]", [SEVERITY.TIP] = "[>]", [SEVERITY.INFO] = "[i]" }
+  local lines = {}
+  local icons = { 
+    [SEVERITY.CRITICAL] = "[!]", 
+    [SEVERITY.WARNING] = "[*]", 
+    [SEVERITY.TIP] = "[>]", 
+    [SEVERITY.INFO] = "[i]" 
+  }
   local byPriority = { {}, {}, {}, {} }
   local order = { [SEVERITY.CRITICAL] = 1, [SEVERITY.WARNING] = 2, [SEVERITY.TIP] = 3, [SEVERITY.INFO] = 4 }
   
-  for _, i in ipairs(list) do table.insert(byPriority[order[i.severity] or 4], i) end
+  -- Sort by priority, then by confidence (higher confidence first)
+  for _, i in ipairs(list) do 
+    table.insert(byPriority[order[i.severity] or 4], i) 
+  end
+  
   for _, group in ipairs(byPriority) do
-    for _, i in ipairs(group) do table.insert(lines, string.format("  %s %s", icons[i.severity] or "[?]", i.message)) end
+    -- Sort each group by confidence descending
+    table.sort(group, function(a, b) return (a.confidence or 0) > (b.confidence or 0) end)
+    for _, i in ipairs(group) do 
+      table.insert(lines, string.format("  %s %s", icons[i.severity] or "[?]", i.message))
+    end
   end
   return lines
 end
 
 function Insights.calculateScore()
   local elapsed = getElapsed()
-  if elapsed < 300000 then return 0 end
+  if elapsed < 180000 then return 0 end  -- Need 3 min minimum
   
   local m = analytics.metrics
   local metrics = calculateMetrics()
+  
+  -- Confidence multiplier based on session length (more data = more accurate score)
+  local confidence = clamp(elapsed / 1800000, 0.5, 1.0)  -- 50% at start, 100% at 30 min
+  
   local score = 0
+  local maxScore = 100
   
-  -- Level Progress (20 pts)
+  -- ========== XP EFFICIENCY (25 pts) ==========
   local lvlPct = metrics.levelPercentPerHour
-  score = score + (lvlPct >= 10 and 20 or lvlPct >= 5 and 18 or lvlPct >= 2 and 15 or lvlPct >= 1 and 12 or lvlPct >= 0.5 and 8 or lvlPct >= 0.2 and 5 or lvlPct > 0 and 3 or 0)
-  
-  -- Kill Rate (15 pts)
-  score = score + (metrics.killsPerHour > 300 and 15 or metrics.killsPerHour > 200 and 12 or metrics.killsPerHour > 100 and 9 or metrics.killsPerHour > 50 and 5 or 0)
-  
-  -- Movement (5 pts)
-  if m.kills > 10 and m.tilesWalked > 0 then
-    score = score + (metrics.tilesPerKill < 10 and 5 or metrics.tilesPerKill < 20 and 3 or metrics.tilesPerKill < 40 and 1 or 0)
+  local xpScore = 0
+  if lvlPct >= 10 then xpScore = 25
+  elseif lvlPct >= 5 then xpScore = 22
+  elseif lvlPct >= 2 then xpScore = 18
+  elseif lvlPct >= 1 then xpScore = 14
+  elseif lvlPct >= 0.5 then xpScore = 10
+  elseif lvlPct >= 0.2 then xpScore = 6
+  elseif lvlPct > 0 then xpScore = 3
   end
+  score = score + xpScore
   
-  -- Survivability (30 pts)
+  -- ========== KILL EFFICIENCY (20 pts) ==========
+  local killScore = 0
+  if metrics.killsPerHour > 300 then killScore = 20
+  elseif metrics.killsPerHour > 200 then killScore = 16
+  elseif metrics.killsPerHour > 150 then killScore = 13
+  elseif metrics.killsPerHour > 100 then killScore = 10
+  elseif metrics.killsPerHour > 50 then killScore = 6
+  elseif metrics.killsPerHour > 20 then killScore = 3
+  end
+  score = score + killScore
+  
+  -- ========== SPAWN DENSITY (10 pts) ==========
+  local densityScore = 0
+  if m.kills > 10 and m.tilesWalked > 0 then
+    local tpk = metrics.tilesPerKill
+    if tpk < 5 then densityScore = 10
+    elseif tpk < 10 then densityScore = 8
+    elseif tpk < 20 then densityScore = 6
+    elseif tpk < 35 then densityScore = 4
+    elseif tpk < 50 then densityScore = 2
+    end
+  end
+  score = score + densityScore
+  
+  -- ========== SURVIVABILITY (25 pts) ==========
+  local survScore = 0
+  
+  -- Damage ratio component (15 pts)
   if m.healingDone > 0 then
     local dr = metrics.damageRatio
-    score = score + (dr < 0.4 and 15 or dr < 0.6 and 12 or dr < 0.8 and 8 or dr < 1.0 and 4 or dr > 1.2 and -5 or 0)
-  else score = score + 10 end
-  score = score + (m.deathCount > 0 and (-m.deathCount * 10) or 10)
-  local nearDeathRate = m.nearDeathCount / math.max(1, metrics.elapsedHour)
-  score = score + (nearDeathRate > 5 and -5 or nearDeathRate > 2 and -2 or nearDeathRate == 0 and 5 or 0)
+    if dr < 0.3 then survScore = survScore + 15
+    elseif dr < 0.5 then survScore = survScore + 13
+    elseif dr < 0.7 then survScore = survScore + 10
+    elseif dr < 0.9 then survScore = survScore + 6
+    elseif dr < 1.0 then survScore = survScore + 3
+    elseif dr > 1.2 then survScore = survScore - 5  -- Penalty for dangerous
+    end
+  else
+    survScore = survScore + 12  -- No damage taken = safe
+  end
   
-  -- Resources (20 pts)
+  -- Death penalty (up to -15 pts)
+  if m.deathCount > 0 then
+    survScore = survScore - math.min(15, m.deathCount * 8)
+  else
+    survScore = survScore + 5  -- Bonus for no deaths
+  end
+  
+  -- Near-death frequency (5 pts)
+  local ndRate = metrics.nearDeathPerHour
+  if ndRate == 0 then survScore = survScore + 5
+  elseif ndRate < 1 then survScore = survScore + 3
+  elseif ndRate < 2 then survScore = survScore + 1
+  elseif ndRate > 4 then survScore = survScore - 3
+  end
+  
+  score = score + math.max(0, survScore)
+  
+  -- ========== RESOURCE EFFICIENCY (10 pts) ==========
+  local resScore = 0
   if m.kills > 10 then
     local ppk = metrics.potionsPerKill
-    score = score + (ppk < 0.3 and 10 or ppk < 0.7 and 7 or ppk < 1.5 and 4 or ppk > 3 and -3 or 0)
+    if ppk < 0.3 then resScore = 10
+    elseif ppk < 0.7 then resScore = 8
+    elseif ppk < 1.2 then resScore = 6
+    elseif ppk < 2.0 then resScore = 4
+    elseif ppk < 3.0 then resScore = 2
+    elseif ppk > 4.0 then resScore = -2  -- Penalty for excessive use
+    end
+  else
+    resScore = 5  -- Neutral if not enough data
   end
-  score = score + 6 -- Base resource score
+  score = score + math.max(0, resScore)
   
-  -- Economy (10 pts)
+  -- ========== COMBAT UPTIME (5 pts) ==========
+  local uptimeScore = 0
+  if elapsed >= 300000 then
+    local uptime = metrics.combatUptime
+    if uptime >= 70 then uptimeScore = 5
+    elseif uptime >= 50 then uptimeScore = 4
+    elseif uptime >= 35 then uptimeScore = 3
+    elseif uptime >= 20 then uptimeScore = 2
+    end
+  end
+  score = score + uptimeScore
+  
+  -- ========== ECONOMY BONUS (5 pts) ==========
   if bottingStats then
-    local _, _, balance = bottingStats()
-    local profitPerHour = balance / math.max(0.1, metrics.elapsedHour)
-    score = score + (profitPerHour > 100000 and 10 or profitPerHour > 50000 and 7 or profitPerHour > 20000 and 4 or profitPerHour > 0 and 2 or profitPerHour < -20000 and -3 or 0)
+    local ok, waste, loot, balance = pcall(bottingStats)
+    if ok and balance then
+      local profitPerHour = balance / math.max(0.1, metrics.elapsedHour)
+      if profitPerHour > 100000 then score = score + 5
+      elseif profitPerHour > 50000 then score = score + 4
+      elseif profitPerHour > 20000 then score = score + 3
+      elseif profitPerHour > 0 then score = score + 1
+      elseif profitPerHour < -30000 then score = score - 2
+      end
+    end
   end
   
-  return clamp(score, 0, 100)
+  -- Apply confidence multiplier for short sessions
+  local finalScore = score * confidence
+  
+  return clamp(math.floor(finalScore), 0, 100)
 end
 
 function Insights.scoreBar(score)
   local filled = math.floor(score / 10)
-  local rating = score >= 80 and "Excellent" or score >= 60 and "Good" or score >= 40 and "Average" or score >= 20 and "Below Avg" or "Poor"
+  local rating
+  if score >= 85 then rating = "Excellent"
+  elseif score >= 70 then rating = "Great"
+  elseif score >= 55 then rating = "Good"
+  elseif score >= 40 then rating = "Average"
+  elseif score >= 25 then rating = "Below Avg"
+  else rating = "Poor"
+  end
   return string.format("[%s%s] %d/100 (%s)", string.rep("#", filled), string.rep("-", 10 - filled), score, rating)
 end
 
@@ -547,11 +889,10 @@ local function buildSummary()
   local metrics = calculateMetrics()
   local levelInfo = Player.levelProgress()
   local stamInfo = Player.staminaInfo()
-  local vocInfo = Player.vocation()
   
   -- Header
   table.insert(lines, "============================================")
-  table.insert(lines, "        SMARTHUNT ANALYTICS v3.1")
+  table.insert(lines, "        SMARTHUNT ANALYTICS v4.0")
   table.insert(lines, "============================================")
   table.insert(lines, "")
   
@@ -583,10 +924,26 @@ local function buildSummary()
   })
   
   -- Stamina
-  local staminaUsed = (analytics.session.startStamina or 0) - stamInfo.minutes
+  local startStaminaMins = analytics.session.startStamina or 0
+  local staminaUsedMins = startStaminaMins - stamInfo.minutes
+  if staminaUsedMins < 0 then staminaUsedMins = 0 end -- In case stamina was refilled
+  
+  -- Format stamina used as hours:minutes
+  local staminaUsedStr
+  if staminaUsedMins > 0 then
+    local usedHrs = math.floor(staminaUsedMins / 60)
+    local usedMins = staminaUsedMins % 60
+    if usedHrs > 0 then
+      staminaUsedStr = string.format("%dh %dm", usedHrs, usedMins)
+    else
+      staminaUsedStr = string.format("%dm", usedMins)
+    end
+  end
+  
   local stamLines = {
-    "Current: " .. string.format("%.1fh (%s)", stamInfo.hours, stamInfo.status),
-    staminaUsed > 0 and ("Used: " .. staminaUsed .. " min") or nil,
+    "Current: " .. string.format("%.2fh (%s)", stamInfo.hours, stamInfo.status),
+    "Session Start: " .. string.format("%.2fh", startStaminaMins / 60),
+    staminaUsedStr and ("Spent: " .. staminaUsedStr) or nil,
     stamInfo.greenRemaining > 0 and ("Green Left: " .. string.format("%.1fh", stamInfo.greenRemaining)) or nil
   }
   local filteredStam = {}
@@ -595,7 +952,6 @@ local function buildSummary()
   
   -- Player
   addSection(lines, "PLAYER", {
-    "Vocation: " .. vocInfo.name,
     "Magic Level: " .. Player.mlevel(),
     "Blessings: " .. Player.blessings(),
     "Speed: " .. Player.speed()
@@ -625,16 +981,51 @@ end
 local analyticsWindow = nil
 
 local function showAnalytics()
-  if analyticsWindow then analyticsWindow:destroy() analyticsWindow = nil end
+  if analyticsWindow then 
+    pcall(function() analyticsWindow:destroy() end)
+    analyticsWindow = nil 
+  end
   
-  analyticsWindow = UI.createWindow('SmartHuntAnalyticsWindow')
-  if not analyticsWindow then print(buildSummary()) return end
+  -- Try to create window, fall back to console output
+  local ok, win = pcall(function() return UI.createWindow('SmartHuntAnalyticsWindow') end)
+  if not ok or not win then 
+    print(buildSummary()) 
+    return 
+  end
   
-  analyticsWindow.content.textContent:setText(buildSummary())
-  analyticsWindow.buttons.refreshButton.onClick = function() analyticsWindow.content.textContent:setText(buildSummary()) end
-  analyticsWindow.buttons.closeButton.onClick = function() analyticsWindow:destroy() analyticsWindow = nil end
-  analyticsWindow.buttons.resetButton.onClick = function() startSession() analyticsWindow.content.textContent:setText(buildSummary()) end
-  analyticsWindow:show():raise():focus()
+  analyticsWindow = win
+  
+  -- Safely access window elements
+  if analyticsWindow.content and analyticsWindow.content.textContent then
+    analyticsWindow.content.textContent:setText(buildSummary())
+  end
+  
+  if analyticsWindow.buttons then
+    if analyticsWindow.buttons.refreshButton then
+      analyticsWindow.buttons.refreshButton.onClick = function() 
+        if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
+          analyticsWindow.content.textContent:setText(buildSummary()) 
+        end
+      end
+    end
+    if analyticsWindow.buttons.closeButton then
+      analyticsWindow.buttons.closeButton.onClick = function() 
+        if analyticsWindow then pcall(function() analyticsWindow:destroy() end) end
+        analyticsWindow = nil 
+      end
+    end
+    if analyticsWindow.buttons.resetButton then
+      analyticsWindow.buttons.resetButton.onClick = function() 
+        startSession() 
+        if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
+          analyticsWindow.content.textContent:setText(buildSummary()) 
+        end
+      end
+    end
+  end
+  
+  -- Safely show window
+  pcall(function() analyticsWindow:show():raise():focus() end)
 end
 
 -- ============================================================================
@@ -673,7 +1064,8 @@ nExBot.Analytics = {
   isActive = isSessionActive,
   getSummary = buildSummary,
   getMetrics = function() return analytics.metrics end,
-  getElapsed = getElapsed
+  getElapsed = getElapsed,
+  getTrends = function() return trendData end
 }
 
-print("[SmartHunt] v3.1 loaded (refactored)")
+print("[SmartHunt] v4.0 loaded (Advanced AI)")

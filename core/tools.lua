@@ -23,24 +23,8 @@ local function setProfileSetting(key, value)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- MONEY EXCHANGER (Optimized)
--- Automatically exchanges 100 gold → platinum, 100 platinum → crystal
--- Works on all open containers including nested backpacks
+-- MONEY EXCHANGER - Auto-exchange 100 gold → platinum, 100 platinum → crystal
 -- ═══════════════════════════════════════════════════════════════════════════
-
---[[
-  Money Exchange System
-  
-  Pure function design:
-  - isExchangeable(item) → boolean (pure)
-  - findExchangeableItem(containers) → item or nil (pure)
-  - exchangeItem(item) → void (side effect, isolated)
-  
-  Coin IDs:
-  - 3031 = Gold Coin (100 → 1 Platinum)
-  - 3035 = Platinum Coin (100 → 1 Crystal)
-  - 3043 = Crystal Coin (no exchange)
-]]
 
 local EXCHANGEABLE_COINS = {
   [3031] = true,  -- Gold Coin
@@ -258,27 +242,8 @@ schedule(1000, function()
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- FISHING (Optimized with Random Spot Selection + Auto Fish Drop)
--- Automatically fishes on random water tiles within range
--- Drops caught fish to random water tiles
--- Uses per-character state persistence like Auto Mount
+-- FISHING - Random water tile selection + auto fish drop to water
 -- ═══════════════════════════════════════════════════════════════════════════
-
---[[
-  Fishing System - Pure Function Architecture
-  
-  Design Principles:
-  - SRP: Each function has one responsibility
-  - DRY: Reusable utility functions
-  - KISS: Simple, focused logic
-  - Pure Functions: No side effects in detection functions
-  
-  Features:
-  - Simple and reliable implementation
-  - Uses g_game.useWith() directly
-  - Random water tile selection
-  - Respects exhausted cooldown
-]]
 
 -- Water tile IDs that can be fished
 local WATER_TILES = {
@@ -310,8 +275,6 @@ local FISHING_ROD_ID = 3483
 local FISHING_RANGE = 3  -- Search radius for water tiles
 local lastFishTime = 0
 local lastDropTime = 0
-local fishingInitialized = false
-local fishingDebug = false -- Set to true to enable debug messages
 
 -- Items to drop into water when fishing
 local DROP_TO_WATER = {
