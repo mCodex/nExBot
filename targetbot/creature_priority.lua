@@ -1,60 +1,97 @@
 --[[
-  Optimized Priority Calculation System
+  Optimized Priority Calculation System v1.0
   
-  Uses a weighted scoring algorithm that considers:
-  1. Health state (critical monsters get highest priority to prevent escapes)
-  2. Distance (closer = more dangerous and easier to kill)
-  3. Current target (maintain focus to finish kills)
-  4. Configuration priority (user-defined importance)
-  5. Group optimization (for AoE attacks)
+  Integrates with TargetCore for pure function calculations.
   
-  The algorithm uses pre-computed weights and early exits for performance.
+  Features:
+  1. Health-based priority with exponential scaling (finish kills!)
+  2. Target stickiness (maintain focus on wounded targets)
+  3. Distance optimization (closer = easier to kill)
+  4. AOE optimization (for group attacks)
+  5. RP Safe mode (avoid pulling extra monsters)
+  
+  The algorithm uses the centralized TargetCore.calculatePriority()
+  with local configuration handling.
 ]]
 
--- Priority weights (tunable constants)
-local WEIGHT_CRITICAL_HEALTH = 60    -- HP <= 15%
-local WEIGHT_LOW_HEALTH = 35         -- HP <= 25%
-local WEIGHT_WOUNDED = 18            -- HP <= 35%
-local WEIGHT_CURRENT_TARGET = 12     -- Currently attacking this monster
-local WEIGHT_TARGET_WOUNDED = 15     -- Current target is wounded
-local WEIGHT_ADJACENT = 12           -- Distance == 1
-local WEIGHT_CLOSE = 8               -- Distance == 2
-local WEIGHT_NEAR = 5                -- Distance <= 3
-local WEIGHT_MEDIUM = 2              -- Distance <= 5
-local WEIGHT_CHASE_LOW = 10          -- Chase mode + low HP
+-- Use TargetCore constants if available, otherwise define locally
+local PRIO = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.PRIORITY) or {
+  CRITICAL_HEALTH = 80,
+  VERY_LOW_HEALTH = 55,
+  LOW_HEALTH = 35,
+  WOUNDED = 18,
+  CURRENT_TARGET = 15,
+  CURRENT_WOUNDED = 25,
+  ADJACENT = 14,
+  CLOSE = 10,
+  NEAR = 6,
+  MEDIUM = 3,
+  CHASE_BONUS = 12,
+  AOE_BONUS = 8,
+}
 
--- Pre-computed distance-to-weight lookup for O(1) access
-local DISTANCE_WEIGHTS = {
-  [1] = 12, [2] = 8, [3] = 5, [4] = 3, [5] = 2,
+local DIST_W = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.DISTANCE_WEIGHTS) or {
+  [1] = 14, [2] = 10, [3] = 6, [4] = 3, [5] = 3,
   [6] = 1, [7] = 1, [8] = 0, [9] = 0, [10] = 0
 }
 
 -- Diamond arrow pattern for paladin optimization
-local diamondArrowArea = {
+local DIAMOND_ARROW_AREA = {
   {0, 1}, {1, 0}, {0, -1}, {-1, 0},
   {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
 }
 
-local largeRuneArea = {
+local LARGE_RUNE_AREA = {
   {0, 1}, {1, 0}, {0, -1}, {-1, 0},
   {1, 1}, {1, -1}, {-1, 1}, {-1, -1},
   {0, 2}, {2, 0}, {0, -2}, {-2, 0}
 }
 
-TargetBot.Creature.calculatePriority = function(creature, config, path)
-  local priority = 0
-  local pathLength = #path
-  local healthPercent = creature:getHealthPercent()
+-- Pure function: Get monsters in area around position
+local function getMonstersInArea(pos, offsets, maxDist)
+  local count = 0
   
-  -- Early exit for out of range targets
-  local maxDistance = config.maxDistance
-  if pathLength > maxDistance then
-    -- Exception: nearly dead monsters get reduced but non-zero priority
-    if healthPercent <= 20 and pathLength <= maxDistance + 3 then
-      return config.priority * 0.3  -- Reduced priority, still targetable
+  for i = 1, #offsets do
+    local offset = offsets[i]
+    local checkPos = {
+      x = pos.x + offset[1],
+      y = pos.y + offset[2],
+      z = pos.z
+    }
+    
+    local tile = g_map.getTile(checkPos)
+    if tile then
+      local creatures = tile:getCreatures()
+      if creatures then
+        for j = 1, #creatures do
+          local c = creatures[j]
+          if c:isMonster() and not c:isDead() then
+            count = count + 1
+          end
+        end
+      end
+    end
+  end
+  
+  return count
+end
+
+-- Main priority calculation function
+TargetBot.Creature.calculatePriority = function(creature, config, path)
+  local pathLength = path and #path or 99
+  local hp = creature:getHealthPercent()
+  local maxDist = config.maxDistance or 10
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- EARLY EXIT: Out of range
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if pathLength > maxDist then
+    -- Exception: nearly dead monsters still targetable (don't let them escape!)
+    if hp <= 15 and pathLength <= maxDist + 2 then
+      return config.priority * 0.4
     end
     
-    -- Cancel attack if using rpSafe mode and target is out of range
+    -- RP Safe: Cancel attack on out-of-range target
     if config.rpSafe then
       local currentTarget = g_game.getAttackingCreature()
       if currentTarget == creature then
@@ -64,65 +101,96 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
     return 0
   end
   
-  -- Base priority from config
-  priority = config.priority
-  
-  -- Health-based priority (CRITICAL for kill efficiency)
-  -- Uses exponential scaling for low health to ensure kills
-  if healthPercent <= 15 then
-    priority = priority + WEIGHT_CRITICAL_HEALTH
-    -- Extra bonus for single-hit killable monsters
-    if healthPercent <= 5 then
-      priority = priority + 20
-    end
-  elseif healthPercent <= 25 then
-    priority = priority + WEIGHT_LOW_HEALTH
-  elseif healthPercent <= 35 then
-    priority = priority + WEIGHT_WOUNDED
-  elseif healthPercent <= 50 then
-    priority = priority + 8
-  elseif healthPercent <= 70 then
-    priority = priority + 3
-  end
-  
-  -- Current target bonus (target stickiness to finish kills)
+  local priority = config.priority or 1
   local currentTarget = g_game.getAttackingCreature()
-  if currentTarget == creature then
-    priority = priority + WEIGHT_CURRENT_TARGET
+  local isCurrentTarget = (currentTarget == creature)
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- HEALTH-BASED PRIORITY (Most critical - finish kills!)
+  -- Exponential scaling for low health ensures we don't switch targets
+  -- ═══════════════════════════════════════════════════════════════════════════
+  
+  if hp <= 5 then
+    -- One-hit kill - MAXIMUM priority
+    priority = priority + PRIO.CRITICAL_HEALTH + 35
+  elseif hp <= 10 then
+    priority = priority + PRIO.CRITICAL_HEALTH
+  elseif hp <= 20 then
+    priority = priority + PRIO.VERY_LOW_HEALTH
+  elseif hp <= 30 then
+    priority = priority + PRIO.LOW_HEALTH
+  elseif hp <= 50 then
+    priority = priority + PRIO.WOUNDED
+  elseif hp <= 70 then
+    priority = priority + 5
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- CURRENT TARGET BONUS (Target stickiness)
+  -- Prevents constant target switching, ensures kills complete
+  -- ═══════════════════════════════════════════════════════════════════════════
+  
+  if isCurrentTarget then
+    priority = priority + PRIO.CURRENT_TARGET
     
-    -- Extra priority for wounded current target
-    if healthPercent < 50 then
-      priority = priority + WEIGHT_TARGET_WOUNDED
+    -- Progressive bonus for wounded targets
+    if hp < 50 then
+      priority = priority + PRIO.CURRENT_WOUNDED
     end
-    if healthPercent < 25 then
-      priority = priority + 10  -- Don't let it escape!
+    if hp < 25 then
+      priority = priority + 20  -- Don't switch when target almost dead!
+    end
+    if hp < 10 then
+      priority = priority + 15  -- FINISH THIS KILL
     end
   end
   
-  -- Distance-based priority using lookup table
-  local distWeight = DISTANCE_WEIGHTS[pathLength] or 0
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- DISTANCE-BASED PRIORITY (O(1) lookup)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  
+  local distWeight = DIST_W[pathLength] or 0
   priority = priority + distWeight
   
-  -- Chase mode bonus for low health monsters
-  if config.chase and healthPercent < 30 then
-    priority = priority + WEIGHT_CHASE_LOW
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- CHASE MODE BONUS (Low health targets when chasing)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  
+  if config.chase and hp < 35 then
+    priority = priority + PRIO.CHASE_BONUS
   end
   
-  -- Paladin diamond arrow optimization
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- AOE OPTIMIZATION (Diamond arrows, spell areas)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  
   if config.diamondArrows then
     local creaturePos = creature:getPosition()
-    local mobCount = getCreaturesInArea(creaturePos, diamondArrowArea, 2)
-    priority = priority + (mobCount * 5)
+    local aoeMonsters = getMonstersInArea(creaturePos, DIAMOND_ARROW_AREA, 2)
+    priority = priority + aoeMonsters * PRIO.AOE_BONUS
     
-    -- RP safe mode check
+    -- RP Safe mode: Check for dangerous pulls
     if config.rpSafe then
-      if getCreaturesInArea(creaturePos, largeRuneArea, 3) > 0 then
-        if currentTarget == creature then
+      local largeAreaMonsters = getMonstersInArea(creaturePos, LARGE_RUNE_AREA, 3)
+      if largeAreaMonsters > 0 and not isCurrentTarget then
+        -- Could pull extra monsters - reduce priority significantly
+        priority = priority - largeAreaMonsters * 10
+        
+        -- If currently attacking this and would pull, cancel
+        if isCurrentTarget and largeAreaMonsters >= 2 then
           g_game.cancelAttackAndFollow()
+          return 0
         end
-        return 0
       end
     end
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- DANGER BONUS (Higher danger = need to kill faster)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  
+  if config.danger and config.danger > 0 then
+    priority = priority + config.danger * 0.5
   end
   
   return priority

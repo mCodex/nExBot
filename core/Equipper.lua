@@ -1,4 +1,9 @@
 local panelName = "EquipperPanel"
+
+-- ============================================================================
+-- UI SETUP
+-- ============================================================================
+
 local ui = setupUI([[
 Panel
   height: 19
@@ -22,7 +27,11 @@ Panel
 ]])
 ui:setId(panelName)
 
-if not storage[panelName] or not storage[panelName].bosses then -- no bosses - old ver
+-- ============================================================================
+-- STORAGE & STATE (Centralized)
+-- ============================================================================
+
+if not storage[panelName] or not storage[panelName].bosses then
     storage[panelName] = {
         enabled = false,
         rules = {},
@@ -31,6 +40,38 @@ if not storage[panelName] or not storage[panelName].bosses then -- no bosses - o
 end
 
 local config = storage[panelName]
+
+-- Non-blocking equipment manager state
+local EquipState = {
+  lastEquipAction = 0,
+  EQUIP_COOLDOWN = 200,    -- ms between equip actions
+  missingItem = false,
+  lastRule = nil,
+  correctEq = false,
+  needsEquipCheck = true,
+  rulesCache = nil,        -- Cached rules for macro iteration
+  rulesCacheDirty = true   -- Flag to rebuild cache
+}
+
+-- ============================================================================
+-- CACHE MANAGEMENT
+-- ============================================================================
+
+-- Invalidate rules cache when rules change
+local function invalidateRulesCache()
+  EquipState.rulesCacheDirty = true
+  EquipState.needsEquipCheck = true
+  EquipState.correctEq = false
+end
+
+-- Get cached rules (avoids repeated getChildren calls in macro)
+local function getCachedRules()
+  if EquipState.rulesCacheDirty or not EquipState.rulesCache then
+    EquipState.rulesCache = config.rules
+    EquipState.rulesCacheDirty = false
+  end
+  return EquipState.rulesCache
+end
 
 ui.switch:setOn(config.enabled)
 ui.switch.onClick = function(widget)
@@ -125,8 +166,9 @@ local function resetFields()
         widget:setItemId(0)
         widget:setChecked(false)
     end
-    for i, child in ipairs(listPanel.list:getChildren()) do
-        child.display = false
+    local children = listPanel.list:getChildren()
+    for i = 1, #children do
+        children[i].display = false
     end
     namePanel.profileName:setText("")
     inputPanel.condition.text:setText('')
@@ -257,6 +299,7 @@ listPanel.up.onClick = function(widget)
     listPanel.down:setEnabled(true)
     listPanel.list:moveChildToIndex(focused, n-1)
     listPanel.list:ensureChildVisible(focused)
+    invalidateRulesCache()  -- Priority changed
 end
 
 listPanel.down.onClick = function(widget)
@@ -271,6 +314,7 @@ listPanel.down.onClick = function(widget)
     listPanel.up:setEnabled(true)
     listPanel.list:moveChildToIndex(focused, n+1)
     listPanel.list:ensureChildVisible(focused)
+    invalidateRulesCache()  -- Priority changed
 end
 
 eqPanel.cloneEq.onClick = function(widget)
@@ -331,108 +375,163 @@ end
 namePanel.profileName.onTextChange = function(widget, text)
     local button = inputPanel.add
     text = text:lower()
+    
+    -- Check against config.rules directly (not UI children)
+    local isOverwrite = false
+    for i = 1, #config.rules do
+        if config.rules[i].name:lower() == text then
+            isOverwrite = true
+            break
+        end
+    end
+    
+    button:setText(isOverwrite and "Overwrite" or "Add Rule")
+    button:setTooltip(isOverwrite and ("Overwrite existing rule named: " .. text) or ("Add new rule to the list: " .. text))
+end
 
-    for i, child in ipairs(listPanel.list:getChildren()) do
-        local name = child:getText():lower()
-
-        button:setText(name == text and "Overwrite" or "Add Rule")
-        button:setTooltip(name == text and "Overwrite existing rule named: "..name, "Add new rule to the list: "..name)
+-- Populate Equipment Setup slots when editing a rule (double-click)
+local function loadRuleToSlots(data)
+    for i, value in ipairs(data) do
+        local widget = slotWidgets[i]
+        if value == false then
+            widget:setChecked(false)
+            widget:setItemId(0)
+        elseif value == true then
+            widget:setChecked(true)
+            widget:setItemId(0)
+        else
+            widget:setChecked(false)
+            widget:setItemId(value)       
+        end
     end
 end
 
-local function setupPreview(display, data)
-    namePanel.profileName:setText('')
-    if not display then
-        resetFields()
-    else
-        for i, value in ipairs(data) do
-            local widget = slotWidgets[i]
-            if value == false then
-                widget:setChecked(false)
-                widget:setItemId(0)
-            elseif value == true then
-                widget:setChecked(true)
-                widget:setItemId(0)
-            else
-                widget:setChecked(false)
-                widget:setItemId(value)       
-            end
-        end
+-- ============================================================================
+-- RULES LIST UI (Optimized - no destroyChildren flicker)
+-- ============================================================================
+
+-- Widget cache to avoid recreating widgets
+local ruleWidgetCache = {}
+
+-- Create or update a single rule widget
+local function createOrUpdateRuleWidget(list, rule, index)
+  local widgetId = "rule_" .. index
+  local widget = ruleWidgetCache[widgetId]
+  
+  -- Reuse existing widget or create new one
+  if not widget or not widget:getParent() then
+    widget = UI.createWidget('Rule', list)
+    ruleWidgetCache[widgetId] = widget
+  end
+  
+  widget:setId(rule.name)
+  widget:setText(rule.name)
+  widget.ruleData = rule
+  
+  -- Update visual state without recreating
+  widget.visible:setColor(rule.visible and "green" or "red")
+  widget.enabled:setChecked(rule.enabled)
+  
+  -- Set up event handlers (only if not already set)
+  if not widget._handlersSet then
+    widget.remove.onClick = function()
+      local ruleIndex = table.find(config.rules, rule)
+      if ruleIndex then
+        table.remove(config.rules, ruleIndex)
+      end
+      widget:destroy()
+      ruleWidgetCache[widgetId] = nil
+      listPanel.up:setEnabled(false)
+      listPanel.down:setEnabled(false)
+      invalidateRulesCache()
+      refreshRules()
     end
+    
+    widget.visible.onClick = function()
+      rule.visible = not rule.visible
+      widget.visible:setColor(rule.visible and "green" or "red")
+    end
+    
+    widget.enabled.onClick = function()
+      rule.enabled = not rule.enabled
+      widget.enabled:setChecked(rule.enabled)
+      invalidateRulesCache()
+    end
+    
+    -- Hover preview disabled - Equipment Setup only shows when editing (double-click)
+    
+    widget.onDoubleClick = function(w)
+      local ruleData = w.ruleData
+      w.display = true
+      loadRuleToSlots(ruleData.data)
+      conditionNumber = ruleData.mainCondition
+      optionalConditionNumber = ruleData.optionalCondition
+      setCondition(false, optionalConditionNumber)
+      setCondition(true, conditionNumber)
+      inputPanel.useSecondCondition:setOption(ruleData.relation)
+      namePanel.profileName:setText(rule.name)
+
+      if type(ruleData.mainValue) == "string" then
+        inputPanel.condition.text:setText(ruleData.mainValue)
+      elseif type(ruleData.mainValue) == "number" then
+        inputPanel.condition.spinbox:setValue(ruleData.mainValue)
+      end
+
+      if type(ruleData.optValue) == "string" then
+        inputPanel.optionalCondition.text:setText(ruleData.optValue)
+      elseif type(ruleData.optValue) == "number" then
+        inputPanel.optionalCondition.spinbox:setValue(ruleData.optValue)
+      end
+    end
+    
+    widget.onClick = function()
+      local panel = listPanel
+      local childCount = #panel.list:getChildren()
+      local focusedChild = panel.list:getFocusedChild()
+      local focusedIndex = focusedChild and panel.list:getChildIndex(focusedChild) or 0
+      
+      if childCount == 1 then
+        panel.up:setEnabled(false)
+        panel.down:setEnabled(false)
+      elseif focusedIndex == 1 then
+        panel.up:setEnabled(false)
+        panel.down:setEnabled(true)
+      elseif focusedIndex == childCount then
+        panel.up:setEnabled(true)
+        panel.down:setEnabled(false)
+      else
+        panel.up:setEnabled(true)
+        panel.down:setEnabled(true)
+      end
+    end
+    
+    widget._handlersSet = true
+  end
+  
+  return widget
 end
 
 local function refreshRules()
-    local list = listPanel.list
-
-    list:destroyChildren()
-    for i,v in ipairs(config.rules) do
-        local widget = UI.createWidget('Rule', list)
-        widget:setId(v.name)
-        widget:setText(v.name)
-        widget.ruleData = v
-        widget.remove.onClick = function()
-            widget:destroy()
-            table.remove(config.rules, table.find(config.rules, v))
-            listPanel.up:setEnabled(false)
-            listPanel.down:setEnabled(false)
-            refreshRules()
-        end
-        widget.visible:setColor(v.visible and "green" or "red")
-        widget.visible.onClick = function()
-            v.visible = not v.visible
-            widget.visible:setColor(v.visible and "green" or "red")
-        end
-        widget.enabled:setChecked(v.enabled)
-        widget.enabled.onClick = function()
-            v.enabled = not v.enabled
-            widget.enabled:setChecked(v.enabled)
-        end
-        widget.onHoverChange = function(widget, hover)
-            for i, child in ipairs(list:getChildren()) do
-                if child.display then return end
-            end
-            setupPreview(hover, widget.ruleData.data)
-        end
-        widget.onDoubleClick = function(widget)
-            local ruleData = widget.ruleData
-            widget.display = true
-            setupPreview(true, ruleData.data)
-            conditionNumber = ruleData.mainCondition
-            optionalConditionNumber = ruleData.optionalCondition
-            setCondition(false, optionalConditionNumber)
-            setCondition(true, conditionNumber)
-            inputPanel.useSecondCondition:setOption(ruleData.relation)
-            namePanel.profileName:setText(v.name)
-
-            if type(ruleData.mainValue) == "string" then
-                inputPanel.condition.text:setText(ruleData.mainValue)
-            elseif type(ruleData.mainValue) == "number" then
-                inputPanel.condition.spinbox:setValue(ruleData.mainValue)
-            end
-
-            if type(ruleData.optValue) == "string" then
-                inputPanel.optionalCondition.text:setText(ruleData.optValue)
-            elseif type(ruleData.optValue) == "number" then
-                inputPanel.optionalCondition.spinbox:setValue(ruleData.optValue)
-            end
-        end
-        widget.onClick = function()
-            local panel = listPanel
-            if #panel.list:getChildren() == 1 then
-                panel.up:setEnabled(false)
-                panel.down:setEnabled(false)
-            elseif panel.list:getChildIndex(panel.list:getFocusedChild()) == 1 then
-                panel.up:setEnabled(false)
-                panel.down:setEnabled(true)
-            elseif panel.list:getChildIndex(panel.list:getFocusedChild()) == #panel.list:getChildren() then
-                panel.up:setEnabled(true)
-                panel.down:setEnabled(false)
-            else
-                panel.up:setEnabled(true)
-                panel.down:setEnabled(true)
-            end
-        end
+  local list = listPanel.list
+  local existingChildren = list:getChildren()
+  local rulesCount = #config.rules
+  
+  -- Remove excess widgets (if rules were deleted)
+  for i = rulesCount + 1, #existingChildren do
+    local widget = existingChildren[i]
+    if widget then
+      widget:destroy()
+      ruleWidgetCache["rule_" .. i] = nil
     end
+  end
+  
+  -- Create or update widgets for each rule
+  for i, rule in ipairs(config.rules) do
+    createOrUpdateRuleWidget(list, rule, i)
+  end
+  
+  -- Invalidate macro cache
+  invalidateRulesCache()
 end
 refreshRules()
 
@@ -518,10 +617,14 @@ inputPanel.add.onClick = function(widget)
         table.insert(config.rules, ruleData) -- create new one
     end
 
-    for i, child in ipairs(listPanel.list:getChildren()) do
-        child.display = false
+    -- Reset display flag on all children
+    local children = listPanel.list:getChildren()
+    for i = 1, #children do
+        children[i].display = false
     end
+    
     resetFields()
+    invalidateRulesCache()  -- Important: invalidate cache after rule changes
     refreshRules()
 end
 
@@ -699,45 +802,48 @@ end
 
 local function markChild(child)
     if mainWindow:isVisible() then
-        for i, child in ipairs(listPanel.list:getChildren()) do
-            if child ~= widget then
-                child:setColor('white')
+        local children = listPanel.list:getChildren()
+        for i = 1, #children do
+            local c = children[i]
+            if c ~= child then
+                c:setColor('white')
             end
         end
-        widget:setColor('green')
+        if child then child:setColor('green') end
     end
 end
-
--- Non-blocking equipment manager state
-local lastEquipAction = 0
-local EQUIP_COOLDOWN = 200 -- ms between equip actions (prevents flicker)
-local missingItem = false
-local lastRule = false
-local correctEq = false
-local needsEquipCheck = true
 
 -- Subscribe to equipment change events from EventBus
 if EventBus then
   EventBus.on("equipment:change", function(slotId, slotName, newId, oldId, item)
-    needsEquipCheck = true
-    correctEq = false
+    EquipState.needsEquipCheck = true
+    EquipState.correctEq = false
   end, 50)
 end
 
+-- ============================================================================
+-- MAIN EQUIPMENT MACRO (Optimized)
+-- Uses cached rules instead of UI children iteration
+-- ============================================================================
+
 EquipManager = macro(100, function()
     if not config.enabled then return end
-    if #config.rules == 0 then return end
+    
+    -- Use cached rules (avoids expensive getChildren() call)
+    local rules = getCachedRules()
+    if not rules or #rules == 0 then return end
     
     -- Non-blocking cooldown check (prevents flicker)
     local currentTime = now
-    if (currentTime - lastEquipAction) < EQUIP_COOLDOWN then return end
+    if (currentTime - EquipState.lastEquipAction) < EquipState.EQUIP_COOLDOWN then return end
     
     -- Skip if nothing changed and we're already correct
-    if not needsEquipCheck and correctEq then return end
+    if not EquipState.needsEquipCheck and EquipState.correctEq then return end
 
-    for i, widget in ipairs(listPanel.list:getChildren()) do
-        local rule = widget.ruleData
-        if rule.enabled then
+    -- Iterate over cached rules (not UI widgets!)
+    for i = 1, #rules do
+        local rule = rules[i]
+        if rule and rule.enabled then
 
             -- conditions
             local firstCondition = interpreteCondition(rule.mainCondition, rule.mainValue)
@@ -750,15 +856,15 @@ EquipManager = macro(100, function()
             if finalCheck(firstCondition, rule.relation, optionalCondition) then
 
                 -- performance edits, loop reset
-                local resetLoop = not missingItem and correctEq and lastRule == rule
+                local resetLoop = not EquipState.missingItem and EquipState.correctEq and EquipState.lastRule == rule
                 if resetLoop then 
-                    needsEquipCheck = false
+                    EquipState.needsEquipCheck = false
                     return 
                 end
 
                 -- first check unequip
                 if unequipItem(rule.data) == true then
-                    lastEquipAction = currentTime
+                    EquipState.lastEquipAction = currentTime
                     return
                 end
 
@@ -768,29 +874,29 @@ EquipManager = macro(100, function()
                         if not isEquipped(item) then
                             if rule.visible then
                                 if findItem(item) then
-                                    missingItem = false
-                                    lastEquipAction = currentTime
+                                    EquipState.missingItem = false
+                                    EquipState.lastEquipAction = currentTime
                                     return equipItem(item, slot)
                                 else
-                                    missingItem = true
+                                    EquipState.missingItem = true
                                 end
                             else
-                                missingItem = false
-                                lastEquipAction = currentTime
+                                EquipState.missingItem = false
+                                EquipState.lastEquipAction = currentTime
                                 return equipItem(item, slot)
                             end
                         end
                     end
                 end
 
-                correctEq = not missingItem and true or false
-                lastRule = rule
-                needsEquipCheck = false
+                EquipState.correctEq = not EquipState.missingItem
+                EquipState.lastRule = rule
+                EquipState.needsEquipCheck = false
                 -- even if nothing was done, exit function to hold rule
                 return
             end
         end
     end
     
-    needsEquipCheck = false
+    EquipState.needsEquipCheck = false
 end)

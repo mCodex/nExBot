@@ -1,5 +1,5 @@
-SmartHuntAnalyticsWindow < MainWindow
-  text: SmartHunt Analytics
+HuntAnalyzerWindow < MainWindow
+  text: Hunt Analyzer
   width: 420
   height: 480
   @onEscape: self:destroy()

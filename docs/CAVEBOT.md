@@ -183,7 +183,7 @@ Sell items to NPC.
 
 ## 🛡️ Safety Features
 
-### Smart Execution System
+### Optimized Execution System
 
 > [!NOTE]
 > CaveBot now intelligently skips macro execution when not needed!
@@ -201,14 +201,14 @@ if shouldSkipExecution() then return end  -- Walking? Skip!
 
 ---
 
-### Smart Waypoint Guard
+### Waypoint Guard
 
 > [!IMPORTANT]
 > Checks distance from CURRENT waypoint, not first waypoint!
 
 **Key improvements over old guard:**
 
-| Old Guard | New Smart Guard |
+| Old Guard | New Waypoint Guard |
 |-----------|----------------|
 | Checked first waypoint | Checks **current focused waypoint** |
 | Ran every 250ms | **Rate-limited to every 5 seconds** |
@@ -229,9 +229,9 @@ WaypointGuard = {
 - Player is >100 tiles from current waypoint
 - After 3 consecutive failures → **skips to next waypoint**
 
-### Smart Pull Integration
+### Pull System Integration
 
-When TargetBot's Smart Pull is active:
+When TargetBot's Pull System is active:
 - CaveBot **pauses** waypoint execution
 - Player stays and fights current monsters
 - Prevents running away from respawns
@@ -326,7 +326,7 @@ gotolabel:refill
 
 **Check:**
 1. Is CaveBot enabled? (green light)
-2. Is TargetBot blocking it? (check smartPull)
+2. Is TargetBot blocking it? (check Pull System)
 3. Are there waypoints in the list?
 4. Is there a path to the waypoint?
 

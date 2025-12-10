@@ -122,7 +122,7 @@ CaveBot.clearWalkingState = function()
 end
 
 --[[
-  HIGH-PERFORMANCE WAYPOINT ENGINE v3.0
+  HIGH-PERFORMANCE WAYPOINT ENGINE
   
   A production-grade waypoint system with:
   - O(1) state lookups using hash maps
@@ -610,7 +610,7 @@ cavebotMacro = macro(250, function()
       return
     end
     
-    -- SMART PULL PAUSE: If smartPull is active, pause waypoint walking
+    -- PULL SYSTEM PAUSE: If smartPull is active, pause waypoint walking
     if TargetBot.smartPullActive then
       CaveBot.resetWalking()
       return

@@ -6,9 +6,12 @@ local lureEnabled = true
 local dangerValue = 0
 local looterStatus = ""
 
--- Smart Pull state (shared with CaveBot)
+-- Pull System state (shared with CaveBot)
 TargetBot = TargetBot or {}
 TargetBot.smartPullActive = false  -- When true, CaveBot pauses waypoint walking
+
+-- Use TargetBotCore if available (DRY principle)
+local Core = TargetCore or {}
 
 -- Creature type constants for clarity
 local CREATURE_TYPE = {
@@ -34,21 +37,24 @@ local STATUS_WAITING = "Waiting"
 local STATUS_ATTACK_PREFIX = "Attack & "
 
 --------------------------------------------------------------------------------
--- PERFORMANCE: Optimized Creature Cache with EventBus Integration
--- Uses event-driven updates instead of constant polling
+-- PERFORMANCE: Optimized Creature Cache
+-- Uses event-driven updates with LRU eviction and TargetCore integration
 --------------------------------------------------------------------------------
 local CreatureCache = {
-  monsters = {},          -- {id -> {creature, path, params, lastUpdate}}
+  monsters = {},          -- {id -> {creature, path, params, lastUpdate, priority}}
   monsterCount = 0,
   bestTarget = nil,
   bestPriority = 0,
   totalDanger = 0,
   dirty = true,           -- Flag to recalculate on next tick
   lastFullUpdate = 0,
-  FULL_UPDATE_INTERVAL = 500,  -- Full recalculation every 500ms
-  PATH_TTL = 300,         -- Path cache valid for 300ms
+  FULL_UPDATE_INTERVAL = 400,  -- Reduced for faster adaptation
+  PATH_TTL = 250,         -- Path cache valid for 250ms (faster invalidation)
   lastCleanup = 0,
-  CLEANUP_INTERVAL = 2000
+  CLEANUP_INTERVAL = 1500,
+  -- LRU eviction
+  accessOrder = {},       -- Array of IDs in access order
+  maxSize = 50            -- Max cached creatures
 }
 
 -- Mark cache as dirty (needs recalculation)
@@ -56,35 +62,76 @@ local function invalidateCache()
   CreatureCache.dirty = true
 end
 
--- Clean up stale cache entries
+-- LRU eviction helper: move ID to end of access order
+local function touchCreature(id)
+  local order = CreatureCache.accessOrder
+  -- Remove existing position
+  for i = #order, 1, -1 do
+    if order[i] == id then
+      table.remove(order, i)
+      break
+    end
+  end
+  -- Add to end (most recently used)
+  order[#order + 1] = id
+end
+
+-- LRU eviction: remove oldest entries when over capacity
+local function evictOldestCreatures()
+  local order = CreatureCache.accessOrder
+  while #order > CreatureCache.maxSize do
+    local oldestId = table.remove(order, 1)
+    if CreatureCache.monsters[oldestId] then
+      CreatureCache.monsters[oldestId] = nil
+      CreatureCache.monsterCount = CreatureCache.monsterCount - 1
+    end
+  end
+end
+
+-- Clean up stale cache entries (improved with LRU)
 local function cleanupCache()
   if now - CreatureCache.lastCleanup < CreatureCache.CLEANUP_INTERVAL then
     return
   end
   
-  local cutoff = now - 5000  -- Remove entries older than 5 seconds
+  local cutoff = now - 3000  -- Reduced from 5s to 3s for faster cleanup
   local newMonsters = {}
+  local newOrder = {}
   local count = 0
   
-  for id, data in pairs(CreatureCache.monsters) do
-    if data.lastUpdate > cutoff then
+  -- Keep only recent entries in access order
+  for i = 1, #CreatureCache.accessOrder do
+    local id = CreatureCache.accessOrder[i]
+    local data = CreatureCache.monsters[id]
+    if data and data.lastUpdate > cutoff and data.creature and not data.creature:isDead() then
       newMonsters[id] = data
+      newOrder[#newOrder + 1] = id
       count = count + 1
     end
   end
   
   CreatureCache.monsters = newMonsters
+  CreatureCache.accessOrder = newOrder
   CreatureCache.monsterCount = count
   CreatureCache.lastCleanup = now
+  invalidateCache()
 end
 
 -- Update a single creature in cache (called on events)
+-- Improved with LRU tracking and distance-based filtering
 local function updateCreatureInCache(creature)
   if not creature or creature:isDead() then
     local id = creature and creature:getId()
     if id and CreatureCache.monsters[id] then
       CreatureCache.monsters[id] = nil
       CreatureCache.monsterCount = CreatureCache.monsterCount - 1
+      -- Remove from access order
+      for i = #CreatureCache.accessOrder, 1, -1 do
+        if CreatureCache.accessOrder[i] == id then
+          table.remove(CreatureCache.accessOrder, i)
+          break
+        end
+      end
     end
     invalidateCache()
     return
@@ -96,23 +143,46 @@ local function updateCreatureInCache(creature)
   local pos = player:getPosition()
   local cpos = creature:getPosition()
   
-  -- Skip if too far
-  if math.abs(pos.x - cpos.x) > 10 or math.abs(pos.y - cpos.y) > 10 then
+  -- Use TargetBotCore distance if available, otherwise calculate
+  local dist
+  if Core.Geometry and Core.Geometry.chebyshevDistance then
+    dist = Core.Geometry.chebyshevDistance(pos, cpos)
+  else
+    dist = math.max(math.abs(pos.x - cpos.x), math.abs(pos.y - cpos.y))
+  end
+  
+  -- Skip if too far (reduced from 10 to 8 for better performance)
+  if dist > 8 then
     if CreatureCache.monsters[id] then
       CreatureCache.monsters[id] = nil
       CreatureCache.monsterCount = CreatureCache.monsterCount - 1
+      for i = #CreatureCache.accessOrder, 1, -1 do
+        if CreatureCache.accessOrder[i] == id then
+          table.remove(CreatureCache.accessOrder, i)
+          break
+        end
+      end
     end
     return
   end
   
   local entry = CreatureCache.monsters[id]
   if not entry then
-    entry = { creature = creature, lastUpdate = now }
+    entry = { 
+      creature = creature, 
+      lastUpdate = now,
+      distance = dist
+    }
     CreatureCache.monsters[id] = entry
     CreatureCache.monsterCount = CreatureCache.monsterCount + 1
+    touchCreature(id)
+    -- Check if we need to evict
+    evictOldestCreatures()
   else
     entry.creature = creature
     entry.lastUpdate = now
+    entry.distance = dist
+    touchCreature(id)
   end
   
   -- Recalculate path if needed
@@ -124,13 +194,20 @@ local function updateCreatureInCache(creature)
   invalidateCache()
 end
 
--- Remove creature from cache
+-- Remove creature from cache (with LRU cleanup)
 local function removeCreatureFromCache(creature)
   if not creature then return end
   local id = creature:getId()
   if CreatureCache.monsters[id] then
     CreatureCache.monsters[id] = nil
     CreatureCache.monsterCount = CreatureCache.monsterCount - 1
+    -- Remove from LRU order
+    for i = #CreatureCache.accessOrder, 1, -1 do
+      if CreatureCache.accessOrder[i] == id then
+        table.remove(CreatureCache.accessOrder, i)
+        break
+      end
+    end
     invalidateCache()
   end
 end

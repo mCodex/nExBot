@@ -1,5 +1,5 @@
 --[[
-  SmartHunt Analytics Module v4.0 (Advanced AI)
+  Hunt Analyzer Module v1.0
   
   Features:
   - Statistical analysis (standard deviation, trends, confidence)
@@ -339,7 +339,7 @@ local function updateTracking()
 end
 
 -- ============================================================================
--- INSIGHTS ENGINE (Advanced AI Analysis)
+-- INSIGHTS ENGINE (Analysis)
 -- Uses: Weighted scoring, trend analysis, statistical methods, correlation
 -- ============================================================================
 
@@ -514,7 +514,7 @@ local function calculateMetrics()
 end
 
 -- ============================================================================
--- AI INSIGHTS ANALYSIS
+-- INSIGHTS ANALYSIS
 -- ============================================================================
 
 function Insights.analyze()
@@ -892,7 +892,7 @@ local function buildSummary()
   
   -- Header
   table.insert(lines, "============================================")
-  table.insert(lines, "        SMARTHUNT ANALYTICS v4.0")
+  table.insert(lines, "          HUNT ANALYZER v1.0")
   table.insert(lines, "============================================")
   table.insert(lines, "")
   
@@ -963,7 +963,7 @@ local function buildSummary()
   
   -- Insights
   local insightsList = Insights.analyze()
-  table.insert(lines, "[AI INSIGHTS]")
+  table.insert(lines, "[INSIGHTS]")
   table.insert(lines, "--------------------------------------------")
   local insightLines = Insights.format(insightsList)
   for _, line in ipairs(insightLines) do table.insert(lines, line) end
@@ -987,7 +987,7 @@ local function showAnalytics()
   end
   
   -- Try to create window, fall back to console output
-  local ok, win = pcall(function() return UI.createWindow('SmartHuntAnalyticsWindow') end)
+  local ok, win = pcall(function() return UI.createWindow('HuntAnalyzerWindow') end)
   if not ok or not win then 
     print(buildSummary()) 
     return 
@@ -1034,13 +1034,14 @@ end
 
 UI.Separator()
 
-macro(5000, "SmartHunt Tracker", function()
+local huntTracker = macro(5000, "Hunt Tracker", function()
   if CaveBot and CaveBot.isOn() and not isSessionActive() then
     startSession()
     -- Session started silently
   end
   updateTracking()
 end)
+huntTracker:setOn(true)  -- Enable by default
 
 macro(1000, function() updateTracking() end)
 
@@ -1048,9 +1049,9 @@ macro(1000, function() updateTracking() end)
 -- UI BUTTON
 -- ============================================================================
 
-local btn = UI.Button("SmartHunt Analytics", function()
+local btn = UI.Button("Hunt Analyzer", function()
   local ok, err = pcall(showAnalytics)
-  if not ok then warn("[SmartHunt] " .. tostring(err)) print(buildSummary()) end
+  if not ok then warn("[HuntAnalyzer] " .. tostring(err)) print(buildSummary()) end
 end)
 if btn then btn:setTooltip("View hunting analytics") end
 
@@ -1068,4 +1069,4 @@ nExBot.Analytics = {
   getTrends = function() return trendData end
 }
 
-print("[SmartHunt] v4.0 loaded (Advanced AI)")
+print("[HuntAnalyzer] v1.0 loaded")

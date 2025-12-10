@@ -7,7 +7,7 @@
 ![OTClientV8](https://img.shields.io/badge/OTClientV8-compatible-orange.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1+-purple.svg)
 
-**A high-performance, event-driven automation bot for OTClientV8**
+**A high-performance automation bot for OTClientV8**
 
 [Features](#-features) • [Architecture](#-architecture) • [Installation](#-installation) • [Performance](#-performance)
 
@@ -18,23 +18,42 @@
 ## ✨ Features
 
 ### 🎯 TargetBot
-- **Smart Target Priority** - Weighted scoring with health, distance, and danger factors
-- **Wave Attack Avoidance** - Front-arc detection with anti-oscillation (300ms cooldown)
-- **Smart Pull with Pause** - Pauses waypoint walking to maximize exp/hour (prevents respawn loss)
+- **Weighted Target Priority** - Scoring with health, distance, and danger factors
+- **Wave Attack Avoidance** - Front-arc detection with dynamic scaling based on monster count
+- **Movement Coordinator** - Unified movement with dynamic confidence thresholds
+- **Dynamic Reactivity** - More reactive when surrounded (7+ monsters), conservative when few
+- **Monster Behavior Analysis** - Pattern recognition and attack prediction
+- **Spell Position Optimizer** - Calculates optimal position for AoE spell damage
+- **Pull with Pause** - Pauses waypoint walking to maximize exp/hour
 - **Tactical Reposition** - Multi-factor tile scoring (escape routes, danger zones, target distance)
 - **Dynamic Lure** - Pull more monsters when pack is below threshold
-- **Priority Movement System** - Safety → Survival → Positioning → Combat
+- **Priority Movement System** - Emergency → Safety → Kill → Spell → Distance → Chase
 - **Exclusion Patterns** - Use `!` prefix to exclude monsters (e.g., `*, !Dragon`)
 
+### 🧠 Monster Behavior System
+- **Behavior Tracking** - Real-time tracking of monster movement patterns
+- **Attack Prediction** - Predicts wave attacks based on monster facing and timing
+- **Pattern Learning** - Learns monster behavior (static, chase, kite, erratic)
+- **Confidence Scoring** - Each prediction includes confidence score (0-1)
+- **Extensible Database** - Register known monster patterns for better accuracy
+
+### ⚡ Movement Coordinator
+- **Intent-Based Architecture** - Each system registers movement "intents"
+- **Dynamic Threshold Scaling** - Thresholds adjust based on monster count
+- **Voting System** - Similar intents aggregate, conflicting intents cancel
+- **Adaptive Reactivity** - Low thresholds when surrounded, high when safe
+- **Strong Anti-Oscillation** - Tracks recent moves, blocks erratic behavior
+- **Dynamic Hysteresis** - Less sticky to positions when many monsters nearby
+- **Unified Decision Point** - Single coordinated movement execution
+
 ### 🗺️ CaveBot  
-- **Smart Execution System** - Skips macro ticks when walking (reduces CPU by 60%)
+- **Efficient Execution** - Skips macro ticks when walking (reduces CPU by 60%)
 - **Walk State Tracking** - Knows when walking is in progress, prevents redundant pathfinding
-- **Smart Waypoint Guard** - Checks CURRENT waypoint (not first), skips unreachable after 3 failures
+- **Waypoint Guard** - Checks CURRENT waypoint (not first), skips unreachable after 3 failures
 - **Stuck Detection** - Auto-recovers after 3 seconds of no movement
-- **Path Caching** - LRU cache with 2-second TTL and smart invalidation
-- **Smart Pull Integration** - Automatically pauses when TargetBot is pulling
+- **Path Caching** - LRU cache with 2-second TTL and invalidation
+- **Pull Integration** - Automatically pauses when TargetBot is pulling
 - **Floor Change Prevention** - Detects stairs/ladders to prevent accidental floor changes
-- **Optimized Pathfinding** - autoWalk first, manual findPath only if needed
 - **Native autoWalk** - Uses reliable OTClient pathfinding
 
 ### 💊 HealBot
@@ -49,37 +68,23 @@
 - **Monster Count Caching** - 100ms TTL reduces redundant calculations
 - **Attack Entry Caching** - 500ms cache for UI children list
 - **Lazy Safety Evaluation** - Only checks PvP/blacklist when needed
-- **Pre-cached Target Data** - Single target info fetch per tick
-- **Conditional Direction Calc** - Only calculates when Rotate is enabled
 - **Hotkey-Style Runes** - All rune types work without open backpack
-- **Non-Blocking Cooldowns** - No UI freezing
 
-### 📦 Container Panel
-- **Auto Open on Login** - Toggle to automatically open all containers when logging in
-- **Slot-Based Tracking** - Accurate nested container detection (no infinite loops)
-- **Quiver Support** - Opens equipped quiver from right hand slot
-- **Purse Support** - Opens purse alongside backpacks
-- **Auto Minimize** - Keeps UI clean by minimizing opened containers
-
-### 📊 SmartHunt Analytics v3.0
-- **Real-Time Tracking** - XP/hour, kills/hour, profit/hour with peak performance metrics
-- **Bot Integration** - Pulls detailed data from HealBot and AttackBot
-- **Spell Breakdown** - Shows exact count of each healing and attack spell used
-- **Potion/Rune Tracking** - Individual item usage with waste detection
-- **Damage Output** - Total damage dealt, damage/hour, avg damage per kill/attack
-- **Skill Gains** - Tracks all skill level increases during session
-- **Survivability Metrics** - Death count, near-death events, lowest HP, highest damage taken
-- **Economic Analysis** - Loot value, waste value, profit balance from Analyzer integration
-- **AI Insights Engine** - Intelligent recommendations including damage efficiency analysis
-- **Efficiency Score** - 0-100 weighted score based on 4 factor categories
-- **Peak Performance** - Tracks best XP/hour and kills/hour achieved
+### 📊 Hunt Analyzer
+- **Real-Time Tracking** - XP/hour, kills/hour, profit/hour with peak metrics
+- **Trend Analysis** - Rolling window with direction indicators (↑↓→)
+- **Confidence Scores** - Statistical confidence for all insights
+- **Stamina Tracking** - Session start stamina and time spent
+- **Bot Integration** - Pulls data from HealBot and AttackBot
+- **Insights Engine** - Recommendations with confidence levels
+- **Efficiency Score** - 0-100 weighted score based on multiple factors
 
 ### 🛠️ Core Utilities
-- **Object Pool** (`nExBot.acquireTable/releaseTable`) - Reusable tables to reduce GC
-- **Memoization** (`nExBot.memoize`) - Cache pure function results with optional TTL
+- **BotCore Module** - Unified statistics, cooldowns, and analytics
 - **EventBus** - Centralized event system for decoupled modules
-- **Shape Distance** - Circle/Square/Diamond/Cross distance calculations
-- **Multi-Client Support** - Per-character profile persistence (HealBot, AttackBot, CaveBot, TargetBot)
+- **Object Pool** - Reusable tables to reduce GC pressure
+- **Memoization** - Cache pure function results with optional TTL
+- **Multi-Client Support** - Per-character profile persistence
 
 ---
 
@@ -103,9 +108,14 @@ nExBot/
 │   ├── actions.lua          # Waypoint actions
 │   └── ...
 ├── targetbot/               # TargetBot system
-│   ├── target.lua           # Creature cache + EventBus
-│   ├── creature_attack.lua  # Movement priority system + reposition
+│   ├── target.lua           # Creature cache + EventBus + LRU eviction
+│   ├── creature_attack.lua  # Movement priority + MovementCoordinator
+│   ├── creature_priority.lua # Weighted scoring
 │   ├── creature.lua         # Config lookup with LRU cache
+│   ├── core.lua             # Pure utility functions (geometry, combat)
+│   ├── monster_behavior.lua # Behavior pattern recognition + prediction
+│   ├── spell_optimizer.lua  # AoE position optimization
+│   ├── movement_coordinator.lua # Intent voting + anti-oscillation
 │   └── ...
 └── storage/                 # User settings
 ```
@@ -114,33 +124,43 @@ nExBot/
 
 ```
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║           UNIFIED MOVEMENT SYSTEM v3 - Feature Integration                ║
+║      UNIFIED MOVEMENT SYSTEM - Coordinated Movement                       ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
 ║                                                                           ║
 ║  PHASE 1: CONTEXT GATHERING                                               ║
 ║  ├─ Health status (targetIsLowHealth = health < killUnder)               ║
 ║  ├─ Trapped detection (no walkable adjacent tiles)                       ║
 ║  ├─ Anchor position management                                           ║
-║  └─ Path distance calculation                                            ║
+║  ├─ Path distance calculation                                            ║
+║  └─ Monster behavior analysis (patterns, confidence)                     ║
 ║                                                                           ║
 ║  PHASE 2: LURE DECISIONS (CaveBot delegation)                            ║
 ║  ├─ SKIP if target has low health! (prevents abandoning kills)           ║
 ║  ├─ SKIP if player is trapped                                            ║
-║  ├─ smartPull → shape-based monster counting                             ║
+║  ├─ pull → shape-based monster counting                                  ║
 ║  ├─ dynamicLure → target count threshold                                 ║
 ║  └─ closeLure → legacy support                                           ║
 ║                                                                           ║
-║  PHASE 3: MOVEMENT PRIORITY                                               ║
-║  ├─ 1. SAFETY: avoidAttacks (wave avoidance)                             ║
-║  ├─ 2. SURVIVAL: Chase low-health targets (override all)                 ║
-║  ├─ 3. DISTANCE: keepDistance (ranged positioning + anchor)              ║
-║  ├─ 4. TACTICAL: rePosition (better tile + anchor)                       ║
-║  ├─ 5. MELEE: chase (close gap + anchor)                                 ║
-║  └─ 6. FACING: faceMonster (diagonal correction + anchor)                ║
+║  PHASE 3: MOVEMENT COORDINATOR (Intent-Based Voting)                      ║
+║  ├─ Dynamic scaling based on monster count                               ║
+║  ├─ 1. EMERGENCY (0.45→0.23): Critical danger evasion                    ║
+║  ├─ 2. WAVE_AVOID (0.70→0.35): Monster attack prediction                 ║
+║  ├─ 3. FINISH_KILL (0.65→0.33): Low-health target priority               ║
+║  ├─ 4. SPELL_POSITION (0.80→0.56): AoE optimization                      ║
+║  ├─ 5. CHASE (0.60→0.51): Close distance to target                       ║
+║  └─ 6. KEEP_DISTANCE (0.65→0.46): Ranged positioning                     ║
+║       (Thresholds show: base → with 7+ monsters)                         ║
+║                                                                           ║
+║  FEATURES:                                                                ║
+║  • Dynamic reactivity: reactive when surrounded, conservative when safe  ║
+║  • Behavior tracking, attack prediction, wave cooldowns                  ║
+║  • Position scoring for AoE spells/runes                                 ║
+║  • Confidence voting with dynamic hysteresis                             ║
+║  • Strong anti-oscillation (3 moves in 2.5s = blocked)                   ║
 ║                                                                           ║
 ║  INTEGRATIONS:                                                            ║
 ║  • anchor respected by: keepDistance, rePosition, chase, faceMonster     ║
-║  • targetIsLowHealth checked by: smartPull, dynamicLure, closeLure       ║
+║  • targetIsLowHealth checked by: pull, dynamicLure, closeLure            ║
 ║  • isTrapped checked by: dynamicLure, rePosition                         ║
 ║  • danger zones considered by: rePosition scoring                        ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
@@ -155,6 +175,9 @@ nExBot/
 | **Event-Driven** | Health/mana changes, creature updates, container opens |
 | **Slot Tracking** | Container opening without duplicates |
 | **Multi-Factor Scoring** | Tile evaluation for repositioning |
+| **Intent Voting** | MovementCoordinator confidence-based decisions |
+| **Behavior Analysis** | Monster pattern recognition |
+| **Pure Functions** | TargetBotCore geometry/combat utilities |
 
 ---
 
@@ -172,6 +195,9 @@ nExBot/
 | **AttackBot** | Unrolled loops | Direct comparisons |
 | **TargetBot** | Object pooling | Reuse cache entries |
 | **TargetBot** | Multi-factor scoring | Optimal tile selection |
+| **TargetBot** | LRU cache eviction | Bounded memory (50 entries) |
+| **MonsterAI** | Behavior caching | Pattern reuse per monster type |
+| **MovementCoordinator** | Intent deduplication | Reduced decision overhead |
 | **Containers** | Slot-based tracking | No infinite loops |
 | **Containers** | Event-driven opens | Responsive feedback |
 
@@ -211,37 +237,39 @@ local count = getMonstersAdvanced(range, nExBot.SHAPE.CIRCLE)
 - **Supported Bots**: HealBot, AttackBot, CaveBot, TargetBot profiles
 - **Auto-Restore** - Profiles automatically load when switching characters
 
-### SmartHunt Analytics v3.0
+### Hunt Analyzer
 - **Complete Rewrite** - Event-driven architecture using EventBus pattern
 - **Bot Integration** - Pulls real data from HealBot and AttackBot analytics APIs
 - **Damage Output Section** - Tracks damage dealt, damage/hour, damage per kill/attack
 - **Detailed Tracking**: Individual spell counts, potion/rune usage, waste detection
 - **Survivability Metrics**: Death count, near-death events, lowest HP, damage ratio
-- **AI Insights Engine**: Damage efficiency, attack diversity, resource optimization
+- **Insights Engine**: Damage efficiency, attack diversity, resource optimization
 - **Efficiency Score** (0-100) with multi-factor scoring
 
-### TargetBot Unified Movement System v3
+### TargetBot Unified Movement System
 - **Complete feature integration**: All features work together seamlessly
 - **Three-phase execution**: Context → Lure → Movement
 - **Priority-based movement**: Safety → Survival → Distance → Tactical → Melee → Facing
 - **Anchor integration**: All movement features respect anchor constraint
 - **Low-health protection**: Lure features won't trigger when target is almost dead
 - **Trapped detection**: Prevents lure when stuck
+- **Higher confidence thresholds**: Conservative movement to reduce oscillation
 
 ### Tactical Reposition
 - **2-tile search radius** with multi-factor scoring
-- **Escape routes** (+10 per walkable tile)
-- **Danger zones** (-15 per monster front arc)
+- **Escape routes** (+15 per walkable tile)
+- **Danger zones** (-22 per monster front arc)
 - **Target distance** (stay in attack range)
 - **Movement cost** (prefer closer tiles)
 - **Anchor constraint** (skip tiles outside anchor range)
+- **Stay bonus** (+15 for current position)
 
-### Smart Pull Improvements
+### Pull Improvements
 - **Shape-based counting**: Circle, Square, Diamond, Cross
 - **Health check first**: Never abandon low-health targets
 - **Visual shape labels**: Slider shows shape name instead of number
 
-### Container Panel v4
+### Container Panel
 - **Slot-based tracking**: Prevents infinite open/close loops
 - **Auto-open on login**: Toggle switch with `onPlayerHealthChange` detection
 - **Quiver support**: Opens equipped quiver from right hand slot
