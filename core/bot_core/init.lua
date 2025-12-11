@@ -26,14 +26,14 @@
 
 -- Initialize global namespace
 BotCore = BotCore or {}
-BotCore.version = "2.1.0"
+BotCore.version = "1.0.0"
 BotCore.initialized = false
 
 -- ============================================================================
 -- COMPONENT LOADING (order matters for dependencies)
 -- ============================================================================
 
-local basePath = "core/bot_core/"
+local basePath = "/core/bot_core/"
 
 -- Core managers (no dependencies)
 dofile(basePath .. "stats.lua")
