@@ -206,8 +206,13 @@ local function isSessionActive()
   return analytics.session.active == true
 end
 
+-- Captures player skills at session start for potential future skill gain tracking
+-- @return table Skills table with string keys: "skill_0" through "skill_6" (Fist, Club, Sword, Axe, Distance, Shielding, Fishing)
+--               and "mlevel" for Magic Level
+-- Note: Uses string keys (e.g., skills["skill_0"]) instead of numeric indices to avoid Lua sparse array issues
+--       Access pattern: skills["skill_" .. skillId] where skillId is 0-6, or skills["mlevel"]
+-- Currently stored but not used - reserved for future skill gain analytics feature
 local function captureSkills()
-  -- Use string keys to avoid sparse array issues (skill IDs 0-6 would create sparse array)
   local skills = {}
   for id = 0, 6 do skills["skill_" .. id] = Player.skill(id).current end
   skills["mlevel"] = Player.mlevel()
@@ -218,6 +223,8 @@ local function startSession()
   local stamInfo = Player.staminaInfo()
   local levelInfo = Player.levelProgress()
   
+  -- Session data structure:
+  -- startSkills: table with string keys "skill_0" to "skill_6" and "mlevel" (reserved for future use)
   analytics.session = {
     startTime = now, startXp = Player.exp(), startSkills = captureSkills(),
     startCap = Player.cap(), startStamina = stamInfo.minutes,
@@ -1094,7 +1101,20 @@ nExBot.Analytics = {
   getSummary = buildSummary,
   getMetrics = function() return analytics.metrics end,
   getElapsed = getElapsed,
-  getTrends = function() return trendData end
+  getTrends = function() return trendData end,
+  
+  -- Access session start skills data
+  -- @param skillId number 0-6 for combat skills (Fist, Club, Sword, Axe, Distance, Shielding, Fishing), or 7 for Magic Level
+  -- @return number The skill level at session start, or nil if no active session
+  getStartSkill = function(skillId)
+    if not analytics.session or not analytics.session.startSkills then return nil end
+    if skillId == 7 then
+      return analytics.session.startSkills["mlevel"]
+    elseif skillId >= 0 and skillId <= 6 then
+      return analytics.session.startSkills["skill_" .. skillId]
+    end
+    return nil
+  end
 }
 
 print("[HuntAnalyzer] v1.0 loaded")
