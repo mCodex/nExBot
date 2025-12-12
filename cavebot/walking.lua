@@ -165,10 +165,14 @@ end
 local function isFloorChangeTile(tilePos)
   if not tilePos then return false end
   
-  -- Periodic cache cleanup (inline, cheap)
-  if now - FloorChangeCache.lastCleanup > 5000 then
-    FloorChangeCache.tiles = {}
-    FloorChangeCache.lastCleanup = now
+  -- Periodic cache cleanup (guarded to run at most once per second)
+  FloorChangeCache.lastCleanupCheck = FloorChangeCache.lastCleanupCheck or 0
+  if now - FloorChangeCache.lastCleanupCheck > 1000 then
+    FloorChangeCache.lastCleanupCheck = now
+    if now - FloorChangeCache.lastCleanup > 5000 then
+      FloorChangeCache.tiles = {}
+      FloorChangeCache.lastCleanup = now
+    end
   end
   
   -- Check cache first
