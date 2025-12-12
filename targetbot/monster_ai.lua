@@ -133,7 +133,7 @@ function MonsterAI.Tracker.track(creature)
   if not creature or creature:isDead() then return end
   
   local id = creature:getId()
-  if not id then return end  -- Invalid creature
+  if not id then return end  -- Creature ID unavailable (invalid creature or getId() failed)
   if MonsterAI.Tracker.monsters[id] then return end  -- Already tracking
   
   local pos = creature:getPosition()

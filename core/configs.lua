@@ -225,6 +225,10 @@ local DEFAULTS = {
   eatFromCorpses = false,
   cavebotSell = { 23544, 3081 },
   -- Macro toggle states (all default to false/off)
+  -- NOTE: These defaults are also defined in bot_database.lua SCHEMA.
+  -- This duplication exists for backward compatibility with legacy code
+  -- that reads from ProfileStorage before BotDB is loaded.
+  -- BotDB.getSchema().macros is the authoritative source for new code.
   macroStates = {
     exchangeMoney = false,
     autoTradeMsg = false,

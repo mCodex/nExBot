@@ -391,23 +391,29 @@ function BotDB.registerMacro(macroRef, key, onEnable)
   local originalSetOn = macroRef.setOn
   local originalSetOff = macroRef.setOff
   
-  macroRef.setOn = function(val)
-    if originalSetOn then originalSetOn(val) end
-    
-    if initialized then
-      local newState = (val ~= false)
-      BotDB.set(path, newState)
-      if newState and onEnable then
-        schedule(50, onEnable)
+  -- Wrap setOn with state persistence (only if original exists)
+  if originalSetOn then
+    macroRef.setOn = function(val)
+      originalSetOn(val)
+      
+      if initialized then
+        local newState = (val ~= false)
+        BotDB.set(path, newState)
+        if newState and onEnable then
+          schedule(50, onEnable)
+        end
       end
     end
   end
   
-  macroRef.setOff = function(val)
-    if originalSetOff then originalSetOff(val) end
-    
-    if initialized then
-      BotDB.set(path, val == false)
+  -- Wrap setOff with state persistence (only if original exists)
+  if originalSetOff then
+    macroRef.setOff = function(val)
+      originalSetOff(val)
+      
+      if initialized then
+        BotDB.set(path, false)
+      end
     end
   end
   
@@ -416,10 +422,10 @@ function BotDB.registerMacro(macroRef, key, onEnable)
     originalSetOn(savedState)
   end
   
-  schedule(100, function()
-    initialized = true
-    _registeredMacros[key] = macroRef
-  end)
+  -- Set initialized immediately to avoid race condition
+  -- (user could toggle within 100ms of registration)
+  initialized = true
+  _registeredMacros[key] = macroRef
 end
 
 -- Get registered macro by key

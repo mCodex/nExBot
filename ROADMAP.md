@@ -4,7 +4,7 @@
 
 ---
 
-## � **WALKING MODULE v3.2.0** (Latest - December 2025)
+## 🚀 **WALKING MODULE v3.2.0** (Latest - December 2025)
 
 ### Complete Walking Rewrite ⭐⭐⭐ ✅ IMPLEMENTED
 - [x] **Floor-Change Prevention**: Validates ENTIRE path before autoWalk

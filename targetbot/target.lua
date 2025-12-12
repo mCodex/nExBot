@@ -388,10 +388,15 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
 
   -- Determine final enabled state:
   -- On initial load, use stored value if available; otherwise use config's enabled
+  -- Note: storage.targetbotEnabled can be true, false, or nil
+  -- - true/false: User explicitly set state, use that
+  -- - nil: Never set, use config default
+  -- To reset to config default, set storage.targetbotEnabled = nil
   local finalEnabled = enabled
   if not TargetBot._initialized then
     TargetBot._initialized = true
-    if storage.targetbotEnabled ~= nil then
+    -- Only use stored value if it is explicitly true or false
+    if storage.targetbotEnabled == true or storage.targetbotEnabled == false then
       finalEnabled = storage.targetbotEnabled
     end
   else

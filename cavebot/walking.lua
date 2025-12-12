@@ -107,7 +107,7 @@ local FLOOR_CHANGE_ITEMS = {
   -- Stairs up (stone)
   [432] = true, [433] = true, [434] = true, [435] = true,
   -- Wooden stairs
-  [1948] = true, [1949] = true, [1950] = true, [1951] = true,
+  [1949] = true, [1950] = true, [1951] = true,
   [1952] = true, [1953] = true, [1954] = true, [1955] = true,
   -- Ramps (very common cause of issues!)
   [1956] = true, [1957] = true, [1958] = true, [1959] = true,
@@ -123,15 +123,15 @@ local FLOOR_CHANGE_ITEMS = {
   [392] = true, [408] = true, [409] = true, [410] = true,
   [469] = true, [470] = true, [482] = true, [484] = true,
   -- Sewer grates
-  [426] = true, [427] = true, [428] = true, [429] = true,
+  [426] = true, [427] = true,
   -- Rope spots
   [384] = true, [418] = true, [386] = true,
   -- Teleports
-  [502] = true, [1387] = true, [1958] = true,
+  [502] = true, [1387] = true,
   -- Magic forcefields / portals
-  [1949] = true, [2129] = true, [2130] = true, [8709] = true,
+  [2129] = true, [2130] = true, [8709] = true,
   -- Trapdoors
-  [423] = true, [424] = true, [425] = true, [426] = true,
+  [423] = true, [424] = true, [425] = true,
   -- Ice/Desert/Jungle ramps
   [6915] = true, [6916] = true, [6917] = true, [6918] = true,
   [7545] = true, [7546] = true, [7547] = true, [7548] = true,

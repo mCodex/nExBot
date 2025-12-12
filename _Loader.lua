@@ -33,21 +33,21 @@ nExBot.loadTimes = loadTimes  -- Expose for debugging
 -- JSON serialization fails on these tables
 local function isSparseArray(tbl)
   if type(tbl) ~= "table" then return false end
-  local maxIndex = 0
-  local count = 0
+  local minIndex, maxIndex, count = nil, nil, 0
   for k, v in pairs(tbl) do
-    if type(k) == "number" then
-      if k > maxIndex then maxIndex = k end
+    if type(k) == "number" and k % 1 == 0 then
+      if not minIndex or k < minIndex then minIndex = k end
+      if not maxIndex or k > maxIndex then maxIndex = k end
       count = count + 1
     end
   end
-  -- It's sparse if numeric keys exist and max index > count (has gaps)
-  -- Or if it starts at 0 (Lua arrays should start at 1)
-  return count > 0 and (maxIndex > count or tbl[0] ~= nil)
+  -- It's sparse if numeric keys exist and there are gaps in the sequence
+  -- (i.e., not all integer keys between minIndex and maxIndex are present)
+  return count > 0 and (maxIndex - minIndex + 1 > count)
 end
 
 local function sanitizeTable(tbl, path, depth)
-  if type(tbl) ~= "table" or depth > 10 then return tbl end
+  if type(tbl) ~= "table" or depth > 5 then return tbl end
   
   -- If this table is a sparse array, convert numeric keys to strings
   if isSparseArray(tbl) then
