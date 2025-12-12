@@ -1107,7 +1107,7 @@ nExBot.Analytics = {
   -- @param skillId number 0-6 for combat skills (Fist, Club, Sword, Axe, Distance, Shielding, Fishing), or 7 for Magic Level
   -- @return number The skill level at session start, or nil if no active session
   getStartSkill = function(skillId)
-    if not analytics.session.startSkills then return nil end
+    if not analytics.session or not analytics.session.startSkills then return nil end
     if skillId == 7 then
       return analytics.session.startSkills["mlevel"]
     elseif skillId >= 0 and skillId <= 6 then
