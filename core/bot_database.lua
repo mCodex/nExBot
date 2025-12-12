@@ -418,13 +418,12 @@ function BotDB.registerMacro(macroRef, key, onEnable)
   end
   
   -- Set initial state
-  if originalSetOn then
-    originalSetOn(savedState)
-  end
-  
   -- Set initialized immediately to avoid race condition
   -- (user could toggle within 100ms of registration)
   initialized = true
+  if originalSetOn then
+    originalSetOn(savedState)
+  end
   _registeredMacros[key] = macroRef
 end
 
