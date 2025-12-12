@@ -464,13 +464,25 @@ CaveBot.walkTo = function(dest, maxDist, params)
   -- FIELD HANDLING: Use keyboard walking for paths with fields
   -- autoWalk/map-click doesn't work through fire/poison/energy fields
   if ignoreFields then
-    -- Use direct keyboard walk for first step (handles fields properly)
-    local firstDir = path[1]
-    if firstDir then
-      walk(firstDir)
-      return true
+    -- Walk through consecutive field tiles using keyboard walking
+    local currentPos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+    for i = 1, #path do
+      local dir = path[i]
+      local offset = getDirectionOffset(dir)
+      if not offset then break end
+      local nextPos = applyOffset(currentPos, offset)
+      -- Check if nextPos is a field tile; if not, stop walking
+      if not isFieldTile(nextPos) then
+        break
+      end
+      walk(dir)
+      currentPos = nextPos
+      -- Optionally, check if we've reached the destination
+      if posEquals(currentPos, dest) then
+        return true
+      end
     end
-    return false
+    return true
   end
   
   -- SMOOTH MOVEMENT: Use autoWalk for 3+ verified safe steps
