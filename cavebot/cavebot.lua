@@ -117,7 +117,7 @@ local waypointPositionCache = {} -- Waypoint position cache table
 local waypointCacheValid = false
 local waypointCacheFloors = {}
 local startupWaypointFound = false
-local startupCheckTime = 0
+local startupCheckTime = -500  -- Initialize to -500 to ensure 500ms delay works on first call
 
 --[[
   HIGH-PERFORMANCE WAYPOINT ENGINE
@@ -328,8 +328,21 @@ end
 
 -- ============================================================================
 -- RECOVERY STRATEGIES (ordered by likelihood of success)
--- Uses tiered approach: fast local search → global search → skip strategies
+-- Uses a tiered approach: fast local search → global search → skip strategies
 -- ============================================================================
+
+-- Helper function to focus a waypoint (DRY: used in recovery and startup)
+-- Focuses the waypoint BEFORE the target so next tick executes it
+-- @param targetChild widget The waypoint widget to focus
+-- @param targetIndex number The index of the waypoint
+local function focusWaypointBefore(targetChild, targetIndex)
+  local prevChild = ui.list:getChildByIndex(targetIndex - 1)
+  if prevChild then
+    ui.list:focusChild(prevChild)
+  else
+    ui.list:focusChild(targetChild)
+  end
+end
 
 local function executeRecovery()
   local attempt = WaypointEngine.recoveryAttempt
@@ -365,13 +378,7 @@ local function executeRecovery()
     
     if nearestChild then
       print("[CaveBot] Recovery: Found waypoint via global search at index " .. nearestIndex)
-      -- Focus the waypoint BEFORE so next tick executes it
-      local prevChild = ui.list:getChildByIndex(nearestIndex - 1)
-      if prevChild then
-        ui.list:focusChild(prevChild)
-      else
-        ui.list:focusChild(nearestChild)
-      end
+      focusWaypointBefore(nearestChild, nearestIndex)
       transitionTo("NORMAL")
       return true
     end
@@ -387,12 +394,7 @@ local function executeRecovery()
     
     if nearestChild then
       print("[CaveBot] Recovery: Found waypoint via extended global search at index " .. nearestIndex)
-      local prevChild = ui.list:getChildByIndex(nearestIndex - 1)
-      if prevChild then
-        ui.list:focusChild(prevChild)
-      else
-        ui.list:focusChild(nearestChild)
-      end
+      focusWaypointBefore(nearestChild, nearestIndex)
       transitionTo("NORMAL")
       return true
     end
@@ -774,7 +776,7 @@ CaveBot.isOn = function()
 end
 
 CaveBot.isOff = function()
-  return not config or not config.isOff or config.isOff()
+  return not config or not config.isOff or not config.isOff()
 end
 
 CaveBot.setOn = function(val)
@@ -857,14 +859,16 @@ local function parseGotoPosition(text)
 end
 
 -- Calculate Chebyshev distance (max of dx, dy) - used for "within range" checks
--- @param p1, p2 tables with x, y fields
+-- @param p1 table Table with x, y fields (first position)
+-- @param p2 table Table with x, y fields (second position)
 -- @return number
 chebyshevDist = function(p1, p2)
   return math.max(math.abs(p1.x - p2.x), math.abs(p1.y - p2.y))
 end
 
 -- Calculate Manhattan distance (dx + dy) - used for path length estimation
--- @param p1, p2 tables with x, y fields
+-- @param p1 table Table with x, y fields (first position)
+-- @param p2 table Table with x, y fields (second position)
 -- @return number
 local function manhattanDist(p1, p2)
   return math.abs(p1.x - p2.x) + math.abs(p1.y - p2.y)
@@ -1067,13 +1071,7 @@ checkStartupWaypoint = function()
   
   if nearestChild then
     print("[CaveBot] Startup: Found nearest reachable waypoint at index " .. nearestIndex)
-    -- Focus the waypoint BEFORE the found one (so next tick executes it)
-    local prevChild = ui.list:getChildByIndex(nearestIndex - 1)
-    if prevChild then
-      ui.list:focusChild(prevChild)
-    else
-      ui.list:focusChild(nearestChild)
-    end
+    focusWaypointBefore(nearestChild, nearestIndex)
     startupWaypointFound = true
     return
   end
@@ -1087,12 +1085,7 @@ checkStartupWaypoint = function()
   
   if extendedChild then
     print("[CaveBot] Startup: Found waypoint at extended range, index " .. extendedIndex)
-    local prevChild = ui.list:getChildByIndex(extendedIndex - 1)
-    if prevChild then
-      ui.list:focusChild(prevChild)
-    else
-      ui.list:focusChild(extendedChild)
-    end
+    focusWaypointBefore(extendedChild, extendedIndex)
   else
     warn("[CaveBot] Startup: No reachable waypoint found. Bot may be stuck.")
   end

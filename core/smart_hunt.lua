@@ -1068,7 +1068,7 @@ end
 
 -- Background tracking (no visible button)
 macro(5000, function()
-  if CaveBot and CaveBot.isOn and CaveBot.isOn() and not isSessionActive() then
+  if CaveBot and type(CaveBot.isOn) == "function" and CaveBot.isOn() and not isSessionActive() then
     startSession()
   end
   updateTracking()
