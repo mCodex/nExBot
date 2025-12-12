@@ -112,6 +112,7 @@ end
 
 -- Create the macro (empty function - logic is in event handler)
 local antiRsMacro = macro(50, "AntiRS & Msg", function() end)
+BotDB.registerMacro(antiRsMacro, "antiRs")
 
 -- Listen for murder warning messages
 onTextMessage(function(mode, text)

@@ -2,10 +2,12 @@ local voc = player:getVocation()
 if voc == 1 or voc == 11 then
     setDefaultTab("Cave")
     UI.Separator()
-    local m = macro(100000, "Exeta when low hp", function() end)
+    local exetaLowHpMacro = macro(100000, "Exeta when low hp", function() end)
+    BotDB.registerMacro(exetaLowHpMacro, "exetaLowHp")
+    
     local lastCast = now
     onCreatureHealthPercentChange(function(creature, healthPercent)
-        if m.isOff() then return end
+        if exetaLowHpMacro.isOff() then return end
         if healthPercent > 15 then return end 
         if CaveBot.isOff() or TargetBot.isOff() then return end
         if modules.game_cooldown.isGroupCooldownIconActive(3) then return end
@@ -18,7 +20,7 @@ if voc == 1 or voc == 11 then
 
     -- Non-blocking cooldown for exeta if player nearby
     local lastExetaPlayer = 0
-    macro(500, "ExetaIfPlayer", function()
+    local exetaIfPlayerMacro = macro(500, "ExetaIfPlayer", function()
         if CaveBot.isOff() then return end
         -- Non-blocking cooldown check
         if (now - lastExetaPlayer) < 6000 then return end
@@ -27,5 +29,6 @@ if voc == 1 or voc == 11 then
     		lastExetaPlayer = now
     	end
     end)
+    BotDB.registerMacro(exetaIfPlayerMacro, "exetaIfPlayer")
     UI.Separator()
 end

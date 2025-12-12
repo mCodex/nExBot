@@ -133,13 +133,9 @@ if eatFoodMacro and eatFoodMacro.button then
   eatFoodMacro.button:setTooltip("Automatically eats food until full (10+ min regen).\nRuns every 3 minutes and eats multiple pieces.\nSearches all open containers for supported food items.\nSupports: Brown Mushroom, Ham, Fish, Bread, Cheese, and more.")
 end
 
--- Trigger eat immediately when enabled using .onSwitch callback
-eatFoodMacro.onSwitch = function(macro, enabled)
-  if enabled then
-    schedule(100, function()
-      eatUntilFull()
-    end)
-  end
-end
+-- Setup persistence with onEnable callback to eat immediately
+BotDB.registerMacro(eatFoodMacro, "eatFood", function()
+  eatUntilFull()
+end)
 
 UI.Separator()

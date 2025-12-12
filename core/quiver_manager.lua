@@ -208,7 +208,7 @@ if voc() == 2 or voc() == 12 then
     end
     
     -- Main macro - runs less frequently, with cooldown protection
-    macro(300, "Quiver Manager", function()
+    local quiverManagerMacro = macro(300, "Quiver Manager", function()
         -- Skip if nothing changed
         if not needsCheck then return end
         
@@ -264,4 +264,5 @@ if voc() == 2 or voc() == 12 then
             lastMoveTime = currentTime -- Just moved something, apply cooldown
         end
     end)
+    BotDB.registerMacro(quiverManagerMacro, "quiverManager")
 end

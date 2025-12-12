@@ -164,6 +164,7 @@ loadCategory("core", {
   "lib",              -- Utility library
   "new_cavebot_lib",  -- CaveBot library
   "configs",          -- Configuration system
+  "bot_database",     -- Unified database (BotDB) - load AFTER configs
 })
 
 -- 2. Architecture Layer (Event system, state management)

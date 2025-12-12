@@ -224,7 +224,22 @@ local DEFAULTS = {
   },
   eatFromCorpses = false,
   cavebotSell = { 23544, 3081 },
-  fishingEnabled = false  -- Fishing macro state
+  -- Macro toggle states (all default to false/off)
+  macroStates = {
+    exchangeMoney = false,
+    autoTradeMsg = false,
+    autoHaste = false,
+    autoMount = false,
+    manaTraining = false,
+    eatFood = false,
+    antiRs = false,
+    holdTarget = false,
+    exetaLowHp = false,
+    exetaIfPlayer = false,
+    depotWithdraw = false,
+    quiverManager = false,
+    fishing = false
+  }
 }
 
 -- Internal cache for profile settings
@@ -263,6 +278,12 @@ local function saveToolsConfig()
   if not status then
     warn("[ProfileStorage] Error encoding config: " .. tostring(result))
     return
+  end
+  
+  -- Ensure directory exists before writing
+  local dirPath = profilePath
+  if not g_resources.directoryExists(dirPath) then
+    g_resources.makeDir(dirPath)
   end
   
   g_resources.writeFileContents(toolsConfigFile, result)

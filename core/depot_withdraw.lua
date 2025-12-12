@@ -23,7 +23,7 @@ function reopenLootContainer()
 
 end
 
-macro(50, "Depot Withdraw", function()
+local depotWithdrawMacro = macro(50, "Depot Withdraw", function()
   
   -- set the containers
   if not potionsContainer or not runesContainer or not ammoContainer then
@@ -74,3 +74,4 @@ if playerContainer and freecap() >= 200 then
 end
 
 end)
+BotDB.registerMacro(depotWithdrawMacro, "depotWithdraw")

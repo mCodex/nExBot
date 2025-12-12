@@ -9,7 +9,7 @@ onKeyPress(function(keys)
     end
 end)
 
-macro(100, "Hold Target", function()
+local holdTargetMacro = macro(100, "Hold Target", function()
     -- if attacking then save it as target, but check pos z in case of marking by mistake on other floor
     if target() and target():getPosition().z == posz() and not target():isNpc() then
         targetID = target():getId()
@@ -27,4 +27,5 @@ macro(100, "Hold Target", function()
             end
         end
     end
-end) 
+end)
+BotDB.registerMacro(holdTargetMacro, "holdTarget") 

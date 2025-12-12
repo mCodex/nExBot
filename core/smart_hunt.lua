@@ -671,15 +671,7 @@ function Insights.analyze()
   end
   
   -- ========== PROTECTION ANALYSIS ==========
-  
-  local blessCount = Player.blessings()
-  if blessCount < 5 then
-    if m.nearDeathCount >= 2 or m.deathCount > 0 then
-      addInsight(results, SEVERITY.WARNING, "Protection", string.format("Only %d blessings with %d close calls. Get full bless!", blessCount, m.nearDeathCount), 0.95)
-    elseif metrics.damageRatio > 0.7 then
-      addInsight(results, SEVERITY.TIP, "Protection", string.format("%d/5 blessings. Recommend full protection.", blessCount), 0.7)
-    end
-  end
+  -- Blessings analysis removed - server-specific data
   
   -- ========== CONSISTENCY ANALYSIS ==========
   
@@ -954,7 +946,6 @@ local function buildSummary()
   -- Player
   addSection(lines, "PLAYER", {
     "Magic Level: " .. Player.mlevel(),
-    "Blessings: " .. Player.blessings(),
     "Speed: " .. Player.speed()
   })
   
