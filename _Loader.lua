@@ -35,7 +35,7 @@ local function isSparseArray(tbl)
   if type(tbl) ~= "table" then return false end
   local minIndex, maxIndex, count = nil, nil, 0
   for k, v in pairs(tbl) do
-    if type(k) == "number" and k % 1 == 0 then
+    if type(k) == "number" and k % 1 == 0 and k > 0 then
       if not minIndex or k < minIndex then minIndex = k end
       if not maxIndex or k > maxIndex then maxIndex = k end
       count = count + 1
