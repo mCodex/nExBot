@@ -207,9 +207,10 @@ local function isSessionActive()
 end
 
 local function captureSkills()
+  -- Use string keys to avoid sparse array issues (skill IDs 0-6 would create sparse array)
   local skills = {}
-  for id = 0, 6 do skills[id] = Player.skill(id).current end
-  skills[7] = Player.mlevel()
+  for id = 0, 6 do skills["skill_" .. id] = Player.skill(id).current end
+  skills["mlevel"] = Player.mlevel()
   return skills
 end
 
@@ -980,8 +981,38 @@ end
 
 local analyticsWindow = nil
 
+-- Live update flag for analytics window (must be defined before showAnalytics)
+local liveUpdatesActive = false
+
+local function stopLiveUpdates()
+  liveUpdatesActive = false
+end
+
+local function doLiveUpdate()
+  if not liveUpdatesActive then return end
+  
+  if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
+    pcall(function()
+      analyticsWindow.content.textContent:setText(buildSummary())
+    end)
+    -- Schedule next update
+    schedule(1000, doLiveUpdate)
+  else
+    -- Window closed, stop live updates
+    liveUpdatesActive = false
+  end
+end
+
+local function startLiveUpdates()
+  if liveUpdatesActive then return end  -- Already running
+  liveUpdatesActive = true
+  -- Start the update loop
+  schedule(1000, doLiveUpdate)
+end
+
 local function showAnalytics()
   if analyticsWindow then 
+    stopLiveUpdates()  -- Stop any existing live updates
     pcall(function() analyticsWindow:destroy() end)
     analyticsWindow = nil 
   end
@@ -1002,6 +1033,7 @@ local function showAnalytics()
   
   if analyticsWindow.buttons then
     if analyticsWindow.buttons.refreshButton then
+      -- Keep refresh button for manual refresh, but it's less needed now
       analyticsWindow.buttons.refreshButton.onClick = function() 
         if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
           analyticsWindow.content.textContent:setText(buildSummary()) 
@@ -1010,6 +1042,7 @@ local function showAnalytics()
     end
     if analyticsWindow.buttons.closeButton then
       analyticsWindow.buttons.closeButton.onClick = function() 
+        stopLiveUpdates()  -- Stop live updates when closing
         if analyticsWindow then pcall(function() analyticsWindow:destroy() end) end
         analyticsWindow = nil 
       end
@@ -1026,28 +1059,32 @@ local function showAnalytics()
   
   -- Safely show window
   pcall(function() analyticsWindow:show():raise():focus() end)
+  
+  -- Start live updates
+  startLiveUpdates()
 end
 
 -- ============================================================================
--- MACROS (Hidden)
+-- MACROS (Hidden - runs automatically in background)
 -- ============================================================================
 
-UI.Separator()
-
-local huntTracker = macro(5000, "Hunt Tracker", function()
+-- Background tracking (no visible button)
+macro(5000, function()
   if CaveBot and CaveBot.isOn() and not isSessionActive() then
     startSession()
-    -- Session started silently
   end
   updateTracking()
 end)
-huntTracker:setOn(true)  -- Enable by default
 
 macro(1000, function() updateTracking() end)
 
 -- ============================================================================
 -- UI BUTTON
 -- ============================================================================
+
+UI.Separator();
+
+UI.Label("Statistics:")
 
 local btn = UI.Button("Hunt Analyzer", function()
   local ok, err = pcall(showAnalytics)
