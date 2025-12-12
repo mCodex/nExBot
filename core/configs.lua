@@ -226,8 +226,10 @@ local DEFAULTS = {
   cavebotSell = { 23544, 3081 },
   -- Macro toggle states (all default to false/off)
   -- NOTE: These defaults are also defined in bot_database.lua SCHEMA.
-  -- This duplication exists for backward compatibility with legacy code
-  -- that reads from ProfileStorage before BotDB is loaded.
+  -- This duplication was originally for backward compatibility with legacy code
+  -- that read from ProfileStorage before BotDB was loaded. As of loader changes,
+  -- bot_database.lua is loaded before configs.lua, so BotDB is available when configs loads.
+  -- The duplication is retained for safety and until all legacy code is refactored.
   -- BotDB.getSchema().macros is the authoritative source for new code.
   macroStates = {
     exchangeMoney = false,
