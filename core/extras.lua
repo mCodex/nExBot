@@ -311,7 +311,7 @@ if true then
   end
   
   macro(400, function()
-    if not CaveBot.isOn() or not settings.stake then return end
+    if not CaveBot or not CaveBot.isOn or not CaveBot.isOn() or not settings.stake then return end
     
     local playerPos = player:getPosition()
     local playerZ = playerPos.z
