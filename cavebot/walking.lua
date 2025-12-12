@@ -101,40 +101,51 @@ end
 
 -- Comprehensive floor-change item IDs
 local FLOOR_CHANGE_ITEMS = {
-  -- Stairs down (stone)
+  -- === STAIRS ===
+  -- Stone stairs down (414-417, 428-431)
   [414] = true, [415] = true, [416] = true, [417] = true,
   [428] = true, [429] = true, [430] = true, [431] = true,
-  -- Stairs up (stone)
+  -- Stone stairs up (432-435)
   [432] = true, [433] = true, [434] = true, [435] = true,
-  -- Wooden stairs
+  -- Wooden stairs (1949-1955)
   [1949] = true, [1950] = true, [1951] = true,
   [1952] = true, [1953] = true, [1954] = true, [1955] = true,
-  -- Ramps (very common cause of issues!)
+  
+  -- === RAMPS ===
+  -- Standard ramps (1956-1959) - very common cause of pathfinding issues!
   [1956] = true, [1957] = true, [1958] = true, [1959] = true,
-  [4834] = true, [4835] = true, [4836] = true, [4837] = true,
-  [4838] = true, [4839] = true, [4840] = true, [4841] = true,
-  -- Stone ramps
+  -- Stone/Cave ramps (1385, 1396-1402)
   [1385] = true, [1396] = true, [1397] = true, [1398] = true,
   [1399] = true, [1400] = true, [1401] = true, [1402] = true,
-  -- Ladders
-  [1386] = true, [3678] = true, [5543] = true, [1219] = true,
-  -- Holes / pitfalls
+  -- Special terrain ramps (4834-4841)
+  [4834] = true, [4835] = true, [4836] = true, [4837] = true,
+  [4838] = true, [4839] = true, [4840] = true, [4841] = true,
+  -- Ice ramps (6915-6918)
+  [6915] = true, [6916] = true, [6917] = true, [6918] = true,
+  -- Desert/Jungle ramps (7545-7548)
+  [7545] = true, [7546] = true, [7547] = true, [7548] = true,
+  
+  -- === LADDERS & ROPE SPOTS ===
+  -- Ladders (1219, 1386, 3678, 5543)
+  [1219] = true, [1386] = true, [3678] = true, [5543] = true,
+  -- Rope spots (384, 386, 418)
+  [384] = true, [386] = true, [418] = true,
+  
+  -- === HOLES & TRAPDOORS ===
+  -- Holes and pitfalls (294, 369-370, 383, 392, 408-410, 469-470, 482, 484)
   [294] = true, [369] = true, [370] = true, [383] = true,
   [392] = true, [408] = true, [409] = true, [410] = true,
   [469] = true, [470] = true, [482] = true, [484] = true,
-  -- Sewer grates
-  [426] = true, [427] = true,
-  -- Rope spots
-  [384] = true, [418] = true, [386] = true,
-  -- Teleports
-  [502] = true, [1387] = true,
-  -- Magic forcefields / portals
-  [2129] = true, [2130] = true, [8709] = true,
-  -- Trapdoors
+  -- Trapdoors (423-425)
   [423] = true, [424] = true, [425] = true,
-  -- Ice/Desert/Jungle ramps
-  [6915] = true, [6916] = true, [6917] = true, [6918] = true,
-  [7545] = true, [7546] = true, [7547] = true, [7548] = true,
+  -- Sewer grates (426-427)
+  [426] = true, [427] = true,
+  
+  -- === TELEPORTS & PORTALS ===
+  -- Basic teleports (502, 1387)
+  [502] = true, [1387] = true,
+  -- Magic forcefields and portals (2129-2130, 8709)
+  [2129] = true, [2130] = true, [8709] = true,
 }
 
 -- Pure: Check if tile has floor-change ground
