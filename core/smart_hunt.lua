@@ -206,10 +206,16 @@ local function isSessionActive()
   return analytics.session.active == true
 end
 
+-- Captures player skills at session start for potential future skill gain tracking
+-- @return table Skills table with string keys: "skill_0" through "skill_6" (Fist, Club, Sword, Axe, Distance, Shielding, Fishing)
+--               and "mlevel" for Magic Level
+-- Note: Uses string keys (e.g., skills["skill_0"]) instead of numeric indices to avoid Lua sparse array issues
+--       Access pattern: skills["skill_" .. skillId] where skillId is 0-6, or skills["mlevel"]
+-- Currently stored but not used - reserved for future skill gain analytics feature
 local function captureSkills()
   local skills = {}
-  for id = 0, 6 do skills[id] = Player.skill(id).current end
-  skills[7] = Player.mlevel()
+  for id = 0, 6 do skills["skill_" .. id] = Player.skill(id).current end
+  skills["mlevel"] = Player.mlevel()
   return skills
 end
 
@@ -217,6 +223,8 @@ local function startSession()
   local stamInfo = Player.staminaInfo()
   local levelInfo = Player.levelProgress()
   
+  -- Session data structure:
+  -- startSkills: table with string keys "skill_0" to "skill_6" and "mlevel" (reserved for future use)
   analytics.session = {
     startTime = now, startXp = Player.exp(), startSkills = captureSkills(),
     startCap = Player.cap(), startStamina = stamInfo.minutes,
@@ -670,15 +678,7 @@ function Insights.analyze()
   end
   
   -- ========== PROTECTION ANALYSIS ==========
-  
-  local blessCount = Player.blessings()
-  if blessCount < 5 then
-    if m.nearDeathCount >= 2 or m.deathCount > 0 then
-      addInsight(results, SEVERITY.WARNING, "Protection", string.format("Only %d blessings with %d close calls. Get full bless!", blessCount, m.nearDeathCount), 0.95)
-    elseif metrics.damageRatio > 0.7 then
-      addInsight(results, SEVERITY.TIP, "Protection", string.format("%d/5 blessings. Recommend full protection.", blessCount), 0.7)
-    end
-  end
+  -- Blessings analysis removed - server-specific data
   
   -- ========== CONSISTENCY ANALYSIS ==========
   
@@ -953,7 +953,6 @@ local function buildSummary()
   -- Player
   addSection(lines, "PLAYER", {
     "Magic Level: " .. Player.mlevel(),
-    "Blessings: " .. Player.blessings(),
     "Speed: " .. Player.speed()
   })
   
@@ -980,8 +979,38 @@ end
 
 local analyticsWindow = nil
 
+-- Live update flag for analytics window (must be defined before showAnalytics)
+local liveUpdatesActive = false
+
+local function stopLiveUpdates()
+  liveUpdatesActive = false
+end
+
+local function doLiveUpdate()
+  if not liveUpdatesActive then return end
+  
+  if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
+    pcall(function()
+      analyticsWindow.content.textContent:setText(buildSummary())
+    end)
+    -- Schedule next update
+    schedule(1000, doLiveUpdate)
+  else
+    -- Window closed, stop live updates
+    liveUpdatesActive = false
+  end
+end
+
+local function startLiveUpdates()
+  if liveUpdatesActive then return end  -- Already running
+  liveUpdatesActive = true
+  -- Start the update loop
+  schedule(1000, doLiveUpdate)
+end
+
 local function showAnalytics()
   if analyticsWindow then 
+    stopLiveUpdates()  -- Stop any existing live updates
     pcall(function() analyticsWindow:destroy() end)
     analyticsWindow = nil 
   end
@@ -1002,6 +1031,7 @@ local function showAnalytics()
   
   if analyticsWindow.buttons then
     if analyticsWindow.buttons.refreshButton then
+      -- Keep refresh button for manual refresh, but it's less needed now
       analyticsWindow.buttons.refreshButton.onClick = function() 
         if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
           analyticsWindow.content.textContent:setText(buildSummary()) 
@@ -1010,6 +1040,7 @@ local function showAnalytics()
     end
     if analyticsWindow.buttons.closeButton then
       analyticsWindow.buttons.closeButton.onClick = function() 
+        stopLiveUpdates()  -- Stop live updates when closing
         if analyticsWindow then pcall(function() analyticsWindow:destroy() end) end
         analyticsWindow = nil 
       end
@@ -1026,28 +1057,32 @@ local function showAnalytics()
   
   -- Safely show window
   pcall(function() analyticsWindow:show():raise():focus() end)
+  
+  -- Start live updates
+  startLiveUpdates()
 end
 
 -- ============================================================================
--- MACROS (Hidden)
+-- MACROS (Hidden - runs automatically in background)
 -- ============================================================================
 
-UI.Separator()
-
-local huntTracker = macro(5000, "Hunt Tracker", function()
+-- Background tracking (no visible button)
+macro(5000, function()
   if CaveBot and CaveBot.isOn() and not isSessionActive() then
     startSession()
-    -- Session started silently
   end
   updateTracking()
 end)
-huntTracker:setOn(true)  -- Enable by default
 
 macro(1000, function() updateTracking() end)
 
 -- ============================================================================
 -- UI BUTTON
 -- ============================================================================
+
+UI.Separator();
+
+UI.Label("Statistics:")
 
 local btn = UI.Button("Hunt Analyzer", function()
   local ok, err = pcall(showAnalytics)
@@ -1066,7 +1101,20 @@ nExBot.Analytics = {
   getSummary = buildSummary,
   getMetrics = function() return analytics.metrics end,
   getElapsed = getElapsed,
-  getTrends = function() return trendData end
+  getTrends = function() return trendData end,
+  
+  -- Access session start skills data
+  -- @param skillId number 0-6 for combat skills (Fist, Club, Sword, Axe, Distance, Shielding, Fishing), or 7 for Magic Level
+  -- @return number The skill level at session start, or nil if no active session
+  getStartSkill = function(skillId)
+    if not analytics.session or not analytics.session.startSkills then return nil end
+    if skillId == 7 then
+      return analytics.session.startSkills["mlevel"]
+    elseif skillId >= 0 and skillId <= 6 then
+      return analytics.session.startSkills["skill_" .. skillId]
+    end
+    return nil
+  end
 }
 
 print("[HuntAnalyzer] v1.0 loaded")

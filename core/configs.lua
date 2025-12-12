@@ -224,7 +224,28 @@ local DEFAULTS = {
   },
   eatFromCorpses = false,
   cavebotSell = { 23544, 3081 },
-  fishingEnabled = false  -- Fishing macro state
+  -- Macro toggle states (all default to false/off)
+  -- NOTE: These defaults are also defined in bot_database.lua SCHEMA.
+  -- This duplication was originally for backward compatibility with legacy code
+  -- that read from ProfileStorage before BotDB was loaded. As of loader changes,
+  -- bot_database.lua is loaded before configs.lua, so BotDB is available when configs loads.
+  -- The duplication is retained for safety and until all legacy code is refactored.
+  -- BotDB.getSchema().macros is the authoritative source for new code.
+  macroStates = {
+    exchangeMoney = false,
+    autoTradeMsg = false,
+    autoHaste = false,
+    autoMount = false,
+    manaTraining = false,
+    eatFood = false,
+    antiRs = false,
+    holdTarget = false,
+    exetaLowHp = false,
+    exetaIfPlayer = false,
+    depotWithdraw = false,
+    quiverManager = false,
+    fishing = false
+  }
 }
 
 -- Internal cache for profile settings
@@ -263,6 +284,12 @@ local function saveToolsConfig()
   if not status then
     warn("[ProfileStorage] Error encoding config: " .. tostring(result))
     return
+  end
+  
+  -- Ensure directory exists before writing
+  local dirPath = profilePath
+  if not g_resources.directoryExists(dirPath) then
+    g_resources.makeDir(dirPath)
   end
   
   g_resources.writeFileContents(toolsConfigFile, result)

@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![OTClientV8](https://img.shields.io/badge/OTClientV8-compatible-orange.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1+-purple.svg)
@@ -47,14 +47,17 @@
 - **Unified Decision Point** - Single coordinated movement execution
 
 ### 🗺️ CaveBot  
+- **Walking Module v3.2.0** - Complete rewrite with floor-change prevention
+- **Floor Change Prevention** - Validates entire path before walking (stairs/ladders/ramps)
+- **Field Handling** - Respects `ignoreFields` config, keyboard walking through fire/poison/energy
+- **Chunked Walking** - 15 tiles per autoWalk call keeps paths fresh
+- **Tiered Validation** - Thorough check for near tiles, fast minimap for far tiles
 - **Efficient Execution** - Skips macro ticks when walking (reduces CPU by 60%)
 - **Walk State Tracking** - Knows when walking is in progress, prevents redundant pathfinding
 - **Waypoint Guard** - Checks CURRENT waypoint (not first), skips unreachable after 3 failures
 - **Stuck Detection** - Auto-recovers after 3 seconds of no movement
-- **Path Caching** - LRU cache with 2-second TTL and invalidation
 - **Pull Integration** - Automatically pauses when TargetBot is pulling
-- **Floor Change Prevention** - Detects stairs/ladders to prevent accidental floor changes
-- **Native autoWalk** - Uses reliable OTClient pathfinding
+- **Native autoWalk** - Uses reliable OTClient pathfinding with keyboard fallback
 
 ### 💊 HealBot
 - **75ms Spell Response** - Ultra-fast healing for critical situations
@@ -104,7 +107,7 @@ nExBot/
 │   └── ...
 ├── cavebot/                 # CaveBot system
 │   ├── cavebot.lua          # Main loop (250ms interval)
-│   ├── walking.lua          # Path caching + floor prevention
+│   ├── walking.lua          # Walking v3.2.0 + floor-change + field handling
 │   ├── actions.lua          # Waypoint actions
 │   └── ...
 ├── targetbot/               # TargetBot system
@@ -230,7 +233,32 @@ local count = getMonstersAdvanced(range, nExBot.SHAPE.CIRCLE)
 
 ---
 
-## 📝 Recent Changes (v1.0.0)
+## 📝 Recent Changes (v1.1.0)
+
+### Walking Module v3.2.0 - Complete Rewrite
+- **Floor-Change Prevention** - Validates ENTIRE path before autoWalk
+- **Comprehensive Detection** - Stairs, ladders, ramps, holes, teleports, trapdoors
+- **Field Handling** - `ignoreFields` config + keyboard walking fallback
+- **Chunked Walking** - Max 15 tiles per autoWalk call (keeps paths fresh)
+- **Tiered Validation** - Thorough for first 20 tiles, fast minimap for distant
+- **Pathfinding Limit** - Realistic 50-tile limit matching game engine
+- **10 Waypoint Candidates** - Checks more waypoints for better recovery
+- **Dual Path Attempts** - Tries with/without creature ignoring
+
+### Codebase Cleanup
+- Removed 9 unused functions from CaveBot modules
+- Removed `extension_template.lua` references (kept for documentation)
+- Simplified state management with `_initialized` flag pattern
+- Reduced walking.lua by ~85 lines while maintaining functionality
+
+### State Persistence Fix
+- CaveBot and TargetBot now properly restore on/off state
+- Uses `_initialized` flag instead of `schedule(100, ...)` pattern
+- Distinguishes between initial load and user toggle
+
+---
+
+## 📝 Previous Changes (v1.0.0)
 
 ### Multi-Client Profile Persistence
 - **Character-Based Storage** - Each character remembers their own active profiles

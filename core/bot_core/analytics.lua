@@ -24,8 +24,8 @@ local _data = storage.botCoreAnalytics or {
   
   -- Healing analytics
   healing = {
-    spells = {},      -- { [spellName] = count }
-    potions = {},     -- { [itemId] = count }
+    spells = {},      -- { ["spellName"] = count }
+    potions = {},     -- { ["itemId"] = count } - string keys to avoid sparse arrays
     totalSpells = 0,
     totalPotions = 0,
     manaWaste = 0,    -- Mana wasted on unnecessary heals
@@ -34,8 +34,8 @@ local _data = storage.botCoreAnalytics or {
   
   -- Attack analytics
   attacks = {
-    spells = {},      -- { [spellName] = count }
-    runes = {},       -- { [runeId] = count }
+    spells = {},      -- { ["spellName"] = count }
+    runes = {},       -- { ["runeId"] = count } - string keys to avoid sparse arrays
     totalSpells = 0,
     totalRunes = 0,
     empowerments = 0
@@ -43,7 +43,7 @@ local _data = storage.botCoreAnalytics or {
   
   -- Support analytics
   support = {
-    spells = {},      -- { [spellName] = count }
+    spells = {},      -- { ["spellName"] = count }
     totalSpells = 0
   },
   
@@ -51,6 +51,30 @@ local _data = storage.botCoreAnalytics or {
   log = {},
   logMaxSize = 100
 }
+
+-- Fix any existing numeric keys that may have been saved as sparse arrays
+-- Convert them to string keys for proper JSON serialization
+local function fixSparseTable(tbl)
+  if not tbl or type(tbl) ~= "table" then return {} end
+  local fixed = {}
+  for k, v in pairs(tbl) do
+    fixed[tostring(k)] = v
+  end
+  return fixed
+end
+
+-- Apply fixes to loaded data
+if _data.healing then
+  _data.healing.potions = fixSparseTable(_data.healing.potions)
+  _data.healing.spells = fixSparseTable(_data.healing.spells)
+end
+if _data.attacks then
+  _data.attacks.runes = fixSparseTable(_data.attacks.runes)
+  _data.attacks.spells = fixSparseTable(_data.attacks.spells)
+end
+if _data.support then
+  _data.support.spells = fixSparseTable(_data.support.spells)
+end
 
 -- Persist to storage
 storage.botCoreAnalytics = _data
@@ -70,8 +94,10 @@ local function appendLog(entry)
 end
 
 -- Increment counter in table
+-- Always use string keys to prevent sparse array issues in JSON serialization
 local function incrementCounter(tbl, key)
-  tbl[key] = (tbl[key] or 0) + 1
+  local strKey = tostring(key)
+  tbl[strKey] = (tbl[strKey] or 0) + 1
 end
 
 -- ============================================================================

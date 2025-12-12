@@ -41,8 +41,9 @@ local function recordAttackAction(cat, idOrFormula)
       attackAnalytics.empowerments = attackAnalytics.empowerments + 1
     end
   elseif cat == 2 or cat == 3 then
-    local runeId = tonumber(idOrFormula) or 0
-    attackAnalytics.runes[runeId] = (attackAnalytics.runes[runeId] or 0) + 1
+    -- Use string key for runeId to prevent sparse array issues in JSON serialization
+    local runeKey = tostring(tonumber(idOrFormula) or 0)
+    attackAnalytics.runes[runeKey] = (attackAnalytics.runes[runeKey] or 0) + 1
   end
   
   local log = attackAnalytics.log

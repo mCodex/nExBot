@@ -15,6 +15,44 @@ CaveBot automates your hunting route by following waypoints. It handles:
 
 ---
 
+## 🚀 Walking Module v3.2.0
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Floor-Change Prevention** | Validates entire path before walking, never steps on stairs/ramps |
+| **Field Handling** | Respects `ignoreFields` config, uses keyboard walking for fire/poison |
+| **Chunked Walking** | Max 15 tiles per autoWalk call keeps paths fresh |
+| **Tiered Validation** | Thorough check (20 tiles), fast minimap for distant |
+| **Pathfinding Limit** | Realistic 50-tile limit matching game engine |
+| **Keyboard Fallback** | Uses `walk(direction)` when autoWalk fails on fields |
+
+### How Floor-Change Prevention Works
+
+```
+Path Found → Validate Each Step → Floor Change Detected?
+                                        ↓ YES
+              Stop at step BEFORE floor change
+              Calculate safe destination
+              autoWalk to safe point only
+```
+
+### Field Handling
+
+When paths cross fire/poison/energy fields:
+
+1. Normal pathfinding tries without `ignoreFields`
+2. If fails, retries with `ignoreFields = true`
+3. Uses keyboard `walk(direction)` step-by-step
+4. This bypasses autoWalk's inability to cross fields
+
+### Configuration
+
+Enable **"Ignore fields"** in CaveBot Config to walk through damaging fields.
+
+---
+
 ## 🚀 Quick Start
 
 ### Creating a Simple Route

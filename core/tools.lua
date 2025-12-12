@@ -73,8 +73,8 @@ end
 local lastExchangeTime = 0
 local EXCHANGE_COOLDOWN = 500  -- 500ms between exchanges for reliability
 
--- Main macro
-macro(200, "Exchange Money", function()
+-- Main macro with persistence
+local exchangeMoneyMacro = macro(200, "Exchange Money", function()
   -- Cooldown check
   if (now - lastExchangeTime) < EXCHANGE_COOLDOWN then return end
   
@@ -85,19 +85,21 @@ macro(200, "Exchange Money", function()
     lastExchangeTime = now
   end
 end)
+BotDB.registerMacro(exchangeMoneyMacro, "exchangeMoney")
 
 UI.Separator()
 
 -- Auto trade message --------------------------------------------------------
 local autoTradeMessage = getProfileSetting("autoTradeMessage") or "nExBot is online!"
 
-macro(60 * 1000, "Send message on trade", function()
+local autoTradeMacro = macro(60 * 1000, "Send message on trade", function()
   local trade = getChannelId("advertising") or getChannelId("trade")
   local message = autoTradeMessage or ""
   if trade and message:len() > 0 then
     sayChannel(trade, message)
   end
 end)
+BotDB.registerMacro(autoTradeMacro, "autoTradeMsg")
 
 local tradeMessageEdit = UI.TextEdit(autoTradeMessage, function(widget, text)
   autoTradeMessage = text
@@ -141,7 +143,7 @@ local function isHasted()
   return false
 end
 
-macro(500, "Auto Haste", function()
+local autoHasteMacro = macro(500, "Auto Haste", function()
   if not player then return end
   
   -- Cast cooldown
@@ -163,40 +165,18 @@ macro(500, "Auto Haste", function()
   say(haste.spell)
   lastHasteCast = now
 end)
+BotDB.registerMacro(autoHasteMacro, "autoHaste")
 
 -- Auto Mount ----------------------------------------------------------------
 -- Automatically mounts player when outside of PZ
 -- Uses the player's default mount from client settings
 -- Does NOT attempt to mount in PZ (saves CPU/memory)
--- State is saved PER CHARACTER using storage
+-- State persisted via BotDB.registerMacro
 
 local lastMountAttempt = 0
 local MOUNT_COOLDOWN = 2000 -- Don't spam mount attempts
-local autoMountInitialized = false -- Prevent running before state is loaded
 
--- Helper to get character-specific storage key
-local function getCharStorageKey(key)
-  local charName = player and name() or "unknown"
-  storage.charSettings = storage.charSettings or {}
-  storage.charSettings[charName] = storage.charSettings[charName] or {}
-  return storage.charSettings[charName], key
-end
-
--- Load/save per-character Auto Mount state
-local function getAutoMountState()
-  local charStorage, key = getCharStorageKey("autoMount")
-  return charStorage[key] == true
-end
-
-local function setAutoMountState(enabled)
-  local charStorage, key = getCharStorageKey("autoMount")
-  charStorage[key] = enabled
-end
-
--- Create the macro (starts OFF, state will be loaded from per-char storage)
 local autoMountMacro = macro(500, "Auto Mount", function()
-  -- Don't run until per-character state has been loaded
-  if not autoMountInitialized then return end
   if not player then return end
   
   -- Skip if in protection zone - saves CPU/memory
@@ -221,25 +201,7 @@ local autoMountMacro = macro(500, "Auto Mount", function()
     lastMountAttempt = now
   end
 end)
-
--- Start with macro OFF to prevent premature execution
-autoMountMacro.setOff()
-
--- Handle state changes and persist per-character
-autoMountMacro.onSwitch = function(m, enabled)
-  if autoMountInitialized then
-    setAutoMountState(enabled)
-  end
-end
-
--- Restore per-character state on load (after a delay to ensure player is ready)
-schedule(1000, function()
-  if player then
-    local savedState = getAutoMountState()
-    autoMountMacro.setOn(savedState)
-  end
-  autoMountInitialized = true
-end)
+BotDB.registerMacro(autoMountMacro, "autoMount")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FISHING - Random water tile selection + auto fish drop to water
@@ -408,18 +370,18 @@ Panel
     !text: tr('Fishing')
 ]])
 
--- Load saved state from ProfileStorage
-local savedFishingState = getProfileSetting("fishingEnabled")
-if savedFishingState == true then
-  fishingEnabled = true
-  fishingUI.title:setOn(true)
-end
-
--- Handle click - toggle and save
+-- Connect UI switch to macro state using BotDB
 fishingUI.title.onClick = function(widget)
   fishingEnabled = not fishingEnabled
   widget:setOn(fishingEnabled)
-  setProfileSetting("fishingEnabled", fishingEnabled)
+  BotDB.set("macros.fishing", fishingEnabled)
+end
+
+-- Restore fishing state on load (synchronous)
+local savedFishingState = BotDB.get("macros.fishing") == true
+if savedFishingState then
+  fishingEnabled = true
+  fishingUI.title:setOn(true)
 end
 
 UI.Separator()
@@ -472,7 +434,7 @@ end)
 local lastTrainCast = 0
 local TRAIN_COOLDOWN = 1000
 
-macro(500, "Mana Training", function()
+local manaTrainingMacro = macro(500, "Mana Training", function()
   if not player then return end
   if (now - lastTrainCast) < TRAIN_COOLDOWN then return end
 
@@ -485,5 +447,6 @@ macro(500, "Mana Training", function()
   say(spell)
   lastTrainCast = now
 end)
+BotDB.registerMacro(manaTrainingMacro, "manaTraining")
 
 UI.Separator()

@@ -691,9 +691,9 @@ local function recordPotion(entry, hpPercent, mpPercent)
   -- Fallback to local analytics
   analytics.potionUses = analytics.potionUses + 1
   
-  -- Track individual potion usage
-  local itemId = entry.item or 0
-  analytics.potions[itemId] = (analytics.potions[itemId] or 0) + 1
+  -- Track individual potion usage (use string key to prevent sparse array issues)
+  local itemKey = tostring(entry.item or 0)
+  analytics.potions[itemKey] = (analytics.potions[itemKey] or 0) + 1
   
   local wasted = false
   if entry.value then
