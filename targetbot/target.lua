@@ -401,7 +401,12 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
     end
   else
     -- User is toggling - save their choice
-    storage.targetbotEnabled = enabled
+    -- If user sets to config default, reset to nil (use config default)
+    if enabled == (data and data.enabled) then
+      storage.targetbotEnabled = nil
+    else
+      storage.targetbotEnabled = enabled
+    end
   end
 
   -- Update UI to reflect final state
