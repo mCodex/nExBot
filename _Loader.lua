@@ -239,8 +239,6 @@ if totalTime > 1000 then
   if #slowModules > 0 then
     warn("[nExBot] Slow modules: " .. table.concat(slowModules, ", "))
   end
-else
-  info("[nExBot] Started in " .. totalTime .. "ms")
 end
 
 -- ============================================================================

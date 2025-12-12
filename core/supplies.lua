@@ -235,7 +235,7 @@ local function refreshProfileList()
       label.remove.onClick = function()
         local childs = SuppliesWindow.profiles:getChildCount()
         if childs == 1 then
-          return info("nExBot[Supplies] You need at least one profile!")
+          return  -- Need at least one profile
         end
         profiles[k] = nil
         label:destroy()
@@ -286,7 +286,7 @@ setProfileFocus()
 SuppliesWindow.newProfile.onClick = function()
   local n = SuppliesWindow.profiles:getChildCount()
   if n > 6 then
-    return info("nExBot[Supplies] - max profile count reached!")
+    return  -- Max profile count reached
   end
   local name = "Profile #" .. n + 1
   SuppliesConfig[panelName][name] = {items = {}}
