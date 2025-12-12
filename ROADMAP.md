@@ -4,7 +4,35 @@
 
 ---
 
-## 🚀 **PERFORMANCE OPTIMIZATIONS** (Latest Updates)
+## � **WALKING MODULE v3.2.0** (Latest - December 2025)
+
+### Complete Walking Rewrite ⭐⭐⭐ ✅ IMPLEMENTED
+- [x] **Floor-Change Prevention**: Validates ENTIRE path before autoWalk
+- [x] **Comprehensive Detection**: Stairs (210-213 minimap), ladders, ramps, holes, teleports
+- [x] **Field Handling**: `ignoreFields` config + keyboard walking fallback
+- [x] **Chunked Walking**: Max 15 tiles per autoWalk (keeps paths fresh)
+- [x] **Tiered Validation**: Thorough for 20 tiles, fast minimap for distant
+- [x] **Realistic Pathfinding**: 50-tile limit matching game engine
+- [x] **10 Waypoint Candidates**: Improved stuck recovery
+- [x] **Dual Path Attempts**: With/without creature ignoring
+- **Files**: `cavebot/walking.lua`, `cavebot/cavebot.lua`, `cavebot/actions.lua`
+
+### Codebase Cleanup ⭐⭐ ✅ IMPLEMENTED
+- [x] Removed 9 unused functions from CaveBot modules
+- [x] Removed dead code: `isStuck()`, `setExecutionDelay()`, `getCurrentWaypointPos()`, etc.
+- [x] Simplified state management with `_initialized` flag pattern
+- [x] Reduced walking.lua by ~85 lines
+- **Files**: `cavebot/walking.lua`, `cavebot/cavebot.lua`
+
+### State Persistence Fix ⭐⭐ ✅ IMPLEMENTED
+- [x] CaveBot/TargetBot properly restore on/off state on reload
+- [x] Uses `_initialized` flag instead of `schedule(100, ...)` pattern
+- [x] Distinguishes between initial load and user toggle
+- **Files**: `cavebot/cavebot.lua`, `targetbot/target.lua`
+
+---
+
+## 🚀 **PERFORMANCE OPTIMIZATIONS**
 
 ### Critical Performance Fixes ⭐⭐⭐ ✅ IMPLEMENTED
 - [x] **CaveBot Macro Interval**: Increased from 50ms → 250ms → 500ms to prevent slow macro warnings

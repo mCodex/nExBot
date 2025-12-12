@@ -133,9 +133,12 @@ function MonsterAI.Tracker.track(creature)
   if not creature or creature:isDead() then return end
   
   local id = creature:getId()
+  if not id then return end  -- Invalid creature
   if MonsterAI.Tracker.monsters[id] then return end  -- Already tracking
   
   local pos = creature:getPosition()
+  if not pos then return end  -- Creature position unavailable (teleporting/disappearing)
+  
   MonsterAI.Tracker.monsters[id] = {
     creature = creature,
     name = creature:getName(),
@@ -165,6 +168,8 @@ function MonsterAI.Tracker.update(creature)
   if not creature or creature:isDead() then return end
   
   local id = creature:getId()
+  if not id then return end  -- Invalid creature
+  
   local data = MonsterAI.Tracker.monsters[id]
   if not data then
     MonsterAI.Tracker.track(creature)
@@ -173,6 +178,8 @@ function MonsterAI.Tracker.update(creature)
   
   local currentTime = now
   local pos = creature:getPosition()
+  if not pos then return end  -- Creature position unavailable
+  
   local dir = creature:getDirection()
   
   -- Add sample

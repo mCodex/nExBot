@@ -24,12 +24,6 @@ end
 local actionRetries = 0
 local prevActionResult = true
 
--- Cache frequently accessed values
-local cachedActionCount = 0
-local cachedCurrentAction = nil
-local lastCacheUpdate = 0
-local CACHE_TTL = 100  -- Update cache every 100ms
-
 -- Cached UI list reference (avoid repeated lookups)
 local uiList = nil
 
@@ -71,17 +65,6 @@ local function hasPlayerMoved()
   end
   
   return moved
-end
-
--- Check if we're stuck (no movement for too long)
-local function isStuck()
-  if not walkState.isWalkingToWaypoint then return false end
-  return now > walkState.stuckCheckTime
-end
-
--- Set a delay before next execution
-local function setExecutionDelay(delayMs)
-  walkState.delayUntil = now + delayMs
 end
 
 -- Check if we should skip execution
@@ -204,49 +187,6 @@ local function getCurrentWaypointId()
   
   cachedWaypointId = ui.list:getChildIndex(focused)
   return cachedWaypointId
-end
-
--- Fast position parsing with caching
-local cachedWaypointPos = nil
-local cachedWaypointPosTime = 0
-local function getCurrentWaypointPos()
-  if now - cachedWaypointPosTime < 100 then
-    return cachedWaypointPos
-  end
-  cachedWaypointPosTime = now
-  
-  if not ui or not ui.list then 
-    cachedWaypointPos = nil
-    return nil 
-  end
-  
-  local focused = ui.list:getFocusedChild()
-  if not focused then 
-    cachedWaypointPos = nil
-    return nil 
-  end
-  
-  local actionType = focused.action
-  if actionType ~= "goto" and actionType ~= "walk" then
-    cachedWaypointPos = nil
-    return nil
-  end
-  
-  local value = focused.value
-  if not value or type(value) ~= "string" then 
-    cachedWaypointPos = nil
-    return nil 
-  end
-  
-  -- Inline parsing (avoid string:split allocation)
-  local x, y, z = value:match("(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
-  if x then
-    cachedWaypointPos = {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
-  else
-    cachedWaypointPos = nil
-  end
-  
-  return cachedWaypointPos
 end
 
 -- ============================================================================
@@ -542,37 +482,6 @@ local function resetWaypointEngine()
   -- Clear caches
   cachedWaypointId = 0
   cachedWaypointTime = 0
-  cachedWaypointPos = nil
-  cachedWaypointPosTime = 0
-end
-
--- Skip to next waypoint
-local function skipCurrentWaypoint()
-  if not ui or not ui.list then return false end
-  
-  local actionCount = ui.list:getChildCount()
-  if actionCount == 0 then return false end
-  
-  local current = ui.list:getFocusedChild()
-  if not current then return false end
-  
-  local currentIndex = ui.list:getChildIndex(current)
-  local nextIndex = (currentIndex % actionCount) + 1
-  
-  local nextChild = ui.list:getChildByIndex(nextIndex)
-  if nextChild then
-    ui.list:focusChild(nextChild)
-    return true
-  end
-  
-  return false
-end
-
-local function updateCache()
-  if (now - lastCacheUpdate) < CACHE_TTL then return end
-  lastCacheUpdate = now
-  uiList = uiList or ui.list
-  cachedActionCount = uiList:getChildCount()
 end
 
 -- Cache TargetBot function references (avoid repeated table lookups)
@@ -739,7 +648,21 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
   CaveBot.resetWalking()
   resetWaypointEngine()  -- Reset waypoint engine state on config change
   prevActionResult = true
-  cavebotMacro.setOn(enabled)
+  
+  -- Determine final enabled state:
+  -- On initial load, use stored value if available; otherwise use config's enabled
+  local finalEnabled = enabled
+  if not CaveBot._initialized then
+    CaveBot._initialized = true
+    if storage.cavebotEnabled ~= nil then
+      finalEnabled = storage.cavebotEnabled
+    end
+  else
+    -- User is toggling - save their choice
+    storage.cavebotEnabled = enabled
+  end
+  
+  cavebotMacro.setOn(finalEnabled)
   cavebotMacro.delay = nil
   if lastConfig == name then 
     -- restore focused child on the action list
@@ -784,14 +707,14 @@ CaveBot.setOn = function(val)
   if val == false then  
     return CaveBot.setOff(true)
   end
-  config.setOn()
+  config.setOn()  -- This triggers callback which handles storage
 end
 
 CaveBot.setOff = function(val)
   if val == false then  
     return CaveBot.setOn(true)
   end
-  config.setOff()
+  config.setOff()  -- This triggers callback which handles storage
 end
 
 CaveBot.getCurrentProfile = function()
@@ -879,7 +802,7 @@ CaveBot.findBestWaypoint = function(searchForward)
   local actionCount = #actions
   
   local playerPos = player:getPosition()
-  local maxDist = storage.extras.gotoMaxDistance or 30
+  local maxDist = storage.extras.gotoMaxDistance or 50  -- Realistic pathfinding limit
   local playerZ = playerPos.z
   
   -- Collect candidates: waypoints within distance on same floor
@@ -925,15 +848,20 @@ CaveBot.findBestWaypoint = function(searchForward)
     return a.distance < b.distance
   end)
   
-  -- Phase 2: Check pathfinding only for top candidates (limit to 5 for performance)
-  local maxCandidates = math.min(5, #candidates)
+  -- Phase 2: Check pathfinding for candidates (check up to 10 for better recovery)
+  local maxCandidates = math.min(10, #candidates)
   for i = 1, maxCandidates do
     local candidate = candidates[i]
     local wp = candidate.waypoint
     local destPos = {x = wp.x, y = wp.y, z = wp.z}
     
-    -- Check if path exists
+    -- Check if path exists (try with and without creature ignore)
     local path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true })
+    if not path then
+      -- Second attempt: ignore creatures
+      path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true, ignoreCreatures = true })
+    end
+    
     if path then
       -- Found a reachable waypoint
       local prevChild = ui.list:getChildByIndex(candidate.index - 1)
@@ -1257,7 +1185,7 @@ CaveBot.GoTo = function(dest, precision)
   end
   
   -- Use optimized walkTo
-  return CaveBot.walkTo(dest, storage.extras.gotoMaxDistance or 40, {
+  return CaveBot.walkTo(dest, storage.extras.gotoMaxDistance or 50, {
     precision = precision,
     ignoreNonPathable = true
   })

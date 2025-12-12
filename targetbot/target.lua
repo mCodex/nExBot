@@ -386,15 +386,28 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
   end
   TargetBot.Looting.update(data["looting"] or {})
 
-  -- add configs
-  if enabled then
+  -- Determine final enabled state:
+  -- On initial load, use stored value if available; otherwise use config's enabled
+  local finalEnabled = enabled
+  if not TargetBot._initialized then
+    TargetBot._initialized = true
+    if storage.targetbotEnabled ~= nil then
+      finalEnabled = storage.targetbotEnabled
+    end
+  else
+    -- User is toggling - save their choice
+    storage.targetbotEnabled = enabled
+  end
+
+  -- Update UI to reflect final state
+  if finalEnabled then
     ui.status.right:setText("On")
   else
     ui.status.right:setText("Off")
   end
 
   if targetbotMacro and targetbotMacro.setOn then
-    targetbotMacro.setOn(enabled)
+    targetbotMacro.setOn(finalEnabled)
     targetbotMacro.delay = nil
   end
   lureEnabled = true
@@ -465,14 +478,14 @@ TargetBot.setOn = function(val)
   if val == false then  
     return TargetBot.setOff(true)
   end
-  config.setOn()
+  config.setOn()  -- This triggers callback which handles storage
 end
 
 TargetBot.setOff = function(val)
   if val == false then  
     return TargetBot.setOn(true)
   end
-  config.setOff()
+  config.setOff()  -- This triggers callback which handles storage
 end
 
 TargetBot.getCurrentProfile = function()

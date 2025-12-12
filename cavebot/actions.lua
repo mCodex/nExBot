@@ -396,7 +396,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Distance calculations
   local distX = math.abs(destPos.x - playerPos.x)
   local distY = math.abs(destPos.y - playerPos.y)
-  local maxDist = storage.extras.gotoMaxDistance or 40
+  local maxDist = storage.extras.gotoMaxDistance or 50  -- Realistic pathfinding limit
   
   -- Too far
   if (distX + distY) > maxDist then
