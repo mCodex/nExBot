@@ -3,7 +3,7 @@ local version = "1.0.0"
 UI.Label("nExBot v" .. version)
 UI.Separator()
 
--- Create a label
+-- Create a panel with blinking label
 local blinkUI = setupUI([[
 Panel
   height: 20

@@ -415,7 +415,7 @@ local function setFollowEnabled(state)
 end
 
 -- Follow Player macro - Uses native OTClient follow system
-local followPlayerMacro = macro(200, function()
+local followPlayerMacro = macro(500, function()
   if not followPlayerConfig.enabled or not player then return end
   if not followPlayerConfig.playerName or followPlayerConfig.playerName == "" then return end
   

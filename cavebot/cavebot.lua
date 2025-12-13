@@ -117,7 +117,7 @@ local waypointPositionCache = {} -- Waypoint position cache table
 local waypointCacheValid = false
 local waypointCacheFloors = {}
 local startupWaypointFound = false
-local startupCheckTime = -500  -- Initialize to -500 to ensure 500ms delay works on first call
+local startupCheckTime = nil   -- Set on first check to enforce 500ms delay
 
 --[[
   HIGH-PERFORMANCE WAYPOINT ENGINE
@@ -356,6 +356,8 @@ local function executeRecovery()
       transitionTo("NORMAL")
       return true
     end
+    WaypointEngine.recoveryAttempt = 2
+    return false
   end
   
   -- Strategy 2: Search backwards for reachable waypoint
@@ -365,6 +367,8 @@ local function executeRecovery()
       transitionTo("NORMAL")
       return true
     end
+    WaypointEngine.recoveryAttempt = 3
+    return false
   end
   
   -- Strategy 3: GLOBAL SEARCH - Find ANY reachable waypoint on current floor
@@ -382,6 +386,8 @@ local function executeRecovery()
       transitionTo("NORMAL")
       return true
     end
+    WaypointEngine.recoveryAttempt = 4
+    return false
   end
   
   -- Strategy 4: EXTENDED GLOBAL SEARCH with cross-floor support
@@ -416,6 +422,8 @@ local function executeRecovery()
             transitionTo("NORMAL")
             return true
           end
+          WaypointEngine.recoveryAttempt = 5
+          return false
         end
       end
     end
@@ -439,6 +447,8 @@ local function executeRecovery()
             return true
           end
         end
+        WaypointEngine.recoveryAttempt = 6
+        return false
       end
     end
   end
@@ -776,7 +786,7 @@ CaveBot.isOn = function()
 end
 
 CaveBot.isOff = function()
-  return not config or not config.isOff or not config.isOff()
+  return not CaveBot.isOn()
 end
 
 CaveBot.setOn = function(val)
@@ -835,7 +845,7 @@ end
   
   Architecture follows DRY, KISS, SRP principles:
   - Pure functions for calculations (testable, no side effects)
-  - O(n) scan, O(k log k) sort for top k candidates
+  - O(n) scan, O(n log n) sort (full list before truncation)
   - Minimal allocations via table reuse
   - Tiered pathfinding: distance filter → path check
 ]]
@@ -932,6 +942,7 @@ end
     - maxCandidates: max candidates to check pathfinding for (default 20)
     - preferCurrentFloor: prioritize current floor (default true)
     - searchAllFloors: also search adjacent floors if nothing found (default false)
+    - collectRangeMultiplier: multiplier for candidate collection distance (default 1)
   @return child, index or nil, nil if not found
 ]]
 findNearestGlobalWaypoint = function(playerPos, maxDist, options)
@@ -941,16 +952,18 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
   local maxCandidates = options.maxCandidates or 20
   local preferCurrentFloor = options.preferCurrentFloor ~= false
   local searchAllFloors = options.searchAllFloors or false
+  local collectRangeMultiplier = options.collectRangeMultiplier or 1
   local playerZ = playerPos.z
   
   -- Phase 1: Collect candidates on same floor with distance
   local candidates = {}
-  local extendedDistLimit = maxDist * 2  -- Extended range for collection
-  
+  local collectionLimit = maxDist * collectRangeMultiplier
+
   for i, wp in pairs(waypointPositionCache) do
-    if wp.z == playerZ then
+    local isSameFloor = (wp.z == playerZ)
+    if isSameFloor then
       local dist = chebyshevDist(playerPos, wp)
-      if dist <= extendedDistLimit then
+      if dist <= collectionLimit then
         candidates[#candidates + 1] = {
           index = i,
           waypoint = wp,
@@ -958,6 +971,15 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
           child = wp.child
         }
       end
+    elseif searchAllFloors and not preferCurrentFloor then
+      -- When not prioritizing current floor, allow collecting cross-floor
+      local dist = manhattanDist(playerPos, wp)
+      candidates[#candidates + 1] = {
+        index = i,
+        waypoint = wp,
+        distance = dist,
+        child = wp.child
+      }
     end
   end
   
@@ -987,7 +1009,7 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
     end
   end
   
-  -- No candidates found on current floor
+  -- No candidates found on current floor (or none collected when preferCurrentFloor=false)
   if searchAllFloors then
     -- Try adjacent floors (±1) - useful for stairs/holes
     for _, floorZ in ipairs({playerZ - 1, playerZ + 1}) do
@@ -1030,10 +1052,13 @@ end
 -- Check if we need to find a startup waypoint (called once per session)
 checkStartupWaypoint = function()
   if startupWaypointFound then return end
+  if not startupCheckTime then
+    startupCheckTime = now
+    return
+  end
   
   -- Small delay to ensure map is loaded
   if now - startupCheckTime < 500 then return end
-  startupCheckTime = now
   
   local playerPos = player:getPosition()
   if not playerPos then return end
@@ -1096,7 +1121,7 @@ end
 -- Reset startup check (called on config change)
 resetStartupCheck = function()
   startupWaypointFound = false
-  startupCheckTime = 0
+  startupCheckTime = nil
 end
 
 -- Find the best waypoint to go to (optimized for long distances)
