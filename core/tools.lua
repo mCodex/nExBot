@@ -386,10 +386,96 @@ end
 
 UI.Separator()
 
--- NOTE: Low Power Mode removed - OTClient v8 bot API does not expose FPS control
--- FPS is managed at the client level (Options > Graphics), not through bot scripts
+-- ═══════════════════════════════════════════════════════════════════════════
+-- FOLLOW PLAYER - Use OTClient's native follow system (like CTRL + Right Click)
+-- ═══════════════════════════════════════════════════════════════════════════
 
--- Mana training -------------------------------------------------------------
+-- Follow Player settings (stored per-profile)
+local followPlayerConfig = getProfileSetting("followPlayer") or {
+  enabled = false,
+  playerName = ""
+}
+
+-- Forward decl for UI switch so helper can sync it
+local followPlayerToggle = nil
+
+local lastFollowCheck = 0
+local FOLLOW_CHECK_COOLDOWN = 500  -- Check every 500ms
+
+-- Helper: sync state, UI, and side effects
+local function setFollowEnabled(state)
+  followPlayerConfig.enabled = state
+  setProfileSetting("followPlayer", followPlayerConfig)
+  if followPlayerToggle then
+    followPlayerToggle:setOn(state)
+  end
+  if not state then
+    g_game.cancelFollow()
+  end
+end
+
+-- Follow Player macro - Uses native OTClient follow system
+local followPlayerMacro = macro(500, function()
+  if not followPlayerConfig.enabled or not player then return end
+  if not followPlayerConfig.playerName or followPlayerConfig.playerName == "" then return end
+  
+  -- Cooldown check
+  if (now - lastFollowCheck) < FOLLOW_CHECK_COOLDOWN then return end
+  lastFollowCheck = now
+
+  -- If player started attacking, stop following and disable toggle
+  if getTarget() then
+    if followPlayerConfig.enabled then
+      setFollowEnabled(false)
+    end
+    return
+  end
+  
+  -- Find the target player
+  local target = getCreatureByName(followPlayerConfig.playerName)
+  
+  if target then
+    -- Start following the target (like CTRL + Right Click) only if not already
+    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
+    if not currentFollow or currentFollow:getId() ~= target:getId() then
+      follow(target)
+    end
+  else
+    -- Target not found, cancel follow if we were following someone
+    g_game.cancelFollow()
+  end
+end)
+
+BotDB.registerMacro(followPlayerMacro, "followPlayer")
+
+-- Follow Player UI
+UI.Label("Follow Player:")
+
+local followPlayerNameEdit = UI.TextEdit(followPlayerConfig.playerName, function(widget, text)
+  followPlayerConfig.playerName = text:trim()
+  setProfileSetting("followPlayer", followPlayerConfig)
+end)
+
+local followToggleUI = setupUI([[
+Panel
+  height: 19
+
+  BotSwitch
+    id: followPlayerToggle
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    !text: tr('Follow')
+]])
+
+followPlayerToggle = followToggleUI.followPlayerToggle
+followPlayerToggle:setOn(followPlayerConfig.enabled)
+followPlayerToggle.onClick = function(widget)
+  setFollowEnabled(not followPlayerConfig.enabled)
+end
+
+UI.Separator()
 local manaTraining = getProfileSetting("manaTraining") or {
   spell = "exura",
   minManaPercent = 80

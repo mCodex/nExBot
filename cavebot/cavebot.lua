@@ -104,6 +104,21 @@ CaveBot.clearWalkingState = function()
   walkState.targetPos = nil
 end
 
+-- ============================================================================
+-- FORWARD DECLARATIONS (functions defined later but used early)
+-- ============================================================================
+local findNearestGlobalWaypoint  -- Defined in WAYPOINT FINDER section
+local checkStartupWaypoint       -- Defined in STARTUP DETECTION section
+local invalidateWaypointCache    -- Defined in WAYPOINT CACHE section
+local resetStartupCheck          -- Defined in STARTUP DETECTION section
+local buildWaypointCache         -- Defined in WAYPOINT CACHE section
+local chebyshevDist              -- Defined in PURE UTILITY FUNCTIONS section
+local waypointPositionCache = {} -- Waypoint position cache table
+local waypointCacheValid = false
+local waypointCacheFloors = {}
+local startupWaypointFound = false
+local startupCheckTime = nil   -- Set on first check to enforce 500ms delay
+
 --[[
   HIGH-PERFORMANCE WAYPOINT ENGINE
   
@@ -144,11 +159,11 @@ local WaypointEngine = {
   STUCK_TIMEOUT = 10000,         -- Max time in stuck state before recovery
   MOVEMENT_THRESHOLD = 3,        -- Min tiles to consider "progress"
   PROGRESS_WINDOW = 15000,       -- Time window for progress check (15s)
-  RECOVERY_TIMEOUT = 20000,      -- Max recovery time before stop
+  RECOVERY_TIMEOUT = 25000,      -- Max recovery time before stop (increased for more strategies)
   
   -- Backoff for recovery attempts
   recoveryAttempt = 0,
-  MAX_RECOVERY_ATTEMPTS = 5,
+  MAX_RECOVERY_ATTEMPTS = 6,     -- Increased: 6 strategies now available
   
   -- Performance counters (optional, for debugging)
   tickCount = 0,
@@ -313,29 +328,86 @@ end
 
 -- ============================================================================
 -- RECOVERY STRATEGIES (ordered by likelihood of success)
+-- Uses a tiered approach: fast local search → global search → skip strategies
 -- ============================================================================
+
+-- Helper function to focus a waypoint (DRY: used in recovery and startup)
+-- Focuses the waypoint BEFORE the target so next tick executes it
+-- @param targetChild widget The waypoint widget to focus
+-- @param targetIndex number The index of the waypoint
+local function focusWaypointBefore(targetChild, targetIndex)
+  local prevChild = ui.list:getChildByIndex(targetIndex - 1)
+  if prevChild then
+    ui.list:focusChild(prevChild)
+  else
+    ui.list:focusChild(targetChild)
+  end
+end
 
 local function executeRecovery()
   local attempt = WaypointEngine.recoveryAttempt
+  local playerPos = player:getPosition()
+  local maxDist = storage.extras.gotoMaxDistance or 50
   
-  -- Strategy 1: Find nearest reachable waypoint (forward search)
-  if attempt <= 2 then
+  -- Strategy 1: Find nearest reachable waypoint (forward search - fastest)
+  if attempt <= 1 then
     if CaveBot.findBestWaypoint and CaveBot.findBestWaypoint(true) then
+      print("[CaveBot] Recovery: Found waypoint via forward search")
       transitionTo("NORMAL")
       return true
     end
+    WaypointEngine.recoveryAttempt = 2
+    return false
   end
   
   -- Strategy 2: Search backwards for reachable waypoint
-  if attempt <= 3 then
+  if attempt <= 2 then
     if CaveBot.gotoFirstPreviousReachableWaypoint and CaveBot.gotoFirstPreviousReachableWaypoint() then
+      print("[CaveBot] Recovery: Found waypoint via backward search")
+      transitionTo("NORMAL")
+      return true
+    end
+    WaypointEngine.recoveryAttempt = 3
+    return false
+  end
+  
+  -- Strategy 3: GLOBAL SEARCH - Find ANY reachable waypoint on current floor
+  -- This is the key improvement for relog scenarios
+  if attempt <= 3 and playerPos and findNearestGlobalWaypoint then
+    local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
+      maxCandidates = 30,
+      preferCurrentFloor = true,
+      searchAllFloors = false
+    })
+    
+    if nearestChild then
+      print("[CaveBot] Recovery: Found waypoint via global search at index " .. nearestIndex)
+      focusWaypointBefore(nearestChild, nearestIndex)
+      transitionTo("NORMAL")
+      return true
+    end
+    WaypointEngine.recoveryAttempt = 4
+    return false
+  end
+  
+  -- Strategy 4: EXTENDED GLOBAL SEARCH with cross-floor support
+  if attempt <= 4 and playerPos and findNearestGlobalWaypoint then
+    local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
+      maxCandidates = 50,
+      preferCurrentFloor = true,
+      searchAllFloors = true  -- Check adjacent floors
+    })
+    
+    if nearestChild then
+      print("[CaveBot] Recovery: Found waypoint via extended global search at index " .. nearestIndex)
+      focusWaypointBefore(nearestChild, nearestIndex)
       transitionTo("NORMAL")
       return true
     end
   end
   
-  -- Strategy 3: Skip current waypoint
-  if attempt <= 4 then
+  -- Strategy 5: Skip current waypoint (last resort)
+  if attempt <= 5 then
     if ui and ui.list then
       local actionCount = ui.list:getChildCount()
       if actionCount > 1 then
@@ -345,17 +417,20 @@ local function executeRecovery()
           local nextIndex = (currentIndex % actionCount) + 1
           local nextChild = ui.list:getChildByIndex(nextIndex)
           if nextChild then
+            print("[CaveBot] Recovery: Skipping waypoint " .. currentIndex .. " -> " .. nextIndex)
             ui.list:focusChild(nextChild)
             transitionTo("NORMAL")
             return true
           end
+          WaypointEngine.recoveryAttempt = 5
+          return false
         end
       end
     end
   end
   
-  -- Strategy 4: Skip multiple waypoints (exponential skip)
-  if attempt <= 5 then
+  -- Strategy 6: Skip multiple waypoints (exponential skip - emergency)
+  if attempt <= 6 then
     if ui and ui.list then
       local actionCount = ui.list:getChildCount()
       local skipCount = math.min(5, math.floor(actionCount / 4))
@@ -366,11 +441,14 @@ local function executeRecovery()
           local nextIndex = ((currentIndex + skipCount - 1) % actionCount) + 1
           local nextChild = ui.list:getChildByIndex(nextIndex)
           if nextChild then
+            print("[CaveBot] Recovery: Skipping " .. skipCount .. " waypoints")
             ui.list:focusChild(nextChild)
             transitionTo("NORMAL")
             return true
           end
         end
+        WaypointEngine.recoveryAttempt = 6
+        return false
       end
     end
   end
@@ -501,6 +579,12 @@ cavebotMacro = macro(250, function()
   
   -- Update player position tracking
   hasPlayerMoved()
+  
+  -- STARTUP DETECTION: Find nearest waypoint on relog/load
+  -- Note: checkStartupWaypoint is defined later in file, check if available
+  if checkStartupWaypoint then
+    checkStartupWaypoint()
+  end
   
   -- WAYPOINT ENGINE: High-performance stuck detection and recovery
   if runWaypointEngine() then
@@ -647,6 +731,8 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
   actionRetries = 0
   CaveBot.resetWalking()
   resetWaypointEngine()  -- Reset waypoint engine state on config change
+  if invalidateWaypointCache then invalidateWaypointCache() end  -- Clear waypoint position cache
+  if resetStartupCheck then resetStartupCheck() end  -- Reset startup check to find nearest waypoint
   prevActionResult = true
   
   -- Determine final enabled state:
@@ -696,11 +782,11 @@ end
 
 -- public function, you can use them in your scripts
 CaveBot.isOn = function()
-  return config.isOn()
+  return config and config.isOn and config.isOn() or false
 end
 
 CaveBot.isOff = function()
-  return config.isOff()
+  return not CaveBot.isOn()
 end
 
 CaveBot.setOn = function(val)
@@ -748,48 +834,294 @@ CaveBot.isRecovering = function()
 end
 
 --[[
-  IMPROVED WAYPOINT FINDER
+  OPTIMIZED WAYPOINT FINDER (v2.0)
   
-  Finds the best reachable waypoint considering:
-  1. Distance from player (within maxDist)
-  2. Path availability (can actually walk there)
-  3. Preference for closer waypoints to reduce travel time
-  4. Skip waypoints on different floors
+  Intelligent waypoint selection with:
+  1. Distance-based filtering (Chebyshev/Manhattan hybrid)
+  2. Path availability validation
+  3. Global search capability (for startup/recovery)
+  4. Multi-floor awareness
+  5. Smart startup: Find nearest waypoint on relog/load
   
-  Uses tiered search: fast distance check first, then pathfinding only for candidates
+  Architecture follows DRY, KISS, SRP principles:
+  - Pure functions for calculations (testable, no side effects)
+  - O(n) scan, O(n log n) sort (full list before truncation)
+  - Minimal allocations via table reuse
+  - Tiered pathfinding: distance filter → path check
 ]]
 
--- Pre-compute waypoint positions to avoid regex parsing every search
-local waypointPositionCache = {}
-local waypointCacheValid = false
+-- ============================================================================
+-- PURE UTILITY FUNCTIONS (SRP: Single responsibility, no side effects)
+-- ============================================================================
 
-local function invalidateWaypointCache()
-  waypointPositionCache = {}
-  waypointCacheValid = false
+-- Parse position from goto waypoint text
+-- @param text string "goto:1234,5678,7"
+-- @return table {x, y, z} or nil
+local function parseGotoPosition(text)
+  if not text or not string.starts(text, "goto:") then return nil end
+  local re = regexMatch(text, [[(?:goto:)([^,]+),([^,]+),([^,]+)]])
+  if not re or not re[1] then return nil end
+  return {
+    x = tonumber(re[1][2]),
+    y = tonumber(re[1][3]),
+    z = tonumber(re[1][4])
+  }
 end
 
-local function buildWaypointCache()
+-- Calculate Chebyshev distance (max of dx, dy) - used for "within range" checks
+-- @param p1 table Table with x, y fields (first position)
+-- @param p2 table Table with x, y fields (second position)
+-- @return number
+chebyshevDist = function(p1, p2)
+  return math.max(math.abs(p1.x - p2.x), math.abs(p1.y - p2.y))
+end
+
+-- Calculate Manhattan distance (dx + dy) - used for path length estimation
+-- @param p1 table Table with x, y fields (first position)
+-- @param p2 table Table with x, y fields (second position)
+-- @return number
+local function manhattanDist(p1, p2)
+  return math.abs(p1.x - p2.x) + math.abs(p1.y - p2.y)
+end
+
+-- ============================================================================
+-- WAYPOINT CACHE (DRY: Single source of truth for waypoint positions)
+-- ============================================================================
+
+-- Note: waypointPositionCache, waypointCacheValid, waypointCacheFloors declared at top
+
+invalidateWaypointCache = function()
+  waypointPositionCache = {}
+  waypointCacheValid = false
+  waypointCacheFloors = {}
+end
+
+buildWaypointCache = function()
   if waypointCacheValid then return end
   
   waypointPositionCache = {}
+  waypointCacheFloors = {}
   local actions = ui.list:getChildren()
   
   for i, child in ipairs(actions) do
     local text = child:getText()
-    if string.starts(text, "goto:") then
-      local re = regexMatch(text, [[(?:goto:)([^,]+),([^,]+),([^,]+)]])
-      if re and re[1] then
-        waypointPositionCache[i] = {
-          x = tonumber(re[1][2]),
-          y = tonumber(re[1][3]),
-          z = tonumber(re[1][4]),
-          child = child
-        }
-      end
+    local pos = parseGotoPosition(text)
+    if pos then
+      waypointPositionCache[i] = {
+        x = pos.x,
+        y = pos.y,
+        z = pos.z,
+        child = child,
+        index = i
+      }
+      -- Track which floors have waypoints (for cross-floor recovery)
+      waypointCacheFloors[pos.z] = true
     end
   end
   
   waypointCacheValid = true
+end
+
+-- ============================================================================
+-- GLOBAL WAYPOINT FINDER (Pure function, SRP)
+-- Used for startup detection and stuck recovery
+-- ============================================================================
+
+--[[
+  Find the nearest reachable waypoint from ANY position globally.
+  
+  Algorithm (optimized for both accuracy and performance):
+  1. Build waypoint cache if needed (O(n))
+  2. Filter by floor and collect candidates (O(n))
+  3. Sort by distance (O(n log n) but typically small n after filtering)
+  4. Check pathfinding for top k candidates (O(k))
+  
+  @param playerPos table {x, y, z} - player's current position
+  @param maxDist number - maximum pathfinding distance
+  @param options table (optional):
+    - maxCandidates: max candidates to check pathfinding for (default 20)
+    - preferCurrentFloor: prioritize current floor (default true)
+    - searchAllFloors: also search adjacent floors if nothing found (default false)
+    - collectRangeMultiplier: multiplier for candidate collection distance (default 1)
+  @return child, index or nil, nil if not found
+]]
+findNearestGlobalWaypoint = function(playerPos, maxDist, options)
+  buildWaypointCache()
+  
+  options = options or {}
+  local maxCandidates = options.maxCandidates or 20
+  local preferCurrentFloor = options.preferCurrentFloor ~= false
+  local searchAllFloors = options.searchAllFloors or false
+  local collectRangeMultiplier = options.collectRangeMultiplier or 1
+  local playerZ = playerPos.z
+  
+  -- Phase 1: Collect candidates on same floor with distance
+  local candidates = {}
+  local collectionLimit = maxDist * collectRangeMultiplier
+
+  for i, wp in pairs(waypointPositionCache) do
+    local isSameFloor = (wp.z == playerZ)
+    if isSameFloor then
+      local dist = chebyshevDist(playerPos, wp)
+      if dist <= collectionLimit then
+        candidates[#candidates + 1] = {
+          index = i,
+          waypoint = wp,
+          distance = dist,
+          child = wp.child
+        }
+      end
+    elseif searchAllFloors and not preferCurrentFloor then
+      -- When not prioritizing current floor, allow collecting cross-floor
+      local dist = manhattanDist(playerPos, wp)
+      candidates[#candidates + 1] = {
+        index = i,
+        waypoint = wp,
+        distance = dist,
+        child = wp.child
+      }
+    end
+  end
+  
+  -- Phase 2: Sort by distance (closest first)
+  if #candidates > 0 then
+    table.sort(candidates, function(a, b)
+      return a.distance < b.distance
+    end)
+    
+    -- Phase 3: Check pathfinding for top candidates (tiered approach)
+    local checkCount = math.min(maxCandidates, #candidates)
+    for i = 1, checkCount do
+      local candidate = candidates[i]
+      local destPos = {x = candidate.waypoint.x, y = candidate.waypoint.y, z = candidate.waypoint.z}
+      
+      -- Tier 1: Normal pathfinding
+      local path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true })
+      
+      -- Tier 2: Ignore creatures (maybe blocked by monsters)
+      if not path then
+        path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true, ignoreCreatures = true })
+      end
+      
+      if path then
+        return candidate.child, candidate.index
+      end
+    end
+  end
+  
+  -- No candidates found on current floor (or none collected when preferCurrentFloor=false)
+  if searchAllFloors then
+    -- Try adjacent floors (±1) - useful for stairs/holes
+    for _, floorZ in ipairs({playerZ - 1, playerZ + 1}) do
+      if waypointCacheFloors[floorZ] then
+        -- Collect candidates on this floor
+        local floorCandidates = {}
+        for i, wp in pairs(waypointPositionCache) do
+          if wp.z == floorZ then
+            local dist = manhattanDist(playerPos, wp)
+            floorCandidates[#floorCandidates + 1] = {
+              index = i,
+              waypoint = wp,
+              distance = dist,
+              child = wp.child
+            }
+          end
+        end
+        
+        -- Sort and return first (can't pathfind cross-floor, just return closest)
+        if #floorCandidates > 0 then
+          table.sort(floorCandidates, function(a, b)
+            return a.distance < b.distance
+          end)
+          return floorCandidates[1].child, floorCandidates[1].index
+        end
+      end
+    end
+  end
+  
+  return nil, nil
+end
+
+-- ============================================================================
+-- STARTUP WAYPOINT DETECTION
+-- Finds nearest waypoint when bot starts (relog scenario)
+-- ============================================================================
+
+-- Note: startupWaypointFound and startupCheckTime declared at top
+
+-- Check if we need to find a startup waypoint (called once per session)
+checkStartupWaypoint = function()
+  if startupWaypointFound then return end
+  if not startupCheckTime then
+    startupCheckTime = now
+    return
+  end
+  
+  -- Small delay to ensure map is loaded
+  if now - startupCheckTime < 500 then return end
+  
+  local playerPos = player:getPosition()
+  if not playerPos then return end
+  
+  buildWaypointCache()
+  
+  -- Check if current focused waypoint is already reachable
+  local currentAction = ui.list:getFocusedChild()
+  if currentAction then
+    local currentIndex = ui.list:getChildIndex(currentAction)
+    local currentWp = waypointPositionCache[currentIndex]
+    
+    if currentWp and currentWp.z == playerPos.z then
+      local dist = chebyshevDist(playerPos, currentWp)
+      local maxDist = storage.extras.gotoMaxDistance or 50
+      
+      if dist <= maxDist then
+        local path = findPath(playerPos, currentWp, maxDist, { ignoreNonPathable = true })
+        if path then
+          -- Current waypoint is reachable, no need to search
+          startupWaypointFound = true
+          return
+        end
+      end
+    end
+  end
+  
+  -- Current waypoint not reachable - find nearest globally
+  local maxDist = storage.extras.gotoMaxDistance or 50
+  local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
+    maxCandidates = 25,
+    preferCurrentFloor = true,
+    searchAllFloors = false
+  })
+  
+  if nearestChild then
+    print("[CaveBot] Startup: Found nearest reachable waypoint at index " .. nearestIndex)
+    focusWaypointBefore(nearestChild, nearestIndex)
+    startupWaypointFound = true
+    return
+  end
+  
+  -- Extended search: larger distance, more candidates
+  local extendedChild, extendedIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
+    maxCandidates = 40,
+    preferCurrentFloor = true,
+    searchAllFloors = true  -- Try adjacent floors
+  })
+  
+  if extendedChild then
+    print("[CaveBot] Startup: Found waypoint at extended range, index " .. extendedIndex)
+    focusWaypointBefore(extendedChild, extendedIndex)
+  else
+    warn("[CaveBot] Startup: No reachable waypoint found. Bot may be stuck.")
+  end
+  
+  startupWaypointFound = true
+end
+
+-- Reset startup check (called on config change)
+resetStartupCheck = function()
+  startupWaypointFound = false
+  startupCheckTime = nil
 end
 
 -- Find the best waypoint to go to (optimized for long distances)
@@ -825,13 +1157,11 @@ CaveBot.findBestWaypoint = function(searchForward)
     end
   end
   
-  -- Phase 1: Fast distance check (no pathfinding)
+  -- Phase 1: Fast distance check (no pathfinding) - uses pure chebyshevDist function
   for _, i in ipairs(searchOrder) do
     local waypoint = waypointPositionCache[i]
     if waypoint and waypoint.z == playerZ then
-      local dx = math.abs(playerPos.x - waypoint.x)
-      local dy = math.abs(playerPos.y - waypoint.y)
-      local dist = math.max(dx, dy)
+      local dist = chebyshevDist(playerPos, waypoint)
       
       if dist <= maxDist then
         table.insert(candidates, {
