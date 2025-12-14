@@ -95,6 +95,12 @@ TargetBot.Creature.addConfig = function(config, focus)
   if type(config) ~= 'table' or type(config.name) ~= 'string' then
     return error("Invalid targetbot creature config (missing name)")
   end
+
+  -- Defaults: chase by default; keep-distance only when explicitly enabled
+  if config.chase == nil then config.chase = true end
+  if config.keepDistance == nil then config.keepDistance = false end
+  if not config.keepDistanceRange then config.keepDistanceRange = 1 end
+
   TargetBot.Creature.resetConfigsCache()
   compiledPatterns = {}  -- Clear compiled patterns on config change
 

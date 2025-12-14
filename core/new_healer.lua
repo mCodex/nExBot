@@ -151,6 +151,21 @@ local function updateBotCoreConfig()
     BotCore.FriendHealer.init(bcConfig)
   end
 end
+
+-- Macro handle so we can fully stop the engine when unused
+local friendHealerMacro = nil
+
+local function syncFriendHealerState()
+    if BotCore and BotCore.FriendHealer and BotCore.FriendHealer.setEnabled then
+        BotCore.FriendHealer.setEnabled(config.enabled)
+    end
+    if HealEngine and HealEngine.setFriendHealingEnabled then
+        HealEngine.setFriendHealingEnabled(config.enabled)
+    end
+    if friendHealerMacro and friendHealerMacro.setOn then
+        friendHealerMacro:setOn(config.enabled)
+    end
+end
 local healerWindow = UI.createWindow('FriendHealer')
 healerWindow:hide()
 healerWindow:setId(panelName)
@@ -159,7 +174,12 @@ ui.title:setOn(config.enabled)
 ui.title.onClick = function(widget)
     config.enabled = not config.enabled
     widget:setOn(config.enabled)
+    syncFriendHealerState()
 end
+
+-- Initialize integration on load so unused friend heal stays disabled by default
+initBotCoreHealer()
+syncFriendHealerState()
 
 ui.edit.onClick = function()
     healerWindow:show()
@@ -429,6 +449,7 @@ local useBotCore = false
 -- Initialize on load
 schedule(100, function()
   useBotCore = initBotCoreHealer()
+    syncFriendHealerState()
   if useBotCore then
     -- BotCore high-performance mode enabled silently
   end
@@ -537,13 +558,11 @@ end
 -- MAIN MACRO: Uses BotCore when available, falls back to legacy
 -- ============================================================================
 
-macro(100, function()
+friendHealerMacro = macro(100, function()
     if not config.enabled then return end
     
     -- Update BotCore config on each tick (in case settings changed)
     if useBotCore and BotCore and BotCore.FriendHealer then
-        BotCore.FriendHealer.setEnabled(config.enabled)
-        
         -- Let BotCore handle everything
         local actionTaken = BotCore.FriendHealer.tick()
         if actionTaken then return end
@@ -582,6 +601,8 @@ macro(100, function()
         return legacyHealAction(healTarget.creature, inMasResRange)
     end
 end)
+
+syncFriendHealerState()
 
 -- ============================================================================
 -- EVENT-DRIVEN HEALING (instant response to friend health drops)

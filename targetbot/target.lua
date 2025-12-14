@@ -774,6 +774,24 @@ targetbotMacro = macro(100, function()
   if not config or not config.isOn or not config.isOn() then
     return
   end
+
+  -- TargetBot never triggers friend-heal; keep that path dormant to save cycles
+  if HealEngine and HealEngine.setFriendHealingEnabled then
+    HealEngine.setFriendHealingEnabled(false)
+  end
+
+  if HealContext and HealContext.isCritical and HealContext.isCritical() then
+    TargetBot.clearWalk()
+    TargetBot.stopAttack(true)
+    ui.status.right:setText(STATUS_WAITING)
+    return
+  end
+  if HealContext and HealContext.isDanger and HealContext.isDanger() then
+    TargetBot.clearWalk()
+    TargetBot.stopAttack(true)
+    ui.status.right:setText(STATUS_WAITING)
+    return
+  end
   
   local pos = player:getPosition()
   if not pos then return end
@@ -837,6 +855,18 @@ targetbotMacro = macro(100, function()
     ui.status.right:setText(STATUS_WAITING)
   end
 end)
+
+-- Stop attacking the current target
+TargetBot.stopAttack = function(clearWalk)
+  if clearWalk then
+    TargetBot.clearWalk()
+  end
+  -- OTClient has a built-in autoAttackTarget() that toggles attack
+  -- Calling it when attacking will stop the attack
+  if autoAttackTarget then
+    autoAttackTarget(nil)
+  end
+end
 
 -- Note: Profile restoration is handled early in configs.lua
 -- before Config.setup() is called, so the dropdown loads correctly

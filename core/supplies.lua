@@ -235,7 +235,7 @@ local function refreshProfileList()
       label.remove.onClick = function()
         local childs = SuppliesWindow.profiles:getChildCount()
         if childs == 1 then
-          info("At least one profile must exist. Cannot delete the last profile.")
+          warn("At least one profile must exist. Cannot delete the last profile.")
           return
         end
         profiles[k] = nil
@@ -287,7 +287,7 @@ setProfileFocus()
 SuppliesWindow.newProfile.onClick = function()
   local n = SuppliesWindow.profiles:getChildCount()
   if n > 6 then
-    info("You cannot create more than 6 profiles.")
+    warn("You cannot create more than 6 profiles.")
     return
   end
   local name = "Profile #" .. n + 1

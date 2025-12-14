@@ -178,7 +178,8 @@ local DEFAULT_METRICS = {
   tilesWalked = 0, kills = 0, spellsCast = 0, potionsUsed = 0, runesUsed = 0,
   damageTaken = 0, healingDone = 0, deathCount = 0, nearDeathCount = 0,
   timePoisoned = 0, timeBurning = 0, timeParalyzed = 0, timeManaShield = 0,
-  timeHasted = 0, greenStaminaTime = 0, orangeStaminaTime = 0, timeInCombat = 0
+  timeHasted = 0, greenStaminaTime = 0, orangeStaminaTime = 0, timeInCombat = 0,
+  lootValue = 0, lootGold = 0, lootDrops = 0
 }
 
 local DEFAULT_PEAKS = { maxXpPerHour = 0, maxKillsPerHour = 0, lowestHpPercent = 100, highestDamageHit = 0, maxSpeed = 0 }
@@ -193,6 +194,7 @@ local function initStorage()
   local a = storage.analytics
   ensureDefaults(a.metrics, DEFAULT_METRICS)
   ensureDefaults(a.peakStats, DEFAULT_PEAKS)
+  a.lootItems = a.lootItems or {}
   return a
 end
 
@@ -235,12 +237,189 @@ local function startSession()
   for k, v in pairs(DEFAULT_METRICS) do analytics.metrics[k] = v end
   for k, v in pairs(DEFAULT_PEAKS) do analytics.peakStats[k] = v end
   analytics.monsters = {}
+  analytics.lootItems = {}
   analytics.peakStats.maxSpeed = Player.speed()
   
   if HealBot and HealBot.resetAnalytics then HealBot.resetAnalytics() end
   if AttackBot and AttackBot.resetAnalytics then AttackBot.resetAnalytics() end
   if EventBus then EventBus.emit("analytics:session:start") end
 end
+
+-- ============================================================================
+-- LOOT PARSING (Server message listener)
+-- ============================================================================
+
+local COIN_VALUES = {
+  ["gold coin"] = 1,
+  ["platinum coin"] = 100,
+  ["crystal coin"] = 10000
+}
+
+local function trim(s)
+  return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+-- Parse values like "1.2k" -> 1200, "2.5m" -> 2500000
+local function parseValue(str)
+  if not str then return 0 end
+  str = trim(str:lower())
+  local num, suffix = str:match("^([%d%.]+)([km]?)$")
+  if not num then
+    -- Try plain number
+    return tonumber(str) or 0
+  end
+  local value = tonumber(num) or 0
+  if suffix == "k" then
+    value = value * 1000
+  elseif suffix == "m" then
+    value = value * 1000000
+  end
+  return math.floor(value)
+end
+
+local function normalizeItemName(name)
+  if not name then return nil end
+  local lowered = trim(name:lower())
+  -- Collapse multiple spaces to single space
+  lowered = lowered:gsub("%s+", " ")
+  -- Remove article prefixes
+  lowered = lowered:gsub("^a ", ""):gsub("^an ", ""):gsub("^the ", "")
+  -- Normalize coins plural (match any coin type)
+  lowered = lowered:gsub("coins$", "coin")
+  -- Ensure proper spacing around "coin"
+  lowered = lowered:gsub("%s+coin$", " coin")
+  -- Try singular if plural not found in LootItems
+  if LootItems and not LootItems[lowered] and lowered:sub(-1) == "s" then
+    local singular = lowered:sub(1, -2)
+    if LootItems[singular] then
+      lowered = singular
+    end
+  end
+  return lowered
+end
+
+local function parseLootMessage(text)
+  if not text then return nil end
+  
+  -- Clean up the text: remove newlines, collapse spaces
+  local cleanText = text:gsub("[\r\n]+", " "):gsub("%s+", " ")
+  
+  -- Must contain "Loot of" (case insensitive check)
+  if not cleanText:lower():find("loot of") then return nil end
+  
+  -- Strip timestamp if present (e.g., "18:41 ")
+  cleanText = cleanText:gsub("^%d%d:%d%d%s*", "")
+  
+  -- Format: "Loot of a cyclops drone: 27 gold coins" or "Loot of a cyclops: nothing"
+  -- May optionally have " - (Ngp)" suffix from loot channel
+  
+  -- First strip optional value suffix if present
+  cleanText = cleanText:gsub("%s*%-%s*%([%d%.]+[km]?gp%)%s*$", "")
+  
+  -- Find the colon that separates creature from items
+  local colonPos = cleanText:find(":")
+  if not colonPos then return nil end
+  
+  local creaturePart = cleanText:sub(1, colonPos - 1)
+  local itemsPart = trim(cleanText:sub(colonPos + 1))
+  
+  -- Extract creature name: remove "Loot of " prefix and article
+  local creature = creaturePart:lower():gsub("^loot of%s*", "")
+  creature = creature:gsub("^a%s+", ""):gsub("^an%s+", ""):gsub("^the%s+", "")
+  creature = trim(creature)
+  
+  if not creature or creature == "" or not itemsPart or itemsPart == "" then 
+    return nil 
+  end
+  
+  local items = {}
+  local totalValue = 0
+  
+  -- Check for "nothing" loot
+  if itemsPart:lower():find("nothing") then
+    return { creature = trim(creature), totalValue = 0, items = items }
+  end
+  
+  -- Parse each item separated by comma
+  for part in itemsPart:gmatch("[^,]+") do
+    local entry = trim(part)
+    if entry ~= "" then
+      -- Try to match "N item" pattern (e.g., "20 gold coins", "a short sword")
+      local count, itemName = entry:match("^(%d+)%s+(.+)$")
+      if count then
+        count = tonumber(count) or 1
+      else
+        -- Check for "a/an item" pattern
+        itemName = entry:match("^an?%s+(.+)$")
+        if itemName then
+          count = 1
+        else
+          -- Just the item name
+          itemName = entry
+          count = 1
+        end
+      end
+      
+      local normalized = normalizeItemName(itemName)
+      local price = 0
+      if normalized and LootItems then
+        price = LootItems[normalized] or 0
+      end
+      
+      -- Calculate value from coins directly
+      if normalized then
+        local coinVal = COIN_VALUES[normalized]
+        if coinVal then
+          totalValue = totalValue + (coinVal * count)
+        else
+          totalValue = totalValue + (price * count)
+        end
+      end
+      
+      items[#items + 1] = { 
+        name = normalized or itemName:lower(), 
+        display = itemName, 
+        count = count, 
+        price = price 
+      }
+    end
+  end
+  
+  return { creature = trim(creature), totalValue = totalValue, items = items }
+end
+
+local function recordLoot(entry)
+  if not entry or not isSessionActive() then return end
+  local m = analytics.metrics
+  m.lootDrops = (m.lootDrops or 0) + 1
+  m.lootValue = (m.lootValue or 0) + (entry.totalValue or 0)
+
+  analytics.lootItems = analytics.lootItems or {}
+
+  for _, itm in ipairs(entry.items or {}) do
+    local nameKey = itm.name or itm.display
+    if nameKey then
+      local bucket = analytics.lootItems[nameKey] or {count = 0, value = 0}
+      bucket.count = bucket.count + (itm.count or 0)
+      local itemValue = (itm.price or 0) * (itm.count or 0)
+      bucket.value = bucket.value + itemValue
+      analytics.lootItems[nameKey] = bucket
+      -- Track gold from coins
+      if COIN_VALUES[nameKey] then
+        m.lootGold = (m.lootGold or 0) + COIN_VALUES[nameKey] * (itm.count or 0)
+      end
+    end
+  end
+end
+
+-- Listen to server text messages (loot appears here, not in onTalk)
+onTextMessage(function(mode, text)
+  if not text then return end
+  local entry = parseLootMessage(text)
+  if entry then
+    recordLoot(entry)
+  end
+end)
 
 local function endSession()
   analytics.session.active = false
@@ -513,6 +692,14 @@ local function calculateMetrics()
   
   -- Near death frequency (per hour)
   metrics.nearDeathPerHour = perHour(m.nearDeathCount, elapsed)
+
+  -- Loot economy metrics
+  metrics.lootValue = m.lootValue or 0
+  metrics.lootGold = m.lootGold or 0
+  metrics.lootDrops = m.lootDrops or 0
+  metrics.lootValuePerHour = perHour(metrics.lootValue, elapsed)
+  metrics.lootGoldPerHour = perHour(metrics.lootGold, elapsed)
+  metrics.lootPerKill = m.kills > 0 and (metrics.lootValue / m.kills) or 0
   
   -- Stamina efficiency (XP per minute of stamina)
   local staminaUsed = (analytics.session.startStamina or 0) - (Player.stamina() or 0)
@@ -849,6 +1036,23 @@ function Insights.calculateScore()
       elseif profitPerHour > 0 then score = score + 1
       elseif profitPerHour < -30000 then score = score - 2
       end
+    elseif metrics.lootValuePerHour and metrics.lootValuePerHour > 0 then
+      -- Fallback: use parsed loot value if bottingStats unavailable
+      local profitPerHour = metrics.lootValuePerHour
+      if profitPerHour > 100000 then score = score + 5
+      elseif profitPerHour > 50000 then score = score + 4
+      elseif profitPerHour > 20000 then score = score + 3
+      elseif profitPerHour > 0 then score = score + 1
+      elseif profitPerHour < -30000 then score = score - 2
+      end
+    end
+  elseif metrics.lootValuePerHour and metrics.lootValuePerHour > 0 then
+    local profitPerHour = metrics.lootValuePerHour
+    if profitPerHour > 100000 then score = score + 5
+    elseif profitPerHour > 50000 then score = score + 4
+    elseif profitPerHour > 20000 then score = score + 3
+    elseif profitPerHour > 0 then score = score + 1
+    elseif profitPerHour < -30000 then score = score - 2
     end
   end
   
@@ -956,6 +1160,26 @@ local function buildSummary()
     "Speed: " .. Player.speed()
   })
   
+  -- Loot
+  local lootLines = {
+    "Total Value: " .. formatNum(m.lootValue) .. " gp (" .. formatNum(math.floor(metrics.lootValuePerHour)) .. "/h)",
+    "Gold Coins: " .. formatNum(m.lootGold) .. " (" .. formatNum(math.floor(metrics.lootGoldPerHour)) .. "/h)",
+    "Drops Parsed: " .. formatNum(m.lootDrops),
+    "Avg/Kill: " .. formatNum(math.floor(metrics.lootPerKill)) .. " gp"
+  }
+
+  local topItems = {}
+  for name, data in pairs(analytics.lootItems or {}) do
+    topItems[#topItems + 1] = {name = name, count = data.count or 0, value = data.value or 0}
+  end
+  table.sort(topItems, function(a, b) return a.value > b.value end)
+  local limit = math.min(5, #topItems)
+  for i = 1, limit do
+    local itm = topItems[i]
+    lootLines[#lootLines + 1] = string.format("%d) %s x%d (%s gp)", i, itm.name, itm.count, formatNum(math.floor(itm.value)))
+  end
+  addSection(lines, "LOOT", lootLines)
+
   -- Score
   local score = Insights.calculateScore()
   addSection(lines, "HUNT SCORE", { Insights.scoreBar(score) })
