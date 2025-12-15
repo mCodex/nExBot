@@ -72,6 +72,10 @@ storage.analyzers = storage.analyzers or {}
 storage.analyzers.trackedLoot = storage.analyzers.trackedLoot or {}
 storage.analyzers.trackedBoss = storage.analyzers.trackedBoss or {}
 storage.analyzers.outfits = storage.analyzers.outfits or {}
+-- Ensure lootChannel defaults to true if not set
+if storage.analyzers.lootChannel == nil then
+  storage.analyzers.lootChannel = true
+end
 local trackedLoot = storage.analyzers.trackedLoot
 
 --destroy old windows
@@ -886,13 +890,16 @@ onTextMessage(function(mode, text)
 
     -- adding monster to killed list
     if text:find("Loot of") then
-      name = regexMatch(text, nameRegex)[1][2]
-      if not killList[name] then
-        killList[name] = 1
-      else
-        killList[name] = killList[name] + 1
+      local match = regexMatch(text, nameRegex)
+      if match and match[1] and match[1][2] then
+        name = match[1][2]
+        if not killList[name] then
+          killList[name] = 1
+        else
+          killList[name] = killList[name] + 1
+        end
+        refreshKills()
       end
-      refreshKills()
     end
     -- variables
     local split = string.split(text, ":")
@@ -1382,12 +1389,16 @@ function refreshKills()
     for k,v in pairs(killList) do
       kills = kills + 1
       local label = UI.createWidget("ListLabel", killedList)
-      label:setText(v .. "x " .. k)
+      if label then
+        label:setText(v .. "x " .. k)
+      end
     end
 
     if kills == 0 then
       local label = UI.createWidget("ListLabel", killedList)
-      label:setText("None")
+      if label then
+        label:setText("None")
+      end
     end
 end
 refreshKills()

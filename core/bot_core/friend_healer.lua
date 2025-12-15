@@ -21,6 +21,9 @@
     6. Normal operation - Heal whoever needs it most
 ]]
 
+local HealContext = dofile("/core/heal_context.lua")
+local HealEngine = dofile("/core/heal_engine.lua")
+
 BotCore.FriendHealer = BotCore.FriendHealer or {}
 local FriendHealer = BotCore.FriendHealer
 
@@ -280,60 +283,7 @@ local function findBestTarget(spectators, config, selfHpPercent)
   return bestTarget, targetsInRange
 end
 
--- ============================================================================
--- COOLDOWN INTEGRATION (Uses BotCore.Cooldown)
--- ============================================================================
-
--- Check if we can cast healing spell (shared with HealBot)
-local function canCastHeal()
-  -- Use BotCore cooldown manager if available
-  if BotCore.Cooldown and BotCore.Cooldown.isHealingOnCooldown then
-    if BotCore.Cooldown.isHealingOnCooldown() then
-      return false
-    end
-  end
-  
-  -- Fallback to direct check
-  if modules and modules.game_cooldown then
-    if modules.game_cooldown.isGroupCooldownIconActive(2) then
-      return false
-    end
-  end
-  
-  return true
-end
-
--- Check if specific spell is ready
-local function canCastSpell(spellId)
-  if not spellId then return true end  -- Unknown spell, try anyway
-  
-  -- Use BotCore cooldown manager
-  if BotCore.Cooldown and BotCore.Cooldown.isSpellOnCooldown then
-    return not BotCore.Cooldown.isSpellOnCooldown(spellId)
-  end
-  
-  -- Fallback
-  if modules and modules.game_cooldown then
-    return not modules.game_cooldown.isCooldownIconActive(spellId)
-  end
-  
-  return true
-end
-
--- Check if can use healing item
-local function canUseHealItem()
-  -- Use BotCore cooldown manager
-  if BotCore.Cooldown and BotCore.Cooldown.canUsePotion then
-    return BotCore.Cooldown.canUsePotion()
-  end
-  
-  -- Fallback: check nExBot potion state
-  if nExBot and nExBot.isUsingPotion then
-    return false
-  end
-  
-  return true
-end
+-- Cooldown helpers handled by HealEngine/HealContext; legacy checks removed
 
 -- Mark that we used a heal (update shared cooldown)
 local function markHealUsed()
@@ -354,57 +304,12 @@ end
 -- Returns true if action was taken
 local function executeHeal(target, config, targetsInRange)
   if not target or not target.creature then return false end
-  
-  local name = target.name
-  local hp = target.hp
-  local dist = target.distance
-  
-  -- Check settings
-  local masResPlayers = config.settings.masResPlayers or 2
-  local itemRange = config.settings.itemRange or 6
-  local healthItemId = config.settings.healthItem or 3160
-  local manaItemId = config.settings.manaItem or 268
-  local granSioThreshold = config.settings.granSioAt or 40
-  
-  -- Priority 1: Mas Res if multiple friends need healing
-  if targetsInRange >= masResPlayers and canCast and canCast("exura gran mas res") then
-    if canCastHeal() and canCastSpell(SPELL_EXURA_MAS_RES) then
-      say("exura gran mas res")
-      markHealUsed()
-      return true
-    end
+  local snap = HealContext.get()
+  local engineAction = HealEngine.planFriend(snap, target)
+  if engineAction and HealEngine.execute(engineAction) then
+    markHealUsed()
+    return true
   end
-  
-  -- Priority 2: Gran Sio for critical friends
-  if hp <= granSioThreshold and canCast and canCast('exura gran sio "' .. name) then
-    if canCastHeal() and canCastSpell(SPELL_EXURA_GRAN_SIO) then
-      say('exura gran sio "' .. name)
-      markHealUsed()
-      return true
-    end
-  end
-  
-  -- Priority 3: Normal Sio
-  if canCast and canCast('exura sio "' .. name) then
-    if canCastHeal() then
-      say('exura sio "' .. name)
-      markHealUsed()
-      return true
-    end
-  end
-  
-  -- Priority 4: Health item if in range
-  if dist <= itemRange and findItem and findItem(healthItemId) then
-    if canUseHealItem() then
-      useWith(healthItemId, target.creature)
-      markHealUsed()
-      if BotCore.Cooldown and BotCore.Cooldown.markPotionUsed then
-        BotCore.Cooldown.markPotionUsed()
-      end
-      return true
-    end
-  end
-  
   return false
 end
 
@@ -437,6 +342,10 @@ end
 -- Returns true if action was taken
 function FriendHealer.tick()
   if not FriendHealer.isEnabled() then return false end
+  if HealContext and HealContext.isCritical and HealContext.isCritical() then
+    _state.bestTarget = nil
+    return false
+  end
   
   local config = _state.config
   if not config then return false end
@@ -503,6 +412,7 @@ end
 -- Event handler: Friend health changed (for instant response)
 function FriendHealer.onFriendHealthChange(creature, newHpPercent, oldHpPercent)
   if not FriendHealer.isEnabled() then return end
+  if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
   if not creature or creature:isLocalPlayer() then return end
   
   local config = _state.config

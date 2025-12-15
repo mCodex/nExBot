@@ -1,5 +1,35 @@
-local standBySpells = false
-local standByItems = false
+local standBySpells, standByItems = false, false
+
+-- Load heal modules using simple dofile; they set globals directly
+-- Try multiple paths in order of likelihood
+local function tryLoadModule(name)
+  local paths = {
+    "core/" .. name .. ".lua",
+    "/core/" .. name .. ".lua"
+  }
+  for _, path in ipairs(paths) do
+    local ok = pcall(dofile, path)
+    if ok then return true end
+  end
+  return false
+end
+
+-- Load heal_context (sets global HealContext)
+if not HealContext then
+  tryLoadModule("heal_context")
+end
+if not HealContext or not HealContext.get then
+  warn("[HealBot] HealContext not loaded")
+end
+
+-- Load heal_engine (sets global HealEngine)
+if not HealEngine then
+  tryLoadModule("heal_engine")
+end
+if not HealEngine then
+  warn("[HealBot] HealEngine not loaded")
+end
+HealBot = HealBot or {}
 
 local red = "#ff0800" -- "#ff0800" / #ea3c53 best
 local blue = "#7ef9ff"
@@ -164,6 +194,22 @@ local setActiveProfile = function()
 end
 setActiveProfile()
 
+-- Macro handle so we can fully stop/start execution with the UI toggle
+local healMacro = nil
+local function syncHealMacro()
+  if healMacro and healMacro.setOn then
+    healMacro:setOn(currentSettings.enabled)
+  end
+end
+
+local setProfileName = function()
+  local name = (currentSettings and currentSettings.name) or ("Profile #" .. HealBotConfig.currentHealBotProfile)
+  ui.name:setText(name)
+  if healWindow and healWindow.settings and healWindow.settings.profiles then
+    healWindow.settings.profiles.Name:setText(name)
+  end
+end
+
 local activeProfileColor = function()
   for i=1,5 do
     if i == HealBotConfig.currentHealBotProfile then
@@ -179,288 +225,174 @@ ui.title:setOn(currentSettings.enabled)
 ui.title.onClick = function(widget)
   currentSettings.enabled = not currentSettings.enabled
   widget:setOn(currentSettings.enabled)
+  syncHealMacro()
+  applyHealEngineToggles()  -- Update HealEngine when toggling on/off
   nExBotConfigSave("heal")
 end
 
 ui.settings.onClick = function(widget)
-  healWindow:show()
-  healWindow:raise()
-  healWindow:focus()
+  if healWindow then
+    healWindow:show()
+    healWindow:raise()
+    healWindow:focus()
+  end
 end
 
-rootWidget = g_ui.getRootWidget()
+-- Convert HealBot spell format to HealEngine format
+local function convertSpellsToEngineFormat(spellTable)
+  if not spellTable then return {} end
+  local converted = {}
+  for i, spell in ipairs(spellTable) do
+    if spell.enabled ~= false and spell.spell then  -- Only include enabled spells with valid spell name
+      -- Determine HP/MP trigger based on origin and sign
+      -- sign field indicates "<" (Below) or ">" (Above)
+      local hp, mp = nil, nil
+      local isBelow = spell.sign == "<" or spell.sign == nil  -- Default to "Below" if not set
+      
+      if spell.origin == "HP" or spell.origin == "HP%" then
+        -- For HP spells with "Below" condition: trigger when HP <= value
+        if isBelow then
+          hp = spell.value or 50
+        end
+      elseif spell.origin == "MP" or spell.origin == "MP%" then
+        -- For MP spells with "Below" condition: trigger when MP <= value
+        -- This is for spells like mana shield that trigger on low mana
+        if isBelow then
+          mp = spell.value or 50
+        end
+      end
+      
+      -- Only add if we have a valid trigger threshold
+      if hp or mp then
+        table.insert(converted, {
+          name = spell.spell,
+          key = spell.spell:lower(),
+          hp = hp,
+          mp = mp,
+          cd = 1100,  -- Default cooldown, can be customized per spell
+          prio = #converted + 1    -- Priority based on insertion order
+        })
+      end
+    end
+  end
+  return converted
+end
+
+-- Convert HealBot potion format to HealEngine format
+local function convertPotionsToEngineFormat(itemTable)
+  if not itemTable then return {} end
+  local converted = {}
+  for i, item in ipairs(itemTable) do
+    if item.enabled ~= false and item.item and item.item > 0 then  -- Only include enabled potions with valid item ID
+      -- Determine HP/MP trigger based on origin
+      -- Note: sign field indicates "<" (Below) or ">" (Above)
+      -- For "Below" (sign="<"), we want to use when stat <= threshold
+      -- For "Above" (sign=">"), we invert: use when stat >= threshold (but this is unusual for potions)
+      local hp, mp = nil, nil
+      local isBelow = item.sign == "<" or item.sign == nil  -- Default to "Below" if not set
+      
+      if item.origin == "HP" or item.origin == "HP%" then
+        -- For HP potions with "Below" condition: trigger when HP <= value
+        -- For HP potions with "Above" condition: this is unusual, but we'd skip (set nil)
+        if isBelow then
+          hp = item.value or 50
+        end
+      elseif item.origin == "MP" or item.origin == "MP%" then
+        -- For MP potions with "Below" condition: trigger when MP <= value
+        if isBelow then
+          mp = item.value or 50
+        end
+      end
+      
+      -- Get the actual item name from the game data
+      local itemName = nil
+      if g_things and g_things.getThingType then
+        local thing = g_things.getThingType(item.item, ThingCategoryItem)
+        if thing and thing.getName then
+          local name = thing:getName()
+          if name and name ~= "" then
+            itemName = name:lower()
+          end
+        elseif thing and thing.getMarketData then
+          local marketData = thing:getMarketData()
+          if marketData and marketData.name and marketData.name ~= "" then
+            itemName = marketData.name:lower()
+          end
+        end
+      end
+      -- Fallback name based on item ID if we couldn't get the real name
+      if not itemName then
+        itemName = "potion #" .. item.item
+      end
+      
+      -- Only add if we have a valid trigger threshold
+      if hp or mp then
+        table.insert(converted, {
+          id = item.item,
+          key = "potion_" .. item.item,
+          hp = hp,
+          mp = mp,
+          cd = 1000,  -- Potion cooldown
+          prio = #converted + 1,    -- Priority based on insertion order
+          name = itemName
+        })
+      end
+    end
+  end
+  return converted
+end
+
+-- Module-level helper so validateStartup can access it
+local function applyHealEngineToggles()
+  if not HealEngine or not HealEngine.configure or not currentSettings then return end
+  local isOn = not not currentSettings.enabled
+  local hasSpells = currentSettings.spellTable and #currentSettings.spellTable > 0
+  local hasItems = currentSettings.itemTable and #currentSettings.itemTable > 0
+  
+  -- Debug: uncomment to debug configuration
+  -- print(string.format("[HealBot] applyHealEngineToggles: enabled=%s hasSpells=%s hasItems=%s", tostring(isOn), tostring(hasSpells), tostring(hasItems)))
+  
+  -- Enable/disable the healing features
+  HealEngine.configure({
+    selfSpells = isOn and hasSpells,
+    potions = isOn and hasItems,
+    friendHeals = false -- Friend healing only enabled by FriendHealer
+  })
+  
+  -- Pass the custom configured spells and potions to the engine (converted to engine format)
+  if HealEngine.setCustomSpells and hasSpells then
+    HealEngine.setCustomSpells(convertSpellsToEngineFormat(currentSettings.spellTable))
+  end
+  if HealEngine.setCustomPotions and hasItems then
+    local converted = convertPotionsToEngineFormat(currentSettings.itemTable)
+    -- Debug: uncomment to debug potions
+    -- print(string.format("[HealBot] Setting %d potions to HealEngine", #converted))
+    -- for i, pot in ipairs(converted) do
+    --   print(string.format("[HealBot]   Potion %d: id=%s hp=%s mp=%s", i, tostring(pot.id), tostring(pot.hp), tostring(pot.mp)))
+    -- end
+    HealEngine.setCustomPotions(converted)
+  end
+end
+
+local rootWidget = g_ui.getRootWidget()
 if rootWidget then
   healWindow = UI.createWindow('HealWindow', rootWidget)
   healWindow:hide()
-
-  healWindow.onVisibilityChange = function(widget, visible)
-    if not visible then
-      nExBotConfigSave("heal")
-      healWindow.healer:show()
-      healWindow.settings:hide()
-      healWindow.settingsButton:setText("Settings")
-    end
-  end
-
-  healWindow.settingsButton.onClick = function(widget)
-    if healWindow.healer:isVisible() then
-      healWindow.healer:hide()
-      healWindow.settings:show()
-      widget:setText("Back")
-    else
-      healWindow.healer:show()
-      healWindow.settings:hide()
-      widget:setText("Settings")
-    end
-  end
-
-  local setProfileName = function()
-    ui.name:setText(currentSettings.name)
-  end
-  healWindow.settings.profiles.Name.onTextChange = function(widget, text)
-    currentSettings.name = text
-    setProfileName()
-  end
-  healWindow.settings.list.Visible.onClick = function(widget)
-    currentSettings.Visible = not currentSettings.Visible
-    healWindow.settings.list.Visible:setChecked(currentSettings.Visible)
-  end
-  healWindow.settings.list.Cooldown.onClick = function(widget)
-    currentSettings.Cooldown = not currentSettings.Cooldown
-    healWindow.settings.list.Cooldown:setChecked(currentSettings.Cooldown)
-  end
-  healWindow.settings.list.Interval.onClick = function(widget)
-    currentSettings.Interval = not currentSettings.Interval
-    healWindow.settings.list.Interval:setChecked(currentSettings.Interval)
-  end
-  healWindow.settings.list.Conditions.onClick = function(widget)
-    currentSettings.Conditions = not currentSettings.Conditions
-    healWindow.settings.list.Conditions:setChecked(currentSettings.Conditions)
-  end
-  healWindow.settings.list.Delay.onClick = function(widget)
-    currentSettings.Delay = not currentSettings.Delay
-    healWindow.settings.list.Delay:setChecked(currentSettings.Delay)
-  end
-  healWindow.settings.list.MessageDelay.onClick = function(widget)
-    currentSettings.MessageDelay = not currentSettings.MessageDelay
-    healWindow.settings.list.MessageDelay:setChecked(currentSettings.MessageDelay)
-  end
-
-  local refreshSpells = function()
-    if currentSettings.spellTable then
-      healWindow.healer.spells.spellList:destroyChildren()
-      for _, entry in pairs(currentSettings.spellTable) do
-        local label = UI.createWidget("SpellEntry", healWindow.healer.spells.spellList)
-        label.enabled:setChecked(entry.enabled)
-        label.enabled.onClick = function(widget)
-          standBySpells = false
-          standByItems = false
-          entry.enabled = not entry.enabled
-          label.enabled:setChecked(entry.enabled)
-        end
-        label.remove.onClick = function(widget)
-          standBySpells = false
-          standByItems = false
-          table.removevalue(currentSettings.spellTable, entry)
-          reindexTable(currentSettings.spellTable)
-          label:destroy()
-        end
-        label:setText("(MP>" .. entry.cost .. ") " .. entry.origin .. entry.sign .. entry.value .. ": " .. entry.spell)
-      end
-    end
-  end
-  refreshSpells()
-
-  local refreshItems = function()
-    if currentSettings.itemTable then
-      healWindow.healer.items.itemList:destroyChildren()
-      for _, entry in pairs(currentSettings.itemTable) do
-        local label = UI.createWidget("ItemEntry", healWindow.healer.items.itemList)
-        label.enabled:setChecked(entry.enabled)
-        label.enabled.onClick = function(widget)
-          standBySpells = false
-          standByItems = false
-          entry.enabled = not entry.enabled
-          label.enabled:setChecked(entry.enabled)
-        end
-        label.remove.onClick = function(widget)
-          standBySpells = false
-          standByItems = false
-          table.removevalue(currentSettings.itemTable, entry)
-          reindexTable(currentSettings.itemTable)
-          label:destroy()
-        end
-        label.id:setItemId(entry.item)
-        label:setText(entry.origin .. entry.sign .. entry.value .. ": " .. entry.item)
-      end
-    end
-  end
-  refreshItems()
-
-  healWindow.healer.spells.MoveUp.onClick = function(widget)
-    local input = healWindow.healer.spells.spellList:getFocusedChild()
-    if not input then return end
-    local index = healWindow.healer.spells.spellList:getChildIndex(input)
-    if index < 2 then return end
-
-    local t = currentSettings.spellTable
-
-    t[index],t[index-1] = t[index-1], t[index]
-    healWindow.healer.spells.spellList:moveChildToIndex(input, index - 1)
-    healWindow.healer.spells.spellList:ensureChildVisible(input)
-  end
-
-  healWindow.healer.spells.MoveDown.onClick = function(widget)
-    local input = healWindow.healer.spells.spellList:getFocusedChild()
-    if not input then return end
-    local index = healWindow.healer.spells.spellList:getChildIndex(input)
-    if index >= healWindow.healer.spells.spellList:getChildCount() then return end
-
-    local t = currentSettings.spellTable
-
-    t[index],t[index+1] = t[index+1],t[index]
-    healWindow.healer.spells.spellList:moveChildToIndex(input, index + 1)
-    healWindow.healer.spells.spellList:ensureChildVisible(input)
-  end
-
-  healWindow.healer.items.MoveUp.onClick = function(widget)
-    local input = healWindow.healer.items.itemList:getFocusedChild()
-    if not input then return end
-    local index = healWindow.healer.items.itemList:getChildIndex(input)
-    if index < 2 then return end
-
-    local t = currentSettings.itemTable
-
-    t[index],t[index-1] = t[index-1], t[index]
-    healWindow.healer.items.itemList:moveChildToIndex(input, index - 1)
-    healWindow.healer.items.itemList:ensureChildVisible(input)
-  end
-
-  healWindow.healer.items.MoveDown.onClick = function(widget)
-    local input = healWindow.healer.items.itemList:getFocusedChild()
-    if not input then return end
-    local index = healWindow.healer.items.itemList:getChildIndex(input)
-    if index >= healWindow.healer.items.itemList:getChildCount() then return end
-
-    local t = currentSettings.itemTable
-
-    t[index],t[index+1] = t[index+1],t[index]
-    healWindow.healer.items.itemList:moveChildToIndex(input, index + 1)
-    healWindow.healer.items.itemList:ensureChildVisible(input)
-  end
-
-  healWindow.healer.spells.addSpell.onClick = function(widget)
- 
-    local spellFormula = healWindow.healer.spells.spellFormula:getText():trim()
-    local manaCost = tonumber(healWindow.healer.spells.manaCost:getText())
-    local spellTrigger = tonumber(healWindow.healer.spells.spellValue:getText())
-    local spellSource = healWindow.healer.spells.spellSource:getCurrentOption().text
-    local spellEquasion = healWindow.healer.spells.spellCondition:getCurrentOption().text
-    local source
-    local equasion
-
-    if not manaCost then  
-      warn("HealBot: incorrect mana cost value!")       
-      healWindow.healer.spells.spellFormula:setText('')
-      healWindow.healer.spells.spellValue:setText('')
-      healWindow.healer.spells.manaCost:setText('') 
-      return 
-    end
-    if not spellTrigger then  
-      warn("HealBot: incorrect condition value!") 
-      healWindow.healer.spells.spellFormula:setText('')
-      healWindow.healer.spells.spellValue:setText('')
-      healWindow.healer.spells.manaCost:setText('')
-      return 
-    end
-
-    if spellSource == "Current Mana" then
-      source = "MP"
-    elseif spellSource == "Current Health" then
-      source = "HP"
-    elseif spellSource == "Mana Percent" then
-      source = "MP%"
-    elseif spellSource == "Health Percent" then
-      source = "HP%"
-    else
-      source = "burst"
-    end
-    
-    if spellEquasion == "Above" then
-      equasion = ">"
-    elseif spellEquasion == "Below" then
-      equasion = "<"
-    else
-      equasion = "="
-    end
-
-    if spellFormula:len() > 0 then
-      table.insert(currentSettings.spellTable,  {index = #currentSettings.spellTable+1, spell = spellFormula, sign = equasion, origin = source, cost = manaCost, value = spellTrigger, enabled = true})
-      healWindow.healer.spells.spellFormula:setText('')
-      healWindow.healer.spells.spellValue:setText('')
-      healWindow.healer.spells.manaCost:setText('')
-    end
-    standBySpells = false
-    standByItems = false
-    refreshSpells()
-  end
-
-  healWindow.healer.items.addItem.onClick = function(widget)
- 
-    local id = healWindow.healer.items.itemId:getItemId()
-    local trigger = tonumber(healWindow.healer.items.itemValue:getText())
-    local src = healWindow.healer.items.itemSource:getCurrentOption().text
-    local eq = healWindow.healer.items.itemCondition:getCurrentOption().text
-    local source
-    local equasion
-
-    if not trigger then
-      warn("HealBot: incorrect trigger value!")
-      healWindow.healer.items.itemId:setItemId(0)
-      healWindow.healer.items.itemValue:setText('')
-      return
-    end
-
-    if src == "Current Mana" then
-      source = "MP"
-    elseif src == "Current Health" then
-      source = "HP"
-    elseif src == "Mana Percent" then
-      source = "MP%"
-    elseif src == "Health Percent" then
-      source = "HP%"
-    else
-      source = "burst"
-    end
-    
-    if eq == "Above" then
-      equasion = ">"
-    elseif eq == "Below" then
-      equasion = "<"
-    else
-      equasion = "="
-    end
-
-    if id > 100 then
-      table.insert(currentSettings.itemTable, {index = #currentSettings.itemTable+1,item = id, sign = equasion, origin = source, value = trigger, enabled = true})
-      standBySpells = false
-      standByItems = false
-      refreshItems()
-      healWindow.healer.items.itemId:setItemId(0)
-      healWindow.healer.items.itemValue:setText('')
-    end
-  end
 
   healWindow.closeButton.onClick = function(widget)
     healWindow:hide()
   end
 
+  local refreshSpells
+  local refreshItems
+
   local loadSettings = function()
     ui.title:setOn(currentSettings.enabled)
+    syncHealMacro()
     setProfileName()
-    healWindow.settings.profiles.Name:setText(currentSettings.name)
     refreshSpells()
     refreshItems()
+    applyHealEngineToggles()
     healWindow.settings.list.Visible:setChecked(currentSettings.Visible)
     healWindow.settings.list.Cooldown:setChecked(currentSettings.Cooldown)
     healWindow.settings.list.Delay:setChecked(currentSettings.Delay)
@@ -468,12 +400,140 @@ if rootWidget then
     healWindow.settings.list.Interval:setChecked(currentSettings.Interval)
     healWindow.settings.list.Conditions:setChecked(currentSettings.Conditions)
   end
+
+    refreshSpells = function()
+      if not currentSettings.spellTable then return end
+      healWindow.healer.spells.spellList:destroyChildren()
+      for _, entry in pairs(currentSettings.spellTable) do
+        local label = UI.createWidget("SpellEntry", healWindow.healer.spells.spellList)
+        label.enabled:setChecked(entry.enabled)
+        label.enabled.onClick = function()
+          entry.enabled = not entry.enabled
+          label.enabled:setChecked(entry.enabled)
+          applyHealEngineToggles()
+          nExBotConfigSave("heal")
+        end
+        label.remove.onClick = function()
+          table.removevalue(currentSettings.spellTable, entry)
+          refreshSpells()
+          applyHealEngineToggles()
+          nExBotConfigSave("heal")
+        end
+        label:setText("(MP>" .. entry.cost .. ") " .. entry.origin .. entry.sign .. entry.value .. ": " .. entry.spell)
+      end
+    end
+
+    refreshItems = function()
+      if not currentSettings.itemTable then return end
+      healWindow.healer.items.itemList:destroyChildren()
+      for _, entry in pairs(currentSettings.itemTable) do
+        local label = UI.createWidget("ItemEntry", healWindow.healer.items.itemList)
+        label.enabled:setChecked(entry.enabled)
+        label.enabled.onClick = function()
+          entry.enabled = not entry.enabled
+          label.enabled:setChecked(entry.enabled)
+          applyHealEngineToggles()
+          nExBotConfigSave("heal")
+        end
+        label.remove.onClick = function()
+          table.removevalue(currentSettings.itemTable, entry)
+          refreshItems()
+          applyHealEngineToggles()
+          nExBotConfigSave("heal")
+        end
+        label.id:setItemId(entry.item)
+        label:setText(entry.origin .. entry.sign .. entry.value .. ": " .. entry.item)
+      end
+    end
+
+    healWindow.healer.spells.MoveUp.onClick = function()
+      local input = healWindow.healer.spells.spellList:getFocusedChild()
+      if not input then return end
+      local index = healWindow.healer.spells.spellList:getChildIndex(input)
+      if index < 2 then return end
+      local t = currentSettings.spellTable
+      t[index], t[index-1] = t[index-1], t[index]
+      healWindow.healer.spells.spellList:moveChildToIndex(input, index - 1)
+      healWindow.healer.spells.spellList:ensureChildVisible(input)
+      nExBotConfigSave("heal")
+    end
+
+    healWindow.healer.spells.MoveDown.onClick = function()
+      local input = healWindow.healer.spells.spellList:getFocusedChild()
+      if not input then return end
+      local index = healWindow.healer.spells.spellList:getChildIndex(input)
+      if index >= healWindow.healer.spells.spellList:getChildCount() then return end
+      local t = currentSettings.spellTable
+      t[index], t[index+1] = t[index+1], t[index]
+      healWindow.healer.spells.spellList:moveChildToIndex(input, index + 1)
+      healWindow.healer.spells.spellList:ensureChildVisible(input)
+      nExBotConfigSave("heal")
+    end
+
+    healWindow.healer.items.MoveUp.onClick = function()
+      local input = healWindow.healer.items.itemList:getFocusedChild()
+      if not input then return end
+      local index = healWindow.healer.items.itemList:getChildIndex(input)
+      if index < 2 then return end
+      local t = currentSettings.itemTable
+      t[index], t[index-1] = t[index-1], t[index]
+      healWindow.healer.items.itemList:moveChildToIndex(input, index - 1)
+      healWindow.healer.items.itemList:ensureChildVisible(input)
+      nExBotConfigSave("heal")
+    end
+
+    healWindow.healer.items.MoveDown.onClick = function()
+      local input = healWindow.healer.items.itemList:getFocusedChild()
+      if not input then return end
+      local index = healWindow.healer.items.itemList:getChildIndex(input)
+      if index >= healWindow.healer.items.itemList:getChildCount() then return end
+      local t = currentSettings.itemTable
+      t[index], t[index+1] = t[index+1], t[index]
+      healWindow.healer.items.itemList:moveChildToIndex(input, index + 1)
+      healWindow.healer.items.itemList:ensureChildVisible(input)
+      nExBotConfigSave("heal")
+    end
+
+    healWindow.healer.spells.addSpell.onClick = function()
+      local spellFormula = healWindow.healer.spells.spellFormula:getText():trim()
+      local manaCost = tonumber(healWindow.healer.spells.manaCost:getText())
+      local trigger = tonumber(healWindow.healer.spells.spellValue:getText())
+      local src = healWindow.healer.spells.spellSource:getCurrentOption().text
+      local eq = healWindow.healer.spells.spellCondition:getCurrentOption().text
+      if not manaCost or not trigger or spellFormula:len() == 0 then return end
+      local origin = (src == "Current Mana" and "MP") or (src == "Current Health" and "HP") or (src == "Mana Percent" and "MP%") or (src == "Health Percent" and "HP%") or "burst"
+      local sign = (eq == "Above" and ">") or (eq == "Below" and "<") or "="
+      table.insert(currentSettings.spellTable, {index = #currentSettings.spellTable+1, spell = spellFormula, sign = sign, origin = origin, cost = manaCost, value = trigger, enabled = true})
+      healWindow.healer.spells.spellFormula:setText('')
+      healWindow.healer.spells.spellValue:setText('')
+      healWindow.healer.spells.manaCost:setText('')
+      refreshSpells()
+      applyHealEngineToggles()
+      nExBotConfigSave("heal")
+    end
+
+    healWindow.healer.items.addItem.onClick = function()
+      local id = healWindow.healer.items.itemId:getItemId()
+      local trigger = tonumber(healWindow.healer.items.itemValue:getText())
+      local src = healWindow.healer.items.itemSource:getCurrentOption().text
+      local eq = healWindow.healer.items.itemCondition:getCurrentOption().text
+      if not trigger or id <= 100 then return end
+      local origin = (src == "Current Mana" and "MP") or (src == "Current Health" and "HP") or (src == "Mana Percent" and "MP%") or (src == "Health Percent" and "HP%") or "burst"
+      local sign = (eq == "Above" and ">") or (eq == "Below" and "<") or "="
+      table.insert(currentSettings.itemTable, {index = #currentSettings.itemTable+1, item = id, sign = sign, origin = origin, value = trigger, enabled = true})
+      healWindow.healer.items.itemId:setItemId(0)
+      healWindow.healer.items.itemValue:setText('')
+      refreshItems()
+      applyHealEngineToggles()
+      nExBotConfigSave("heal")
+    end
   loadSettings()
 
   local profileChange = function()
     setActiveProfile()
     activeProfileColor()
     loadSettings()
+    applyHealEngineToggles()  -- Update HealEngine with new profile's spells/potions
     nExBotConfigSave("heal")
   end
 
@@ -519,13 +579,17 @@ if rootWidget then
   HealBot.setOff = function()
     currentSettings.enabled = false
     ui.title:setOn(currentSettings.enabled)
-    nExBotConfigSave("atk")
+    syncHealMacro()
+    applyHealEngineToggles()
+    nExBotConfigSave("heal")
   end
 
   HealBot.setOn = function()
     currentSettings.enabled = true
     ui.title:setOn(currentSettings.enabled)
-    nExBotConfigSave("atk")
+    syncHealMacro()
+    applyHealEngineToggles()
+    nExBotConfigSave("heal")
   end
 
   HealBot.getActiveProfile = function()
@@ -737,190 +801,47 @@ HealBot.resetAnalytics = function()
   analytics.log = {}
 end
 
--- Process spell healing (high priority, runs on events)
-local function processSpellHealing()
-  if standBySpells then return false end
-  if not currentSettings.enabled then return false end
-  
-  local spellTable = currentSettings.spellTable
-  local spellCount = spellTable and #spellTable or 0
-  if spellCount == 0 then return false end
-  
-  -- Get stats from BotCore (single source of truth)
-  local stats = getStats()
-  
-  local somethingIsOnCooldown = false
-  local currentMp = stats.mp
-  local ignoreConditions = not currentSettings.Conditions
-  local ignoreCooldown = not currentSettings.Cooldown
-  
-  for i = 1, spellCount do
-    local entry = spellTable[i]
-    if entry.enabled and entry.cost < currentMp then
-      if canCast(entry.spell, ignoreConditions, ignoreCooldown) then
-        if checkCondition(entry.origin, entry.sign, entry.value) then
-          local beforeHp = stats.hpPercent
-          local beforeMp = stats.mpPercent
-          say(entry.spell)
-          recordSpell(entry, beforeHp, beforeMp)
-          return true
-        end
-      else
-        somethingIsOnCooldown = true
-      end
-    end
-  end
-  
-  if not somethingIsOnCooldown then
-    standBySpells = true
-  end
-  return false
-end
-
--- Use BotCore.Items for hotkey-style item usage (works even with closed backpack)
-local function useItemLikeHotkey(itemId)
-  -- Use BotCore.Items if available
-  if BotCore and BotCore.Items and BotCore.Items.useSelf then
-    return BotCore.Items.useSelf(itemId)
-  end
-  
-  -- Fallback: direct implementation
-  local localPlayer = g_game.getLocalPlayer()
-  if not localPlayer then return false end
-  
-  if g_game.useInventoryItemWith then
-    g_game.useInventoryItemWith(itemId, localPlayer)
-    return true
-  end
-  
-  local item = findItem(itemId)
-  if item then
-    g_game.useWith(item, localPlayer)
-    return true
-  end
-  
-  return false
-end
-
--- Process item healing (slightly lower priority) - optimized
-local function processItemHealing()
-  if standByItems then return false end
-  if not currentSettings.enabled then return false end
-  
-  local itemTable = currentSettings.itemTable
-  local itemCount = itemTable and #itemTable or 0
-  if itemCount == 0 then return false end
-  
-  if currentSettings.Delay and nExBot.isUsing then return false end
-  if currentSettings.MessageDelay and nExBot.isUsingPotion then return false end
-  
-  -- Check if looting (delay if needed) - cache TargetBot references
-  if TargetBot and TargetBot.isOn and TargetBot.isOn() and currentSettings.Interval then
-    local looting = TargetBot.Looting
-    if looting and looting.getStatus then
-      local status = looting.getStatus()
-      if status and status:len() > 0 then
-        return false -- Skip this tick, let looting finish
-      end
-    end
-  end
-  
-  -- Get stats from BotCore (single source of truth)
-  local stats = getStats()
-  local checkVisibility = currentSettings.Visible and not g_game.useInventoryItemWith
-  
-  for i = 1, itemCount do
-    local entry = itemTable[i]
-    if entry and entry.enabled then
-      -- Only check visibility if required and no inventory method available
-      local canUse = not checkVisibility or findItem(entry.item) ~= nil
-      
-      if canUse and checkCondition(entry.origin, entry.sign, entry.value) then
-        if useItemLikeHotkey(entry.item) then
-          local beforeHp = stats.hpPercent
-          local beforeMp = stats.mpPercent
-          recordPotion(entry, beforeHp, beforeMp)
-          return true
-        end
-      end
-    end
-  end
-  
-  standByItems = true
-  return false
-end
+-- Legacy healer removed; new engine is the single path
 
 -- Subscribe to EventBus for instant reaction to stat changes
 -- Note: BotCore handles event-driven stat updates, we just need to reset flags
-if EventBus then
-  -- High priority health change handler (priority 100 = runs first)
-  EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMaxHealth)
-    -- BotCore.Stats handles the actual stat update
-    -- We just reset standby flags
-    standByItems = false
-    standBySpells = false
-    needsHealCheck = true
-    needsItemCheck = true
-    
-    -- CRITICAL: If health dropped significantly, process immediately
-    if health < oldHealth then
-      -- Immediate spell check for emergency healing
-      processSpellHealing()
-    end
-  end, 100)
-  
-  -- Mana change handler
-  EventBus.on("player:mana", function(mp, maxMp, oldMp, oldMaxMp)
-    -- BotCore.Stats handles the actual stat update
-    standByItems = false
-    standBySpells = false
-    needsHealCheck = true
-    needsItemCheck = true
-  end, 90)
-end
+-- Legacy event hooks removed; HealEngine runs on macro tick only
 
--- Fast spell macro (75ms for critical healing response)
-macro(75, function()
+-- Fast spell macro (driven by HealBot on/off state)
+healMacro = macro(150, function()
   if not currentSettings.enabled then return end
-  
-  -- BotCore.Stats.update() is called by BotCore tick handler
-  -- Just reset standby and process
-  standBySpells = false
-  
-  processSpellHealing()
+
+  if not HealContext or not HealContext.get then
+    return
+  end
+
+  local snap = HealContext.get()
+  local action = HealEngine.planSelf(snap)
+  if action then
+    HealEngine.execute(action)
+    return
+  end
 end)
 
--- Item macro (100ms - potions have 1s cooldown anyway)
-macro(100, function()
-  if not currentSettings.enabled then return end
-  if not currentSettings.itemTable or #currentSettings.itemTable == 0 then return end
-  if currentSettings.Delay and nExBot.isUsing then return end
-  if currentSettings.MessageDelay and nExBot.isUsingPotion then return end
-  
-  -- Reset standby on each tick
-  standByItems = false
-  
-  processItemHealing()
-end)
+syncHealMacro()
 
--- Keep the original event handlers as fallback (they just set flags now)
-onPlayerHealthChange(function(healthPercent)
-  standByItems = false
-  standBySpells = false
-  needsHealCheck = true
-  needsItemCheck = true
-end)
-
-onManaChange(function(localPlayer, mp, maxMp, oldMp, oldMaxMp)
-  standByItems = false
-  standBySpells = false
-  needsHealCheck = true
-  needsItemCheck = true
-end)
 
 -- Initialize stats on load (BotCore handles this if available)
 if BotCore and BotCore.Stats then
   BotCore.Stats.update()
 end
+
+local function validateStartup()
+  if not HealContext or not HealContext.get then
+    warn("[HealBot] HealContext missing or failed to load")
+  end
+  if not HealEngine then
+    warn("[HealBot] HealEngine missing or failed to load")
+  else
+    applyHealEngineToggles()
+  end
+end
+
+validateStartup()
 
 UI.Separator()

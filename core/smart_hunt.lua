@@ -1,5 +1,5 @@
 --[[
-  Hunt Analyzer Module v1.0
+  Hunt Analyzer Module v2.0
   
   Features:
   - Statistical analysis (standard deviation, trends, confidence)
@@ -7,6 +7,17 @@
   - Weighted scoring with time-decay
   - Confidence-based insights prioritization
   - Advanced metrics: efficiency index, survivability index, combat uptime
+  - Detailed consumption tracking: spells, potions, runes from HealBot/TargetBot
+  - Consumption-based insights and recommendations
+  - Enhanced multi-variable score calculation
+  
+  Consumption Tracking API (HuntAnalytics):
+  - trackHealSpell(name, mana) - Track heal spell usage
+  - trackAttackSpell(name, mana) - Track attack spell usage
+  - trackSupportSpell(name, mana) - Track support spell usage
+  - trackPotion(name, type) - Track potion usage ("heal"/"mana"/"other")
+  - trackRune(name, type) - Track rune usage ("attack"/"heal")
+  - getConsumption() - Get all consumption data
   
   OTClient Functions: getLevel, getLevelPercent, getStamina, getSoul,
   getBlessings, getSpeed, getSkillLevel/Percent, getMagicLevel
@@ -178,7 +189,13 @@ local DEFAULT_METRICS = {
   tilesWalked = 0, kills = 0, spellsCast = 0, potionsUsed = 0, runesUsed = 0,
   damageTaken = 0, healingDone = 0, deathCount = 0, nearDeathCount = 0,
   timePoisoned = 0, timeBurning = 0, timeParalyzed = 0, timeManaShield = 0,
-  timeHasted = 0, greenStaminaTime = 0, orangeStaminaTime = 0, timeInCombat = 0
+  timeHasted = 0, greenStaminaTime = 0, orangeStaminaTime = 0, timeInCombat = 0,
+  lootValue = 0, lootGold = 0, lootDrops = 0,
+  -- Detailed consumption tracking
+  healSpellsCast = 0, attackSpellsCast = 0, supportSpellsCast = 0,
+  healPotionsUsed = 0, manaPotionsUsed = 0,
+  attackRunesUsed = 0, healRunesUsed = 0,
+  manaSpent = 0  -- Total mana spent on spells
 }
 
 local DEFAULT_PEAKS = { maxXpPerHour = 0, maxKillsPerHour = 0, lowestHpPercent = 100, highestDamageHit = 0, maxSpeed = 0 }
@@ -193,6 +210,11 @@ local function initStorage()
   local a = storage.analytics
   ensureDefaults(a.metrics, DEFAULT_METRICS)
   ensureDefaults(a.peakStats, DEFAULT_PEAKS)
+  a.lootItems = a.lootItems or {}
+  -- Detailed consumption tracking tables
+  a.spellsUsed = a.spellsUsed or {}      -- { ["exura vita"] = { count = 5, mana = 80 }, ... }
+  a.potionsUsed = a.potionsUsed or {}    -- { ["great mana potion"] = 10, ... }
+  a.runesUsed = a.runesUsed or {}        -- { ["sudden death rune"] = 15, ... }
   return a
 end
 
@@ -235,12 +257,193 @@ local function startSession()
   for k, v in pairs(DEFAULT_METRICS) do analytics.metrics[k] = v end
   for k, v in pairs(DEFAULT_PEAKS) do analytics.peakStats[k] = v end
   analytics.monsters = {}
+  analytics.lootItems = {}
+  -- Reset detailed consumption tracking
+  analytics.spellsUsed = {}
+  analytics.potionsUsed = {}
+  analytics.runesUsed = {}
   analytics.peakStats.maxSpeed = Player.speed()
   
   if HealBot and HealBot.resetAnalytics then HealBot.resetAnalytics() end
   if AttackBot and AttackBot.resetAnalytics then AttackBot.resetAnalytics() end
   if EventBus then EventBus.emit("analytics:session:start") end
 end
+
+-- ============================================================================
+-- LOOT PARSING (Server message listener)
+-- ============================================================================
+
+local COIN_VALUES = {
+  ["gold coin"] = 1,
+  ["platinum coin"] = 100,
+  ["crystal coin"] = 10000
+}
+
+local function trim(s)
+  return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+-- Parse values like "1.2k" -> 1200, "2.5m" -> 2500000
+local function parseValue(str)
+  if not str then return 0 end
+  str = trim(str:lower())
+  local num, suffix = str:match("^([%d%.]+)([km]?)$")
+  if not num then
+    -- Try plain number
+    return tonumber(str) or 0
+  end
+  local value = tonumber(num) or 0
+  if suffix == "k" then
+    value = value * 1000
+  elseif suffix == "m" then
+    value = value * 1000000
+  end
+  return math.floor(value)
+end
+
+local function normalizeItemName(name)
+  if not name then return nil end
+  local lowered = trim(name:lower())
+  -- Collapse multiple spaces to single space
+  lowered = lowered:gsub("%s+", " ")
+  -- Remove article prefixes
+  lowered = lowered:gsub("^a ", ""):gsub("^an ", ""):gsub("^the ", "")
+  -- Normalize coins plural (match any coin type)
+  lowered = lowered:gsub("coins$", "coin")
+  -- Ensure proper spacing around "coin"
+  lowered = lowered:gsub("%s+coin$", " coin")
+  -- Try singular if plural not found in LootItems
+  if LootItems and not LootItems[lowered] and lowered:sub(-1) == "s" then
+    local singular = lowered:sub(1, -2)
+    if LootItems[singular] then
+      lowered = singular
+    end
+  end
+  return lowered
+end
+
+local function parseLootMessage(text)
+  if not text then return nil end
+  
+  -- Clean up the text: remove newlines, collapse spaces
+  local cleanText = text:gsub("[\r\n]+", " "):gsub("%s+", " ")
+  
+  -- Must contain "Loot of" (case insensitive check)
+  if not cleanText:lower():find("loot of") then return nil end
+  
+  -- Strip timestamp if present (e.g., "18:41 ")
+  cleanText = cleanText:gsub("^%d%d:%d%d%s*", "")
+  
+  -- Format: "Loot of a cyclops drone: 27 gold coins" or "Loot of a cyclops: nothing"
+  -- May optionally have " - (Ngp)" suffix from loot channel
+  
+  -- First strip optional value suffix if present
+  cleanText = cleanText:gsub("%s*%-%s*%([%d%.]+[km]?gp%)%s*$", "")
+  
+  -- Find the colon that separates creature from items
+  local colonPos = cleanText:find(":")
+  if not colonPos then return nil end
+  
+  local creaturePart = cleanText:sub(1, colonPos - 1)
+  local itemsPart = trim(cleanText:sub(colonPos + 1))
+  
+  -- Extract creature name: remove "Loot of " prefix and article
+  local creature = creaturePart:lower():gsub("^loot of%s*", "")
+  creature = creature:gsub("^a%s+", ""):gsub("^an%s+", ""):gsub("^the%s+", "")
+  creature = trim(creature)
+  
+  if not creature or creature == "" or not itemsPart or itemsPart == "" then 
+    return nil 
+  end
+  
+  local items = {}
+  local totalValue = 0
+  
+  -- Check for "nothing" loot
+  if itemsPart:lower():find("nothing") then
+    return { creature = trim(creature), totalValue = 0, items = items }
+  end
+  
+  -- Parse each item separated by comma
+  for part in itemsPart:gmatch("[^,]+") do
+    local entry = trim(part)
+    if entry ~= "" then
+      -- Try to match "N item" pattern (e.g., "20 gold coins", "a short sword")
+      local count, itemName = entry:match("^(%d+)%s+(.+)$")
+      if count then
+        count = tonumber(count) or 1
+      else
+        -- Check for "a/an item" pattern
+        itemName = entry:match("^an?%s+(.+)$")
+        if itemName then
+          count = 1
+        else
+          -- Just the item name
+          itemName = entry
+          count = 1
+        end
+      end
+      
+      local normalized = normalizeItemName(itemName)
+      local price = 0
+      if normalized and LootItems then
+        price = LootItems[normalized] or 0
+      end
+      
+      -- Calculate value from coins directly
+      if normalized then
+        local coinVal = COIN_VALUES[normalized]
+        if coinVal then
+          totalValue = totalValue + (coinVal * count)
+        else
+          totalValue = totalValue + (price * count)
+        end
+      end
+      
+      items[#items + 1] = { 
+        name = normalized or itemName:lower(), 
+        display = itemName, 
+        count = count, 
+        price = price 
+      }
+    end
+  end
+  
+  return { creature = trim(creature), totalValue = totalValue, items = items }
+end
+
+local function recordLoot(entry)
+  if not entry or not isSessionActive() then return end
+  local m = analytics.metrics
+  m.lootDrops = (m.lootDrops or 0) + 1
+  m.lootValue = (m.lootValue or 0) + (entry.totalValue or 0)
+
+  analytics.lootItems = analytics.lootItems or {}
+
+  for _, itm in ipairs(entry.items or {}) do
+    local nameKey = itm.name or itm.display
+    if nameKey then
+      local bucket = analytics.lootItems[nameKey] or {count = 0, value = 0}
+      bucket.count = bucket.count + (itm.count or 0)
+      local itemValue = (itm.price or 0) * (itm.count or 0)
+      bucket.value = bucket.value + itemValue
+      analytics.lootItems[nameKey] = bucket
+      -- Track gold from coins
+      if COIN_VALUES[nameKey] then
+        m.lootGold = (m.lootGold or 0) + COIN_VALUES[nameKey] * (itm.count or 0)
+      end
+    end
+  end
+end
+
+-- Listen to server text messages (loot appears here, not in onTalk)
+onTextMessage(function(mode, text)
+  if not text then return end
+  local entry = parseLootMessage(text)
+  if entry then
+    recordLoot(entry)
+  end
+end)
 
 local function endSession()
   analytics.session.active = false
@@ -299,6 +502,232 @@ onPlayerHealthChange(function(healthPercent)
   end
   
   lastHP, lastHpPercent = currentHP, healthPercent
+end)
+
+-- ============================================================================
+-- CONSUMPTION TRACKING API
+-- Provides functions for HealBot and TargetBot to report spell/potion/rune usage
+-- ============================================================================
+
+local Analytics = {}
+
+-- Track a healing spell cast (called by HealBot/HealEngine)
+-- @param spellName string - The spell name (e.g., "exura vita")
+-- @param manaCost number - Mana cost of the spell
+function Analytics.trackHealSpell(spellName, manaCost)
+  if not isSessionActive() then return end
+  spellName = spellName or "unknown"
+  manaCost = manaCost or 0
+  
+  analytics.metrics.healSpellsCast = (analytics.metrics.healSpellsCast or 0) + 1
+  analytics.metrics.manaSpent = (analytics.metrics.manaSpent or 0) + manaCost
+  
+  analytics.spellsUsed = analytics.spellsUsed or {}
+  if not analytics.spellsUsed[spellName] then
+    analytics.spellsUsed[spellName] = { count = 0, mana = 0, type = "heal" }
+  end
+  analytics.spellsUsed[spellName].count = analytics.spellsUsed[spellName].count + 1
+  analytics.spellsUsed[spellName].mana = analytics.spellsUsed[spellName].mana + manaCost
+end
+
+-- Track an attack spell cast (called by TargetBot)
+-- @param spellName string - The spell name (e.g., "exori gran")
+-- @param manaCost number - Mana cost of the spell
+function Analytics.trackAttackSpell(spellName, manaCost)
+  if not isSessionActive() then return end
+  spellName = spellName or "unknown"
+  manaCost = manaCost or 0
+  
+  analytics.metrics.attackSpellsCast = (analytics.metrics.attackSpellsCast or 0) + 1
+  analytics.metrics.manaSpent = (analytics.metrics.manaSpent or 0) + manaCost
+  
+  analytics.spellsUsed = analytics.spellsUsed or {}
+  if not analytics.spellsUsed[spellName] then
+    analytics.spellsUsed[spellName] = { count = 0, mana = 0, type = "attack" }
+  end
+  analytics.spellsUsed[spellName].count = analytics.spellsUsed[spellName].count + 1
+  analytics.spellsUsed[spellName].mana = analytics.spellsUsed[spellName].mana + manaCost
+end
+
+-- Track a support spell cast (haste, mana shield, etc.)
+-- @param spellName string - The spell name (e.g., "utani hur")
+-- @param manaCost number - Mana cost of the spell
+function Analytics.trackSupportSpell(spellName, manaCost)
+  if not isSessionActive() then return end
+  spellName = spellName or "unknown"
+  manaCost = manaCost or 0
+  
+  analytics.metrics.supportSpellsCast = (analytics.metrics.supportSpellsCast or 0) + 1
+  analytics.metrics.manaSpent = (analytics.metrics.manaSpent or 0) + manaCost
+  
+  analytics.spellsUsed = analytics.spellsUsed or {}
+  if not analytics.spellsUsed[spellName] then
+    analytics.spellsUsed[spellName] = { count = 0, mana = 0, type = "support" }
+  end
+  analytics.spellsUsed[spellName].count = analytics.spellsUsed[spellName].count + 1
+  analytics.spellsUsed[spellName].mana = analytics.spellsUsed[spellName].mana + manaCost
+end
+
+-- Track a potion used (called by HealBot)
+-- @param potionName string - The potion name (e.g., "great mana potion")
+-- @param potionType string - Type: "heal", "mana", or "other"
+function Analytics.trackPotion(potionName, potionType)
+  if not isSessionActive() then return end
+  potionName = potionName or "unknown potion"
+  potionType = potionType or "other"
+  
+  analytics.metrics.potionsUsed = (analytics.metrics.potionsUsed or 0) + 1
+  
+  if potionType == "heal" then
+    analytics.metrics.healPotionsUsed = (analytics.metrics.healPotionsUsed or 0) + 1
+  elseif potionType == "mana" then
+    analytics.metrics.manaPotionsUsed = (analytics.metrics.manaPotionsUsed or 0) + 1
+  end
+  
+  analytics.potionsUsed = analytics.potionsUsed or {}
+  analytics.potionsUsed[potionName] = (analytics.potionsUsed[potionName] or 0) + 1
+end
+
+-- Track a rune used (called by TargetBot - kept for backwards compatibility)
+-- Note: Runes are now also tracked via onUseWith hook
+-- @param runeName string - The rune name (e.g., "sudden death rune")
+-- @param runeType string - Type: "attack" or "heal"
+function Analytics.trackRune(runeName, runeType)
+  -- This function is now mostly handled by the onUseWith hook
+  -- But we keep it for any direct API calls
+  if not isSessionActive() then return end
+  runeName = runeName or "unknown rune"
+  runeType = runeType or "attack"
+  
+  analytics.metrics.runesUsed = (analytics.metrics.runesUsed or 0) + 1
+  
+  if runeType == "attack" then
+    analytics.metrics.attackRunesUsed = (analytics.metrics.attackRunesUsed or 0) + 1
+  elseif runeType == "heal" then
+    analytics.metrics.healRunesUsed = (analytics.metrics.healRunesUsed or 0) + 1
+  end
+  
+  analytics.runesUsed = analytics.runesUsed or {}
+  analytics.runesUsed[runeName] = (analytics.runesUsed[runeName] or 0) + 1
+  
+  -- Additional debug: verify it was stored
+  if DEBUG_HUNT_ANALYZER then
+    print("[HuntAnalytics] Runes used table: " .. tostring(analytics.runesUsed[runeName]) .. "x " .. runeName)
+  end
+end
+
+-- Get all consumption data for external use
+function Analytics.getConsumption()
+  return {
+    spells = analytics.spellsUsed or {},
+    potions = analytics.potionsUsed or {},
+    runes = analytics.runesUsed or {},
+    totals = {
+      spellsCast = analytics.metrics.spellsCast or 0,
+      healSpells = analytics.metrics.healSpellsCast or 0,
+      attackSpells = analytics.metrics.attackSpellsCast or 0,
+      supportSpells = analytics.metrics.supportSpellsCast or 0,
+      potions = analytics.metrics.potionsUsed or 0,
+      healPotions = analytics.metrics.healPotionsUsed or 0,
+      manaPotions = analytics.metrics.manaPotionsUsed or 0,
+      runes = analytics.metrics.runesUsed or 0,
+      attackRunes = analytics.metrics.attackRunesUsed or 0,
+      healRunes = analytics.metrics.healRunesUsed or 0,
+      manaSpent = analytics.metrics.manaSpent or 0
+    }
+  }
+end
+
+-- Expose Analytics API globally for HealBot/TargetBot integration
+HuntAnalytics = Analytics
+
+-- ============================================================================
+-- GLOBAL RUNE TRACKING HOOK
+-- ============================================================================
+-- This hooks into ALL useWith calls to track rune usage automatically,
+-- regardless of whether runes are used via TargetBot, combo, hotkey, etc.
+
+-- List of known rune item IDs (expand as needed)
+local RUNE_ITEM_IDS = {
+  -- Attack Runes
+  [3155] = "sudden death rune",
+  [3200] = "thunderstorm rune",
+  [3161] = "destroy field rune",
+  [3180] = "fire bomb rune", 
+  [3178] = "paralyze rune",
+  [3188] = "avalanche rune",
+  [3189] = "ultimate healing rune",
+  [3152] = "energy bomb rune",
+  [3149] = "wild growth rune",
+  [3191] = "great fireball rune",
+  [3179] = "heavy magic missile rune",
+  [3198] = "explosion rune",
+  [3203] = "fire wall rune",
+  [3174] = "soulfire rune",
+  [3197] = "energy wall rune",
+  [3175] = "stalagmite rune",
+  [3202] = "poison wall rune",
+  [3173] = "icicle rune",
+  [3164] = "stone shower rune",
+  [3153] = "magic wall rune",
+  -- Healing Runes
+  [3160] = "intense healing rune",
+  -- Add more rune IDs as needed
+}
+
+-- Check if an item is a rune based on ID or name pattern
+local function isRune(itemId)
+  if RUNE_ITEM_IDS[itemId] then
+    return true, RUNE_ITEM_IDS[itemId], "attack"
+  end
+  
+  -- Try to get item info from g_things
+  if g_things and g_things.getThingType then
+    local ok, thing = pcall(function() return g_things.getThingType(itemId, ThingCategoryItem) end)
+    if ok and thing then
+      -- Try getName
+      if thing.getName and type(thing.getName) == "function" then
+        local nameOk, name = pcall(function() return thing:getName() end)
+        if nameOk and name and name:lower():find("rune") then
+          local runeType = name:lower():find("healing") and "heal" or "attack"
+          return true, name:lower(), runeType
+        end
+      end
+      -- Try getMarketData
+      if thing.getMarketData and type(thing.getMarketData) == "function" then
+        local mdOk, marketData = pcall(function() return thing:getMarketData() end)
+        if mdOk and marketData and marketData.name and marketData.name:lower():find("rune") then
+          local runeType = marketData.name:lower():find("healing") and "heal" or "attack"
+          return true, marketData.name:lower(), runeType
+        end
+      end
+    end
+  end
+  
+  return false, nil, nil
+end
+
+-- Hook into ALL useWith calls to track rune usage
+onUseWith(function(pos, itemId, target, subType)
+  if not isSessionActive() then return end
+  
+  local isRuneItem, runeName, runeType = isRune(itemId)
+  if isRuneItem then
+    -- Track the rune
+    runeName = runeName or ("rune #" .. tostring(itemId))
+    runeType = runeType or "attack"
+    
+    analytics.metrics.runesUsed = (analytics.metrics.runesUsed or 0) + 1
+    
+    if runeType == "attack" then
+      analytics.metrics.attackRunesUsed = (analytics.metrics.attackRunesUsed or 0) + 1
+    elseif runeType == "heal" then
+      analytics.metrics.healRunesUsed = (analytics.metrics.healRunesUsed or 0) + 1
+    end
+    
+    analytics.runesUsed = analytics.runesUsed or {}
+    analytics.runesUsed[runeName] = (analytics.runesUsed[runeName] or 0) + 1
+  end
 end)
 
 -- ============================================================================
@@ -513,10 +942,35 @@ local function calculateMetrics()
   
   -- Near death frequency (per hour)
   metrics.nearDeathPerHour = perHour(m.nearDeathCount, elapsed)
+
+  -- Loot economy metrics
+  metrics.lootValue = m.lootValue or 0
+  metrics.lootGold = m.lootGold or 0
+  metrics.lootDrops = m.lootDrops or 0
+  metrics.lootValuePerHour = perHour(metrics.lootValue, elapsed)
+  metrics.lootGoldPerHour = perHour(metrics.lootGold, elapsed)
+  metrics.lootPerKill = m.kills > 0 and (metrics.lootValue / m.kills) or 0
   
   -- Stamina efficiency (XP per minute of stamina)
   local staminaUsed = (analytics.session.startStamina or 0) - (Player.stamina() or 0)
   metrics.xpPerStaminaMin = staminaUsed > 0 and (xpGained / staminaUsed) or 0
+  
+  -- Consumption metrics
+  metrics.potionsPerHour = perHour(m.potionsUsed or 0, elapsed)
+  metrics.runesPerHour = perHour(m.runesUsed or 0, elapsed)
+  metrics.runesPerKill = m.kills > 0 and ((m.runesUsed or 0) / m.kills) or 0
+  metrics.healSpellsPerHour = perHour(m.healSpellsCast or 0, elapsed)
+  metrics.attackSpellsPerHour = perHour(m.attackSpellsCast or 0, elapsed)
+  metrics.manaSpentPerHour = perHour(m.manaSpent or 0, elapsed)
+  metrics.manaPerKill = m.kills > 0 and ((m.manaSpent or 0) / m.kills) or 0
+  
+  -- Healing efficiency (HP healed per heal spell)
+  local healActions = (m.healSpellsCast or 0) + (m.healPotionsUsed or 0)
+  metrics.healingPerAction = healActions > 0 and (m.healingDone / healActions) or 0
+  
+  -- Damage efficiency (damage per attack spell/rune)
+  local attackActions = (m.attackSpellsCast or 0) + (m.attackRunesUsed or 0)
+  metrics.attackActionsPerKill = m.kills > 0 and (attackActions / m.kills) or 0
   
   return metrics
 end
@@ -649,6 +1103,55 @@ function Insights.analyze()
       addInsight(results, SEVERITY.WARNING, "Resources", string.format("High potion use: %.1f/kill. Check mana efficiency.", ppk), sessionConfidence)
     elseif ppk < 0.5 and m.kills > 30 then
       addInsight(results, SEVERITY.INFO, "Resources", "Efficient potion usage!", sessionConfidence)
+    end
+  end
+  
+  -- Mana potion analysis
+  if (m.manaPotionsUsed or 0) >= 10 then
+    local manaPotsPerHour = metrics.potionsPerHour or 0
+    if manaPotsPerHour > 200 then
+      addInsight(results, SEVERITY.WARNING, "Resources", string.format("Very high mana potion use: %.0f/h. Consider lower MP threshold.", manaPotsPerHour), sessionConfidence)
+    elseif manaPotsPerHour > 100 then
+      addInsight(results, SEVERITY.TIP, "Resources", string.format("High mana consumption: %.0f potions/h.", manaPotsPerHour), sessionConfidence)
+    end
+  end
+  
+  -- Health potion analysis
+  if (m.healPotionsUsed or 0) >= 10 then
+    local healPotsPerHour = perHour(m.healPotionsUsed or 0, elapsed)
+    if healPotsPerHour > 60 then
+      addInsight(results, SEVERITY.WARNING, "Resources", string.format("Heavy HP potion use: %.0f/h. Consider adding heal spells.", healPotsPerHour), sessionConfidence)
+    end
+  end
+  
+  -- Rune consumption analysis
+  if (m.runesUsed or 0) >= 10 then
+    local runesPerKill = metrics.runesPerKill or 0
+    local runesPerHour = metrics.runesPerHour or 0
+    if runesPerKill > 2 then
+      addInsight(results, SEVERITY.WARNING, "Resources", string.format("High rune use: %.1f/kill. Consider spell attacks.", runesPerKill), sessionConfidence)
+    elseif runesPerKill < 0.5 and m.kills > 30 then
+      addInsight(results, SEVERITY.INFO, "Resources", string.format("Efficient rune usage: %.1f/kill", runesPerKill), sessionConfidence)
+    end
+  end
+  
+  -- Mana efficiency analysis
+  if (m.manaSpent or 0) > 5000 and m.kills >= 20 then
+    local manaPerKill = metrics.manaPerKill or 0
+    if manaPerKill > 500 then
+      addInsight(results, SEVERITY.TIP, "Efficiency", string.format("High mana/kill: %.0f. Optimize spell selection.", manaPerKill), sessionConfidence)
+    elseif manaPerKill < 100 and manaPerKill > 0 then
+      addInsight(results, SEVERITY.INFO, "Efficiency", string.format("Excellent mana efficiency: %.0f mana/kill", manaPerKill), sessionConfidence)
+    end
+  end
+  
+  -- Healing spell efficiency
+  if (m.healSpellsCast or 0) >= 10 and m.healingDone > 1000 then
+    local healPerSpell = metrics.healingPerAction or 0
+    if healPerSpell < 100 then
+      addInsight(results, SEVERITY.TIP, "Healing", "Low heal per cast. Consider stronger healing spells.", sessionConfidence)
+    elseif healPerSpell > 400 then
+      addInsight(results, SEVERITY.INFO, "Healing", string.format("Great healing efficiency: %.0f HP/action", healPerSpell), sessionConfidence)
     end
   end
   
@@ -810,20 +1313,49 @@ function Insights.calculateScore()
   
   score = score + math.max(0, survScore)
   
-  -- ========== RESOURCE EFFICIENCY (10 pts) ==========
+  -- ========== RESOURCE EFFICIENCY (15 pts) ==========
   local resScore = 0
+  
+  -- Potion efficiency (5 pts)
   if m.kills > 10 then
     local ppk = metrics.potionsPerKill
-    if ppk < 0.3 then resScore = 10
-    elseif ppk < 0.7 then resScore = 8
-    elseif ppk < 1.2 then resScore = 6
-    elseif ppk < 2.0 then resScore = 4
-    elseif ppk < 3.0 then resScore = 2
-    elseif ppk > 4.0 then resScore = -2  -- Penalty for excessive use
+    if ppk < 0.3 then resScore = resScore + 5
+    elseif ppk < 0.7 then resScore = resScore + 4
+    elseif ppk < 1.2 then resScore = resScore + 3
+    elseif ppk < 2.0 then resScore = resScore + 2
+    elseif ppk < 3.0 then resScore = resScore + 1
+    elseif ppk > 4.0 then resScore = resScore - 1
     end
   else
-    resScore = 5  -- Neutral if not enough data
+    resScore = resScore + 2  -- Neutral if not enough data
   end
+  
+  -- Rune efficiency (5 pts)
+  if m.kills > 10 and (m.runesUsed or 0) > 0 then
+    local rpk = metrics.runesPerKill or 0
+    if rpk < 0.5 then resScore = resScore + 5
+    elseif rpk < 1.0 then resScore = resScore + 4
+    elseif rpk < 1.5 then resScore = resScore + 3
+    elseif rpk < 2.5 then resScore = resScore + 2
+    elseif rpk > 3.0 then resScore = resScore - 1
+    end
+  else
+    resScore = resScore + 2  -- No runes = spell-based (efficient)
+  end
+  
+  -- Mana efficiency (5 pts)
+  if m.kills > 10 and (m.manaSpent or 0) > 0 then
+    local mpk = metrics.manaPerKill or 0
+    if mpk < 100 then resScore = resScore + 5
+    elseif mpk < 200 then resScore = resScore + 4
+    elseif mpk < 350 then resScore = resScore + 3
+    elseif mpk < 500 then resScore = resScore + 2
+    elseif mpk > 700 then resScore = resScore - 1
+    end
+  else
+    resScore = resScore + 2
+  end
+  
   score = score + math.max(0, resScore)
   
   -- ========== COMBAT UPTIME (5 pts) ==========
@@ -849,6 +1381,23 @@ function Insights.calculateScore()
       elseif profitPerHour > 0 then score = score + 1
       elseif profitPerHour < -30000 then score = score - 2
       end
+    elseif metrics.lootValuePerHour and metrics.lootValuePerHour > 0 then
+      -- Fallback: use parsed loot value if bottingStats unavailable
+      local profitPerHour = metrics.lootValuePerHour
+      if profitPerHour > 100000 then score = score + 5
+      elseif profitPerHour > 50000 then score = score + 4
+      elseif profitPerHour > 20000 then score = score + 3
+      elseif profitPerHour > 0 then score = score + 1
+      elseif profitPerHour < -30000 then score = score - 2
+      end
+    end
+  elseif metrics.lootValuePerHour and metrics.lootValuePerHour > 0 then
+    local profitPerHour = metrics.lootValuePerHour
+    if profitPerHour > 100000 then score = score + 5
+    elseif profitPerHour > 50000 then score = score + 4
+    elseif profitPerHour > 20000 then score = score + 3
+    elseif profitPerHour > 0 then score = score + 1
+    elseif profitPerHour < -30000 then score = score - 2
     end
   end
   
@@ -923,6 +1472,126 @@ local function buildSummary()
     "Deaths: " .. m.deathCount .. " | Near-Death: " .. m.nearDeathCount
   })
   
+  -- Monsters Killed
+  local monsterLines = {}
+  local monsterList = {}
+  for name, count in pairs(analytics.monsters or {}) do
+    table.insert(monsterList, {name = name, count = count})
+  end
+  -- Sort by count descending
+  table.sort(monsterList, function(a, b) return a.count > b.count end)
+  -- Show up to 10 monsters
+  local monsterLimit = math.min(10, #monsterList)
+  for i = 1, monsterLimit do
+    local mon = monsterList[i]
+    table.insert(monsterLines, string.format("%dx %s", mon.count, mon.name))
+  end
+  if #monsterList > monsterLimit then
+    table.insert(monsterLines, string.format("... and %d more types", #monsterList - monsterLimit))
+  end
+  if #monsterLines == 0 then
+    table.insert(monsterLines, "No monsters killed yet")
+  end
+  addSection(lines, "MONSTERS KILLED", monsterLines)
+  
+  -- Spells Used
+  local spellLines = {}
+  local spellList = {}
+  for name, data in pairs(analytics.spellsUsed or {}) do
+    table.insert(spellList, {name = name, count = data.count or 0, mana = data.mana or 0, type = data.type or "other"})
+  end
+  table.sort(spellList, function(a, b) return a.count > b.count end)
+  local spellLimit = math.min(8, #spellList)
+  for i = 1, spellLimit do
+    local sp = spellList[i]
+    local typeIcon = sp.type == "heal" and "[H]" or sp.type == "attack" and "[A]" or "[S]"
+    table.insert(spellLines, string.format("%s %dx %s", typeIcon, sp.count, sp.name))
+  end
+  if #spellList > spellLimit then
+    table.insert(spellLines, string.format("... and %d more spells", #spellList - spellLimit))
+  end
+  -- Add summary line
+  local totalSpells = (m.healSpellsCast or 0) + (m.attackSpellsCast or 0) + (m.supportSpellsCast or 0)
+  if totalSpells > 0 then
+    table.insert(spellLines, 1, string.format("Total: %d (%.0f/h) | Mana: %s", 
+      totalSpells, perHour(totalSpells, elapsed), formatNum(m.manaSpent or 0)))
+  end
+  if #spellLines == 0 then
+    table.insert(spellLines, "No spells tracked yet")
+  end
+  addSection(lines, "SPELLS USED", spellLines)
+  
+  -- Potions Used
+  local potionLines = {}
+  local potionList = {}
+  for name, count in pairs(analytics.potionsUsed or {}) do
+    table.insert(potionList, {name = name, count = count})
+  end
+  table.sort(potionList, function(a, b) return a.count > b.count end)
+  local potionLimit = math.min(6, #potionList)
+  for i = 1, potionLimit do
+    local pot = potionList[i]
+    table.insert(potionLines, string.format("%dx %s", pot.count, pot.name))
+  end
+  -- Add summary line
+  local totalPotions = m.potionsUsed or 0
+  if totalPotions > 0 then
+    local healPots = m.healPotionsUsed or 0
+    local manaPots = m.manaPotionsUsed or 0
+    table.insert(potionLines, 1, string.format("Total: %d (%.0f/h) | HP: %d | MP: %d", 
+      totalPotions, metrics.potionsPerHour or 0, healPots, manaPots))
+  end
+  if #potionLines == 0 then
+    table.insert(potionLines, "No potions tracked yet")
+  end
+  addSection(lines, "POTIONS USED", potionLines)
+  
+  -- Runes Used
+  local runeLines = {}
+  local runeList = {}
+  
+  -- Debug: Show raw table state
+  local runeTableSize = 0
+  if analytics.runesUsed then
+    for _ in pairs(analytics.runesUsed) do runeTableSize = runeTableSize + 1 end
+  end
+  
+  -- Collect rune data from analytics table
+  if analytics.runesUsed then
+    for name, count in pairs(analytics.runesUsed) do
+      if count and count > 0 then
+        table.insert(runeList, {name = name, count = count})
+      end
+    end
+  end
+  
+  -- Sort by count (highest first)
+  if #runeList > 0 then
+    table.sort(runeList, function(a, b) return a.count > b.count end)
+    local runeLimit = math.min(6, #runeList)
+    for i = 1, runeLimit do
+      local rn = runeList[i]
+      table.insert(runeLines, string.format("%dx %s", rn.count, rn.name))
+    end
+    if #runeList > runeLimit then
+      table.insert(runeLines, string.format("... and %d more runes", #runeList - runeLimit))
+    end
+  end
+  
+  -- Add summary line
+  local totalRunes = m.runesUsed or 0
+  if totalRunes > 0 then
+    local attackRunes = m.attackRunesUsed or 0
+    local healRunes = m.healRunesUsed or 0
+    table.insert(runeLines, 1, string.format("Total: %d (%.0f/h) | Attack: %d | Heal: %d", 
+      totalRunes, metrics.runesPerHour or 0, attackRunes, healRunes))
+  end
+  
+  if #runeLines == 0 then
+    table.insert(runeLines, string.format("No runes tracked (table:%d, metric:%d)", runeTableSize, totalRunes))
+  end
+  addSection(lines, "RUNES USED", runeLines)
+  
   -- Stamina
   local startStaminaMins = analytics.session.startStamina or 0
   local staminaUsedMins = startStaminaMins - stamInfo.minutes
@@ -956,6 +1625,26 @@ local function buildSummary()
     "Speed: " .. Player.speed()
   })
   
+  -- Loot
+  local lootLines = {
+    "Total Value: " .. formatNum(m.lootValue) .. " gp (" .. formatNum(math.floor(metrics.lootValuePerHour)) .. "/h)",
+    "Gold Coins: " .. formatNum(m.lootGold) .. " (" .. formatNum(math.floor(metrics.lootGoldPerHour)) .. "/h)",
+    "Drops Parsed: " .. formatNum(m.lootDrops),
+    "Avg/Kill: " .. formatNum(math.floor(metrics.lootPerKill)) .. " gp"
+  }
+
+  local topItems = {}
+  for name, data in pairs(analytics.lootItems or {}) do
+    topItems[#topItems + 1] = {name = name, count = data.count or 0, value = data.value or 0}
+  end
+  table.sort(topItems, function(a, b) return a.value > b.value end)
+  local limit = math.min(5, #topItems)
+  for i = 1, limit do
+    local itm = topItems[i]
+    lootLines[#lootLines + 1] = string.format("%d) %s x%d (%s gp)", i, itm.name, itm.count, formatNum(math.floor(itm.value)))
+  end
+  addSection(lines, "LOOT", lootLines)
+
   -- Score
   local score = Insights.calculateScore()
   addSection(lines, "HUNT SCORE", { Insights.scoreBar(score) })
@@ -1013,6 +1702,11 @@ local function showAnalytics()
     stopLiveUpdates()  -- Stop any existing live updates
     pcall(function() analyticsWindow:destroy() end)
     analyticsWindow = nil 
+  end
+  
+  -- Auto-start session if not active
+  if not isSessionActive() then
+    startSession()
   end
   
   -- Try to create window, fall back to console output

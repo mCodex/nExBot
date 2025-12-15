@@ -185,6 +185,7 @@ AnalyzerPriceLabel < Label
     height: 15
 
 AnalyzerListPanel < Panel
+  width: 100%
   padding-left: 4
   padding-right: 4
   layout:
@@ -194,6 +195,7 @@ AnalyzerListPanel < Panel
 
 ListLabel < Label
   height: 15
+  width: 100%
   font: verdana-11px-rounded
   text-offset: 15 0
 

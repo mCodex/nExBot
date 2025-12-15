@@ -2,8 +2,40 @@ local cavebotMacro = nil
 local config = nil
 
 -- ui
-local configWidget = UI.Config()
+local configWidget = UI.Config()  -- Create config widget first
 local ui = UI.createWidget("CaveBotPanel")
+
+-- Move the config widget into the placeholder panel at the top
+if ui.configWidgetPlaceholder and configWidget then
+  -- Try multiple methods to reparent the widget
+  local placeholder = ui.configWidgetPlaceholder
+  if configWidget.setParent then
+    configWidget:setParent(placeholder)
+  end
+  if placeholder.addChild then
+    placeholder:addChild(configWidget)
+  end
+  -- Move to first child position if possible
+  if placeholder.moveChildToIndex then
+    placeholder:moveChildToIndex(configWidget, 1)
+  end
+end
+
+-- Move the main CaveBot panel to the first position in the tab
+-- This ensures the waypoint list appears before Editor/Config panels
+do
+  local parent = ui:getParent()
+  if parent then
+    -- Try different OTClient methods for reordering children
+    if parent.moveChildToIndex then
+      parent:moveChildToIndex(ui, 1)
+    elseif parent.insertChild then
+      -- Alternative: remove and re-insert at front
+      parent:removeChild(ui)
+      parent:insertChild(1, ui)
+    end
+  end
+end
 
 ui.list = ui.listPanel.list -- shortcut
 CaveBot.actionList = ui.list
@@ -26,6 +58,7 @@ local prevActionResult = true
 
 -- Cached UI list reference (avoid repeated lookups)
 local uiList = nil
+local lastPlayerFloor = nil
 
 --[[
   SMART EXECUTION SYSTEM
@@ -574,11 +607,43 @@ local function initTargetBotCache()
 end
 
 cavebotMacro = macro(250, function()
+  -- Safety-first gating: pause movement when healing/danger active
+  if HealContext and HealContext.isCritical and HealContext.isCritical() then
+    CaveBot.resetWalking()
+    return
+  end
+  if HealContext and HealContext.isDanger and HealContext.isDanger() then
+    CaveBot.resetWalking()
+    return
+  end
+
   -- SMART EXECUTION: Skip if we shouldn't execute this tick
   if shouldSkipExecution() then return end
   
   -- Update player position tracking
   hasPlayerMoved()
+
+  -- Guard against unintended floor changes: realign to nearest waypoint on current floor
+  local playerPos = player:getPosition()
+  if playerPos then
+    if lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
+      CaveBot.resetWalking()
+      resetWaypointEngine()
+      if resetStartupCheck then resetStartupCheck() end
+      if findNearestGlobalWaypoint then
+        local maxDist = storage.extras.gotoMaxDistance or 50
+        local child, idx = findNearestGlobalWaypoint(playerPos, maxDist, {
+          maxCandidates = 25,
+          preferCurrentFloor = true,
+          searchAllFloors = false
+        })
+        if child then
+          focusWaypointBefore(child, idx)
+        end
+      end
+    end
+    lastPlayerFloor = playerPos.z
+  end
   
   -- STARTUP DETECTION: Find nearest waypoint on relog/load
   -- Note: checkStartupWaypoint is defined later in file, check if available
@@ -754,7 +819,7 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
     -- restore focused child on the action list
     ui.list:focusChild(ui.list:getChildByIndex(currentActionIndex))
   end
-  lastConfig = name  
+  lastConfig = name
 end)
 
 -- ui callbacks

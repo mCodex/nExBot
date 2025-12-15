@@ -1,3 +1,5 @@
+local HealContext = dofile("/core/heal_context.lua")
+
 setDefaultTab('main')
 -- locales
 local panelName = "AttackBot"
@@ -570,7 +572,7 @@ local posW = ek and [[
 if not AttackBotConfig[panelName] or not AttackBotConfig[panelName][1] or #AttackBotConfig[panelName] ~= 5 then
   AttackBotConfig[panelName] = {
     [1] = {
-      enabled = false,
+      enabled = true,  -- Enable by default so user doesn't have to manually toggle
       attackTable = {},
       ignoreMana = true,
       Kills = false,
@@ -666,6 +668,12 @@ local setActiveProfile = function()
   setCharacterProfile("attackProfile", n)
 end
 setActiveProfile()
+
+-- Ensure currentSettings is initialized (fallback if profile is nil)
+if not currentSettings then
+  AttackBotConfig.currentBotProfile = 1
+  setActiveProfile()
+end
 
 if not currentSettings.AntiRsRange then
   currentSettings.AntiRsRange = 5 
@@ -1247,37 +1255,49 @@ local isOldClient = g_game.getClientVersion() < 960
 local cachedAttackEntries = nil
 local cachedEntriesCount = 0
 local lastEntryCacheTime = 0
-local ENTRY_CACHE_TTL = 500  -- Refresh every 500ms
+local ENTRY_CACHE_TTL = 300  -- Refresh every 300ms for fresher lists
 
 -- Monster count cache to avoid recounting for similar patterns
-local monsterCountCache = {}
-local lastMonsterCacheTime = 0
-local MONSTER_CACHE_TTL = 100  -- Valid for 100ms (one tick)
+local monsterCountCache = { ts = 0, values = {} }
+local MONSTER_CACHE_TTL = 80  -- Slightly tighter TTL for responsiveness
+
+local function resetMonsterCache()
+  monsterCountCache.ts = now
+  monsterCountCache.values = {}
+end
 
 local function getMonsterCountCached(category, posOrCreature, pattern, minHp, maxHp, safePattern, monsters)
-  -- Invalidate cache if too old
-  if now - lastMonsterCacheTime > MONSTER_CACHE_TTL then
-    monsterCountCache = {}
-    lastMonsterCacheTime = now
+  if now - (monsterCountCache.ts or 0) > MONSTER_CACHE_TTL then
+    resetMonsterCache()
   end
-  
-  -- Generate cache key
+
   local key = category .. "_" .. minHp .. "_" .. maxHp .. "_" .. tostring(pattern)
-  
-  if monsterCountCache[key] ~= nil then
-    return monsterCountCache[key]
+  local cached = monsterCountCache.values[key]
+  if cached ~= nil then
+    return cached
   end
-  
+
   local count = getMonstersInArea(category, posOrCreature, pattern, minHp, maxHp, safePattern, monsters)
-  monsterCountCache[key] = count
+  monsterCountCache.values[key] = count
   return count
 end
 
-macro(100, function()
+local attackMacro = macro(100, function()
+  -- Fallback to first profile if currentSettings not initialized
+  if not currentSettings then
+    AttackBotConfig.currentBotProfile = 1
+    local setActiveProfile = function()
+      currentSettings = AttackBotConfig[panelName][AttackBotConfig.currentBotProfile]
+    end
+    setActiveProfile()
+  end
+  
   if not currentSettings.enabled then return end
   
-  -- SAFETY: Check if healing priority should block attacks
-  -- This is non-configurable - healing ALWAYS takes priority
+  -- SAFETY: Healing/danger gating (non-configurable)
+  -- Allow attack if HealContext not available (treat as safe)
+  if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
+  if HealContext and HealContext.isDanger and HealContext.isDanger() then return end
   if BotCore and BotCore.Priority then
     if not BotCore.Priority.canAttack() then
       return  -- Healing has priority, skip attack
