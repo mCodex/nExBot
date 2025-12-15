@@ -226,6 +226,7 @@ ui.title.onClick = function(widget)
   currentSettings.enabled = not currentSettings.enabled
   widget:setOn(currentSettings.enabled)
   syncHealMacro()
+  applyHealEngineToggles()  -- Update HealEngine when toggling on/off
   nExBotConfigSave("heal")
 end
 
@@ -242,23 +243,36 @@ local function convertSpellsToEngineFormat(spellTable)
   if not spellTable then return {} end
   local converted = {}
   for i, spell in ipairs(spellTable) do
-    if spell.enabled ~= false then  -- Only include enabled spells
+    if spell.enabled ~= false and spell.spell then  -- Only include enabled spells with valid spell name
       -- Determine HP/MP trigger based on origin and sign
+      -- sign field indicates "<" (Below) or ">" (Above)
       local hp, mp = nil, nil
+      local isBelow = spell.sign == "<" or spell.sign == nil  -- Default to "Below" if not set
+      
       if spell.origin == "HP" or spell.origin == "HP%" then
-        hp = spell.value or 50
+        -- For HP spells with "Below" condition: trigger when HP <= value
+        if isBelow then
+          hp = spell.value or 50
+        end
       elseif spell.origin == "MP" or spell.origin == "MP%" then
-        mp = spell.value or 50
+        -- For MP spells with "Below" condition: trigger when MP <= value
+        -- This is for spells like mana shield that trigger on low mana
+        if isBelow then
+          mp = spell.value or 50
+        end
       end
       
-      converted[i] = {
-        name = spell.spell or "unknown",
-        key = (spell.spell or "unknown"):lower(),
-        hp = hp,
-        mp = mp,
-        cd = 1100,  -- Default cooldown, can be customized per spell
-        prio = i    -- Priority based on order
-      }
+      -- Only add if we have a valid trigger threshold
+      if hp or mp then
+        table.insert(converted, {
+          name = spell.spell,
+          key = spell.spell:lower(),
+          hp = hp,
+          mp = mp,
+          cd = 1100,  -- Default cooldown, can be customized per spell
+          prio = #converted + 1    -- Priority based on insertion order
+        })
+      end
     end
   end
   return converted
@@ -269,23 +283,60 @@ local function convertPotionsToEngineFormat(itemTable)
   if not itemTable then return {} end
   local converted = {}
   for i, item in ipairs(itemTable) do
-    if item.enabled ~= false then  -- Only include enabled potions
-      -- Determine HP/MP trigger based on origin and sign
+    if item.enabled ~= false and item.item and item.item > 0 then  -- Only include enabled potions with valid item ID
+      -- Determine HP/MP trigger based on origin
+      -- Note: sign field indicates "<" (Below) or ">" (Above)
+      -- For "Below" (sign="<"), we want to use when stat <= threshold
+      -- For "Above" (sign=">"), we invert: use when stat >= threshold (but this is unusual for potions)
       local hp, mp = nil, nil
+      local isBelow = item.sign == "<" or item.sign == nil  -- Default to "Below" if not set
+      
       if item.origin == "HP" or item.origin == "HP%" then
-        hp = item.value or 50
+        -- For HP potions with "Below" condition: trigger when HP <= value
+        -- For HP potions with "Above" condition: this is unusual, but we'd skip (set nil)
+        if isBelow then
+          hp = item.value or 50
+        end
       elseif item.origin == "MP" or item.origin == "MP%" then
-        mp = item.value or 50
+        -- For MP potions with "Below" condition: trigger when MP <= value
+        if isBelow then
+          mp = item.value or 50
+        end
       end
       
-      converted[i] = {
-        id = item.item or 0,
-        key = "potion_" .. (item.item or 0),
-        hp = hp,
-        mp = mp,
-        cd = 1000,  -- Potion cooldown
-        prio = i    -- Priority based on order
-      }
+      -- Get the actual item name from the game data
+      local itemName = nil
+      if g_things and g_things.getThingType then
+        local thing = g_things.getThingType(item.item, ThingCategoryItem)
+        if thing and thing.getName then
+          local name = thing:getName()
+          if name and name ~= "" then
+            itemName = name:lower()
+          end
+        elseif thing and thing.getMarketData then
+          local marketData = thing:getMarketData()
+          if marketData and marketData.name and marketData.name ~= "" then
+            itemName = marketData.name:lower()
+          end
+        end
+      end
+      -- Fallback name based on item ID if we couldn't get the real name
+      if not itemName then
+        itemName = "potion #" .. item.item
+      end
+      
+      -- Only add if we have a valid trigger threshold
+      if hp or mp then
+        table.insert(converted, {
+          id = item.item,
+          key = "potion_" .. item.item,
+          hp = hp,
+          mp = mp,
+          cd = 1000,  -- Potion cooldown
+          prio = #converted + 1,    -- Priority based on insertion order
+          name = itemName
+        })
+      end
     end
   end
   return converted
@@ -297,6 +348,9 @@ local function applyHealEngineToggles()
   local isOn = not not currentSettings.enabled
   local hasSpells = currentSettings.spellTable and #currentSettings.spellTable > 0
   local hasItems = currentSettings.itemTable and #currentSettings.itemTable > 0
+  
+  -- Debug: uncomment to debug configuration
+  -- print(string.format("[HealBot] applyHealEngineToggles: enabled=%s hasSpells=%s hasItems=%s", tostring(isOn), tostring(hasSpells), tostring(hasItems)))
   
   -- Enable/disable the healing features
   HealEngine.configure({
@@ -310,7 +364,13 @@ local function applyHealEngineToggles()
     HealEngine.setCustomSpells(convertSpellsToEngineFormat(currentSettings.spellTable))
   end
   if HealEngine.setCustomPotions and hasItems then
-    HealEngine.setCustomPotions(convertPotionsToEngineFormat(currentSettings.itemTable))
+    local converted = convertPotionsToEngineFormat(currentSettings.itemTable)
+    -- Debug: uncomment to debug potions
+    -- print(string.format("[HealBot] Setting %d potions to HealEngine", #converted))
+    -- for i, pot in ipairs(converted) do
+    --   print(string.format("[HealBot]   Potion %d: id=%s hp=%s mp=%s", i, tostring(pot.id), tostring(pot.hp), tostring(pot.mp)))
+    -- end
+    HealEngine.setCustomPotions(converted)
   end
 end
 
@@ -351,11 +411,13 @@ if rootWidget then
           entry.enabled = not entry.enabled
           label.enabled:setChecked(entry.enabled)
           applyHealEngineToggles()
+          nExBotConfigSave("heal")
         end
         label.remove.onClick = function()
           table.removevalue(currentSettings.spellTable, entry)
           refreshSpells()
           applyHealEngineToggles()
+          nExBotConfigSave("heal")
         end
         label:setText("(MP>" .. entry.cost .. ") " .. entry.origin .. entry.sign .. entry.value .. ": " .. entry.spell)
       end
@@ -371,11 +433,13 @@ if rootWidget then
           entry.enabled = not entry.enabled
           label.enabled:setChecked(entry.enabled)
           applyHealEngineToggles()
+          nExBotConfigSave("heal")
         end
         label.remove.onClick = function()
           table.removevalue(currentSettings.itemTable, entry)
           refreshItems()
           applyHealEngineToggles()
+          nExBotConfigSave("heal")
         end
         label.id:setItemId(entry.item)
         label:setText(entry.origin .. entry.sign .. entry.value .. ": " .. entry.item)
@@ -391,6 +455,7 @@ if rootWidget then
       t[index], t[index-1] = t[index-1], t[index]
       healWindow.healer.spells.spellList:moveChildToIndex(input, index - 1)
       healWindow.healer.spells.spellList:ensureChildVisible(input)
+      nExBotConfigSave("heal")
     end
 
     healWindow.healer.spells.MoveDown.onClick = function()
@@ -402,6 +467,7 @@ if rootWidget then
       t[index], t[index+1] = t[index+1], t[index]
       healWindow.healer.spells.spellList:moveChildToIndex(input, index + 1)
       healWindow.healer.spells.spellList:ensureChildVisible(input)
+      nExBotConfigSave("heal")
     end
 
     healWindow.healer.items.MoveUp.onClick = function()
@@ -413,6 +479,7 @@ if rootWidget then
       t[index], t[index-1] = t[index-1], t[index]
       healWindow.healer.items.itemList:moveChildToIndex(input, index - 1)
       healWindow.healer.items.itemList:ensureChildVisible(input)
+      nExBotConfigSave("heal")
     end
 
     healWindow.healer.items.MoveDown.onClick = function()
@@ -424,6 +491,7 @@ if rootWidget then
       t[index], t[index+1] = t[index+1], t[index]
       healWindow.healer.items.itemList:moveChildToIndex(input, index + 1)
       healWindow.healer.items.itemList:ensureChildVisible(input)
+      nExBotConfigSave("heal")
     end
 
     healWindow.healer.spells.addSpell.onClick = function()
@@ -441,6 +509,7 @@ if rootWidget then
       healWindow.healer.spells.manaCost:setText('')
       refreshSpells()
       applyHealEngineToggles()
+      nExBotConfigSave("heal")
     end
 
     healWindow.healer.items.addItem.onClick = function()
@@ -456,6 +525,7 @@ if rootWidget then
       healWindow.healer.items.itemValue:setText('')
       refreshItems()
       applyHealEngineToggles()
+      nExBotConfigSave("heal")
     end
   loadSettings()
 

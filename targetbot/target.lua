@@ -575,6 +575,10 @@ TargetBot.sayAttackSpell = function(text, delay)
   if lastAttackSpell + delay < now then
     say(text)
     lastAttackSpell = now
+    -- Track attack spell for Hunt Analyzer
+    if HuntAnalytics and HuntAnalytics.trackAttackSpell then
+      HuntAnalytics.trackAttackSpell(text, 0)  -- Mana cost unknown from here
+    end
     return true
   end
   return false
@@ -629,6 +633,7 @@ TargetBot.useAttackItem = function(item, subType, target, delay)
   if lastRuneAttack + delay < now then
     if useItemOnTargetLikeHotkey(item, target, subType) then
       lastRuneAttack = now
+      -- Note: Rune tracking is now handled by onUseWith hook in smart_hunt.lua
       return true
     end
   end

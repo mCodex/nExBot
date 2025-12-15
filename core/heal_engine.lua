@@ -48,12 +48,32 @@ local function stamp(key)
   cooldowns[key] = nowMs()
 end
 
--- Safe wrapper for useItem - OTClient global may not be available during early boot
-local useItemSafe = useItem or function(itemId)
-  if useItem then
-    return useItem(itemId)
+-- Safe wrapper for using potions/items on self
+-- Uses the global useWith function which is standard in OTClientV8
+local function useItemSafe(itemId)
+  if not itemId or itemId <= 0 then return false end
+  
+  -- First try the global useWith(itemId, player) pattern commonly used
+  if useWith and player then
+    local item = findItem and findItem(itemId)
+    if item then
+      useWith(item, player)
+      return true
+    end
   end
-  -- Fallback: log warning but don't crash
+  
+  -- Alternative: try g_game.useInventoryItemWith
+  if g_game and g_game.useInventoryItemWith and player then
+    g_game.useInventoryItemWith(itemId, player, 0)
+    return true
+  end
+  
+  -- Alternative: try g_game.useInventoryItem (uses on self)
+  if g_game and g_game.useInventoryItem then
+    g_game.useInventoryItem(itemId)
+    return true
+  end
+  
   return false
 end
 
@@ -137,19 +157,56 @@ function HealEngine.planSelf(snap)
 
   if options.selfSpells then
     for _, spell in ipairs(selfSpells) do
-      if hp <= spell.hp and mp >= spell.mp and healingGroupReady() and ready(spell.key, spell.cd) then
-        return {kind = "spell", name = spell.name, key = spell.key, cd = spell.cd}
+      local hpMatch = (spell.hp == nil) or (hp <= spell.hp)
+      local mpMatch = (spell.mp == nil) or (mp >= spell.mp)
+      local mpThresholdMet = (spell.mp == nil) or true  -- Always allow if no mp cost defined
+      -- For HP spells: check HP threshold. For MP spells: check MP threshold
+      local shouldHeal = false
+      if spell.hp and hp <= spell.hp then
+        shouldHeal = true
+      elseif spell.mp and not spell.hp and mp <= spell.mp then
+        -- MP-triggered spell (e.g., mana shield, utana vid)
+        shouldHeal = true
+      end
+      if shouldHeal and healingGroupReady() and ready(spell.key, spell.cd) then
+        return {kind = "spell", name = spell.name, key = spell.key, cd = spell.cd, mana = spell.mana or 0}
       end
     end
   end
 
   if options.potions then
     for _, pot in ipairs(selfPotions) do
+      -- Debug: uncomment to diagnose potion issues
+      -- print(string.format("[HealEngine] Checking potion id=%s hp=%s mp=%s | current hp=%d mp=%d allowPotion=%s ready=%s canUse=%s", 
+      --   tostring(pot.id), tostring(pot.hp), tostring(pot.mp), hp, mp, tostring(allowPotion), tostring(ready(pot.key, pot.cd)), tostring(canUseItem())))
+      
+      -- Get the actual potion name - prefer pot.name, then try to look up by ID
+      local potionName = pot.name
+      if not potionName and pot.id then
+        -- Try to get item name from game data
+        if g_things and g_things.getThingType then
+          local thing = g_things.getThingType(pot.id, ThingCategoryItem)
+          if thing then
+            if thing.getName then
+              local name = thing:getName()
+              if name and name ~= "" then potionName = name:lower() end
+            elseif thing.getMarketData then
+              local marketData = thing:getMarketData()
+              if marketData and marketData.name and marketData.name ~= "" then
+                potionName = marketData.name:lower()
+              end
+            end
+          end
+        end
+      end
+      -- Final fallback
+      potionName = potionName or ("potion #" .. (pot.id or 0))
+      
       if pot.hp and hp <= pot.hp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
-        return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd}
+        return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "heal"}
       end
       if pot.mp and mp <= pot.mp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
-        return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd}
+        return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "mana"}
       end
     end
   end
@@ -166,7 +223,9 @@ function HealEngine.planFriend(snap, target)
   local inPz = snap.inPz or isInPz()
   if inPz then return nil end
   for _, spell in ipairs(friendSpells) do
-    if hp <= spell.hp and mp >= spell.mp and healingGroupReady() and ready(spell.key, spell.cd) then
+    local hpThreshold = spell.hp or 0
+    local mpCost = spell.mp or 0
+    if hp <= hpThreshold and mp >= mpCost and healingGroupReady() and ready(spell.key, spell.cd) then
       return {
         kind = "spell",
         name = string.format('%s "%s"', spell.name, target.name),
@@ -186,12 +245,21 @@ function HealEngine.execute(action)
     if BotCore and BotCore.Cooldown and BotCore.Cooldown.markHealingUsed then
       BotCore.Cooldown.markHealingUsed(action.cd)
     end
+    -- Track spell usage for Hunt Analyzer
+    if HuntAnalytics and HuntAnalytics.trackHealSpell then
+      HuntAnalytics.trackHealSpell(action.name, action.mana or 0)
+    end
     return true
   elseif action.kind == "potion" then
     useItemSafe(action.id)
     stamp(action.key)
     if BotCore and BotCore.Cooldown and BotCore.Cooldown.markPotionUsed then
       BotCore.Cooldown.markPotionUsed(action.cd)
+    end
+    -- Track potion usage for Hunt Analyzer
+    if HuntAnalytics and HuntAnalytics.trackPotion then
+      local potionType = action.potionType or "other"
+      HuntAnalytics.trackPotion(action.name or "potion", potionType)
     end
     return true
   end

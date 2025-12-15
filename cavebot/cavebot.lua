@@ -2,8 +2,24 @@ local cavebotMacro = nil
 local config = nil
 
 -- ui
-local configWidget = UI.Config()
+local configWidget = UI.Config()  -- Create config widget first
 local ui = UI.createWidget("CaveBotPanel")
+
+-- Move the config widget into the placeholder panel at the top
+if ui.configWidgetPlaceholder and configWidget then
+  -- Try multiple methods to reparent the widget
+  local placeholder = ui.configWidgetPlaceholder
+  if configWidget.setParent then
+    configWidget:setParent(placeholder)
+  end
+  if placeholder.addChild then
+    placeholder:addChild(configWidget)
+  end
+  -- Move to first child position if possible
+  if placeholder.moveChildToIndex then
+    placeholder:moveChildToIndex(configWidget, 1)
+  end
+end
 
 -- Move the main CaveBot panel to the first position in the tab
 -- This ensures the waypoint list appears before Editor/Config panels
@@ -803,7 +819,7 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
     -- restore focused child on the action list
     ui.list:focusChild(ui.list:getChildByIndex(currentActionIndex))
   end
-  lastConfig = name  
+  lastConfig = name
 end)
 
 -- ui callbacks

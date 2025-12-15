@@ -12,6 +12,14 @@ CaveBotPanel < Panel
     type: verticalBox
     fit-children: true
 
+  Panel
+    id: configWidgetPlaceholder
+    layout:
+      type: verticalBox
+      fit-children: true
+    margin-top: 2
+    margin-bottom: 2
+
   HorizontalSeparator
     margin-top: 2
     margin-bottom: 5
