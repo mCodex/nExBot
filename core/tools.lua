@@ -551,3 +551,184 @@ end)
 BotDB.registerMacro(manaTrainingMacro, "manaTraining")
 
 UI.Separator()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- AUTO LEVITATE - Predictive instant-cast for PVP
+-- Detects movement direction, pre-casts when approaching levitate points
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local autoLevitateEnabled = false
+local lastLevCast = 0
+local LEV_CD = 2000
+local LEV_MANA = 50
+
+-- Direction offsets
+local DX = {[0]=0, [1]=1, [2]=0, [3]=-1, [4]=1, [5]=1, [6]=-1, [7]=-1}
+local DY = {[0]=-1, [1]=0, [2]=1, [3]=0, [4]=-1, [5]=1, [6]=1, [7]=-1}
+
+-- Levitate cache: "x,y" -> "up" or "down"
+local levCache = {}
+local lastCacheX, lastCacheY, lastCacheZ = 0, 0, 0
+
+-- Movement tracking for prediction
+local lastPosX, lastPosY, lastPosZ = 0, 0, 0
+local moveDir = -1  -- Detected movement direction
+
+-- Fast inline levitate check (returns "up", "down", or nil)
+local function checkLevitate(x, y, z)
+  local tile = g_map.getTile({x = x, y = y, z = z})
+  
+  -- Check UP: blocked + ground above
+  if tile then
+    local blocked = tile.isWalkable and not tile:isWalkable() or not tile:getGround()
+    if blocked and z > 0 then
+      local above = g_map.getTile({x = x, y = y, z = z - 1})
+      if above and above:getGround() then
+        return "up"
+      end
+    end
+  end
+  
+  -- Check DOWN: no ground + ground below
+  local noGround = not tile or not tile:getGround()
+  if noGround and z < 15 then
+    local below = g_map.getTile({x = x, y = y, z = z + 1})
+    if below and below:getGround() then
+      return "down"
+    end
+  end
+  
+  return nil
+end
+
+-- Build cache for 13x13 area (6 tiles each direction for prediction)
+local function buildCache(cx, cy, cz)
+  levCache = {}
+  for dx = -6, 6 do
+    for dy = -6, 6 do
+      local x, y = cx + dx, cy + dy
+      local lev = checkLevitate(x, y, cz)
+      if lev then
+        levCache[x .. "," .. y] = lev
+      end
+    end
+  end
+  lastCacheX, lastCacheY, lastCacheZ = cx, cy, cz
+end
+
+-- Instant cast function
+local function castLevitate(levType)
+  if levType == "up" then
+    say("exani hur up")
+  else
+    say("exani hur down")
+  end
+  lastLevCast = now
+end
+
+-- Ultra-fast 5ms detection + prediction macro
+macro(5, function()
+  if not autoLevitateEnabled then return end
+  
+  local p = player
+  if not p then return end
+  
+  local pos = p:getPosition()
+  if not pos then return end
+  
+  local px, py, pz = pos.x, pos.y, pos.z
+  
+  -- Detect movement direction from position change
+  if px ~= lastPosX or py ~= lastPosY then
+    local mdx, mdy = px - lastPosX, py - lastPosY
+    -- Convert movement delta to direction
+    if mdx == 0 and mdy == -1 then moveDir = 0      -- North
+    elseif mdx == 1 and mdy == 0 then moveDir = 1   -- East
+    elseif mdx == 0 and mdy == 1 then moveDir = 2   -- South
+    elseif mdx == -1 and mdy == 0 then moveDir = 3  -- West
+    elseif mdx == 1 and mdy == -1 then moveDir = 4  -- NE
+    elseif mdx == 1 and mdy == 1 then moveDir = 5   -- SE
+    elseif mdx == -1 and mdy == 1 then moveDir = 6  -- SW
+    elseif mdx == -1 and mdy == -1 then moveDir = 7 -- NW
+    end
+    lastPosX, lastPosY, lastPosZ = px, py, pz
+  end
+  
+  -- Rebuild cache if needed (moved 3+ tiles or floor change)
+  local needCache = math.abs(px - lastCacheX) > 3 or 
+                    math.abs(py - lastCacheY) > 3 or 
+                    pz ~= lastCacheZ
+  if needCache then
+    buildCache(px, py, pz)
+  end
+  
+  -- Cooldown/mana check
+  if (now - lastLevCast) < LEV_CD then return end
+  if mana() < LEV_MANA then return end
+  
+  -- Use facing direction, but prefer movement direction if available
+  local dir = p:getDirection()
+  local checkDir = (moveDir >= 0) and moveDir or dir
+  
+  local dx, dy = DX[checkDir], DY[checkDir]
+  if not dx then 
+    dx, dy = DX[dir], DY[dir]
+    if not dx then return end
+  end
+  
+  -- INSTANT: Check front tile (adjacent)
+  local fx, fy = px + dx, py + dy
+  local cached = levCache[fx .. "," .. fy]
+  if cached then
+    castLevitate(cached)
+    return
+  end
+  
+  -- PREDICTIVE: Check if moving towards levitate point (2-3 tiles ahead)
+  -- If we detect we're heading to a levitate point, check current facing
+  for dist = 2, 3 do
+    local ax, ay = px + dx * dist, py + dy * dist
+    local aheadCached = levCache[ax .. "," .. ay]
+    if aheadCached then
+      -- We're approaching a levitate point - use current facing direction check
+      local faceDx, faceDy = DX[dir], DY[dir]
+      if faceDx then
+        local faceFx, faceFy = px + faceDx, py + faceDy
+        local faceCached = levCache[faceFx .. "," .. faceFy]
+        if faceCached then
+          castLevitate(faceCached)
+          return
+        end
+      end
+      break
+    end
+  end
+end)
+
+-- Single UI Toggle for Auto Levitate
+local autoLevitateUI = setupUI([[
+Panel
+  height: 19
+
+  BotSwitch
+    id: autoLevitateToggle
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    !text: tr('Auto Levitate')
+]])
+
+autoLevitateUI.autoLevitateToggle.onClick = function(widget)
+  autoLevitateEnabled = not autoLevitateEnabled
+  widget:setOn(autoLevitateEnabled)
+  BotDB.set("macros.autoLevitate", autoLevitateEnabled)
+end
+
+-- Restore state on load
+if BotDB.get("macros.autoLevitate") == true then
+  autoLevitateEnabled = true
+  autoLevitateUI.autoLevitateToggle:setOn(true)
+end
+
+UI.Separator()
