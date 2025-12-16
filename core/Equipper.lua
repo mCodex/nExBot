@@ -1,5 +1,11 @@
 local panelName = "EquipperPanel"
 local HealContext = dofile("/core/heal_context.lua")
+local EquipperService = dofile("/core/equipper_service.lua")
+if EquipperService then
+  warn("[EQ] EquipperService loaded successfully")
+else
+  warn("[EQ] Warning: EquipperService failed to load")
+end
 
 -- ============================================================================
 -- UI SETUP
@@ -36,7 +42,8 @@ if not storage[panelName] or not storage[panelName].bosses then
     storage[panelName] = {
         enabled = false,
         rules = {},
-        bosses = {}
+        bosses = {},
+        activeRule = nil
     }
 end
 
@@ -77,6 +84,67 @@ local function getCachedRules()
   return EquipState.rulesCache
 end
 
+-- ============================================================================
+-- RULE NORMALIZATION (precompute slot plans)
+-- ============================================================================
+
+-- Delegate normalization to EquipperService for testability and clarity
+local function normalizeRule(rule)
+  return EquipperService.normalizeRule(rule)
+end
+
+local function getNormalizedRules()
+    if EquipState.normalizedDirty or not EquipState.normalizedRules then
+        local raw = getCachedRules() or {}
+        if EquipperService and EquipperService.normalizeRules then
+            EquipState.normalizedRules = EquipperService.normalizeRules(raw)
+        else
+            warn("[EQ] Warning: EquipperService missing, using fallback normalization")
+            local norm = {}
+            for i = 1, #raw do
+                -- basic fallback normalization
+                local r = raw[i]
+                local slots = {}
+                for idx, val in ipairs(r.data or {}) do
+                    if val == true then
+                        slots[#slots + 1] = {slotIdx = idx, mode = "unequip"}
+                    elseif type(val) == "number" and val > 100 then
+                        slots[#slots + 1] = {slotIdx = idx, mode = "equip", itemId = val}
+                    end
+                end
+                norm[#norm + 1] = {
+                    name = r.name,
+                    enabled = r.enabled ~= false,
+                    visible = r.visible ~= false,
+                    mainCondition = r.mainCondition,
+                    optionalCondition = r.optionalCondition,
+                    mainValue = r.mainValue,
+                    optValue = r.optValue,
+                    relation = r.relation or "-",
+                    slots = slots,
+                }
+            end
+            EquipState.normalizedRules = norm
+        end
+        EquipState.normalizedDirty = false
+    end
+    return EquipState.normalizedRules
+end
+
+-- Get the currently active rule (first enabled rule by index)
+-- Return enabled rules in priority order (pure)
+local function getEnabledRules()
+    if EquipperService and EquipperService.getEnabledRules then
+        return EquipperService.getEnabledRules(config)
+    end
+    local rules = getNormalizedRules() or {}
+    local out = {}
+    for i, r in ipairs(rules) do
+        if r.enabled then out[#out + 1] = r end
+    end
+    return out
+end
+
 ui.switch:setOn(config.enabled)
 ui.switch.onClick = function(widget)
   config.enabled = not config.enabled
@@ -101,7 +169,9 @@ local conditions = { -- always add new conditions at the bottom
     "Blacklist player in range (sqm)", -- spinbox 15
     "Target is Boss", -- nothing 16
     "Player is NOT in protection zone", -- nothing 17
-    "CaveBot is ON, TargetBot is OFF" -- nothing 18
+    "CaveBot is ON, TargetBot is OFF", -- nothing 18
+    "HealBot is enabled", -- nothing 19
+    "HealBot is disabled" -- nothing 20
 }
 
 local conditionNumber = 1
@@ -143,7 +213,7 @@ local function setCondition(first, n)
     spinBox:setValue(0)
     textEdit:setText('')
 
-    if n == 1 or n == 10 or n == 11 or n == 16 or n == 17 or n == 18 then
+    if n == 1 or n == 10 or n == 11 or n == 16 or n == 17 or n == 18 or n == 19 or n == 20 then
         spinBox:hide()
         textEdit:hide()
     elseif n == 9 or n == 8 then
@@ -416,6 +486,7 @@ end
 
 -- Widget cache to avoid recreating widgets
 local ruleWidgetCache = {}
+local refreshRules -- forward-declared so handlers can close over it
 
 -- Create or update a single rule widget
 local function createOrUpdateRuleWidget(list, rule, index)
@@ -432,35 +503,42 @@ local function createOrUpdateRuleWidget(list, rule, index)
   widget:setText(rule.name)
   widget.ruleData = rule
   
-  -- Update visual state without recreating
-  widget.visible:setColor(rule.visible and "green" or "red")
-  widget.enabled:setChecked(rule.enabled)
+    -- Update visual state without recreating
+    widget.visible:setColor(rule.visible and "green" or "red")
+    widget.enabled:setChecked(rule.enabled and true or false)
   
   -- Set up event handlers (only if not already set)
-  if not widget._handlersSet then
-    widget.remove.onClick = function()
-      local ruleIndex = table.find(config.rules, rule)
-      if ruleIndex then
-        table.remove(config.rules, ruleIndex)
-      end
-      widget:destroy()
-      ruleWidgetCache[widgetId] = nil
-      listPanel.up:setEnabled(false)
-      listPanel.down:setEnabled(false)
-      invalidateRulesCache()
-      refreshRules()
-    end
-    
-    widget.visible.onClick = function()
-      rule.visible = not rule.visible
-      widget.visible:setColor(rule.visible and "green" or "red")
-    end
-    
-    widget.enabled.onClick = function()
-      rule.enabled = not rule.enabled
-      widget.enabled:setChecked(rule.enabled)
-      invalidateRulesCache()
-    end
+        if not widget._handlersSet then
+        widget.remove.onClick = function()
+            local r = widget.ruleData
+            local ruleIndex = table.find(config.rules, r)
+            if ruleIndex then
+                table.remove(config.rules, ruleIndex)
+                if config.activeRule and config.activeRule > #config.rules then
+                    config.activeRule = nil
+                end
+            end
+            widget:destroy()
+            ruleWidgetCache[widgetId] = nil
+            listPanel.up:setEnabled(false)
+            listPanel.down:setEnabled(false)
+            invalidateRulesCache()
+            refreshRules()
+        end
+
+        widget.visible.onClick = function()
+            local r = widget.ruleData
+            r.visible = not r.visible
+            widget.visible:setColor(r.visible and "green" or "red")
+        end
+
+        widget.enabled.onClick = function()
+            local r = widget.ruleData
+            r.enabled = not r.enabled
+            widget.enabled:setChecked(r.enabled and true or false)
+            invalidateRulesCache()
+            refreshRules()
+        end
     
     -- Hover preview disabled - Equipment Setup only shows when editing (double-click)
     
@@ -515,7 +593,7 @@ local function createOrUpdateRuleWidget(list, rule, index)
   return widget
 end
 
-local function refreshRules()
+refreshRules = function()
   local list = listPanel.list
   local existingChildren = list:getChildren()
   local rulesCount = #config.rules
@@ -530,14 +608,16 @@ local function refreshRules()
   end
   
   -- Create or update widgets for each rule
-  for i, rule in ipairs(config.rules) do
-    createOrUpdateRuleWidget(list, rule, i)
-  end
+    for i, rule in ipairs(config.rules) do
+        createOrUpdateRuleWidget(list, rule, i)
+    end
   
   -- Invalidate macro cache
   invalidateRulesCache()
 end
 refreshRules()
+
+warn("[EQ] Equipper loaded, rules count: " .. #config.rules .. ", enabled: " .. tostring(config.enabled))
 
 inputPanel.add.onClick = function(widget)
     local mainVal
@@ -619,7 +699,11 @@ inputPanel.add.onClick = function(widget)
         config.rules[index] = ruleData -- overwrite
     else
         table.insert(config.rules, ruleData) -- create new one
+        index = #config.rules
     end
+
+    -- Keep existing enabled flags; clear legacy activeRule pointer
+    config.activeRule = nil
 
     -- Reset display flag on all children
     local children = listPanel.list:getChildren()
@@ -675,46 +759,7 @@ bossPanel.add.onClick = function()
     bossPanel.name:setText('')
 end
 
-local function interpreteCondition(n, v)
-
-    if n == 1 then
-        return true
-    elseif n == 2 then
-        return getMonsters() > v
-    elseif n == 3 then
-        return getMonsters() < v
-    elseif n == 4 then
-        return hppercent() < v
-    elseif n == 5 then
-        return hppercent() > v
-    elseif n == 6 then
-        return manapercent() < v
-    elseif n == 7 then
-        return manapercent() > v
-    elseif n == 8 then
-        return target() and target():getName():lower() == v:lower() or false
-    elseif n == 9 then
-        return g_keyboard.isKeyPressed(v)
-    elseif n == 10 then
-        return isParalyzed()
-    elseif n == 11 then
-        return isInPz()
-    elseif n == 12 then
-        return getPlayers() > v
-    elseif n == 13 then
-        return getPlayers() < v
-    elseif n == 14 then
-        return TargetBot.Danger() > v and TargetBot.isOn()
-    elseif n == 15 then
-        return isBlackListedPlayerInRange(v)
-    elseif n == 16 then
-        return target() and table.find(config.bosses, target():getName():lower(), true) and true or false
-    elseif n == 17 then
-        return not isInPz()
-    elseif n == 18 then
-        return CaveBot.isOn() and TargetBot.isOff()
-    end
-end
+-- `interpreteCondition` removed: condition evaluation now delegated to `EquipperService.evalCondition` with a local fallback `LOCAL_CONDITIONS`.
 
 local function finalCheck(first,relation,second)
     if relation == "-" then
@@ -730,51 +775,25 @@ end
 -- SLOT / INVENTORY HELPERS (pure-ish, cached per tick)
 -- ============================================================================
 
-local SLOT_ACCESSORS = {
-    [1] = getHead,
-    [2] = getBody,
-    [3] = getLeg,
-    [4] = getFeet,
-    [5] = getNeck,
-    [6] = getLeft,
-    [7] = getRight,
-    [8] = getFinger,
-    [9] = getAmmo,
+-- Delegate slot/inventory/context helpers to EquipperService when available
+local SLOT_MAP = (EquipperService and EquipperService.SLOT_MAP) or {
+    [1] = 1, [2] = 4, [3] = 7, [4] = 8, [5] = 2, [6] = 6, [7] = 5, [8] = 9, [9] = 10,
 }
 
--- Map UI slot index → client slot id (keeps legacy mapping but centralized)
-local SLOT_MAP = {
-    [1] = 1,  -- head
-    [2] = 4,  -- body
-    [3] = 7,  -- legs
-    [4] = 8,  -- feet
-    [5] = 2,  -- neck
-    [6] = 6,  -- left hand
-    [7] = 5,  -- right hand
-    [8] = 9,  -- finger
-    [9] = 10, -- ammo
-}
-
-local DEFENSIVE_SLOTS = {
-    [2] = true, -- body
-    [6] = true, -- left hand (often shield)
-    [7] = true, -- right hand (weapon/shield)
-}
-
-local function slotHasItem(slotIdx)
-    local f = SLOT_ACCESSORS[slotIdx]
+local slotHasItem = EquipperService and EquipperService.slotHasItem or function(slotIdx)
+    local f = ({[1]=getHead,[2]=getBody,[3]=getLeg,[4]=getFeet,[5]=getNeck,[6]=getLeft,[7]=getRight,[8]=getFinger,[9]=getAmmo})[slotIdx]
     if not f then return nil end
     return f()
 end
 
-local function slotHasItemId(slotIdx, itemId)
+local slotHasItemId = EquipperService and EquipperService.slotHasItemId or function(slotIdx, itemId)
     local item = slotHasItem(slotIdx)
     if not item then return false end
     local ids = {itemId, getInactiveItemId(itemId), getActiveItemId(itemId)}
     return table.find(ids, item:getId()) and true or false
 end
 
-local function buildInventoryIndex()
+local buildInventoryIndex = EquipperService and EquipperService.buildInventoryIndex or function()
     local idx = {}
     for _, container in ipairs(getContainers()) do
         local items = container:getItems()
@@ -789,73 +808,99 @@ local function buildInventoryIndex()
     return idx
 end
 
-local function snapshotContext()
+local snapshotContext = EquipperService and EquipperService.snapshotContext or function()
     return {
-        hp = hppercent(),
-        mp = manapercent(),
-        monsters = getMonsters(),
-        players = getPlayers(),
-        target = target() and target():getName():lower() or nil,
-        inPz = isInPz(),
-        paralyzed = isParalyzed(),
+        hp = hppercent(), mp = manapercent(), monsters = getMonsters(), players = getPlayers(),
+        target = target() and target():getName():lower() or nil, inPz = isInPz(), paralyzed = isParalyzed(),
         danger = (TargetBot and TargetBot.Danger and TargetBot.Danger()) or 0,
         cavebotOn = CaveBot and CaveBot.isOn and CaveBot.isOn() or false,
         targetbotOn = TargetBot and TargetBot.isOn and TargetBot.isOn() or false,
+        healbotOn = (storage["healbot"] and storage["healbot"][1] and storage["healbot"][1].enabled) or false,
+        bosses = config.bosses or {},
     }
 end
 
--- Safety guard: avoid stripping defensive gear when exposed
-local SAFETY = {
-    minHp = 35,
-    maxDanger = 50,
-}
-
-local function isUnsafeToUnequip(ctx)
+local isUnsafeToUnequip = EquipperService and EquipperService.isUnsafeToUnequip or function(ctx)
     if ctx.inPz then return false end
-    if ctx.hp <= SAFETY.minHp then return true end
-    if ctx.danger >= SAFETY.maxDanger then return true end
+    if ctx.hp <= 35 then return true end
+    if ctx.danger >= 50 then return true end
     return false
 end
 
 local function unequipSlot(slotIdx)
     local item = slotHasItem(slotIdx)
     if not item then return false end
-
-    if g_game.getClientVersion() >= 910 then
-        g_game.equipItemId(item:getId())
-        return true
-    end
-
-    -- legacy move to first suitable container
+    -- Preferred: move equipped item from inventory slot to first available backpack
+    warn("[EQ] Unequipping slot " .. tostring(slotIdx) .. ", itemId=" .. tostring(item:getId()))
     local dest
     for _, container in ipairs(getContainers()) do
-        local cname = container:getName()
-        if not containerIsFull(container) and not cname:find("loot") and (cname:find("backpack") or cname:find("bag") or cname:find("chess")) then
+        if not containerIsFull(container) then
             dest = container
             break
         end
     end
-    if not dest then return false end
+    if not dest then
+        warn("[EQ] No suitable destination container found for unequip")
+        return false
+    end
     local pos = dest:getSlotPosition(dest:getItemsCount())
-    return g_game.move(item, pos, item:getCount())
+    local ok = g_game.move(item, pos, item:getCount())
+    warn("[EQ] Unequip move returned: " .. tostring(ok))
+    return ok
 end
 
 local function equipSlot(slotIdx, itemId)
     local mappedSlot = SLOT_MAP[slotIdx] or slotIdx
-    if g_game.getClientVersion() >= 910 then
-        return g_game.equipItemId(itemId, mappedSlot)
-    else
-        local item = findItem(itemId)
-        if not item then return false end
-        return moveToSlot(item, mappedSlot)
+    warn("[EQ] Equipping item " .. tostring(itemId) .. " to slotIdx=" .. tostring(slotIdx) .. " mappedSlot=" .. tostring(mappedSlot))
+
+    -- Try direct equip API first (non-blocking request)
+    local triedEquipApi = false
+    if g_game and g_game.equipItemId then
+        triedEquipApi = true
+        local ok = pcall(function() g_game.equipItemId(itemId) end)
+        warn("[EQ] g_game.equipItemId called (pcall ok=" .. tostring(ok) .. ")")
+        -- small chance server synchronizes instantly; re-check
+        if slotHasItemId(slotIdx, itemId) then
+            warn("[EQ] equipItemId resulted in item present in slot")
+            return true
+        end
     end
+
+    -- Fallback: try g_game.findItemInContainers first (may find in closed containers)
+    local found = nil
+    if g_game and g_game.findItemInContainers then
+        pcall(function()
+            local f = g_game.findItemInContainers(itemId)
+            if f then found = f end
+        end)
+    end
+    if not found then
+        for _, container in ipairs(getContainers()) do
+            for _, it in ipairs(container:getItems() or {}) do
+                if it:getId() == itemId then
+                    found = it
+                    break
+                end
+            end
+            if found then break end
+        end
+    end
+    if not found then
+        warn("[EQ] Item " .. tostring(itemId) .. " not found in containers (triedEquipApi=" .. tostring(triedEquipApi) .. ")")
+            -- item not found in open containers
+            return false
+    end
+    local ok2 = g_game.move(found, {x = 65535, y = mappedSlot, z = 0}, found:getCount())
+    warn("[EQ] Fallback move returned: " .. tostring(ok2))
+    return slotHasItemId(slotIdx, itemId) or ok2
 end
 
 -- ============================================================================
 -- CONDITIONS (table-driven)
 -- ============================================================================
 
-local conditionFns = {
+-- Delegate condition evaluation to EquipperService when available, fallback to local map
+local LOCAL_CONDITIONS = {
     [1]  = function(ctx, v) return true end,
     [2]  = function(ctx, v) return ctx.monsters > v end,
     [3]  = function(ctx, v) return ctx.monsters < v end,
@@ -874,15 +919,24 @@ local conditionFns = {
     [16] = function(ctx, v) return ctx.target and table.find(config.bosses, ctx.target, true) and true or false end,
     [17] = function(ctx, v) return not ctx.inPz end,
     [18] = function(ctx, v) return ctx.cavebotOn and not ctx.targetbotOn end,
+    [19] = function(ctx, v) return ctx.healbotOn end,
+    [20] = function(ctx, v) return not ctx.healbotOn end,
 }
 
 local function evalCondition(id, value, ctx)
-    local fn = conditionFns[id]
+    if EquipperService and EquipperService.evalCondition then
+        return EquipperService.evalCondition(id, value, ctx)
+    end
+    local fn = LOCAL_CONDITIONS[id]
     if not fn then return false end
     return fn(ctx, value)
 end
 
 local function rulePasses(rule, ctx)
+    if EquipperService and EquipperService.rulePasses then
+        return EquipperService.rulePasses(rule, ctx)
+    end
+    -- fallback
     local mainOk = evalCondition(rule.mainCondition, rule.mainValue, ctx)
     if rule.relation == "-" then return mainOk end
     local optOk = evalCondition(rule.optionalCondition, rule.optValue, ctx)
@@ -892,80 +946,21 @@ local function rulePasses(rule, ctx)
 end
 
 -- ============================================================================
--- RULE NORMALIZATION (precompute slot plans)
--- ============================================================================
-
-local function normalizeRule(rule)
-    local slots = {}
-    for idx, val in ipairs(rule.data or {}) do
-        if val == true then
-            slots[#slots + 1] = {slotIdx = idx, mode = "unequip"}
-        elseif type(val) == "number" and val > 100 then
-            slots[#slots + 1] = {slotIdx = idx, mode = "equip", itemId = val}
-        end
-    end
-    return {
-        name = rule.name,
-        enabled = rule.enabled ~= false,
-        visible = rule.visible ~= false,
-        mainCondition = rule.mainCondition,
-        optionalCondition = rule.optionalCondition,
-        mainValue = rule.mainValue,
-        optValue = rule.optValue,
-        relation = rule.relation or "-",
-        slots = slots,
-    }
-end
-
-local function getNormalizedRules()
-    if EquipState.normalizedDirty or not EquipState.normalizedRules then
-        local raw = getCachedRules() or {}
-        local norm = {}
-        for i = 1, #raw do
-            norm[#norm + 1] = normalizeRule(raw[i])
-        end
-        EquipState.normalizedRules = norm
-        EquipState.normalizedDirty = false
-    end
-    return EquipState.normalizedRules
-end
-
 -- ============================================================================
 -- ACTION PLANNING (pure decision-making)
 -- ============================================================================
 
 local function computeAction(rule, ctx, inventoryIndex)
-    local missing = false
-
-    -- First, process unequips (priority: don’t strip defenses when unsafe)
-    for _, slotPlan in ipairs(rule.slots) do
-        if slotPlan.mode == "unequip" then
-            local hasItem = slotHasItem(slotPlan.slotIdx)
-            if hasItem then
-                if DEFENSIVE_SLOTS[slotPlan.slotIdx] and isUnsafeToUnequip(ctx) then
-                    missing = true -- treat as pending to avoid turning correctEq true
-                else
-                    return {kind = "unequip", slotIdx = slotPlan.slotIdx}, missing
-                end
-            end
-        end
+    -- Delegate pure decision making to service for testability/consistency
+    if EquipperService and EquipperService.computeAction then
+        return EquipperService.computeAction(rule, ctx, inventoryIndex, {
+            slotHasItem = slotHasItem,
+            slotHasItemId = slotHasItemId,
+            isUnsafeToUnequip = isUnsafeToUnequip,
+        })
     end
-
-    -- Then, process equips (first missing slot gets action)
-    for _, slotPlan in ipairs(rule.slots) do
-        if slotPlan.mode == "equip" and slotPlan.itemId then
-            if not slotHasItemId(slotPlan.slotIdx, slotPlan.itemId) then
-                local hasItem = inventoryIndex[slotPlan.itemId] ~= nil
-                if hasItem then
-                    return {kind = "equip", slotIdx = slotPlan.slotIdx, itemId = slotPlan.itemId}, missing
-                else
-                    missing = true
-                end
-            end
-        end
-    end
-
-    return nil, missing
+    -- If service missing, conservatively return no action and mark missing
+    return nil, true
 end
 
 
@@ -995,15 +990,18 @@ end
 -- Uses cached rules instead of UI children iteration
 -- ============================================================================
 
-EquipManager = macro(250, function()
+EquipManager = macro(1000, function()
     if not config.enabled then return end
+
+    -- Debug: enabled for troubleshooting
+    warn("[EQ] Macro running, enabled=" .. tostring(config.enabled))
 
     -- Skip gear swaps during critical healing/danger to avoid conflicts
     if HealContext and HealContext.isCritical and HealContext.isCritical() then
         return
     end
 
-    local rules = getNormalizedRules()
+    local rules = getEnabledRules()
     if not rules or #rules == 0 then return end
 
     local currentTime = now
@@ -1014,27 +1012,31 @@ EquipManager = macro(250, function()
     local ctx = snapshotContext()
     local inventoryIndex = buildInventoryIndex()
 
-    for i = 1, #rules do
-        local rule = rules[i]
-        if rule.enabled and rulePasses(rule, ctx) then
+    for _, rule in ipairs(rules) do
+        if rulePasses(rule, ctx) then
             local action, missing = computeAction(rule, ctx, inventoryIndex)
-
             if action then
                 if action.kind == "unequip" then
+                    warn("[EQ] Unequipping slot " .. action.slotIdx)
                     if unequipSlot(action.slotIdx) then
                         EquipState.lastEquipAction = currentTime
                         EquipState.correctEq = false
                         EquipState.needsEquipCheck = true
                         EquipState.lastRule = rule
                         return
+                    else
+                        warn("[EQ] Failed to unequip slot " .. action.slotIdx)
                     end
                 elseif action.kind == "equip" then
+                    warn("[EQ] Equipping item " .. action.itemId .. " to slot " .. action.slotIdx)
                     if equipSlot(action.slotIdx, action.itemId) then
                         EquipState.lastEquipAction = currentTime
                         EquipState.correctEq = false
                         EquipState.needsEquipCheck = true
                         EquipState.lastRule = rule
                         return
+                    else
+                        warn("[EQ] Failed to equip item " .. action.itemId .. " to slot " .. action.slotIdx)
                     end
                 end
             else
@@ -1042,10 +1044,74 @@ EquipManager = macro(250, function()
                 EquipState.correctEq = not missing
                 EquipState.needsEquipCheck = missing
                 EquipState.lastRule = rule
-                return
+                -- continue to next rule
             end
         end
     end
 
     EquipState.needsEquipCheck = false
 end)
+
+-- ============================================================================
+-- EVENT-DRIVEN EQUIPMENT MANAGEMENT
+-- Listen to equipment changes for immediate response
+-- ============================================================================
+
+EventBus.on("equipment:change", function(slotId, slotName, currentId, lastId, item)
+    if not config.enabled then return end
+
+    -- Debug: enabled for troubleshooting
+    warn("[EQ] Equipment changed: slot " .. slotId .. " to item " .. currentId)
+
+    -- Skip if recently equipped by us to avoid loops
+    if now - EquipState.lastEquipAction < EquipState.EQUIP_COOLDOWN then return end
+
+    -- Skip during critical healing
+    if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
+
+    local rules = getEnabledRules()
+    if not rules or #rules == 0 then return end
+
+    local ctx = snapshotContext()
+    local inventoryIndex = buildInventoryIndex()
+
+    for _, rule in ipairs(rules) do
+        warn("[EQ] Checking rule: " .. rule.name .. ", enabled: " .. tostring(rule.enabled))
+        if rulePasses(rule, ctx) then
+            warn("[EQ] Rule passes: " .. rule.name)
+            for _, slotPlan in ipairs(rule.slots) do
+                if SLOT_MAP[slotPlan.slotIdx] == slotId and slotPlan.mode == "equip" and slotPlan.itemId then
+                    warn("[EQ] Slot matches: " .. slotPlan.slotIdx .. " for item " .. slotPlan.itemId)
+                    if not slotHasItemId(slotPlan.slotIdx, slotPlan.itemId) then
+                        warn("[EQ] Slot does not have item, checking inventory")
+                        local hasItem = inventoryIndex[slotPlan.itemId] ~= nil
+                        if not hasItem and g_game and g_game.findItemInContainers then
+                            local ok, found = pcall(g_game.findItemInContainers, slotPlan.itemId)
+                            hasItem = ok and found ~= nil
+                        end
+                        if hasItem then
+                            warn("[EQ] Event: Equipping item " .. slotPlan.itemId .. " to slot " .. slotId)
+                            if equipSlot(slotPlan.slotIdx, slotPlan.itemId) then
+                                EquipState.lastEquipAction = now
+                                EquipState.correctEq = false
+                                EquipState.needsEquipCheck = true
+                            else
+                                warn("[EQ] Event: failed to equip item " .. slotPlan.itemId .. " to slot " .. slotPlan.slotIdx)
+                            end
+                            return
+                        else
+                            warn("[EQ] Item not in inventory: " .. slotPlan.itemId)
+                        end
+                    else
+                        warn("[EQ] Slot already has correct item")
+                    end
+                end
+            end
+        else
+            warn("[EQ] Rule does not pass: " .. rule.name)
+        end
+    end
+end)
+
+-- Debug helpers: call from Lua console to force an equip/unequip and print result.
+-- debug helpers removed
