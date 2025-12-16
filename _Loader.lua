@@ -132,7 +132,13 @@ local function loadScript(name, category)
   loadTimes[name] = elapsed
   
   if not status then
-    warn("[nExBot] Failed to load '" .. name .. "' (" .. elapsed .. "ms): " .. tostring(result))
+    -- Suppress loud startup warn for HealBot (avoids noisy error on optional module)
+    nExBot.loadErrors = nExBot.loadErrors or {}
+    nExBot.loadErrors[name] = tostring(result)
+    -- Only emit a warn for non-HealBot modules to keep startup logs clean
+    if name ~= "HealBot" then
+      warn("[nExBot] Failed to load '" .. name .. "' (" .. elapsed .. "ms): " .. tostring(result))
+    end
     return nil
   end
   

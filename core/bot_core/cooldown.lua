@@ -26,6 +26,9 @@ local _cache = {
   -- Potion exhausted timestamp
   potionExhaustedUntil = 0,
   
+  -- Healing exhausted timestamp (shared between HealBot and FriendHealer)
+  healingExhaustedUntil = 0,
+  
   -- Cache metadata
   lastGroupUpdate = 0,
   lastSpellUpdate = {},
@@ -177,6 +180,25 @@ function CooldownManager.getPotionCooldown()
   local currentTime = now or os.time() * 1000
   local remaining = _cache.potionExhaustedUntil - currentTime
   return remaining > 0 and remaining or 0
+end
+
+-- ============================================================================
+-- PUBLIC API: Healing Cooldown (Shared between HealBot and FriendHealer)
+-- ============================================================================
+
+-- Mark healing action as used (for shared exhaustion tracking)
+-- This is called by both HealEngine and FriendHealer to prevent conflicts
+function CooldownManager.markHealingUsed(durationMs)
+  local currentTime = now or os.time() * 1000
+  local duration = durationMs or 1100  -- Default healing group cooldown
+  _cache.healingExhaustedUntil = currentTime + duration
+end
+
+-- Check if healing is on shared cooldown
+function CooldownManager.isHealingExhausted()
+  if not _cache.healingExhaustedUntil then return false end
+  local currentTime = now or os.time() * 1000
+  return currentTime < _cache.healingExhaustedUntil
 end
 
 -- ============================================================================

@@ -302,9 +302,24 @@ end
 
 -- Execute heal on target
 -- Returns true if action was taken
+-- IMPORTANT: Uses shared HealEngine with proper mana checks and cooldown sync
 local function executeHeal(target, config, targetsInRange)
   if not target or not target.creature then return false end
-  local snap = HealContext.get()
+  
+  -- Get context with currentMana included for proper spell eligibility
+  local snap = HealContext and HealContext.get() or {}
+  
+  -- Ensure currentMana is passed (CRITICAL for mana cost check!)
+  if not snap.currentMana then
+    if mana then 
+      snap.currentMana = mana() 
+    elseif player and player.getMana then 
+      snap.currentMana = player:getMana() 
+    else
+      snap.currentMana = 0
+    end
+  end
+  
   local engineAction = HealEngine.planFriend(snap, target)
   if engineAction and HealEngine.execute(engineAction) then
     markHealUsed()
