@@ -83,20 +83,16 @@ function Equipper.computeAction(rule, ctx, inventoryIndex, helpers)
   local slotHasItemId = helpers.slotHasItemId
   local isUnsafeToUnequip = helpers.isUnsafeToUnequip
 
-  warn("[EQ][Service] computeAction for rule: " .. tostring(rule.name))
+  -- debug logs removed for clean runtime
 
   -- unequip pass
   for _, slotPlan in ipairs(rule.slots) do
-    warn("[EQ][Service] checking slot=" .. tostring(slotPlan.slotIdx) .. " mode=" .. tostring(slotPlan.mode) .. " itemId=" .. tostring(slotPlan.itemId))
     if slotPlan.mode == "unequip" then
       local hasItem = slotHasItem(slotPlan.slotIdx)
-      warn("[EQ][Service] slotHasItem(" .. tostring(slotPlan.slotIdx) .. ") => " .. tostring(hasItem and true or false))
       if hasItem then
         if isUnsafeToUnequip and isUnsafeToUnequip(ctx) then
-          warn("[EQ][Service] unsafe to unequip slot " .. tostring(slotPlan.slotIdx) .. ", deferring")
           missing = true
         else
-          warn("[EQ][Service] planning unequip slot " .. tostring(slotPlan.slotIdx))
           return {kind = "unequip", slotIdx = slotPlan.slotIdx}, missing
         end
       end
@@ -107,7 +103,7 @@ function Equipper.computeAction(rule, ctx, inventoryIndex, helpers)
   for _, slotPlan in ipairs(rule.slots) do
     if slotPlan.mode == "equip" and slotPlan.itemId then
       local hasItemId = slotHasItemId(slotPlan.slotIdx, slotPlan.itemId)
-      warn("[EQ][Service] slotHasItemId(" .. tostring(slotPlan.slotIdx) .. ", " .. tostring(slotPlan.itemId) .. ") => " .. tostring(hasItemId))
+      -- silent in service
       if not hasItemId then
         -- Check inventory index first, fall back to g_game.findItemInContainers (closed containers)
         local hasItem = false
@@ -119,12 +115,9 @@ function Equipper.computeAction(rule, ctx, inventoryIndex, helpers)
             if ok and found then hasItem = true end
           end
         end
-        warn("[EQ][Service] inventory presence for " .. tostring(slotPlan.itemId) .. " => " .. tostring(hasItem))
         if hasItem then
-          warn("[EQ][Service] planning equip item " .. tostring(slotPlan.itemId) .. " to slot " .. tostring(slotPlan.slotIdx))
           return {kind = "equip", slotIdx = slotPlan.slotIdx, itemId = slotPlan.itemId}, missing
         else
-          warn("[EQ][Service] item " .. tostring(slotPlan.itemId) .. " missing from inventory, mark missing")
           missing = true
         end
       end
