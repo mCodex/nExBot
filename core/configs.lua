@@ -182,7 +182,20 @@ function nExBotConfigSave(file)
     return onError("Config file too large (>100MB), not saved")
   end
 
-  g_resources.writeFileContents(config.file, result)
+  -- Attempt to write file and capture any io errors
+  local okWrite, writeErr = pcall(function() g_resources.writeFileContents(config.file, result) end)
+  if not okWrite then
+    return onError("Error writing " .. file .. " config. Details: " .. tostring(writeErr))
+  end
+
+  -- Verify by re-reading the file and comparing the encoded JSON
+  local okRead, readResult = pcall(function() return g_resources.readFileContents(config.file) end)
+  if okRead and readResult == result then
+    return true
+  else
+    warn("[nExBot] Verification failed saving config '" .. file .. "'")
+    return false
+  end
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════

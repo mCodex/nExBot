@@ -13,7 +13,11 @@ if ui.configWidgetPlaceholder and configWidget then
     configWidget:setParent(placeholder)
   end
   if placeholder.addChild then
-    placeholder:addChild(configWidget)
+    -- Only add if not already a child to avoid duplicate-add warnings
+    local ok, parent = pcall(function() return configWidget:getParent() end)
+    if not ok or parent ~= placeholder then
+      placeholder:addChild(configWidget)
+    end
   end
   -- Move to first child position if possible
   if placeholder.moveChildToIndex then

@@ -476,10 +476,24 @@ followPlayerToggle.onClick = function(widget)
 end
 
 UI.Separator()
-local manaTraining = getProfileSetting("manaTraining") or {
-  spell = "exura",
-  minManaPercent = 80
+local profileManaTraining = getProfileSetting("manaTraining") or { spell = "exura", minManaPercent = 80 }
+
+-- Migrate legacy profile-level custom spell to per-character storage
+if storage and not storage.manaTrainingSpell and profileManaTraining.spell and profileManaTraining.spell:lower() ~= "exura" then
+  storage.manaTrainingSpell = profileManaTraining.spell
+  -- reset profile default to avoid affecting other characters
+  profileManaTraining.spell = "exura"
+  setProfileSetting("manaTraining", profileManaTraining)
+end
+
+-- Build runtime manaTraining: profile defaults + per-character override for spell
+local manaTraining = {
+  spell = profileManaTraining.spell or "exura",
+  minManaPercent = profileManaTraining.minManaPercent or 80
 }
+if storage and storage.manaTrainingSpell then
+  manaTraining.spell = storage.manaTrainingSpell
+end
 
 local function sanitizeSpell(text)
   text = text or ""
@@ -503,7 +517,8 @@ UI.Label("Mana Training:")
 UI.Label("Spell to cast (default: exura):")
 UI.TextEdit(manaTraining.spell or "exura", function(widget, text)
   manaTraining.spell = sanitizeSpell(text)
-  setProfileSetting("manaTraining", manaTraining)
+  -- Save player-specific spell to character storage (do NOT overwrite profile default)
+  if storage then storage.manaTrainingSpell = manaTraining.spell end
 end)
 
 UI.Label("Min mana % to train (10-100):")

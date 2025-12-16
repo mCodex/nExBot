@@ -31,6 +31,37 @@ if not HealEngine then
 end
 HealBot = HealBot or {}
 
+local function applyHealEngineToggles()
+  if not HealEngine or not HealEngine.configure or not currentSettings then return end
+  local isOn = not not currentSettings.enabled
+  local hasSpells = currentSettings.spellTable and #currentSettings.spellTable > 0
+  local hasItems = currentSettings.itemTable and #currentSettings.itemTable > 0
+  
+  -- Debug: uncomment to debug configuration
+  -- print(string.format("[HealBot] applyHealEngineToggles: enabled=%s hasSpells=%s hasItems=%s", tostring(isOn), tostring(hasSpells), tostring(hasItems)))
+  
+  -- Enable/disable the healing features
+  HealEngine.configure({
+    selfSpells = isOn and hasSpells,
+    potions = isOn and hasItems,
+    friendHeals = false -- Friend healing only enabled by FriendHealer
+  })
+  
+  -- Pass the custom configured spells and potions to the engine (converted to engine format)
+  if HealEngine.setCustomSpells and hasSpells then
+    HealEngine.setCustomSpells(convertSpellsToEngineFormat(currentSettings.spellTable))
+  end
+  if HealEngine.setCustomPotions and hasItems then
+    local converted = convertPotionsToEngineFormat(currentSettings.itemTable)
+    -- Debug: uncomment to debug potions
+    -- print(string.format("[HealBot] Setting %d potions to HealEngine", #converted))
+    -- for i, pot in ipairs(converted) do
+    --   print(string.format("[HealBot]   Potion %d: id=%s hp=%s mp=%s", i, tostring(pot.id), tostring(pot.hp), tostring(pot.mp)))
+    -- end
+    HealEngine.setCustomPotions(converted)
+  end
+end
+
 local red = "#ff0800" -- "#ff0800" / #ea3c53 best
 local blue = "#7ef9ff"
 
@@ -194,6 +225,18 @@ local setActiveProfile = function()
 end
 setActiveProfile()
 
+local function saveHeal()
+  local ok = false
+  local status, res = pcall(function() return nExBotConfigSave("heal") end)
+  if status and res == true then
+    ok = true
+  end
+  if not ok then
+    warn("[nExBot] Failed to save Heal config")
+  end
+  return ok
+end
+
 -- Macro handle so we can fully stop/start execution with the UI toggle
 local healMacro = nil
 local function syncHealMacro()
@@ -227,7 +270,7 @@ ui.title.onClick = function(widget)
   widget:setOn(currentSettings.enabled)
   syncHealMacro()
   applyHealEngineToggles()  -- Update HealEngine when toggling on/off
-  nExBotConfigSave("heal")
+  saveHeal()
 end
 
 ui.settings.onClick = function(widget)
@@ -342,38 +385,6 @@ local function convertPotionsToEngineFormat(itemTable)
   return converted
 end
 
--- Module-level helper so validateStartup can access it
-local function applyHealEngineToggles()
-  if not HealEngine or not HealEngine.configure or not currentSettings then return end
-  local isOn = not not currentSettings.enabled
-  local hasSpells = currentSettings.spellTable and #currentSettings.spellTable > 0
-  local hasItems = currentSettings.itemTable and #currentSettings.itemTable > 0
-  
-  -- Debug: uncomment to debug configuration
-  -- print(string.format("[HealBot] applyHealEngineToggles: enabled=%s hasSpells=%s hasItems=%s", tostring(isOn), tostring(hasSpells), tostring(hasItems)))
-  
-  -- Enable/disable the healing features
-  HealEngine.configure({
-    selfSpells = isOn and hasSpells,
-    potions = isOn and hasItems,
-    friendHeals = false -- Friend healing only enabled by FriendHealer
-  })
-  
-  -- Pass the custom configured spells and potions to the engine (converted to engine format)
-  if HealEngine.setCustomSpells and hasSpells then
-    HealEngine.setCustomSpells(convertSpellsToEngineFormat(currentSettings.spellTable))
-  end
-  if HealEngine.setCustomPotions and hasItems then
-    local converted = convertPotionsToEngineFormat(currentSettings.itemTable)
-    -- Debug: uncomment to debug potions
-    -- print(string.format("[HealBot] Setting %d potions to HealEngine", #converted))
-    -- for i, pot in ipairs(converted) do
-    --   print(string.format("[HealBot]   Potion %d: id=%s hp=%s mp=%s", i, tostring(pot.id), tostring(pot.hp), tostring(pot.mp)))
-    -- end
-    HealEngine.setCustomPotions(converted)
-  end
-end
-
 local rootWidget = g_ui.getRootWidget()
 if rootWidget then
   healWindow = UI.createWindow('HealWindow', rootWidget)
@@ -411,13 +422,13 @@ if rootWidget then
           entry.enabled = not entry.enabled
           label.enabled:setChecked(entry.enabled)
           applyHealEngineToggles()
-          nExBotConfigSave("heal")
+          saveHeal()
         end
         label.remove.onClick = function()
           table.removevalue(currentSettings.spellTable, entry)
           refreshSpells()
           applyHealEngineToggles()
-          nExBotConfigSave("heal")
+          saveHeal()
         end
         label:setText("(MP>" .. entry.cost .. ") " .. entry.origin .. entry.sign .. entry.value .. ": " .. entry.spell)
       end
@@ -430,17 +441,17 @@ if rootWidget then
         local label = UI.createWidget("ItemEntry", healWindow.healer.items.itemList)
         label.enabled:setChecked(entry.enabled)
         label.enabled.onClick = function()
-          entry.enabled = not entry.enabled
-          label.enabled:setChecked(entry.enabled)
-          applyHealEngineToggles()
-          nExBotConfigSave("heal")
-        end
+            entry.enabled = not entry.enabled
+            label.enabled:setChecked(entry.enabled)
+            applyHealEngineToggles()
+            saveHeal()
+          end
         label.remove.onClick = function()
-          table.removevalue(currentSettings.itemTable, entry)
-          refreshItems()
-          applyHealEngineToggles()
-          nExBotConfigSave("heal")
-        end
+            table.removevalue(currentSettings.itemTable, entry)
+            refreshItems()
+            applyHealEngineToggles()
+            saveHeal()
+          end
         label.id:setItemId(entry.item)
         label:setText(entry.origin .. entry.sign .. entry.value .. ": " .. entry.item)
       end
@@ -455,7 +466,7 @@ if rootWidget then
       t[index], t[index-1] = t[index-1], t[index]
       healWindow.healer.spells.spellList:moveChildToIndex(input, index - 1)
       healWindow.healer.spells.spellList:ensureChildVisible(input)
-      nExBotConfigSave("heal")
+      saveHeal()
     end
 
     healWindow.healer.spells.MoveDown.onClick = function()
@@ -467,7 +478,7 @@ if rootWidget then
       t[index], t[index+1] = t[index+1], t[index]
       healWindow.healer.spells.spellList:moveChildToIndex(input, index + 1)
       healWindow.healer.spells.spellList:ensureChildVisible(input)
-      nExBotConfigSave("heal")
+      saveHeal()
     end
 
     healWindow.healer.items.MoveUp.onClick = function()
@@ -479,7 +490,7 @@ if rootWidget then
       t[index], t[index-1] = t[index-1], t[index]
       healWindow.healer.items.itemList:moveChildToIndex(input, index - 1)
       healWindow.healer.items.itemList:ensureChildVisible(input)
-      nExBotConfigSave("heal")
+      saveHeal()
     end
 
     healWindow.healer.items.MoveDown.onClick = function()
@@ -491,7 +502,7 @@ if rootWidget then
       t[index], t[index+1] = t[index+1], t[index]
       healWindow.healer.items.itemList:moveChildToIndex(input, index + 1)
       healWindow.healer.items.itemList:ensureChildVisible(input)
-      nExBotConfigSave("heal")
+      saveHeal()
     end
 
     healWindow.healer.spells.addSpell.onClick = function()
@@ -509,7 +520,7 @@ if rootWidget then
       healWindow.healer.spells.manaCost:setText('')
       refreshSpells()
       applyHealEngineToggles()
-      nExBotConfigSave("heal")
+      saveHeal()
     end
 
     healWindow.healer.items.addItem.onClick = function()
@@ -525,7 +536,7 @@ if rootWidget then
       healWindow.healer.items.itemValue:setText('')
       refreshItems()
       applyHealEngineToggles()
-      nExBotConfigSave("heal")
+      saveHeal()
     end
   loadSettings()
 
@@ -534,7 +545,7 @@ if rootWidget then
     activeProfileColor()
     loadSettings()
     applyHealEngineToggles()  -- Update HealEngine with new profile's spells/potions
-    nExBotConfigSave("heal")
+    saveHeal()
   end
 
   local resetSettings = function()
@@ -581,7 +592,7 @@ if rootWidget then
     ui.title:setOn(currentSettings.enabled)
     syncHealMacro()
     applyHealEngineToggles()
-    nExBotConfigSave("heal")
+    saveHeal()
   end
 
   HealBot.setOn = function()
@@ -589,7 +600,7 @@ if rootWidget then
     ui.title:setOn(currentSettings.enabled)
     syncHealMacro()
     applyHealEngineToggles()
-    nExBotConfigSave("heal")
+    saveHeal()
   end
 
   HealBot.getActiveProfile = function()

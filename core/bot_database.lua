@@ -386,6 +386,17 @@ function BotDB.registerMacro(macroRef, key, onEnable)
     BotDB.set(path, savedState)
     storage[legacyKey] = nil
   end
+
+  -- Special-case: persist manaTraining macro enabled state per-character (storage)
+  local usePerCharacterStorage = (key == "manaTraining")
+  if usePerCharacterStorage then
+    if storage and storage.manaTrainingEnabled ~= nil then
+      savedState = storage.manaTrainingEnabled == true
+    else
+      -- fallback to BotDB stored value
+      savedState = BotDB.get(path) == true
+    end
+  end
   
   local initialized = false
   local originalSetOn = macroRef.setOn
@@ -398,7 +409,11 @@ function BotDB.registerMacro(macroRef, key, onEnable)
       
       if initialized then
         local newState = (val ~= false)
-        BotDB.set(path, newState)
+        if usePerCharacterStorage and storage then
+          storage.manaTrainingEnabled = newState
+        else
+          BotDB.set(path, newState)
+        end
         if newState and onEnable then
           schedule(50, onEnable)
         end
@@ -412,7 +427,11 @@ function BotDB.registerMacro(macroRef, key, onEnable)
       originalSetOff(val)
       
       if initialized then
-        BotDB.set(path, false)
+        if usePerCharacterStorage and storage then
+          storage.manaTrainingEnabled = false
+        else
+          BotDB.set(path, false)
+        end
       end
     end
   end
@@ -497,6 +516,32 @@ load()
 
 -- Run migration
 migrateOldData()
+
+-- Migrate existing BotDB manaTraining macro state to per-character storage
+-- This moves persistent macro-enabled state into `storage.manaTrainingEnabled`
+-- so each character controls whether mana training is enabled independently.
+local function migrateManaTrainingMacroToStorage()
+  if not storage then return end
+  -- If per-character flag already set, nothing to do
+  if storage.manaTrainingEnabled ~= nil then return end
+  local botdbState = BotDB.get("macros.manaTraining")
+  if botdbState ~= nil then
+    storage.manaTrainingEnabled = botdbState and true or false
+    -- Optionally clear BotDB value to avoid duplication; keep it for safety
+    -- BotDB.set("macros.manaTraining", nil)
+  end
+end
+migrateManaTrainingMacroToStorage()
+
+-- Ensure the manaTraining macro picks up per-character storage state if already registered.
+schedule(200, function()
+  if not storage then return end
+  local macroRef = BotDB.getMacro and BotDB.getMacro("manaTraining") or nil
+  if macroRef and macroRef.setOn and storage.manaTrainingEnabled ~= nil then
+    -- Apply per-character enabled state immediately
+    macroRef.setOn(storage.manaTrainingEnabled)
+  end
+end)
 
 -- Export globally
 nExBot = nExBot or {}
