@@ -553,71 +553,103 @@ BotDB.registerMacro(manaTrainingMacro, "manaTraining")
 UI.Separator()
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- AUTO LEVITATE - Predictive instant-cast for PVP
--- Detects movement direction, pre-casts when approaching levitate points
+-- AUTO LEVITATE - Ultra-fast instant-cast for PVP
+-- Moving: auto-levitates when running into wall/floor
+-- Stopped: press direction key toward levitate point to turn & cast
 -- ═══════════════════════════════════════════════════════════════════════════
 
 local autoLevitateEnabled = false
 local lastLevCast = 0
-local LEV_CD = 2000
-local LEV_MANA = 50
+local LEV_CD = 1950  -- Slightly under 2s for faster re-cast
 
--- Direction offsets
-local DX = {[0]=0, [1]=1, [2]=0, [3]=-1, [4]=1, [5]=1, [6]=-1, [7]=-1}
-local DY = {[0]=-1, [1]=0, [2]=1, [3]=0, [4]=-1, [5]=1, [6]=1, [7]=-1}
+-- All 8 directions with offsets
+local DIRS = {
+  {dx = 0, dy = -1},   -- 1: North
+  {dx = 1, dy = 0},    -- 2: East
+  {dx = 0, dy = 1},    -- 3: South
+  {dx = -1, dy = 0},   -- 4: West
+  {dx = 1, dy = -1},   -- 5: NE
+  {dx = 1, dy = 1},    -- 6: SE
+  {dx = -1, dy = 1},   -- 7: SW
+  {dx = -1, dy = -1},  -- 8: NW
+}
 
--- Levitate cache: "x,y" -> "up" or "down"
-local levCache = {}
-local lastCacheX, lastCacheY, lastCacheZ = 0, 0, 0
+-- Player direction (0-7) to DIRS index (1-8)
+local DIR_TO_IDX = {[0]=1, [1]=2, [2]=3, [3]=4, [4]=5, [5]=6, [6]=7, [7]=8}
 
--- Movement tracking for prediction
-local lastPosX, lastPosY, lastPosZ = 0, 0, 0
-local moveDir = -1  -- Detected movement direction
+-- Track which direction keys are currently held down
+local heldDirKeys = {}
 
--- Fast inline levitate check (returns "up", "down", or nil)
-local function checkLevitate(x, y, z)
-  local tile = g_map.getTile({x = x, y = y, z = z})
+-- Map key names to direction indices
+local KEY_TO_DIR = {}
+KEY_TO_DIR["Up"] = 1
+KEY_TO_DIR["Numpad8"] = 1
+KEY_TO_DIR["W"] = 1
+KEY_TO_DIR["Right"] = 2
+KEY_TO_DIR["Numpad6"] = 2
+KEY_TO_DIR["D"] = 2
+KEY_TO_DIR["Down"] = 3
+KEY_TO_DIR["Numpad2"] = 3
+KEY_TO_DIR["S"] = 3
+KEY_TO_DIR["Left"] = 4
+KEY_TO_DIR["Numpad4"] = 4
+KEY_TO_DIR["A"] = 4
+KEY_TO_DIR["Numpad9"] = 5
+KEY_TO_DIR["Numpad3"] = 6
+KEY_TO_DIR["Numpad1"] = 7
+KEY_TO_DIR["Numpad7"] = 8
+
+-- Track key presses using bot callbacks
+onKeyDown(function(keys)
+  local dir = KEY_TO_DIR[keys]
+  if dir then
+    heldDirKeys[dir] = true
+  end
+end)
+
+onKeyUp(function(keys)
+  local dir = KEY_TO_DIR[keys]
+  if dir then
+    heldDirKeys[dir] = false
+  end
+end)
+
+-- Check levitate opportunity at adjacent position
+local function getLevType(px, py, pz, dx, dy)
+  local fx, fy = px + dx, py + dy
+  local tile = g_map.getTile({x = fx, y = fy, z = pz})
   
-  -- Check UP: blocked + ground above
+  -- Check UP: blocked tile + ground above
   if tile then
-    local blocked = tile.isWalkable and not tile:isWalkable() or not tile:getGround()
-    if blocked and z > 0 then
-      local above = g_map.getTile({x = x, y = y, z = z - 1})
+    local blocked = false
+    if tile.isWalkable then
+      blocked = not tile:isWalkable()
+    else
+      blocked = not tile:getGround()
+    end
+    if blocked and pz > 0 then
+      local above = g_map.getTile({x = fx, y = fy, z = pz - 1})
       if above and above:getGround() then
         return "up"
       end
     end
   end
   
-  -- Check DOWN: no ground + ground below
-  local noGround = not tile or not tile:getGround()
-  if noGround and z < 15 then
-    local below = g_map.getTile({x = x, y = y, z = z + 1})
-    if below and below:getGround() then
-      return "down"
+  -- Check DOWN: no ground in front + ground below
+  if not tile or not tile:getGround() then
+    if pz < 15 then
+      local below = g_map.getTile({x = fx, y = fy, z = pz + 1})
+      if below and below:getGround() then
+        return "down"
+      end
     end
   end
   
   return nil
 end
 
--- Build cache for 13x13 area (6 tiles each direction for prediction)
-local function buildCache(cx, cy, cz)
-  levCache = {}
-  for dx = -6, 6 do
-    for dy = -6, 6 do
-      local x, y = cx + dx, cy + dy
-      local lev = checkLevitate(x, y, cz)
-      if lev then
-        levCache[x .. "," .. y] = lev
-      end
-    end
-  end
-  lastCacheX, lastCacheY, lastCacheZ = cx, cy, cz
-end
-
--- Instant cast function
-local function castLevitate(levType)
+-- Cast levitate spell
+local function castLev(levType)
   if levType == "up" then
     say("exani hur up")
   else
@@ -626,81 +658,57 @@ local function castLevitate(levType)
   lastLevCast = now
 end
 
--- Ultra-fast 5ms detection + prediction macro
-macro(5, function()
+-- Track movement state
+local lastPx, lastPy = 0, 0
+
+-- Ultra-fast 2ms polling
+macro(2, function()
   if not autoLevitateEnabled then return end
   
   local p = player
   if not p then return end
+  
+  -- Fast cooldown check first
+  if (now - lastLevCast) < LEV_CD then return end
+  
+  -- Mana check
+  if mana() < 50 then return end
   
   local pos = p:getPosition()
   if not pos then return end
   
   local px, py, pz = pos.x, pos.y, pos.z
   
-  -- Detect movement direction from position change
-  if px ~= lastPosX or py ~= lastPosY then
-    local mdx, mdy = px - lastPosX, py - lastPosY
-    -- Convert movement delta to direction
-    if mdx == 0 and mdy == -1 then moveDir = 0      -- North
-    elseif mdx == 1 and mdy == 0 then moveDir = 1   -- East
-    elseif mdx == 0 and mdy == 1 then moveDir = 2   -- South
-    elseif mdx == -1 and mdy == 0 then moveDir = 3  -- West
-    elseif mdx == 1 and mdy == -1 then moveDir = 4  -- NE
-    elseif mdx == 1 and mdy == 1 then moveDir = 5   -- SE
-    elseif mdx == -1 and mdy == 1 then moveDir = 6  -- SW
-    elseif mdx == -1 and mdy == -1 then moveDir = 7 -- NW
-    end
-    lastPosX, lastPosY, lastPosZ = px, py, pz
-  end
+  -- Detect if player moved this tick
+  local justMoved = (px ~= lastPx or py ~= lastPy)
+  lastPx, lastPy = px, py
   
-  -- Rebuild cache if needed (moved 3+ tiles or floor change)
-  local needCache = math.abs(px - lastCacheX) > 3 or 
-                    math.abs(py - lastCacheY) > 3 or 
-                    pz ~= lastCacheZ
-  if needCache then
-    buildCache(px, py, pz)
-  end
-  
-  -- Cooldown/mana check
-  if (now - lastLevCast) < LEV_CD then return end
-  if mana() < LEV_MANA then return end
-  
-  -- Use facing direction, but prefer movement direction if available
-  local dir = p:getDirection()
-  local checkDir = (moveDir >= 0) and moveDir or dir
-  
-  local dx, dy = DX[checkDir], DY[checkDir]
-  if not dx then 
-    dx, dy = DX[dir], DY[dir]
-    if not dx then return end
-  end
-  
-  -- INSTANT: Check front tile (adjacent)
-  local fx, fy = px + dx, py + dy
-  local cached = levCache[fx .. "," .. fy]
-  if cached then
-    castLevitate(cached)
-    return
-  end
-  
-  -- PREDICTIVE: Check if moving towards levitate point (2-3 tiles ahead)
-  -- If we detect we're heading to a levitate point, check current facing
-  for dist = 2, 3 do
-    local ax, ay = px + dx * dist, py + dy * dist
-    local aheadCached = levCache[ax .. "," .. ay]
-    if aheadCached then
-      -- We're approaching a levitate point - use current facing direction check
-      local faceDx, faceDy = DX[dir], DY[dir]
-      if faceDx then
-        local faceFx, faceFy = px + faceDx, py + faceDy
-        local faceCached = levCache[faceFx .. "," .. faceFy]
-        if faceCached then
-          castLevitate(faceCached)
-          return
-        end
+  -- PRIORITY 1: Check all directions for held key (works when trapped/stopped)
+  for dirIdx = 1, 8 do
+    if heldDirKeys[dirIdx] then
+      local d = DIRS[dirIdx]
+      local levType = getLevType(px, py, pz, d.dx, d.dy)
+      if levType then
+        -- Turn player to face the direction before casting
+        local newDir = dirIdx - 1  -- Convert back to 0-7
+        if turn then turn(newDir) end
+        castLev(levType)
+        return
       end
-      break
+    end
+  end
+  
+  -- PRIORITY 2: If moving, also auto-levitate in facing direction
+  if justMoved then
+    local playerDir = p:getDirection()
+    local facingIdx = DIR_TO_IDX[playerDir] or 1
+    local fd = DIRS[facingIdx]
+    if fd then
+      local levType = getLevType(px, py, pz, fd.dx, fd.dy)
+      if levType then
+        castLev(levType)
+        return
+      end
     end
   end
 end)
