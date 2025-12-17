@@ -362,29 +362,50 @@ listPanel.up.onClick = function(widget)
     local n = listPanel.list:getChildIndex(focused)
     local t = config.rules
 
+    if n <= 1 then return end  -- Can't move up if already at top
+    
     t[n], t[n-1] = t[n-1], t[n]
-    if n-1 == 1 then
-      widget:setEnabled(false)
+    
+    -- Refresh entire list to fix ruleIndex references
+    invalidateRulesCache()
+    refreshRules()
+    
+    -- Re-focus the moved item (now at n-1)
+    local children = listPanel.list:getChildren()
+    if children[n-1] then
+        listPanel.list:focusChild(children[n-1])
+        listPanel.list:ensureChildVisible(children[n-1])
     end
+    
+    -- Update button states
+    listPanel.up:setEnabled(n-1 > 1)
     listPanel.down:setEnabled(true)
-    listPanel.list:moveChildToIndex(focused, n-1)
-    listPanel.list:ensureChildVisible(focused)
-    invalidateRulesCache()  -- Priority changed
 end
 
 listPanel.down.onClick = function(widget)
     local focused = listPanel.list:getFocusedChild()    
     local n = listPanel.list:getChildIndex(focused)
     local t = config.rules
+    local count = #t
 
+    if n >= count then return end  -- Can't move down if already at bottom
+    
     t[n], t[n+1] = t[n+1], t[n]
-    if n + 1 == listPanel.list:getChildCount() then
-      widget:setEnabled(false)
+    
+    -- Refresh entire list to fix ruleIndex references
+    invalidateRulesCache()
+    refreshRules()
+    
+    -- Re-focus the moved item (now at n+1)
+    local children = listPanel.list:getChildren()
+    if children[n+1] then
+        listPanel.list:focusChild(children[n+1])
+        listPanel.list:ensureChildVisible(children[n+1])
     end
+    
+    -- Update button states
     listPanel.up:setEnabled(true)
-    listPanel.list:moveChildToIndex(focused, n+1)
-    listPanel.list:ensureChildVisible(focused)
-    invalidateRulesCache()  -- Priority changed
+    listPanel.down:setEnabled(n+1 < count)
 end
 
 eqPanel.cloneEq.onClick = function(widget)
@@ -477,113 +498,104 @@ local function loadRuleToSlots(data)
 end
 
 -- ============================================================================
--- RULES LIST UI (Optimized - no destroyChildren flicker)
+-- RULES LIST UI (Fixed - proper sync between UI and config.rules)
 -- ============================================================================
 
--- Widget cache to avoid recreating widgets
-local ruleWidgetCache = {}
-local refreshRules -- forward-declared so handlers can close over it
+-- Forward declare refreshRules
+local refreshRules
 
--- Create or update a single rule widget
-local function createOrUpdateRuleWidget(list, rule, index)
-  local widgetId = "rule_" .. index
-  local widget = ruleWidgetCache[widgetId]
+-- Create or update a single rule widget - uses rule reference directly
+local function createRuleWidget(list, rule, index)
+  local widget = UI.createWidget('Rule', list)
   
-  -- Reuse existing widget or create new one
-  if not widget or not widget:getParent() then
-    widget = UI.createWidget('Rule', list)
-    ruleWidgetCache[widgetId] = widget
+  widget:setId("rule_" .. index)
+  widget:setText(rule.name)
+  
+  -- Store index, not a copy of rule data - always access config.rules[index] directly
+  widget.ruleIndex = index
+  
+  -- Update visual state
+  widget.visible:setColor(rule.visible and "green" or "red")
+  widget.enabled:setChecked(rule.enabled and true or false)
+  
+  -- Event handlers
+  widget.remove.onClick = function()
+    local idx = widget.ruleIndex
+    if idx and config.rules[idx] then
+      table.remove(config.rules, idx)
+      if config.activeRule and config.activeRule > #config.rules then
+        config.activeRule = nil
+      end
+    end
+    listPanel.up:setEnabled(false)
+    listPanel.down:setEnabled(false)
+    invalidateRulesCache()
+    refreshRules()
+  end
+
+  widget.visible.onClick = function()
+    local idx = widget.ruleIndex
+    if idx and config.rules[idx] then
+      config.rules[idx].visible = not config.rules[idx].visible
+      widget.visible:setColor(config.rules[idx].visible and "green" or "red")
+    end
+  end
+
+  widget.enabled.onClick = function()
+    local idx = widget.ruleIndex
+    if idx and config.rules[idx] then
+      config.rules[idx].enabled = not config.rules[idx].enabled
+      widget.enabled:setChecked(config.rules[idx].enabled and true or false)
+      invalidateRulesCache()
+    end
+  end
+
+  widget.onDoubleClick = function(w)
+    local idx = w.ruleIndex
+    if not idx or not config.rules[idx] then return end
+    local ruleData = config.rules[idx]
+    
+    w.display = true
+    loadRuleToSlots(ruleData.data)
+    conditionNumber = ruleData.mainCondition
+    optionalConditionNumber = ruleData.optionalCondition
+    setCondition(false, optionalConditionNumber)
+    setCondition(true, conditionNumber)
+    inputPanel.useSecondCondition:setOption(ruleData.relation)
+    namePanel.profileName:setText(ruleData.name)
+
+    if type(ruleData.mainValue) == "string" then
+      inputPanel.condition.text:setText(ruleData.mainValue)
+    elseif type(ruleData.mainValue) == "number" then
+      inputPanel.condition.spinbox:setValue(ruleData.mainValue)
+    end
+
+    if type(ruleData.optValue) == "string" then
+      inputPanel.optionalCondition.text:setText(ruleData.optValue)
+    elseif type(ruleData.optValue) == "number" then
+      inputPanel.optionalCondition.spinbox:setValue(ruleData.optValue)
+    end
   end
   
-  widget:setId(rule.name)
-  widget:setText(rule.name)
-  widget.ruleData = rule
-  
-    -- Update visual state without recreating
-    widget.visible:setColor(rule.visible and "green" or "red")
-    widget.enabled:setChecked(rule.enabled and true or false)
-  
-  -- Set up event handlers (only if not already set)
-        if not widget._handlersSet then
-        widget.remove.onClick = function()
-            local r = widget.ruleData
-            local ruleIndex = table.find(config.rules, r)
-            if ruleIndex then
-                table.remove(config.rules, ruleIndex)
-                if config.activeRule and config.activeRule > #config.rules then
-                    config.activeRule = nil
-                end
-            end
-            widget:destroy()
-            ruleWidgetCache[widgetId] = nil
-            listPanel.up:setEnabled(false)
-            listPanel.down:setEnabled(false)
-            invalidateRulesCache()
-            refreshRules()
-        end
-
-        widget.visible.onClick = function()
-            local r = widget.ruleData
-            r.visible = not r.visible
-            widget.visible:setColor(r.visible and "green" or "red")
-        end
-
-        widget.enabled.onClick = function()
-            local r = widget.ruleData
-            r.enabled = not r.enabled
-            widget.enabled:setChecked(r.enabled and true or false)
-            invalidateRulesCache()
-            refreshRules()
-        end
+  widget.onClick = function()
+    local panel = listPanel
+    local childCount = #panel.list:getChildren()
+    local focusedChild = panel.list:getFocusedChild()
+    local focusedIndex = focusedChild and panel.list:getChildIndex(focusedChild) or 0
     
-    -- Hover preview disabled - Equipment Setup only shows when editing (double-click)
-    
-    widget.onDoubleClick = function(w)
-      local ruleData = w.ruleData
-      w.display = true
-      loadRuleToSlots(ruleData.data)
-      conditionNumber = ruleData.mainCondition
-      optionalConditionNumber = ruleData.optionalCondition
-      setCondition(false, optionalConditionNumber)
-      setCondition(true, conditionNumber)
-      inputPanel.useSecondCondition:setOption(ruleData.relation)
-      namePanel.profileName:setText(rule.name)
-
-      if type(ruleData.mainValue) == "string" then
-        inputPanel.condition.text:setText(ruleData.mainValue)
-      elseif type(ruleData.mainValue) == "number" then
-        inputPanel.condition.spinbox:setValue(ruleData.mainValue)
-      end
-
-      if type(ruleData.optValue) == "string" then
-        inputPanel.optionalCondition.text:setText(ruleData.optValue)
-      elseif type(ruleData.optValue) == "number" then
-        inputPanel.optionalCondition.spinbox:setValue(ruleData.optValue)
-      end
+    if childCount == 1 then
+      panel.up:setEnabled(false)
+      panel.down:setEnabled(false)
+    elseif focusedIndex == 1 then
+      panel.up:setEnabled(false)
+      panel.down:setEnabled(true)
+    elseif focusedIndex == childCount then
+      panel.up:setEnabled(true)
+      panel.down:setEnabled(false)
+    else
+      panel.up:setEnabled(true)
+      panel.down:setEnabled(true)
     end
-    
-    widget.onClick = function()
-      local panel = listPanel
-      local childCount = #panel.list:getChildren()
-      local focusedChild = panel.list:getFocusedChild()
-      local focusedIndex = focusedChild and panel.list:getChildIndex(focusedChild) or 0
-      
-      if childCount == 1 then
-        panel.up:setEnabled(false)
-        panel.down:setEnabled(false)
-      elseif focusedIndex == 1 then
-        panel.up:setEnabled(false)
-        panel.down:setEnabled(true)
-      elseif focusedIndex == childCount then
-        panel.up:setEnabled(true)
-        panel.down:setEnabled(false)
-      else
-        panel.up:setEnabled(true)
-        panel.down:setEnabled(true)
-      end
-    end
-    
-    widget._handlersSet = true
   end
   
   return widget
@@ -591,22 +603,21 @@ end
 
 refreshRules = function()
   local list = listPanel.list
-  local existingChildren = list:getChildren()
-  local rulesCount = #config.rules
   
-  -- Remove excess widgets (if rules were deleted)
-  for i = rulesCount + 1, #existingChildren do
-    local widget = existingChildren[i]
-    if widget then
-      widget:destroy()
-      ruleWidgetCache["rule_" .. i] = nil
-    end
+  -- Clear all existing widgets to avoid stale references
+  local existingChildren = list:getChildren()
+  for i = #existingChildren, 1, -1 do
+    existingChildren[i]:destroy()
   end
   
-  -- Create or update widgets for each rule
-    for i, rule in ipairs(config.rules) do
-        createOrUpdateRuleWidget(list, rule, i)
-    end
+  -- Create fresh widgets for each rule
+  for i, rule in ipairs(config.rules) do
+    createRuleWidget(list, rule, i)
+  end
+  
+  -- Reset up/down button states
+  listPanel.up:setEnabled(false)
+  listPanel.down:setEnabled(false)
   
   -- Invalidate macro cache
   invalidateRulesCache()
@@ -971,24 +982,50 @@ local function markChild(child)
     end
 end
 
--- Subscribe to equipment change events from EventBus
-if EventBus then
-  EventBus.on("equipment:change", function(slotId, slotName, newId, oldId, item)
+-- ============================================================================
+-- EVENT SUBSCRIPTIONS - Listen for condition changes
+-- ============================================================================
+
+-- Helper to trigger equipment re-check
+local function triggerEquipCheck()
     EquipState.needsEquipCheck = true
     EquipState.correctEq = false
-  end, 50)
+end
+
+-- Subscribe to mana changes (conditions 6, 7)
+if EventBus then
+    EventBus.on("player:mana", function(mana, maxMana, oldMana, oldMaxMana)
+        triggerEquipCheck()
+    end, 100)
+    
+    -- Subscribe to health changes (conditions 4, 5)
+    EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMaxHealth)
+        triggerEquipCheck()
+    end, 100)
+    
+    -- Subscribe to target changes (conditions 8, 16)
+    EventBus.on("target:change", function(target)
+        triggerEquipCheck()
+    end, 100)
+    
+    -- Subscribe to PZ state changes (conditions 11, 17)
+    EventBus.on("player:pz", function(inPz)
+        triggerEquipCheck()
+    end, 100)
+    
+    -- Subscribe to states/conditions changes (condition 10 - paralyzed)
+    EventBus.on("player:states", function(states)
+        triggerEquipCheck()
+    end, 100)
 end
 
 -- ============================================================================
--- MAIN EQUIPMENT MACRO (Optimized)
--- Uses cached rules instead of UI children iteration
+-- MAIN EQUIPMENT MACRO
+-- Faster polling (250ms) to catch condition changes promptly
 -- ============================================================================
 
-EquipManager = macro(1000, function()
+EquipManager = macro(250, function()
     if not config.enabled then return end
-
-    -- Debug: enabled for troubleshooting
-    
 
     -- Skip gear swaps during critical healing/danger to avoid conflicts
     if HealContext and HealContext.isCritical and HealContext.isCritical() then
@@ -1001,8 +1038,7 @@ EquipManager = macro(1000, function()
     local currentTime = now
     if (currentTime - EquipState.lastEquipAction) < EquipState.EQUIP_COOLDOWN then return end
 
-    if not EquipState.needsEquipCheck and EquipState.correctEq then return end
-
+    -- Always re-check conditions (events set needsEquipCheck, but also periodic check)
     local ctx = snapshotContext()
     local inventoryIndex = buildInventoryIndex()
 
@@ -1051,11 +1087,13 @@ end)
 -- Listen to equipment changes for immediate response
 -- ============================================================================
 
-EventBus.on("equipment:change", function(slotId, slotName, currentId, lastId, item)
-    if not config.enabled then return end
-
-    -- Debug: enabled for troubleshooting
+if EventBus then
+  EventBus.on("equipment:change", function(slotId, slotName, currentId, lastId, item)
+    -- Always invalidate check state on equipment change
+    EquipState.needsEquipCheck = true
+    EquipState.correctEq = false
     
+    if not config.enabled then return end
 
     -- Skip if recently equipped by us to avoid loops
     if now - EquipState.lastEquipAction < EquipState.EQUIP_COOLDOWN then return end
@@ -1070,42 +1108,29 @@ EventBus.on("equipment:change", function(slotId, slotName, currentId, lastId, it
     local inventoryIndex = buildInventoryIndex()
 
     for _, rule in ipairs(rules) do
-        
         if rulePasses(rule, ctx) then
-            
             for _, slotPlan in ipairs(rule.slots) do
                 if SLOT_MAP[slotPlan.slotIdx] == slotId and slotPlan.mode == "equip" and slotPlan.itemId then
-                    
                     if not slotHasItemId(slotPlan.slotIdx, slotPlan.itemId) then
-                        
                         local hasItem = inventoryIndex[slotPlan.itemId] ~= nil
                         if not hasItem and g_game and g_game.findItemInContainers then
                             local ok, found = pcall(g_game.findItemInContainers, slotPlan.itemId)
                             hasItem = ok and found ~= nil
                         end
                         if hasItem then
-                            
                             if equipSlot(slotPlan.slotIdx, slotPlan.itemId) then
                                 EquipState.lastEquipAction = now
                                 EquipState.correctEq = false
                                 EquipState.needsEquipCheck = true
-                            else
-                                
                             end
                             return
-                        else
-                            
                         end
-                    else
-                        
                     end
                 end
             end
-        else
-            
         end
     end
-end)
+  end, 50)  -- Priority 50
+end
 
--- Debug helpers: call from Lua console to force an equip/unequip and print result.
--- debug helpers removed
+-- Debug helpers removed

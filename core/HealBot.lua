@@ -1,3 +1,45 @@
+-- Panel name constant (must be defined before ensureCurrentSettings uses it)
+local healPanelName = "healbot"
+
+-- Safety: auto-restore currentSettings if nil
+local function ensureCurrentSettings()
+  if not currentSettings then
+    if not HealBotConfig then HealBotConfig = {} end
+    -- Ensure profile container exists and has 5 profiles
+    if not HealBotConfig[healPanelName] or type(HealBotConfig[healPanelName]) ~= "table" or #HealBotConfig[healPanelName] ~= 5 then
+      local function makeDefaultProfiles()
+        local t = {}
+        for i=1,5 do
+          t[i] = {
+            enabled = false,
+            spellTable = {},
+            itemTable = {},
+            name = "Profile #" .. i,
+            Visible = true,
+            Cooldown = true,
+            Interval = true,
+            Conditions = true,
+            Delay = true,
+            MessageDelay = false
+          }
+        end
+        return t
+      end
+      HealBotConfig[healPanelName] = makeDefaultProfiles()
+      pcall(saveHeal)
+    end
+    if not HealBotConfig.currentHealBotProfile or HealBotConfig.currentHealBotProfile < 1 or HealBotConfig.currentHealBotProfile > 5 then
+      HealBotConfig.currentHealBotProfile = 1
+    end
+    -- Use setActiveProfile to properly assign currentSettings
+    if setActiveProfile then
+      pcall(setActiveProfile)
+    else
+      currentSettings = HealBotConfig[healPanelName][HealBotConfig.currentHealBotProfile]
+    end
+  end
+end
+
 local standBySpells, standByItems = false, false
 
 -- Load heal modules using simple dofile; they set globals directly
@@ -31,14 +73,131 @@ if not HealEngine then
 end
 HealBot = HealBot or {}
 
+-- Convert HealBot spell format to HealEngine format
+-- Must be defined before applyHealEngineToggles which uses it
+local function convertSpellsToEngineFormat(spellTable)
+  if not spellTable then return {} end
+  local converted = {}
+  local invalidSpells = {}
+  for i, spell in ipairs(spellTable) do
+    local valid = true
+    if spell.enabled == false or not spell.spell or spell.spell == "" then
+      valid = false
+      table.insert(invalidSpells, {reason = "Disabled or missing name", spell = spell})
+    end
+    -- Determine HP/MP trigger based on origin and sign
+    local hp, mp = nil, nil
+    local isBelow = spell.sign == "<" or spell.sign == nil  -- Default to "Below" if not set
+    if spell.origin == "HP" or spell.origin == "HP%" then
+      if isBelow then
+        hp = spell.value or 50
+      else
+        valid = false
+        table.insert(invalidSpells, {reason = "HP spell set to 'Above' (>) which is not supported", spell = spell})
+      end
+    elseif spell.origin == "MP" or spell.origin == "MP%" then
+      if isBelow then
+        mp = spell.value or 50
+      else
+        valid = false
+        table.insert(invalidSpells, {reason = "MP spell set to 'Above' (>) which is not supported", spell = spell})
+      end
+    else
+      valid = false
+      table.insert(invalidSpells, {reason = "Unknown origin", spell = spell})
+    end
+    if (not hp and not mp) then
+      valid = false
+      table.insert(invalidSpells, {reason = "Missing HP/MP trigger", spell = spell})
+    end
+    if valid then
+        table.insert(converted, {
+          name = spell.spell,
+          key = (spell.spell or ""):lower(),
+          hp = hp,
+          mp = mp,
+          op = spell.sign or "<",
+          mana = spell.cost or spell.mana or 0,
+          cd = 1100,
+          prio = #converted + 1
+        })
+    end
+  end
+  if #invalidSpells > 0 then
+    warn("[HealBot] Some spells are invalid and will not be used:")
+    for _, s in ipairs(invalidSpells) do
+      warn("[HealBot] Invalid spell: " .. (s.spell.spell or "<no name>") .. " | Reason: " .. s.reason)
+    end
+  end
+  return converted
+end
+
+-- Convert HealBot potion format to HealEngine format
+-- Must be defined before applyHealEngineToggles which uses it
+local function convertPotionsToEngineFormat(itemTable)
+  if not itemTable then return {} end
+  local converted = {}
+  for i, item in ipairs(itemTable) do
+    if item.enabled ~= false and item.item and item.item > 0 then
+      local hp, mp = nil, nil
+      local isBelow = item.sign == "<" or item.sign == nil
+      
+      if item.origin == "HP" or item.origin == "HP%" then
+        if isBelow then
+          hp = item.value or 50
+        end
+      elseif item.origin == "MP" or item.origin == "MP%" then
+        if isBelow then
+          mp = item.value or 50
+        end
+      end
+      
+      -- Get the actual item name from the game data
+      local itemName = nil
+      if g_things and g_things.getThingType then
+        local thing = g_things.getThingType(item.item, ThingCategoryItem)
+        if thing and thing.getName then
+          local name = thing:getName()
+          if name and name ~= "" then
+            itemName = name:lower()
+          end
+        elseif thing and thing.getMarketData then
+          local marketData = thing:getMarketData()
+          if marketData and marketData.name and marketData.name ~= "" then
+            itemName = marketData.name:lower()
+          end
+        end
+      end
+      if not itemName then
+        itemName = "potion #" .. item.item
+      end
+      
+      if hp or mp then
+        table.insert(converted, {
+          id = item.item,
+          key = "potion_" .. item.item,
+          hp = hp,
+          mp = mp,
+          cd = 1000,
+          prio = #converted + 1,
+          name = itemName
+        })
+      end
+    end
+  end
+  return converted
+end
+
 local function applyHealEngineToggles()
-  if not HealEngine or not HealEngine.configure or not currentSettings then return end
+  ensureCurrentSettings()
+  if not HealEngine or not HealEngine.configure then return end
+  if not currentSettings then
+    warn("[HealBot] applyHealEngineToggles: currentSettings missing, aborting sync")
+    return
+  end
   local isOn = not not currentSettings.enabled
   local hasSpells = currentSettings.spellTable and #currentSettings.spellTable > 0
   local hasItems = currentSettings.itemTable and #currentSettings.itemTable > 0
-  
-  -- Debug: uncomment to debug configuration
-  -- print(string.format("[HealBot] applyHealEngineToggles: enabled=%s hasSpells=%s hasItems=%s", tostring(isOn), tostring(hasSpells), tostring(hasItems)))
   
   -- Enable/disable the healing features
   HealEngine.configure({
@@ -48,17 +207,53 @@ local function applyHealEngineToggles()
   })
   
   -- Pass the custom configured spells and potions to the engine (converted to engine format)
-  if HealEngine.setCustomSpells and hasSpells then
-    HealEngine.setCustomSpells(convertSpellsToEngineFormat(currentSettings.spellTable))
+  -- Always push converted lists to the engine and log engine status immediately
+  if HealEngine.setCustomSpells then
+    local convertedSpells = {}
+    if type(convertSpellsToEngineFormat) == 'function' then
+      local okConv, res = pcall(convertSpellsToEngineFormat, currentSettings.spellTable)
+      if okConv and type(res) == 'table' then
+        convertedSpells = res
+      else
+        convertedSpells = {}
+      end
+    end
+    -- Attempt to call engine API safely
+    if HealEngine.setCustomSpells then
+      local ok, err = pcall(HealEngine.setCustomSpells, convertedSpells)
+      if not ok then
+        HealEngine._pendingSpells = convertedSpells
+        nExBot_LastConvertedSpells = convertedSpells
+      else
+        nExBot_LastConvertedSpells = convertedSpells
+      end
+    else
+      HealEngine._pendingSpells = convertedSpells
+      nExBot_LastConvertedSpells = convertedSpells
+    end
   end
-  if HealEngine.setCustomPotions and hasItems then
-    local converted = convertPotionsToEngineFormat(currentSettings.itemTable)
-    -- Debug: uncomment to debug potions
-    -- print(string.format("[HealBot] Setting %d potions to HealEngine", #converted))
-    -- for i, pot in ipairs(converted) do
-    --   print(string.format("[HealBot]   Potion %d: id=%s hp=%s mp=%s", i, tostring(pot.id), tostring(pot.hp), tostring(pot.mp)))
-    -- end
-    HealEngine.setCustomPotions(converted)
+  if HealEngine.setCustomPotions then
+    local converted = {}
+    if type(convertPotionsToEngineFormat) == 'function' then
+      local okConv, res = pcall(convertPotionsToEngineFormat, currentSettings.itemTable)
+      if okConv and type(res) == 'table' then
+        converted = res
+      else
+        converted = {}
+      end
+    end
+    if HealEngine.setCustomPotions then
+      local ok, err = pcall(HealEngine.setCustomPotions, converted)
+      if not ok then
+        HealEngine._pendingPotions = converted
+        nExBot_LastConvertedPotions = converted
+      else
+        nExBot_LastConvertedPotions = converted
+      end
+    else
+      HealEngine._pendingPotions = converted
+      nExBot_LastConvertedPotions = converted
+    end
   end
 end
 
@@ -66,7 +261,7 @@ local red = "#ff0800" -- "#ff0800" / #ea3c53 best
 local blue = "#7ef9ff"
 
 setDefaultTab("HP")
-local healPanelName = "healbot"
+-- healPanelName already defined at top of file
 local ui = setupUI([[
 Panel
   height: 38
@@ -281,109 +476,7 @@ ui.settings.onClick = function(widget)
   end
 end
 
--- Convert HealBot spell format to HealEngine format
-local function convertSpellsToEngineFormat(spellTable)
-  if not spellTable then return {} end
-  local converted = {}
-  for i, spell in ipairs(spellTable) do
-    if spell.enabled ~= false and spell.spell then  -- Only include enabled spells with valid spell name
-      -- Determine HP/MP trigger based on origin and sign
-      -- sign field indicates "<" (Below) or ">" (Above)
-      local hp, mp = nil, nil
-      local isBelow = spell.sign == "<" or spell.sign == nil  -- Default to "Below" if not set
-      
-      if spell.origin == "HP" or spell.origin == "HP%" then
-        -- For HP spells with "Below" condition: trigger when HP <= value
-        if isBelow then
-          hp = spell.value or 50
-        end
-      elseif spell.origin == "MP" or spell.origin == "MP%" then
-        -- For MP spells with "Below" condition: trigger when MP <= value
-        -- This is for spells like mana shield that trigger on low mana
-        if isBelow then
-          mp = spell.value or 50
-        end
-      end
-      
-      -- Only add if we have a valid trigger threshold
-      if hp or mp then
-        table.insert(converted, {
-          name = spell.spell,
-          key = spell.spell:lower(),
-          hp = hp,
-          mp = mp,
-          cd = 1100,  -- Default cooldown, can be customized per spell
-          prio = #converted + 1    -- Priority based on insertion order
-        })
-      end
-    end
-  end
-  return converted
-end
-
--- Convert HealBot potion format to HealEngine format
-local function convertPotionsToEngineFormat(itemTable)
-  if not itemTable then return {} end
-  local converted = {}
-  for i, item in ipairs(itemTable) do
-    if item.enabled ~= false and item.item and item.item > 0 then  -- Only include enabled potions with valid item ID
-      -- Determine HP/MP trigger based on origin
-      -- Note: sign field indicates "<" (Below) or ">" (Above)
-      -- For "Below" (sign="<"), we want to use when stat <= threshold
-      -- For "Above" (sign=">"), we invert: use when stat >= threshold (but this is unusual for potions)
-      local hp, mp = nil, nil
-      local isBelow = item.sign == "<" or item.sign == nil  -- Default to "Below" if not set
-      
-      if item.origin == "HP" or item.origin == "HP%" then
-        -- For HP potions with "Below" condition: trigger when HP <= value
-        -- For HP potions with "Above" condition: this is unusual, but we'd skip (set nil)
-        if isBelow then
-          hp = item.value or 50
-        end
-      elseif item.origin == "MP" or item.origin == "MP%" then
-        -- For MP potions with "Below" condition: trigger when MP <= value
-        if isBelow then
-          mp = item.value or 50
-        end
-      end
-      
-      -- Get the actual item name from the game data
-      local itemName = nil
-      if g_things and g_things.getThingType then
-        local thing = g_things.getThingType(item.item, ThingCategoryItem)
-        if thing and thing.getName then
-          local name = thing:getName()
-          if name and name ~= "" then
-            itemName = name:lower()
-          end
-        elseif thing and thing.getMarketData then
-          local marketData = thing:getMarketData()
-          if marketData and marketData.name and marketData.name ~= "" then
-            itemName = marketData.name:lower()
-          end
-        end
-      end
-      -- Fallback name based on item ID if we couldn't get the real name
-      if not itemName then
-        itemName = "potion #" .. item.item
-      end
-      
-      -- Only add if we have a valid trigger threshold
-      if hp or mp then
-        table.insert(converted, {
-          id = item.item,
-          key = "potion_" .. item.item,
-          hp = hp,
-          mp = mp,
-          cd = 1000,  -- Potion cooldown
-          prio = #converted + 1,    -- Priority based on insertion order
-          name = itemName
-        })
-      end
-    end
-  end
-  return converted
-end
+-- Converter functions already defined at top of file
 
 local rootWidget = g_ui.getRootWidget()
 if rootWidget then
@@ -413,7 +506,10 @@ if rootWidget then
   end
 
     refreshSpells = function()
-      if not currentSettings.spellTable then return end
+      ensureCurrentSettings()
+      if not currentSettings or not currentSettings.spellTable then
+        return
+      end
       healWindow.healer.spells.spellList:destroyChildren()
       for _, entry in pairs(currentSettings.spellTable) do
         local label = UI.createWidget("SpellEntry", healWindow.healer.spells.spellList)
@@ -506,6 +602,11 @@ if rootWidget then
     end
 
     healWindow.healer.spells.addSpell.onClick = function()
+      ensureCurrentSettings()
+      if not currentSettings then
+        return
+      end
+      currentSettings.spellTable = currentSettings.spellTable or {}
       local spellFormula = healWindow.healer.spells.spellFormula:getText():trim()
       local manaCost = tonumber(healWindow.healer.spells.manaCost:getText())
       local trigger = tonumber(healWindow.healer.spells.spellValue:getText())
@@ -819,18 +920,44 @@ end
 -- Legacy event hooks removed; HealEngine runs on macro tick only
 
 -- Fast spell macro (driven by HealBot on/off state)
-healMacro = macro(150, function()
-  if not currentSettings.enabled then return end
+-- Main healing macro loop (keeps heal engine ticking)
+local _lastApplyToggle = 0
+local syncDone = false
+local SYNC_INTERVAL_MS = 500  -- Reduced from 2000ms for faster profile updates
 
-  if not HealContext or not HealContext.get then
-    return
+healMacro = macro(150, function()
+  ensureCurrentSettings()
+  if not currentSettings or not currentSettings.enabled then return end
+  
+  if not HealContext or not HealContext.get then return end
+  if not HealEngine or not HealEngine.planSelf then return end
+
+  -- Force sync once on first run to ensure spells are loaded
+  if not syncDone then
+    applyHealEngineToggles()
+    syncDone = true
   end
 
+  -- Periodic sync to catch profile changes
+  local nowTime = now or (g_clock and g_clock.millis and g_clock.millis()) or os.time() * 1000
+  if (nowTime - _lastApplyToggle) > SYNC_INTERVAL_MS then
+    _lastApplyToggle = nowTime
+    applyHealEngineToggles()
+  end
+
+  -- Get context snapshot (includes currentMana for spell cost checks)
   local snap = HealContext.get()
+  
+  -- Ensure currentMana is set for proper spell eligibility
+  if not snap.currentMana then
+    if mana then snap.currentMana = mana() or 0
+    elseif player and player.getMana then snap.currentMana = player:getMana() or 0
+    else snap.currentMana = 0 end
+  end
+  
   local action = HealEngine.planSelf(snap)
   if action then
     HealEngine.execute(action)
-    return
   end
 end)
 

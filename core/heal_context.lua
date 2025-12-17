@@ -37,9 +37,18 @@ local function snapshotOnce()
     return HealContext.snapshot
   end
 
+  -- Get current mana (absolute value) for spell cost checks
+  local currentMana = 0
+  if mana then 
+    currentMana = mana() or 0
+  elseif player and player.getMana then 
+    currentMana = player:getMana() or 0 
+  end
+
   local snap = {
     hp = hppercent(),
     mp = manapercent(),
+    currentMana = currentMana,  -- CRITICAL: Absolute mana value for spell cost checks
     monsters = getMonsters(),
     players = getPlayers(),
     inPz = isInPz(),

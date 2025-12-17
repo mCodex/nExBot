@@ -63,7 +63,7 @@ TargetBotCreatureEditorCheckBox < BotSwitch
 
 TargetBotCreatureEditorWindow < MainWindow
   text: TargetBot creature editor
-  width: 500
+  width: 600
   height: 425
   
   $mobile:
@@ -74,8 +74,15 @@ TargetBotCreatureEditorWindow < MainWindow
     anchors.right: parent.right
     anchors.top: parent.top
     text-align: center
-    !text: tr('You can use * (any characters) and ? (any character) in target name')
-
+    !text: tr('You can use *, ? and ! on the target name for wildcards and negation.')
+  
+  Label
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: prev.bottom
+    text-align: center
+    !text: tr('For example, to target all creatures except "Rat", you can use "*, !Rat" as target name.')
+  
   Label
     anchors.left: parent.left
     anchors.right: parent.right
@@ -83,6 +90,13 @@ TargetBotCreatureEditorWindow < MainWindow
     text-align: center
     !text: tr('You can also enter multiple targets, separate them by ,')
   
+  Label
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: prev.bottom
+    text-align: center
+    !text: tr('For example, to target "Rat" and "Goblin", you can use "Rat, Goblin" as target name.')
+
   TextEdit
     id: name
     anchors.top: prev.bottom

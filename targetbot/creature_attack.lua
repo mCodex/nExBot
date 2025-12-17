@@ -781,7 +781,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
   -- ═══════════════════════════════════════════════════════════════════════════
   -- PHASE 2: LURE DECISIONS (CaveBot delegation)
   -- These all delegate to CaveBot and return early
-  -- CRITICAL: Never trigger if target has low health!
+  -- Never trigger if target has low health
   -- ═══════════════════════════════════════════════════════════════════════════
   
   if not targetIsLowHealth and not isTrapped then

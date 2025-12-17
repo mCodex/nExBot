@@ -551,3 +551,193 @@ end)
 BotDB.registerMacro(manaTrainingMacro, "manaTraining")
 
 UI.Separator()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- AUTO LEVITATE - Ultra-fast instant-cast for PVP
+-- Moving: auto-levitates when running into wall/floor
+-- Stopped: press direction key toward levitate point to turn & cast
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local autoLevitateEnabled = false
+local lastLevCast = 0
+local LEV_CD = 1950  -- Slightly under 2s for faster re-cast
+
+-- All 8 directions with offsets
+local DIRS = {
+  {dx = 0, dy = -1},   -- 1: North
+  {dx = 1, dy = 0},    -- 2: East
+  {dx = 0, dy = 1},    -- 3: South
+  {dx = -1, dy = 0},   -- 4: West
+  {dx = 1, dy = -1},   -- 5: NE
+  {dx = 1, dy = 1},    -- 6: SE
+  {dx = -1, dy = 1},   -- 7: SW
+  {dx = -1, dy = -1},  -- 8: NW
+}
+
+-- Player direction (0-7) to DIRS index (1-8)
+local DIR_TO_IDX = {[0]=1, [1]=2, [2]=3, [3]=4, [4]=5, [5]=6, [6]=7, [7]=8}
+
+-- Track which direction keys are currently held down
+local heldDirKeys = {}
+
+-- Map key names to direction indices
+local KEY_TO_DIR = {}
+KEY_TO_DIR["Up"] = 1
+KEY_TO_DIR["Numpad8"] = 1
+KEY_TO_DIR["W"] = 1
+KEY_TO_DIR["Right"] = 2
+KEY_TO_DIR["Numpad6"] = 2
+KEY_TO_DIR["D"] = 2
+KEY_TO_DIR["Down"] = 3
+KEY_TO_DIR["Numpad2"] = 3
+KEY_TO_DIR["S"] = 3
+KEY_TO_DIR["Left"] = 4
+KEY_TO_DIR["Numpad4"] = 4
+KEY_TO_DIR["A"] = 4
+KEY_TO_DIR["Numpad9"] = 5
+KEY_TO_DIR["Numpad3"] = 6
+KEY_TO_DIR["Numpad1"] = 7
+KEY_TO_DIR["Numpad7"] = 8
+
+-- Track key presses using bot callbacks
+onKeyDown(function(keys)
+  local dir = KEY_TO_DIR[keys]
+  if dir then
+    heldDirKeys[dir] = true
+  end
+end)
+
+onKeyUp(function(keys)
+  local dir = KEY_TO_DIR[keys]
+  if dir then
+    heldDirKeys[dir] = false
+  end
+end)
+
+-- Check levitate opportunity at adjacent position
+local function getLevType(px, py, pz, dx, dy)
+  local fx, fy = px + dx, py + dy
+  local tile = g_map.getTile({x = fx, y = fy, z = pz})
+  
+  -- Check UP: blocked tile + ground above
+  if tile then
+    local blocked = false
+    if tile.isWalkable then
+      blocked = not tile:isWalkable()
+    else
+      blocked = not tile:getGround()
+    end
+    if blocked and pz > 0 then
+      local above = g_map.getTile({x = fx, y = fy, z = pz - 1})
+      if above and above:getGround() then
+        return "up"
+      end
+    end
+  end
+  
+  -- Check DOWN: no ground in front + ground below
+  if not tile or not tile:getGround() then
+    if pz < 15 then
+      local below = g_map.getTile({x = fx, y = fy, z = pz + 1})
+      if below and below:getGround() then
+        return "down"
+      end
+    end
+  end
+  
+  return nil
+end
+
+-- Cast levitate spell
+local function castLev(levType)
+  if levType == "up" then
+    say("exani hur up")
+  else
+    say("exani hur down")
+  end
+  lastLevCast = now
+end
+
+-- Track movement state
+local lastPx, lastPy = 0, 0
+
+-- Ultra-fast 2ms polling
+macro(2, function()
+  if not autoLevitateEnabled then return end
+  
+  local p = player
+  if not p then return end
+  
+  -- Fast cooldown check first
+  if (now - lastLevCast) < LEV_CD then return end
+  
+  -- Mana check
+  if mana() < 50 then return end
+  
+  local pos = p:getPosition()
+  if not pos then return end
+  
+  local px, py, pz = pos.x, pos.y, pos.z
+  
+  -- Detect if player moved this tick
+  local justMoved = (px ~= lastPx or py ~= lastPy)
+  lastPx, lastPy = px, py
+  
+  -- PRIORITY 1: Check all directions for held key (works when trapped/stopped)
+  for dirIdx = 1, 8 do
+    if heldDirKeys[dirIdx] then
+      local d = DIRS[dirIdx]
+      local levType = getLevType(px, py, pz, d.dx, d.dy)
+      if levType then
+        -- Turn player to face the direction before casting
+        local newDir = dirIdx - 1  -- Convert back to 0-7
+        if turn then turn(newDir) end
+        castLev(levType)
+        return
+      end
+    end
+  end
+  
+  -- PRIORITY 2: If moving, also auto-levitate in facing direction
+  if justMoved then
+    local playerDir = p:getDirection()
+    local facingIdx = DIR_TO_IDX[playerDir] or 1
+    local fd = DIRS[facingIdx]
+    if fd then
+      local levType = getLevType(px, py, pz, fd.dx, fd.dy)
+      if levType then
+        castLev(levType)
+        return
+      end
+    end
+  end
+end)
+
+-- Single UI Toggle for Auto Levitate
+local autoLevitateUI = setupUI([[
+Panel
+  height: 19
+
+  BotSwitch
+    id: autoLevitateToggle
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    !text: tr('Auto Levitate')
+    tooltip: Automatically casts levitate when moving into walls or when pressing direction keys toward walls
+]])
+
+autoLevitateUI.autoLevitateToggle.onClick = function(widget)
+  autoLevitateEnabled = not autoLevitateEnabled
+  widget:setOn(autoLevitateEnabled)
+  BotDB.set("macros.autoLevitate", autoLevitateEnabled)
+end
+
+-- Restore state on load
+if BotDB.get("macros.autoLevitate") == true then
+  autoLevitateEnabled = true
+  autoLevitateUI.autoLevitateToggle:setOn(true)
+end
+
+UI.Separator()

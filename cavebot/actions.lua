@@ -405,10 +405,18 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false
   end
 
-  -- Check if stairs (need precision 0)
+  -- Check if destination is floor-change tile (stairs, ladder, rope spot, hole)
+  -- When user explicitly adds such a waypoint, they INTEND to use it
   local minimapColor = g_map.getMinimapColor(destPos)
-  local isStairs = (minimapColor >= 210 and minimapColor <= 213)
-  if isStairs then precision = 0 end
+  local isFloorChange = (minimapColor >= 210 and minimapColor <= 213)
+  
+  -- Also check tile items for floor-change detection (minimap might miss some)
+  if not isFloorChange and CaveBot.isFloorChangeTile then
+    isFloorChange = CaveBot.isFloorChangeTile(destPos)
+  end
+  
+  -- If destination is floor-change, use precision 0 and allow the floor change
+  if isFloorChange then precision = 0 end
   
   -- Already at destination
   if distX <= precision and distY <= precision then
@@ -443,7 +451,8 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Attempt to walk
   local walkParams = {
     ignoreNonPathable = true,
-    precision = precision
+    precision = precision,
+    allowFloorChange = isFloorChange  -- Allow if user explicitly added floor-change waypoint
   }
   
   -- Use creature ignoring on higher retries
