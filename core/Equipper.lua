@@ -983,15 +983,49 @@ local function markChild(child)
 end
 
 -- ============================================================================
--- MAIN EQUIPMENT MACRO (Optimized)
--- Uses cached rules instead of UI children iteration
+-- EVENT SUBSCRIPTIONS - Listen for condition changes
 -- ============================================================================
 
-EquipManager = macro(1000, function()
-    if not config.enabled then return end
+-- Helper to trigger equipment re-check
+local function triggerEquipCheck()
+    EquipState.needsEquipCheck = true
+    EquipState.correctEq = false
+end
 
-    -- Debug: enabled for troubleshooting
+-- Subscribe to mana changes (conditions 6, 7)
+if EventBus then
+    EventBus.on("player:mana", function(mana, maxMana, oldMana, oldMaxMana)
+        triggerEquipCheck()
+    end, 100)
     
+    -- Subscribe to health changes (conditions 4, 5)
+    EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMaxHealth)
+        triggerEquipCheck()
+    end, 100)
+    
+    -- Subscribe to target changes (conditions 8, 16)
+    EventBus.on("target:change", function(target)
+        triggerEquipCheck()
+    end, 100)
+    
+    -- Subscribe to PZ state changes (conditions 11, 17)
+    EventBus.on("player:pz", function(inPz)
+        triggerEquipCheck()
+    end, 100)
+    
+    -- Subscribe to states/conditions changes (condition 10 - paralyzed)
+    EventBus.on("player:states", function(states)
+        triggerEquipCheck()
+    end, 100)
+end
+
+-- ============================================================================
+-- MAIN EQUIPMENT MACRO
+-- Faster polling (250ms) to catch condition changes promptly
+-- ============================================================================
+
+EquipManager = macro(250, function()
+    if not config.enabled then return end
 
     -- Skip gear swaps during critical healing/danger to avoid conflicts
     if HealContext and HealContext.isCritical and HealContext.isCritical() then
@@ -1004,8 +1038,7 @@ EquipManager = macro(1000, function()
     local currentTime = now
     if (currentTime - EquipState.lastEquipAction) < EquipState.EQUIP_COOLDOWN then return end
 
-    if not EquipState.needsEquipCheck and EquipState.correctEq then return end
-
+    -- Always re-check conditions (events set needsEquipCheck, but also periodic check)
     local ctx = snapshotContext()
     local inventoryIndex = buildInventoryIndex()
 

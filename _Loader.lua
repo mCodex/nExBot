@@ -121,6 +121,15 @@ end
 -- OPTIMIZED SCRIPT LOADING
 -- ============================================================================
 
+-- List of optional modules that should not show warnings if missing
+local OPTIONAL_MODULES = {
+  ["HealBot"] = true,
+  ["bot_core/init"] = true,
+  ["performance_optimizer"] = true,
+  ["combat_intelligence"] = true,
+  ["state_machine"] = true,
+}
+
 -- Load a script with timing and error isolation
 local function loadScript(name, category)
   local scriptStart = os.clock()
@@ -132,12 +141,18 @@ local function loadScript(name, category)
   loadTimes[name] = elapsed
   
   if not status then
-    -- Suppress loud startup warn for HealBot (avoids noisy error on optional module)
+    local errorMsg = tostring(result)
     nExBot.loadErrors = nExBot.loadErrors or {}
-    nExBot.loadErrors[name] = tostring(result)
-    -- Only emit a warn for non-HealBot modules to keep startup logs clean
-    if name ~= "HealBot" then
-      warn("[nExBot] Failed to load '" .. name .. "' (" .. elapsed .. "ms): " .. tostring(result))
+    nExBot.loadErrors[name] = errorMsg
+    
+    -- Silence warnings for:
+    -- 1. Optional modules (listed above)
+    -- 2. "not found" errors (file doesn't exist)
+    local isOptional = OPTIONAL_MODULES[name]
+    local isNotFound = errorMsg:match("not found") or errorMsg:match("No such file")
+    
+    if not isOptional and not isNotFound then
+      warn("[nExBot] Failed to load '" .. name .. "' (" .. elapsed .. "ms): " .. errorMsg)
     end
     return nil
   end
@@ -249,10 +264,118 @@ if totalTime > 1000 then
 end
 
 -- ============================================================================
--- PRIVATE SCRIPTS SECTION
+-- PRIVATE SCRIPTS AUTO-LOADER
+-- ============================================================================
+-- Automatically loads user scripts from the /private folder
+-- Scripts control their own tab using setDefaultTab() inside the script
+-- 
+-- Folder Structure:
+--   private/
+--   ├── my_script.lua
+--   ├── hunting/
+--   │   └── lure_helper.lua
+--   └── utils/
+--       └── mana_trainer.lua
+--
+-- On bot restart, it automatically detects new/removed files.
 -- ============================================================================
 
+local PRIVATE_PATH = "/bot/" .. configName .. "/private"
+local PRIVATE_DOFILE_PATH = "/private"
+
+-- Recursively collect all .lua files from a directory
+local function collectLuaFiles(folderPath, dofileBase, collected)
+    collected = collected or {}
+    
+    local status, items = pcall(function()
+        return g_resources.listDirectoryFiles(folderPath, false, false)
+    end)
+    
+    if not status or not items then
+        return collected
+    end
+    
+    for i = 1, #items do
+        local item = items[i]
+        local fullPath = folderPath .. "/" .. item
+        local dofilePath = dofileBase .. "/" .. item
+        
+        -- Check if it's a lua file
+        if item:match("%.lua$") then
+            collected[#collected + 1] = {
+                name = item,
+                path = dofilePath
+            }
+        -- Check if it's a directory (no extension)
+        elseif not item:match("%.") then
+            -- Try to recurse into it as a folder
+            local subStatus, subItems = pcall(function()
+                return g_resources.listDirectoryFiles(fullPath, false, false)
+            end)
+            if subStatus and subItems then
+                collectLuaFiles(fullPath, dofilePath, collected)
+            end
+        end
+    end
+    
+    return collected
+end
+
+-- Load private scripts
+local function loadPrivateScripts()
+    -- Check if private folder exists
+    local status, items = pcall(function()
+        return g_resources.listDirectoryFiles(PRIVATE_PATH, false, false)
+    end)
+    
+    if not status or not items or #items == 0 then
+        return  -- Private folder doesn't exist or is empty
+    end
+    
+    local privateStart = os.clock()
+    
+    -- Collect all lua files recursively
+    local luaFiles = collectLuaFiles(PRIVATE_PATH, PRIVATE_DOFILE_PATH)
+    
+    if #luaFiles == 0 then
+        return
+    end
+    
+    -- Sort for consistent load order
+    table.sort(luaFiles, function(a, b) return a.path < b.path end)
+    
+    local loadedCount = 0
+    
+    -- Load each script
+    for i = 1, #luaFiles do
+        local file = luaFiles[i]
+        local scriptStart = os.clock()
+        
+        local loadStatus, err = pcall(function()
+            dofile(file.path)
+        end)
+        
+        local elapsed = math.floor((os.clock() - scriptStart) * 1000)
+        
+        if loadStatus then
+            loadedCount = loadedCount + 1
+            loadTimes["private:" .. file.name] = elapsed
+        else
+            warn("[Private] Failed to load '" .. file.path .. "': " .. tostring(err))
+            nExBot.loadErrors = nExBot.loadErrors or {}
+            nExBot.loadErrors["private:" .. file.name] = tostring(err)
+        end
+    end
+    
+    loadTimes["_private_total"] = math.floor((os.clock() - privateStart) * 1000)
+    
+    if loadedCount > 0 then
+        info("[nExBot] Loaded " .. loadedCount .. " private script(s) in " .. loadTimes["_private_total"] .. "ms")
+    end
+end
+
+-- Run the private scripts loader
+loadPrivateScripts()
+
+-- Return to Main tab
 setDefaultTab("Main")
-UI.Separator()
-UI.Label("Private Scripts:")
-UI.Separator()
