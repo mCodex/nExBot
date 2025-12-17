@@ -986,37 +986,115 @@ end
 -- EVENT SUBSCRIPTIONS - Listen for condition changes
 -- ============================================================================
 
--- Helper to trigger equipment re-check
+-- Helper to trigger equipment re-check and optionally run immediate check
 local function triggerEquipCheck()
     EquipState.needsEquipCheck = true
     EquipState.correctEq = false
 end
 
--- Subscribe to mana changes (conditions 6, 7)
+-- Immediate equipment check function (called by events)
+local function immediateEquipCheck()
+    if not config.enabled then return end
+    
+    -- Skip if on cooldown
+    if (now - EquipState.lastEquipAction) < EquipState.EQUIP_COOLDOWN then return end
+    
+    -- Skip during critical healing
+    if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
+    
+    local rules = getEnabledRules()
+    if not rules or #rules == 0 then return end
+    
+    local ctx = snapshotContext()
+    local inventoryIndex = buildInventoryIndex()
+    
+    for _, rule in ipairs(rules) do
+        if rulePasses(rule, ctx) then
+            local action, missing = computeAction(rule, ctx, inventoryIndex)
+            if action then
+                if action.kind == "unequip" then
+                    if unequipSlot(action.slotIdx) then
+                        EquipState.lastEquipAction = now
+                        EquipState.correctEq = false
+                        EquipState.needsEquipCheck = true
+                        EquipState.lastRule = rule
+                        return
+                    end
+                elseif action.kind == "equip" then
+                    if equipSlot(action.slotIdx, action.itemId) then
+                        EquipState.lastEquipAction = now
+                        EquipState.correctEq = false
+                        EquipState.needsEquipCheck = true
+                        EquipState.lastRule = rule
+                        return
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Subscribe via EventBus if available
 if EventBus then
+    -- Subscribe to mana changes (conditions 6, 7)
     EventBus.on("player:mana", function(mana, maxMana, oldMana, oldMaxMana)
         triggerEquipCheck()
+        immediateEquipCheck()
     end, 100)
     
     -- Subscribe to health changes (conditions 4, 5)
     EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMaxHealth)
         triggerEquipCheck()
+        immediateEquipCheck()
     end, 100)
     
     -- Subscribe to target changes (conditions 8, 16)
     EventBus.on("target:change", function(target)
         triggerEquipCheck()
+        immediateEquipCheck()
     end, 100)
     
     -- Subscribe to PZ state changes (conditions 11, 17)
     EventBus.on("player:pz", function(inPz)
         triggerEquipCheck()
+        immediateEquipCheck()
     end, 100)
     
     -- Subscribe to states/conditions changes (condition 10 - paralyzed)
     EventBus.on("player:states", function(states)
         triggerEquipCheck()
+        immediateEquipCheck()
     end, 100)
+end
+
+-- FALLBACK: Use native OTC callbacks directly if EventBus doesn't trigger
+-- These ensure equipment changes happen even if EventBus is not working
+if onManaChange then
+    onManaChange(function(localPlayer, mana, maxMana, oldMana, oldMaxMana)
+        triggerEquipCheck()
+        immediateEquipCheck()
+    end)
+end
+
+if onHealthChange then
+    onHealthChange(function(localPlayer, health, maxHealth, oldHealth, oldMaxHealth)
+        triggerEquipCheck()
+        immediateEquipCheck()
+    end)
+end
+
+if onTargetChange then
+    onTargetChange(function(target)
+        triggerEquipCheck()
+        immediateEquipCheck()
+    end)
+end
+
+if onStatesChange then
+    onStatesChange(function(localPlayer, states, oldStates)
+        triggerEquipCheck()
+        immediateEquipCheck()
+    end)
 end
 
 -- ============================================================================
