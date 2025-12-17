@@ -518,12 +518,20 @@ local function initSetupWindow()
     setupWindow.sortEnabled.onClick = function(widget)
         config.sortEnabled = not config.sortEnabled
         widget:setChecked(config.sortEnabled)
+        -- Trigger immediate sorting when enabled
+        if config.sortEnabled and sortingMacro then
+            sortingMacro:setOn()
+        end
     end
     
     setupWindow.forceOpen:setChecked(config.forceOpen)
     setupWindow.forceOpen.onClick = function(widget)
         config.forceOpen = not config.forceOpen
         widget:setChecked(config.forceOpen)
+        -- Trigger immediate check when enabled
+        if config.forceOpen and sortingMacro then
+            sortingMacro:setOn()
+        end
     end
     
     setupWindow.renameEnabled:setChecked(config.renameEnabled)
@@ -581,12 +589,21 @@ local function initSetupWindow()
         selectedContainerIndex = nil
         
         refreshContainerList()
+        
+        -- Trigger immediate sorting when rule is added/updated
+        if config.sortEnabled and sortingMacro then
+            sortingMacro:setOn()
+        end
     end
     
     -- Items list change handler
     UI.Container(function()
         if selectedContainerIndex and config.containerList[selectedContainerIndex] then
             config.containerList[selectedContainerIndex].items = setupWindow.itemsList:getItems()
+            -- Trigger immediate sorting when items list changes
+            if config.sortEnabled and sortingMacro then
+                sortingMacro:setOn()
+            end
         end
     end, true, nil, setupWindow.itemsList)
     
