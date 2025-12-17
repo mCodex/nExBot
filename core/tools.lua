@@ -725,6 +725,7 @@ Panel
     anchors.right: parent.right
     text-align: center
     !text: tr('Auto Levitate')
+    tooltip: Automatically casts levitate when moving into walls or when pressing direction keys toward walls
 ]])
 
 autoLevitateUI.autoLevitateToggle.onClick = function(widget)
