@@ -21,6 +21,12 @@ setDefaultTab("Tools")
 local panelName = "containerPanel"
 
 -- ============================================================================
+-- CONSTANTS
+-- ============================================================================
+local PURSE_ITEM_ID = 23396
+local LOOT_BAG_ITEM_ID = 23721
+
+-- ============================================================================
 -- DEFAULT CONFIGURATION
 -- ============================================================================
 local DEFAULT_CONTAINER_LIST = {
@@ -1411,7 +1417,7 @@ sortingMacro = macro(150, function(m)
         
         -- Force open purse
         if config.purse then
-            local purseContainer = getContainerByItem(23396)
+            local purseContainer = getContainerByItem(PURSE_ITEM_ID)
             if not purseContainer then
                 local purseItem = getPurse()
                 if purseItem then
@@ -1423,11 +1429,11 @@ sortingMacro = macro(150, function(m)
         
         -- Force open loot bag
         if config.lootBag then
-            local lootBagContainer = getContainerByItem(23721)
+            local lootBagContainer = getContainerByItem(LOOT_BAG_ITEM_ID)
             if not lootBagContainer then
-                local lootBag = findItem(23721)
+                local lootBag = findItem(LOOT_BAG_ITEM_ID)
                 if lootBag then
-                    local purseContainer = getContainerByItem(23396)
+                    local purseContainer = getContainerByItem(PURSE_ITEM_ID)
                     if purseContainer then
                         g_game.open(lootBag, purseContainer)
                     else
