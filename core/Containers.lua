@@ -149,7 +149,7 @@ end
 UI.Separator()
 local containerUI = setupUI([[
 Panel
-  height: 140
+  height: 110
 
   Label
     text-align: center
