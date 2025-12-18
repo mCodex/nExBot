@@ -869,6 +869,30 @@ TargetBot.Creature.walk = function(creature, config, targets)
   end
 
   -- ─────────────────────────────────────────────────────────────────────────
+  -- AUTO-FOLLOW MANAGEMENT: Cancel native follow when precision control needed
+  -- 
+  -- Native follow is efficient but incompatible with:
+  -- - Wave avoidance (needs instant direction changes)
+  -- - Keep distance (needs precise range maintenance)
+  -- - Repositioning (custom tile scoring)
+  -- We cancel follow here if any of these modes are active
+  -- ─────────────────────────────────────────────────────────────────────────
+  local needsPrecisionControl = config.avoidAttacks or config.keepDistance or config.rePosition
+  if needsPrecisionControl then
+    if TargetCore and TargetCore.Native and TargetCore.Native.cancelFollow then
+      local currentFollow = TargetCore.Native.getFollowingCreature()
+      if currentFollow then
+        TargetCore.Native.cancelFollow()
+      end
+    elseif g_game.cancelFollow and g_game.getFollowingCreature then
+      local currentFollow = g_game.getFollowingCreature()
+      if currentFollow then
+        g_game.cancelFollow()
+      end
+    end
+  end
+
+  -- ─────────────────────────────────────────────────────────────────────────
   -- INTENT 1: WAVE AVOIDANCE (Highest priority movement)
   -- Higher base confidence, only move when really needed
   -- ─────────────────────────────────────────────────────────────────────────
@@ -1075,8 +1099,57 @@ TargetBot.Creature.walk = function(creature, config, targets)
   
   -- ─────────────────────────────────────────────────────────────────────────
   -- INTENT 6: CHASE (Close gap to target)
+  -- Supports both custom pathfinding and native OTClient follow
   -- ─────────────────────────────────────────────────────────────────────────
   if config.chase and not config.keepDistance and pathLen > 1 then
+    -- AUTO FOLLOW: Use OTClient's native g_game.follow() for smoother chasing
+    -- This is more performant as it delegates movement to the client
+    if config.autoFollow and creature then
+      -- Check anchor constraint before allowing follow
+      local anchorValid = true
+      if config.anchor and anchorPosition then
+        local anchorDist = math.max(
+          math.abs(cpos.x - anchorPosition.x),
+          math.abs(cpos.y - anchorPosition.y)
+        )
+        anchorValid = anchorDist <= (config.anchorRange or 5)
+      end
+      
+      if anchorValid then
+        -- Use TargetCore.Native for cleaner API management
+        if TargetCore and TargetCore.Native and TargetCore.Native.followCreature then
+          if TargetCore.Native.followCreature(creature) then
+            return true  -- Native follow handles movement
+          end
+        else
+          -- Fallback: direct implementation
+          local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
+          if not currentFollow or currentFollow:getId() ~= creature:getId() then
+            if g_game.follow then
+              g_game.follow(creature)
+            else
+              follow(creature)
+            end
+          end
+          if g_game.setChaseMode and g_game.getChaseMode then
+            local currentChaseMode = g_game.getChaseMode()
+            if currentChaseMode ~= 1 then
+              g_game.setChaseMode(1)
+            end
+          end
+          return true
+        end
+      else
+        -- Anchor violated - cancel follow and let custom pathfinding handle it
+        if TargetCore and TargetCore.Native and TargetCore.Native.cancelFollow then
+          TargetCore.Native.cancelFollow()
+        elseif g_game.cancelFollow then
+          g_game.cancelFollow()
+        end
+      end
+    end
+    
+    -- CUSTOM PATHFINDING: Traditional walkTo-based chase
     local confidence = 0.5
     
     -- Higher confidence for closer targets (easier to reach)
