@@ -370,15 +370,27 @@ Panel
     !text: tr('Fishing')
 ]])
 
--- Connect UI switch to macro state using BotDB
+-- Connect UI switch to macro state using CharacterDB (per-character)
 fishingUI.title.onClick = function(widget)
   fishingEnabled = not fishingEnabled
   widget:setOn(fishingEnabled)
-  BotDB.set("macros.fishing", fishingEnabled)
+  -- Save to CharacterDB if available, otherwise BotDB
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("macros.fishing", fishingEnabled)
+  else
+    BotDB.set("macros.fishing", fishingEnabled)
+  end
 end
 
--- Restore fishing state on load (synchronous)
-local savedFishingState = BotDB.get("macros.fishing") == true
+-- Restore fishing state on load (per-character via CharacterDB)
+local function loadFishingState()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    return CharacterDB.get("macros.fishing") == true
+  end
+  return BotDB.get("macros.fishing") == true
+end
+
+local savedFishingState = loadFishingState()
 if savedFishingState then
   fishingEnabled = true
   fishingUI.title:setOn(true)
@@ -388,13 +400,39 @@ UI.Separator()
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FOLLOW PLAYER - Use OTClient's native follow system (like CTRL + Right Click)
+-- Per-character settings via CharacterDB
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Follow Player settings (stored per-profile)
-local followPlayerConfig = getProfileSetting("followPlayer") or {
-  enabled = false,
-  playerName = ""
-}
+-- Load follow player settings from CharacterDB (per-character)
+local function loadFollowPlayerConfig()
+  local config = { enabled = false, playerName = "" }
+  
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    local charConfig = CharacterDB.get("tools.followPlayer")
+    if charConfig then
+      config.enabled = charConfig.enabled or false
+      config.playerName = charConfig.playerName or ""
+    end
+    
+    -- Migration from ProfileStorage
+    local profileConfig = getProfileSetting("followPlayer")
+    if profileConfig and profileConfig.playerName and config.playerName == "" then
+      config.playerName = profileConfig.playerName
+      CharacterDB.set("tools.followPlayer", config)
+    end
+  else
+    -- Fallback to ProfileStorage
+    local profileConfig = getProfileSetting("followPlayer")
+    if profileConfig then
+      config.enabled = profileConfig.enabled or false
+      config.playerName = profileConfig.playerName or ""
+    end
+  end
+  
+  return config
+end
+
+local followPlayerConfig = loadFollowPlayerConfig()
 
 -- Forward decl for UI switch so helper can sync it
 local followPlayerToggle = nil
@@ -402,10 +440,22 @@ local followPlayerToggle = nil
 local lastFollowCheck = 0
 local FOLLOW_CHECK_COOLDOWN = 500  -- Check every 500ms
 
+-- Helper: save follow player settings
+local function saveFollowPlayerConfig()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("tools.followPlayer", {
+      enabled = followPlayerConfig.enabled,
+      playerName = followPlayerConfig.playerName
+    })
+  else
+    setProfileSetting("followPlayer", followPlayerConfig)
+  end
+end
+
 -- Helper: sync state, UI, and side effects
 local function setFollowEnabled(state)
   followPlayerConfig.enabled = state
-  setProfileSetting("followPlayer", followPlayerConfig)
+  saveFollowPlayerConfig()
   if followPlayerToggle then
     followPlayerToggle:setOn(state)
   end
@@ -453,7 +503,7 @@ UI.Label("Follow Player:")
 
 local followPlayerNameEdit = UI.TextEdit(followPlayerConfig.playerName, function(widget, text)
   followPlayerConfig.playerName = text:trim()
-  setProfileSetting("followPlayer", followPlayerConfig)
+  saveFollowPlayerConfig()
 end)
 
 local followToggleUI = setupUI([[
@@ -476,24 +526,47 @@ followPlayerToggle.onClick = function(widget)
 end
 
 UI.Separator()
-local profileManaTraining = getProfileSetting("manaTraining") or { spell = "exura", minManaPercent = 80 }
 
--- Migrate legacy profile-level custom spell to per-character storage
-if storage and not storage.manaTrainingSpell and profileManaTraining.spell and profileManaTraining.spell:lower() ~= "exura" then
-  storage.manaTrainingSpell = profileManaTraining.spell
-  -- reset profile default to avoid affecting other characters
-  profileManaTraining.spell = "exura"
-  setProfileSetting("manaTraining", profileManaTraining)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- MANA TRAINING - Per-character settings via CharacterDB
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Load mana training settings from CharacterDB (per-character) with fallbacks
+local function loadManaTrainingSettings()
+  local settings = { spell = "exura", minManaPercent = 80 }
+  
+  -- Try CharacterDB first (per-character)
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    local charSettings = CharacterDB.get("tools.manaTraining")
+    if charSettings then
+      settings.spell = charSettings.spell or "exura"
+      settings.minManaPercent = charSettings.minManaPercent or 80
+    end
+    
+    -- Migration from legacy storage
+    if storage and storage.manaTrainingSpell and settings.spell == "exura" then
+      settings.spell = storage.manaTrainingSpell
+      CharacterDB.set("tools.manaTraining", settings)
+    end
+  else
+    -- Fallback to legacy storage
+    if storage and storage.manaTrainingSpell then
+      settings.spell = storage.manaTrainingSpell
+    end
+    -- Profile-level fallback
+    local profileSettings = getProfileSetting("manaTraining")
+    if profileSettings then
+      if not storage or not storage.manaTrainingSpell then
+        settings.spell = profileSettings.spell or "exura"
+      end
+      settings.minManaPercent = profileSettings.minManaPercent or 80
+    end
+  end
+  
+  return settings
 end
 
--- Build runtime manaTraining: profile defaults + per-character override for spell
-local manaTraining = {
-  spell = profileManaTraining.spell or "exura",
-  minManaPercent = profileManaTraining.minManaPercent or 80
-}
-if storage and storage.manaTrainingSpell then
-  manaTraining.spell = storage.manaTrainingSpell
-end
+local manaTraining = loadManaTrainingSettings()
 
 local function sanitizeSpell(text)
   text = text or ""
@@ -512,13 +585,25 @@ local function getManaPercent()
   return (current / maximum) * 100
 end
 
+-- Helper to save mana training settings to CharacterDB
+local function saveManaTrainingSettings()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("tools.manaTraining", {
+      spell = manaTraining.spell,
+      minManaPercent = manaTraining.minManaPercent
+    })
+  else
+    -- Fallback to legacy storage
+    if storage then storage.manaTrainingSpell = manaTraining.spell end
+  end
+end
+
 UI.Label("Mana Training:")
 
 UI.Label("Spell to cast (default: exura):")
 UI.TextEdit(manaTraining.spell or "exura", function(widget, text)
   manaTraining.spell = sanitizeSpell(text)
-  -- Save player-specific spell to character storage (do NOT overwrite profile default)
-  if storage then storage.manaTrainingSpell = manaTraining.spell end
+  saveManaTrainingSettings()
 end)
 
 UI.Label("Min mana % to train (10-100):")
@@ -528,7 +613,7 @@ UI.TextEdit(tostring(manaTraining.minManaPercent or 80), function(widget, text)
   if value < 10 then value = 10 end
   if value > 100 then value = 100 end
   manaTraining.minManaPercent = value
-  setProfileSetting("manaTraining", manaTraining)
+  saveManaTrainingSettings()
 end)
 
 -- Mana Training macro with built-in toggle (like Hold Target)

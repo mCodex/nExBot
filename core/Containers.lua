@@ -42,37 +42,109 @@ local DEFAULT_CONTAINER_LIST = {
     }
 }
 
--- Config storage with migration support
-if type(storage[panelName]) ~= "table" then
-    storage[panelName] = {
-        purse = true,
-        autoMinimize = true,
-        autoOpenOnLogin = false,
-        sortEnabled = false,
-        forceOpen = false,
-        renameEnabled = false,
-        lootBag = false,
-        containerList = DEFAULT_CONTAINER_LIST,
-        windowHeight = 200
-    }
+-- Default config structure
+local DEFAULT_CONFIG = {
+    purse = true,
+    autoMinimize = true,
+    autoOpenOnLogin = false,
+    sortEnabled = false,
+    forceOpen = false,
+    renameEnabled = false,
+    lootBag = false,
+    containerList = DEFAULT_CONTAINER_LIST,
+    windowHeight = 200
+}
+
+-- Deep clone utility
+local function deepClone(t)
+    if type(t) ~= "table" then return t end
+    local copy = {}
+    for k, v in pairs(t) do
+        copy[k] = deepClone(v)
+    end
+    return copy
 end
 
-local config = storage[panelName]
+-- Initialize config from CharacterDB with migration from legacy storage
+local function initConfig()
+    local cfg
+    
+    -- Try to load from CharacterDB first
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        cfg = CharacterDB.getModule("containers")
+        
+        -- Migration: if CharacterDB is empty but legacy storage has data
+        if (not cfg.containerList or #cfg.containerList == 0) and storage[panelName] then
+            local legacy = storage[panelName]
+            if legacy.containerList and #legacy.containerList > 0 then
+                -- Migrate from legacy storage
+                cfg = deepClone(legacy)
+                CharacterDB.setModule("containers", cfg)
+            end
+        end
+    else
+        -- Fallback to legacy storage (CharacterDB not ready yet)
+        if type(storage[panelName]) ~= "table" then
+            storage[panelName] = deepClone(DEFAULT_CONFIG)
+        end
+        cfg = storage[panelName]
+    end
+    
+    -- Ensure all required fields exist (migration for old configs)
+    for key, defaultValue in pairs(DEFAULT_CONFIG) do
+        if cfg[key] == nil then
+            cfg[key] = type(defaultValue) == "table" and deepClone(defaultValue) or defaultValue
+        end
+    end
+    
+    return cfg
+end
 
--- Migration: Ensure new config options exist for old configs
-local function ensureConfigField(field, defaultValue)
-    if config[field] == nil then
-        config[field] = defaultValue
+-- Create a proxy that auto-saves to CharacterDB on changes
+local function createConfigProxy(initialConfig)
+    local _data = initialConfig
+    local _saveTimer = nil
+    
+    local function scheduleSave()
+        if not CharacterDB or not CharacterDB.isReady or not CharacterDB.isReady() then return end
+        if _saveTimer then removeEvent(_saveTimer) end
+        _saveTimer = scheduleEvent(function()
+            _saveTimer = nil
+            CharacterDB.setModule("containers", _data)
+        end, 300)
+    end
+    
+    return setmetatable({}, {
+        __index = function(t, k)
+            return _data[k]
+        end,
+        __newindex = function(t, k, v)
+            _data[k] = v
+            scheduleSave()
+        end,
+        __pairs = function(t) return pairs(_data) end,
+        __ipairs = function(t) return ipairs(_data) end,
+    })
+end
+
+local config = createConfigProxy(initConfig())
+
+-- Force save function (call after modifying nested tables like containerList)
+local function saveConfig()
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        CharacterDB.setModule("containers", {
+            purse = config.purse,
+            autoMinimize = config.autoMinimize,
+            autoOpenOnLogin = config.autoOpenOnLogin,
+            sortEnabled = config.sortEnabled,
+            forceOpen = config.forceOpen,
+            renameEnabled = config.renameEnabled,
+            lootBag = config.lootBag,
+            containerList = config.containerList,
+            windowHeight = config.windowHeight
+        })
     end
 end
-
-ensureConfigField("autoOpenOnLogin", false)
-ensureConfigField("sortEnabled", false)
-ensureConfigField("forceOpen", false)
-ensureConfigField("renameEnabled", false)
-ensureConfigField("lootBag", false)
-ensureConfigField("containerList", DEFAULT_CONTAINER_LIST)
-ensureConfigField("windowHeight", 200)
 
 UI.Separator()
 local containerUI = setupUI([[
@@ -465,6 +537,7 @@ local function refreshContainerList()
         label.enabled.onClick = function()
             entry.enabled = not entry.enabled
             label.enabled:setChecked(entry.enabled)
+            saveConfig()  -- Persist to CharacterDB
             -- Trigger immediate processing when rule is enabled
             if entry.enabled and sortingMacro and (config.sortEnabled or config.forceOpen) then
                 sortingMacro:setOn()
@@ -476,6 +549,7 @@ local function refreshContainerList()
             entry.minimize = not entry.minimize
             label.minimize:setColor(entry.minimize and '#00FF00' or '#FF6666')
             label.minimize:setTooltip(entry.minimize and 'Opens Minimized' or 'Opens Normal')
+            saveConfig()  -- Persist to CharacterDB
             -- Apply minimize state to currently open containers of this type
             if entry.enabled and entry.itemId then
                 for _, container in pairs(g_game.getContainers()) do
@@ -501,6 +575,7 @@ local function refreshContainerList()
             entry.openNested = not entry.openNested
             label.nested:setColor(entry.openNested and '#00FF00' or '#FF6666')
             label.nested:setTooltip(entry.openNested and 'Opens Nested' or 'No Nested')
+            saveConfig()  -- Persist to CharacterDB
             -- Trigger nested container opening if enabled
             if entry.enabled and entry.openNested and entry.itemId then
                 for _, container in pairs(g_game.getContainers()) do
@@ -522,6 +597,7 @@ local function refreshContainerList()
             table.remove(config.containerList, index)
             refreshContainerList()
             selectedContainerIndex = nil
+            saveConfig()  -- Persist to CharacterDB
         end
     end
 end
@@ -625,6 +701,7 @@ local function initSetupWindow()
         selectedContainerIndex = nil
         
         refreshContainerList()
+        saveConfig()  -- Persist to CharacterDB
         
         -- Trigger immediate sorting when rule is added/updated
         if config.sortEnabled and sortingMacro then
@@ -636,6 +713,7 @@ local function initSetupWindow()
     UI.Container(function()
         if selectedContainerIndex and config.containerList[selectedContainerIndex] then
             config.containerList[selectedContainerIndex].items = setupWindow.itemsList:getItems()
+            saveConfig()  -- Persist to CharacterDB
             -- Trigger immediate sorting when items list changes
             if config.sortEnabled and sortingMacro then
                 sortingMacro:setOn()

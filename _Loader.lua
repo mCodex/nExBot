@@ -186,6 +186,7 @@ loadCategory("core", {
   "new_cavebot_lib",  -- CaveBot library
   "configs",          -- Configuration system
   "bot_database",     -- Unified database (BotDB) - load AFTER configs
+  "character_db",     -- Per-character database (CharacterDB) - for multi-client
 })
 
 -- 2. Architecture Layer (Event system, state management)

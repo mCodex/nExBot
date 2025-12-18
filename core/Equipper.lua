@@ -38,19 +38,100 @@ Panel
 ui:setId(panelName)
 
 -- ============================================================================
--- STORAGE & STATE (Centralized)
+-- STORAGE & STATE (Per-Character with CharacterDB)
 -- ============================================================================
 
-if not storage[panelName] or not storage[panelName].bosses then
-    storage[panelName] = {
-        enabled = false,
-        rules = {},
-        bosses = {},
-        activeRule = nil
-    }
+-- Default config structure
+local DEFAULT_CONFIG = {
+    enabled = false,
+    rules = {},
+    bosses = {},
+    activeRule = nil
+}
+
+-- Initialize config from CharacterDB with migration from legacy storage
+local function initConfig()
+    local config
+    
+    -- Try to load from CharacterDB first
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        config = CharacterDB.getModule("equipper")
+        
+        -- Migration: if CharacterDB is empty but legacy storage has data
+        if (not config.rules or #config.rules == 0) and storage[panelName] and storage[panelName].rules then
+            local legacy = storage[panelName]
+            if legacy.rules and #legacy.rules > 0 then
+                -- Migrate from legacy storage
+                config = {
+                    enabled = legacy.enabled or false,
+                    rules = legacy.rules or {},
+                    bosses = legacy.bosses or {},
+                    activeRule = legacy.activeRule
+                }
+                CharacterDB.setModule("equipper", config)
+                -- Note: We don't clear legacy storage to preserve data for other characters
+            end
+        end
+    else
+        -- Fallback to legacy storage (CharacterDB not ready yet)
+        if not storage[panelName] or not storage[panelName].bosses then
+            storage[panelName] = DEFAULT_CONFIG
+        end
+        config = storage[panelName]
+    end
+    
+    -- Ensure all required fields exist
+    config.enabled = config.enabled or false
+    config.rules = config.rules or {}
+    config.bosses = config.bosses or {}
+    config.activeRule = config.activeRule or nil
+    
+    return config
 end
 
-local config = storage[panelName]
+-- Create a proxy that auto-saves to CharacterDB on changes
+local function createConfigProxy(initialConfig)
+    local _data = initialConfig
+    local _saveTimer = nil
+    
+    local function scheduleSave()
+        if not CharacterDB or not CharacterDB.isReady or not CharacterDB.isReady() then return end
+        if _saveTimer then removeEvent(_saveTimer) end
+        _saveTimer = scheduleEvent(function()
+            _saveTimer = nil
+            CharacterDB.setModule("equipper", _data)
+        end, 300)
+    end
+    
+    -- Expose data directly (for read operations)
+    -- Modifications should trigger save via explicit call
+    return setmetatable({}, {
+        __index = function(t, k)
+            return _data[k]
+        end,
+        __newindex = function(t, k, v)
+            _data[k] = v
+            scheduleSave()
+        end,
+        -- Expose raw data for ipairs/pairs
+        __pairs = function(t) return pairs(_data) end,
+        __ipairs = function(t) return ipairs(_data) end,
+    })
+end
+
+local config = createConfigProxy(initConfig())
+
+-- Force save function (call after modifying nested tables like rules/bosses)
+local function saveConfig()
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        CharacterDB.setModule("equipper", {
+            enabled = config.enabled,
+            rules = config.rules,
+            bosses = config.bosses,
+            activeRule = config.activeRule
+        })
+    end
+end
 
 -- Non-blocking equipment manager state
 local EquipState = {
@@ -544,6 +625,7 @@ local function createRuleWidget(list, rule, index)
     listPanel.down:setEnabled(false)
     invalidateRulesCache()
     refreshRules()
+    saveConfig()  -- Persist to CharacterDB
   end
 
   widget.visible.onClick = function()
@@ -551,6 +633,7 @@ local function createRuleWidget(list, rule, index)
     if idx and config.rules[idx] then
       config.rules[idx].visible = not config.rules[idx].visible
       widget.visible:setColor(config.rules[idx].visible and "green" or "red")
+      saveConfig()  -- Persist to CharacterDB
     end
   end
 
@@ -560,6 +643,7 @@ local function createRuleWidget(list, rule, index)
       config.rules[idx].enabled = not config.rules[idx].enabled
       widget.enabled:setChecked(config.rules[idx].enabled and true or false)
       invalidateRulesCache()
+      saveConfig()  -- Persist to CharacterDB
     end
   end
 
@@ -732,6 +816,7 @@ inputPanel.add.onClick = function(widget)
     resetFields()
     invalidateRulesCache()  -- Important: invalidate cache after rule changes
     refreshRules()
+    saveConfig()  -- Persist to CharacterDB
 end
 
 mainWindow.bossList.onClick = function(widget)
@@ -754,6 +839,7 @@ for i, v in ipairs(config.bosses) do
     widget.remove.onClick = function()
         table.remove(config.bosses, table.find(config.bosses, v))
         widget:destroy()
+        saveConfig()  -- Persist to CharacterDB
     end
 end
 
@@ -771,10 +857,12 @@ bossPanel.add.onClick = function()
     widget.remove.onClick = function()
         table.remove(config.bosses, table.find(config.bosses, name))
         widget:destroy()
+        saveConfig()  -- Persist to CharacterDB
     end    
 
     table.insert(config.bosses, name)
     bossPanel.name:setText('')
+    saveConfig()  -- Persist to CharacterDB
 end
 
 -- `interpreteCondition` removed: condition evaluation now delegated to `EquipperService.evalCondition` with a local fallback `LOCAL_CONDITIONS`.

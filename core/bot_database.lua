@@ -363,86 +363,70 @@ function BotDB.getSchema()
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- MACRO REGISTRATION SYSTEM
--- Intercept setOn/setOff to persist state changes
+-- MACRO REGISTRATION SYSTEM (Simplified - KISS Principle)
+-- Uses OTClient's NATIVE storage._macros[name] for persistence
+-- OTClient already handles this automatically for NAMED macros!
 -- ═══════════════════════════════════════════════════════════════════════════
 
 local _registeredMacros = {}
 
--- Register a macro for automatic persistence
--- @param macroRef: the macro object from macro()
--- @param key: unique key like "autoMount" (maps to macros.autoMount)
--- @param onEnable: optional callback when macro is turned ON
+--[[
+  Register a macro for automatic state persistence.
+  
+  IMPORTANT: OTClient already persists state for NAMED macros automatically!
+  When you create: macro(500, "Auto Mount", function() ... end)
+  OTClient stores state in: storage._macros["Auto Mount"]
+  
+  This function:
+  1. Ensures storage._macros table exists
+  2. Explicitly initializes state to false if never set (prevents "start as true")
+  3. Applies saved state immediately
+  4. Tracks macro for programmatic access
+  
+  @param macroRef: the macro object from macro()
+  @param key: unique key (used for _registeredMacros lookup, not storage)
+  @param onEnable: optional callback when macro is turned ON
+]]--
 function BotDB.registerMacro(macroRef, key, onEnable)
   if not macroRef then return end
+  if not storage then return end
   
-  local path = "macros." .. key
-  local savedState = BotDB.get(path) == true
-  
-  -- Check legacy storage for migration
-  local legacyKey = key .. "Enabled"
-  if storage and storage[legacyKey] ~= nil then
-    savedState = storage[legacyKey] == true
-    BotDB.set(path, savedState)
-    storage[legacyKey] = nil
+  -- Ensure storage._macros exists (OTClient creates this automatically, but be safe)
+  if not storage._macros then
+    storage._macros = {}
   end
-
-  -- Special-case: persist manaTraining macro enabled state per-character (storage)
-  local usePerCharacterStorage = (key == "manaTraining")
-  if usePerCharacterStorage then
-    if storage and storage.manaTrainingEnabled ~= nil then
-      savedState = storage.manaTrainingEnabled == true
+  
+  -- Get the macro's display name (used by OTClient for persistence)
+  local macroName = macroRef.name
+  if not macroName or macroName == "" then
+    -- For unnamed macros, use the key
+    macroName = key
+  end
+  
+  -- CRITICAL: Initialize to false if never set (prevents "start as true" bug)
+  -- OTClient sets enabled=true for unnamed macros by default
+  if storage._macros[macroName] == nil then
+    storage._macros[macroName] = false
+  end
+  
+  -- Get the saved state
+  local savedState = (storage._macros[macroName] == true)
+  
+  -- Apply saved state - this uses OTClient's native setOn which updates storage._macros
+  if macroRef.setOn then
+    if savedState then
+      macroRef:setOn()
     else
-      -- fallback to BotDB stored value
-      savedState = BotDB.get(path) == true
+      macroRef:setOff()
     end
   end
   
-  local initialized = false
-  local originalSetOn = macroRef.setOn
-  local originalSetOff = macroRef.setOff
-  
-  -- Wrap setOn with state persistence (only if original exists)
-  if originalSetOn then
-    macroRef.setOn = function(val)
-      originalSetOn(val)
-      
-      if initialized then
-        local newState = (val ~= false)
-        if usePerCharacterStorage and storage then
-          storage.manaTrainingEnabled = newState
-        else
-          BotDB.set(path, newState)
-        end
-        if newState and onEnable then
-          schedule(50, onEnable)
-        end
-      end
-    end
+  -- Fire onEnable callback if restoring to ON state
+  if savedState and onEnable then
+    schedule(100, onEnable)
   end
   
-  -- Wrap setOff with state persistence (only if original exists)
-  if originalSetOff then
-    macroRef.setOff = function(val)
-      originalSetOff(val)
-      
-      if initialized then
-        if usePerCharacterStorage and storage then
-          storage.manaTrainingEnabled = false
-        else
-          BotDB.set(path, false)
-        end
-      end
-    end
-  end
-  
-  -- Set initial state
-  -- Set initialized immediately to avoid race condition
-  -- (user could toggle within 100ms of registration)
-  initialized = true
-  if originalSetOn then
-    originalSetOn(savedState)
-  end
+  -- Track registered macro for programmatic access
   _registeredMacros[key] = macroRef
 end
 
@@ -451,59 +435,76 @@ function BotDB.getMacro(key)
   return _registeredMacros[key]
 end
 
+-- Get current state of a registered macro
+function BotDB.getMacroState(key)
+  local macro = _registeredMacros[key]
+  if macro and macro.isOn then
+    return macro:isOn()
+  end
+  return false
+end
+
+-- Manually set macro state (for programmatic control)
+function BotDB.setMacroState(key, enabled)
+  local macro = _registeredMacros[key]
+  if not macro then return end
+  
+  if enabled then
+    if macro.setOn then macro:setOn() end
+  else
+    if macro.setOff then macro:setOff() end
+  end
+end
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- MIGRATION SYSTEM
--- Migrate from old storage systems
+-- One-time migration from legacy storage keys to new format
 -- ═══════════════════════════════════════════════════════════════════════════
 
 local function migrateOldData()
-  -- Only migrate if database is fresh (no existing data)
-  if g_resources.fileExists(dbFile) then return end
+  if not storage then return end
   
-  local migrated = {}
+  -- Ensure storage._macros exists
+  if not storage._macros then
+    storage._macros = {}
+  end
   
-  -- Migrate from global storage
-  if storage then
-    -- Migrate macro states
-    local macroKeys = {
-      "exchangeMoneyEnabled", "autoTradeMsgEnabled", "autoHasteEnabled",
-      "autoMountEnabled", "manaTrainingEnabled", "eatFoodEnabled",
-      "antiRsEnabled", "holdTargetEnabled", "exetaLowHpEnabled",
-      "exetaIfPlayerEnabled", "depotWithdrawEnabled", "quiverManagerEnabled",
-      "fishingEnabled"
-    }
-    
-    for _, legacyKey in ipairs(macroKeys) do
-      if storage[legacyKey] ~= nil then
-        local key = legacyKey:gsub("Enabled$", "")
-        migrated["macros." .. key] = storage[legacyKey] == true
-      end
-    end
-    
-    -- Migrate tool settings
-    if storage.manaTraining then
-      migrated["tools.manaTraining"] = storage.manaTraining
-    end
-    if storage.autoTradeMessage then
-      migrated["tools.autoTradeMessage"] = storage.autoTradeMessage
-    end
-    if storage.dropper then
-      migrated["dropper"] = storage.dropper
-    end
-    if storage.autoEquip then
-      migrated["autoEquip"] = storage.autoEquip
+  -- Migrate old *Enabled keys to storage._macros format
+  -- Maps: old key -> macro display name
+  local legacyMappings = {
+    exchangeMoneyEnabled = "Exchange Money",
+    autoTradeMsgEnabled = "Send message on trade",
+    autoHasteEnabled = "Auto Haste",
+    autoMountEnabled = "Auto Mount",
+    manaTrainingEnabled = "Mana Training",
+    eatFoodEnabled = "Eat Food",
+    fishingEnabled = "Fishing",
+    followPlayerEnabled = "Follow Player",
+  }
+  
+  for oldKey, macroName in pairs(legacyMappings) do
+    -- Only migrate if old key exists and macro state not already set
+    if storage[oldKey] ~= nil and storage._macros[macroName] == nil then
+      storage._macros[macroName] = (storage[oldKey] == true)
     end
   end
   
-  -- Apply migrations (check if migrated has any keys)
-  local hasMigrations = false
-  for _ in pairs(migrated) do
-    hasMigrations = true
-    break
-  end
+  -- Also migrate from macro_* format (previous implementation)
+  local macroKeyMappings = {
+    macro_exchangeMoney = "Exchange Money",
+    macro_autoTradeMsg = "Send message on trade",
+    macro_autoHaste = "Auto Haste",
+    macro_autoMount = "Auto Mount",
+    macro_manaTraining = "Mana Training",
+    macro_eatFood = "Eat Food",
+    macro_fishing = "Fishing",
+    macro_followPlayer = "Follow Player",
+  }
   
-  if hasMigrations then
-    BotDB.batch(migrated)
+  for oldKey, macroName in pairs(macroKeyMappings) do
+    if storage[oldKey] ~= nil and storage._macros[macroName] == nil then
+      storage._macros[macroName] = (storage[oldKey] == true)
+    end
   end
 end
 
@@ -511,37 +512,11 @@ end
 -- INITIALIZATION
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Load immediately on module load (synchronous)
+-- Load BotDB file immediately (for profile-level settings)
 load()
 
--- Run migration
+-- Run migration for macro states (per-character via storage)
 migrateOldData()
-
--- Migrate existing BotDB manaTraining macro state to per-character storage
--- This moves persistent macro-enabled state into `storage.manaTrainingEnabled`
--- so each character controls whether mana training is enabled independently.
-local function migrateManaTrainingMacroToStorage()
-  if not storage then return end
-  -- If per-character flag already set, nothing to do
-  if storage.manaTrainingEnabled ~= nil then return end
-  local botdbState = BotDB.get("macros.manaTraining")
-  if botdbState ~= nil then
-    storage.manaTrainingEnabled = botdbState and true or false
-    -- Optionally clear BotDB value to avoid duplication; keep it for safety
-    -- BotDB.set("macros.manaTraining", nil)
-  end
-end
-migrateManaTrainingMacroToStorage()
-
--- Ensure the manaTraining macro picks up per-character storage state if already registered.
-schedule(200, function()
-  if not storage then return end
-  local macroRef = BotDB.getMacro and BotDB.getMacro("manaTraining") or nil
-  if macroRef and macroRef.setOn and storage.manaTrainingEnabled ~= nil then
-    -- Apply per-character enabled state immediately
-    macroRef.setOn(storage.manaTrainingEnabled)
-  end
-end)
 
 -- Export globally
 nExBot = nExBot or {}
