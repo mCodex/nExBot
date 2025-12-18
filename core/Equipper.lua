@@ -1075,8 +1075,6 @@ local function rulePasses(rule, ctx)
     end
     -- fallback with debug info
     local mainOk = evalCondition(rule.mainCondition, rule.mainValue, ctx)
-    -- Debug: uncomment below to see condition evaluation
-    -- info("[EQ Debug] Rule '" .. (rule.name or "?") .. "' condition " .. tostring(rule.mainCondition) .. " value " .. tostring(rule.mainValue) .. " ctx.mp=" .. tostring(ctx.mp) .. " result=" .. tostring(mainOk))
     if rule.relation == "-" then return mainOk end
     local optOk = evalCondition(rule.optionalCondition, rule.optValue, ctx)
     if rule.relation == "and" then return mainOk and optOk end
