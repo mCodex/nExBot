@@ -65,29 +65,50 @@ local function deepClone(t)
     return copy
 end
 
+-- ============================================================================
+-- STORAGE & STATE (Per-Character with CharacterDB)
+-- ============================================================================
+
+-- Internal state (not persisted)
+local _configData = nil
+local _saveTimer = nil
+
+-- Schedule save to CharacterDB (debounced)
+local function scheduleSave()
+    if not CharacterDB or not CharacterDB.isReady or not CharacterDB.isReady() then return end
+    if not _configData then return end
+    if _saveTimer then removeEvent(_saveTimer) end
+    _saveTimer = schedule(300, function()
+        _saveTimer = nil
+        CharacterDB.setModule("containers", _configData)
+    end)
+end
+
 -- Initialize config from CharacterDB with migration from legacy storage
 local function initConfig()
-    local cfg
+    local cfg = {}
     
     -- Try to load from CharacterDB first
     if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
-        cfg = CharacterDB.getModule("containers")
+        cfg = CharacterDB.getModule("containers") or {}
         
-        -- Migration: if CharacterDB is empty but legacy storage has data
-        if (not cfg.containerList or #cfg.containerList == 0) and storage[panelName] then
+        -- Migration: if CharacterDB has never been initialized (no _migrated flag) 
+        -- and legacy storage has data, migrate once
+        if not cfg._migrated and storage[panelName] then
             local legacy = storage[panelName]
             if legacy.containerList and #legacy.containerList > 0 then
                 -- Migrate from legacy storage
                 cfg = deepClone(legacy)
-                CharacterDB.setModule("containers", cfg)
             end
+            -- Mark as migrated so we don't overwrite user deletions
+            cfg._migrated = true
+            CharacterDB.setModule("containers", cfg)
         end
     else
         -- Fallback to legacy storage (CharacterDB not ready yet)
-        if type(storage[panelName]) ~= "table" then
-            storage[panelName] = deepClone(DEFAULT_CONFIG)
+        if storage[panelName] and type(storage[panelName]) == "table" then
+            cfg = storage[panelName]
         end
-        cfg = storage[panelName]
     end
     
     -- Ensure all required fields exist (migration for old configs)
@@ -97,54 +118,47 @@ local function initConfig()
         end
     end
     
+    _configData = cfg
     return cfg
 end
 
 -- Create a proxy that auto-saves to CharacterDB on changes
-local function createConfigProxy(initialConfig)
-    local _data = initialConfig
-    local _saveTimer = nil
-    
-    local function scheduleSave()
-        if not CharacterDB or not CharacterDB.isReady or not CharacterDB.isReady() then return end
-        if _saveTimer then removeEvent(_saveTimer) end
-        _saveTimer = scheduleEvent(function()
-            _saveTimer = nil
-            CharacterDB.setModule("containers", _data)
-        end, 300)
-    end
-    
+local function createConfigProxy()
     return setmetatable({}, {
         __index = function(t, k)
-            return _data[k]
+            if not _configData then initConfig() end
+            return _configData[k]
         end,
         __newindex = function(t, k, v)
-            _data[k] = v
+            if not _configData then initConfig() end
+            _configData[k] = v
             scheduleSave()
         end,
-        __pairs = function(t) return pairs(_data) end,
-        __ipairs = function(t) return ipairs(_data) end,
+        __pairs = function(t) 
+            if not _configData then initConfig() end
+            return pairs(_configData) 
+        end,
+        __ipairs = function(t) 
+            if not _configData then initConfig() end
+            return ipairs(_configData) 
+        end,
     })
 end
 
-local config = createConfigProxy(initConfig())
+-- Initialize config now
+initConfig()
+local config = createConfigProxy()
 
 -- Force save function (call after modifying nested tables like containerList)
 local function saveConfig()
-    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
-        CharacterDB.setModule("containers", {
-            purse = config.purse,
-            autoMinimize = config.autoMinimize,
-            autoOpenOnLogin = config.autoOpenOnLogin,
-            sortEnabled = config.sortEnabled,
-            forceOpen = config.forceOpen,
-            renameEnabled = config.renameEnabled,
-            lootBag = config.lootBag,
-            containerList = config.containerList,
-            windowHeight = config.windowHeight
-        })
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() and _configData then
+        CharacterDB.setModule("containers", _configData)
     end
 end
+
+-- Forward declaration for UI sync functions
+local syncUIWithConfig
+local refreshContainerList
 
 UI.Separator()
 local containerUI = setupUI([[
@@ -251,6 +265,37 @@ containerUI.minimizeAll:setTooltip("Minimize all container windows")
 containerUI.maximizeAll:setTooltip("Maximize all container windows")
 containerUI.purseSwitch:setTooltip("Also open the purse when reopening")
 containerUI.autoMinSwitch:setTooltip("Automatically minimize containers after opening")
+
+-- Sync UI with config (call on init and when CharacterDB becomes ready)
+syncUIWithConfig = function()
+    if containerUI then
+        containerUI.openAll:setOn(config.autoOpenOnLogin == true)
+        containerUI.purseSwitch:setOn(config.purse == true)
+        containerUI.autoMinSwitch:setOn(config.autoMinimize ~= false)
+    end
+end
+
+-- Initial sync
+syncUIWithConfig()
+
+-- Delayed re-sync to ensure CharacterDB is ready
+-- (In case the player wasn't fully available at init time)
+schedule(500, function()
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        -- Reinitialize config from CharacterDB
+        initConfig()
+        syncUIWithConfig()
+        -- Refresh setup window if it exists
+        if setupWindow then
+            if refreshContainerList then refreshContainerList() end
+            -- Sync setup window checkboxes
+            setupWindow.sortEnabled:setChecked(config.sortEnabled == true)
+            setupWindow.forceOpen:setChecked(config.forceOpen == true)
+            setupWindow.renameEnabled:setChecked(config.renameEnabled == true)
+            setupWindow.lootBag:setChecked(config.lootBag == true)
+        end
+    end
+end)
 
 -- ============================================================================
 -- SETUP WINDOW UI DEFINITION
@@ -630,6 +675,7 @@ local function initSetupWindow()
     setupWindow.sortEnabled.onClick = function(widget)
         config.sortEnabled = not config.sortEnabled
         widget:setChecked(config.sortEnabled)
+        saveConfig()  -- Persist to CharacterDB
         -- Trigger immediate sorting when enabled
         if config.sortEnabled and sortingMacro then
             sortingMacro:setOn()
@@ -640,6 +686,7 @@ local function initSetupWindow()
     setupWindow.forceOpen.onClick = function(widget)
         config.forceOpen = not config.forceOpen
         widget:setChecked(config.forceOpen)
+        saveConfig()  -- Persist to CharacterDB
         -- Trigger immediate check when enabled
         if config.forceOpen and sortingMacro then
             sortingMacro:setOn()
@@ -650,12 +697,14 @@ local function initSetupWindow()
     setupWindow.renameEnabled.onClick = function(widget)
         config.renameEnabled = not config.renameEnabled
         widget:setChecked(config.renameEnabled)
+        saveConfig()  -- Persist to CharacterDB
     end
     
     setupWindow.lootBag:setChecked(config.lootBag)
     setupWindow.lootBag.onClick = function(widget)
         config.lootBag = not config.lootBag
         widget:setChecked(config.lootBag)
+        saveConfig()  -- Persist to CharacterDB
     end
     
     -- Add/Update container button
@@ -722,6 +771,15 @@ local function initSetupWindow()
     end, true, nil, setupWindow.itemsList)
     
     refreshContainerList()
+end
+
+-- Sync setup window checkboxes with current config
+local function syncSetupWindowCheckboxes()
+    if not setupWindow then return end
+    setupWindow.sortEnabled:setChecked(config.sortEnabled == true)
+    setupWindow.forceOpen:setChecked(config.forceOpen == true)
+    setupWindow.renameEnabled:setChecked(config.renameEnabled == true)
+    setupWindow.lootBag:setChecked(config.lootBag == true)
 end
 
 --[[
@@ -1125,10 +1183,10 @@ function reopenBackpacks()
 end
 
 -- Auto Open switch (toggle for auto-open on login)
-containerUI.openAll:setOn(config.autoOpenOnLogin)
 containerUI.openAll.onClick = function(widget)
     config.autoOpenOnLogin = not config.autoOpenOnLogin
     widget:setOn(config.autoOpenOnLogin)
+    saveConfig()  -- Persist to CharacterDB
 end
 
 -- Setup button - opens configuration window
@@ -1191,17 +1249,17 @@ containerUI.maximizeAll.onClick = function(widget)
 end
 
 -- Purse switch
-containerUI.purseSwitch:setOn(config.purse)
 containerUI.purseSwitch.onClick = function(widget)
     config.purse = not config.purse
     widget:setOn(config.purse)
+    saveConfig()  -- Persist to CharacterDB
 end
 
 -- Auto minimize switch
-containerUI.autoMinSwitch:setOn(config.autoMinimize ~= false)
 containerUI.autoMinSwitch.onClick = function(widget)
     config.autoMinimize = not config.autoMinimize
     widget:setOn(config.autoMinimize)
+    saveConfig()  -- Persist to CharacterDB
 end
 
 --[[

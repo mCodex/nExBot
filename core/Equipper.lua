@@ -79,8 +79,9 @@ local function initConfig()
     if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
         cfg = CharacterDB.getModule("equipper") or {}
         
-        -- Migration: if CharacterDB is empty but legacy storage has data
-        if (not cfg.rules or #cfg.rules == 0) and storage[panelName] and storage[panelName].rules then
+        -- Migration: if CharacterDB has never been initialized (no _migrated flag)
+        -- and legacy storage has data, migrate once
+        if not cfg._migrated and storage[panelName] and storage[panelName].rules then
             local legacy = storage[panelName]
             if legacy.rules and #legacy.rules > 0 then
                 -- Migrate from legacy storage
@@ -90,8 +91,10 @@ local function initConfig()
                     bosses = legacy.bosses or {},
                     activeRule = legacy.activeRule
                 }
-                CharacterDB.setModule("equipper", cfg)
             end
+            -- Mark as migrated so we don't overwrite user deletions
+            cfg._migrated = true
+            CharacterDB.setModule("equipper", cfg)
         end
     else
         -- Fallback to legacy storage (CharacterDB not ready yet)
