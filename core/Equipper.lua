@@ -49,89 +49,92 @@ local DEFAULT_CONFIG = {
     activeRule = nil
 }
 
+-- Internal state (not persisted)
+local _configData = nil
+local _saveTimer = nil
+
+-- Schedule save to CharacterDB (debounced)
+local function scheduleSave()
+    if not CharacterDB or not CharacterDB.isReady or not CharacterDB.isReady() then return end
+    if not _configData then return end
+    if _saveTimer then removeEvent(_saveTimer) end
+    _saveTimer = schedule(300, function()
+        _saveTimer = nil
+        CharacterDB.setModule("equipper", _configData)
+    end)
+end
+
+-- Force immediate save
+local function saveConfig()
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() and _configData then
+        CharacterDB.setModule("equipper", _configData)
+    end
+end
+
 -- Initialize config from CharacterDB with migration from legacy storage
 local function initConfig()
-    local config
+    local cfg = {}
     
     -- Try to load from CharacterDB first
     if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
-        config = CharacterDB.getModule("equipper")
+        cfg = CharacterDB.getModule("equipper") or {}
         
         -- Migration: if CharacterDB is empty but legacy storage has data
-        if (not config.rules or #config.rules == 0) and storage[panelName] and storage[panelName].rules then
+        if (not cfg.rules or #cfg.rules == 0) and storage[panelName] and storage[panelName].rules then
             local legacy = storage[panelName]
             if legacy.rules and #legacy.rules > 0 then
                 -- Migrate from legacy storage
-                config = {
-                    enabled = legacy.enabled or false,
+                cfg = {
+                    enabled = legacy.enabled == true,  -- Explicit boolean check
                     rules = legacy.rules or {},
                     bosses = legacy.bosses or {},
                     activeRule = legacy.activeRule
                 }
-                CharacterDB.setModule("equipper", config)
-                -- Note: We don't clear legacy storage to preserve data for other characters
+                CharacterDB.setModule("equipper", cfg)
             end
         end
     else
         -- Fallback to legacy storage (CharacterDB not ready yet)
-        if not storage[panelName] or not storage[panelName].bosses then
-            storage[panelName] = DEFAULT_CONFIG
+        if storage[panelName] then
+            cfg = storage[panelName]
         end
-        config = storage[panelName]
     end
     
-    -- Ensure all required fields exist
-    config.enabled = config.enabled or false
-    config.rules = config.rules or {}
-    config.bosses = config.bosses or {}
-    config.activeRule = config.activeRule or nil
+    -- Ensure all required fields exist with proper defaults
+    if cfg.enabled == nil then cfg.enabled = false end
+    if not cfg.rules then cfg.rules = {} end
+    if not cfg.bosses then cfg.bosses = {} end
     
-    return config
+    _configData = cfg
+    return cfg
 end
 
 -- Create a proxy that auto-saves to CharacterDB on changes
-local function createConfigProxy(initialConfig)
-    local _data = initialConfig
-    local _saveTimer = nil
-    
-    local function scheduleSave()
-        if not CharacterDB or not CharacterDB.isReady or not CharacterDB.isReady() then return end
-        if _saveTimer then removeEvent(_saveTimer) end
-        _saveTimer = scheduleEvent(function()
-            _saveTimer = nil
-            CharacterDB.setModule("equipper", _data)
-        end, 300)
-    end
-    
-    -- Expose data directly (for read operations)
-    -- Modifications should trigger save via explicit call
+local function createConfigProxy()
     return setmetatable({}, {
         __index = function(t, k)
-            return _data[k]
+            if not _configData then initConfig() end
+            return _configData[k]
         end,
         __newindex = function(t, k, v)
-            _data[k] = v
+            if not _configData then initConfig() end
+            _configData[k] = v
             scheduleSave()
         end,
-        -- Expose raw data for ipairs/pairs
-        __pairs = function(t) return pairs(_data) end,
-        __ipairs = function(t) return ipairs(_data) end,
+        __pairs = function(t) 
+            if not _configData then initConfig() end
+            return pairs(_configData) 
+        end,
+        __ipairs = function(t) 
+            if not _configData then initConfig() end
+            return ipairs(_configData) 
+        end,
     })
 end
 
-local config = createConfigProxy(initConfig())
-
--- Force save function (call after modifying nested tables like rules/bosses)
-local function saveConfig()
-    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
-        CharacterDB.setModule("equipper", {
-            enabled = config.enabled,
-            rules = config.rules,
-            bosses = config.bosses,
-            activeRule = config.activeRule
-        })
-    end
-end
+-- Initialize config now
+initConfig()
+local config = createConfigProxy()
 
 -- Non-blocking equipment manager state
 local EquipState = {
@@ -235,10 +238,35 @@ local function getEnabledRules()
     return out
 end
 
-ui.switch:setOn(config.enabled)
+-- ============================================================================
+-- UI SWITCH SYNC (Per-Character State)
+-- ============================================================================
+
+-- Sync switch state with config (call on init and when CharacterDB becomes ready)
+local function syncSwitchState()
+    if ui and ui.switch then
+        ui.switch:setOn(config.enabled == true)
+    end
+end
+
+-- Initial sync
+syncSwitchState()
+
+-- Delayed re-sync to ensure CharacterDB is ready
+-- (In case the player wasn't fully available at init time)
+schedule(500, function()
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        -- Reinitialize config from CharacterDB
+        initConfig()
+        syncSwitchState()
+        invalidateRulesCache()
+    end
+end)
+
 ui.switch.onClick = function(widget)
   config.enabled = not config.enabled
   widget:setOn(config.enabled)
+  saveConfig()  -- Force immediate save on toggle
 end
 
 local conditions = { -- always add new conditions at the bottom
