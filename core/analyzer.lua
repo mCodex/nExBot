@@ -19,6 +19,54 @@ local BOSSES = {
   {"Urmahlulu", "Urmahlullu"}
 }
 
+-- ============================================================================
+-- SESSION MANAGEMENT: Reset hunt data on bot restart/login
+-- 
+-- This fixes the issue of cached hunts from past sessions persisting.
+-- Session-specific data is cleared on each bot initialization.
+-- Persistent data (boss cooldowns, custom prices, settings) is preserved.
+-- ============================================================================
+
+-- Clear session-specific hunt data (runs on every bot load)
+local function resetHuntSession()
+  -- Clear session stats (these should NOT persist between logins)
+  storage.bestHit = 0
+  storage.bestHeal = 0
+  
+  -- Initialize analyzers if needed
+  storage.analyzers = storage.analyzers or {}
+  
+  -- Clear tracked loot (session-specific)
+  storage.analyzers.trackedLoot = {}
+  
+  -- Clean up expired boss cooldowns (older than 24 hours past their due time)
+  if storage.analyzers.trackedBoss then
+    local currentTime = os.time()
+    local expiredBosses = {}
+    
+    for bossName, dueTime in pairs(storage.analyzers.trackedBoss) do
+      -- If cooldown ended more than 24 hours ago, remove it
+      if currentTime - dueTime > 86400 then  -- 24 * 60 * 60 = 86400 seconds
+        expiredBosses[#expiredBosses + 1] = bossName
+      end
+    end
+    
+    for i = 1, #expiredBosses do
+      storage.analyzers.trackedBoss[expiredBosses[i]] = nil
+    end
+  end
+  
+  -- Note: We preserve these across sessions:
+  -- - storage.analyzers.trackedBoss (boss cooldowns still active)
+  -- - storage.analyzers.customPrices (user preferences)
+  -- - storage.analyzers.outfits (creature appearances, limited by LRU)
+  -- - storage.analyzers.lootChannel (user preference)
+  -- - storage.analyzers.rarityFrames (user preference)
+end
+
+-- Reset session on bot initialization
+resetHuntSession()
+
 nExBot.CaveBotData = nExBot.CaveBotData or {
   refills = 0,
   rounds = 0,
@@ -46,8 +94,8 @@ local second = {l="-", r="0"}
 local third = {l="-", r="0"}
 local fourth = {l="-", r="0"}
 local five = {l="-", r="0"}
-storage.bestHit = storage.bestHit or 0
-storage.bestHeal = storage.bestHeal or 0
+-- Note: bestHit/bestHeal are reset by resetHuntSession() above
+-- We don't restore old values here anymore
 local lootedItems = {}
 local useData = {}
 local usedItems ={}

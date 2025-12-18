@@ -110,6 +110,195 @@ UI.Separator()
 
 UI.Label("Tools:")
 
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- AUTO LEVITATE - Ultra-fast instant-cast for PVP
+-- Moving: auto-levitates when running into wall/floor
+-- Stopped: press direction key toward levitate point to turn & cast
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local autoLevitateEnabled = false
+local lastLevCast = 0
+local LEV_CD = 1950  -- Slightly under 2s for faster re-cast
+
+-- All 8 directions with offsets
+local DIRS = {
+  {dx = 0, dy = -1},   -- 1: North
+  {dx = 1, dy = 0},    -- 2: East
+  {dx = 0, dy = 1},    -- 3: South
+  {dx = -1, dy = 0},   -- 4: West
+  {dx = 1, dy = -1},   -- 5: NE
+  {dx = 1, dy = 1},    -- 6: SE
+  {dx = -1, dy = 1},   -- 7: SW
+  {dx = -1, dy = -1},  -- 8: NW
+}
+
+-- Player direction (0-7) to DIRS index (1-8)
+local DIR_TO_IDX = {[0]=1, [1]=2, [2]=3, [3]=4, [4]=5, [5]=6, [6]=7, [7]=8}
+
+-- Track which direction keys are currently held down
+local heldDirKeys = {}
+
+-- Map key names to direction indices
+local KEY_TO_DIR = {}
+KEY_TO_DIR["Up"] = 1
+KEY_TO_DIR["Numpad8"] = 1
+KEY_TO_DIR["W"] = 1
+KEY_TO_DIR["Right"] = 2
+KEY_TO_DIR["Numpad6"] = 2
+KEY_TO_DIR["D"] = 2
+KEY_TO_DIR["Down"] = 3
+KEY_TO_DIR["Numpad2"] = 3
+KEY_TO_DIR["S"] = 3
+KEY_TO_DIR["Left"] = 4
+KEY_TO_DIR["Numpad4"] = 4
+KEY_TO_DIR["A"] = 4
+KEY_TO_DIR["Numpad9"] = 5
+KEY_TO_DIR["Numpad3"] = 6
+KEY_TO_DIR["Numpad1"] = 7
+KEY_TO_DIR["Numpad7"] = 8
+
+-- Track key presses using bot callbacks
+onKeyDown(function(keys)
+  local dir = KEY_TO_DIR[keys]
+  if dir then
+    heldDirKeys[dir] = true
+  end
+end)
+
+onKeyUp(function(keys)
+  local dir = KEY_TO_DIR[keys]
+  if dir then
+    heldDirKeys[dir] = false
+  end
+end)
+
+-- Check levitate opportunity at adjacent position
+local function getLevType(px, py, pz, dx, dy)
+  local fx, fy = px + dx, py + dy
+  local tile = g_map.getTile({x = fx, y = fy, z = pz})
+  
+  -- Check UP: blocked tile + ground above
+  if tile then
+    local blocked = false
+    if tile.isWalkable then
+      blocked = not tile:isWalkable()
+    else
+      blocked = not tile:getGround()
+    end
+    if blocked and pz > 0 then
+      local above = g_map.getTile({x = fx, y = fy, z = pz - 1})
+      if above and above:getGround() then
+        return "up"
+      end
+    end
+  end
+  
+  -- Check DOWN: no ground in front + ground below
+  if not tile or not tile:getGround() then
+    if pz < 15 then
+      local below = g_map.getTile({x = fx, y = fy, z = pz + 1})
+      if below and below:getGround() then
+        return "down"
+      end
+    end
+  end
+  
+  return nil
+end
+
+-- Cast levitate spell
+local function castLev(levType)
+  if levType == "up" then
+    say("exani hur up")
+  else
+    say("exani hur down")
+  end
+  lastLevCast = now
+end
+
+-- Track movement state
+local lastPx, lastPy = 0, 0
+
+-- Ultra-fast 2ms polling
+macro(2, function()
+  if not autoLevitateEnabled then return end
+  
+  local p = player
+  if not p then return end
+  
+  -- Fast cooldown check first
+  if (now - lastLevCast) < LEV_CD then return end
+  
+  -- Mana check
+  if mana() < 50 then return end
+  
+  local pos = p:getPosition()
+  if not pos then return end
+  
+  local px, py, pz = pos.x, pos.y, pos.z
+  
+  -- Detect if player moved this tick
+  local justMoved = (px ~= lastPx or py ~= lastPy)
+  lastPx, lastPy = px, py
+  
+  -- PRIORITY 1: Check all directions for held key (works when trapped/stopped)
+  for dirIdx = 1, 8 do
+    if heldDirKeys[dirIdx] then
+      local d = DIRS[dirIdx]
+      local levType = getLevType(px, py, pz, d.dx, d.dy)
+      if levType then
+        -- Turn player to face the direction before casting
+        local newDir = dirIdx - 1  -- Convert back to 0-7
+        if turn then turn(newDir) end
+        castLev(levType)
+        return
+      end
+    end
+  end
+  
+  -- PRIORITY 2: If moving, also auto-levitate in facing direction
+  if justMoved then
+    local playerDir = p:getDirection()
+    local facingIdx = DIR_TO_IDX[playerDir] or 1
+    local fd = DIRS[facingIdx]
+    if fd then
+      local levType = getLevType(px, py, pz, fd.dx, fd.dy)
+      if levType then
+        castLev(levType)
+        return
+      end
+    end
+  end
+end)
+
+-- Single UI Toggle for Auto Levitate
+local autoLevitateUI = setupUI([[
+Panel
+  height: 19
+
+  BotSwitch
+    id: autoLevitateToggle
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    !text: tr('Auto Levitate')
+    tooltip: Automatically casts levitate when moving into walls or when pressing direction keys toward walls
+]])
+
+autoLevitateUI.autoLevitateToggle.onClick = function(widget)
+  autoLevitateEnabled = not autoLevitateEnabled
+  widget:setOn(autoLevitateEnabled)
+  BotDB.set("macros.autoLevitate", autoLevitateEnabled)
+end
+
+-- Restore state on load
+if BotDB.get("macros.autoLevitate") == true then
+  autoLevitateEnabled = true
+  autoLevitateUI.autoLevitateToggle:setOn(true)
+end
+
 -- Auto haste ---------------------------------------------------------------
 local HASTE_SPELLS = {
   [1]  = { spell = "utani hur",      mana = 60  }, -- Knight
@@ -370,15 +559,27 @@ Panel
     !text: tr('Fishing')
 ]])
 
--- Connect UI switch to macro state using BotDB
+-- Connect UI switch to macro state using CharacterDB (per-character)
 fishingUI.title.onClick = function(widget)
   fishingEnabled = not fishingEnabled
   widget:setOn(fishingEnabled)
-  BotDB.set("macros.fishing", fishingEnabled)
+  -- Save to CharacterDB if available, otherwise BotDB
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("macros.fishing", fishingEnabled)
+  else
+    BotDB.set("macros.fishing", fishingEnabled)
+  end
 end
 
--- Restore fishing state on load (synchronous)
-local savedFishingState = BotDB.get("macros.fishing") == true
+-- Restore fishing state on load (per-character via CharacterDB)
+local function loadFishingState()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    return CharacterDB.get("macros.fishing") == true
+  end
+  return BotDB.get("macros.fishing") == true
+end
+
+local savedFishingState = loadFishingState()
 if savedFishingState then
   fishingEnabled = true
   fishingUI.title:setOn(true)
@@ -388,13 +589,39 @@ UI.Separator()
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FOLLOW PLAYER - Use OTClient's native follow system (like CTRL + Right Click)
+-- Per-character settings via CharacterDB
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Follow Player settings (stored per-profile)
-local followPlayerConfig = getProfileSetting("followPlayer") or {
-  enabled = false,
-  playerName = ""
-}
+-- Load follow player settings from CharacterDB (per-character)
+local function loadFollowPlayerConfig()
+  local config = { enabled = false, playerName = "" }
+  
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    local charConfig = CharacterDB.get("tools.followPlayer")
+    if charConfig then
+      config.enabled = charConfig.enabled or false
+      config.playerName = charConfig.playerName or ""
+    end
+    
+    -- Migration from ProfileStorage
+    local profileConfig = getProfileSetting("followPlayer")
+    if profileConfig and profileConfig.playerName and config.playerName == "" then
+      config.playerName = profileConfig.playerName
+      CharacterDB.set("tools.followPlayer", config)
+    end
+  else
+    -- Fallback to ProfileStorage
+    local profileConfig = getProfileSetting("followPlayer")
+    if profileConfig then
+      config.enabled = profileConfig.enabled or false
+      config.playerName = profileConfig.playerName or ""
+    end
+  end
+  
+  return config
+end
+
+local followPlayerConfig = loadFollowPlayerConfig()
 
 -- Forward decl for UI switch so helper can sync it
 local followPlayerToggle = nil
@@ -402,10 +629,22 @@ local followPlayerToggle = nil
 local lastFollowCheck = 0
 local FOLLOW_CHECK_COOLDOWN = 500  -- Check every 500ms
 
+-- Helper: save follow player settings
+local function saveFollowPlayerConfig()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("tools.followPlayer", {
+      enabled = followPlayerConfig.enabled,
+      playerName = followPlayerConfig.playerName
+    })
+  else
+    setProfileSetting("followPlayer", followPlayerConfig)
+  end
+end
+
 -- Helper: sync state, UI, and side effects
 local function setFollowEnabled(state)
   followPlayerConfig.enabled = state
-  setProfileSetting("followPlayer", followPlayerConfig)
+  saveFollowPlayerConfig()
   if followPlayerToggle then
     followPlayerToggle:setOn(state)
   end
@@ -453,7 +692,7 @@ UI.Label("Follow Player:")
 
 local followPlayerNameEdit = UI.TextEdit(followPlayerConfig.playerName, function(widget, text)
   followPlayerConfig.playerName = text:trim()
-  setProfileSetting("followPlayer", followPlayerConfig)
+  saveFollowPlayerConfig()
 end)
 
 local followToggleUI = setupUI([[
@@ -476,24 +715,47 @@ followPlayerToggle.onClick = function(widget)
 end
 
 UI.Separator()
-local profileManaTraining = getProfileSetting("manaTraining") or { spell = "exura", minManaPercent = 80 }
 
--- Migrate legacy profile-level custom spell to per-character storage
-if storage and not storage.manaTrainingSpell and profileManaTraining.spell and profileManaTraining.spell:lower() ~= "exura" then
-  storage.manaTrainingSpell = profileManaTraining.spell
-  -- reset profile default to avoid affecting other characters
-  profileManaTraining.spell = "exura"
-  setProfileSetting("manaTraining", profileManaTraining)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- MANA TRAINING - Per-character settings via CharacterDB
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Load mana training settings from CharacterDB (per-character) with fallbacks
+local function loadManaTrainingSettings()
+  local settings = { spell = "exura", minManaPercent = 80 }
+  
+  -- Try CharacterDB first (per-character)
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    local charSettings = CharacterDB.get("tools.manaTraining")
+    if charSettings then
+      settings.spell = charSettings.spell or "exura"
+      settings.minManaPercent = charSettings.minManaPercent or 80
+    end
+    
+    -- Migration from legacy storage
+    if storage and storage.manaTrainingSpell and settings.spell == "exura" then
+      settings.spell = storage.manaTrainingSpell
+      CharacterDB.set("tools.manaTraining", settings)
+    end
+  else
+    -- Fallback to legacy storage
+    if storage and storage.manaTrainingSpell then
+      settings.spell = storage.manaTrainingSpell
+    end
+    -- Profile-level fallback
+    local profileSettings = getProfileSetting("manaTraining")
+    if profileSettings then
+      if not storage or not storage.manaTrainingSpell then
+        settings.spell = profileSettings.spell or "exura"
+      end
+      settings.minManaPercent = profileSettings.minManaPercent or 80
+    end
+  end
+  
+  return settings
 end
 
--- Build runtime manaTraining: profile defaults + per-character override for spell
-local manaTraining = {
-  spell = profileManaTraining.spell or "exura",
-  minManaPercent = profileManaTraining.minManaPercent or 80
-}
-if storage and storage.manaTrainingSpell then
-  manaTraining.spell = storage.manaTrainingSpell
-end
+local manaTraining = loadManaTrainingSettings()
 
 local function sanitizeSpell(text)
   text = text or ""
@@ -512,13 +774,25 @@ local function getManaPercent()
   return (current / maximum) * 100
 end
 
+-- Helper to save mana training settings to CharacterDB
+local function saveManaTrainingSettings()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("tools.manaTraining", {
+      spell = manaTraining.spell,
+      minManaPercent = manaTraining.minManaPercent
+    })
+  else
+    -- Fallback to legacy storage
+    if storage then storage.manaTrainingSpell = manaTraining.spell end
+  end
+end
+
 UI.Label("Mana Training:")
 
 UI.Label("Spell to cast (default: exura):")
 UI.TextEdit(manaTraining.spell or "exura", function(widget, text)
   manaTraining.spell = sanitizeSpell(text)
-  -- Save player-specific spell to character storage (do NOT overwrite profile default)
-  if storage then storage.manaTrainingSpell = manaTraining.spell end
+  saveManaTrainingSettings()
 end)
 
 UI.Label("Min mana % to train (10-100):")
@@ -528,7 +802,7 @@ UI.TextEdit(tostring(manaTraining.minManaPercent or 80), function(widget, text)
   if value < 10 then value = 10 end
   if value > 100 then value = 100 end
   manaTraining.minManaPercent = value
-  setProfileSetting("manaTraining", manaTraining)
+  saveManaTrainingSettings()
 end)
 
 -- Mana Training macro with built-in toggle (like Hold Target)
@@ -549,195 +823,5 @@ local manaTrainingMacro = macro(500, "Mana Training", function()
   lastTrainCast = now
 end)
 BotDB.registerMacro(manaTrainingMacro, "manaTraining")
-
-UI.Separator()
-
--- ═══════════════════════════════════════════════════════════════════════════
--- AUTO LEVITATE - Ultra-fast instant-cast for PVP
--- Moving: auto-levitates when running into wall/floor
--- Stopped: press direction key toward levitate point to turn & cast
--- ═══════════════════════════════════════════════════════════════════════════
-
-local autoLevitateEnabled = false
-local lastLevCast = 0
-local LEV_CD = 1950  -- Slightly under 2s for faster re-cast
-
--- All 8 directions with offsets
-local DIRS = {
-  {dx = 0, dy = -1},   -- 1: North
-  {dx = 1, dy = 0},    -- 2: East
-  {dx = 0, dy = 1},    -- 3: South
-  {dx = -1, dy = 0},   -- 4: West
-  {dx = 1, dy = -1},   -- 5: NE
-  {dx = 1, dy = 1},    -- 6: SE
-  {dx = -1, dy = 1},   -- 7: SW
-  {dx = -1, dy = -1},  -- 8: NW
-}
-
--- Player direction (0-7) to DIRS index (1-8)
-local DIR_TO_IDX = {[0]=1, [1]=2, [2]=3, [3]=4, [4]=5, [5]=6, [6]=7, [7]=8}
-
--- Track which direction keys are currently held down
-local heldDirKeys = {}
-
--- Map key names to direction indices
-local KEY_TO_DIR = {}
-KEY_TO_DIR["Up"] = 1
-KEY_TO_DIR["Numpad8"] = 1
-KEY_TO_DIR["W"] = 1
-KEY_TO_DIR["Right"] = 2
-KEY_TO_DIR["Numpad6"] = 2
-KEY_TO_DIR["D"] = 2
-KEY_TO_DIR["Down"] = 3
-KEY_TO_DIR["Numpad2"] = 3
-KEY_TO_DIR["S"] = 3
-KEY_TO_DIR["Left"] = 4
-KEY_TO_DIR["Numpad4"] = 4
-KEY_TO_DIR["A"] = 4
-KEY_TO_DIR["Numpad9"] = 5
-KEY_TO_DIR["Numpad3"] = 6
-KEY_TO_DIR["Numpad1"] = 7
-KEY_TO_DIR["Numpad7"] = 8
-
--- Track key presses using bot callbacks
-onKeyDown(function(keys)
-  local dir = KEY_TO_DIR[keys]
-  if dir then
-    heldDirKeys[dir] = true
-  end
-end)
-
-onKeyUp(function(keys)
-  local dir = KEY_TO_DIR[keys]
-  if dir then
-    heldDirKeys[dir] = false
-  end
-end)
-
--- Check levitate opportunity at adjacent position
-local function getLevType(px, py, pz, dx, dy)
-  local fx, fy = px + dx, py + dy
-  local tile = g_map.getTile({x = fx, y = fy, z = pz})
-  
-  -- Check UP: blocked tile + ground above
-  if tile then
-    local blocked = false
-    if tile.isWalkable then
-      blocked = not tile:isWalkable()
-    else
-      blocked = not tile:getGround()
-    end
-    if blocked and pz > 0 then
-      local above = g_map.getTile({x = fx, y = fy, z = pz - 1})
-      if above and above:getGround() then
-        return "up"
-      end
-    end
-  end
-  
-  -- Check DOWN: no ground in front + ground below
-  if not tile or not tile:getGround() then
-    if pz < 15 then
-      local below = g_map.getTile({x = fx, y = fy, z = pz + 1})
-      if below and below:getGround() then
-        return "down"
-      end
-    end
-  end
-  
-  return nil
-end
-
--- Cast levitate spell
-local function castLev(levType)
-  if levType == "up" then
-    say("exani hur up")
-  else
-    say("exani hur down")
-  end
-  lastLevCast = now
-end
-
--- Track movement state
-local lastPx, lastPy = 0, 0
-
--- Ultra-fast 2ms polling
-macro(2, function()
-  if not autoLevitateEnabled then return end
-  
-  local p = player
-  if not p then return end
-  
-  -- Fast cooldown check first
-  if (now - lastLevCast) < LEV_CD then return end
-  
-  -- Mana check
-  if mana() < 50 then return end
-  
-  local pos = p:getPosition()
-  if not pos then return end
-  
-  local px, py, pz = pos.x, pos.y, pos.z
-  
-  -- Detect if player moved this tick
-  local justMoved = (px ~= lastPx or py ~= lastPy)
-  lastPx, lastPy = px, py
-  
-  -- PRIORITY 1: Check all directions for held key (works when trapped/stopped)
-  for dirIdx = 1, 8 do
-    if heldDirKeys[dirIdx] then
-      local d = DIRS[dirIdx]
-      local levType = getLevType(px, py, pz, d.dx, d.dy)
-      if levType then
-        -- Turn player to face the direction before casting
-        local newDir = dirIdx - 1  -- Convert back to 0-7
-        if turn then turn(newDir) end
-        castLev(levType)
-        return
-      end
-    end
-  end
-  
-  -- PRIORITY 2: If moving, also auto-levitate in facing direction
-  if justMoved then
-    local playerDir = p:getDirection()
-    local facingIdx = DIR_TO_IDX[playerDir] or 1
-    local fd = DIRS[facingIdx]
-    if fd then
-      local levType = getLevType(px, py, pz, fd.dx, fd.dy)
-      if levType then
-        castLev(levType)
-        return
-      end
-    end
-  end
-end)
-
--- Single UI Toggle for Auto Levitate
-local autoLevitateUI = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: autoLevitateToggle
-    anchors.top: parent.top
-    anchors.left: parent.left
-    anchors.right: parent.right
-    text-align: center
-    !text: tr('Auto Levitate')
-    tooltip: Automatically casts levitate when moving into walls or when pressing direction keys toward walls
-]])
-
-autoLevitateUI.autoLevitateToggle.onClick = function(widget)
-  autoLevitateEnabled = not autoLevitateEnabled
-  widget:setOn(autoLevitateEnabled)
-  BotDB.set("macros.autoLevitate", autoLevitateEnabled)
-end
-
--- Restore state on load
-if BotDB.get("macros.autoLevitate") == true then
-  autoLevitateEnabled = true
-  autoLevitateUI.autoLevitateToggle:setOn(true)
-end
 
 UI.Separator()

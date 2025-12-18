@@ -186,6 +186,7 @@ loadCategory("core", {
   "new_cavebot_lib",  -- CaveBot library
   "configs",          -- Configuration system
   "bot_database",     -- Unified database (BotDB) - load AFTER configs
+  "character_db",     -- Per-character database (CharacterDB) - for multi-client
 })
 
 -- 2. Architecture Layer (Event system, state management)
@@ -226,6 +227,7 @@ loadCategory("tools", {
   "eat_food",       -- Auto eat food
   "equip",          -- Equipment utilities
   "exeta",          -- Exeta res handler
+  "outfit_cloner",  -- Outfit cloning via right-click menu
 })
 
 -- 5. Analytics and UI (Can be loaded last)

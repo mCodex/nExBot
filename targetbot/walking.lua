@@ -91,6 +91,14 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
   maxDist = _maxDist
   params = _params or {}
   
+  -- Cancel native follow when using custom pathfinding (prevents conflicts)
+  if g_game.cancelFollow and g_game.getFollowingCreature then
+    local currentFollow = g_game.getFollowingCreature()
+    if currentFollow then
+      g_game.cancelFollow()
+    end
+  end
+  
   -- Invalidate cache if destination changed
   local newKey = getCacheKey(_dest)
   if newKey ~= WalkCache.destKey then

@@ -83,8 +83,6 @@ function Equipper.computeAction(rule, ctx, inventoryIndex, helpers)
   local slotHasItemId = helpers.slotHasItemId
   local isUnsafeToUnequip = helpers.isUnsafeToUnequip
 
-  -- debug logs removed for clean runtime
-
   -- unequip pass
   for _, slotPlan in ipairs(rule.slots) do
     if slotPlan.mode == "unequip" then
@@ -103,7 +101,6 @@ function Equipper.computeAction(rule, ctx, inventoryIndex, helpers)
   for _, slotPlan in ipairs(rule.slots) do
     if slotPlan.mode == "equip" and slotPlan.itemId then
       local hasItemId = slotHasItemId(slotPlan.slotIdx, slotPlan.itemId)
-      -- silent in service
       if not hasItemId then
         -- Check inventory index first, fall back to g_game.findItemInContainers (closed containers)
         local hasItem = false
@@ -112,7 +109,9 @@ function Equipper.computeAction(rule, ctx, inventoryIndex, helpers)
         else
           if g_game and g_game.findItemInContainers then
             local ok, found = pcall(g_game.findItemInContainers, slotPlan.itemId)
-            if ok and found then hasItem = true end
+            if ok and found then 
+              hasItem = true 
+            end
           end
         end
         if hasItem then

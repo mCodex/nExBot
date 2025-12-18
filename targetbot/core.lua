@@ -591,6 +591,105 @@ function TargetCore.Metrics.getCacheHitRate()
 end
 
 -- ============================================================================
+-- OTCLIENT NATIVE API HELPERS
+-- 
+-- Wrappers for OTClient's game API to handle version differences and
+-- provide caching to reduce unnecessary API calls
+-- ============================================================================
+
+TargetCore.Native = {
+  -- Cached chase mode to avoid redundant setChaseMode calls
+  lastChaseMode = nil,
+  lastFollowCreature = nil,
+  
+  -- Chase mode constants (OTClient uses these)
+  CHASE_MODE = {
+    STAND = 0,        -- Don't chase (DontChase)
+    CHASE = 1         -- Chase opponent (ChaseOpponent)
+  }
+}
+
+-- Set chase mode with caching (avoids redundant packets)
+-- @param mode: 0 = Stand, 1 = Chase
+-- @return boolean: true if mode was changed
+function TargetCore.Native.setChaseMode(mode)
+  if TargetCore.Native.lastChaseMode == mode then
+    return false  -- No change needed
+  end
+  
+  if g_game.setChaseMode then
+    g_game.setChaseMode(mode)
+    TargetCore.Native.lastChaseMode = mode
+    return true
+  end
+  return false
+end
+
+-- Get current chase mode (cached)
+function TargetCore.Native.getChaseMode()
+  if g_game.getChaseMode then
+    TargetCore.Native.lastChaseMode = g_game.getChaseMode()
+  end
+  return TargetCore.Native.lastChaseMode or 0
+end
+
+-- Follow creature with validation
+-- @param creature: creature to follow
+-- @return boolean: true if follow was initiated
+function TargetCore.Native.followCreature(creature)
+  if not creature or creature:isDead() then
+    return false
+  end
+  
+  -- Check if already following this creature
+  local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+  if currentFollow and currentFollow:getId() == creature:getId() then
+    return true  -- Already following
+  end
+  
+  -- Set chase mode to chase opponent for better pathfinding
+  TargetCore.Native.setChaseMode(TargetCore.Native.CHASE_MODE.CHASE)
+  
+  -- Use g_game.follow if available, otherwise fall back to bot's follow()
+  if g_game.follow then
+    g_game.follow(creature)
+  elseif follow then
+    follow(creature)
+  else
+    return false
+  end
+  
+  TargetCore.Native.lastFollowCreature = creature:getId()
+  return true
+end
+
+-- Cancel following with state cleanup
+function TargetCore.Native.cancelFollow()
+  if g_game.cancelFollow then
+    g_game.cancelFollow()
+  end
+  TargetCore.Native.lastFollowCreature = nil
+end
+
+-- Check if currently following a creature
+-- @return creature or nil
+function TargetCore.Native.getFollowingCreature()
+  if g_game.getFollowingCreature then
+    return g_game.getFollowingCreature()
+  end
+  return nil
+end
+
+-- Check if following a specific creature
+-- @param creature: creature to check
+-- @return boolean
+function TargetCore.Native.isFollowing(creature)
+  if not creature then return false end
+  local following = TargetCore.Native.getFollowingCreature()
+  return following and following:getId() == creature:getId()
+end
+
+-- ============================================================================
 -- INITIALIZATION
 -- ============================================================================
 
