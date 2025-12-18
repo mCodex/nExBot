@@ -226,6 +226,7 @@ loadCategory("tools", {
   "eat_food",       -- Auto eat food
   "equip",          -- Equipment utilities
   "exeta",          -- Exeta res handler
+  "outfit_cloner",  -- Outfit cloning via right-click menu
 })
 
 -- 5. Analytics and UI (Can be loaded last)

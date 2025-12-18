@@ -225,13 +225,13 @@ ContainerEntry < Label
     !text: tr('X')
     anchors.right: parent.right
     anchors.verticalCenter: parent.verticalCenter
-    margin-right: 3
+    margin-right: 20
     width: 16
     height: 16
 
 ContainerSetupWindow < MainWindow
   !text: tr('Container Setup')
-  size: 480 200
+  size: 550 220
   @onEscape: self:hide()
 
   TextList
@@ -239,7 +239,7 @@ ContainerSetupWindow < MainWindow
     anchors.left: parent.left
     anchors.top: parent.top
     anchors.bottom: separator.top
-    width: 180
+    width: 210
     margin-bottom: 8
     margin-top: 3
     margin-left: 3
@@ -266,9 +266,9 @@ ContainerSetupWindow < MainWindow
     id: lblName
     anchors.left: sep.right
     anchors.top: sep.top
-    width: 55
+    width: 65
     text: Name:
-    margin-left: 8
+    margin-left: 10
     margin-top: 3
     font: verdana-11px-rounded
 
@@ -277,14 +277,14 @@ ContainerSetupWindow < MainWindow
     anchors.left: lblName.right
     anchors.top: sep.top
     anchors.right: parent.right
-    margin-right: 5
+    margin-right: 8
     font: verdana-11px-rounded
 
   Label
     id: lblContainer
     anchors.left: lblName.left
     anchors.top: containerName.bottom
-    width: 55
+    width: 65
     text: Container:
     margin-top: 8
     font: verdana-11px-rounded
@@ -299,9 +299,9 @@ ContainerSetupWindow < MainWindow
     id: addContainer
     anchors.left: containerId.right
     anchors.top: containerId.top
-    margin-left: 5
-    text: Add
-    width: 50
+    margin-left: 8
+    text: Add/Update
+    width: 90
     height: 20
     font: verdana-11px-rounded
 
@@ -309,7 +309,7 @@ ContainerSetupWindow < MainWindow
     id: lblItems
     anchors.left: lblName.left
     anchors.top: containerId.bottom
-    width: 55
+    width: 65
     text: Items:
     margin-top: 8
     font: verdana-11px-rounded
@@ -320,7 +320,7 @@ ContainerSetupWindow < MainWindow
     anchors.top: lblItems.top
     anchors.right: parent.right
     anchors.bottom: separator.top
-    margin-right: 5
+    margin-right: 8
     margin-bottom: 8
     margin-top: -3
 
@@ -337,9 +337,9 @@ ContainerSetupWindow < MainWindow
     anchors.bottom: parent.bottom
     text: Sort Items
     tooltip: Automatically move items to designated containers
-    width: 70
+    width: 80
     height: 15
-    margin-left: 5
+    margin-left: 8
     font: verdana-11px-rounded
 
   CheckBox
@@ -348,9 +348,9 @@ ContainerSetupWindow < MainWindow
     anchors.bottom: parent.bottom
     text: Keep Open
     tooltip: Force containers to stay open
-    width: 75
+    width: 85
     height: 15
-    margin-left: 8
+    margin-left: 10
     font: verdana-11px-rounded
 
   CheckBox
@@ -359,9 +359,9 @@ ContainerSetupWindow < MainWindow
     anchors.bottom: parent.bottom
     text: Rename
     tooltip: Rename container windows with custom names
-    width: 65
+    width: 70
     height: 15
-    margin-left: 8
+    margin-left: 10
     font: verdana-11px-rounded
 
   CheckBox
@@ -370,9 +370,9 @@ ContainerSetupWindow < MainWindow
     anchors.bottom: parent.bottom
     text: Loot Bag
     tooltip: Also manage loot bag
-    width: 65
+    width: 75
     height: 15
-    margin-left: 8
+    margin-left: 10
     font: verdana-11px-rounded
 
   Button
@@ -461,24 +461,60 @@ local function refreshContainerList()
             list:focusChild(label)
         end
         
-        -- Toggle enabled
+        -- Toggle enabled - immediately trigger sorting when activated
         label.enabled.onClick = function()
             entry.enabled = not entry.enabled
             label.enabled:setChecked(entry.enabled)
+            -- Trigger immediate processing when rule is enabled
+            if entry.enabled and sortingMacro and (config.sortEnabled or config.forceOpen) then
+                sortingMacro:setOn()
+            end
         end
         
-        -- Toggle minimize
+        -- Toggle minimize - apply immediately to open containers
         label.minimize.onClick = function()
             entry.minimize = not entry.minimize
             label.minimize:setColor(entry.minimize and '#00FF00' or '#FF6666')
             label.minimize:setTooltip(entry.minimize and 'Opens Minimized' or 'Opens Normal')
+            -- Apply minimize state to currently open containers of this type
+            if entry.enabled and entry.itemId then
+                for _, container in pairs(g_game.getContainers()) do
+                    local containerItem = container:getContainerItem()
+                    if containerItem and containerItem:getId() == entry.itemId then
+                        local window = getContainerWindow(container:getId())
+                        if window then
+                            if entry.minimize then
+                                if window.minimize then window:minimize()
+                                elseif window.setOn then window:setOn(false) end
+                            else
+                                if window.maximize then window:maximize()
+                                elseif window.setOn then window:setOn(true) end
+                            end
+                        end
+                    end
+                end
+            end
         end
         
-        -- Toggle nested
+        -- Toggle nested - trigger container opening if enabled
         label.nested.onClick = function()
             entry.openNested = not entry.openNested
             label.nested:setColor(entry.openNested and '#00FF00' or '#FF6666')
             label.nested:setTooltip(entry.openNested and 'Opens Nested' or 'No Nested')
+            -- Trigger nested container opening if enabled
+            if entry.enabled and entry.openNested and entry.itemId then
+                for _, container in pairs(g_game.getContainers()) do
+                    local containerItem = container:getContainerItem()
+                    if containerItem and containerItem:getId() == entry.itemId then
+                        for _, item in ipairs(container:getItems()) do
+                            if item:isContainer() and item:getId() == entry.itemId then
+                                g_game.open(item)
+                                break
+                            end
+                        end
+                    end
+                end
+            end
         end
         
         -- Remove entry
@@ -643,11 +679,38 @@ local WAIT_FOR_OPEN = 400           -- ms to wait for container to appear
 -- ============================================================================
 
 -- Pure function: Get container window from game_containers module
+-- Uses multiple fallback methods for better compatibility
 local function getContainerWindow(containerId)
+    -- Method 1: Try the standard game_containers module
     local gameContainers = modules.game_containers
-    if gameContainers and gameContainers.getContainerWindow then
-        return gameContainers.getContainerWindow(containerId)
+    if gameContainers then
+        -- Try getContainerWindow function
+        if gameContainers.getContainerWindow then
+            local window = gameContainers.getContainerWindow(containerId)
+            if window then return window end
+        end
+        
+        -- Try containerWindows table directly (some OTClient versions)
+        if gameContainers.containerWindows and gameContainers.containerWindows[containerId] then
+            return gameContainers.containerWindows[containerId]
+        end
     end
+    
+    -- Method 2: Try finding by widget ID in the root
+    local rootWidget = g_ui.getRootWidget()
+    if rootWidget then
+        -- Try common container window naming patterns
+        local patterns = {
+            "containerWindow" .. containerId,
+            "container" .. containerId,
+            "containerMiniWindow" .. containerId
+        }
+        for _, pattern in ipairs(patterns) do
+            local window = rootWidget:recursiveGetChildById(pattern)
+            if window then return window end
+        end
+    end
+    
     return nil
 end
 
@@ -688,8 +751,14 @@ local function minimizeContainer(container)
     if not container then return end
     
     local window = getContainerWindow(container:getId())
-    if window and window.minimize then
-        window:minimize()
+    if window then
+        if window.minimize then
+            window:minimize()
+        elseif window.setOn then
+            window:setOn(false)
+        elseif window.minimizeButton then
+            window.minimizeButton:onClick()
+        end
     end
 end
 
@@ -698,8 +767,14 @@ local function maximizeContainer(container)
     if not container then return end
     
     local window = getContainerWindow(container:getId())
-    if window and window.maximize then
-        window:maximize()
+    if window then
+        if window.maximize then
+            window:maximize()
+        elseif window.setOn then
+            window:setOn(true)
+        elseif window.minimizeButton then
+            window.minimizeButton:onClick()
+        end
     end
 end
 
@@ -842,8 +917,14 @@ onContainerOpen(function(container, previousContainer)
     if entry and entry.minimize then
         schedule(50, function()
             local window = getContainerWindow(container:getId())
-            if window and window.minimize then
-                window:minimize()
+            if window then
+                if window.minimize then
+                    window:minimize()
+                elseif window.setOn then
+                    window:setOn(false)
+                elseif window.minimizeButton then
+                    window.minimizeButton:onClick()
+                end
             end
         end)
     elseif isProcessing and config.autoMinimize then
@@ -994,19 +1075,39 @@ containerUI.closeAll.onClick = function(widget)
 end
 
 containerUI.minimizeAll.onClick = function(widget)
-    for _, container in pairs(g_game.getContainers()) do
+    local containers = g_game.getContainers()
+    for _, container in pairs(containers) do
         local window = getContainerWindow(container:getId())
-        if window and window.minimize then
-            window:minimize()
+        if window then
+            -- Try minimize method
+            if window.minimize then
+                window:minimize()
+            -- Fallback: try setOn method (some MiniWindows use this)
+            elseif window.setOn then
+                window:setOn(false)
+            -- Fallback: try clicking minimize button if it exists
+            elseif window.minimizeButton then
+                window.minimizeButton:onClick()
+            end
         end
     end
 end
 
 containerUI.maximizeAll.onClick = function(widget)
-    for _, container in pairs(g_game.getContainers()) do
+    local containers = g_game.getContainers()
+    for _, container in pairs(containers) do
         local window = getContainerWindow(container:getId())
-        if window and window.maximize then
-            window:maximize()
+        if window then
+            -- Try maximize method
+            if window.maximize then
+                window:maximize()
+            -- Fallback: try setOn method (some MiniWindows use this)
+            elseif window.setOn then
+                window:setOn(true)
+            -- Fallback: try clicking minimize button if it exists (toggle behavior)
+            elseif window.minimizeButton then
+                window.minimizeButton:onClick()
+            end
         end
     end
 end

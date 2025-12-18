@@ -1,7 +1,14 @@
 local panelName = "EquipperPanel"
 local HealContext = dofile("/core/heal_context.lua")
-local EquipperService = dofile("/core/equipper_service.lua")
--- EquipperService loaded if available; keep silent on load
+
+-- Load EquipperService with error handling
+local EquipperService = nil
+local serviceLoadOk, serviceResult = pcall(function()
+    return dofile("/core/equipper_service.lua")
+end)
+if serviceLoadOk and serviceResult then
+    EquipperService = serviceResult
+end
 
 -- ============================================================================
 -- UI SETUP
@@ -47,16 +54,22 @@ local config = storage[panelName]
 
 -- Non-blocking equipment manager state
 local EquipState = {
-  lastEquipAction = 0,
-    EQUIP_COOLDOWN = 250,    -- ms between equip actions (align with macro interval)
-  missingItem = false,
-  lastRule = nil,
-  correctEq = false,
-  needsEquipCheck = true,
-  rulesCache = nil,        -- Cached rules for macro iteration
-    rulesCacheDirty = true,  -- Flag to rebuild cache
+    lastEquipAction = 0,
+    EQUIP_COOLDOWN = 600,       -- ms between equip actions (safe value)
+    CHECK_INTERVAL = 500,       -- ms between condition checks (throttle)
+    lastCheckTime = 0,          -- Last time we ran a full check
+    pendingCheck = false,       -- Flag for debounced check
+    missingItem = false,
+    lastRule = nil,
+    correctEq = false,
+    needsEquipCheck = true,
+    rulesCache = nil,           -- Cached rules for macro iteration
+    rulesCacheDirty = true,     -- Flag to rebuild cache
     normalizedRules = nil,
-    normalizedDirty = true
+    normalizedDirty = true,
+    inventoryCache = nil,       -- Cached inventory index
+    inventoryCacheTime = 0,     -- When inventory was last cached
+    INVENTORY_CACHE_TTL = 300,  -- ms before inventory cache expires
 }
 
 -- ============================================================================
@@ -941,8 +954,10 @@ local function rulePasses(rule, ctx)
     if EquipperService and EquipperService.rulePasses then
         return EquipperService.rulePasses(rule, ctx)
     end
-    -- fallback
+    -- fallback with debug info
     local mainOk = evalCondition(rule.mainCondition, rule.mainValue, ctx)
+    -- Debug: uncomment below to see condition evaluation
+    -- info("[EQ Debug] Rule '" .. (rule.name or "?") .. "' condition " .. tostring(rule.mainCondition) .. " value " .. tostring(rule.mainValue) .. " ctx.mp=" .. tostring(ctx.mp) .. " result=" .. tostring(mainOk))
     if rule.relation == "-" then return mainOk end
     local optOk = evalCondition(rule.optionalCondition, rule.optValue, ctx)
     if rule.relation == "and" then return mainOk and optOk end
@@ -964,8 +979,52 @@ local function computeAction(rule, ctx, inventoryIndex)
             isUnsafeToUnequip = isUnsafeToUnequip,
         })
     end
-    -- If service missing, conservatively return no action and mark missing
-    return nil, true
+    
+    -- FALLBACK: If service missing, implement computeAction locally
+    local missing = false
+    
+    -- unequip pass
+    for _, slotPlan in ipairs(rule.slots or {}) do
+        if slotPlan.mode == "unequip" then
+            local hasItem = slotHasItem(slotPlan.slotIdx)
+            if hasItem then
+                if isUnsafeToUnequip and isUnsafeToUnequip(ctx) then
+                    missing = true
+                else
+                    return {kind = "unequip", slotIdx = slotPlan.slotIdx}, missing
+                end
+            end
+        end
+    end
+    
+    -- equip pass
+    for _, slotPlan in ipairs(rule.slots or {}) do
+        if slotPlan.mode == "equip" and slotPlan.itemId then
+            local hasItemId = slotHasItemId(slotPlan.slotIdx, slotPlan.itemId)
+            if not hasItemId then
+                -- Check inventory index first
+                local hasItem = false
+                if inventoryIndex[slotPlan.itemId] and #inventoryIndex[slotPlan.itemId] > 0 then
+                    hasItem = true
+                else
+                    -- Try g_game.findItemInContainers
+                    if g_game and g_game.findItemInContainers then
+                        local ok, found = pcall(g_game.findItemInContainers, slotPlan.itemId)
+                        if ok and found then
+                            hasItem = true
+                        end
+                    end
+                end
+                if hasItem then
+                    return {kind = "equip", slotIdx = slotPlan.slotIdx, itemId = slotPlan.itemId}, missing
+                else
+                    missing = true
+                end
+            end
+        end
+    end
+    
+    return nil, missing
 end
 
 
@@ -986,27 +1045,57 @@ end
 -- EVENT SUBSCRIPTIONS - Listen for condition changes
 -- ============================================================================
 
--- Helper to trigger equipment re-check and optionally run immediate check
+-- Helper to trigger equipment re-check (just sets flag, no immediate processing)
 local function triggerEquipCheck()
     EquipState.needsEquipCheck = true
     EquipState.correctEq = false
 end
 
--- Immediate equipment check function (called by events)
-local function immediateEquipCheck()
+-- Get cached inventory index (avoids rebuilding on every check)
+local function getCachedInventoryIndex()
+    local timeSinceCache = now - EquipState.inventoryCacheTime
+    if not EquipState.inventoryCache or timeSinceCache > EquipState.INVENTORY_CACHE_TTL then
+        EquipState.inventoryCache = buildInventoryIndex()
+        EquipState.inventoryCacheTime = now
+    end
+    return EquipState.inventoryCache
+end
+
+-- Invalidate inventory cache (call when items change)
+local function invalidateInventoryCache()
+    EquipState.inventoryCache = nil
+    EquipState.inventoryCacheTime = 0
+end
+
+-- Throttled equipment check - only runs once per CHECK_INTERVAL
+local function throttledEquipCheck()
     if not config.enabled then return end
     
-    -- Skip if on cooldown
-    if (now - EquipState.lastEquipAction) < EquipState.EQUIP_COOLDOWN then return end
+    -- Throttle: Skip if we checked too recently
+    local timeSinceCheck = now - EquipState.lastCheckTime
+    if timeSinceCheck < EquipState.CHECK_INTERVAL then
+        return
+    end
+    
+    -- Skip if on action cooldown
+    local timeSinceAction = now - EquipState.lastEquipAction
+    if timeSinceAction < EquipState.EQUIP_COOLDOWN then
+        return
+    end
     
     -- Skip during critical healing
-    if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
+    if HealContext and HealContext.isCritical and HealContext.isCritical() then
+        return
+    end
     
     local rules = getEnabledRules()
     if not rules or #rules == 0 then return end
     
+    -- Update last check time
+    EquipState.lastCheckTime = now
+    
     local ctx = snapshotContext()
-    local inventoryIndex = buildInventoryIndex()
+    local inventoryIndex = getCachedInventoryIndex()
     
     for _, rule in ipairs(rules) do
         if rulePasses(rule, ctx) then
@@ -1018,6 +1107,7 @@ local function immediateEquipCheck()
                         EquipState.correctEq = false
                         EquipState.needsEquipCheck = true
                         EquipState.lastRule = rule
+                        invalidateInventoryCache()
                         return
                     end
                 elseif action.kind == "equip" then
@@ -1026,6 +1116,7 @@ local function immediateEquipCheck()
                         EquipState.correctEq = false
                         EquipState.needsEquipCheck = true
                         EquipState.lastRule = rule
+                        invalidateInventoryCache()
                         return
                     end
                 end
@@ -1034,75 +1125,27 @@ local function immediateEquipCheck()
     end
 end
 
--- Subscribe via EventBus if available
+-- Subscribe via EventBus if available (just set flag, throttled check handles the rest)
 if EventBus then
-    -- Subscribe to mana changes (conditions 6, 7)
-    EventBus.on("player:mana", function(mana, maxMana, oldMana, oldMaxMana)
-        triggerEquipCheck()
-        immediateEquipCheck()
-    end, 100)
-    
-    -- Subscribe to health changes (conditions 4, 5)
-    EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMaxHealth)
-        triggerEquipCheck()
-        immediateEquipCheck()
-    end, 100)
-    
-    -- Subscribe to target changes (conditions 8, 16)
-    EventBus.on("target:change", function(target)
-        triggerEquipCheck()
-        immediateEquipCheck()
-    end, 100)
-    
-    -- Subscribe to PZ state changes (conditions 11, 17)
-    EventBus.on("player:pz", function(inPz)
-        triggerEquipCheck()
-        immediateEquipCheck()
-    end, 100)
-    
-    -- Subscribe to states/conditions changes (condition 10 - paralyzed)
-    EventBus.on("player:states", function(states)
-        triggerEquipCheck()
-        immediateEquipCheck()
-    end, 100)
-end
-
--- FALLBACK: Use native OTC callbacks directly if EventBus doesn't trigger
--- These ensure equipment changes happen even if EventBus is not working
-if onManaChange then
-    onManaChange(function(localPlayer, mana, maxMana, oldMana, oldMaxMana)
-        triggerEquipCheck()
-        immediateEquipCheck()
-    end)
-end
-
-if onHealthChange then
-    onHealthChange(function(localPlayer, health, maxHealth, oldHealth, oldMaxHealth)
-        triggerEquipCheck()
-        immediateEquipCheck()
-    end)
-end
-
-if onTargetChange then
-    onTargetChange(function(target)
-        triggerEquipCheck()
-        immediateEquipCheck()
-    end)
-end
-
-if onStatesChange then
-    onStatesChange(function(localPlayer, states, oldStates)
-        triggerEquipCheck()
-        immediateEquipCheck()
-    end)
+    EventBus.on("player:mana", function() triggerEquipCheck() end, 100)
+    EventBus.on("player:health", function() triggerEquipCheck() end, 100)
+    EventBus.on("target:change", function() triggerEquipCheck() end, 100)
+    EventBus.on("player:pz", function() triggerEquipCheck() end, 100)
+    EventBus.on("player:states", function() triggerEquipCheck() end, 100)
+else
+    -- FALLBACK: Use native OTC callbacks only if EventBus unavailable
+    if onManaChange then onManaChange(function() triggerEquipCheck() end) end
+    if onHealthChange then onHealthChange(function() triggerEquipCheck() end) end
+    if onTargetChange then onTargetChange(function() triggerEquipCheck() end) end
+    if onStatesChange then onStatesChange(function() triggerEquipCheck() end) end
 end
 
 -- ============================================================================
 -- MAIN EQUIPMENT MACRO
--- Faster polling (250ms) to catch condition changes promptly
+-- Single point of equipment checking - runs throttled checks
 -- ============================================================================
 
-EquipManager = macro(250, function()
+EquipManager = macro(300, function()
     if not config.enabled then return end
 
     -- Skip gear swaps during critical healing/danger to avoid conflicts
@@ -1110,105 +1153,22 @@ EquipManager = macro(250, function()
         return
     end
 
-    local rules = getEnabledRules()
-    if not rules or #rules == 0 then return end
-
-    local currentTime = now
-    if (currentTime - EquipState.lastEquipAction) < EquipState.EQUIP_COOLDOWN then return end
-
-    -- Always re-check conditions (events set needsEquipCheck, but also periodic check)
-    local ctx = snapshotContext()
-    local inventoryIndex = buildInventoryIndex()
-
-    for _, rule in ipairs(rules) do
-        if rulePasses(rule, ctx) then
-            local action, missing = computeAction(rule, ctx, inventoryIndex)
-            if action then
-                if action.kind == "unequip" then
-                    
-                    if unequipSlot(action.slotIdx) then
-                        EquipState.lastEquipAction = currentTime
-                        EquipState.correctEq = false
-                        EquipState.needsEquipCheck = true
-                        EquipState.lastRule = rule
-                        return
-                    else
-                        
-                    end
-                elseif action.kind == "equip" then
-                    
-                    if equipSlot(action.slotIdx, action.itemId) then
-                        EquipState.lastEquipAction = currentTime
-                        EquipState.correctEq = false
-                        EquipState.needsEquipCheck = true
-                        EquipState.lastRule = rule
-                        return
-                    else
-                        
-                    end
-                end
-            else
-                EquipState.missingItem = missing or false
-                EquipState.correctEq = not missing
-                EquipState.needsEquipCheck = missing
-                EquipState.lastRule = rule
-                -- continue to next rule
-            end
-        end
-    end
-
-    EquipState.needsEquipCheck = false
+    -- Run the throttled check (respects cooldowns internally)
+    throttledEquipCheck()
 end)
 
 -- ============================================================================
 -- EVENT-DRIVEN EQUIPMENT MANAGEMENT
--- Listen to equipment changes for immediate response
+-- Listen to equipment changes to invalidate cache
 -- ============================================================================
 
 if EventBus then
-  EventBus.on("equipment:change", function(slotId, slotName, currentId, lastId, item)
-    -- Always invalidate check state on equipment change
-    EquipState.needsEquipCheck = true
-    EquipState.correctEq = false
-    
-    if not config.enabled then return end
-
-    -- Skip if recently equipped by us to avoid loops
-    if now - EquipState.lastEquipAction < EquipState.EQUIP_COOLDOWN then return end
-
-    -- Skip during critical healing
-    if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
-
-    local rules = getEnabledRules()
-    if not rules or #rules == 0 then return end
-
-    local ctx = snapshotContext()
-    local inventoryIndex = buildInventoryIndex()
-
-    for _, rule in ipairs(rules) do
-        if rulePasses(rule, ctx) then
-            for _, slotPlan in ipairs(rule.slots) do
-                if SLOT_MAP[slotPlan.slotIdx] == slotId and slotPlan.mode == "equip" and slotPlan.itemId then
-                    if not slotHasItemId(slotPlan.slotIdx, slotPlan.itemId) then
-                        local hasItem = inventoryIndex[slotPlan.itemId] ~= nil
-                        if not hasItem and g_game and g_game.findItemInContainers then
-                            local ok, found = pcall(g_game.findItemInContainers, slotPlan.itemId)
-                            hasItem = ok and found ~= nil
-                        end
-                        if hasItem then
-                            if equipSlot(slotPlan.slotIdx, slotPlan.itemId) then
-                                EquipState.lastEquipAction = now
-                                EquipState.correctEq = false
-                                EquipState.needsEquipCheck = true
-                            end
-                            return
-                        end
-                    end
-                end
-            end
-        end
-    end
-  end, 50)  -- Priority 50
+    EventBus.on("equipment:change", function(slotId, slotName, currentId, lastId, item)
+        -- Invalidate state on equipment change
+        EquipState.needsEquipCheck = true
+        EquipState.correctEq = false
+        invalidateInventoryCache()
+    end, 50)
 end
 
--- Debug helpers removed
+-- End of Equipper module
