@@ -18,6 +18,11 @@
 
 EventBus = {}
 
+-- Compatibility shim: Ensure table.unpack exists (Lua 5.1 fallback)
+if not table.unpack and unpack then
+  table.unpack = unpack
+end
+
 -- Private state
 local listeners = {}
 local eventQueue = {}
