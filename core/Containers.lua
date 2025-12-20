@@ -1306,6 +1306,23 @@ onPlayerHealthChange(function(healthPercent)
     end
 end)
 
+-- Initial startup check: if player is logged in and auto-open is enabled but no containers are open,
+-- this likely indicates a relogin; trigger the auto-open behavior once to restore the user's containers.
+schedule(1000, function()
+    if not config.autoOpenOnLogin then return end
+    if hasTriggeredThisSession then return end
+    local p = player and player:getHealthPercent()
+    if not p or p == 0 then return end
+
+    -- Only auto-open if no containers are currently open (avoids surprising behavior during normal play)
+    if #g_game.getContainers() == 0 then
+        hasTriggeredThisSession = true
+        schedule(1500, function()
+            openAllContainers()
+        end)
+    end
+end)
+
 -- ============================================================================
 -- ITEM SORTING SYSTEM
 -- ============================================================================

@@ -860,4 +860,4 @@ end
 -- INITIALIZATION
 -- ============================================================================
 
-print("[TargetCore] v1.0 loaded (Pure functions, SOLID principles)")
+print("[TargetCore] v1.0 loaded")
