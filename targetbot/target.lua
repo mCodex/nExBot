@@ -70,6 +70,67 @@ local function invalidateCache()
   CreatureCache.dirty = true
 end
 
+-- Event-driven hooks: mark cache dirty and optionally schedule a quick recalc
+if EventBus then
+  -- Safe debounce factory (works even if nExBot.EventUtil isn't initialized yet)
+  local function makeDebounce(ms, fn)
+    if nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
+      return nExBot.EventUtil.debounce(ms, fn)
+    end
+    local scheduled = false
+    return function(...)
+      if scheduled then return end
+      scheduled = true
+      local args = {...}
+      schedule(ms, function()
+        scheduled = false
+        pcall(fn, table.unpack(args))
+      end)
+    end
+  end
+
+  -- Debounced invalidation + optional immediate lightweight recalc for responsiveness
+  local debouncedInvalidateAndRecalc = makeDebounce(80, function()
+    invalidateCache()
+    -- Schedule a lightweight recalc to update cache quickly (non-blocking)
+    schedule(1, function()
+      pcall(function()
+        -- protect call; recalculateBestTarget returns bestTarget, targetCount, totalDanger
+        if recalculateBestTarget then
+          recalculateBestTarget()
+        end
+      end)
+    end)
+  end)
+
+  EventBus.on("monster:appear", function(creature)
+    if creature then debouncedInvalidateAndRecalc() end
+  end, 20)
+
+  EventBus.on("monster:disappear", function(creature)
+    debouncedInvalidateAndRecalc()
+  end, 20)
+
+  EventBus.on("creature:move", function(creature, oldPos)
+    if creature and creature:isMonster() then
+      debouncedInvalidateAndRecalc()
+    end
+  end, 20)
+
+  EventBus.on("monster:health", function(creature, percent)
+    debouncedInvalidateAndRecalc()
+  end, 20)
+
+  EventBus.on("player:move", function(newPos, oldPos)
+    -- Player movement changes proximity; trigger recalculation
+    debouncedInvalidateAndRecalc()
+  end, 10)
+
+  EventBus.on("combat:target", function(creature, oldCreature)
+    debouncedInvalidateAndRecalc()
+  end, 20)
+end
+
 -- LRU eviction helper: move ID to end of access order
 local function touchCreature(id)
   local order = CreatureCache.accessOrder

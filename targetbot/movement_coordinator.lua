@@ -127,8 +127,14 @@ local scalingCache = {
 -- Lightweight monster cache maintained from EventBus
 MovementCoordinator.MonsterCache = MovementCoordinator.MonsterCache or {
   monsters = {}, -- map id -> creature
-  lastUpdate = 0
+  lastUpdate = 0,
+  stats = { queries = 0, hits = 0, misses = 0, lastQuery = 0 }
 }
+
+-- Expose simple stats getter
+function MovementCoordinator.MonsterCache.getStats()
+  return MovementCoordinator.MonsterCache.stats
+end
 
 local function updateMonsterCacheFromCreature(creature)
   if not creature then return end
@@ -212,9 +218,14 @@ end
 -- Get list of nearby monsters within given chebyshev radius
 function MovementCoordinator.MonsterCache.getNearby(radius)
   radius = radius or 7
+  MovementCoordinator.MonsterCache.stats.queries = MovementCoordinator.MonsterCache.stats.queries + 1
+  MovementCoordinator.MonsterCache.stats.lastQuery = now
   local res = {}
   local p = player and player:getPosition()
-  if not p then return res end
+  if not p then
+    MovementCoordinator.MonsterCache.stats.misses = MovementCoordinator.MonsterCache.stats.misses + 1
+    return res
+  end
   for id, c in pairs(MovementCoordinator.MonsterCache.monsters) do
     if c and not c:isDead() then
       local pos = c:getPosition()
@@ -222,6 +233,11 @@ function MovementCoordinator.MonsterCache.getNearby(radius)
         table.insert(res, c)
       end
     end
+  end
+  if #res > 0 then
+    MovementCoordinator.MonsterCache.stats.hits = MovementCoordinator.MonsterCache.stats.hits + 1
+  else
+    MovementCoordinator.MonsterCache.stats.misses = MovementCoordinator.MonsterCache.stats.misses + 1
   end
   return res
 end
