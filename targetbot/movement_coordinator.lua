@@ -124,30 +124,106 @@ local scalingCache = {
   TTL = 150  -- Update every 150ms
 }
 
--- Get current monster count (cached)
+-- Lightweight monster cache maintained from EventBus
+MovementCoordinator.MonsterCache = MovementCoordinator.MonsterCache or {
+  monsters = {}, -- map id -> creature
+  lastUpdate = 0
+}
+
+local function updateMonsterCacheFromCreature(creature)
+  if not creature then return end
+  local id = creature:getId() or tostring(creature)
+  MovementCoordinator.MonsterCache.monsters[id] = creature
+  MovementCoordinator.MonsterCache.lastUpdate = now
+end
+
+local function removeCreatureFromCache(creature)
+  if not creature then return end
+  local id = creature:getId() or tostring(creature)
+  MovementCoordinator.MonsterCache.monsters[id] = nil
+  MovementCoordinator.MonsterCache.lastUpdate = now
+end
+
+-- Subscribe to creature events to maintain a local monster cache (lower latency)
+if EventBus then
+  -- Debounced updater to avoid storms
+  local function makeDebounce(ms, fn)
+    if nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
+      return nExBot.EventUtil.debounce(ms, fn)
+    end
+    -- Simple fallback debounce using schedule
+    local scheduled = false
+    return function()
+      if scheduled then return end
+      scheduled = true
+      schedule(ms, function()
+        scheduled = false
+        pcall(fn)
+      end)
+    end
+  end
+
+  local debounceUpdate = makeDebounce(100, function() scalingCache.lastUpdate = 0 end)
+
+  EventBus.on("creature:appear", function(c)
+    if c and c:isMonster() and not c:isDead() then
+      updateMonsterCacheFromCreature(c)
+      debounceUpdate()
+    end
+  end, 10)
+
+  EventBus.on("creature:move", function(c, oldPos)
+    if c and c:isMonster() and not c:isDead() then
+      updateMonsterCacheFromCreature(c)
+      debounceUpdate()
+    end
+  end, 10)
+
+  EventBus.on("monster:disappear", function(c)
+    removeCreatureFromCache(c)
+    debounceUpdate()
+  end, 10)
+end
+
+-- Get current monster count (cached), uses MonsterCache when available
 function MovementCoordinator.Scaling.getMonsterCount()
   if now - scalingCache.lastUpdate < scalingCache.TTL then
     return scalingCache.monsterCount
   end
-  
-  local playerPos = player and player:getPosition()
-  if not playerPos then
-    return scalingCache.monsterCount
-  end
-  
-  local creatures = g_map.getSpectatorsInRange(playerPos, false, 7, 7)
+
+  -- Prefer MonsterCache if populated
   local count = 0
-  
-  for i = 1, #creatures do
-    local c = creatures[i]
-    if c:isMonster() and not c:isDead() then
-      count = count + 1
+  for id, c in pairs(MovementCoordinator.MonsterCache.monsters) do
+    if c and not c:isDead() then
+      -- Optional range check: only count monsters within 7 tiles
+      local p = player and player:getPosition()
+      local pos = c:getPosition()
+      if p and pos and math.max(math.abs(p.x-pos.x), math.abs(p.y-pos.y)) <= 7 then
+        count = count + 1
+      end
     end
   end
-  
+
   scalingCache.monsterCount = count
   scalingCache.lastUpdate = now
   return count
+end
+
+-- Get list of nearby monsters within given chebyshev radius
+function MovementCoordinator.MonsterCache.getNearby(radius)
+  radius = radius or 7
+  local res = {}
+  local p = player and player:getPosition()
+  if not p then return res end
+  for id, c in pairs(MovementCoordinator.MonsterCache.monsters) do
+    if c and not c:isDead() then
+      local pos = c:getPosition()
+      if pos and math.max(math.abs(pos.x - p.x), math.abs(pos.y - p.y)) <= radius then
+        table.insert(res, c)
+      end
+    end
+  end
+  return res
 end
 
 -- Calculate scaling factor based on monster count
@@ -735,3 +811,18 @@ nExBot = nExBot or {}
 nExBot.MovementCoordinator = MovementCoordinator
 
 print("[MovementCoordinator] Movement Coordinator v" .. MovementCoordinator.VERSION .. " loaded")
+
+-- Public API: whether movement should be allowed for TargetBot
+function MovementCoordinator.canMove()
+  -- Disallow movement when oscillating
+  if MovementCoordinator.Decide.isOscillating() then
+    return false
+  end
+  -- Also enforce execution cooldown to prevent command spam
+  if now - MovementCoordinator.State.lastExecutionTime < TIMING.EXECUTION_COOLDOWN then
+    return false
+  end
+  return true
+end
+
+nExBot.MovementCoordinator.canMove = MovementCoordinator.canMove

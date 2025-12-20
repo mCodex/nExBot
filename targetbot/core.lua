@@ -116,6 +116,173 @@ local PRIO = CONST.PRIORITY
 local DIST_W = CONST.DISTANCE_WEIGHTS
 local TIMING = CONST.TIMING
 
+-- Geometry export for reuse by other modules
+TargetCore.Geometry = TargetCore.Geometry or {}
+TargetCore.Geometry.DIRECTIONS = CONST.DIRECTIONS
+TargetCore.Geometry.DIR_VECTORS = CONST.DIR_VECTORS
+TargetCore.Geometry.ADJACENT_OFFSETS = CONST.ADJACENT_OFFSETS
+TargetCore.Geometry.getDirection = TargetCore.getDirection
+TargetCore.Geometry.chebyshevDistance = TargetCore.chebyshevDistance
+TargetCore.Geometry.manhattanDistance = TargetCore.manhattanDistance
+TargetCore.Geometry.isAdjacent = TargetCore.isAdjacent
+
+
+-- ============================================================================
+-- PATH SAFETY HELPERS (Pure-ish functions operating on map API)
+-- Exported so cavebot and other modules can share the same logic
+-- ============================================================================
+
+TargetCore.PathSafety = TargetCore.PathSafety or {}
+
+-- Minimal minimap colors that typically indicate stairs/ramps/holes
+TargetCore.PathSafety.FLOOR_CHANGE_COLORS = {
+  [210] = true, [211] = true, [212] = true, [213] = true,
+}
+
+-- Common floor-change item ids (subset maintained here)
+TargetCore.PathSafety.FLOOR_CHANGE_ITEMS = {
+  [414] = true, [415] = true, [416] = true, [417] = true,
+  [428] = true, [429] = true, [430] = true, [431] = true,
+  [432] = true, [433] = true, [434] = true, [435] = true,
+  [1949] = true, [1950] = true, [1951] = true, [1952] = true,
+  [1953] = true, [1954] = true, [1955] = true, [1956] = true,
+  [1957] = true, [1958] = true, [1959] = true, [1385] = true,
+  [1396] = true, [1397] = true, [1398] = true, [1399] = true,
+  [1400] = true, [1401] = true, [1402] = true, [4834] = true,
+  [4835] = true, [4836] = true, [4837] = true, [4838] = true,
+  [4839] = true, [4840] = true, [4841] = true, [6915] = true,
+  [6916] = true, [6917] = true, [6918] = true, [1219] = true,
+  [1386] = true, [3678] = true, [5543] = true, [384] = true,
+  [386] = true, [418] = true, [294] = true, [369] = true,
+  [370] = true, [383] = true, [392] = true, [408] = true,
+  [409] = true, [410] = true, [469] = true, [470] = true,
+  [482] = true, [484] = true, [423] = true, [424] = true,
+  [425] = true, [426] = true, [427] = true, [502] = true,
+  [1387] = true, [2129] = true, [2130] = true, [8709] = true,
+}
+
+-- Check if tile position is a floor-change tile (no caching here)
+function TargetCore.PathSafety.isFloorChangeTile(pos)
+  if not pos then return false end
+  local color = g_map.getMinimapColor(pos)
+  if color and TargetCore.PathSafety.FLOOR_CHANGE_COLORS[color] then return true end
+  local tile = g_map.getTile(pos)
+  if not tile then return false end
+  local ground = tile:getGround()
+  if ground and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[ground:getId()] then return true end
+  local useThing = tile:getTopUseThing()
+  if useThing and useThing:isItem() and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[useThing:getId()] then return true end
+  local topThing = tile:getTopThing()
+  if topThing and topThing:isItem() and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[topThing:getId()] then return true end
+  return false
+end
+
+-- Simple tile safe check
+function TargetCore.PathSafety.isTileSafe(pos, allowFloorChange)
+  if not pos then return false end
+  local tile = g_map.getTile(pos)
+  if not tile then return false end
+  if not tile:isWalkable() then return false end
+  if tile:hasCreature() then return false end
+  if not allowFloorChange and TargetCore.PathSafety.isFloorChangeTile(pos) then return false end
+  return true
+end
+
+-- Check if a path (direction indices) crosses a floor-change tile
+function TargetCore.PathSafety.pathCrossesFloorChange(path, startPos, maxSteps)
+  if not path or #path == 0 then return false end
+  local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
+  local limit = maxSteps and math.min(#path, maxSteps) or #path
+  for i = 1, limit do
+    local offset = TargetCore.Geometry and TargetCore.Geometry.DIR_VECTORS and TargetCore.Geometry.DIR_VECTORS[path[i]] or nil
+    if offset then
+      probe = {x = probe.x + offset.x, y = probe.y + offset.y, z = probe.z}
+      if TargetCore.PathSafety.isFloorChangeTile(probe) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- Recursive reachable check (bounded DFS) using isTileSafe
+function TargetCore.PathSafety.recursiveReachable(startPos, destPos, depth, maxNodes)
+  depth = depth or 6
+  maxNodes = maxNodes or 500
+  local visited = {}
+  local nodes = 0
+  local function key(p) return p.x..","..p.y..","..p.z end
+  local function dfs(p, d)
+    if nodes > maxNodes then
+      return false
+    end
+    nodes = nodes + 1
+    if p.x == destPos.x and p.y == destPos.y and p.z == destPos.z then return true end
+    if d <= 0 then return false end
+    visited[key(p)] = true
+    for i = 1, #CONST.ADJACENT_OFFSETS do
+      local off = CONST.ADJACENT_OFFSETS[i]
+      local np = {x = p.x + off.x, y = p.y + off.y, z = p.z}
+      if not visited[key(np)] and TargetCore.PathSafety.isTileSafe(np, false) then
+        if dfs(np, d - 1) then return true end
+      end
+    end
+    return false
+  end
+  local res = dfs(startPos, depth)
+
+  return res
+end
+
+-- Quick neighbor search + BFS fallback to find safe reachable tile near dest
+function TargetCore.PathSafety.findSafeAlternate(playerPos, destPos, maxDist, opts)
+  opts = opts or {}
+  local ignoreFields = opts.ignoreFields or false
+  -- quick neighbor check
+  for i = 1, #CONST.ADJACENT_OFFSETS do
+    local off = CONST.ADJACENT_OFFSETS[i]
+    local cand = {x = destPos.x + off.x, y = destPos.y + off.y, z = destPos.z}
+    if not (cand.x == playerPos.x and cand.y == playerPos.y) and TargetCore.PathSafety.isTileSafe(cand, false) then
+      local path = findPath(playerPos, cand, maxDist, {ignoreNonPathable = true, ignoreCreatures = true, ignoreFields = ignoreFields})
+      if path and #path > 0 and not TargetCore.PathSafety.pathCrossesFloorChange(path, playerPos) then
+        return cand, path
+      end
+    end
+  end
+  -- small additional diagnostic: if no candidate found, optionally try to widen search if debug enabled
+
+
+  -- BFS fallback (small radius)
+  local radius = opts.radius or 3
+  local queue = {{x = destPos.x, y = destPos.y, z = destPos.z}}
+  local seen = {}
+  local function k(p) return p.x..","..p.y end
+  seen[k(destPos)] = true
+  local qi = 1
+  while qi <= #queue do
+    local cur = queue[qi]
+    qi = qi + 1
+    if TargetCore.PathSafety.isTileSafe(cur, false) then
+      local path = findPath(playerPos, cur, maxDist, {ignoreNonPathable = true, ignoreCreatures = true, ignoreFields = ignoreFields})
+      if path and #path > 0 and not TargetCore.PathSafety.pathCrossesFloorChange(path, playerPos) then
+        return cur, path
+      end
+    end
+    if math.abs(cur.x - destPos.x) < radius and math.abs(cur.y - destPos.y) < radius then
+      for i = 1, #CONST.ADJACENT_OFFSETS do
+        local off = CONST.ADJACENT_OFFSETS[i]
+        local np = {x = cur.x + off.x, y = cur.y + off.y, z = cur.z}
+        if not seen[k(np)] then
+          seen[k(np)] = true
+          table.insert(queue, np)
+        end
+      end
+    end
+  end
+
+  return nil, nil
+end
+
 -- ============================================================================
 -- PURE UTILITY FUNCTIONS
 -- ============================================================================

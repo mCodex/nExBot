@@ -6,6 +6,14 @@ local lureEnabled = true
 local dangerValue = 0
 local looterStatus = ""
 
+-- Attack watchdog to recover from indecision (rate-limited)
+local attackWatchdog = {
+  lastForce = 0,
+  attempts = 0,
+  cooldown = 800,
+  maxAttempts = 2
+}
+
 -- Pull System state (shared with CaveBot)
 TargetBot = TargetBot or {}
 TargetBot.smartPullActive = false  -- When true, CaveBot pauses waypoint walking
@@ -717,8 +725,8 @@ local function recalculateBestTarget()
       end
     end
   else
-    -- Slow path: full refresh from getSpectators
-    local creatures = g_map.getSpectatorsInRange(pos, false, 10, 10)
+    -- Slow path: full refresh from Observed monsters (fallback to getSpectators)
+    local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(10) or g_map.getSpectatorsInRange(pos, false, 10, 10)
     
     -- Clear and rebuild cache
     CreatureCache.monsters = {}
@@ -808,8 +816,13 @@ targetbotMacro = macro(100, function()
   -- Handle walking if destination is set
   TargetBot.walk()
   
-  -- Check for looting first
-  local lootResult = TargetBot.Looting.process()
+  -- Check for looting first (event-driven: only process when dirty or when actively looting)
+  local shouldProcessLoot = TargetBot.Looting.isDirty and TargetBot.Looting.isDirty() or (#TargetBot.Looting.list > 0)
+  local lootResult = false
+  if shouldProcessLoot then
+    lootResult = TargetBot.Looting.process()
+    TargetBot.Looting.clearDirty()
+  end
   if lootResult then
     lastAction = now
     looterStatus = TargetBot.Looting.getStatus and TargetBot.Looting.getStatus() or "Looting"
@@ -850,6 +863,19 @@ targetbotMacro = macro(100, function()
       ui.status.right:setText(STATUS_ATTACKING)
     else
       ui.status.right:setText(STATUS_ATTACKING_LURE_OFF)
+    end
+    -- Watchdog: ensure we're actually attacking (recover from safegaurd deadlocks)
+    local following = g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if storage.attackWatchdog == nil then storage.attackWatchdog = true end
+    if storage.attackWatchdog and bestTarget.creature and following ~= bestTarget.creature then
+      if now - attackWatchdog.lastForce > attackWatchdog.cooldown and attackWatchdog.attempts < attackWatchdog.maxAttempts then
+        -- Try to force attack again
+        pcall(function() g_game.attack(bestTarget.creature) end)
+        attackWatchdog.lastForce = now
+        attackWatchdog.attempts = attackWatchdog.attempts + 1
+      end
+    else
+      attackWatchdog.attempts = 0
     end
   else
     ui.target.right:setText("-")

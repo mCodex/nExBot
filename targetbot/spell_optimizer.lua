@@ -350,8 +350,12 @@ function SpellOptimizer.findOptimalPosition(spellShape, monsters, options)
       local isValid = isCurrentPos
       
       if not isCurrentPos then
-        local tile = g_map.getTile(checkPos)
-        isValid = tile and tile:isWalkable() and not tile:hasCreature()
+        isValid = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+          and TargetCore.PathSafety.isTileSafe(checkPos)
+          or (function()
+            local tile = g_map.getTile(checkPos)
+            return tile and tile:isWalkable() and not tile:hasCreature()
+          end)()
       end
       
       if isValid then

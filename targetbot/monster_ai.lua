@@ -518,7 +518,7 @@ function MonsterAI.updateAll()
   local playerPos = player:getPosition()
   if not playerPos then return end
   
-  local creatures = g_map.getSpectatorsInRange(playerPos, false, 8, 8)
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(8) or g_map.getSpectatorsInRange(playerPos, false, 8, 8)
   if not creatures then return end
   
   for i = 1, #creatures do

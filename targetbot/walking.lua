@@ -41,6 +41,9 @@ local FLOOR_CHANGE_ITEMS = {
 }
 
 local function isFloorChangeTile(pos)
+  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isFloorChangeTile then
+    return TargetCore.PathSafety.isFloorChangeTile(pos)
+  end
   if not pos then return false end
   local color = g_map.getMinimapColor(pos)
   if FLOOR_CHANGE_COLORS[color] then return true end
@@ -56,6 +59,9 @@ local function isFloorChangeTile(pos)
 end
 
 local function pathCrossesFloorChange(path, startPos)
+  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.pathCrossesFloorChange then
+    return TargetCore.PathSafety.pathCrossesFloorChange(path, startPos)
+  end
   if not path or #path == 0 or not startPos then return false end
   local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
   for i = 1, #path do

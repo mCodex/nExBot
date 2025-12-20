@@ -50,7 +50,32 @@ local LARGE_RUNE_AREA = {
 -- Pure function: Get monsters in area around position
 local function getMonstersInArea(pos, offsets, maxDist)
   local count = 0
-  
+
+  -- Prefer MonsterCache for performance and accuracy
+  if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
+    local radius = maxDist or 8
+    local nearby = MovementCoordinator.MonsterCache.getNearby(radius)
+    if nearby then
+      local areaSet = {}
+      for i = 1, #offsets do
+        local offset = offsets[i]
+        local key = (pos.x + offset[1])..","..(pos.y + offset[2])
+        areaSet[key] = true
+      end
+      for i = 1, #nearby do
+        local c = nearby[i]
+        if c and c:isMonster() and not c:isDead() then
+          local p = c:getPosition()
+          if p and areaSet[p.x..","..p.y] then
+            count = count + 1
+          end
+        end
+      end
+      return count
+    end
+  end
+
+  -- Fallback to map scan
   for i = 1, #offsets do
     local offset = offsets[i]
     local checkPos = {
@@ -58,7 +83,7 @@ local function getMonstersInArea(pos, offsets, maxDist)
       y = pos.y + offset[2],
       z = pos.z
     }
-    
+
     local tile = g_map.getTile(checkPos)
     if tile then
       local creatures = tile:getCreatures()
@@ -72,7 +97,7 @@ local function getMonstersInArea(pos, offsets, maxDist)
       end
     end
   end
-  
+
   return count
 end
 

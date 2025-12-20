@@ -17,8 +17,17 @@ local dynamicLureDelay = false
 local Core = TargetCore or {}
 local Geometry = Core.Geometry or {}
 
+-- Helper: check MovementCoordinator for movement allowance
+local function movementAllowed()
+  if nExBot and nExBot.MovementCoordinator and nExBot.MovementCoordinator.canMove then
+    return nExBot.MovementCoordinator.canMove()
+  end
+  return true
+end
+
 -- Pre-computed direction offsets (fallback if Core not available)
-local DIRECTIONS = Geometry.DIRECTIONS or {
+-- Adjacent offsets array (use Geometry.ADJACENT_OFFSETS if provided)
+local DIRECTIONS = Geometry.ADJACENT_OFFSETS or Geometry.DIRECTIONS or {
   {x = 0, y = -1},   -- North
   {x = 1, y = 0},    -- East  
   {x = 0, y = 1},    -- South
@@ -106,6 +115,10 @@ end
 -- @param arcWidth: how wide the arc is (default 1 tile on each side)
 -- @return boolean, number (isInArc, distanceToCenter)
 local function isInFrontArc(pos, monsterPos, monsterDir, range, arcWidth)
+  -- Prefer TargetCore's implementation when available
+  if Core and Core.isInFrontArc then
+    return Core.isInFrontArc(pos, monsterPos, monsterDir, range, arcWidth)
+  end
   range = range or 5
   arcWidth = arcWidth or 1
   
@@ -121,24 +134,18 @@ local function isInFrontArc(pos, monsterPos, monsterDir, range, arcWidth)
     return false, dist
   end
   
-  -- Calculate distance from center of attack line
   local distFromCenter
-  
   if dirVec.x == 0 then
-    -- North or South: check vertical alignment
     local inDirection = (dy * dirVec.y) > 0
     distFromCenter = math.abs(dx)
     return inDirection and distFromCenter <= arcWidth, distFromCenter
   elseif dirVec.y == 0 then
-    -- East or West: check horizontal alignment
     local inDirection = (dx * dirVec.x) > 0
     distFromCenter = math.abs(dy)
     return inDirection and distFromCenter <= arcWidth, distFromCenter
   else
-    -- Diagonal: check if in the quadrant cone
     local inX = (dirVec.x > 0 and dx > 0) or (dirVec.x < 0 and dx < 0)
     local inY = (dirVec.y > 0 and dy > 0) or (dirVec.y < 0 and dy < 0)
-    -- For diagonals, use the perpendicular distance from the diagonal line
     distFromCenter = math.abs(dx - dy) / 2
     return inX and inY, distFromCenter
   end
@@ -150,49 +157,39 @@ end
 -- @param monsters: array of monster creatures
 -- @return table {totalDanger, waveThreats, meleeThreats, details}
 local function analyzePositionDanger(pos, monsters)
-  local result = {
-    totalDanger = 0,
-    waveThreats = 0,
-    meleeThreats = 0,
-    details = {}
-  }
-  
+  -- Prefer TargetCore if available
+  if Core and Core.calculatePositionDanger then
+    local danger = Core.calculatePositionDanger(pos, monsters)
+    if type(danger) == 'table' then
+      return danger
+    end
+    -- Wrap scalar danger value into expected table shape
+    return { totalDanger = danger or 0, waveThreats = 0, meleeThreats = 0, details = {} }
+  end
+  local result = { totalDanger = 0, waveThreats = 0, meleeThreats = 0, details = {} }
   for i = 1, #monsters do
     local monster = monsters[i]
     if monster and not monster:isDead() then
       local mpos = monster:getPosition()
       local mdir = monster:getDirection()
       local dist = math.max(math.abs(pos.x - mpos.x), math.abs(pos.y - mpos.y))
-      
-      local threat = {
-        monster = monster,
-        distance = dist,
-        inWaveArc = false,
-        arcDistance = 99
-      }
-      
-      -- Check wave attack danger
+      local threat = { monster = monster, distance = dist, inWaveArc = false, arcDistance = 99 }
       local inArc, arcDist = isInFrontArc(pos, mpos, mdir, 5, 1)
       if inArc then
         threat.inWaveArc = true
         threat.arcDistance = arcDist
         result.waveThreats = result.waveThreats + 1
-        -- Closer to center of arc = more dangerous
         result.totalDanger = result.totalDanger + (3 - arcDist)
       end
-      
-      -- Check melee danger
       if dist == 1 then
         result.meleeThreats = result.meleeThreats + 1
         result.totalDanger = result.totalDanger + 2
       elseif dist == 2 then
         result.totalDanger = result.totalDanger + 0.5
       end
-      
       result.details[#result.details + 1] = threat
     end
   end
-  
   return result
 end
 
@@ -202,7 +199,7 @@ end
 -- @return boolean, number (isDangerous, dangerCount)
 local function isDangerousPosition(pos, monsters)
   local analysis = analyzePositionDanger(pos, monsters)
-  return analysis.totalDanger > 0, analysis.waveThreats + analysis.meleeThreats
+  return analysis.totalDanger > 0, (analysis.waveThreats or 0) + (analysis.meleeThreats or 0)
 end
 
 -- Pure function: Find the safest adjacent tile with improved scoring
@@ -222,8 +219,14 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
   -- Dynamic danger threshold based on monster count
   local dynamicDangerThreshold = avoidanceState.baseDangerThreshold * scaling.dangerThresholdMultiplier
   
+  -- Prefer Core's safest tile search if available
+  if Core and Core.findSafestTile then
+    local coreRes = Core.findSafestTile(playerPos, monsters, currentTarget)
+    if coreRes and coreRes.pos then
+      return coreRes.pos, coreRes.score or 0
+    end
+  end
   -- When many monsters (7+), any danger is concerning
-  -- When few monsters (1-2), need more danger to trigger movement
   if currentAnalysis.totalDanger < dynamicDangerThreshold then
     return nil, 0
   end
@@ -250,8 +253,13 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
       z = playerPos.z
     }
     
-    local tile = g_map.getTile(checkPos)
-    if tile and tile:isWalkable() and not tile:hasCreature() then
+    local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+      and TargetCore.PathSafety.isTileSafe(checkPos)
+      or (function()
+        local tile = g_map.getTile(checkPos)
+        return tile and tile:isWalkable() and not tile:hasCreature()
+      end)()
+    if tileSafe then
       local analysis = analyzePositionDanger(checkPos, monsters)
       local score = 0
       
@@ -278,16 +286,21 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
       
       -- Factor 4: Escape routes (walkable adjacent tiles)
       local escapeRoutes = 0
-      for j = 1, 8 do
-        local escapeDir = DIRECTIONS[j]
-        local escapePos = {
-          x = checkPos.x + escapeDir.x,
-          y = checkPos.y + escapeDir.y,
-          z = checkPos.z
-        }
-        local escapeTile = g_map.getTile(escapePos)
-        if escapeTile and escapeTile:isWalkable() then
-          escapeRoutes = escapeRoutes + 1
+      if Core and Core.countEscapeRoutes then
+        escapeRoutes = Core.countEscapeRoutes(checkPos)
+      else
+        for j = 1, 8 do
+          local escapeDir = DIRECTIONS[j]
+          local escapePos = { x = checkPos.x + escapeDir.x, y = checkPos.y + escapeDir.y, z = checkPos.z }
+          local escapeSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+            and TargetCore.PathSafety.isTileSafe(escapePos)
+            or (function()
+              local et = g_map.getTile(escapePos)
+              return et and et:isWalkable()
+            end)()
+          if escapeSafe then
+            escapeRoutes = escapeRoutes + 1
+          end
         end
       end
       score = score + escapeRoutes * WEIGHTS.ESCAPE_ROUTES
@@ -347,12 +360,12 @@ local function avoidWaveAttacks()
   
   -- Get monsters in range FIRST (needed for scaling)
   local playerPos = player:getPosition()
-  local creatures = g_map.getSpectatorsInRange(playerPos, false, 7, 7)
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(7) or g_map.getSpectatorsInRange(playerPos, false, 7, 7)
   local monsters = {}
   
   for i = 1, #creatures do
     local c = creatures[i]
-    if c:isMonster() and not c:isDead() then
+    if c and c:isMonster() and not c:isDead() then
       monsters[#monsters + 1] = c
     end
   end
@@ -428,7 +441,9 @@ local function avoidWaveAttacks()
     avoidanceState.lastMove = currentTime
     avoidanceState.lastSafePos = safePos
     avoidanceState.consecutiveMoves = avoidanceState.consecutiveMoves + 1
-    TargetBot.walkTo(safePos, 2, {ignoreNonPathable = true, precision = 0})
+    if movementAllowed() then
+      TargetBot.walkTo(safePos, 2, {ignoreNonPathable = true, precision = 0})
+    end
     return true
   end
   
@@ -463,6 +478,41 @@ nExBot.isDangerousPosition = isDangerousPosition
 nExBot.analyzePositionDanger = analyzePositionDanger
 nExBot.findSafeAdjacentTile = findSafeAdjacentTile
 
+-- Event-driven hookup: debounce avoidWaveAttacks on creature changes nearby
+if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
+  local debounceAvoid = nExBot.EventUtil.debounce(120, function()
+    -- Run avoidance in schedule to avoid blocking EventBus handlers
+    schedule(1, function()
+      pcall(avoidWaveAttacks)
+    end)
+  end)
+
+  EventBus.on("creature:appear", function(creature)
+    if creature and creature:isMonster() then
+      local p = player and player:getPosition()
+      local cpos = creature and creature:getPosition()
+      if p and cpos and math.max(math.abs(p.x-cpos.x), math.abs(p.y-cpos.y)) <= 7 then
+        debounceAvoid()
+      end
+    end
+  end, 10)
+
+  EventBus.on("creature:move", function(creature, oldPos)
+    if creature and creature:isMonster() then
+      local p = player and player:getPosition()
+      local cpos = creature and creature:getPosition()
+      if p and cpos and math.max(math.abs(p.x-cpos.x), math.abs(p.y-cpos.y)) <= 7 then
+        debounceAvoid()
+      end
+    end
+  end, 10)
+
+  EventBus.on("monster:disappear", function(creature)
+    -- disappear may reduce danger; trigger a check
+    debounceAvoid()
+  end, 10)
+end
+
 --------------------------------------------------------------------------------
 -- UTILITY FUNCTIONS (Optimized with TargetBotCore integration)
 --------------------------------------------------------------------------------
@@ -481,8 +531,13 @@ local function countWalkableTiles(position)
       y = position.y + dir.y,
       z = position.z
     }
-    local tile = g_map.getTile(checkPos)
-    if tile and tile:isWalkable() then
+    local safe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+      and TargetCore.PathSafety.isTileSafe(checkPos)
+      or (function()
+        local tile = g_map.getTile(checkPos)
+        return tile and tile:isWalkable()
+      end)()
+    if safe then
       count = count + 1
     end
   end
@@ -514,11 +569,11 @@ local function rePosition(minTiles, config)
   if currentWalkable >= minTiles then return end
   
   -- Get nearby monsters for scoring
-  local creatures = g_map.getSpectatorsInRange(playerPos, false, 5, 5)
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(5) or g_map.getSpectatorsInRange(playerPos, false, 5, 5)
   local monsters = {}
   for i = 1, #creatures do
     local c = creatures[i]
-    if c:isMonster() and not c:isDead() then
+    if c and c:isMonster() and not c:isDead() then
       monsters[#monsters + 1] = c
     end
   end
@@ -567,8 +622,13 @@ local function rePosition(minTiles, config)
         end
         
         if not shouldSkip then
-          local tile = g_map.getTile(checkPos)
-          if tile and tile:isWalkable() and not tile:hasCreature() then
+          local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+            and TargetCore.PathSafety.isTileSafe(checkPos)
+            or (function()
+              local t = g_map.getTile(checkPos)
+              return t and t:isWalkable() and not t:hasCreature()
+            end)()
+          if tileSafe then
             -- Score this position using improved danger analysis
             local score = 0
             
@@ -644,17 +704,17 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   
   -- Group attack spell check
   if config.useGroupAttack and config.groupAttackSpell:len() > 1 and mana > config.minManaGroup then
-    local creatures = g_map.getSpectatorsInRange(playerPos, false, config.groupAttackRadius, config.groupAttackRadius)
+    local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(config.groupAttackRadius) or g_map.getSpectatorsInRange(playerPos, false, config.groupAttackRadius, config.groupAttackRadius)
     local playersAround = false
     local monsters = 0
     
     for i = 1, #creatures do
       local c = creatures[i]
-      if c:isPlayer() and not c:isLocalPlayer() then
+      if c and c:isPlayer() and not c:isLocalPlayer() then
         if not config.groupAttackIgnoreParty or c:getShield() <= 2 then
           playersAround = true
         end
-      elseif c:isMonster() then
+      elseif c and c:isMonster() then
         monsters = monsters + 1
       end
     end
@@ -669,17 +729,19 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   -- Group attack rune check
   if config.useGroupAttackRune and config.groupAttackRune > 100 then
     local creaturePos = creature:getPosition()
-    local creatures = g_map.getSpectatorsInRange(creaturePos, false, config.groupRuneAttackRadius, config.groupRuneAttackRadius)
+    local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
+      and MovementCoordinator.MonsterCache.getNearby(config.groupRuneAttackRadius)
+      or g_map.getSpectatorsInRange(creaturePos, false, config.groupRuneAttackRadius, config.groupRuneAttackRadius)
     local playersAround = false
     local monsters = 0
     
     for i = 1, #creatures do
       local c = creatures[i]
-      if c:isPlayer() and not c:isLocalPlayer() then
+      if c and c:isPlayer() and not c:isLocalPlayer() then
         if not config.groupAttackIgnoreParty or c:getShield() <= 2 then
           playersAround = true
         end
-      elseif c:isMonster() then
+      elseif c and c:isMonster() then
         monsters = monsters + 1
       end
     end
@@ -854,11 +916,13 @@ TargetBot.Creature.walk = function(creature, config, targets)
   local useCoordinator = MovementCoordinator and MovementCoordinator.Intent
   
   -- Get nearby monsters for danger analysis
-  local creatures = g_map.getSpectatorsInRange(pos, false, 7, 7)
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
+    and MovementCoordinator.MonsterCache.getNearby(7)
+    or g_map.getSpectatorsInRange(pos, false, 7, 7)
   local monsters = {}
   for i = 1, #creatures do
     local c = creatures[i]
-    if c:isMonster() and not c:isDead() then
+    if c and c:isMonster() and not c:isDead() then
       monsters[#monsters + 1] = c
     end
   end
@@ -951,7 +1015,9 @@ TargetBot.Creature.walk = function(creature, config, targets)
     else
       -- Fallback: direct execution only for critical targets
       if confidence >= 0.70 then
-        return TargetBot.walkTo(cpos, 10, {ignoreNonPathable = true, precision = 1})
+        if movementAllowed() then
+          return TargetBot.walkTo(cpos, 10, {ignoreNonPathable = true, precision = 1})
+        end
       end
     end
   end
@@ -1028,7 +1094,9 @@ TargetBot.Creature.walk = function(creature, config, targets)
             if config.anchor and anchorPosition then
               walkParams.maxDistanceFrom = {anchorPosition, config.anchorRange or 5}
             end
-            return TargetBot.walkTo(cpos, 10, walkParams)
+            if movementAllowed() then
+              return TargetBot.walkTo(cpos, 10, walkParams)
+            end
           end
         end
       end
@@ -1052,9 +1120,14 @@ TargetBot.Creature.walk = function(creature, config, targets)
         for dy = -2, 2 do
           if dx ~= 0 or dy ~= 0 then
             local checkPos = {x = pos.x + dx, y = pos.y + dy, z = pos.z}
-            local tile = g_map.getTile(checkPos)
+            local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+              and TargetCore.PathSafety.isTileSafe(checkPos)
+              or (function()
+                local t = g_map.getTile(checkPos)
+                return t and t:isWalkable() and not t:hasCreature()
+              end)()
             
-            if tile and tile:isWalkable() and not tile:hasCreature() then
+            if tileSafe then
               -- Check anchor
               local anchorValid = true
               if config.anchor and anchorPosition then
@@ -1175,7 +1248,9 @@ TargetBot.Creature.walk = function(creature, config, targets)
         if config.anchor and anchorPosition then
           walkParams.maxDistanceFrom = {anchorPosition, config.anchorRange or 5}
         end
-        return TargetBot.walkTo(cpos, 10, walkParams)
+        if movementAllowed() then
+          return TargetBot.walkTo(cpos, 10, walkParams)
+        end
       end
     end
   end
@@ -1196,8 +1271,13 @@ TargetBot.Creature.walk = function(creature, config, targets)
       }
       
       for i = 1, 2 do
-        local tile = g_map.getTile(candidates[i])
-        if tile and tile:isWalkable() and not tile:hasCreature() then
+        local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+          and TargetCore.PathSafety.isTileSafe(candidates[i])
+          or (function()
+            local t = g_map.getTile(candidates[i])
+            return t and t:isWalkable() and not t:hasCreature()
+          end)()
+        if tileSafe then
           -- Check anchor
           local anchorValid = true
           if config.anchor and anchorPosition then
@@ -1212,7 +1292,9 @@ TargetBot.Creature.walk = function(creature, config, targets)
             if useCoordinator then
               MovementCoordinator.faceMonster(candidates[i], 0.45)
             else
-              return TargetBot.walkTo(candidates[i], 2, {ignoreNonPathable = true})
+              if movementAllowed() then
+                return TargetBot.walkTo(candidates[i], 2, {ignoreNonPathable = true})
+              end
             end
             break
           end

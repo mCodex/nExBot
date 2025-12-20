@@ -11,12 +11,13 @@ local dontSave = false
 TargetBot.Looting.setup = function()
   ui = UI.createWidget("TargetBotLootingPanel")
   UI.Container(TargetBot.Looting.onItemsUpdate, true, nil, ui.items)
-  UI.Container(TargetBot.Looting.onContainersUpdate, true, nil, ui.containers) 
+  UI.Container(TargetBot.Looting.onContainersUpdate, true, nil, ui.containers)
+
   ui.everyItem.onClick = function()
     ui.everyItem:setOn(not ui.everyItem:isOn())
     TargetBot.save()
   end
-  
+
   -- Eat food from corpses toggle
   ui.eatFromCorpses.onClick = function()
     ui.eatFromCorpses:setOn(not ui.eatFromCorpses:isOn())
@@ -25,7 +26,7 @@ TargetBot.Looting.setup = function()
     end
     TargetBot.save()
   end
-  
+
   ui.maxDangerPanel.value.onTextChange = function()
     local value = tonumber(ui.maxDangerPanel.value:getText())
     if not value then
@@ -41,6 +42,34 @@ TargetBot.Looting.setup = function()
     end
     if dontSave then return end
     TargetBot.save()
+  end
+
+  -- Event-driven triggers: mark loot state dirty when containers change
+  if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
+    local markDirtyDebounced = nExBot.EventUtil.debounce(120, function()
+      TargetBot.Looting.markDirty()
+    end)
+
+    EventBus.on("container:open", function(container, prev)
+      markDirtyDebounced()
+    end, 20)
+
+    EventBus.on("container:close", function(container)
+      markDirtyDebounced()
+    end, 20)
+
+    EventBus.on("container:update", function(container, slot, item, oldItem)
+      markDirtyDebounced()
+    end, 20)
+
+    -- Map tile changes can affect loot availability (containers added/removed)
+    EventBus.on("tile:add", function(tile, thing)
+      markDirtyDebounced()
+    end, 10)
+
+    EventBus.on("tile:remove", function(tile, thing)
+      markDirtyDebounced()
+    end, 10)
   end
 end
 
@@ -112,9 +141,24 @@ local waitTill = 0
 local waitingForContainer = nil
 local status = ""
 local lastFoodConsumption = 0
+local lootDirty = false
 
 TargetBot.Looting.getStatus = function()
   return status
+end
+
+-- Mark looting state as needing re-evaluation
+TargetBot.Looting.markDirty = function()
+  lootDirty = true
+end
+
+-- Helper to reset dirty flag (called by TargetBot main loop)
+TargetBot.Looting.clearDirty = function()
+  lootDirty = false
+end
+
+TargetBot.Looting.isDirty = function()
+  return lootDirty
 end
 
 TargetBot.Looting.process = function(targets, dangerLevel)
@@ -170,7 +214,13 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   local tile = g_map.getTile(loot.pos)
   if dist >= 3 or not tile then
     loot.tries = loot.tries + 1
-    TargetBot.walkTo(loot.pos, 20, { ignoreNonPathable = true, precision = 2 })
+    if nExBot and nExBot.MovementCoordinator and nExBot.MovementCoordinator.canMove then
+      if nExBot.MovementCoordinator.canMove() then
+        TargetBot.walkTo(loot.pos, 20, { ignoreNonPathable = true, precision = 2 })
+      end
+    else
+      TargetBot.walkTo(loot.pos, 20, { ignoreNonPathable = true, precision = 2 })
+    end
     return true
   end
 
