@@ -947,8 +947,8 @@ end
 
 local snapshotContext = EquipperService and EquipperService.snapshotContext or function()
     return {
-        hp = hppercent(), mp = manapercent(), monsters = getMonsters(), players = getPlayers(),
-        target = target() and target():getName():lower() or nil, inPz = isInPz(), paralyzed = isParalyzed(),
+        hp = hppercent(), mp = manapercent(), monsters = (getMonsters and getMonsters()) or 0, players = (getPlayers and getPlayers()) or 0,
+        target = (target and target()) and target():getName():lower() or nil, inPz = isInPz and isInPz() or false, paralyzed = isParalyzed and isParalyzed() or false,
         danger = (TargetBot and TargetBot.Danger and TargetBot.Danger()) or 0,
         cavebotOn = CaveBot and CaveBot.isOn and CaveBot.isOn() or false,
         targetbotOn = TargetBot and TargetBot.isOn and TargetBot.isOn() or false,

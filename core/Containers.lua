@@ -1345,7 +1345,7 @@ local function findDestinationForItem(itemId)
             for _, id in ipairs(items) do
                 if id == itemId then
                     -- Find open container with this itemId that has space
-                    return getContainerByItem(entry.itemId, true)
+                    return getContainerByItem and getContainerByItem(entry.itemId, true)
                 end
             end
         end

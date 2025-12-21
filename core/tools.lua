@@ -110,8 +110,7 @@ UI.Separator()
 
 UI.Label("Tools:")
 
-
--- ═══════════════════════════════════════════════════════════════════════════
+UI.Separator()
 -- AUTO LEVITATE - Ultra-fast instant-cast for PVP
 -- Moving: auto-levitates when running into wall/floor
 -- Stopped: press direction key toward levitate point to turn & cast
@@ -393,6 +392,91 @@ end)
 BotDB.registerMacro(autoMountMacro, "autoMount")
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- AUTO RANDOM OUTFIT COLORS - Ultra-fast automatic color cycling
+-- Changes outfit colors every 0.2 seconds when enabled
+-- Uses BotSwitch UI like fishing for consistency
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Auto Random Outfit Colors
+local autoRandomOutfitEnabled = false
+
+local function randomizeOutfitColors()
+  local player = g_game.getLocalPlayer()
+  if not player then return end
+  
+  local currentOutfit = player:getOutfit()
+  if not currentOutfit then return end
+  
+  -- Generate 4 unique random colors from the full valid Tibia color range (1-132)
+  -- Color 0 is transparent/none, so we start from 1
+  -- This ensures maximum variety and prevents duplicate colors in the same outfit
+  local colors = {}
+  local used = {}
+  for i = 1, 4 do
+    local c
+    repeat
+      c = math.random(1, 132)  -- Exclude 0 (transparent)
+    until not used[c]
+    used[c] = true
+    colors[i] = c
+  end
+  
+  local newOutfit = {
+    type = currentOutfit.type,
+    head = colors[1],
+    body = colors[2],
+    legs = colors[3],
+    feet = colors[4],
+    addons = currentOutfit.addons or 0
+  }
+  
+  -- Preserve mount if present
+  if currentOutfit.mount then
+    newOutfit.mount = currentOutfit.mount
+  end
+  
+  -- Apply the new outfit
+  setOutfit(newOutfit)
+end
+
+local function autoRandomOutfitLoop()
+  if autoRandomOutfitEnabled then
+    randomizeOutfitColors()
+    -- Schedule next change in 0.2 seconds (60% faster)
+    schedule(200, autoRandomOutfitLoop)
+  end
+end
+
+local autoRandomOutfitUI = setupUI([[
+Panel
+  height: 19
+
+  BotSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    !text: tr('Auto Random Outfit Colors')
+]])
+
+-- Connect UI switch to macro state
+autoRandomOutfitUI.title.onClick = function(widget)
+  autoRandomOutfitEnabled = not autoRandomOutfitEnabled
+  widget:setOn(autoRandomOutfitEnabled)
+  if autoRandomOutfitEnabled then
+    -- Start the loop
+    randomizeOutfitColors() -- Apply immediately
+    schedule(500, autoRandomOutfitLoop)
+    modules.game_textmessage.displayStatusMessage("Auto random outfit colors enabled!")
+  else
+    modules.game_textmessage.displayStatusMessage("Auto random outfit colors disabled!")
+  end
+end
+
+UI.Separator()
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- FISHING - Random water tile selection + auto fish drop to water
 -- ═══════════════════════════════════════════════════════════════════════════
 
@@ -627,7 +711,10 @@ local followPlayerConfig = loadFollowPlayerConfig()
 local followPlayerToggle = nil
 
 local lastFollowCheck = 0
-local FOLLOW_CHECK_COOLDOWN = 500  -- Check every 500ms
+local FOLLOW_CHECK_COOLDOWN = 200  -- Check every 200ms for faster response
+
+-- Store the ID of the player we're following to persist across visibility changes
+local followedPlayerId = nil
 
 -- Helper: save follow player settings
 local function saveFollowPlayerConfig()
@@ -650,38 +737,78 @@ local function setFollowEnabled(state)
   end
   if not state then
     g_game.cancelFollow()
+    followedPlayerId = nil
   end
 end
 
 -- Follow Player macro - Uses native OTClient follow system
-local followPlayerMacro = macro(500, function()
+local function findPlayerByName(name)
+  if not name or name == "" then return nil end
+  -- Try exact match first (OTClient helper)
+  if getCreatureByName then
+    local exact = getCreatureByName(name, true)
+    if exact then return exact end
+  end
+  -- Fallback: case-insensitive substring match in spectators
+  local lname = name:lower()
+  for i, c in ipairs(getSpectators()) do
+    if c and c:isPlayer() and not c:isLocalPlayer() then
+      local n = c:getName()
+      if n and n:lower():find(lname, 1, true) then
+        return c
+      end
+    end
+  end
+  return nil
+end
+
+local followPlayerMacro = macro(200, function()
   if not followPlayerConfig.enabled or not player then return end
   if not followPlayerConfig.playerName or followPlayerConfig.playerName == "" then return end
-  
+
+  -- Respect resume cooldown after combat or manual pause
+  if followPlayerConfig.resumeAt and now < followPlayerConfig.resumeAt then return end
+
   -- Cooldown check
   if (now - lastFollowCheck) < FOLLOW_CHECK_COOLDOWN then return end
   lastFollowCheck = now
 
-  -- If player started attacking, stop following and disable toggle
+  -- If player started attacking, pause following (don't disable toggle)
   if getTarget() then
-    if followPlayerConfig.enabled then
-      setFollowEnabled(false)
-    end
+    -- Cancel any active follow and set a short resume delay to avoid immediate re-following during combat
+    if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
+    followPlayerConfig.resumeAt = now + 3000 -- resume in 3s
     return
   end
-  
-  -- Find the target player
-  local target = getCreatureByName(followPlayerConfig.playerName)
-  
+
+  -- Find the target player using robust matching
+  local target = findPlayerByName(followPlayerConfig.playerName)
+
   if target then
-    -- Start following the target (like CTRL + Right Click) only if not already
+    -- Start following the target (only if not already following them)
     local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
     if not currentFollow or currentFollow:getId() ~= target:getId() then
-      follow(target)
+      -- Prefer g_game.follow when available (OTClient 8 native API)
+      if g_game and g_game.follow then
+        pcall(g_game.follow, target)
+      else
+        pcall(follow, target)
+      end
+      followedPlayerId = target:getId()
     end
   else
-    -- Target not found, cancel follow if we were following someone
-    g_game.cancelFollow()
+    -- Target not found - check if we're still following the intended player
+    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
+    if currentFollow and followedPlayerId and currentFollow:getId() == followedPlayerId then
+      -- Still following the correct player, persist the follow
+      -- (they might be temporarily off-screen or on another floor)
+    else
+      -- Not following the intended player, cancel follow
+      if currentFollow then
+        if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
+      end
+      followedPlayerId = nil
+    end
   end
 end)
 

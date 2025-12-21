@@ -193,7 +193,7 @@ local WaypointEngine = {
   
   -- Thresholds (tuned for accuracy)
   STUCK_THRESHOLD = 8,           -- Failures before stuck
-  STUCK_TIMEOUT = 10000,         -- Max time in stuck state before recovery
+  STUCK_TIMEOUT = 5000,         -- Reduced from 10000 for faster stuck detection
   MOVEMENT_THRESHOLD = 3,        -- Min tiles to consider "progress"
   PROGRESS_WINDOW = 15000,       -- Time window for progress check (15s)
   RECOVERY_TIMEOUT = 25000,      -- Max recovery time before stop (increased for more strategies)
@@ -610,17 +610,7 @@ local function initTargetBotCache()
   end
 end
 
-cavebotMacro = macro(250, function()
-  -- Safety-first gating: pause movement when healing/danger active
-  if HealContext and HealContext.isCritical and HealContext.isCritical() then
-    CaveBot.resetWalking()
-    return
-  end
-  if HealContext and HealContext.isDanger and HealContext.isDanger() then
-    CaveBot.resetWalking()
-    return
-  end
-
+cavebotMacro = macro(150, function()
   -- SMART EXECUTION: Skip if we shouldn't execute this tick
   if shouldSkipExecution() then return end
   
@@ -636,10 +626,10 @@ cavebotMacro = macro(250, function()
       if resetStartupCheck then resetStartupCheck() end
       if findNearestGlobalWaypoint then
         local maxDist = storage.extras.gotoMaxDistance or 50
-        local child, idx = findNearestGlobalWaypoint(playerPos, maxDist, {
-          maxCandidates = 25,
+        local child, idx = findNearestGlobalWaypoint(playerPos, maxDist * 2, {  -- Larger search
+          maxCandidates = 35,
           preferCurrentFloor = true,
-          searchAllFloors = false
+          searchAllFloors = true  -- Allow cross-floor search
         })
         if child then
           focusWaypointBefore(child, idx)
@@ -1127,7 +1117,7 @@ checkStartupWaypoint = function()
   end
   
   -- Small delay to ensure map is loaded
-  if now - startupCheckTime < 500 then return end
+  if now - startupCheckTime < 200 then return end
   
   local playerPos = player:getPosition()
   if not playerPos then return end
@@ -1157,8 +1147,8 @@ checkStartupWaypoint = function()
   
   -- Current waypoint not reachable - find nearest globally
   local maxDist = storage.extras.gotoMaxDistance or 50
-  local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
-    maxCandidates = 25,
+  local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {  -- Increased search distance
+    maxCandidates = 35,  -- More candidates
     preferCurrentFloor = true,
     searchAllFloors = false
   })

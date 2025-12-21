@@ -6,6 +6,9 @@ local lureEnabled = true
 local dangerValue = 0
 local looterStatus = ""
 
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 -- Compatibility: robust safe unpack (works when neither table.unpack nor unpack exist)
 local function _unpack(tbl)
   if not tbl then return end
@@ -35,6 +38,15 @@ local attackWatchdog = {
   attempts = 0,
   cooldown = 800,
   maxAttempts = 2
+}
+
+-- Aggressive relogin recovery: force re-attempts for a short window after relogin
+local reloginRecovery = {
+  active = false,       -- whether the aggressive recovery is active
+  endTime = 0,          -- when to stop aggressive retries
+  duration = 5000,      -- default aggressive recovery duration (ms)
+  lastAttempt = 0,      -- last forced attempt timestamp
+  interval = 400        -- attempt every 400ms while active
 }
 
 -- Pull System state (shared with CaveBot)
@@ -152,6 +164,22 @@ if EventBus then
   EventBus.on("combat:target", function(creature, oldCreature)
     debouncedInvalidateAndRecalc()
   end, 20)
+end
+
+-- Reset attack watchdog on relogin (player health re-appears)
+if onPlayerHealthChange then
+  onPlayerHealthChange(function(healthPercent)
+    if healthPercent and healthPercent > 0 then
+      attackWatchdog.attempts = 0
+      attackWatchdog.lastForce = 0
+      -- Start an aggressive relogin recovery window if TargetBot is enabled
+      if TargetBot and TargetBot.isOn and TargetBot.isOn() then
+        reloginRecovery.active = true
+        reloginRecovery.endTime = now + reloginRecovery.duration
+        reloginRecovery.lastAttempt = 0
+      end
+    end
+  end)
 end
 
 -- LRU eviction helper: move ID to end of access order
@@ -367,43 +395,6 @@ local function releaseCacheEntry(entry)
     entry.path = nil
     entry.timestamp = 0
     cacheEntryPool[#cacheEntryPool + 1] = entry
-  end
-end
-
-local function getCachedPath(creatureId, fromPos, toPos)
-  local cached = PathCache.paths[creatureId]
-  if cached and (now - cached.timestamp) < PathCache.TTL then
-    return cached.path
-  end
-  return nil
-end
-
-local function setCachedPath(creatureId, path)
-  local existing = PathCache.paths[creatureId]
-  if existing then
-    existing.path = path
-    existing.timestamp = now
-  else
-    if PathCache.size >= PathCache.maxSize then
-      -- Evict oldest entry
-      local oldest, oldestId = now, nil
-      for id, data in pairs(PathCache.paths) do
-        if data.timestamp < oldest then
-          oldest = data.timestamp
-          oldestId = id
-        end
-      end
-      if oldestId then
-        releaseCacheEntry(PathCache.paths[oldestId])
-        PathCache.paths[oldestId] = nil
-        PathCache.size = PathCache.size - 1
-      end
-    end
-    local entry = acquireCacheEntry()
-    entry.path = path
-    entry.timestamp = now
-    PathCache.paths[creatureId] = entry
-    PathCache.size = PathCache.size + 1
   end
 end
 
@@ -632,6 +623,28 @@ end
 
 TargetBot.enableLuring = function()
   lureEnabled = true
+end
+
+-- Relogin recovery configuration and controls
+TargetBot.setReloginRecoveryDuration = function(ms)
+  if type(ms) == 'number' and ms >= 0 then
+    reloginRecovery.duration = ms
+  end
+end
+
+TargetBot.enableReloginRecovery = function(duration)
+  if type(duration) == 'number' and duration >= 0 then
+    reloginRecovery.duration = duration
+  end
+  reloginRecovery.active = true
+  reloginRecovery.endTime = now + reloginRecovery.duration
+  reloginRecovery.lastAttempt = 0
+end
+
+TargetBot.disableReloginRecovery = function()
+  reloginRecovery.active = false
+  reloginRecovery.endTime = 0
+  reloginRecovery.lastAttempt = 0
 end
 
 TargetBot.Danger = function()
@@ -877,12 +890,6 @@ targetbotMacro = macro(100, function()
     HealEngine.setFriendHealingEnabled(false)
   end
 
-  if HealContext and HealContext.isCritical and HealContext.isCritical() then
-    TargetBot.clearWalk()
-    TargetBot.stopAttack(true)
-    ui.status.right:setText(STATUS_WAITING)
-    return
-  end
   if HealContext and HealContext.isDanger and HealContext.isDanger() then
     TargetBot.clearWalk()
     TargetBot.stopAttack(true)
@@ -952,14 +959,41 @@ targetbotMacro = macro(100, function()
     local following = g_game.getAttackingCreature and g_game.getAttackingCreature()
     if storage.attackWatchdog == nil then storage.attackWatchdog = true end
     if storage.attackWatchdog and bestTarget.creature and following ~= bestTarget.creature then
-      if now - attackWatchdog.lastForce > attackWatchdog.cooldown and attackWatchdog.attempts < attackWatchdog.maxAttempts then
-        -- Try to force attack again
-        pcall(function() g_game.attack(bestTarget.creature) end)
-        attackWatchdog.lastForce = now
-        attackWatchdog.attempts = attackWatchdog.attempts + 1
+      -- Allow retrying after an extended recovery period (helps after relogin / creature object refresh)
+      local recoveryWindow = attackWatchdog.cooldown * 5
+      if now - attackWatchdog.lastForce > recoveryWindow then
+        attackWatchdog.attempts = 0
+      end
+
+      -- Aggressive relogin recovery mode: while active, force attack attempts more frequently for the recovery window
+      if reloginRecovery.active and now < reloginRecovery.endTime then
+        -- throttle rapid attempts by interval
+        if now - reloginRecovery.lastAttempt > reloginRecovery.interval then
+          pcall(function() g_game.attack(bestTarget.creature) end)
+          reloginRecovery.lastAttempt = now
+          attackWatchdog.lastForce = now
+        end
+        -- If recovery window passed, disable
+        if now >= reloginRecovery.endTime then
+          reloginRecovery.active = false
+        end
+      else
+        -- Normal watchdog behavior (rate-limited, limited attempts)
+        if now - attackWatchdog.lastForce > attackWatchdog.cooldown and attackWatchdog.attempts < attackWatchdog.maxAttempts then
+          -- Try to force attack again
+          pcall(function() g_game.attack(bestTarget.creature) end)
+          attackWatchdog.lastForce = now
+          attackWatchdog.attempts = attackWatchdog.attempts + 1
+        end
       end
     else
       attackWatchdog.attempts = 0
+      -- If we resumed attacking, cancel any relogin recovery
+      if reloginRecovery.active then
+        reloginRecovery.active = false
+        reloginRecovery.endTime = 0
+        reloginRecovery.lastAttempt = 0
+      end
     end
   else
     ui.target.right:setText("-")

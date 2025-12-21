@@ -719,7 +719,7 @@ end
 addCheckBox("highlightTarget", "Highlight Current Target", true, rightPanel, "Additionaly hightlight current target with red glow")
 if true then
   local function forceMarked(creature)
-    if target() == creature then
+    if target and target() == creature then
         creature:setMarked("red")
         return schedule(333, function() forceMarked(creature) end)
     end

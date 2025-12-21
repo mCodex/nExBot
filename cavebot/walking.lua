@@ -35,7 +35,7 @@ local lastWalkZ = nil
 -- IMPORTANT: Game client's A* pathfinding has practical limits (~50-70 tiles)
 -- For longer distances, rely on waypoint-to-waypoint navigation
 local MAX_PATHFIND_DIST = 50   -- Realistic pathfinding limit
-local MAX_WALK_CHUNK = 15      -- Max steps per autoWalk call (keeps paths fresh)
+local MAX_WALK_CHUNK = 25      -- Increased from 15 for faster walking
 local THOROUGH_CHECK_DIST = 40 -- Increased thorough window to improve floor-change accuracy
 
 -- Config helper: read CaveBot.Config safely
@@ -621,7 +621,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
 
   -- Detect autoWalk stall: if we issued autoWalk previously and the player isn't walking
   -- after a short timeout, reset cursor to force recompute. Configurable timeout.
-  local autoWalkStallTimeout = getCfg("autoWalkStallTimeout", 900)
+  local autoWalkStallTimeout = getCfg("autoWalkStallTimeout", 500)
   if PathCursor.autoWalkIssued and not (player and player:isWalking()) and (now - PathCursor.autoWalkIssuedTs) > autoWalkStallTimeout then
     resetPathCursor()
     -- try to find a nearby safe alternate immediately

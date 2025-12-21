@@ -82,6 +82,13 @@ local function logCritical(msg)
   warn("[HealEngine][CRITICAL] " .. msg)
 end
 
+-- Optional potion debug mode (opt-in): when enabled, HealEngine will emit
+-- short diagnostics about why potions were/weren't selected or used.
+local _potionDebug = false
+function HealEngine.setPotionDebug(flag)
+  _potionDebug = not not flag
+end
+
 -- ============================================================================
 -- TIME UTILITIES
 -- ============================================================================
@@ -189,31 +196,31 @@ local function canUseItem()
 end
 
 -- ============================================================================
--- POTION USAGE (Safe wrapper)
+-- POTION USAGE (Safe wrapper - now prioritizes hotkey-style usage)
 -- ============================================================================
 
 local function useItemSafe(itemId)
   if not itemId or itemId <= 0 then return false end
   
-  -- Try useWith pattern
+  -- Primary: g_game.useInventoryItemWith (like hotkey system, works with closed containers)
+  if g_game and g_game.useInventoryItemWith and player then
+    g_game.useInventoryItemWith(itemId, player, 0)
+    return true
+  end
+  
+  -- Alternative: g_game.useInventoryItem (uses on self, works with closed containers)
+  if g_game and g_game.useInventoryItem then
+    g_game.useInventoryItem(itemId)
+    return true
+  end
+  
+  -- Fallback: useWith pattern (requires open containers)
   if useWith and findItem and player then
     local item = findItem(itemId)
     if item then
       useWith(item, player)
       return true
     end
-  end
-  
-  -- Fallback: g_game.useInventoryItemWith
-  if g_game and g_game.useInventoryItemWith and player then
-    g_game.useInventoryItemWith(itemId, player, 0)
-    return true
-  end
-  
-  -- Alternative: try g_game.useInventoryItem (uses on self)
-  if g_game and g_game.useInventoryItem then
-    g_game.useInventoryItem(itemId)
-    return true
   end
   
   return false
@@ -310,6 +317,16 @@ function HealEngine.setCustomPotions(potionList)
   end
   -- Clear pending flag
   HealEngine._pendingPotions = nil
+end
+
+-- Debug helper: attempt to use a potion by id (returns true on success)
+function HealEngine.tryUsePotionById(itemId)
+  if not itemId or itemId <= 0 then return false end
+  local action = { kind = "potion", id = itemId, key = "potion_test_" .. tostring(itemId), cd = 1000, name = "potion_test", potionType = "mana" }
+  if _potionDebug then warn(string.format("[HealEngine][POTION_DEBUG] tryUsePotionById: attempting to use id=%d", itemId)) end
+  local ok = execute(action)
+  if _potionDebug then warn(string.format("[HealEngine][POTION_DEBUG] tryUsePotionById: result=%s", tostring(ok))) end
+  return ok
 end
 
 function HealEngine.setSelfSpellsEnabled(flag)
@@ -508,15 +525,16 @@ function HealEngine.planSelf(snap)
           end
         end
       end
-      -- Final fallback
       potionName = potionName or ("potion #" .. (pot.id or 0))
-      
+
+      -- Evaluate reasons for not selecting this pot
+      -- (removed debug logging)
+
       if pot.hp and hp <= pot.hp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
-        logDebug(string.format("planSelf: selected health potion '%s' (id=%d)", potionName, pot.id))
         return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "heal"}
       end
+
       if pot.mp and mp <= pot.mp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
-        logDebug(string.format("planSelf: selected mana potion '%s' (id=%d)", potionName, pot.id))
         return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "mana"}
       end
     end
@@ -524,6 +542,24 @@ function HealEngine.planSelf(snap)
 
   logDebug("planSelf: no action selected")
   return nil
+end
+
+-- Debug helper: simulate a self snapshot and print planned action
+function HealEngine.debugPlan(hp, mp, inPz)
+  local snap = { hp = hp or getHpPercent(), mp = mp or getMpPercent(), inPz = inPz }
+  local action = HealEngine.planSelf(snap)
+  if not action then
+    print(string.format("HealEngine.debugPlan: no action for hp=%.1f mp=%.1f inPz=%s", snap.hp, snap.mp, tostring(snap.inPz)))
+    return nil
+  end
+  if action.kind == "potion" then
+    print(string.format("HealEngine.debugPlan: selected potion id=%d name=%s type=%s", action.id or 0, action.name or "-", action.potionType or "-"))
+  elseif action.kind == "spell" then
+    print(string.format("HealEngine.debugPlan: selected spell %s", action.name or "-"))
+  else
+    print("HealEngine.debugPlan: selected action of kind=" .. tostring(action.kind))
+  end
+  return action
 end
 
 -- Select best friend action; target must include name and hp
@@ -608,7 +644,6 @@ function HealEngine.execute(action)
       logDebug(string.format("execute: used potion '%s' (id=%d)", action.name or "?", action.id))
       return true
     else
-      logWarn(string.format("execute: failed to use potion id=%d", action.id))
       return false
     end
   end

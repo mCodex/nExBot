@@ -125,9 +125,6 @@ end
 local OPTIONAL_MODULES = {
   ["HealBot"] = true,
   ["bot_core/init"] = true,
-  ["performance_optimizer"] = true,
-  ["combat_intelligence"] = true,
-  ["state_machine"] = true,
 }
 
 -- Load a script with timing and error isolation
@@ -183,6 +180,7 @@ loadCategory("core", {
   "main",             -- Main initialization
   "items",            -- Item definitions
   "lib",              -- Utility library
+  "safe_call",        -- Safe function call utilities (MUST load after lib)
   "new_cavebot_lib",  -- CaveBot library
   "configs",          -- Configuration system
   "bot_database",     -- Unified database (BotDB) - load AFTER configs
@@ -194,9 +192,6 @@ loadCategory("architecture", {
   "event_bus",            -- Centralized event bus
   "door_items",           -- Door item database
   "global_config",        -- Global configuration
-  "state_machine",        -- FSM architecture
-  "performance_optimizer", -- Performance optimizations
-  "combat_intelligence",  -- Combat system
   "bot_core/init",        -- Unified BotCore system
 })
 

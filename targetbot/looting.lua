@@ -1,3 +1,6 @@
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 TargetBot.Looting = {}
 TargetBot.Looting.list = {} -- list of containers to loot
 
@@ -166,11 +169,14 @@ TargetBot.Looting.process = function(targets, dangerLevel)
     status = ""
     return false
   end
-  if dangerLevel > tonumber(ui.maxDangerPanel.value:getText()) then
+  local maxDanger = tonumber((ui and ui.maxDangerPanel and ui.maxDangerPanel.value and ui.maxDangerPanel.value.getText) and ui.maxDangerPanel.value:getText() or nil) or 0
+  if dangerLevel > maxDanger then
     status = "High danger"
     return false
   end
-  if player:getFreeCapacity() < tonumber(ui.minCapacityPanel.value:getText()) then
+  local minCap = tonumber((ui and ui.minCapacityPanel and ui.minCapacityPanel.value and ui.minCapacityPanel.value.getText) and ui.minCapacityPanel.value:getText() or nil) or 0
+  local freeCap = player and player.getFreeCapacity and player:getFreeCapacity() or 0
+  if freeCap < minCap then
     status = "No cap"
     TargetBot.Looting.list = {}
     return false
@@ -400,7 +406,7 @@ local function getCachedPlayerPos()
 end
 
 onCreatureDisappear(function(creature)
-  if isInPz() then return end
+  if SafeCall.isInPz() then return end
   if not TargetBot.isOn() then return end
   if not creature:isMonster() then return end
   

@@ -1,5 +1,8 @@
 local HealContext = dofile("/core/heal_context.lua")
 
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 setDefaultTab('main')
 -- locales
 local panelName = "AttackBot"
@@ -897,9 +900,11 @@ end
       end
 
       local regex = patternCategory ~= 1 and [[^[^\(]+]] or [[^[^R]+]]
-      local type = regexMatch(patterns[patternCategory][pattern], regex)[1][1]:trim()
+      local matchResult = SafeCall.regexMatch(patterns[patternCategory][pattern], regex)
+      local type = matchResult and matchResult[1] and matchResult[1][1]:trim() or ""
       regex = [[^[^ ]+]]
-      local categoryName = regexMatch(categories[category], regex)[1][1]:trim():lower()
+      local categoryMatch = SafeCall.regexMatch(categories[category], regex)
+      local categoryName = categoryMatch and categoryMatch[1] and categoryMatch[1][1]:trim():lower() or ""
       local specificMonsters = monsters == true and "Any Creatures" or "Creatures"
       local attackType = showItem and "rune "..itemId or spell
 
@@ -1154,7 +1159,8 @@ function getMonstersInArea(category, posOrCreature, pattern, minHp, maxHp, safeP
 
   if category == 1 or category == 3 or category == 4 then
     if category == 1 or category == 3 then
-      local name = getTarget() and getTarget():getName()
+      local currentTarget = SafeCall.getTarget()
+      local name = currentTarget and currentTarget:getName()
       if #t ~= 0 and not table.find(t, name, true) then
         return 0
       end
@@ -1216,7 +1222,7 @@ local function useRuneOnTarget(runeId, targetCreatureOrTile)
     return true
   end
   
-  local rune = findItem(runeId)
+  local rune = SafeCall.findItem(runeId)
   if rune then
     g_game.useWith(rune, targetCreatureOrTile)
     return true
@@ -1235,7 +1241,7 @@ function executeAttackBotAction(categoryOrPos, idOrFormula, cooldown)
   if categoryOrPos == 4 or categoryOrPos == 5 or categoryOrPos == 1 then
     cast(idOrFormula, cooldown)
   elseif categoryOrPos == 3 then 
-    useRuneOnTarget(idOrFormula, target())
+    useRuneOnTarget(idOrFormula, SafeCall.target())
   end
 end
 
@@ -1307,9 +1313,9 @@ local attackMacro = macro(100, function()
   end
   
   -- Early exits (ordered by likelihood/speed)
-  local currentTarget = target()
+  local currentTarget = SafeCall.target()
   if not currentTarget then return end
-  if isInPz() then return end
+  if SafeCall.isInPz() then return end
   
   -- Cooldown check (use Priority engine which includes exhausted handling)
   if BotCore and BotCore.Cooldown then
@@ -1391,7 +1397,7 @@ local attackMacro = macro(100, function()
     local attackData = entry.itemId > 100 and entry.itemId or entry.spell
     
     -- For runes: skip visibility check if using inventory method (works without open BP)
-    local runeAvailable = entry.itemId > 100 and (not currentSettings.Visible or g_game.useInventoryItemWith or findItem(entry.itemId))
+    local runeAvailable = entry.itemId > 100 and (not currentSettings.Visible or g_game.useInventoryItemWith or SafeCall.findItem(entry.itemId))
     local canUseAttack = (type(attackData) == "string" and canCast(entry.spell, not currentSettings.ignoreMana, not currentSettings.Cooldown)) or runeAvailable
     
     if not canUseAttack then goto continue end
@@ -1433,7 +1439,7 @@ local attackMacro = macro(100, function()
         -- Sweep pattern uses bestSide
         countMatch = bestSide >= entry.count
         if countMatch and currentSettings.PvpSafe then
-          playersInRange = playersInRange or getPlayers(2)
+          playersInRange = playersInRange or SafeCall.getPlayers(2)
           if playersInRange > 0 then countMatch = false end
         end
       else

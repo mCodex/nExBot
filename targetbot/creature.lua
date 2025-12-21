@@ -1,4 +1,7 @@
 
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 TargetBot.Creature = {}
 TargetBot.Creature.configsCache = {}
 TargetBot.Creature.cached = 0
@@ -181,13 +184,13 @@ TargetBot.Creature.getConfigs = function(creature)
     local excludeRegex = config.value.excludeRegex
     
     -- Check if name matches include pattern
-    local match = regexMatch(name, regex)
-    if match[1] then
+    local match = SafeCall.regexMatch(name, regex)
+    if match and match[1] then
       -- Check if name is excluded
       local excluded = false
       if excludeRegex then
-        local excludeMatch = regexMatch(name, excludeRegex)
-        if excludeMatch[1] then
+        local excludeMatch = SafeCall.regexMatch(name, excludeRegex)
+        if excludeMatch and excludeMatch[1] then
           excluded = true
         end
       end

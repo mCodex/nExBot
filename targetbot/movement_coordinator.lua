@@ -174,6 +174,10 @@ if EventBus then
   EventBus.on("creature:appear", function(c)
     if c and c:isMonster() and not c:isDead() then
       updateMonsterCacheFromCreature(c)
+      -- Notify WavePredictor if available (non-blocking)
+      if WavePredictor and WavePredictor.ensurePattern then
+        pcall(WavePredictor.ensurePattern, c)
+      end
       debounceUpdate()
     end
   end, 10)
@@ -181,6 +185,10 @@ if EventBus then
   EventBus.on("creature:move", function(c, oldPos)
     if c and c:isMonster() and not c:isDead() then
       updateMonsterCacheFromCreature(c)
+      -- Update WavePredictor about movement
+      if WavePredictor and WavePredictor.onMove then
+        pcall(WavePredictor.onMove, c, oldPos)
+      end
       debounceUpdate()
     end
   end, 10)
@@ -349,6 +357,19 @@ function MovementCoordinator.Intent.register(intentType, targetPos, confidence, 
     return
   end
   
+  -- CRITICAL SAFETY: Validate target position for floor changes
+  -- Prevent accidental Z-level changes during wave avoidance, chase, follow, etc.
+  local currentPos = player and player:getPosition()
+  if currentPos and TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isPositionSafeForMovement then
+    if not TargetCore.PathSafety.isPositionSafeForMovement(targetPos, currentPos) then
+      -- Log blocked unsafe intent (for debugging)
+      if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
+        nExBot.Telemetry.increment("movement.intent.blocked.floor_change")
+      end
+      return -- Block unsafe movement intent
+    end
+  end
+  
   -- Create intent object
   local intent = {
     type = intentType,
@@ -366,6 +387,15 @@ function MovementCoordinator.Intent.register(intentType, targetPos, confidence, 
   
   -- Track statistics
   State.stats.intentsByType[intentType] = (State.stats.intentsByType[intentType] or 0) + 1
+
+  -- Telemetry: record intent registration counts (safe)
+  if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
+    -- find intent name
+    local intentName = "unknown"
+    for k,v in pairs(CONST.INTENT) do if v == intentType then intentName = k; break end end
+    nExBot.Telemetry.increment("movement.intent.registered")
+    nExBot.Telemetry.increment("movement.intent.registered." .. intentName)
+  end
 end
 
 -- Clear all intents (called after decision)
@@ -521,6 +551,10 @@ function MovementCoordinator.Decide.make()
   
   -- Check decision cooldown
   if now - State.lastDecisionTime < TIMING.DECISION_COOLDOWN then
+    if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
+      nExBot.Telemetry.increment("movement.decision.blocked.cooldown")
+      nExBot.Telemetry.increment("movement.decision.blocked")
+    end
     return { shouldMove = false, blocked = true, reason = "cooldown" }
   end
   
@@ -556,6 +590,16 @@ function MovementCoordinator.Decide.make()
   -- Check confidence threshold (with dynamic scaling and hysteresis applied)
   if confidence < effectiveThreshold then
     State.stats.decisionsBlocked = State.stats.decisionsBlocked + 1
+    -- Telemetry: low-confidence blocks
+    if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
+      local intentName = "unknown"
+      if winningIntent and winningIntent.type then
+        for k,v in pairs(CONST.INTENT) do if v == winningIntent.type then intentName = k; break end end
+      end
+      nExBot.Telemetry.increment("movement.decision.blocked.low_confidence")
+      nExBot.Telemetry.increment("movement.decision.blocked")
+      nExBot.Telemetry.increment("movement.decision.blocked.intent." .. intentName)
+    end
     return {
       shouldMove = false,
       blocked = true,
@@ -570,6 +614,15 @@ function MovementCoordinator.Decide.make()
   -- Check anti-oscillation
   if MovementCoordinator.Decide.isOscillating() then
     State.stats.oscillationsDetected = State.stats.oscillationsDetected + 1
+    if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
+      local intentName = "unknown"
+      if winningIntent and winningIntent.type then
+        for k,v in pairs(CONST.INTENT) do if v == winningIntent.type then intentName = k; break end end
+      end
+      nExBot.Telemetry.increment("movement.oscillation")
+      nExBot.Telemetry.increment("movement.decision.blocked.oscillation")
+      nExBot.Telemetry.increment("movement.decision.blocked.intent." .. intentName)
+    end
     return {
       shouldMove = false,
       blocked = true,
@@ -679,6 +732,18 @@ function MovementCoordinator.Execute.move(decision)
     return false, "invalid_position"
   end
   
+  -- ADDITIONAL SAFETY: Double-check target position for floor changes
+  -- This is a backup validation in case intent registration missed something
+  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isPositionSafeForMovement then
+    if not TargetCore.PathSafety.isPositionSafeForMovement(targetPos, playerPos) then
+      -- Log blocked unsafe execution (for debugging)
+      if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
+        nExBot.Telemetry.increment("movement.execution.blocked.floor_change")
+      end
+      return false, "unsafe_position_floor_change"
+    end
+  end
+  
   -- Check if already at target
   if playerPos.x == targetPos.x and playerPos.y == targetPos.y then
     return false, "already_at_target"
@@ -689,6 +754,14 @@ function MovementCoordinator.Execute.move(decision)
     time = now,
     position = {x = targetPos.x, y = targetPos.y}
   })
+
+  -- Telemetry: attempt
+  local intentName = "unknown"
+  for k,v in pairs(CONST.INTENT) do if v == intent.type then intentName = k; break end end
+  if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
+    nExBot.Telemetry.increment("movement.execution.attempt")
+    nExBot.Telemetry.increment("movement.execution.attempt." .. intentName)
+  end
   
   -- Execute the move
   local success = false
@@ -712,6 +785,17 @@ function MovementCoordinator.Execute.move(decision)
       success = TargetBot.walkTo(targetPos, 10, {ignoreNonPathable = true, precision = 1})
     elseif CaveBot and CaveBot.GoTo then
       success = CaveBot.GoTo(targetPos, 0)
+    end
+  end
+
+  -- Telemetry: success/failure
+  if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
+    if success then
+      nExBot.Telemetry.increment("movement.execution.success")
+      nExBot.Telemetry.increment("movement.execution.success." .. intentName)
+    else
+      nExBot.Telemetry.increment("movement.execution.failed")
+      nExBot.Telemetry.increment("movement.execution.failed." .. intentName)
     end
   end
   
@@ -807,6 +891,142 @@ function MovementCoordinator.tick()
   end
   
   return false, decision.reason
+end
+
+-- TUNING utilities: analyze telemetry and suggest conservative adjustments
+MovementCoordinator.Tuning = {}
+
+-- Analyze telemetry counters and return a list of human-friendly suggestions and raw counters
+function MovementCoordinator.Tuning.analyze()
+  local tele = nExBot and nExBot.Telemetry and nExBot.Telemetry.get and nExBot.Telemetry.get()
+  tele = tele or {}
+  local suggestions = {}
+
+  local executed = tele["movement.execution.success"] or 0
+  local failed = tele["movement.execution.failed"] or 0
+  local oscillations = tele["movement.oscillation"] or 0
+  local blocked_low = tele["movement.decision.blocked.low_confidence"] or 0
+  local totalBlocked = tele["movement.decision.blocked"] or 0
+  local registeredWave = tele["movement.intent.registered.WAVE_AVOIDANCE"] or 0
+
+  -- Heuristic: if oscillations are high relative to executed moves, suggest increasing hysteresis
+  if executed > 0 and (oscillations / math.max(1, executed)) > 0.15 then
+    table.insert(suggestions, "High oscillation rate: consider increasing TIMING.MAX_OSCILLATIONS by 1 or increasing HYSTERESIS_BONUS by ~0.05")
+  end
+
+  -- Heuristic: many low confidence blocks while wave predictions are frequent
+  if registeredWave > 0 and blocked_low > executed * 1.5 then
+    table.insert(suggestions, "Many low-confidence blocks for wave avoidance: consider lowering WAVE_AVOIDANCE threshold or reduce its scale factor")
+  end
+
+  -- Heuristic: many execution failures relative to attempts
+  local attempts = tele["movement.execution.attempt"] or 0
+  if attempts > 0 and (failed / attempts) > 0.25 then
+    table.insert(suggestions, "High execution failure rate: inspect pathing and consider raising EXECUTION_COOLDOWN or increasing PATH safety checks")
+  end
+
+  return suggestions, tele
+end
+
+function MovementCoordinator.Tuning.report()
+  local suggestions, tele = MovementCoordinator.Tuning.analyze()
+  print("[MovementCoordinator][Tuning] Telemetry snapshot:")
+  for k,v in pairs(tele) do
+    print("  " .. k .. " = " .. tostring(v))
+  end
+  if #suggestions == 0 then
+    print("[MovementCoordinator][Tuning] No suggestions (metrics look healthy)")
+  else
+    print("[MovementCoordinator][Tuning] Suggestions:")
+    for i,s in ipairs(suggestions) do
+      print("  - " .. s)
+    end
+  end
+end
+
+-- Run a short synthetic trace to generate representative telemetry for tuning
+function MovementCoordinator.Tuning.runSyntheticTrace()
+  if not (nExBot and nExBot.Telemetry and nExBot.Telemetry.increment) then
+    print("[MovementCoordinator][Tuning] telemetry not available; cannot run synthetic trace")
+    return false
+  end
+
+  print("[MovementCoordinator][Tuning] Running short synthetic trace (conservative)...")
+  -- Clear some counters (if present) by setting a baseline (we'll increment positive values)
+  -- Synthetic scenario: many attempts, moderate failures, some oscillations, frequent wave intents
+  nExBot.Telemetry.increment("movement.execution.attempt", 100)
+  nExBot.Telemetry.increment("movement.execution.success", 70)
+  nExBot.Telemetry.increment("movement.execution.failed", 30)
+  nExBot.Telemetry.increment("movement.oscillation", 20)
+  nExBot.Telemetry.increment("movement.decision.blocked.low_confidence", 200)
+  nExBot.Telemetry.increment("movement.decision.blocked", 220)
+  nExBot.Telemetry.increment("movement.intent.registered.WAVE_AVOIDANCE", 20)
+
+  print("[MovementCoordinator][Tuning] Synthetic trace complete; analyzing...")
+  local suggestions, tele = MovementCoordinator.Tuning.analyze()
+  for i,s in ipairs(suggestions) do print("  suggestion: " .. s) end
+  if #suggestions > 0 then
+    print("[MovementCoordinator][Tuning] Applying conservative recommendations...")
+    MovementCoordinator.Tuning.applyRecommendations(suggestions)
+  else
+    print("[MovementCoordinator][Tuning] No recommendations to apply")
+  end
+  return true
+end
+
+-- Apply conservative adjustments based on analyzer suggestions
+function MovementCoordinator.Tuning.applyRecommendations(suggestions)
+  suggestions = suggestions or MovementCoordinator.Tuning.analyze()
+  if type(suggestions) == "table" and suggestions[1] then
+    suggestions = suggestions
+  else
+    -- If passed (suggestions, tele) pair
+    suggestions = suggestions
+  end
+
+  local applied = {}
+
+  for _, s in ipairs(suggestions) do
+    -- Oscillation suggestion: increase MAX_OSCILLATIONS by 1 and HYSTERESIS_BONUS by 0.05
+    if s:find("High oscillation rate") then
+      local old = TIMING.MAX_OSCILLATIONS
+      TIMING.MAX_OSCILLATIONS = math.max(1, TIMING.MAX_OSCILLATIONS + 1)
+      table.insert(applied, string.format("MAX_OSCILLATIONS: %d -> %d", old, TIMING.MAX_OSCILLATIONS))
+      local oldH = TIMING.HYSTERESIS_BONUS
+      TIMING.HYSTERESIS_BONUS = TIMING.HYSTERESIS_BONUS + 0.05
+      table.insert(applied, string.format("HYSTERESIS_BONUS: %.3f -> %.3f", oldH, TIMING.HYSTERESIS_BONUS))
+    end
+
+    -- Low-confidence/wave suggestion: reduce WAVE_AVOIDANCE threshold by 0.05 (clamped)
+    if s:find("lowering WAVE_AVOIDANCE") then
+      local old = THRESHOLDS[INTENT.WAVE_AVOIDANCE]
+      local newv = math.max(0.4, old - 0.05)
+      THRESHOLDS[INTENT.WAVE_AVOIDANCE] = newv
+      table.insert(applied, string.format("WAVE_AVOIDANCE threshold: %.2f -> %.2f", old, newv))
+    end
+
+    -- Execution failure suggestion: raise EXECUTION_COOLDOWN by +100ms
+    if s:find("High execution failure rate") then
+      local old = TIMING.EXECUTION_COOLDOWN
+      TIMING.EXECUTION_COOLDOWN = TIMING.EXECUTION_COOLDOWN + 100
+      table.insert(applied, string.format("EXECUTION_COOLDOWN: %d -> %d", old, TIMING.EXECUTION_COOLDOWN))
+    end
+  end
+
+  -- Additional conservative adjustments regardless of which suggestions matched
+  -- Slightly increase OSCILLATION_WINDOW to make detection a bit more forgiving
+  local oldWin = TIMING.OSCILLATION_WINDOW
+  TIMING.OSCILLATION_WINDOW = TIMING.OSCILLATION_WINDOW + 500
+  table.insert(applied, string.format("OSCILLATION_WINDOW: %d -> %d", oldWin, TIMING.OSCILLATION_WINDOW))
+
+  -- Print applied adjustments
+  print("[MovementCoordinator][Tuning] Applied adjustments:")
+  for _, a in ipairs(applied) do print("  - " .. a) end
+
+  -- Record telemetry for applied tuning ops
+  if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
+    nExBot.Telemetry.increment("movement.tuning.applied")
+  end
 end
 
 -- Get current state for debugging

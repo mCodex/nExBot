@@ -12,6 +12,9 @@
 ]]
 
 local Position = {}
+
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
 BotCore.Position = Position
 
 -- ============================================================================
@@ -310,7 +313,7 @@ end
 -- Check if player is in protection zone
 -- @return boolean
 function Position.isInPz()
-  return isInPz()
+  return SafeCall.isInPz()
 end
 
 -- ============================================================================

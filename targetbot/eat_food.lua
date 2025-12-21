@@ -15,6 +15,9 @@
   - Toggle switch in TargetBot Looting panel
 ]]
 
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 TargetBot.EatFood = {}
 
 -- Food item IDs
@@ -370,14 +373,12 @@ local function eatFromInventory()
   if (now - lastEatTime) < EAT_COOLDOWN then return false end
   
   -- Try findItem first (searches all open containers including backpacks)
-  if findItem then
-    for foodId, _ in pairs(FOOD_IDS) do
-      local food = findItem(foodId)
-      if food then
-        g_game.use(food)
-        lastEatTime = now
-        return true
-      end
+  for foodId, _ in pairs(FOOD_IDS) do
+    local food = SafeCall.findItem(foodId)
+    if food then
+      g_game.use(food)
+      lastEatTime = now
+      return true
     end
   end
   
@@ -501,7 +502,7 @@ end
 TargetBot.EatFood.process = function()
   if not eatFromCorpsesEnabled then return false end
   if not player then return false end
-  if isInPz() then return false end
+  if SafeCall.isInPz() then return false end
   if not TargetBot.isOn() then return false end
   
   -- Clean old corpses
@@ -555,7 +556,7 @@ end
 onCreatureDisappear(function(creature)
   if not eatFromCorpsesEnabled then return end
   if not player then return end
-  if isInPz() then return end
+  if SafeCall.isInPz() then return end
   if not TargetBot.isOn() then return end
   if not creature:isMonster() then return end
   
@@ -613,7 +614,7 @@ end
 macro(200, function()
   if not eatFromCorpsesEnabled then return end
   if not TargetBot or not TargetBot.isOn or not TargetBot.isOn() then return end
-  if isInPz() then return end
+  if SafeCall.isInPz() then return end
   if not player then return end
   
   -- Process corpse eating

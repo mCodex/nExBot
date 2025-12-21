@@ -4,6 +4,9 @@
 -- Dynamic scaling based on monster count for better reactivity
 --------------------------------------------------------------------------------
 
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 local targetBotLure = false
 local targetCount = 0 
 local delayValue = 0
@@ -434,7 +437,7 @@ local function avoidWaveAttacks()
   end
   
   -- Find safe tile with dynamic thresholds
-  local currentTarget = target()
+  local currentTarget = target and target()
   local safePos, score = findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
   
   if safePos then
@@ -578,7 +581,7 @@ local function rePosition(minTiles, config)
     end
   end
   
-  local currentTarget = target()
+  local currentTarget = target and target()
   local bestPos = nil
   local bestScore = -9999
   
@@ -852,7 +855,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
     if config.smartPull then
       -- SAFEGUARD: Only try to pull if there are ANY monsters on screen
       -- No point in pausing waypoints if there's nothing to fight
-      local screenMonsters = getMonsters(7)  -- Check entire visible range first
+      local screenMonsters = SafeCall.getMonsters(7)  -- Check entire visible range first
       if screenMonsters == 0 then
         -- No monsters on screen - don't activate pull system, let CaveBot work
         TargetBot.smartPullActive = false
@@ -863,7 +866,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
         
         local nearbyMonsters
         if getMonstersAdvanced then
-          nearbyMonsters = getMonstersAdvanced(pullRange, pullShape)
+          nearbyMonsters = SafeCall.global("getMonstersAdvanced", pullRange, pullShape)
         else
           nearbyMonsters = getMonsters(pullRange)
         end
@@ -896,7 +899,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
     
     -- Legacy closeLure support
     if config.closeLure and config.closeLureAmount then
-      if getMonsters(1) >= config.closeLureAmount then
+      if SafeCall.getMonsters(1) >= config.closeLureAmount then
         return TargetBot.allowCaveBot(150)
       end
     end
@@ -1199,10 +1202,15 @@ TargetBot.Creature.walk = function(creature, config, targets)
           local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
           if not currentFollow or currentFollow:getId() ~= creature:getId() then
             if g_game.follow then
-              g_game.follow(creature)
+              pcall(g_game.follow, creature)
             else
-              follow(creature)
+              pcall(follow, creature)
             end
+          end
+          -- Verify follow started (no logging)
+          local afterFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
+          if afterFollow and afterFollow:getId() == creature:getId() then
+            -- follow confirmed
           end
           if g_game.setChaseMode and g_game.getChaseMode then
             local currentChaseMode = g_game.getChaseMode()
@@ -1330,6 +1338,6 @@ onPlayerPositionChange(function(newPos, oldPos)
   if not dynamicLureDelay then return end
 
   local targetThreshold = delayFrom or lureMax * 0.5
-  if targetCount < targetThreshold or not target() then return end
+  if targetCount < targetThreshold or not (target and target()) then return end
   CaveBot.delay(delayValue or 0)
 end)
