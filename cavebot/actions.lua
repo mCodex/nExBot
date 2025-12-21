@@ -32,7 +32,7 @@ end
 local lastMoved = now - 200
 onTextMessage(function(mode, text)
   if text ~= 'There is not enough room.' then return end
-  if CaveBot.isOff() then return end
+  if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
 
   local playerPos = pos()
   local tiles = getNearTiles(playerPos)
@@ -126,13 +126,15 @@ local function pathfinder()
   if not storage.extras.pathfinding then return end
   if noPath < 10 then return end
 
-  if not CaveBot.gotoNextWaypointInRange() then
+  if not CaveBot or not CaveBot.gotoNextWaypointInRange or not CaveBot.gotoNextWaypointInRange() then
     if getConfigFromName and getConfigFromName() then
-      local profile = CaveBot.getCurrentProfile()
+      local profile = CaveBot and CaveBot.getCurrentProfile and CaveBot.getCurrentProfile() or nil
       local config = getConfigFromName()
       local newProfile = profile == '#Unibase' and config or '#Unibase'
       
-      CaveBot.setCurrentProfile(newProfile)
+      if CaveBot and CaveBot.setCurrentProfile then
+        CaveBot.setCurrentProfile(newProfile)
+      end
     end
   end
   noPath = 0
@@ -150,6 +152,7 @@ CaveBot.addAction = function(action, value, focus)
     value = tostring(value)
   end
   local widget = UI.createWidget("CaveBotAction", CaveBot.actionList)
+  if not widget then return end
   widget:setText(action .. ":" .. value:split("\n")[1])
   widget.action = action
   widget.value = value
@@ -255,7 +258,7 @@ CaveBot.registerAction("delay", "#AAAAAA", function(value, retries, prev)
 end)
 
 CaveBot.registerAction("follow", "#FF8400", function(value, retries, prev)
-  local c = getCreatureByName(value)
+  local c = SafeCall.getCreatureByName(value)
   if not c then
     print("CaveBot[follow]: can't find creature to follow")
     return false
@@ -266,7 +269,7 @@ CaveBot.registerAction("follow", "#FF8400", function(value, retries, prev)
     g_game.cancelFollow()
     return true
   else
-    follow(c)
+    SafeCall.global("follow", c)
     delay(200)
     return "retry"
   end

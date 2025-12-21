@@ -440,7 +440,7 @@ ui.editor.debug.onClick = function()
   local on = ui.editor.debug:isOn()
   ui.editor.debug:setOn(not on)
   if on then
-    local specs = getSpectators()
+    local specs = SafeCall.global("getSpectators") or {}
     for i = 1, #specs do
       specs[i]:clearText()
     end

@@ -728,53 +728,57 @@ local function saveFollowPlayerConfig()
   end
 end
 
--- Helper: sync state, UI, and side effects
-local function setFollowEnabled(state)
-  followPlayerConfig.enabled = state
-  saveFollowPlayerConfig()
-  if followPlayerToggle then
-    followPlayerToggle:setOn(state)
-  end
-  if not state then
-    g_game.cancelFollow()
-    followedPlayerId = nil
-  end
-end
-
--- Follow Player macro - Uses native OTClient follow system
+-- Helper: Find player by name using OTClient's native functions for better performance
 local function findPlayerByName(name)
   if not name or name == "" then return nil end
-  -- Try exact match first (OTClient helper)
-  if getCreatureByName then
-    local exact = getCreatureByName(name, true)
-    if exact then return exact end
-  end
-  -- Fallback: case-insensitive substring match in spectators
+
+  -- Search through visible spectators for players matching the name
   local lname = name:lower()
-  for i, c in ipairs(getSpectators()) do
+  local spectators = SafeCall.global("getSpectators") or {}
+
+  for i, c in ipairs(spectators) do
     if c and c:isPlayer() and not c:isLocalPlayer() then
-      local n = c:getName()
-      if n and n:lower():find(lname, 1, true) then
+      local cname = c:getName()
+      if cname and (cname:lower() == lname or cname:lower():find(lname, 1, true)) then
         return c
       end
     end
   end
+
   return nil
 end
 
-local followPlayerMacro = macro(200, function()
-  if not followPlayerConfig.enabled or not player then return end
-  if not followPlayerConfig.playerName or followPlayerConfig.playerName == "" then return end
+local followPlayerMacro = macro(200, "Follow Player", function()
+  print("Follow Player macro executing")
+  if not followPlayerConfig.enabled then
+    print("Follow Player macro disabled")
+    return
+  end
+  if not followPlayerConfig.playerName or followPlayerConfig.playerName == "" then
+    print("Follow Player no player name")
+    return
+  end
+
+  -- Get local player
+  local localPlayer = g_game.getLocalPlayer()
+  if not localPlayer then
+    print("Follow Player no local player")
+    return
+  end
 
   -- Respect resume cooldown after combat or manual pause
-  if followPlayerConfig.resumeAt and now < followPlayerConfig.resumeAt then return end
+  if followPlayerConfig.resumeAt and now < followPlayerConfig.resumeAt then
+    print("Follow Player in cooldown")
+    return
+  end
 
-  -- Cooldown check
+  -- Cooldown check to prevent excessive CPU usage
   if (now - lastFollowCheck) < FOLLOW_CHECK_COOLDOWN then return end
   lastFollowCheck = now
 
   -- If player started attacking, pause following (don't disable toggle)
-  if getTarget() then
+  if g_game.isAttacking() then
+    print("Follow Player pausing due to combat")
     -- Cancel any active follow and set a short resume delay to avoid immediate re-following during combat
     if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
     followPlayerConfig.resumeAt = now + 3000 -- resume in 3s
@@ -783,30 +787,30 @@ local followPlayerMacro = macro(200, function()
 
   -- Find the target player using robust matching
   local target = findPlayerByName(followPlayerConfig.playerName)
+  print("Follow Player target found: " .. (target and target:getName() or "nil"))
 
   if target then
-    -- Start following the target (only if not already following them)
-    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
-    if not currentFollow or currentFollow:getId() ~= target:getId() then
-      -- Prefer g_game.follow when available (OTClient 8 native API)
-      if g_game and g_game.follow then
-        pcall(g_game.follow, target)
-      else
-        pcall(follow, target)
-      end
+    -- Only call follow if we're not already following this target
+    if followedPlayerId ~= target:getId() then
+      print("Follow Player starting to follow " .. target:getName())
+      -- Use OTClient's native follow system - it handles Z-levels, off-screen following, and pathfinding automatically
+      local ok, err = pcall(function()
+        if g_game and g_game.follow then
+          g_game.follow(target)
+        else
+          SafeCall.global("follow", target)
+        end
+      end)
+      if not ok then print("Follow Player follow error: "..tostring(err)) end
       followedPlayerId = target:getId()
+    else
+      print("Follow Player already following correct target")
     end
   else
-    -- Target not found - check if we're still following the intended player
-    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
-    if currentFollow and followedPlayerId and currentFollow:getId() == followedPlayerId then
-      -- Still following the correct player, persist the follow
-      -- (they might be temporarily off-screen or on another floor)
-    else
-      -- Not following the intended player, cancel follow
-      if currentFollow then
-        if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
-      end
+    print("Follow Player target not found, canceling follow")
+    -- Target not found - cancel follow if we were following
+    if followedPlayerId then
+      if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
       followedPlayerId = nil
     end
   end
@@ -814,12 +818,61 @@ end)
 
 BotDB.registerMacro(followPlayerMacro, "followPlayer")
 
+-- Initialize macro state based on config
+if followPlayerConfig.enabled then
+  followPlayerMacro:setOn()
+else
+  followPlayerMacro:setOff()
+end
+
+-- Helper: sync state, UI, and side effects
+local function setFollowEnabled(state)
+  followPlayerConfig.enabled = state
+  saveFollowPlayerConfig()
+  if followPlayerToggle then
+    followPlayerToggle:setOn(state)
+  end
+
+  -- Enable/disable the macro in OTClient's system
+  if followPlayerMacro then
+    local ok, err
+    if state then
+      ok, err = pcall(function() followPlayerMacro:setOn() end)
+      if not ok then print("Follow Player macro enable error: "..tostring(err)) end
+    else
+      ok, err = pcall(function() followPlayerMacro:setOff() end)
+      if not ok then print("Follow Player macro disable error: "..tostring(err)) end
+      -- Cancel any active follow when disabling
+      if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
+      followedPlayerId = nil
+    end
+  end
+end
+
 -- Follow Player UI
 UI.Label("Follow Player:")
 
 local followPlayerNameEdit = UI.TextEdit(followPlayerConfig.playerName, function(widget, text)
   followPlayerConfig.playerName = text:trim()
   saveFollowPlayerConfig()
+  -- If enabled, attempt to follow immediately
+  if followPlayerConfig.enabled and followPlayerConfig.playerName ~= "" then
+    local ok, err = pcall(function()
+      local tgt = findPlayerByName(followPlayerConfig.playerName)
+      if tgt then
+        if g_game and g_game.follow then
+          pcall(g_game.follow, tgt)
+        else
+          SafeCall.global("follow", tgt)
+        end
+        followedPlayerId = tgt:getId()
+      else
+        if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
+        followedPlayerId = nil
+      end
+    end)
+    if not ok then print("Follow Player name change follow error: "..tostring(err)) end
+  end
 end)
 
 local followToggleUI = setupUI([[
@@ -838,7 +891,11 @@ Panel
 followPlayerToggle = followToggleUI.followPlayerToggle
 followPlayerToggle:setOn(followPlayerConfig.enabled)
 followPlayerToggle.onClick = function(widget)
-  setFollowEnabled(not followPlayerConfig.enabled)
+  local ok, err = pcall(function()
+    print("Follow Player toggle clicked")
+    setFollowEnabled(not followPlayerConfig.enabled)
+  end)
+  if not ok then print("Follow Player toggle error: "..tostring(err)) end
 end
 
 UI.Separator()

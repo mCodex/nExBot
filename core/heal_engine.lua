@@ -218,7 +218,7 @@ local function useItemSafe(itemId)
   if useWith and findItem and player then
     local item = findItem(itemId)
     if item then
-      useWith(item, player)
+      SafeCall.useWith(item, player)
       return true
     end
   end

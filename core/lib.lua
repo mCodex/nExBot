@@ -508,7 +508,7 @@ function isFriend(c)
     if storage.playerList and storage.playerList.groupMembers then
         local p = creature
         if not p and type(c) == "string" then
-            p = getCreatureByName(c, true)
+            p = SafeCall.getCreatureByName(c, true)
         end
         if p and p:isPlayer() and p:isPartyMember() then
             CachedFriends[p] = true
@@ -557,7 +557,7 @@ function isEnemy(c)
     if not name then return false end
     
     if not p then
-        p = getCreatureByName(name, true)
+        p = SafeCall.getCreatureByName(name, true)
     end
     if not p then return false end
     if p:isLocalPlayer() then return false end
@@ -586,7 +586,7 @@ function getPlayerDistribution()
     local friends = {}
     local neutrals = {}
     local enemies = {}
-    for i, spec in ipairs(getSpectators()) do
+    for i, spec in ipairs(SafeCall.global("getSpectators") or {}) do
         if spec:isPlayer() and not spec:isLocalPlayer() then
             if isFriend(spec) then
                 table.insert(friends, spec)
@@ -733,7 +733,7 @@ end
 function getMonstersInRange(pos, range)
     if not pos or not range then return false end
     local monsters = 0
-    for i, spec in pairs(getSpectators()) do
+    for i, spec in pairs(SafeCall.global("getSpectators") or {}) do
         if spec:isMonster() and
             (g_game.getClientVersion() < 960 or spec:getType() < 3) and
             getDistanceBetween(pos, spec:getPosition()) < range then
@@ -1048,7 +1048,7 @@ function useOnInvertoryItem(a, b)
     local item = findItem(b)
     if not item then return end
 
-    return useWith(a, item)
+    return SafeCall.useWith(a, item)
 end
 
 -- Pre-computed direction offsets (static, never changes)
@@ -1161,7 +1161,7 @@ function useOnGroundItem(a, b)
     end
 
     if dest then
-        return useWith(item, dest)
+        return SafeCall.useWith(item, dest)
     else
         return false
     end

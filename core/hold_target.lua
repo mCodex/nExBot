@@ -18,7 +18,7 @@ local holdTargetMacro = macro(100, "Hold Target", function()
         if not targetID then return end
 
         -- look for target
-        for i, spec in ipairs(getSpectators()) do
+        for i, spec in ipairs(SafeCall.global("getSpectators") or {}) do
             local sameFloor = spec:getPosition().z == posz()
             local oldTarget = spec:getId() == targetID
             

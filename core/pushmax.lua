@@ -106,7 +106,7 @@ local resetData = function()
 end
 
 local getCreatureById = function(id)
-  for i, spec in ipairs(getSpectators()) do
+  for i, spec in ipairs(SafeCall.global("getSpectators") or {}) do
     if spec:getId() == id then
       return spec
     end

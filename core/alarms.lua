@@ -22,6 +22,7 @@ Panel
 
 ]])
 ui:setId(panelName)
+ui:setVisible(true)
 
 if not storage[panelName] then
   storage[panelName] = {}
@@ -31,17 +32,24 @@ local config = storage[panelName]
 
 ui.title:setOn(config.enabled)
 ui.title.onClick = function(widget)
-  config.enabled = not config.enabled
-  widget:setOn(config.enabled)
+  local ok, err = pcall(function()
+    print("Alarms toggle clicked")
+    config.enabled = not config.enabled
+    widget:setOn(config.enabled)
+  end)
+  if not ok then print("Alarms toggle error: "..tostring(err)) end
 end
 
 local window = UI.createWindow("AlarmsWindow")
 window:hide()
 
 ui.alerts.onClick = function()
-  window:show()
-  window:raise()
-  window:focus()
+  local ok, err = pcall(function()
+    window:show()
+    window:raise()
+    window:focus()
+  end)
+  if not ok then print("Alarms edit open error: "..tostring(err)) end
 end
 
 local widgets = 
@@ -190,7 +198,7 @@ macro(100, function()
     end
   end
 
-  for i, spec in ipairs(getSpectators()) do
+  for i, spec in ipairs(SafeCall.global("getSpectators") or {}) do
     if not spec:isLocalPlayer() and not (config.ignoreFriends.enabled and isFriend(spec)) then
 
       if config.creatureDetected.enabled then

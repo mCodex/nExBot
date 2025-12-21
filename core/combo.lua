@@ -1,4 +1,5 @@
 setDefaultTab("Main")
+local SafeCall = SafeCall or require("core.safe_call")
 local panelName = "combobot"
 local ui = setupUI([[
 Panel
@@ -231,7 +232,7 @@ onTextMessage(function(mode, text)
         local regex = "[a-zA-Z]*"
         local regexData = regexMatch(text, regex)
         if regexData[1][1]:lower() == config.serverLeader:lower() then
-          local leader = getCreatureByName and getCreatureByName(regexData[1][1])
+          local leader = SafeCall.getCreatureByName(regexData[1][1])
           if leader then
             g_game.partyJoin(leader:getId())
             g_game.requestChannels()
@@ -250,7 +251,7 @@ onTalk(function(name, level, mode, text, channelId, pos)
       if string.find(text, "request invite") then
         local access = string.match(text, "%d.*")
         if access and access == storage.BotServerChannel then
-          local minion = getCreatureByName and getCreatureByName(name)
+          local minion = SafeCall.getCreatureByName(name)
           if minion then
             g_game.partyInvite(minion:getId())
             if firstInvitee then
@@ -282,16 +283,18 @@ onTalk(function(name, level, mode, text, channelId, pos)
       local params = string.split(text, ",")
       if #params == 2 then
         local target = params[2]:trim()
-        if getCreatureByName and getCreatureByName(target) then
-          if useWith then useWith(3155, getCreatureByName(target)) end
+        local creature = SafeCall.getCreatureByName(target)
+        if creature then
+          if useWith then useWith(3155, creature) end
         end
       end
     elseif string.find(text, "att") then
       local attParams = string.split(text, ",")
       if #attParams == 2 then
         local atTarget = attParams[2]:trim()
-        if getCreatureByName and getCreatureByName(atTarget) and config.attack == "COMMAND TARGET" then
-          g_game.attack(getCreatureByName(atTarget))
+        local creature = SafeCall.getCreatureByName(atTarget)
+        if creature and config.attack == "COMMAND TARGET" then
+          g_game.attack(creature)
         end
       end
     end
@@ -337,13 +340,14 @@ end)
 macro(10, function()
   if not config.enabled or not config.attackLeaderTargetEnabled then return end
   if leaderTarget and config.attack == "LEADER TARGET" then
-    if not (getTarget and getTarget()) or (getTarget and getTarget() and getTarget():getName() ~= leaderTarget:getName()) then
+    local target = SafeCall.getTarget()
+    if not target or target:getName() ~= leaderTarget:getName() then
       g_game.attack(leaderTarget)
     end
   end
   if config.enabled and config.serverEnabled and config.attack == "SERVER LEADER TARGET" and serverTarget then
-    if serverTarget and not (getTarget and getTarget()) or (getTarget and getTarget() and getTarget():getname() ~= serverTarget)
-    then
+    local target = SafeCall.getTarget()
+    if serverTarget and not target or (target and target:getName() ~= serverTarget) then
       g_game.attack(serverTarget)
     end
   end
@@ -374,7 +378,7 @@ macro(100, function()
     end
   end
   if not toFollow then return end
-  local target = getCreatureByName and getCreatureByName(toFollow)
+  local target = SafeCall.getCreatureByName(toFollow)
   if target then
     local tpos = target:getPosition()
     toFollowPos[tpos.z] = tpos
@@ -401,7 +405,8 @@ local timeout = now
 macro(10, function()
   if config.enabled and startCombo then
     if config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item) then
-      if useWith and getTarget then useWith(config.item, getTarget()) end
+      local target = SafeCall.getTarget()
+      if useWith and target then useWith(config.item, target) end
     end
     if config.attackSpellEnabled and config.spell:len() > 1 then
       say(config.spell)
@@ -432,10 +437,11 @@ if BotServer._websocket and config.enabled and config.serverEnabled then
   end)
   BotServer.listen("target", function(name, message)
     if name:lower() ~= player:getName():lower() and name:lower() == config.serverLeader:lower() then
-      if not (target and target()) or (target and target():getName() == (getCreatureByName and getCreatureByName(message))) then
+      local msgCreature = SafeCall.getCreatureByName(message)
+      if not (target and target()) or (target and target():getName() == msgCreature) then
         if config.serverLeaderTarget then
-          serverTarget = getCreatureByName and getCreatureByName(message)
-          if g_game and g_game.attack and getCreatureByName then g_game.attack(getCreatureByName(message)) end
+          serverTarget = msgCreature
+          if g_game and g_game.attack then g_game.attack(msgCreature) end
         end
       end
     end

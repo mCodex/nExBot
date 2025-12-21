@@ -885,10 +885,8 @@ function TargetCore.Native.followCreature(creature)
   -- Use g_game.follow if available, otherwise fall back to bot's follow()
   if g_game.follow then
     g_game.follow(creature)
-  elseif follow then
-    follow(creature)
   else
-    return false
+    SafeCall.global("follow", creature)
   end
   
   TargetCore.Native.lastFollowCreature = creature:getId()

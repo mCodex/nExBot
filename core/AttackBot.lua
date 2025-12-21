@@ -1165,7 +1165,7 @@ function getMonstersInArea(category, posOrCreature, pattern, minHp, maxHp, safeP
         return 0
       end
     end
-    for i, spec in pairs(getSpectators()) do
+    for i, spec in pairs(SafeCall.global("getSpectators") or {}) do
       local specHp = spec:getHealthPercent()
       local name = spec:getName():lower()
       monsters = spec:isMonster() and specHp >= minHp and specHp <= maxHp and (#t == 0 or table.find(t, name, true)) and

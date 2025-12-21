@@ -410,7 +410,7 @@ function FriendHealer.tick()
   _state.lastScan = currentTime
   
   -- Get spectators
-  local spectators = getSpectators and getSpectators() or {}
+  local spectators = SafeCall.global("getSpectators") or {}
   
   -- Find best target
   local bestTarget, targetsInRange = findBestTarget(spectators, config, selfHpPercent)
