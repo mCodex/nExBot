@@ -150,7 +150,9 @@ function SafeCall.wrap(originalFunc, fallback)
     end
 end
 
--- Export to global namespace for easy access
-_G.SafeCall = SafeCall
+-- Export to global namespace for easy access (only if _G is available)
+if _G then
+    _G.SafeCall = SafeCall
+end
 
 return SafeCall
