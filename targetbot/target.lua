@@ -6,6 +6,9 @@ local lureEnabled = true
 local dangerValue = 0
 local looterStatus = ""
 
+-- Local cached reference to local player (updated on relogin)
+local player = g_game and g_game.getLocalPlayer() or nil
+
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
 
@@ -177,6 +180,52 @@ if onPlayerHealthChange then
         reloginRecovery.active = true
         reloginRecovery.endTime = now + reloginRecovery.duration
         reloginRecovery.lastAttempt = 0
+
+        -- Force immediate cache refresh and attempt recovery hits
+        -- Update local player reference (in case object changed on relogin)
+        player = g_game and g_game.getLocalPlayer() or player
+        debouncedInvalidateAndRecalc()
+
+        -- If TargetBot was previously enabled via storage, ensure it's on now to allow recovery
+        if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+          if storage.targetbotEnabled == true then
+            pcall(function() TargetBot.setOn() end)
+          end
+        end
+
+        -- Update UI status so user sees recovery in progress
+        if ui and ui.status and ui.status.right then ui.status.right:setText("Recovering...") end
+
+        -- Schedule repeated attempts (aggressive recovery window)
+        if targetbotMacro then
+          local function attemptRecovery()
+            if TargetBot and TargetBot.isOn and TargetBot.isOn() then
+              pcall(targetbotMacro)
+              -- After macro run, try recalc and a direct attack as a backup
+              local ok2, best2 = pcall(function() return recalculateBestTarget() end)
+              if ok2 then
+                local count = CreatureCache.monsterCount or 0
+                if ui and ui.status and ui.status.right then
+                  if best2 and best2.creature then
+                    ui.status.right:setText("Recovering ("..tostring(count)..") best: "..best2.creature:getName())
+                  else
+                    ui.status.right:setText("Recovering ("..tostring(count)..")")
+                  end
+                end
+                if best2 and best2.creature then pcall(function() g_game.attack(best2.creature) end) end
+              end
+            end
+          end
+          schedule(200, attemptRecovery)
+          schedule(600, attemptRecovery)
+          schedule(1200, attemptRecovery)
+          schedule(2500, attemptRecovery)
+          schedule(5000, attemptRecovery)
+          schedule(8000, attemptRecovery)
+          schedule(12000, attemptRecovery)
+        end
+
+        -- Mark recovery window active (already set) and let watchdog handle disabling later
       end
     end
   end)

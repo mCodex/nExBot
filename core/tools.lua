@@ -760,7 +760,7 @@ local function followStartCreature(creature)
   local ok, err = pcall(function()
     if g_game and g_game.follow then g_game.follow(creature) else SafeCall.global("follow", creature) end
   end)
-  if not ok then print("Follow: follow error: "..tostring(err)) end
+  if not ok then end
   followedPlayerId = creature:getId()
 end
 
@@ -849,7 +849,7 @@ local function setFollowEnabled(state)
     local ok, err
     if state then
       ok, err = pcall(function() followPlayerMacro:setOn() end)
-      if not ok then print("Follow macro enable error: "..tostring(err)) end
+      if not ok then end
 
       -- If we have a name set, attempt immediate follow
       if followPlayerConfig.playerName and followPlayerConfig.playerName ~= "" then
@@ -858,13 +858,13 @@ local function setFollowEnabled(state)
           local ok2, err2 = pcall(function()
             if g_game and g_game.follow then g_game.follow(tgt) else SafeCall.global("follow", tgt) end
           end)
-          if not ok2 then print("Follow immediate follow error: "..tostring(err2)) end
+          if not ok2 then end
           followedPlayerId = tgt:getId()
         end
       end
     else
       ok, err = pcall(function() followPlayerMacro:setOff() end)
-      if not ok then print("Follow macro disable error: "..tostring(err)) end
+      if not ok then end
       -- Cancel any active follow when disabling
       if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
       followedPlayerId = nil
@@ -894,7 +894,7 @@ local followPlayerNameEdit = UI.TextEdit(followPlayerConfig.playerName, function
         followedPlayerId = nil
       end
     end)
-    if not ok then print("Follow name change follow error: "..tostring(err)) end
+    if not ok then end
   end
 end)
 
@@ -915,10 +915,10 @@ followPlayerToggle = followToggleUI.followPlayerToggle
 followPlayerToggle:setOn(followPlayerConfig.enabled)
 followPlayerToggle.onClick = function(widget)
   local ok, err = pcall(function()
-    print("Follow toggle clicked")
+    
     setFollowEnabled(not followPlayerConfig.enabled)
   end)
-  if not ok then print("Follow toggle error: "..tostring(err)) end
+  if not ok then end
 end
 
 UI.Separator()
