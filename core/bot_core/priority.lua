@@ -22,9 +22,9 @@ local PriorityEngine = {}
 -- CONSTANTS (hardcoded for safety)
 -- ============================================================================
 
--- Emergency thresholds (cannot be changed via UI)
-local EMERGENCY_HP_THRESHOLD = 30  -- HP% below this = emergency
-local CRITICAL_HP_THRESHOLD = 50   -- HP% below this = critical
+-- Emergency thresholds disabled per user request
+local EMERGENCY_HP_THRESHOLD = 0  -- HP% below this = emergency (disabled)
+local CRITICAL_HP_THRESHOLD = 0   -- HP% below this = critical (disabled)
 local LOW_MANA_THRESHOLD = 20      -- MP% below this = need mana
 
 -- Priority levels (lower = higher priority)
@@ -124,15 +124,8 @@ function PriorityEngine.getCurrentPriority()
   local hpPercent = BotCore.Stats.getHpPercent()
   local mpPercent = BotCore.Stats.getMpPercent()
   
-  -- EMERGENCY: HP critically low - healing is absolute priority
-  if hpPercent < EMERGENCY_HP_THRESHOLD then
-    return PRIORITY.EMERGENCY_HEAL
-  end
-  
-  -- CRITICAL: HP low - healing takes priority
-  if hpPercent < CRITICAL_HP_THRESHOLD then
-    return PRIORITY.CRITICAL_HEAL
-  end
+  -- Health-based healing priority disabled by user request; skip emergency/critical checks
+  -- (HP checks intentionally removed to prevent auto-stop of attacks)
   
   -- LOW MANA: Need mana for heals
   if mpPercent < LOW_MANA_THRESHOLD then

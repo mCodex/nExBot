@@ -1034,12 +1034,13 @@ targetbotMacro = macro(100, function()
     HealEngine.setFriendHealingEnabled(false)
   end
 
-  if HealContext and HealContext.isDanger and HealContext.isDanger() then
-    TargetBot.clearWalk()
-    TargetBot.stopAttack(true)
-    setStatusRight(STATUS_WAITING)
-    return
-  end
+  -- Danger-based auto-stop disabled per user request (no-op)
+  -- if HealContext and HealContext.isDanger and HealContext.isDanger() then
+  --   TargetBot.clearWalk()
+  --   TargetBot.stopAttack(true)
+  --   setStatusRight(STATUS_WAITING)
+  --   return
+  -- end
   
   local pos = player:getPosition()
   if not pos then return end

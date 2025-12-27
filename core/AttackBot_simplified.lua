@@ -149,9 +149,9 @@ function attackBotMain()
   if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then return end
   if modules.game_cooldown.isGroupCooldownIconActive(1) then return end
   
-  -- Healing priority
-  if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
-  if HealContext and HealContext.isDanger and HealContext.isDanger() then return end
+  -- Healing priority checks disabled per user request (do not block attacks on critical/danger)
+  -- if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
+  -- if HealContext and HealContext.isDanger and HealContext.isDanger() then return end
   if BotCore and BotCore.Priority and not BotCore.Priority.canAttack() then return end
   
   -- Training dummy check

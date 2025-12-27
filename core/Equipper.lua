@@ -959,7 +959,7 @@ end
 
 local isUnsafeToUnequip = EquipperService and EquipperService.isUnsafeToUnequip or function(ctx)
     if ctx.inPz then return false end
-    if ctx.hp <= 35 then return true end
+    -- HP-based unequip safety disabled per user request (allow unequip regardless of HP)
     if ctx.danger >= 50 then return true end
     return false
 end
@@ -1200,11 +1200,6 @@ local function throttledEquipCheck()
         return
     end
     
-    -- Skip during critical healing
-    if HealContext and HealContext.isCritical and HealContext.isCritical() then
-        return
-    end
-    
     local rules = getEnabledRules()
     if not rules or #rules == 0 then return end
     
@@ -1264,11 +1259,6 @@ end
 
 EquipManager = macro(300, function()
     if not config.enabled then return end
-
-    -- Skip gear swaps during critical healing/danger to avoid conflicts
-    if HealContext and HealContext.isCritical and HealContext.isCritical() then
-        return
-    end
 
     -- Run the throttled check (respects cooldowns internally)
     throttledEquipCheck()

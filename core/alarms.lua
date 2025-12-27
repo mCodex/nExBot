@@ -1,3 +1,5 @@
+-- Ensure this module places its UI on the Main tab (so it appears above PushMax)
+setDefaultTab("Main")
 local panelName = "alarms"
 local ui = setupUI([[
 Panel

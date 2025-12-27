@@ -389,7 +389,7 @@ function HealEngine.planSelf(snap)
   local mp = snap.mp or getMpPercent()
   local inPz = snap.inPz
   if inPz == nil then inPz = getInPz() end
-  local emergency = snap.emergency or (hp <= 15)
+  local emergency = false -- Emergency disabled by user request
 
   logDebug(string.format("planSelf: hp=%.1f mp=%.1f spells=%d potions=%d emergency=%s inPz=%s", 
     hp, mp, #selfSpells, #selfPotions, tostring(emergency), tostring(inPz)))
@@ -493,7 +493,8 @@ function HealEngine.planSelf(snap)
     return true, nil
   end
 
-  if (options.selfSpells or emergency) and #selfSpells > 0 then
+  -- Only run configured self spells when explicitly enabled by user (emergency-forcing removed)
+  if options.selfSpells and #selfSpells > 0 then
     local rejectReasons = {}
     for _, spell in ipairs(selfSpells) do
       local ok, reason = spellEligible(spell)
@@ -508,20 +509,21 @@ function HealEngine.planSelf(snap)
       logDebug('[HealEngine] No eligible spells. Reasons: ' .. table.concat(rejectReasons, ' | '))
     end
     
-    -- EMERGENCY FALLBACK: Cast fallbackSpell when HP critically low and no spell selected
-    -- This is the LAST LINE OF DEFENSE against player death!
-    if (emergency or hp <= 15) and fallbackSpell and healingGroupReady() and ready(fallbackSpell.key, fallbackSpell.cd) then
-      local fallbackManaCost = fallbackSpell.mpCost or 40
-      if currentMana >= fallbackManaCost then
-        logCritical(string.format('EMERGENCY FALLBACK: casting %s (HP=%.1f%%, mana=%d)', fallbackSpell.name, hp, currentMana))
-        return { kind = "spell", name = fallbackSpell.name, key = fallbackSpell.key, cd = fallbackSpell.cd, mana = fallbackManaCost }
-      else
-        logCritical(string.format('EMERGENCY FALLBACK FAILED: not enough mana for %s (need %d, have %d)', fallbackSpell.name, fallbackManaCost, currentMana))
-      end
-    end
+    -- EMERGENCY FALLBACK: disabled per user request
+    -- This block would cast a fallback spell when HP critically low. It has been disabled.
+    -- if (emergency or hp <= 15) and fallbackSpell and healingGroupReady() and ready(fallbackSpell.key, fallbackSpell.cd) then
+    --   local fallbackManaCost = fallbackSpell.mpCost or 40
+    --   if currentMana >= fallbackManaCost then
+    --     logCritical(string.format('EMERGENCY FALLBACK: casting %s (HP=%.1f%%, mana=%d)', fallbackSpell.name, hp, currentMana))
+    --     return { kind = "spell", name = fallbackSpell.name, key = fallbackSpell.key, cd = fallbackSpell.cd, mana = fallbackManaCost }
+    --   else
+    --     logCritical(string.format('EMERGENCY FALLBACK FAILED: not enough mana for %s (need %d, have %d)', fallbackSpell.name, fallbackManaCost, currentMana))
+    --   end
+    -- end
   end
 
-  if (options.potions or emergency) and #selfPotions > 0 then
+  -- Only run potions if user explicitly enabled potions (emergency-forcing removed)
+  if options.potions and #selfPotions > 0 then
     for _, pot in ipairs(selfPotions) do
       -- Get the actual potion name - prefer pot.name, then try to look up by ID
       local potionName = pot.name
@@ -693,7 +695,7 @@ do
       mp = mpNow,
       currentMana = currentMana,
       inPz = getInPz(),
-      emergency = (hpNow <= 15)  -- Emergency threshold raised from 10 to 15
+      emergency = false -- Emergency disabled by user request
     }
 
     local action = HealEngine.planSelf(snap)

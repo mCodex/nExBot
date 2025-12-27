@@ -218,13 +218,13 @@ end
 -- snapshotContext intentionally not provided here; the runtime module owns context creation (depends on `config`).
 
 local SAFETY = {
-  minHp = 35,
+  minHp = 0, -- HP restriction disabled per user request
   maxDanger = 50,
 }
 
 local function isUnsafeToUnequip(ctx)
   if ctx.inPz then return false end
-  if ctx.hp <= SAFETY.minHp then return true end
+  -- HP-based unequip safety disabled per user request
   if ctx.danger >= SAFETY.maxDanger then return true end
   return false
 end

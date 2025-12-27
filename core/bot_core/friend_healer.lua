@@ -357,11 +357,7 @@ end
 -- Returns true if action was taken
 function FriendHealer.tick()
   if not FriendHealer.isEnabled() then return false end
-  if HealContext and HealContext.isCritical and HealContext.isCritical() then
-    _state.bestTarget = nil
-    return false
-  end
-  
+
   local config = _state.config
   if not config then return false end
   
@@ -427,7 +423,7 @@ end
 -- Event handler: Friend health changed (for instant response)
 function FriendHealer.onFriendHealthChange(creature, newHpPercent, oldHpPercent)
   if not FriendHealer.isEnabled() then return end
-  if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
+  
   if not creature or creature:isLocalPlayer() then return end
   
   local config = _state.config

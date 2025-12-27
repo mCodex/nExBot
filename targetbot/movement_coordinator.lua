@@ -873,11 +873,10 @@ function MovementCoordinator.faceMonster(cardinalPos, confidence)
   )
 end
 
--- Register emergency escape
+-- Emergency escape disabled per user request (no-op)
 function MovementCoordinator.emergencyEscape(escapePos, confidence)
-  MovementCoordinator.Intent.register(
-    INTENT.EMERGENCY_ESCAPE, escapePos, confidence, "emergency"
-  )
+  -- intentionally disabled: emergency movement logic removed
+  return
 end
 
 -- ============================================================================

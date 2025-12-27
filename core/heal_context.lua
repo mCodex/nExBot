@@ -68,7 +68,8 @@ local function snapshotOnce()
   HealContext.snapshot = snap
   HealContext.lastSnapshotTime = nowTime
 
-  local crit = (snap.hp <= HealContext.thresholds.hpCritical) or (snap.danger >= HealContext.thresholds.dangerCritical and not snap.inPz)
+  -- HP-based critical detection disabled per user request; only danger triggers critical
+  local crit = (snap.danger >= HealContext.thresholds.dangerCritical and not snap.inPz)
   HealContext.critical = crit
   HealContext.dangerFlag = snap.danger >= HealContext.thresholds.dangerCritical
 
