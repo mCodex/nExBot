@@ -368,6 +368,38 @@ end
 -- Uses a tiered approach: fast local search → global search → skip strategies
 -- ============================================================================
 
+-- Oscillation protection (prevent rapid floor flip-flops between waypoints)
+local FLOOR_OSCILLATION_WINDOW = getCfg("floorOscillationWindow", 5000) -- ms
+local lastFloorChangeRecord = nil
+
+-- Called by walking layer when player's floor changes unexpectedly.
+-- Detects quick flip back between two floors and advances waypoint focus to escape loops.
+CaveBot.onFloorChanged = function(fromFloor, toFloor)
+  if not ui or not ui.list then return end
+  local nowTs = now or os.time() * 1000
+  if lastFloorChangeRecord and lastFloorChangeRecord.from == toFloor and lastFloorChangeRecord.to == fromFloor and (nowTs - lastFloorChangeRecord.ts) <= FLOOR_OSCILLATION_WINDOW then
+    -- Detected flip-flop between floors within window -> advance focused waypoint to escape loop
+    local current = ui.list:getFocusedChild() or ui.list:getFirstChild()
+    if current then
+      local idx = ui.list:getChildIndex(current) or 1
+      local actionCount = ui.list:getChildCount()
+      local nextIdx = idx + 1
+      if nextIdx > actionCount then nextIdx = 1 end
+      local nextChild = ui.list:getChildByIndex(nextIdx)
+      if nextChild then
+        ui.list:focusChild(nextChild)
+        print(string.format('[CaveBot] Floor oscillation detected (%d <-> %d). Advancing waypoint index from %d to %d to avoid loop.', fromFloor, toFloor, idx, nextIdx))
+        -- reset walking and waypoint engine state to avoid immediate re-trigger
+        CaveBot.resetWalking()
+        resetWaypointEngine()
+      end
+    end
+    lastFloorChangeRecord = nil
+  else
+    lastFloorChangeRecord = { from = fromFloor, to = toFloor, ts = nowTs }
+  end
+end
+
 -- Helper function to focus a waypoint (DRY: used in recovery and startup)
 -- Focuses the waypoint BEFORE the target so next tick executes it
 -- @param targetChild widget The waypoint widget to focus

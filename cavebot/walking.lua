@@ -858,6 +858,13 @@ onPlayerPositionChange(function(newPos, oldPos)
   if expectedFloor and newPos.z ~= expectedFloor then
     warn("[CaveBot] Unexpected floor change! Expected: " .. expectedFloor .. ", Current: " .. newPos.z)
     consecutiveFloorChanges = consecutiveFloorChanges + 1
+
+    -- Notify CaveBot controller to allow oscillation handling
+    if CaveBot and CaveBot.onFloorChanged then
+      local fromFloor = expectedFloor or lastWalkZ or (oldPos and oldPos.z) or 0
+      pcall(function() CaveBot.onFloorChanged(fromFloor, newPos.z) end)
+    end
+
     -- only attempt step-back after a couple of consecutive unexpected floor changes
     if consecutiveFloorChanges >= FLOORCHANGE_STEPBACK_THRESHOLD then
       stepBackToLastSafe(newPos)
