@@ -150,6 +150,15 @@ function SafeCall.wrap(originalFunc, fallback)
     end
 end
 
+-- Safely call any function with pcall and return success flag and result
+function SafeCall.call(func, ...)
+    if func then
+        local ok, res = pcall(func, ...)
+        if ok then return true, res end
+    end
+    return false, nil
+end
+
 -- Export to global namespace for easy access (only if _G is available)
 if _G then
     _G.SafeCall = SafeCall

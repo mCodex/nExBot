@@ -38,6 +38,8 @@
 
 MovementCoordinator = MovementCoordinator or {}
 MovementCoordinator.VERSION = "1.0"
+-- Toggle to enable movement coordinator debugging output
+MovementCoordinator.DEBUG = MovementCoordinator.DEBUG or false
 
 -- ============================================================================
 -- CONSTANTS
@@ -930,16 +932,16 @@ end
 
 function MovementCoordinator.Tuning.report()
   local suggestions, tele = MovementCoordinator.Tuning.analyze()
-  print("[MovementCoordinator][Tuning] Telemetry snapshot:")
+  if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] Telemetry snapshot:") end
   for k,v in pairs(tele) do
-    print("  " .. k .. " = " .. tostring(v))
+    if MovementCoordinator.DEBUG then print("  " .. k .. " = " .. tostring(v)) end
   end
   if #suggestions == 0 then
-    print("[MovementCoordinator][Tuning] No suggestions (metrics look healthy)")
+    if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] No suggestions (metrics look healthy)") end
   else
-    print("[MovementCoordinator][Tuning] Suggestions:")
+    if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] Suggestions:") end
     for i,s in ipairs(suggestions) do
-      print("  - " .. s)
+      if MovementCoordinator.DEBUG then print("  - " .. s) end
     end
   end
 end
@@ -951,7 +953,7 @@ function MovementCoordinator.Tuning.runSyntheticTrace()
     return false
   end
 
-  print("[MovementCoordinator][Tuning] Running short synthetic trace (conservative)...")
+  if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] Running short synthetic trace (conservative)...") end
   -- Clear some counters (if present) by setting a baseline (we'll increment positive values)
   -- Synthetic scenario: many attempts, moderate failures, some oscillations, frequent wave intents
   nExBot.Telemetry.increment("movement.execution.attempt", 100)
@@ -962,14 +964,14 @@ function MovementCoordinator.Tuning.runSyntheticTrace()
   nExBot.Telemetry.increment("movement.decision.blocked", 220)
   nExBot.Telemetry.increment("movement.intent.registered.WAVE_AVOIDANCE", 20)
 
-  print("[MovementCoordinator][Tuning] Synthetic trace complete; analyzing...")
+  if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] Synthetic trace complete; analyzing...") end
   local suggestions, tele = MovementCoordinator.Tuning.analyze()
-  for i,s in ipairs(suggestions) do print("  suggestion: " .. s) end
+  for i,s in ipairs(suggestions) do if MovementCoordinator.DEBUG then print("  suggestion: " .. s) end end
   if #suggestions > 0 then
-    print("[MovementCoordinator][Tuning] Applying conservative recommendations...")
+    if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] Applying conservative recommendations...") end
     MovementCoordinator.Tuning.applyRecommendations(suggestions)
   else
-    print("[MovementCoordinator][Tuning] No recommendations to apply")
+    if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] No recommendations to apply") end
   end
   return true
 end
@@ -1046,7 +1048,7 @@ end
 nExBot = nExBot or {}
 nExBot.MovementCoordinator = MovementCoordinator
 
-print("[MovementCoordinator] Movement Coordinator v" .. MovementCoordinator.VERSION .. " loaded")
+if MovementCoordinator.DEBUG then print("[MovementCoordinator] Movement Coordinator v" .. MovementCoordinator.VERSION .. " loaded") end
 
 -- Public API: whether movement should be allowed for TargetBot
 function MovementCoordinator.canMove()

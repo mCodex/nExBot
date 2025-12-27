@@ -23,7 +23,7 @@
 -- ============================================================================
 
 MonsterAI = MonsterAI or {}
-MonsterAI.VERSION = "1.0"
+MonsterAI.VERSION = "1.2"
 
 -- ============================================================================
 -- CONSTANTS
@@ -68,6 +68,19 @@ MonsterAI.CONSTANTS = {
     MEDIUM = 2,
     HIGH = 3,
     CRITICAL = 4
+  },
+
+  -- EWMA / learning tuning
+  EWMA = {
+    ALPHA_DEFAULT = 0.25,           -- Smoothing factor (0..1). Lower = smoother/less responsive
+    VARIANCE_PENALTY_SCALE = 0.28,  -- Scales std/mean into penalty multiplier
+    VARIANCE_PENALTY_MAX = 0.45     -- Maximum fraction to reduce confidence
+  },
+
+  -- Damage correlation tuning
+  DAMAGE = {
+    CORRELATION_RADIUS = 7,        -- Tiles to search for likely source
+    CORRELATION_THRESHOLD = 0.4    -- Minimum score to accept attribution
   }
 }
 
@@ -108,6 +121,50 @@ function MonsterAI.Patterns.get(monsterName)
          or MonsterAI.Patterns.default
 end
 
+-- Load persisted patterns from storage (if any)
+storage.monsterPatterns = storage.monsterPatterns or {}
+for k,v in pairs(storage.monsterPatterns) do
+  MonsterAI.Patterns.knownMonsters[k] = v
+end
+
+-- Persist a known monster pattern to storage
+function MonsterAI.savePattern(monsterName)
+  if not monsterName then return end
+  local name = monsterName:lower()
+  storage.monsterPatterns = storage.monsterPatterns or {}
+  storage.monsterPatterns[name] = MonsterAI.Patterns.knownMonsters[name]
+end
+
+-- Persist partial updates to a known monster pattern (SRP)
+function MonsterAI.Patterns.persist(monsterName, updates)
+  if not monsterName then return end
+  local name = monsterName:lower()
+  MonsterAI.Patterns.knownMonsters[name] = MonsterAI.Patterns.knownMonsters[name] or {}
+  for k,v in pairs(updates) do MonsterAI.Patterns.knownMonsters[name][k] = v end
+  storage.monsterPatterns = storage.monsterPatterns or {}
+  storage.monsterPatterns[name] = MonsterAI.Patterns.knownMonsters[name]
+end
+-- Simple decay: slowly reduce confidence and nudge cooldown toward default when long unseen
+function MonsterAI.decayPatterns()
+  local nowt = now
+  local decayWindow = 7 * 24 * 3600 * 1000 -- 7 days
+  for k, v in pairs(storage.monsterPatterns) do
+    if v.lastSeen and (nowt - v.lastSeen) > decayWindow then
+      v.confidence = (v.confidence or 0.5) * 0.9
+      if v.waveCooldown then v.waveCooldown = v.waveCooldown * 1.05 end
+      storage.monsterPatterns[k] = v
+      MonsterAI.Patterns.knownMonsters[k] = v
+    end
+  end
+end
+
+-- Schedule recurring decay (hourly)
+schedule(3600000, function()
+  MonsterAI.decayPatterns()
+  schedule(3600000, function() MonsterAI.decayPatterns() end)
+end)
+
+
 -- ============================================================================
 -- MONSTER TRACKER
 -- Real-time tracking of monster behavior for pattern learning
@@ -146,14 +203,22 @@ function MonsterAI.Tracker.track(creature)
     lastDirection = creature:getDirection(),
     lastPosition = {x = pos.x, y = pos.y, z = pos.z},
     lastAttackTime = 0,
+    lastWaveTime = 0,
     attackCount = 0,
     directionChanges = 0,
     movementSamples = 0,
     stationaryCount = 0,
     chaseCount = 0,
+    observedWaveAttacks = {},
+    waveCount = 0,
+
+    -- EWMA estimator for wave cooldown (learning)
+    ewmaCooldown = nil,
+    ewmaVariance = 0,
+    ewmaAlpha = 0.3,
+
     -- Learned behavior
     predictedWaveCooldown = nil,
-    observedWaveAttacks = {},
     confidence = 0.1         -- Start with low confidence
   }
 end
@@ -228,6 +293,32 @@ function MonsterAI.Tracker.update(creature)
   -- Update confidence based on sample count
   local sampleRatio = math.min(#data.samples / 50, 1)  -- Need 50 samples for full confidence
   data.confidence = 0.1 + 0.6 * sampleRatio
+end
+
+-- Central helper: update EWMA mean and variance for observed intervals
+-- Update EWMA mean + variance for an observed interval and persist summary
+function MonsterAI.Tracker.updateEWMA(data, observed)
+  if not data or not observed or observed <= 0 then return end
+  local alpha = data.ewmaAlpha or CONST.EWMA.ALPHA_DEFAULT
+  if not data.ewmaCooldown then
+    data.ewmaCooldown = observed
+    data.ewmaVariance = 0
+  else
+    local err = observed - data.ewmaCooldown
+    data.ewmaCooldown = alpha * observed + (1 - alpha) * data.ewmaCooldown
+    -- EWMA of squared error (variance proxy)
+    data.ewmaVariance = (1 - alpha) * (data.ewmaVariance or 0) + alpha * (err * err)
+  end
+  data.predictedWaveCooldown = data.ewmaCooldown
+
+  -- Persist via helper
+  local pname = (data.name or ""):lower()
+  MonsterAI.Patterns.persist(pname, {
+    waveCooldown = data.ewmaCooldown,
+    waveVariance = data.ewmaVariance,
+    lastSeen = now,
+    confidence = math.min((MonsterAI.Patterns.knownMonsters[pname] and MonsterAI.Patterns.knownMonsters[pname].confidence or 0.5) + 0.02, 0.99)
+  })
 end
 
 -- Get predicted movement pattern for a monster
@@ -309,7 +400,22 @@ function MonsterAI.Predictor.predictWaveAttack(creature)
     confidence = confidence + 0.15  -- Cooldown almost up
   end
   
+  -- Reduce confidence if we have noisy observations (large variance) via helper
+  local function computeVariancePenalty(d)
+    if not d or not d.ewmaVariance or not d.ewmaCooldown or d.ewmaCooldown <= 0 then return 0 end
+    local std = math.sqrt(d.ewmaVariance or 0)
+    local ratio = std / (d.ewmaCooldown + 1e-6)
+    local penalty = math.min(CONST.EWMA.VARIANCE_PENALTY_MAX, ratio * CONST.EWMA.VARIANCE_PENALTY_SCALE)
+    return penalty
+  end
+
+  local variancePenalty = computeVariancePenalty(data)
+  if variancePenalty and variancePenalty > 0 then
+    confidence = confidence * (1 - variancePenalty)
+  end
+
   confidence = math.min(confidence, 0.95)
+  confidence = math.max(confidence, 0.05)
   
   return timeToAttack < 500, confidence, timeToAttack
 end
@@ -505,8 +611,104 @@ if EventBus then
   EventBus.on("player:damage", function(damage, source)
     MonsterAI.Tracker.stats.totalDamageReceived = 
       MonsterAI.Tracker.stats.totalDamageReceived + damage
-    -- TODO: Correlate with monster that caused it
+
+    -- Try to correlate this damage to a nearby monster (handles non-projectile attacks)
+    local nowt = now
+    local playerPos = player and player:getPosition()
+    if not playerPos then return end
+
+    local function scoreMonsterForDamage(m, playerPos, nowt)
+      if not m or not m:getPosition() or m:isDead() or not m:isMonster() then return 0, nil end
+      local mpos = m:getPosition()
+      local dist = math.max(math.abs(playerPos.x - mpos.x), math.abs(playerPos.y - mpos.y))
+      local score = 1 / (1 + dist)
+      local id = m:getId()
+      local data = id and MonsterAI.Tracker.monsters[id]
+
+      -- Prefer recently active/visible attackers
+      if data and data.lastWaveTime and math.abs(nowt - data.lastWaveTime) < 800 then score = score + 1.2 end
+      if data and data.lastAttackTime and math.abs(nowt - data.lastAttackTime) < 1500 then score = score + 0.8 end
+      -- Prefer ones facing the player
+      if data and MonsterAI.Predictor.isFacingPosition then
+        local facing = MonsterAI.Predictor.isFacingPosition(mpos, m:getDirection(), playerPos)
+        if facing then score = score + 0.6 end
+      end
+      return score, data
+    end
+
+    local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
+      and MovementCoordinator.MonsterCache.getNearby(CONST.DAMAGE.CORRELATION_RADIUS)
+      or g_map.getSpectatorsInRange(playerPos, false, CONST.DAMAGE.CORRELATION_RADIUS, CONST.DAMAGE.CORRELATION_RADIUS)
+
+    local bestScore, bestData, bestMonster = 0, nil, nil
+    for i = 1, #creatures do
+      local m = creatures[i]
+      local score, data = scoreMonsterForDamage(m, playerPos, nowt)
+      if score and score > bestScore then bestScore, bestData, bestMonster = score, data, m end
+    end
+
+    if bestScore and bestScore > CONST.DAMAGE.CORRELATION_THRESHOLD and bestData then
+      -- Attribute this damage
+      bestData.lastDamageTime = nowt
+      bestData.lastAttackTime = nowt
+      bestData.waveCount = (bestData.waveCount or 0) + 1
+      MonsterAI.Tracker.stats.areaAttacksObserved = MonsterAI.Tracker.stats.areaAttacksObserved + 1
+
+      -- If we have a previous damage timestamp, derive interval and update EWMA
+      if bestData._lastDamageSample then
+        local observed = nowt - bestData._lastDamageSample
+        if observed > 80 then
+          MonsterAI.Tracker.updateEWMA(bestData, observed)
+        end
+      end
+      bestData._lastDamageSample = nowt
+
+      -- Persist small bump
+      local pname = (bestData.name or ""):lower()
+      MonsterAI.Patterns.persist(pname, { lastSeen = nowt, confidence = math.min((MonsterAI.Patterns.knownMonsters[pname] and MonsterAI.Patterns.knownMonsters[pname].confidence or 0.5) + 0.03, 0.99) })
+    end
   end, 30)
+
+  -- Projectile/missile events: observe attacks originating from monsters
+  if onMissle then
+    onMissle(function(missle)
+      local src = missle and missle:getSource()
+      -- Guard method calls in case src does not implement expected API
+      if not src or type(src.isCreature) ~= 'function' or not src:isCreature() then return end
+      if type(src.isMonster) ~= 'function' or not src:isMonster() then return end
+
+      local id = src:getId()
+      if not id then return end
+
+      if not MonsterAI.Tracker.monsters[id] then MonsterAI.Tracker.track(src) end
+      local data = MonsterAI.Tracker.monsters[id]
+      if not data then return end
+
+      local nowt = now
+      -- Record the attack timestamp
+      if data.lastWaveTime and data.lastWaveTime > 0 then
+        local observed = nowt - data.lastWaveTime
+        if observed > 100 then -- ignore micro-events
+          -- Update EWMA mean + variance via helper
+          MonsterAI.Tracker.updateEWMA(data, observed)
+          data.waveCount = (data.waveCount or 0) + 1
+
+          -- Also persist this sample to pattern samples (bounded history)
+          local pname = (data.name or ""):lower()
+          local pattern = MonsterAI.Patterns.knownMonsters[pname] or {}
+          pattern.samples = pattern.samples or {}
+          table.insert(pattern.samples, 1, observed) -- newest first
+          -- keep only last N samples
+          while #pattern.samples > 30 do table.remove(pattern.samples) end
+          MonsterAI.Patterns.persist(pname, { waveCooldown = data.ewmaCooldown, waveVariance = data.ewmaVariance, samples = pattern.samples, lastSeen = now })
+        end
+      end
+
+      data.lastWaveTime = nowt
+      data.observedWaveAttacks = data.observedWaveAttacks or {}
+      table.insert(data.observedWaveAttacks, nowt)
+    end)
+  end
 end
 
 -- ============================================================================
@@ -533,4 +735,6 @@ end
 nExBot = nExBot or {}
 nExBot.MonsterAI = MonsterAI
 
-print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded")
+-- Toggle to enable debug prints
+MonsterAI.DEBUG = MonsterAI.DEBUG or false
+if MonsterAI.DEBUG then print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded") end

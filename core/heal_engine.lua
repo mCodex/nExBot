@@ -201,28 +201,45 @@ end
 
 local function useItemSafe(itemId)
   if not itemId or itemId <= 0 then return false end
-  
-  -- Primary: g_game.useInventoryItemWith (like hotkey system, works with closed containers)
+
+  -- Primary: prefer BotCore.Items abstraction when available
+  if BotCore and BotCore.Items and BotCore.Items.useOn then
+    local ok, res = SafeCall.call(BotCore.Items.useOn, itemId, player)
+    if ok then return true end
+  end
+
+  -- Try client hotkey-style API (works with closed containers on many OTC clients)
   if g_game and g_game.useInventoryItemWith and player then
-    g_game.useInventoryItemWith(itemId, player, 0)
-    return true
+    local ok, res = SafeCall.call(g_game.useInventoryItemWith, itemId, player, 0)
+    if ok then return true end
   end
-  
-  -- Alternative: g_game.useInventoryItem (uses on self, works with closed containers)
+
+  -- Fallback: direct useInventoryItem (some clients support this)
   if g_game and g_game.useInventoryItem then
-    g_game.useInventoryItem(itemId)
-    return true
+    local ok, res = SafeCall.call(g_game.useInventoryItem, itemId)
+    if ok then return true end
   end
-  
-  -- Fallback: useWith pattern (requires open containers)
-  if useWith and findItem and player then
+
+  -- Try to find the actual item instance in player's containers and useWith it
+  if g_game and g_game.findPlayerItem and player then
+    local ok, inst = SafeCall.call(g_game.findPlayerItem, itemId)
+    if ok and inst then
+      local ok2, res2 = SafeCall.call(g_game.useWith, inst, player)
+      if ok2 then return true end
+    end
+  end
+
+  -- Legacy fallback: global findItem + SafeCall
+  if findItem and player then
     local item = findItem(itemId)
     if item then
       SafeCall.useWith(item, player)
       return true
     end
   end
-  
+
+  -- Nothing worked
+  logDebug(string.format("useItemSafe: failed to use item id=%s", tostring(itemId)))
   return false
 end
 
@@ -531,10 +548,12 @@ function HealEngine.planSelf(snap)
       -- (removed debug logging)
 
       if pot.hp and hp <= pot.hp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
+        print("[HealBot] Executing potion: " .. tostring(potionName) .. " (id=" .. tostring(pot.id) .. ") for HP " .. tostring(hp) .. "% <= " .. tostring(pot.hp) .. "%")
         return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "heal"}
       end
 
       if pot.mp and mp <= pot.mp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
+        print("[HealBot] Executing potion: " .. tostring(potionName) .. " (id=" .. tostring(pot.id) .. ") for MP " .. tostring(mp) .. "% <= " .. tostring(pot.mp) .. "%")
         return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "mana"}
       end
     end
@@ -627,10 +646,9 @@ function HealEngine.execute(action)
     return true
     
   elseif action.kind == "potion" then
-    -- Use the potion
-    local success = useItemSafe(action.id)
-    
-    if success then
+    -- Use the potion (simplified like vBot for better OTCv8 compatibility)
+    if useWith and player then
+      useWith(action.id, player)
       -- Mark cooldowns
       stamp(action.key)
       markPotionUsed()
@@ -644,6 +662,7 @@ function HealEngine.execute(action)
       logDebug(string.format("execute: used potion '%s' (id=%d)", action.name or "?", action.id))
       return true
     else
+      logWarn("execute: useWith or player not available for potion")
       return false
     end
   end
@@ -654,54 +673,73 @@ end
 -- Event-driven fast-heal watcher: listen to player health/mana changes
 -- CRITICAL: This provides instant reaction to damage for player safety!
 do
-  if EventBus then
-    local _lastStatEvent = 0
-    local _debounceMs = 25 -- Reduced from 50ms for faster burst damage response
+  local registered = false
+  local _lastStatEvent = 0
+  local _debounceMs = 25 -- Reduced from 50ms for faster burst damage response
 
-    local function handleSnapshot()
-      local nowTime = nowMs()
-      if (nowTime - _lastStatEvent) < _debounceMs then return end
-      _lastStatEvent = nowTime
-      
-      local hpNow = getHpPercent()
-      local mpNow = getMpPercent()
-      local currentMana = getCurrentMana()
-      
-      logDebug(string.format("handleSnapshot triggered: hp=%.1f mp=%.1f mana=%d", hpNow, mpNow, currentMana))
-      
-      local snap = { 
-        hp = hpNow, 
-        mp = mpNow, 
-        currentMana = currentMana,
-        inPz = getInPz(),
-        emergency = (hpNow <= 15)  -- Emergency threshold raised from 10 to 15
-      }
-      
-      local action = HealEngine.planSelf(snap)
-      if action then
-        logDebug(string.format("handleSnapshot executing: %s", action.name or "unknown"))
-        HealEngine.execute(action)
-      end
+  local function handleSnapshot()
+    local nowTime = nowMs()
+    if (nowTime - _lastStatEvent) < _debounceMs then return end
+    _lastStatEvent = nowTime
+
+    local hpNow = getHpPercent()
+    local mpNow = getMpPercent()
+    local currentMana = getCurrentMana()
+
+    logDebug(string.format("handleSnapshot triggered: hp=%.1f mp=%.1f mana=%d", hpNow, mpNow, currentMana))
+
+    local snap = {
+      hp = hpNow,
+      mp = mpNow,
+      currentMana = currentMana,
+      inPz = getInPz(),
+      emergency = (hpNow <= 15)  -- Emergency threshold raised from 10 to 15
+    }
+
+    local action = HealEngine.planSelf(snap)
+    if action then
+      logDebug(string.format("handleSnapshot executing: %s", action.name or "unknown"))
+      HealEngine.execute(action)
     end
+  end
 
+  -- Primary: EventBus if available
+  if EventBus then
     EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMaxHealth)
-      -- Trigger on any HP drop for priority healing
       local hpNow = health and maxHealth and maxHealth > 0 and (health / maxHealth) * 100 or getHpPercent()
       local hpOld = oldHealth and oldMaxHealth and oldMaxHealth > 0 and (oldHealth / oldMaxHealth) * 100 or hpNow
       logDebug(string.format("player:health event: hpNow=%.1f hpOld=%.1f", hpNow, hpOld))
-      if hpNow < hpOld then
-        handleSnapshot()
-      end
+      if hpNow < hpOld then handleSnapshot() end
     end)
 
     EventBus.on("player:mana", function(mana, maxMana, oldMana, oldMaxMana)
-      -- Trigger on any mana drop
       local mpNow = mana and maxMana and maxMana > 0 and (mana / maxMana) * 100 or getMpPercent()
       local mpOld = oldMana and oldMaxMana and oldMaxMana > 0 and (oldMana / oldMaxMana) * 100 or mpNow
-      if mpNow < mpOld then
-        handleSnapshot()
-      end
+      if mpNow < mpOld then handleSnapshot() end
     end)
+    registered = true
+  end
+
+  -- Fallbacks for environments lacking EventBus: try client callback hooks
+  if not registered then
+    if type(onPlayerHealthChange) == 'function' then
+      onPlayerHealthChange(function(healthPercent)
+        -- healthPercent is absolute percent value
+        handleSnapshot()
+      end)
+      registered = true
+    end
+
+    if type(onPlayerManaChange) == 'function' then
+      onPlayerManaChange(function(manaPercent)
+        handleSnapshot()
+      end)
+      registered = true
+    end
+  end
+
+  if not registered then
+    logWarn("HealEngine: no event source found (EventBus or onPlayerHealthChange). Active polling may be required.")
   end
 end
 

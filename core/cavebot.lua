@@ -65,6 +65,7 @@ TargetBot = {} -- global namespace
 importStyle("/targetbot/looting.otui")
 importStyle("/targetbot/target.otui")
 importStyle("/targetbot/creature_editor.otui")
+importStyle("/targetbot/monster_inspector.otui")
 
 -- Load TargetBot core module first (shared utilities)
 dofile("/targetbot/core.lua")
@@ -75,6 +76,9 @@ dofile("/targetbot/movement_coordinator.lua") -- Coordinated movement system
 
 -- Load TargetBot modules
 dofile("/targetbot/creature.lua")
+
+-- Monster inspector UI (visualize learned patterns)
+dofile("/targetbot/monster_inspector.lua")
 dofile("/targetbot/creature_attack.lua")
 dofile("/targetbot/creature_editor.lua")
 dofile("/targetbot/creature_priority.lua")

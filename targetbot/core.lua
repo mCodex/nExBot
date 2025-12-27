@@ -923,4 +923,6 @@ end
 -- INITIALIZATION
 -- ============================================================================
 
-print("[TargetCore] v1.0 loaded")
+-- Toggle to enable debug prints
+TargetCore.DEBUG = TargetCore.DEBUG or false
+if TargetCore.DEBUG then print("[TargetCore] v1.0 loaded") end

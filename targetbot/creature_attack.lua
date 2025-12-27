@@ -158,8 +158,9 @@ end
 -- Returns detailed danger analysis for better decision making
 -- @param pos: position to check
 -- @param monsters: array of monster creatures
+-- @param usePrediction: when true, consult MonsterAI predictions (only enabled for rePosition)
 -- @return table {totalDanger, waveThreats, meleeThreats, details}
-local function analyzePositionDanger(pos, monsters)
+local function analyzePositionDanger(pos, monsters, usePrediction)
   -- Prefer TargetCore if available
   if Core and Core.calculatePositionDanger then
     local danger = Core.calculatePositionDanger(pos, monsters)
@@ -177,13 +178,34 @@ local function analyzePositionDanger(pos, monsters)
       local mdir = monster:getDirection()
       local dist = math.max(math.abs(pos.x - mpos.x), math.abs(pos.y - mpos.y))
       local threat = { monster = monster, distance = dist, inWaveArc = false, arcDistance = 99 }
-      local inArc, arcDist = isInFrontArc(pos, mpos, mdir, 5, 1)
-      if inArc then
-        threat.inWaveArc = true
-        threat.arcDistance = arcDist
-        result.waveThreats = result.waveThreats + 1
-        result.totalDanger = result.totalDanger + (3 - arcDist)
+
+      -- If prediction mode is active (only used by rePosition), prefer learned predictions
+      if usePrediction and MonsterAI and MonsterAI.Predictor then
+        local pattern = MonsterAI.Patterns.get(monster:getName())
+        local isPred, confidence, timeToAttack = MonsterAI.Predictor.predictWaveAttack(monster)
+        local inPredPath = false
+        if isPred then
+          inPredPath = MonsterAI.Predictor.isPositionInWavePath(pos, mpos, mdir, pattern.waveRange, pattern.waveWidth)
+        end
+        if inPredPath then
+          local urgency = 1 - math.max(0, math.min(timeToAttack, 1000)) / 1000
+          local pdanger = (pattern.dangerLevel or 1) * urgency * (confidence or 1)
+          threat.inWaveArc = true
+          threat.arcDistance = 0
+          result.waveThreats = result.waveThreats + 1
+          result.totalDanger = result.totalDanger + pdanger
+        end
+      else
+        -- Fallback to simple front arc detection when prediction is not enabled
+        local inArc, arcDist = isInFrontArc(pos, mpos, mdir, 5, 1)
+        if inArc then
+          threat.inWaveArc = true
+          threat.arcDistance = arcDist
+          result.waveThreats = result.waveThreats + 1
+          result.totalDanger = result.totalDanger + (3 - arcDist)
+        end
       end
+
       if dist == 1 then
         result.meleeThreats = result.meleeThreats + 1
         result.totalDanger = result.totalDanger + 2
@@ -639,8 +661,8 @@ local function rePosition(minTiles, config)
             local walkable = countWalkableTiles(checkPos)
             score = score + walkable * WEIGHTS.WALKABLE
             
-            -- Factor 2: Danger analysis (uses improved analyzePositionDanger)
-            local analysis = analyzePositionDanger(checkPos, monsters)
+            -- Factor 2: Danger analysis (uses improved analyzePositionDanger - prediction-enabled for reposition)
+            local analysis = analyzePositionDanger(checkPos, monsters, true)
             score = score + analysis.totalDanger * WEIGHTS.DANGER
             
             -- Factor 3: Distance to current target
@@ -684,12 +706,18 @@ local function rePosition(minTiles, config)
 end
 
 TargetBot.Creature.attack = function(params, targets, isLooting)
+  -- Removed debug warning per user request (not required)
   if player:isWalking() then
     lastWalk = now
   end
 
   local config = params.config
   local creature = params.creature
+
+  -- Debug about attack decision
+  if TargetBot and TargetBot.DEBUG then
+    warn(string.format("[TargetBot][DEBUG] Creature.attack: config=%s mana=%d target=%s", tostring(config and config.name or "-"), player:getMana(), creature and creature:getName() or "-"))
+  end
   
   -- Cache attacking creature check
   local currentTarget = g_game.getAttackingCreature()
@@ -706,24 +734,25 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local playerPos = player:getPosition()
   
   -- Group attack spell check
-  if config.useGroupAttack and config.groupAttackSpell:len() > 1 and mana > config.minManaGroup then
-    local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(config.groupAttackRadius) or g_map.getSpectatorsInRange(playerPos, false, config.groupAttackRadius, config.groupAttackRadius)
+  if config.useGroupAttackSpell and config.groupAttackSpell:len() > 1 and mana > (config.minMana or 0) then
+    local monsters = MovementCoordinator and MovementCoordinator.Scaling and MovementCoordinator.Scaling.getMonsterCount and MovementCoordinator.Scaling.getMonsterCount() or 0
     local playersAround = false
-    local monsters = 0
     
-    for i = 1, #creatures do
-      local c = creatures[i]
-      if c and c:isPlayer() and not c:isLocalPlayer() then
-        if not config.groupAttackIgnoreParty or c:getShield() <= 2 then
+    -- Check for nearby players if needed
+    if not config.groupAttackIgnorePlayers then
+      local creatures = g_map.getSpectatorsInRange(playerPos, false, 7, 7)
+      for i = 1, #creatures do
+        local c = creatures[i]
+        if c and c:isPlayer() and not c:isLocalPlayer() then
           playersAround = true
+          break
         end
-      elseif c and c:isMonster() then
-        monsters = monsters + 1
       end
     end
     
     if monsters >= config.groupAttackTargets and (not playersAround or config.groupAttackIgnorePlayers) then
-      if TargetBot.sayAttackSpell(config.groupAttackSpell, config.groupAttackDelay) then
+      local okSpell = TargetBot.sayAttackSpell(config.groupAttackSpell, config.groupAttackDelay)
+      if okSpell then
         return
       end
     end
@@ -731,42 +760,49 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
 
   -- Group attack rune check
   if config.useGroupAttackRune and config.groupAttackRune > 100 then
-    local creaturePos = creature:getPosition()
-    local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
-      and MovementCoordinator.MonsterCache.getNearby(config.groupRuneAttackRadius)
-      or g_map.getSpectatorsInRange(creaturePos, false, config.groupRuneAttackRadius, config.groupRuneAttackRadius)
+    local monsters = MovementCoordinator and MovementCoordinator.Scaling and MovementCoordinator.Scaling.getMonsterCount and MovementCoordinator.Scaling.getMonsterCount() or 0
     local playersAround = false
-    local monsters = 0
     
-    for i = 1, #creatures do
-      local c = creatures[i]
-      if c and c:isPlayer() and not c:isLocalPlayer() then
-        if not config.groupAttackIgnoreParty or c:getShield() <= 2 then
+    -- Check for nearby players if needed
+    if not config.groupAttackIgnorePlayers then
+      local creatures = g_map.getSpectatorsInRange(creaturePos, false, 7, 7)
+      for i = 1, #creatures do
+        local c = creatures[i]
+        if c and c:isPlayer() and not c:isLocalPlayer() then
           playersAround = true
+          break
         end
-      elseif c and c:isMonster() then
-        monsters = monsters + 1
       end
     end
     
     if monsters >= config.groupRuneAttackTargets and (not playersAround or config.groupAttackIgnorePlayers) then
-      if TargetBot.useAttackItem(config.groupAttackRune, 0, creature, config.groupRuneAttackDelay) then
+      warn("[TargetBot] Attempting group rune attack: rune=" .. tostring(config.groupAttackRune) .. ", target=" .. tostring(creature:getName()) .. ", monsters=" .. tostring(monsters))
+      local okRune = TargetBot.useAttackItem(config.groupAttackRune, 0, creature, config.groupRuneAttackDelay)
+      if okRune then
         return
+      else
+        warn("[TargetBot] Group rune attack failed for " .. tostring(config.groupAttackRune) .. " on " .. tostring(creature:getName()))
       end
     end
   end
   
   -- Single target spell attack
   if config.useSpellAttack and config.attackSpell:len() > 1 and mana > config.minMana then
-    if TargetBot.sayAttackSpell(config.attackSpell, config.attackSpellDelay) then
+    local okSingleSpell = TargetBot.sayAttackSpell(config.attackSpell, config.attackSpellDelay)
+    
+    if okSingleSpell then
       return
     end
   end
   
   -- Single target rune attack
   if config.useRuneAttack and config.attackRune > 100 then
-    if TargetBot.useAttackItem(config.attackRune, 0, creature, config.attackRuneDelay) then
+    warn("[TargetBot] Attempting single rune attack: rune=" .. tostring(config.attackRune) .. ", target=" .. tostring(creature:getName()))
+    local okSingleRune = TargetBot.useAttackItem(config.attackRune, 0, creature, config.attackRuneDelay)
+    if okSingleRune then
       return
+    else
+      warn("[TargetBot] Single rune attack failed for " .. tostring(config.attackRune) .. " on " .. tostring(creature:getName()))
     end
   end
 end

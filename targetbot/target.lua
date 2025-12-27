@@ -108,7 +108,41 @@ local function invalidateCache()
   CreatureCache.dirty = true
 end
 
+-- Helper to set UI status text on the right side only when changed (reduces layout churn)
+local _lastStatusRight = nil
+local function setStatusRight(text)
+  if not ui or not ui.status or not ui.status.right then return end
+  local cur = nil
+  pcall(function() cur = ui.status.right:getText() end)
+  if cur ~= text then
+    pcall(function() ui.status.right:setText(text) end)
+    _lastStatusRight = text
+  end
+end
+
+-- Safe creature text setter: only set when different to avoid constant layout updates
+local function setCreatureTextSafe(creature, text)
+  if not creature or not text then return end
+  pcall(function()
+    local cur = nil
+    if type(creature.getText) == 'function' then cur = creature:getText() end
+    if cur ~= text then creature:setText(text) end
+  end)
+end
+
+-- Generic safe setter for UI labels/widgets
+local function setWidgetTextSafe(widget, text)
+  if not widget or not text then return end
+  pcall(function()
+    local cur = nil
+    if type(widget.getText) == 'function' then cur = widget:getText() end
+    if cur ~= text then widget:setText(text) end
+  end)
+end
+
 -- Event-driven hooks: mark cache dirty and optionally schedule a quick recalc
+-- Default no-op in case EventBus or debounce util isn't available (prevents nil calls)
+local debouncedInvalidateAndRecalc = function() end
 if EventBus then
   -- Safe debounce factory (works even if nExBot.EventUtil isn't initialized yet)
   local function makeDebounce(ms, fn)
@@ -175,8 +209,8 @@ if onPlayerHealthChange then
     if healthPercent and healthPercent > 0 then
       attackWatchdog.attempts = 0
       attackWatchdog.lastForce = 0
-      -- Start an aggressive relogin recovery window if TargetBot is enabled
-      if TargetBot and TargetBot.isOn and TargetBot.isOn() then
+      -- Start an aggressive relogin recovery window if TargetBot was enabled before or is currently on
+      if TargetBot and TargetBot.isOn and (TargetBot.isOn() or storage.targetbotEnabled == true) then
         reloginRecovery.active = true
         reloginRecovery.endTime = now + reloginRecovery.duration
         reloginRecovery.lastAttempt = 0
@@ -187,19 +221,18 @@ if onPlayerHealthChange then
         debouncedInvalidateAndRecalc()
 
         -- If TargetBot was previously enabled via storage, ensure it's on now to allow recovery
-        if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
-          if storage.targetbotEnabled == true then
-            pcall(function() TargetBot.setOn() end)
-          end
+        if storage.targetbotEnabled == true and not TargetBot.isOn() then
+          pcall(function() TargetBot.setOn() end)
         end
 
         -- Update UI status so user sees recovery in progress
-        if ui and ui.status and ui.status.right then ui.status.right:setText("Recovering...") end
+        if ui and ui.status and ui.status.right then setStatusRight("Recovering...") end
 
         -- Schedule repeated attempts (aggressive recovery window)
         if targetbotMacro then
           local function attemptRecovery()
-            if TargetBot and TargetBot.isOn and TargetBot.isOn() then
+            -- Only attempt recovery runs if targetbot should be enabled
+            if storage.targetbotEnabled == true or TargetBot.isOn() then
               pcall(targetbotMacro)
               -- After macro run, try recalc and a direct attack as a backup
               local ok2, best2 = pcall(function() return recalculateBestTarget() end)
@@ -207,9 +240,9 @@ if onPlayerHealthChange then
                 local count = CreatureCache.monsterCount or 0
                 if ui and ui.status and ui.status.right then
                   if best2 and best2.creature then
-                    ui.status.right:setText("Recovering ("..tostring(count)..") best: "..best2.creature:getName())
+                    setStatusRight("Recovering ("..tostring(count)..") best: "..best2.creature:getName())
                   else
-                    ui.status.right:setText("Recovering ("..tostring(count)..")")
+                    setStatusRight("Recovering ("..tostring(count)..")")
                   end
                 end
                 if best2 and best2.creature then pcall(function() g_game.attack(best2.creature) end) end
@@ -477,13 +510,13 @@ if TargetBot.EatFood and TargetBot.EatFood.setup then
 end
 
 ui.status.left:setText("Status:")
-ui.status.right:setText("Off")
+setStatusRight("Off")
 ui.target.left:setText("Target:")
-ui.target.right:setText("-")
+setWidgetTextSafe(ui.target.right, "-")
 ui.config.left:setText("Config:")
-ui.config.right:setText("-")
+setWidgetTextSafe(ui.config.right, "-")
 ui.danger.left:setText("Danger:")
-ui.danger.right:setText("0")
+setWidgetTextSafe(ui.danger.right, "0")
 
 ui.editor.debug.onClick = function()
   local on = ui.editor.debug:isOn()
@@ -506,7 +539,7 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
   end
 
   if not data then
-    ui.status.right:setText("Off")
+    setStatusRight("Off")
     if targetbotMacro and targetbotMacro.setOff then
       return targetbotMacro.setOff() 
     end
@@ -543,9 +576,9 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
 
   -- Update UI to reflect final state
   if finalEnabled then
-    ui.status.right:setText("On")
+    setStatusRight("On")
   else
-    ui.status.right:setText("Off")
+    setStatusRight("Off")
   end
 
   if targetbotMacro and targetbotMacro.setOn then
@@ -599,16 +632,26 @@ TargetBot.isCaveBotActionAllowed = function()
 end
 
 TargetBot.setStatus = function(text)
-  return ui.status.right:setText(text)
+  setStatusRight(text)
 end
 
 TargetBot.getStatus = function()
-  return ui.status.right:getText()
+  local t = nil
+  pcall(function() t = ui.status.right:getText() end)
+  return t
 end
 
 TargetBot.isOn = function()
-  if not config or not config.isOn then return false end
-  return config.isOn()
+  if not config then return false end
+  -- config.isOn may be a function or a boolean
+  if type(config.isOn) == 'function' then
+    local ok, res = pcall(config.isOn)
+    return ok and not not res
+  end
+  if type(config.isOn) == 'boolean' then
+    return config.isOn
+  end
+  return false
 end
 
 TargetBot.isOff = function()
@@ -709,14 +752,51 @@ end
 local lastSpell = 0
 local lastAttackSpell = 0
 
+
+
+local function doSay(text)
+  if type(text) ~= 'string' or text:len() < 1 then return false end
+  -- primary: global say
+  if type(say) == 'function' then
+    local ok, res = SafeCall.call(say, text)
+    if ok then return true end
+    warn("[TargetBot] doSay: say(...) failed")
+    return false
+  end
+  -- fallback: g_game.say
+  if g_game and type(g_game.say) == 'function' then
+    local ok, res = SafeCall.call(g_game.say, text)
+    if ok then return true end
+    warn("[TargetBot] doSay: g_game.say(...) failed")
+    return false
+  end
+  -- fallback: g_game.talk or g_game.talkLocal
+  if g_game and type(g_game.talk) == 'function' then
+    local ok, res = SafeCall.call(g_game.talk, text)
+    if ok then return true end
+    warn("[TargetBot] doSay: g_game.talk(...) failed")
+    return false
+  end
+  if g_game and type(g_game.talkLocal) == 'function' then
+    local ok, res = SafeCall.call(g_game.talkLocal, text)
+    if ok then return true end
+    warn("[TargetBot] doSay: g_game.talkLocal(...) failed")
+    return false
+  end
+  return false
+end
+
 TargetBot.saySpell = function(text, delay)
-  if type(text) ~= 'string' or text:len() < 1 then return end
+  if type(text) ~= 'string' or text:len() < 1 then return false end
   if not delay then delay = 500 end
   if g_game.getProtocolVersion() < 1090 then
     lastAttackSpell = now -- pause attack spells, healing spells are more important
   end
   if lastSpell + delay < now then
-    say(text)
+    if not doSay(text) then
+      warn("[TargetBot] no suitable say/talk method; cannot cast: " .. tostring(text))
+      return false
+    end
     lastSpell = now
     return true
   end
@@ -724,10 +804,13 @@ TargetBot.saySpell = function(text, delay)
 end
 
 TargetBot.sayAttackSpell = function(text, delay)
-  if type(text) ~= 'string' or text:len() < 1 then return end
+  if type(text) ~= 'string' or text:len() < 1 then return false end
   if not delay then delay = 2000 end
   if lastAttackSpell + delay < now then
-    say(text)
+    if not doSay(text) then
+      warn("[TargetBot] no suitable say/talk method; cannot cast attack spell: " .. tostring(text))
+      return false
+    end
     lastAttackSpell = now
     -- Track attack spell for Hunt Analyzer
     if HuntAnalytics and HuntAnalytics.trackAttackSpell then
@@ -746,7 +829,10 @@ local lastRuneAttack = 0
 local function useItemOnTargetLikeHotkey(item, target, subType)
   -- Use BotCore.Items if available (handles all client compatibility)
   if BotCore and BotCore.Items and BotCore.Items.useOn then
-    return BotCore.Items.useOn(item, target, subType)
+    local ok, res = SafeCall.call(BotCore.Items.useOn, item, target, subType)
+    if ok then return true end
+    warn("[TargetBot] useItemOnTargetLikeHotkey: BotCore.Items.useOn failed for item=" .. tostring(item))
+    -- fallthrough to other methods
   end
   
   -- Fallback: direct implementation
@@ -755,17 +841,18 @@ local function useItemOnTargetLikeHotkey(item, target, subType)
     subType = g_game.getClientVersion() >= 860 and 0 or 1
   end
   
-  if g_game.getClientVersion() >= 780 then
+    if g_game.getClientVersion() >= 780 then
     if g_game.useInventoryItemWith then
-      g_game.useInventoryItemWith(item, target, subType)
-      return true
+      local ok, res = SafeCall.call(g_game.useInventoryItemWith, item, target, subType)
+      if ok then return true end
     end
   end
   
-  local tmpItem = g_game.findPlayerItem(item, subType)
-  if tmpItem then
-    g_game.useWith(tmpItem, target, subType)
-    return true
+  local okf, tmpItem = SafeCall.call(g_game.findPlayerItem, item, subType)
+  if okf and tmpItem then
+    local oku = SafeCall.call(g_game.useWith, tmpItem, target, subType)
+    if oku then return true end
+    warn("[TargetBot] useItemOnTargetLikeHotkey: g_game.useWith failed for item instance")
   end
   
   return false
@@ -785,11 +872,19 @@ end
 TargetBot.useAttackItem = function(item, subType, target, delay)
   if not delay then delay = 2000 end
   if lastRuneAttack + delay < now then
-    if useItemOnTargetLikeHotkey(item, target, subType) then
+    warn("[TargetBot] useAttackItem called: item=" .. tostring(item) .. ", target=" .. tostring(target and target:getName()) .. ", now=" .. tostring(now) .. ", last=" .. tostring(lastRuneAttack))
+    local ok = false
+    local okStatus, res = pcall(function() return useItemOnTargetLikeHotkey(item, target, subType) end)
+    if okStatus and res then ok = true end
+    if ok then
       lastRuneAttack = now
       -- Note: Rune tracking is now handled by onUseWith hook in smart_hunt.lua
       return true
+    else
+      warn("[TargetBot] Failed to use rune/item id=" .. tostring(item) .. " on target=" .. tostring(target and target:getName()) .. "; okStatus=" .. tostring(okStatus) .. ", res=" .. tostring(res))
     end
+  else
+    warn("[TargetBot] Rune on cooldown: last=" .. tostring(lastRuneAttack) .. ", now=" .. tostring(now) .. ", delay=" .. tostring(delay))
   end
   return false
 end
@@ -903,7 +998,7 @@ local function recalculateBestTarget()
               totalDanger = totalDanger + (params.danger or 0)
               
               if debugEnabled then
-                creature:setText(tostring(math.floor(params.priority * 10) / 10))
+                setCreatureTextSafe(creature, tostring(math.floor(params.priority * 10) / 10))
               end
               
               if params.priority > bestPriority then
@@ -942,7 +1037,7 @@ targetbotMacro = macro(100, function()
   if HealContext and HealContext.isDanger and HealContext.isDanger() then
     TargetBot.clearWalk()
     TargetBot.stopAttack(true)
-    ui.status.right:setText(STATUS_WAITING)
+    setStatusRight(STATUS_WAITING)
     return
   end
   
@@ -975,24 +1070,25 @@ targetbotMacro = macro(100, function()
   local bestTarget, targetCount, totalDanger = recalculateBestTarget()
   
   if not bestTarget then
-    ui.target.right:setText("-")
-    ui.danger.right:setText("0")
-    ui.config.right:setText("-")
+    setWidgetTextSafe(ui.target.right, "-")
+    setWidgetTextSafe(ui.danger.right, "0")
+    setWidgetTextSafe(ui.config.right, "-")
     dangerValue = 0
     cavebotAllowance = now + 100
-    ui.status.right:setText(STATUS_WAITING)
+    setStatusRight(STATUS_WAITING)
     return
   end
   
   -- Update danger value
   dangerValue = totalDanger
-  ui.danger.right:setText(tostring(totalDanger))
+  setWidgetTextSafe(ui.danger.right, tostring(totalDanger))
   
   -- Attack best target
   if bestTarget.creature and bestTarget.config then
+    print("[TargetBot] Found bestTarget: " .. bestTarget.creature:getName() .. " with config: " .. (bestTarget.config.name or "unnamed"))
     lastAction = now
-    ui.target.right:setText(bestTarget.creature:getName())
-    ui.config.right:setText(bestTarget.config.name or "-")
+    setWidgetTextSafe(ui.target.right, bestTarget.creature:getName())
+    setWidgetTextSafe(ui.config.right, bestTarget.config.name or "-")
     
     -- Pass lure status for status display
     local isLooting = false
@@ -1000,9 +1096,9 @@ targetbotMacro = macro(100, function()
     
     -- Update status
     if lureEnabled then
-      ui.status.right:setText(STATUS_ATTACKING)
+      setStatusRight(STATUS_ATTACKING)
     else
-      ui.status.right:setText(STATUS_ATTACKING_LURE_OFF)
+      setStatusRight(STATUS_ATTACKING_LURE_OFF)
     end
     -- Watchdog: ensure we're actually attacking (recover from safegaurd deadlocks)
     local following = g_game.getAttackingCreature and g_game.getAttackingCreature()
@@ -1045,12 +1141,12 @@ targetbotMacro = macro(100, function()
       end
     end
   else
-    ui.target.right:setText("-")
-    ui.config.right:setText("-")
+    setWidgetTextSafe(ui.target.right, "-")
+    setWidgetTextSafe(ui.config.right, "-")
     
     -- No target, allow cavebot
     cavebotAllowance = now + 100
-    ui.status.right:setText(STATUS_WAITING)
+    setStatusRight(STATUS_WAITING)
   end
 end)
 

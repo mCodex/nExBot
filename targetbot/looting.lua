@@ -17,7 +17,7 @@ TargetBot.Looting.setup = function()
   UI.Container(TargetBot.Looting.onContainersUpdate, true, nil, ui.containers)
 
   ui.everyItem.onClick = function()
-    ui.everyItem:setOn(not ui.everyItem:isOn())
+    if ui.everyItem and ui.everyItem.isOn then ui.everyItem:setOn(not ui.everyItem:isOn()) end
     TargetBot.save()
   end
 
@@ -123,7 +123,7 @@ TargetBot.Looting.save = function(data)
   data['containers'] = ui.containers:getItems()
   data['maxDanger'] = tonumber(ui.maxDangerPanel.value:getText())
   data['minCapacity'] = tonumber(ui.minCapacityPanel.value:getText())
-  data['everyItem'] = ui.everyItem:isOn()
+  data['everyItem'] = (ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn() or false
   data['eatFromCorpses'] = ui.eatFromCorpses:isOn()
 end
 
@@ -165,7 +165,7 @@ TargetBot.Looting.isDirty = function()
 end
 
 TargetBot.Looting.process = function(targets, dangerLevel)
-  if (not items[1] and not ui.everyItem:isOn()) or not containers[1] then
+  if (not items[1] and not ((ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn())) or not containers[1] then
     status = ""
     return false
   end
@@ -300,7 +300,7 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
   for i, item in ipairs(container:getItems()) do
     if item:isContainer() and not itemsById[item:getId()] then
       nextContainer = item
-    elseif itemsById[item:getId()] or (ui.everyItem:isOn() and not item:isContainer()) then
+    elseif itemsById[item:getId()] or ((ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn() and not item:isContainer()) then
       item.lootTries = (item.lootTries or 0) + 1
       if item.lootTries < 5 then -- if can't be looted within 0.5s then skip it
         return TargetBot.Looting.lootItem(lootContainers, item)
@@ -407,8 +407,9 @@ end
 
 onCreatureDisappear(function(creature)
   if SafeCall.isInPz() then return end
-  if not TargetBot.isOn() then return end
-  if not creature:isMonster() then return end
+  -- Defensive: TargetBot or its isOn may not be ready during early load; guard safely
+  if not TargetBot or not TargetBot.isOn or type(TargetBot.isOn) ~= 'function' or not TargetBot.isOn() then return end
+  if not creature or type(creature.isMonster) ~= 'function' or not creature:isMonster() then return end
   
   local config = TargetBot.Creature.calculateParams(creature, {})
   if not config.config or config.config.dontLoot then
