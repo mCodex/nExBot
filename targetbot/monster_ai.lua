@@ -25,6 +25,18 @@
 MonsterAI = MonsterAI or {}
 MonsterAI.VERSION = "1.2"
 
+-- Time helper (milliseconds). Prefer existing global 'now' if available, else use g_clock.millis or os.time()*1000
+local function nowMs()
+  if now then return now end
+  if g_clock and g_clock.millis then return g_clock.millis() end
+  return os.time() * 1000
+end
+
+-- Extended telemetry defaults
+MonsterAI.COLLECT_EXTENDED = (MonsterAI.COLLECT_EXTENDED == nil) and true or MonsterAI.COLLECT_EXTENDED
+MonsterAI.DPS_WINDOW = MonsterAI.DPS_WINDOW or 5000 -- ms window for DPS calculation
+
+
 -- ============================================================================
 -- CONSTANTS
 -- ============================================================================
@@ -146,7 +158,7 @@ function MonsterAI.Patterns.persist(monsterName, updates)
 end
 -- Simple decay: slowly reduce confidence and nudge cooldown toward default when long unseen
 function MonsterAI.decayPatterns()
-  local nowt = now
+  local nowt = nowMs()
   local decayWindow = 7 * 24 * 3600 * 1000 -- 7 days
   for k, v in pairs(storage.monsterPatterns) do
     if v.lastSeen and (nowt - v.lastSeen) > decayWindow then
@@ -202,6 +214,7 @@ function MonsterAI.Tracker.track(creature)
     samples = {},           -- {time, pos, dir, health, isAttacking}
     lastDirection = creature:getDirection(),
     lastPosition = {x = pos.x, y = pos.y, z = pos.z},
+    lastSampleTime = nowMs(), -- ms
     lastAttackTime = 0,
     lastWaveTime = 0,
     attackCount = 0,
@@ -211,6 +224,13 @@ function MonsterAI.Tracker.track(creature)
     chaseCount = 0,
     observedWaveAttacks = {},
     waveCount = 0,
+
+    -- Extended telemetry
+    damageSamples = {},     -- { {time, amount}, ... }
+    totalDamage = 0,
+    missileCount = 0,
+    facingCount = 0,
+    avgSpeed = 0,           -- tiles/sec (EWMA)
 
     -- EWMA estimator for wave cooldown (learning)
     ewmaCooldown = nil,
@@ -270,9 +290,20 @@ function MonsterAI.Tracker.update(creature)
   
   -- Analyze movement pattern
   data.movementSamples = data.movementSamples + 1
-  if pos.x == data.lastPosition.x and pos.y == data.lastPosition.y then
+  local moved = not (pos.x == data.lastPosition.x and pos.y == data.lastPosition.y)
+  if not moved then
     data.stationaryCount = data.stationaryCount + 1
   else
+    -- Compute speed (tiles/sec) from last sample
+    local nowt = nowMs()
+    local dt = nowt - (data.lastSampleTime or nowt)
+    local dx = math.max(math.abs(pos.x - data.lastPosition.x), math.abs(pos.y - data.lastPosition.y))
+    if dt > 0 and dx > 0 then
+      local instSpeed = dx / (dt / 1000)
+      data.avgSpeed = (data.avgSpeed or 0) * 0.8 + instSpeed * 0.2 -- EWMA
+    end
+    data.lastSampleTime = nowt
+
     -- Check if moving toward player
     local playerPos = player:getPosition()
     local oldDist = math.max(
@@ -286,7 +317,16 @@ function MonsterAI.Tracker.update(creature)
     if newDist < oldDist then
       data.chaseCount = data.chaseCount + 1
     end
-    
+
+    -- Facing detection (counts how often monster faces player)
+    local ok, isFacing = pcall(function()
+      if MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition then
+        return MonsterAI.Predictor.isFacingPosition(pos, creature:getDirection(), playerPos)
+      end
+      return false
+    end)
+    if ok and isFacing then data.facingCount = (data.facingCount or 0) + 1 end
+
     data.lastPosition = {x = pos.x, y = pos.y, z = pos.z}
   end
   
@@ -316,7 +356,7 @@ function MonsterAI.Tracker.updateEWMA(data, observed)
   MonsterAI.Patterns.persist(pname, {
     waveCooldown = data.ewmaCooldown,
     waveVariance = data.ewmaVariance,
-    lastSeen = now,
+    lastSeen = nowMs(),
     confidence = math.min((MonsterAI.Patterns.knownMonsters[pname] and MonsterAI.Patterns.knownMonsters[pname].confidence or 0.5) + 0.02, 0.99)
   })
 end
@@ -359,6 +399,27 @@ function MonsterAI.Predictor.predictWaveAttack(creature)
   local id = creature:getId()
   local data = MonsterAI.Tracker.monsters[id]
   local pattern = MonsterAI.Patterns.get(creature:getName())
+
+-- Utility: compute DPS for a tracked creature
+function MonsterAI.Tracker.getDPS(creatureId, windowMs)
+  windowMs = windowMs or MonsterAI.DPS_WINDOW
+  local nowt = nowMs()
+  local data = MonsterAI.Tracker.monsters[creatureId]
+  if not data or not data.damageSamples or #data.damageSamples == 0 then return 0 end
+  local sum = 0
+  for i = #data.damageSamples, 1, -1 do
+    local s = data.damageSamples[i]
+    if nowt - s.time <= windowMs then
+      sum = sum + (s.amount or 0)
+    else
+      break
+    end
+  end
+  local seconds = math.max(windowMs / 1000, 0.001)
+  return sum / seconds
+end
+
+
   
   -- Base prediction on known pattern
   if not pattern.hasWaveAttack then
@@ -613,7 +674,7 @@ if EventBus then
       MonsterAI.Tracker.stats.totalDamageReceived + damage
 
     -- Try to correlate this damage to a nearby monster (handles non-projectile attacks)
-    local nowt = now
+    local nowt = nowMs()
     local playerPos = player and player:getPosition()
     if not playerPos then return end
 
@@ -654,6 +715,15 @@ if EventBus then
       bestData.waveCount = (bestData.waveCount or 0) + 1
       MonsterAI.Tracker.stats.areaAttacksObserved = MonsterAI.Tracker.stats.areaAttacksObserved + 1
 
+      -- Record damage sample for DPS calculation
+      bestData.damageSamples = bestData.damageSamples or {}
+      table.insert(bestData.damageSamples, { time = nowt, amount = damage })
+      -- Trim samples older than DPS window
+      while #bestData.damageSamples > 0 and (nowt - bestData.damageSamples[1].time) > MonsterAI.DPS_WINDOW do
+        table.remove(bestData.damageSamples, 1)
+      end
+      bestData.totalDamage = (bestData.totalDamage or 0) + damage
+
       -- If we have a previous damage timestamp, derive interval and update EWMA
       if bestData._lastDamageSample then
         local observed = nowt - bestData._lastDamageSample
@@ -665,7 +735,7 @@ if EventBus then
 
       -- Persist small bump
       local pname = (bestData.name or ""):lower()
-      MonsterAI.Patterns.persist(pname, { lastSeen = nowt, confidence = math.min((MonsterAI.Patterns.knownMonsters[pname] and MonsterAI.Patterns.knownMonsters[pname].confidence or 0.5) + 0.03, 0.99) })
+      MonsterAI.Patterns.persist(pname, { lastSeen = nowMs(), confidence = math.min((MonsterAI.Patterns.knownMonsters[pname] and MonsterAI.Patterns.knownMonsters[pname].confidence or 0.5) + 0.03, 0.99) })
     end
   end, 30)
 
@@ -684,7 +754,7 @@ if EventBus then
       local data = MonsterAI.Tracker.monsters[id]
       if not data then return end
 
-      local nowt = now
+      local nowt = nowMs()
       -- Record the attack timestamp
       if data.lastWaveTime and data.lastWaveTime > 0 then
         local observed = nowt - data.lastWaveTime
@@ -700,13 +770,14 @@ if EventBus then
           table.insert(pattern.samples, 1, observed) -- newest first
           -- keep only last N samples
           while #pattern.samples > 30 do table.remove(pattern.samples) end
-          MonsterAI.Patterns.persist(pname, { waveCooldown = data.ewmaCooldown, waveVariance = data.ewmaVariance, samples = pattern.samples, lastSeen = now })
+          MonsterAI.Patterns.persist(pname, { waveCooldown = data.ewmaCooldown, waveVariance = data.ewmaVariance, samples = pattern.samples, lastSeen = nowMs() })
         end
       end
 
       data.lastWaveTime = nowt
       data.observedWaveAttacks = data.observedWaveAttacks or {}
       table.insert(data.observedWaveAttacks, nowt)
+      data.missileCount = (data.missileCount or 0) + 1
     end)
   end
 end
@@ -717,17 +788,71 @@ end
 
 -- Update all tracked monsters periodically
 function MonsterAI.updateAll()
-  local playerPos = player:getPosition()
-  if not playerPos then return end
-  
-  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(8) or g_map.getSpectatorsInRange(playerPos, false, 8, 8)
-  if not creatures then return end
-  
+  local playerPos = player and player:getPosition()
+  if not playerPos then
+    if MonsterAI.COLLECT_DEBUG then print("[MonsterAI] updateAll: player position unavailable") end
+    return
+  end
+
+  local creatures = nil
+  if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
+    creatures = MovementCoordinator.MonsterCache.getNearby(8)
+  else
+    local ok, res = pcall(function() return g_map.getSpectatorsInRange(playerPos, false, 8, 8) end)
+    if ok then creatures = res end
+  end
+
+  if not creatures then
+    if MonsterAI.COLLECT_DEBUG then print("[MonsterAI] updateAll: no creatures returned by map/coord cache") end
+    return
+  end
+
+  local processed = 0
   for i = 1, #creatures do
     local creature = creatures[i]
     if creature and creature:isMonster() and not creature:isDead() then
-      MonsterAI.Tracker.update(creature)
+      local ok, err = pcall(function() MonsterAI.Tracker.update(creature) end)
+      if not ok and MonsterAI.COLLECT_DEBUG then print("[MonsterAI] Tracker.update failed: " .. tostring(err)) end
+      processed = processed + 1
     end
+  end
+
+  MonsterAI.lastUpdate = now or os.time() * 1000
+  if MonsterAI.COLLECT_DEBUG then
+    print(string.format("[MonsterAI] updateAll: processed=%d monsters tracked=%d storagePatterns=%d lastUpdate=%s", processed, (function() local c=0; for _ in pairs(MonsterAI.Tracker.monsters) do c=c+1 end; return c end)(), (function() local c=0; if storage and storage.monsterPatterns then for _ in pairs(storage.monsterPatterns) do c=c+1 end end; return c end)(), tostring(MonsterAI.lastUpdate)))
+  end
+end
+
+-- Diagnostic helper to print current state of the tracker and persisted patterns
+function MonsterAI.debugStatus()
+  print("[MonsterAI][DEBUG] MonsterAI debugStatus:")
+  print(string.format("  automatic collection=%s, collect_debug=%s, extended=%s", tostring(MonsterAI.COLLECT_ENABLED), tostring(MonsterAI.COLLECT_DEBUG), tostring(MonsterAI.COLLECT_EXTENDED)))
+  print(string.format("  lastUpdate=%s", tostring(MonsterAI.lastUpdate or "<never>")))
+  local tracked = 0
+  for _ in pairs(MonsterAI.Tracker.monsters) do tracked = tracked + 1 end
+  print(string.format("  tracked monsters=%d", tracked))
+  local stored = 0
+  if storage and storage.monsterPatterns then for _ in pairs(storage.monsterPatterns) do stored = stored + 1 end end
+  print(string.format("  persisted patterns=%d", stored))
+  if MonsterAI.Tracker and MonsterAI.Tracker.stats then
+    local s = MonsterAI.Tracker.stats
+    print(string.format("  stats: damage=%d waves=%d area=%d", s.totalDamageReceived or 0, s.waveAttacksObserved or 0, s.areaAttacksObserved or 0))
+  end
+
+  -- Show top tracked monsters (by confidence)
+  local tbl = {}
+  for id, d in pairs(MonsterAI.Tracker.monsters) do
+    table.insert(tbl, { id = id, name = d.name or "?", conf = d.confidence or 0, totalDamage = d.totalDamage or 0 })
+  end
+  table.sort(tbl, function(a,b) return a.conf > b.conf end)
+  local N = math.min(#tbl, 5)
+  for i=1,N do
+    local e = tbl[i]
+    local d = MonsterAI.Tracker.monsters[e.id]
+    local dps = MonsterAI.Tracker.getDPS(e.id)
+    local missiles = d.missileCount or 0
+    local facingPct = math.floor(((d.facingCount or 0) / math.max(1, d.movementSamples or 1)) * 100)
+    print(string.format("  [%d] %s conf=%.2f totalDamage=%d dps=%.2f missiles=%d face=%d%%", i, e.name, e.conf, e.totalDamage or 0, dps, missiles, facingPct))
   end
 end
 
@@ -735,6 +860,17 @@ end
 nExBot = nExBot or {}
 nExBot.MonsterAI = MonsterAI
 
+-- Enable automatic collection by default so Monster Insights shows data without console commands
+-- You can disable via: MonsterAI.COLLECT_ENABLED = false
+MonsterAI.COLLECT_ENABLED = (MonsterAI.COLLECT_ENABLED == nil) and true or MonsterAI.COLLECT_ENABLED
+
+-- Periodic background updater that populates tracker info even if TargetBot isn't actively running
+macro(1000, function()
+  if MonsterAI.COLLECT_ENABLED and MonsterAI.updateAll then
+    pcall(function() MonsterAI.updateAll() end)
+  end
+end)
+
 -- Toggle to enable debug prints
 MonsterAI.DEBUG = MonsterAI.DEBUG or false
-if MonsterAI.DEBUG then print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded") end
+if MonsterAI.DEBUG then print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded; automatic collection=%s" .. tostring(MonsterAI.COLLECT_ENABLED)) end

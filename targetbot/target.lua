@@ -1086,7 +1086,9 @@ targetbotMacro = macro(100, function()
   
   -- Attack best target
   if bestTarget.creature and bestTarget.config then
-    print("[TargetBot] Found bestTarget: " .. bestTarget.creature:getName() .. " with config: " .. (bestTarget.config.name or "unnamed"))
+    if ui and ui.editor and ui.editor.debug and ui.editor.debug:isOn() then
+      print("[TargetBot] Found bestTarget: " .. bestTarget.creature:getName() .. " with config: " .. (bestTarget.config.name or "unnamed"))
+    end
     lastAction = now
     setWidgetTextSafe(ui.target.right, bestTarget.creature:getName())
     setWidgetTextSafe(ui.config.right, bestTarget.config.name or "-")

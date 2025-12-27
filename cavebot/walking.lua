@@ -217,6 +217,10 @@ end
 
 -- Pure: Check if position is a floor-change tile (with caching)
 local function isFloorChangeTile(tilePos)
+  -- Prefer PathSafety module if available (centralized)
+  if CaveBot and CaveBot.PathSafety and CaveBot.PathSafety.isFloorChangeTile then
+    return CaveBot.PathSafety.isFloorChangeTile(tilePos)
+  end
   if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isFloorChangeTile then
     return TargetCore.PathSafety.isFloorChangeTile(tilePos)
   end

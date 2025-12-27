@@ -1,9 +1,56 @@
 local cavebotMacro = nil
 local config = nil
 
+local function getCfg(key, def)
+  if CaveBot and CaveBot.Config and CaveBot.Config.get then
+    local ok, v = pcall(function() return CaveBot.Config.get(key) end)
+    if ok and v ~= nil then return v end
+  end
+  return def
+end
+
 -- ui
 local configWidget = UI.Config()  -- Create config widget first
 local ui = UI.createWidget("CaveBotPanel")
+
+-- Hide the global "Money Rune" icon while CaveBot UI is loaded (non-destructive)
+local function hideMoneyRuneIcon()
+  local ok, root = pcall(function() return g_ui.getRootWidget() end)
+  if not ok or not root then return false end
+
+  local function matchAndHide(widget)
+    if not widget then return false end
+    -- Check common text/tooltip properties
+    local ok1, txt = pcall(function() if type(widget.getText) == 'function' then return widget:getText() end end)
+    if ok1 and txt == 'Money Rune' then pcall(function() widget:setVisible(false) end); return true end
+    local ok2, tip = pcall(function() if type(widget.getTooltip) == 'function' then return widget:getTooltip() end end)
+    if ok2 and tip == 'Money Rune' then pcall(function() widget:setVisible(false) end); return true end
+
+    -- Recurse children
+    local ok3, children = pcall(function() return widget:getChildren() end)
+    if ok3 and children then
+      for _, ch in ipairs(children) do
+        if matchAndHide(ch) then return true end
+      end
+    end
+    return false
+  end
+
+  return matchAndHide(root)
+end
+
+-- Try once immediately, then retry after a short delay to handle load-order
+local function ensureHideMoneyRune()
+  if hideMoneyRuneIcon() then
+    print('[CaveBot] Hidden "Money Rune" icon from UI')
+  else
+    schedule(200, function()
+      if hideMoneyRuneIcon() then print('[CaveBot] Hidden "Money Rune" icon on retry') end
+    end)
+  end
+end
+
+ensureHideMoneyRune()
 
 -- Move the config widget into the placeholder panel at the top
 if ui.configWidgetPlaceholder and configWidget then
@@ -387,8 +434,14 @@ CaveBot.onFloorChanged = function(fromFloor, toFloor)
       if nextIdx > actionCount then nextIdx = 1 end
       local nextChild = ui.list:getChildByIndex(nextIdx)
       if nextChild then
+        -- mark the problematic waypoint (the one we just left) as snoozed to avoid immediate re-visit
+        local snoozeDur = getCfg("floorOscillationSnooze", 8000)
+        current.snoozedUntil = nowTs + snoozeDur
+        -- visually mark (best effort): set color to gray if widget supports setColor
+        pcall(function() current:setColor("#888888") end)
+
         ui.list:focusChild(nextChild)
-        print(string.format('[CaveBot] Floor oscillation detected (%d <-> %d). Advancing waypoint index from %d to %d to avoid loop.', fromFloor, toFloor, idx, nextIdx))
+        print(string.format('[CaveBot] Floor oscillation detected (%d <-> %d). Advancing waypoint index from %d to %d and snoozing waypoint for %dms.', fromFloor, toFloor, idx, nextIdx, snoozeDur))
         -- reset walking and waypoint engine state to avoid immediate re-trigger
         CaveBot.resetWalking()
         resetWaypointEngine()
@@ -711,6 +764,18 @@ cavebotMacro = macro(150, function()
   -- Get current action (single call pattern)
   local currentAction = uiList:getFocusedChild() or uiList:getFirstChild()
   if not currentAction then return end
+
+  -- Skip snoozed waypoints (avoid repeating problematic floor-change waypoints)
+  if currentAction.snoozedUntil and currentAction.snoozedUntil > now then
+    -- Advance to next action
+    local currentIndex = uiList:getChildIndex(currentAction)
+    local actionCount = uiList:getChildCount()
+    local nextIndex = currentIndex + 1
+    if nextIndex > actionCount then nextIndex = 1 end
+    local nextChild = uiList:getChildByIndex(nextIndex)
+    if nextChild then uiList:focusChild(nextChild) end
+    return
+  end
   
   -- Direct table access (O(1))
   local actionType = currentAction.action

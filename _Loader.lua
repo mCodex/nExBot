@@ -23,6 +23,30 @@ local CORE_PATH = "/bot/" .. configName .. "/core"
 -- Initialize global nExBot namespace if not exists
 nExBot = nExBot or {}
 nExBot.loadTimes = loadTimes  -- Expose for debugging
+-- Suppress noisy debug prints by default. Set `nExBot.showDebug = true` in console to allow them.
+nExBot.showDebug = nExBot.showDebug or false
+nExBot.suppressDebugPrefixes = nExBot.suppressDebugPrefixes or {"[HealBot]", "[MonsterInspector]"}
+local _orig_print = print
+print = function(...)
+  if nExBot.showDebug then return _orig_print(...) end
+  -- Safely inspect first argument without relying on 'select' (may be missing in some environments)
+  local first = (...)
+  local firstStr = nil
+  if type(first) == "string" then
+    firstStr = first
+  else
+    local ok, s = pcall(tostring, first)
+    if ok then firstStr = s end
+  end
+  if firstStr then
+    for _, p in ipairs(nExBot.suppressDebugPrefixes) do
+      if firstStr:sub(1, #p) == p then
+        return
+      end
+    end
+  end
+  return _orig_print(...)
+end
 
 -- ============================================================================
 -- STORAGE SANITIZER (Fix sparse arrays that prevent saving)

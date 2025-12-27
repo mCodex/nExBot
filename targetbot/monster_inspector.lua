@@ -1,5 +1,8 @@
 -- Monster Insights UI
 
+-- Toggleable debug for this module (set MONSTER_INSPECTOR_DEBUG = true in console to enable)
+MONSTER_INSPECTOR_DEBUG = (type(MONSTER_INSPECTOR_DEBUG) == "boolean" and MONSTER_INSPECTOR_DEBUG) or false
+
 -- Import the style first (try multiple paths to be robust across environments)
 local function tryImportStyle()
   local candidates = {}
@@ -21,7 +24,7 @@ local function tryImportStyle()
     local path = candidates[i]
     if g_resources and g_resources.fileExists and g_resources.fileExists(path) then
       pcall(function() g_ui.importStyle(path) end)
-      print("[MonsterInspector] Imported style from: " .. path)
+      if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Imported style from: " .. path) end
       return true
     end
   end
@@ -48,7 +51,7 @@ local function createWindowIfMissing()
   MonsterInspectorWindow = win
   -- Ensure it's hidden initially
   pcall(function() MonsterInspectorWindow:hide() end)
-  print("[MonsterInspector] Window created successfully (or recreated)")
+  if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Window created successfully (or recreated)") end
 
   -- Rebind buttons and visibility handlers (same logic as below)
   local refreshBtn = SafeCall.globalWithFallback("getWidgetById", nil) -- noop placeholder
@@ -110,8 +113,42 @@ local function findChildRecursive(parent, id)
 end
 
 local function updateWidgetRefs()
-  -- For simplified UI, we only need the textContent
-  print("[MonsterInspector] UI simplified - using textContent only")
+  -- Robustly bind important widgets (content -> textContent) using recursive lookup
+  if not MonsterInspectorWindow then
+    patternList, dmgLabel, waveLabel, areaLabel = nil, nil, nil, nil
+    print("[MonsterInspector] updateWidgetRefs: MonsterInspectorWindow missing")
+    return
+  end
+
+  -- Try direct properties first (common when otui sets ids as fields)
+  local content = nil
+  local ok, cont = pcall(function() return MonsterInspectorWindow.content end)
+  if ok and cont then content = cont end
+
+  -- Fallback to recursive search
+  if not content then content = findChildRecursive(MonsterInspectorWindow, 'content') end
+
+  -- Find the textual content label
+  local textContent = nil
+  if content then
+    local ok2, tc = pcall(function() return content.textContent end)
+    if ok2 and tc then textContent = tc end
+    if not textContent then textContent = findChildRecursive(content, 'textContent') end
+  else
+    -- As a last resort, search the entire window for the label
+    textContent = findChildRecursive(MonsterInspectorWindow, 'textContent')
+  end
+
+  if textContent then
+    patternList = textContent
+    -- Ensure window references are set so other code can access them directly
+    if content and (not MonsterInspectorWindow.content) then MonsterInspectorWindow.content = content end
+    if MonsterInspectorWindow.content and (not MonsterInspectorWindow.content.textContent) then MonsterInspectorWindow.content.textContent = textContent end
+    if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Bound textContent widget successfully") end
+  else
+    patternList = nil
+    warn("[MonsterInspector] Failed to bind textContent widget; UI may not be loaded or style import failed")
+  end
 end
 
 -- Diagnostic helper: print import paths, file existence, window/widget state
@@ -174,7 +211,7 @@ local function isTableEmpty(tbl)
 end
 
 local function fmtTime(ms)
-  if not ms then return "-" end
+  if not ms or (type(ms) == 'number' and ms <= 0) then return "-" end
   return os.date('%Y-%m-%d %H:%M:%S', math.floor(ms / 1000))
 end
 
@@ -194,8 +231,42 @@ local function buildSummary()
   table.insert(lines, string.format("Stats: Damage=%s  Waves=%s  Area=%s", stats.totalDamageReceived or 0, stats.waveAttacksObserved or 0, stats.areaAttacksObserved or 0))
   table.insert(lines, "Patterns:")
   local patterns = storage.monsterPatterns or {}
+
   if isTableEmpty(patterns) then
-    table.insert(lines, "  None")
+    -- If no persisted patterns, try to show live tracking info (useful while hunting)
+    local live = (MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters) or {}
+    local liveCount = 0
+    for _ in pairs(live) do liveCount = liveCount + 1 end
+
+    if liveCount == 0 then
+      table.insert(lines, "  None")
+    else
+      table.insert(lines, string.format("  (Live tracking: %d monsters)", liveCount))
+      -- Header (columns)
+      table.insert(lines, string.format("  %-18s %6s %5s %6s %6s %7s %6s", "name","samps","conf","cd","dps","missiles","spd"))
+
+      -- show up to 20 tracked monsters sorted by confidence (descending)
+      local tbl = {}
+      for id, d in pairs(live) do
+        local name = d.name or "unknown"
+        local samples = d.samples and #d.samples or 0
+        local conf = d.confidence or 0
+        local cooldown = d.ewmaCooldown or d.predictedWaveCooldown or "-"
+        table.insert(tbl, { id = id, name = name, samples = samples, conf = conf, cooldown = cooldown })
+      end
+      table.sort(tbl, function(a, b) return (a.conf or 0) > (b.conf or 0) end)
+      for i = 1, math.min(#tbl, 20) do
+        local e = tbl[i]
+        local confs = e.conf and string.format("%.2f", e.conf) or "-"
+        local cd = (type(e.cooldown) == 'number' and string.format("%dms", math.floor(e.cooldown))) or tostring(e.cooldown)
+        local d = MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters and MonsterAI.Tracker.monsters[e.id] or {}
+        local dps = MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.getDPS and MonsterAI.Tracker.getDPS(e.id) or 0
+        local missiles = d.missileCount or 0
+        local spd = d.avgSpeed or 0
+        table.insert(lines, string.format("  %-18s %6d %5s %6s %6.2f %7d %6.2f", e.name, e.samples, confs, cd, (dps or 0), missiles, spd))
+      end
+      table.insert(lines, "  (Note: live tracker data — patterns persist after observed attacks)")
+    end
   else
     for name, p in pairs(patterns) do
       local cooldown = p and p.waveCooldown and string.format("%dms", math.floor(p.waveCooldown)) or "-"
@@ -211,9 +282,21 @@ end
 function refreshPatterns()
   if not MonsterInspectorWindow or not MonsterInspectorWindow:isVisible() then return end
 
-  -- Ensure we have the latest widget refs
+  -- Ensure we have the latest widget refs; try again if not bound
   if not MonsterInspectorWindow.content or not MonsterInspectorWindow.content.textContent then
     updateWidgetRefs()
+  end
+
+  if not MonsterInspectorWindow.content or not MonsterInspectorWindow.content.textContent then
+    warn("[MonsterInspector] refreshPatterns: textContent widget missing after updateWidgetRefs; aborting refresh.")
+    -- Diagnostic dump to help root-cause: storage and tracker stats
+    local count = 0
+    if storage and storage.monsterPatterns then for _ in pairs(storage.monsterPatterns) do count = count + 1 end end
+    print(string.format("[MonsterInspector][DIAG] storage.monsterPatterns count=%d", count))
+    if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.stats then
+      local s = MonsterAI.Tracker.stats
+      print(string.format("[MonsterInspector][DIAG] MonsterAI stats: damage=%d waves=%d area=%d", s.totalDamageReceived or 0, s.waveAttacksObserved or 0, s.areaAttacksObserved or 0))
+    end
     return
   end
 
@@ -306,7 +389,19 @@ nExBot.MonsterInspector.showWindow = function()
   if MonsterInspectorWindow then
     MonsterInspectorWindow:show()
     updateWidgetRefs()
+
+    -- Ensure tracker runs to populate initial samples (no console required)
+    if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end
     refreshPatterns()
+
+    -- If storage is empty, retry after a short delay to let updater collect samples
+    local hasPatterns = storage and storage.monsterPatterns and next(storage.monsterPatterns) ~= nil
+    if not hasPatterns then
+      schedule(500, function()
+        if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end
+        refreshPatterns()
+      end)
+    end
   end
 end
 
@@ -320,7 +415,12 @@ nExBot.MonsterInspector.toggleWindow = function()
     else
       MonsterInspectorWindow:show()
       updateWidgetRefs()
+      if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end
       refreshPatterns()
+      -- Retry shortly if no patterns yet
+      if not (storage and storage.monsterPatterns and next(storage.monsterPatterns) ~= nil) then
+        schedule(500, function() if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end; refreshPatterns() end)
+      end
     end
   end
 end
@@ -328,4 +428,4 @@ end
 -- Expose refreshPatterns function
 nExBot.MonsterInspector.refreshPatterns = refreshPatterns
 
-print("[MonsterInspector] Use nExBot.MonsterInspector.toggleWindow() to open the inspector")
+if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Use nExBot.MonsterInspector.toggleWindow() to open the inspector") end
