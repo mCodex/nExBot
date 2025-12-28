@@ -265,7 +265,7 @@ local function buildSummary()
         local spd = d.avgSpeed or 0
         table.insert(lines, string.format("  %-18s %6d %5s %6s %6.2f %7d %6.2f", e.name, e.samples, confs, cd, (dps or 0), missiles, spd))
       end
-      table.insert(lines, "  (Note: live tracker data — patterns persist after observed attacks)")
+      table.insert(lines, "  (Note: live tracker data and patterns persist after observed attacks)")
     end
   else
     for name, p in pairs(patterns) do

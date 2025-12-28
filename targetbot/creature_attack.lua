@@ -77,6 +77,11 @@ local avoidanceState = {
   lastMonsterCount = 0     -- Track monster count for scaling
 }
 
+-- Avoidance tuning knobs (can be tuned via TargetCore.CONSTANTS)
+local AVOID_PREDICT_CONF = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.AVOID_PREDICT_CONF) or 0.5 -- min confidence to treat predicted wave as threat
+local AVOID_PREDICT_DANGER = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.AVOID_PREDICT_DANGER) or 3.0 -- added danger weight for predicted wave
+
+
 -- Pure function: Calculate dynamic scaling factor based on monster count
 -- More monsters = more reactive (lower thresholds, shorter cooldowns)
 -- @param monsterCount: number of nearby monsters
@@ -171,6 +176,7 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
     return { totalDanger = danger or 0, waveThreats = 0, meleeThreats = 0, details = {} }
   end
   local result = { totalDanger = 0, waveThreats = 0, meleeThreats = 0, details = {} }
+  local predCache = {}
   for i = 1, #monsters do
     local monster = monsters[i]
     if monster and not monster:isDead() then
@@ -179,21 +185,42 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
       local dist = math.max(math.abs(pos.x - mpos.x), math.abs(pos.y - mpos.y))
       local threat = { monster = monster, distance = dist, inWaveArc = false, arcDistance = 99 }
 
-      -- If prediction mode is active (only used by rePosition), prefer learned predictions
+      -- If prediction mode is active (only used by rePosition and our avoidance integration), prefer learned predictions
       if usePrediction and MonsterAI and MonsterAI.Predictor then
+        local pid = monster:getId()
         local pattern = MonsterAI.Patterns.get(monster:getName())
-        local isPred, confidence, timeToAttack = MonsterAI.Predictor.predictWaveAttack(monster)
+        local isPred, confidence, timeToAttack = nil, nil, nil
+        if predCache[pid] then
+          isPred, confidence, timeToAttack = predCache[pid].isPred, predCache[pid].conf, predCache[pid].tta
+        else
+          local ok, p, c, tta = pcall(function() return MonsterAI.Predictor.predictWaveAttack(monster) end)
+          if ok then isPred, confidence, timeToAttack = p, c, tta else isPred, confidence, timeToAttack = false, 0, 999999 end
+          predCache[pid] = { isPred = isPred, conf = confidence, tta = timeToAttack }
+        end
+
         local inPredPath = false
-        if isPred then
-          inPredPath = MonsterAI.Predictor.isPositionInWavePath(pos, mpos, mdir, pattern.waveRange, pattern.waveWidth)
+        -- Use confidence threshold as the primary gating; allow TTA to be larger but scale urgency with a configurable window
+        if confidence and confidence >= AVOID_PREDICT_CONF then
+          inPredPath = pcall(function()
+            return MonsterAI.Predictor.isPositionInWavePath(pos, mpos, mdir, pattern.waveRange, pattern.waveWidth)
+          end)
         end
         if inPredPath then
-          local urgency = 1 - math.max(0, math.min(timeToAttack, 1000)) / 1000
+          local maxWindow = AVOID_PREDICT_TTA_WINDOW or 3000
+          local urgency = 1 - math.max(0, math.min(timeToAttack, maxWindow)) / maxWindow
           local pdanger = (pattern.dangerLevel or 1) * urgency * (confidence or 1)
+          -- Add a baseline predicted danger scaled by confidence to make avoidance decisive
+          pdanger = pdanger + AVOID_PREDICT_DANGER * (confidence or 1)
           threat.inWaveArc = true
           threat.arcDistance = 0
+          threat.predicted = true
+          threat.predConf = confidence
+          threat.predTTA = timeToAttack
           result.waveThreats = result.waveThreats + 1
           result.totalDanger = result.totalDanger + pdanger
+          if MonsterAI and MonsterAI.COLLECT_DEBUG then
+            print(string.format("[MonsterAI] Predicted wave threat: %s conf=%.2f tta=%dms pdanger=%.2f", monster:getName(), confidence or 0, timeToAttack or 999999, pdanger))
+          end
         end
       else
         -- Fallback to simple front arc detection when prediction is not enabled
@@ -236,7 +263,7 @@ end
 -- @return position or nil, score
 local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
   local candidates = {}
-  local currentAnalysis = analyzePositionDanger(playerPos, monsters)
+  local currentAnalysis = analyzePositionDanger(playerPos, monsters, true)
   
   -- Default scaling if not provided (conservative behavior)
   scaling = scaling or calculateScaling(#monsters)
@@ -285,7 +312,7 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
         return tile and tile:isWalkable() and not tile:hasCreature()
       end)()
     if tileSafe then
-      local analysis = analyzePositionDanger(checkPos, monsters)
+      local analysis = analyzePositionDanger(checkPos, monsters, true)
       local score = 0
       
       -- Factor 1: Danger level (most important)
@@ -448,7 +475,7 @@ local function avoidWaveAttacks()
     if atSafePos and currentTime - avoidanceState.lastMove < dynamicStickiness then
       -- We're at a safe position and within stickiness window
       -- Check if danger has increased (new threats)
-      local analysis = analyzePositionDanger(playerPos, monsters)
+      local analysis = analyzePositionDanger(playerPos, monsters, true)
       -- Dynamic threshold to leave safe position
       local leaveThreshold = avoidanceState.baseDangerThreshold * scaling.dangerThresholdMultiplier + 0.5
       if analysis.totalDanger < leaveThreshold then
