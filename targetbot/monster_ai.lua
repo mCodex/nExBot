@@ -790,7 +790,6 @@ end
 function MonsterAI.updateAll()
   local playerPos = player and player:getPosition()
   if not playerPos then
-    if MonsterAI.COLLECT_DEBUG then print("[MonsterAI] updateAll: player position unavailable") end
     return
   end
 
@@ -803,7 +802,6 @@ function MonsterAI.updateAll()
   end
 
   if not creatures then
-    if MonsterAI.COLLECT_DEBUG then print("[MonsterAI] updateAll: no creatures returned by map/coord cache") end
     return
   end
 
@@ -812,48 +810,15 @@ function MonsterAI.updateAll()
     local creature = creatures[i]
     if creature and creature:isMonster() and not creature:isDead() then
       local ok, err = pcall(function() MonsterAI.Tracker.update(creature) end)
-      if not ok and MonsterAI.COLLECT_DEBUG then print("[MonsterAI] Tracker.update failed: " .. tostring(err)) end
+      if not ok then
+        -- Tracker.update failed (silent)
+      end
       processed = processed + 1
     end
   end
 
   MonsterAI.lastUpdate = now or os.time() * 1000
-  if MonsterAI.COLLECT_DEBUG then
-    print(string.format("[MonsterAI] updateAll: processed=%d monsters tracked=%d storagePatterns=%d lastUpdate=%s", processed, (function() local c=0; for _ in pairs(MonsterAI.Tracker.monsters) do c=c+1 end; return c end)(), (function() local c=0; if storage and storage.monsterPatterns then for _ in pairs(storage.monsterPatterns) do c=c+1 end end; return c end)(), tostring(MonsterAI.lastUpdate)))
-  end
-end
-
--- Diagnostic helper to print current state of the tracker and persisted patterns
-function MonsterAI.debugStatus()
-  print("[MonsterAI][DEBUG] MonsterAI debugStatus:")
-  print(string.format("  automatic collection=%s, collect_debug=%s, extended=%s", tostring(MonsterAI.COLLECT_ENABLED), tostring(MonsterAI.COLLECT_DEBUG), tostring(MonsterAI.COLLECT_EXTENDED)))
-  print(string.format("  lastUpdate=%s", tostring(MonsterAI.lastUpdate or "<never>")))
-  local tracked = 0
-  for _ in pairs(MonsterAI.Tracker.monsters) do tracked = tracked + 1 end
-  print(string.format("  tracked monsters=%d", tracked))
-  local stored = 0
-  if storage and storage.monsterPatterns then for _ in pairs(storage.monsterPatterns) do stored = stored + 1 end end
-  print(string.format("  persisted patterns=%d", stored))
-  if MonsterAI.Tracker and MonsterAI.Tracker.stats then
-    local s = MonsterAI.Tracker.stats
-    print(string.format("  stats: damage=%d waves=%d area=%d", s.totalDamageReceived or 0, s.waveAttacksObserved or 0, s.areaAttacksObserved or 0))
-  end
-
-  -- Show top tracked monsters (by confidence)
-  local tbl = {}
-  for id, d in pairs(MonsterAI.Tracker.monsters) do
-    table.insert(tbl, { id = id, name = d.name or "?", conf = d.confidence or 0, totalDamage = d.totalDamage or 0 })
-  end
-  table.sort(tbl, function(a,b) return a.conf > b.conf end)
-  local N = math.min(#tbl, 5)
-  for i=1,N do
-    local e = tbl[i]
-    local d = MonsterAI.Tracker.monsters[e.id]
-    local dps = MonsterAI.Tracker.getDPS(e.id)
-    local missiles = d.missileCount or 0
-    local facingPct = math.floor(((d.facingCount or 0) / math.max(1, d.movementSamples or 1)) * 100)
-    print(string.format("  [%d] %s conf=%.2f totalDamage=%d dps=%.2f missiles=%d face=%d%%", i, e.name, e.conf, e.totalDamage or 0, dps, missiles, facingPct))
-  end
+  MonsterAI.lastUpdate = now or os.time() * 1000
 end
 
 -- Export for external use

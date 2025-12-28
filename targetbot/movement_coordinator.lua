@@ -931,16 +931,16 @@ end
 
 function MovementCoordinator.Tuning.report()
   local suggestions, tele = MovementCoordinator.Tuning.analyze()
-  if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] Telemetry snapshot:") end
+  -- Telemetry snapshot analyzed (debug prints removed)
   for k,v in pairs(tele) do
-    if MovementCoordinator.DEBUG then print("  " .. k .. " = " .. tostring(v)) end
+    -- data: k,v (silent)
   end
   if #suggestions == 0 then
-    if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] No suggestions (metrics look healthy)") end
+    -- No suggestions (metrics look healthy)
   else
-    if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] Suggestions:") end
+    -- Suggestions available (silent)
     for i,s in ipairs(suggestions) do
-      if MovementCoordinator.DEBUG then print("  - " .. s) end
+      -- suggestion: s (silent)
     end
   end
 end
@@ -952,9 +952,7 @@ function MovementCoordinator.Tuning.runSyntheticTrace()
     return false
   end
 
-  if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] Running short synthetic trace (conservative)...") end
-  -- Clear some counters (if present) by setting a baseline (we'll increment positive values)
-  -- Synthetic scenario: many attempts, moderate failures, some oscillations, frequent wave intents
+  -- Run synthetic trace (silent)
   nExBot.Telemetry.increment("movement.execution.attempt", 100)
   nExBot.Telemetry.increment("movement.execution.success", 70)
   nExBot.Telemetry.increment("movement.execution.failed", 30)
@@ -963,14 +961,10 @@ function MovementCoordinator.Tuning.runSyntheticTrace()
   nExBot.Telemetry.increment("movement.decision.blocked", 220)
   nExBot.Telemetry.increment("movement.intent.registered.WAVE_AVOIDANCE", 20)
 
-  if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] Synthetic trace complete; analyzing...") end
   local suggestions, tele = MovementCoordinator.Tuning.analyze()
-  for i,s in ipairs(suggestions) do if MovementCoordinator.DEBUG then print("  suggestion: " .. s) end end
+  -- suggestions handled silently
   if #suggestions > 0 then
-    if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] Applying conservative recommendations...") end
     MovementCoordinator.Tuning.applyRecommendations(suggestions)
-  else
-    if MovementCoordinator.DEBUG then print("[MovementCoordinator][Tuning] No recommendations to apply") end
   end
   return true
 end

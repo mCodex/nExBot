@@ -5,6 +5,10 @@ local cavebotAllowance = 0
 local lureEnabled = true
 local dangerValue = 0
 local looterStatus = ""
+-- initialization state
+local pendingEnable = false
+local pendingEnableDesired = nil
+local moduleInitialized = false
 
 -- Local cached reference to local player (updated on relogin)
 local player = g_game and g_game.getLocalPlayer() or nil
@@ -162,7 +166,8 @@ if EventBus then
   end
 
   -- Debounced invalidation + optional immediate lightweight recalc for responsiveness
-  local debouncedInvalidateAndRecalc = makeDebounce(80, function()
+  -- Assign to outer variable (do NOT use local here) so external callers use the debounce
+  debouncedInvalidateAndRecalc = makeDebounce(80, function()
     invalidateCache()
     -- Schedule a lightweight recalc to update cache quickly (non-blocking)
     schedule(1, function()
@@ -201,6 +206,33 @@ if EventBus then
   EventBus.on("combat:target", function(creature, oldCreature)
     debouncedInvalidateAndRecalc()
   end, 20)
+end
+
+-- Fallback: If EventBus isn't available (older clients or different environments), hook into global creature events
+if not EventBus then
+  if onCreatureAppear then
+    onCreatureAppear(function(creature)
+      if creature then
+        invalidateCache()
+        -- Do an immediate recalc (not debounced) to pick up new creatures
+        schedule(1, function() pcall(recalculateBestTarget) end)
+      end
+    end)
+  end
+  if onCreatureDisappear then
+    onCreatureDisappear(function(creature)
+      invalidateCache()
+      schedule(1, function() pcall(recalculateBestTarget) end)
+    end)
+  end
+  if onCreatureMove then
+    onCreatureMove(function(creature, oldPos)
+      if creature and creature:isMonster() then
+        invalidateCache()
+        schedule(1, function() pcall(recalculateBestTarget) end)
+      end
+    end)
+  end
 end
 
 -- Reset attack watchdog on relogin (player health re-appears)
@@ -518,75 +550,15 @@ setWidgetTextSafe(ui.config.right, "-")
 ui.danger.left:setText("Danger:")
 setWidgetTextSafe(ui.danger.right, "0")
 
-ui.editor.debug.onClick = function()
-  local on = ui.editor.debug:isOn()
-  ui.editor.debug:setOn(not on)
-  if on then
-    local specs = SafeCall.global("getSpectators") or {}
-    for i = 1, #specs do
-      specs[i]:clearText()
-    end
-  end
-end
+ui.editor.debug.onClick = function() end
+ui.editor.debug:setOn(false)
+ui.editor.debug:setTooltip("")
 
 local oldTibia = g_game.getClientVersion() < 960
 
 -- config, its callback is called immediately, data can be nil
-config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
-  -- Save character's profile preference when profile changes (multi-client support)
-  if enabled and name and name ~= "" and setCharacterProfile then
-    setCharacterProfile("targetbotProfile", name)
-  end
-
-  if not data then
-    setStatusRight("Off")
-    if targetbotMacro and targetbotMacro.setOff then
-      return targetbotMacro.setOff() 
-    end
-    return
-  end
-  TargetBot.Creature.resetConfigs()
-  for _, value in ipairs(data["targeting"] or {}) do
-    TargetBot.Creature.addConfig(value)
-  end
-  TargetBot.Looting.update(data["looting"] or {})
-
-  -- Determine final enabled state:
-  -- On initial load, use stored value if available; otherwise use config's enabled
-  -- Note: storage.targetbotEnabled can be true, false, or nil
-  -- - true/false: User explicitly set state, use that
-  -- - nil: Never set, use config default
-  -- To reset to config default, set storage.targetbotEnabled = nil
-  local finalEnabled = enabled
-  if not TargetBot._initialized then
-    TargetBot._initialized = true
-    -- Only use stored value if it is explicitly true or false
-    if storage.targetbotEnabled == true or storage.targetbotEnabled == false then
-      finalEnabled = storage.targetbotEnabled
-    end
-  else
-    -- User is toggling - save their choice
-    -- If user sets to config default, reset to nil (use config default)
-    if enabled == (data and data.enabled) then
-      storage.targetbotEnabled = nil
-    else
-      storage.targetbotEnabled = enabled
-    end
-  end
-
-  -- Update UI to reflect final state
-  if finalEnabled then
-    setStatusRight("On")
-  else
-    setStatusRight("Off")
-  end
-
-  if targetbotMacro and targetbotMacro.setOn then
-    targetbotMacro.setOn(finalEnabled)
-    targetbotMacro.delay = nil
-  end
-  lureEnabled = true
-end)
+-- Config setup moved down to after macro (to ensure macro and recalc exist before callback runs)
+-- See vBot for reference: https://github.com/Vithrax/vBot
 
 -- Setup UI tooltips
 ui.editor.buttons.add:setTooltip("Add a new creature targeting configuration.\nDefine which creatures to attack and how.")
@@ -919,6 +891,17 @@ end
 -- Only recalculates when cache is dirty (events occurred)
 --------------------------------------------------------------------------------
 
+-- Helper: process a creature into target params (returns params, path) - pure helper to reduce duplication
+local function processCandidate(creature, pos)
+  if not creature or creature:isDead() or not isTargetableCreature(creature) then return nil, nil end
+  local cpos = creature:getPosition()
+  if not cpos then return nil, nil end
+  local path = findPath(pos, cpos, 10, PATH_PARAMS)
+  if not path then return nil, nil end
+  local params = TargetBot.Creature.calculateParams(creature, path)
+  return params, path
+end
+
 -- Recalculate best target from cache
 local function recalculateBestTarget()
   local pos = player:getPosition()
@@ -928,7 +911,7 @@ local function recalculateBestTarget()
   local bestPriority = 0
   local totalDanger = 0
   local targetCount = 0
-  local debugEnabled = ui.editor.debug:isOn()
+
   
   -- Use cached creatures if available, otherwise fetch fresh
   local useCache = CreatureCache.monsterCount > 0 and not CreatureCache.dirty
@@ -938,29 +921,26 @@ local function recalculateBestTarget()
     for id, data in pairs(CreatureCache.monsters) do
       local creature = data.creature
       if creature and not creature:isDead() and isTargetableCreature(creature) then
-        local path = data.path
-        if not path then
-          local cpos = creature:getPosition()
-          path = findPath(pos, cpos, 10, PATH_PARAMS)
-          data.path = path
-          data.pathTime = now
+        local params, path
+        if data.path then
+          params = TargetBot.Creature.calculateParams(creature, data.path)
+        else
+          params, path = processCandidate(creature, pos)
+          if path then
+            data.path = path
+            data.pathTime = now
+          end
         end
-        
-        if path then
-          local params = TargetBot.Creature.calculateParams(creature, path)
-          
-          if params.config then
-            targetCount = targetCount + 1
-            totalDanger = totalDanger + (params.danger or 0)
-            
-            if debugEnabled then
-              creature:setText(tostring(math.floor(params.priority * 10) / 10))
-            end
-            
-            if params.priority > bestPriority then
-              bestPriority = params.priority
-              bestTarget = params
-            end
+
+        if params and params.config then
+          targetCount = targetCount + 1
+          totalDanger = totalDanger + (params.danger or 0)
+
+          setCreatureTextSafe(creature, tostring(math.floor(params.priority * 10) / 10))
+
+          if params.priority > bestPriority then
+            bestPriority = params.priority
+            bestTarget = params
           end
         end
       end
@@ -969,19 +949,26 @@ local function recalculateBestTarget()
     -- Slow path: full refresh from Observed monsters (fallback to getSpectators)
     local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(10) or g_map.getSpectatorsInRange(pos, false, 10, 10)
     
+
+    
     -- Clear and rebuild cache
     CreatureCache.monsters = {}
     CreatureCache.monsterCount = 0
     
     if creatures then
+      local sawAny = false
       for i = 1, #creatures do
         local creature = creatures[i]
-        if isTargetableCreature(creature) then
-          local id = creature:getId()
-          local cpos = creature:getPosition()
-          local path = findPath(pos, cpos, 10, PATH_PARAMS)
-          
-          -- Add to cache
+        sawAny = true
+        local okName, name = pcall(function() return creature:getName() end)
+        local okId, cid = pcall(function() return creature:getId() end)
+        local isTarget = isTargetableCreature(creature)
+
+        if isTarget then
+          local params, path = processCandidate(creature, pos)
+          local okId, id = pcall(function() return creature:getId() end)
+
+          -- Add to cache (even if path nil)
           CreatureCache.monsters[id] = {
             creature = creature,
             path = path,
@@ -989,26 +976,60 @@ local function recalculateBestTarget()
             lastUpdate = now
           }
           CreatureCache.monsterCount = CreatureCache.monsterCount + 1
-          
+
           if path then
-            local params = TargetBot.Creature.calculateParams(creature, path)
-            
-            if params.config then
+            -- params may be nil if calculateParams fails silently
+            if params and params.config then
               targetCount = targetCount + 1
               totalDanger = totalDanger + (params.danger or 0)
-              
-              if debugEnabled then
-                setCreatureTextSafe(creature, tostring(math.floor(params.priority * 10) / 10))
-              end
-              
+
+              setCreatureTextSafe(creature, tostring(math.floor(params.priority * 10) / 10))
+
               if params.priority > bestPriority then
                 bestPriority = params.priority
                 bestTarget = params
               end
             end
+          else
+            -- no path to creature (silent)
           end
         end
       end
+      if not sawAny then
+        -- No spectators found; if we have a recent prime snapshot, use it as a silent short-lived fallback
+        local snap = CreatureCache.primeSnapshot
+        if snap and (now - snap.ts) < 5000 then
+          for i = 1, #snap.creatures do
+            local s = snap.creatures[i]
+            local creature = s and s.creature
+            if creature and not creature:isDead() and isTargetableCreature(creature) then
+              local params, path = processCandidate(creature, pos)
+              local okId, id = pcall(function() return creature:getId() end)
+              id = id or 0
+
+              CreatureCache.monsters[id] = {
+                creature = creature,
+                path = path,
+                pathTime = now,
+                lastUpdate = now
+              }
+              CreatureCache.monsterCount = CreatureCache.monsterCount + 1
+
+              if path and params and params.config then
+                targetCount = targetCount + 1
+                totalDanger = totalDanger + (params.danger or 0)
+                setCreatureTextSafe(creature, tostring(math.floor(params.priority * 10) / 10))
+                if params.priority > bestPriority then
+                  bestPriority = params.priority
+                  bestTarget = params
+                end
+              end
+            end
+          end
+        end
+      end
+    else
+      -- no creatures returned by getSpectatorsInRange (silent)
     end
     
     CreatureCache.lastFullUpdate = now
@@ -1019,8 +1040,76 @@ local function recalculateBestTarget()
   CreatureCache.bestPriority = bestPriority
   CreatureCache.totalDanger = totalDanger
   CreatureCache.dirty = false
-  
+  -- Final decision: cache updated silently
+
   return bestTarget, targetCount, totalDanger
+end
+
+-- If we deferred enabling steps because core functions weren't ready, perform them now (with retries)
+local function performPendingEnableOnce()
+  if not pendingEnable then
+    -- Nothing to do
+    return true
+  end
+  if type(recalculateBestTarget) ~= 'function' or not (targetbotMacro and (type(targetbotMacro) == 'function' or type(targetbotMacro.setOn) == 'function')) then
+    -- core not ready yet; will retry silently
+    return false
+  end
+  pendingEnable = false
+  -- performing deferred enable steps (core ready)
+  -- If user requested a particular enabled state, apply it
+  if pendingEnableDesired ~= nil then
+    pcall(function()
+      if targetbotMacro and type(targetbotMacro.setOn) == 'function' then
+        targetbotMacro.setOn(pendingEnableDesired)
+        targetbotMacro.delay = nil
+      end
+    end)
+    pendingEnableDesired = nil
+  end
+  pcall(function() primeCreatureCache() end)
+  invalidateCache()
+  if debouncedInvalidateAndRecalc then debouncedInvalidateAndRecalc() end
+  schedule(10, function() pcall(function() if type(recalculateBestTarget) == 'function' then recalculateBestTarget() end end) end)
+  schedule(20, function() pcall(function() if type(targetbotMacro) == 'function' then targetbotMacro() elseif targetbotMacro and type(targetbotMacro.setOn) == 'function' then targetbotMacro.setOn(true) end end) end)
+  return true
+end
+
+-- Schedule multiple retries with exponential backoff to cover different load timings
+schedule(20, performPendingEnableOnce)
+schedule(200, function() if not performPendingEnableOnce() then end end)
+schedule(600, function() if not performPendingEnableOnce() then end end)
+schedule(1600, function() if not performPendingEnableOnce() then warn('[TargetBot] post-init: deferred enable attempts exhausted') end end)
+
+-- Prime the CreatureCache directly from current spectators (used when enabling targetbot)
+local function primeCreatureCache()
+  local p = player and player:getPosition()
+  if not p then return end
+  local creatures = g_map.getSpectatorsInRange(p, false, 10, 10)
+  if not creatures or #creatures == 0 then
+    return
+  end
+
+  CreatureCache.monsters = {}
+  CreatureCache.monsterCount = 0
+  local snapshotCreatures = {}
+  for i = 1, #creatures do
+    local creature = creatures[i]
+    if isTargetableCreature(creature) then
+      local id = creature:getId()
+      CreatureCache.monsters[id] = {
+        creature = creature,
+        path = nil,
+        pathTime = 0,
+        lastUpdate = now
+      }
+      table.insert(snapshotCreatures, { id = id, pos = creature:getPosition(), creature = creature })
+      CreatureCache.monsterCount = CreatureCache.monsterCount + 1
+    end
+  end
+  CreatureCache.lastFullUpdate = now
+  CreatureCache.dirty = false
+  CreatureCache.primeSnapshot = { ts = now, pos = p, creatures = snapshotCreatures }
 end
 
 -- Main TargetBot loop - optimized with EventBus caching
@@ -1095,31 +1184,48 @@ targetbotMacro = macro(100, function()
     
     -- Pass lure status for status display
     local isLooting = false
-    TargetBot.Creature.attack(bestTarget, targetCount, isLooting)
-    
-    -- Update status
-    if lureEnabled then
-      setStatusRight(STATUS_ATTACKING)
-    else
-      setStatusRight(STATUS_ATTACKING_LURE_OFF)
-    end
-    -- Watchdog: ensure we're actually attacking (recover from safegaurd deadlocks)
-    local following = g_game.getAttackingCreature and g_game.getAttackingCreature()
+    -- Attack invocation (silent)
     if storage.attackWatchdog == nil then storage.attackWatchdog = true end
-    if storage.attackWatchdog and bestTarget.creature and following ~= bestTarget.creature then
+
+    -- Resolve current following and attacking states
+    local currentFollow = (TargetCore and TargetCore.Native and TargetCore.Native.getFollowingCreature) and TargetCore.Native.getFollowingCreature() or (g_game.getFollowingCreature and g_game.getFollowingCreature())
+    local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature() or nil
+
+    -- Helper to compare creatures by id (safer across object refresh)
+    local function sameCreature(a, b)
+      if not a or not b then return false end
+      local ok, ai = pcall(function() return a:getId() end)
+      local ok2, bi = pcall(function() return b:getId() end)
+      if not ok or not ok2 then return false end
+      return ai == bi
+    end
+
+    -- If we are already attacking the target, reset watchdog and skip forcing
+    if storage.attackWatchdog and bestTarget.creature and sameCreature(currentAttack, bestTarget.creature) then
+      attackWatchdog.attempts = 0
+      if reloginRecovery.active then
+        reloginRecovery.active = false
+        reloginRecovery.endTime = 0
+        reloginRecovery.lastAttempt = 0
+      end
+    elseif storage.attackWatchdog and bestTarget.creature and not sameCreature(currentFollow, bestTarget.creature) then
       -- Allow retrying after an extended recovery period (helps after relogin / creature object refresh)
       local recoveryWindow = attackWatchdog.cooldown * 5
       if now - attackWatchdog.lastForce > recoveryWindow then
         attackWatchdog.attempts = 0
       end
 
-      -- Aggressive relogin recovery mode: while active, force attack attempts more frequently for the recovery window
+      -- Aggressive relogin recovery mode: while active, force re-attempts more frequently for the recovery window
       if reloginRecovery.active and now < reloginRecovery.endTime then
         -- throttle rapid attempts by interval
         if now - reloginRecovery.lastAttempt > reloginRecovery.interval then
           pcall(function() g_game.attack(bestTarget.creature) end)
           reloginRecovery.lastAttempt = now
           attackWatchdog.lastForce = now
+          -- If the attack succeeded (client reports current attacking creature), reset attempts
+          if sameCreature(g_game.getAttackingCreature and g_game.getAttackingCreature() or nil, bestTarget.creature) then
+            attackWatchdog.attempts = 0
+          end
         end
         -- If recovery window passed, disable
         if now >= reloginRecovery.endTime then
@@ -1132,6 +1238,10 @@ targetbotMacro = macro(100, function()
           pcall(function() g_game.attack(bestTarget.creature) end)
           attackWatchdog.lastForce = now
           attackWatchdog.attempts = attackWatchdog.attempts + 1
+          -- If attack registered, reset attempts
+          if sameCreature(g_game.getAttackingCreature and g_game.getAttackingCreature() or nil, bestTarget.creature) then
+            attackWatchdog.attempts = 0
+          end
         end
       end
     else
@@ -1153,8 +1263,84 @@ targetbotMacro = macro(100, function()
   end
 end)
 
+-- Module ready: mark initialized and attempt to process pending enable immediately
+moduleInitialized = true
+pcall(function() performPendingEnableOnce() end)
+
+-- Config setup (moved here so macro/recalc are defined before callback runs)
+config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
+  -- Save character's profile preference when profile changes (multi-client support)
+  if enabled and name and name ~= "" and setCharacterProfile then
+    setCharacterProfile("targetbotProfile", name)
+  end
+
+  if not data then
+    setStatusRight("Off")
+    if targetbotMacro and targetbotMacro.setOff then
+      return targetbotMacro.setOff() 
+    end
+    return
+  end
+  TargetBot.Creature.resetConfigs()
+  for _, value in ipairs(data["targeting"] or {}) do
+    TargetBot.Creature.addConfig(value)
+  end
+  TargetBot.Looting.update(data["looting"] or {})
+
+  -- Determine final enabled state:
+  local finalEnabled = enabled
+  if not TargetBot._initialized then
+    TargetBot._initialized = true
+    if storage.targetbotEnabled == true or storage.targetbotEnabled == false then
+      finalEnabled = storage.targetbotEnabled
+    end
+  else
+    if enabled == (data and data.enabled) then
+      storage.targetbotEnabled = nil
+    else
+      storage.targetbotEnabled = enabled
+    end
+  end
+
+  -- Update UI to reflect final state
+  if finalEnabled then
+    setStatusRight("On")
+  else
+    setStatusRight("Off")
+  end
+
+  if targetbotMacro and targetbotMacro.setOn then
+    targetbotMacro.setOn(finalEnabled)
+    targetbotMacro.delay = nil
+  end
+  -- Force immediate cache refresh & recalc when enabling so existing monsters are picked up
+  if finalEnabled then
+    player = g_game and g_game.getLocalPlayer() or player
+    pcall(function() primeCreatureCache() end)
+    invalidateCache()
+    if debouncedInvalidateAndRecalc then debouncedInvalidateAndRecalc() end
+    schedule(50, function() pcall(function() if type(recalculateBestTarget) == 'function' then recalculateBestTarget() end end) end)
+    schedule(100, function() pcall(function() if targetbotMacro then pcall(targetbotMacro) end end) end)
+  end
+  lureEnabled = true
+end)
+
 -- Stop attacking the current target
 TargetBot.stopAttack = function(clearWalk)
+
+-- debugDumpSpectators removed (cleaned up)
+
+-- debugForceAttackFirst removed (cleaned up)
+
+
+-- Module load diagnostics: print whether key functions are available shortly after load
+-- Module init check (silent): mark module as initialized after a short delay and attempt pending enable
+schedule(1500, function()
+  moduleInitialized = true
+  pcall(function() performPendingEnableOnce() end)
+end)
+
+
   if clearWalk then
     TargetBot.clearWalk()
   end

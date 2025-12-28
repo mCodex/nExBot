@@ -256,6 +256,18 @@ local function isFloorChangeTile(tilePos)
   if tile then
     result = hasFloorChangeGround(tile) or hasFloorChangeItem(tile)
   end
+  
+  -- Strict ramp detection (configurable): if enabled, also check adjacent Z layers
+  -- This helps detect ramps represented differently on some maps/servers
+  if not result and getCfg("strictRampDetect", false) then
+    local upTile = g_map.getTile({x = tilePos.x, y = tilePos.y, z = tilePos.z + 1})
+    local downTile = g_map.getTile({x = tilePos.x, y = tilePos.y, z = tilePos.z - 1})
+    if upTile and (hasFloorChangeGround(upTile) or hasFloorChangeItem(upTile)) then
+      result = true
+    elseif downTile and (hasFloorChangeGround(downTile) or hasFloorChangeItem(downTile)) then
+      result = true
+    end
+  end
    
   FloorChangeCache.tiles[cacheKey] = {value = result, time = now}
   return result
@@ -860,7 +872,6 @@ onPlayerPositionChange(function(newPos, oldPos)
   pushRecentPos(newPos)
 
   if expectedFloor and newPos.z ~= expectedFloor then
-    warn("[CaveBot] Unexpected floor change! Expected: " .. expectedFloor .. ", Current: " .. newPos.z)
     consecutiveFloorChanges = consecutiveFloorChanges + 1
 
     -- Notify CaveBot controller to allow oscillation handling

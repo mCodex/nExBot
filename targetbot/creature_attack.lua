@@ -218,9 +218,7 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
           threat.predTTA = timeToAttack
           result.waveThreats = result.waveThreats + 1
           result.totalDanger = result.totalDanger + pdanger
-          if MonsterAI and MonsterAI.COLLECT_DEBUG then
-            print(string.format("[MonsterAI] Predicted wave threat: %s conf=%.2f tta=%dms pdanger=%.2f", monster:getName(), confidence or 0, timeToAttack or 999999, pdanger))
-          end
+          -- Predicted wave threat (collection debug removed)
         end
       else
         -- Fallback to simple front arc detection when prediction is not enabled
@@ -741,10 +739,7 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local config = params.config
   local creature = params.creature
 
-  -- Debug about attack decision
-  if TargetBot and TargetBot.DEBUG then
-    warn(string.format("[TargetBot][DEBUG] Creature.attack: config=%s mana=%d target=%s", tostring(config and config.name or "-"), player:getMana(), creature and creature:getName() or "-"))
-  end
+  -- attack decision (debug output removed)
   
   -- Cache attacking creature check
   local currentTarget = g_game.getAttackingCreature()

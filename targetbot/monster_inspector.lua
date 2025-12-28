@@ -24,7 +24,7 @@ local function tryImportStyle()
     local path = candidates[i]
     if g_resources and g_resources.fileExists and g_resources.fileExists(path) then
       pcall(function() g_ui.importStyle(path) end)
-      if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Imported style from: " .. path) end
+  
       return true
     end
   end
@@ -51,7 +51,7 @@ local function createWindowIfMissing()
   MonsterInspectorWindow = win
   -- Ensure it's hidden initially
   pcall(function() MonsterInspectorWindow:hide() end)
-  if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Window created successfully (or recreated)") end
+
 
   -- Rebind buttons and visibility handlers (same logic as below)
   local refreshBtn = SafeCall.globalWithFallback("getWidgetById", nil) -- noop placeholder
@@ -116,7 +116,7 @@ local function updateWidgetRefs()
   -- Robustly bind important widgets (content -> textContent) using recursive lookup
   if not MonsterInspectorWindow then
     patternList, dmgLabel, waveLabel, areaLabel = nil, nil, nil, nil
-    print("[MonsterInspector] updateWidgetRefs: MonsterInspectorWindow missing")
+    -- MonsterInspectorWindow missing (silent)
     return
   end
 
@@ -144,51 +144,14 @@ local function updateWidgetRefs()
     -- Ensure window references are set so other code can access them directly
     if content and (not MonsterInspectorWindow.content) then MonsterInspectorWindow.content = content end
     if MonsterInspectorWindow.content and (not MonsterInspectorWindow.content.textContent) then MonsterInspectorWindow.content.textContent = textContent end
-    if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Bound textContent widget successfully") end
+
   else
     patternList = nil
     warn("[MonsterInspector] Failed to bind textContent widget; UI may not be loaded or style import failed")
   end
 end
 
--- Diagnostic helper: print import paths, file existence, window/widget state
-function nExBot.MonsterInspector.debugStatus()
-  print("[MonsterInspector][DEBUG] Running debugStatus...")
-  local candidates = {"/targetbot/monster_inspector.otui", "targetbot/monster_inspector.otui"}
-  if BotConfigName then table.insert(candidates, "/bot/" .. BotConfigName .. "/targetbot/monster_inspector.otui") end
-  -- Try to infer config path from game UI if possible
-  local ok, cfg = pcall(function() return modules and modules.game_bot and modules.game_bot.contentsPanel and modules.game_bot.contentsPanel.config and modules.game_bot.contentsPanel.config:getCurrentOption().text end)
-  if ok and cfg and cfg ~= "" then table.insert(candidates, "/bot/" .. cfg .. "/targetbot/monster_inspector.otui") end
-
-  for i, path in ipairs(candidates) do
-    local exists = false
-    local okf, resf = pcall(function() return g_resources and g_resources.fileExists and g_resources.fileExists(path) end)
-    if okf and resf then exists = true end
-    print(string.format("[MonsterInspector][DEBUG] Path[%d]=%s exists=%s", i, tostring(path), tostring(exists)))
-  end
-
-  -- Try importing each path and report success
-  for i, path in ipairs(candidates) do
-    local okimp, _ = SafeCall.call(function(p) return g_ui.importStyle(p) end, path)
-    print(string.format("[MonsterInspector][DEBUG] importStyle(%s) => %s", tostring(path), tostring(okimp)))
-  end
-
-  -- Window status
-  print("[MonsterInspector][DEBUG] MonsterInspectorWindow present=" .. tostring(MonsterInspectorWindow ~= nil))
-  if MonsterInspectorWindow then
-    local visOk, isVis = pcall(function() return MonsterInspectorWindow:isVisible() end)
-    print("[MonsterInspector][DEBUG] isVisible=" .. tostring(isVis))
-    local childrenOk, children = pcall(function() return MonsterInspectorWindow.getChildren and #MonsterInspectorWindow:getChildren() or 0 end)
-    if childrenOk then print("[MonsterInspector][DEBUG] childCount=" .. tostring(children)) end
-    updateWidgetRefs()
-  end
-
-  -- Storage patterns summary
-  local patterns = storage and storage.monsterPatterns or {}
-  local count = 0
-  for _ in pairs(patterns) do count = count + 1 end
-  print("[MonsterInspector][DEBUG] storage.monsterPatterns count=" .. tostring(count))
-end
+-- MonsterInspector.debugStatus removed (debug helpers cleaned up)
 
 -- Populate refs now (also called again on visibility change)
 updateWidgetRefs()
@@ -428,4 +391,4 @@ end
 -- Expose refreshPatterns function
 nExBot.MonsterInspector.refreshPatterns = refreshPatterns
 
-if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Use nExBot.MonsterInspector.toggleWindow() to open the inspector") end
+-- Use nExBot.MonsterInspector.toggleWindow() to open the inspector (hint removed)
