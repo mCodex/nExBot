@@ -7,10 +7,10 @@ TargetBot.Creature.configsCache = {}
 TargetBot.Creature.cached = 0
 TargetBot.Creature.lastCacheClear = 0
 
--- Cache configuration optimized for memory efficiency
-local CACHE_MAX_SIZE = 200   -- Reduced for better memory management
-local CACHE_TTL = 30000      -- Clear cache every 30 seconds (reduced from 60)
-local CACHE_LRU_SIZE = 50    -- Keep only 50 most recent entries when pruning
+-- Cache configuration optimized for memory efficiency (tuned for lower memory usage)
+local CACHE_MAX_SIZE = 50   -- Reduced from 100 to limit memory per-character
+local CACHE_TTL = 10000      -- Clear cache every 10 seconds to free memory more aggressively
+local CACHE_LRU_SIZE = 20    -- Keep only 20 most recent entries when pruning
 
 -- LRU tracking for smart cache eviction
 local cacheAccessOrder = {}  -- Array of {name, accessTime}

@@ -219,8 +219,8 @@ end
 -- Track movement state
 local lastPx, lastPy = 0, 0
 
--- Ultra-fast 2ms polling
-macro(2, function()
+-- Reduced polling to reduce CPU; 50ms still responsive for levitate
+macro(50, function()
   if not autoLevitateEnabled then return end
   
   local p = player

@@ -341,7 +341,7 @@ end)
 
 if onSpellCooldown and onGroupSpellCooldown then
     onSpellCooldown(function(iconId, duration)
-        schedule(1, function()
+        schedule(40, function()
             if not nExBot.customCooldowns[lastPhrase] then
                 nExBot.customCooldowns[lastPhrase] = {id = iconId}
             end
@@ -349,7 +349,7 @@ if onSpellCooldown and onGroupSpellCooldown then
     end)
 
     onGroupSpellCooldown(function(iconId, duration)
-        schedule(2, function()
+        schedule(40, function()
             if nExBot.customCooldowns[lastPhrase] then
                 nExBot.customCooldowns[lastPhrase] = {id = nExBot.customCooldowns[lastPhrase].id, group = {[iconId] = duration}}
             end

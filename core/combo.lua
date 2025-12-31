@@ -201,7 +201,8 @@ end
 local shouldCloseWindow = false
 local firstInvitee = true
 local isInComboTeam = false
-macro(10, function()
+-- Lower frequency (100ms) to reduce CPU when UI isn't changing rapidly
+macro(100, function()
   if shouldCloseWindow and config.serverEnabled and config.enabled then
     local channelsWindow = modules.game_console.channelsWindow
     if channelsWindow then
@@ -337,7 +338,8 @@ onMissle(function(missle)
   end
 end)
 
-macro(10, function()
+-- Lower frequency (100ms) to reduce CPU usage
+macro(100, function()
   if not config.enabled or not config.attackLeaderTargetEnabled then return end
   if leaderTarget and config.attack == "LEADER TARGET" then
     local target = SafeCall.getTarget()
@@ -402,7 +404,8 @@ onCreaturePositionChange(function(creature, oldPos, newPos)
 end)
 
 local timeout = now
-macro(10, function()
+-- Lower frequency (100ms) to reduce CPU usage
+macro(100, function()
   if config.enabled and startCombo then
     if config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item) then
       local target = SafeCall.getTarget()

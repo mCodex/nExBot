@@ -62,6 +62,8 @@ TargetBot.smartPullActive = false  -- When true, CaveBot pauses waypoint walking
 
 -- Use TargetBotCore if available (DRY principle)
 local Core = TargetCore or {}
+-- Spectator cache to reduce expensive g_map.getSpectatorsInRange calls
+local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
 
 -- Creature type constants for clarity
 local CREATURE_TYPE = {
@@ -167,12 +169,12 @@ if EventBus then
 
   -- Debounced invalidation + optional immediate lightweight recalc for responsiveness
   -- Assign to outer variable (do NOT use local here) so external callers use the debounce
-  debouncedInvalidateAndRecalc = makeDebounce(80, function()
+  debouncedInvalidateAndRecalc = makeDebounce(120, function()
     invalidateCache()
     -- Schedule a lightweight recalc to update cache quickly (non-blocking)
-    schedule(1, function()
+    -- Schedule a lightweight recalc after debounce (short delay)
+    schedule(40, function()
       pcall(function()
-        -- protect call; recalculateBestTarget returns bestTarget, targetCount, totalDanger
         if recalculateBestTarget then
           recalculateBestTarget()
         end
@@ -214,22 +216,22 @@ if not EventBus then
     onCreatureAppear(function(creature)
       if creature then
         invalidateCache()
-        -- Do an immediate recalc (not debounced) to pick up new creatures
-        schedule(1, function() pcall(recalculateBestTarget) end)
+        -- Debounced (120ms) recalc to reduce CPU churn on rapid events
+        schedule(120, function() pcall(recalculateBestTarget) end)
       end
     end)
   end
   if onCreatureDisappear then
     onCreatureDisappear(function(creature)
       invalidateCache()
-      schedule(1, function() pcall(recalculateBestTarget) end)
+      schedule(80, function() pcall(recalculateBestTarget) end)
     end)
   end
   if onCreatureMove then
     onCreatureMove(function(creature, oldPos)
       if creature and creature:isMonster() then
         invalidateCache()
-        schedule(1, function() pcall(recalculateBestTarget) end)
+        schedule(80, function() pcall(recalculateBestTarget) end)
       end
     end)
   end
@@ -481,9 +483,41 @@ if EventBus then
   end, 60)
   
   -- Target changes
+  local lastCombatTargetId = nil
   EventBus.on("combat:target", function(creature, oldCreature)
     invalidateCache()
+
+    local newId = creature and creature:getId() or nil
+    if newId ~= lastCombatTargetId then
+      if creature then
+        -- Combat started
+        storage.targetbotCombatActive = true
+        pcall(function()
+          EventBus.emit("targetbot/combat_start", creature, { id = newId, pos = creature:getPosition() })
+        end)
+      else
+        -- Combat ended
+        storage.targetbotCombatActive = false
+        pcall(function() EventBus.emit("targetbot/combat_end") end)
+      end
+      lastCombatTargetId = newId
+    end
   end, 70)
+
+  -- Monitor player health to emit emergency events
+  EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
+    local cfg = ProfileStorage and ProfileStorage.get and ProfileStorage.get('targetPriority') or {}
+    local threshold = cfg and cfg.emergencyHP or 25
+    local percent = 100
+    if maxHealth and maxHealth > 0 then percent = math.floor(health / maxHealth * 100) end
+    if percent <= threshold and not storage.targetbotEmergency then
+      storage.targetbotEmergency = true
+      pcall(function() EventBus.emit("targetbot/emergency", percent) end)
+    elseif percent > threshold and storage.targetbotEmergency then
+      storage.targetbotEmergency = false
+      pcall(function() EventBus.emit("targetbot/emergency_cleared", percent) end)
+    end
+  end, 90)
 end
 
 -- PERFORMANCE: Path cache for backward compatibility (optimized)
@@ -493,7 +527,7 @@ local PathCache = {
   lastCleanup = 0,
   cleanupInterval = 2000,
   size = 0,
-  maxSize = 100
+  maxSize = 30
 }
 
 -- Pre-allocated cache entry to reduce GC
@@ -551,7 +585,7 @@ ui.danger.left:setText("Danger:")
 setWidgetTextSafe(ui.danger.right, "0")
 
 -- Debug toggle removed to avoid UI flooding
-ui.editor.debug:destroy()
+if ui and ui.editor and ui.editor.debug then ui.editor.debug:destroy() end
 
 local oldTibia = g_game.getClientVersion() < 960
 
@@ -888,7 +922,7 @@ local function recalculateBestTarget()
     end
   else
     -- Slow path: full refresh from Observed monsters (fallback to getSpectators)
-    local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(10) or g_map.getSpectatorsInRange(pos, false, 10, 10)
+    local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(10) or (SpectatorCache and SpectatorCache.getNearby(10, 10) or g_map.getSpectatorsInRange(pos, false, 10, 10))
     
 
     
@@ -1028,7 +1062,7 @@ schedule(1600, function() if not performPendingEnableOnce() then warn('[TargetBo
 local function primeCreatureCache()
   local p = player and player:getPosition()
   if not p then return end
-  local creatures = g_map.getSpectatorsInRange(p, false, 10, 10)
+  local creatures = (SpectatorCache and SpectatorCache.getNearby(10, 10)) or g_map.getSpectatorsInRange(p, false, 10, 10)
   if not creatures or #creatures == 0 then
     return
   end
@@ -1056,10 +1090,13 @@ local function primeCreatureCache()
 end
 
 -- Main TargetBot loop - optimized with EventBus caching
-targetbotMacro = macro(100, function()
+targetbotMacro = macro(400, function()
   if not config or not config.isOn or not config.isOn() then
     return
   end
+
+  -- Prevent execution before login is complete to avoid freezing
+  if not g_game.isOnline() then return end
 
   -- TargetBot never triggers friend-heal; keep that path dormant to save cycles
   if HealEngine and HealEngine.setFriendHealingEnabled then
@@ -1100,7 +1137,7 @@ targetbotMacro = macro(100, function()
   end
   
   -- Get best target (uses cache when possible)
-  local bestTarget, targetCount, totalDanger = recalculateBestTarget()
+    local bestTarget, targetCount, totalDanger = recalculateBestTarget()
   
   if not bestTarget then
     setWidgetTextSafe(ui.target.right, "-")

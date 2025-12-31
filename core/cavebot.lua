@@ -54,7 +54,7 @@ local function loadDeferred(idx)
 	if idx > #deferredModules then return end
 	setDefaultTab(cavebotTab)
 		safeDofile(deferredModules[idx])
-	schedule(1, function() loadDeferred(idx + 1) end)
+	schedule(20, function() loadDeferred(idx + 1) end)
 end
 
 loadDeferred()

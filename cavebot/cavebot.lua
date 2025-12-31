@@ -496,8 +496,13 @@ local function executeRecovery()
   -- Strategy 3: GLOBAL SEARCH - Find ANY reachable waypoint on current floor
   -- This is the key improvement for relog scenarios
   if attempt <= 3 and playerPos and findNearestGlobalWaypoint then
+    -- Throttle heavy search to avoid blocking macro; defer if TargetBot combat/emergency is active
+    if not canRunHeavyOp() or storage.targetbotCombatActive or storage.targetbotEmergency then
+      return false
+    end
+
     local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
-      maxCandidates = 30,
+      maxCandidates = 20,
       preferCurrentFloor = true,
       searchAllFloors = false
     })
@@ -514,8 +519,12 @@ local function executeRecovery()
   
   -- Strategy 4: EXTENDED GLOBAL SEARCH with cross-floor support
   if attempt <= 4 and playerPos and findNearestGlobalWaypoint then
+    if not canRunHeavyOp() or storage.targetbotCombatActive or storage.targetbotEmergency then
+      return false
+    end
+
     local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
-      maxCandidates = 50,
+      maxCandidates = 30,
       preferCurrentFloor = true,
       searchAllFloors = true  -- Check adjacent floors
     })
@@ -695,7 +704,18 @@ local function initTargetBotCache()
   end
 end
 
-cavebotMacro = macro(150, function()
+-- Throttle for heavy operations (pathfinding/global searches)
+local lastHeavyOpTime = 0
+local HEAVY_OP_INTERVAL = 600  -- ms
+local function canRunHeavyOp()
+  if now and (now - lastHeavyOpTime) < HEAVY_OP_INTERVAL then return false end
+  lastHeavyOpTime = now or os.clock() * 1000
+  return true
+end
+
+cavebotMacro = macro(200, function()
+  -- Prevent execution before login is complete to avoid freezing
+  if not g_game.isOnline() then return end
   -- SMART EXECUTION: Skip if we shouldn't execute this tick
   if shouldSkipExecution() then return end
   
@@ -709,15 +729,18 @@ cavebotMacro = macro(150, function()
       CaveBot.resetWalking()
       resetWaypointEngine()
       if resetStartupCheck then resetStartupCheck() end
-      if findNearestGlobalWaypoint then
-        local maxDist = storage.extras.gotoMaxDistance or 50
-        local child, idx = findNearestGlobalWaypoint(playerPos, maxDist * 2, {  -- Larger search
-          maxCandidates = 35,
-          preferCurrentFloor = true,
-          searchAllFloors = true  -- Allow cross-floor search
-        })
-        if child then
-          focusWaypointBefore(child, idx)
+      if findNearestGlobalWaypoint and canRunHeavyOp() then
+        -- Avoid heavy global searches if TargetBot has combat priority or emergency
+        if not storage.targetbotCombatActive and not storage.targetbotEmergency then
+          local maxDist = storage.extras.gotoMaxDistance or 50
+          local child, idx = findNearestGlobalWaypoint(playerPos, maxDist * 2, {  -- Larger search
+            maxCandidates = 20,
+            preferCurrentFloor = true,
+            searchAllFloors = true  -- Allow cross-floor search
+          })
+          if child then
+            focusWaypointBefore(child, idx)
+          end
         end
       end
     end
@@ -1244,17 +1267,19 @@ checkStartupWaypoint = function()
   
   -- Current waypoint not reachable - find nearest globally
   local maxDist = storage.extras.gotoMaxDistance or 50
-  local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {  -- Increased search distance
-    maxCandidates = 35,  -- More candidates
-    preferCurrentFloor = true,
-    searchAllFloors = false
-  })
-  
-  if nearestChild then
-    print("[CaveBot] Startup: Found nearest reachable waypoint at index " .. nearestIndex)
-    focusWaypointBefore(nearestChild, nearestIndex)
-    startupWaypointFound = true
-    return
+  if canRunHeavyOp() and not storage.targetbotCombatActive and not storage.targetbotEmergency then
+    local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {  -- Increased search distance
+      maxCandidates = 20,  -- More candidates
+      preferCurrentFloor = true,
+      searchAllFloors = false
+    })
+    
+    if nearestChild then
+      print("[CaveBot] Startup: Found nearest reachable waypoint at index " .. nearestIndex)
+      focusWaypointBefore(nearestChild, nearestIndex)
+      startupWaypointFound = true
+      return
+    end
   end
   
   -- Extended search: larger distance, more candidates

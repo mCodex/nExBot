@@ -23,6 +23,7 @@ local CORE_PATH = "/bot/" .. configName .. "/core"
 -- Initialize global nExBot namespace if not exists
 nExBot = nExBot or {}
 nExBot.loadTimes = loadTimes  -- Expose for debugging
+
 -- Suppress noisy debug prints by default. Set `nExBot.showDebug = true` in console to allow them.
 nExBot.showDebug = nExBot.showDebug or false
 nExBot.suppressDebugPrefixes = nExBot.suppressDebugPrefixes or {"[HealBot]", "[MonsterInspector]"}
@@ -99,22 +100,38 @@ local function sanitizeTable(tbl, path, depth)
   return tbl
 end
 
--- Sanitize storage on startup
+-- Sanitize storage on startup (non-blocking, chunked to avoid freezing)
 local function sanitizeStorage()
   if not storage then return end
   local sanitizeStart = os.clock()
-  
+  local keys = {}
   for k, v in pairs(storage) do
-    if type(v) == "table" then
-      storage[k] = sanitizeTable(v, k, 0)
+    if type(v) == "table" then keys[#keys + 1] = k end
+  end
+
+  local idx = 1
+  local chunkSize = 20 -- process 20 keys per tick
+  local function processChunk()
+    local stopAt = math.min(idx + chunkSize - 1, #keys)
+    for i = idx, stopAt do
+      local k = keys[i]
+      if type(storage[k]) == 'table' then
+        storage[k] = sanitizeTable(storage[k], k, 0)
+      end
+    end
+    idx = stopAt + 1
+    if idx <= #keys then
+      schedule(50, processChunk)
+    else
+      loadTimes["sanitize"] = math.floor((os.clock() - sanitizeStart) * 1000)
     end
   end
-  
-  loadTimes["sanitize"] = math.floor((os.clock() - sanitizeStart) * 1000)
+  -- Start asynchronous sanitization
+  schedule(1, processChunk)
 end
 
--- Run sanitizer before loading any modules
-pcall(sanitizeStorage)
+-- Run sanitizer before loading any modules (non-blocking)
+sanitizeStorage()
 
 -- ============================================================================
 -- OPTIMIZED STYLE LOADING
@@ -399,6 +416,9 @@ end
 
 -- Run the private scripts loader
 loadPrivateScripts()
+
+-- Initialize optional boot diagnostics (safe, tiny, runs only if enabled via ProfileStorage)
+-- schedule(100, function() pcall(require, 'utils.boot_diagnostics') end)
 
 -- Return to Main tab
 setDefaultTab("Main")

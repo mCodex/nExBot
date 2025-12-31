@@ -25,8 +25,25 @@ end
 
 -- Private state
 local listeners = {}
-local eventQueue = {}
+-- Ring buffer queue for events (head/tail indices) to avoid O(n) table.remove
+local eventQueue = { head = 1, tail = 0 }
 local processing = false
+local FLUSH_BATCH = 100 -- max events processed per flush to avoid blocking
+
+-- Startup safeguard: filter known problematic spawners (configurable via ProfileStorage.get("startupFilterPlayers"))
+local startupFilter = {}
+do
+  local ok, list = pcall(function() return ProfileStorage and ProfileStorage.get("startupFilterPlayers") end)
+  if ok and type(list) == "table" then
+    for _, n in ipairs(list) do startupFilter[tostring(n)] = true end
+  end
+  -- Add a default safe entry for the reported problematic name
+  startupFilter["Elderane"] = true
+end
+
+local startupCounts = {} -- { [name] = {first=ts, count=n, warned=true} }
+local STARTUP_WINDOW_MS = 10000 -- 10s window
+local STARTUP_THRESHOLD = 5 -- ignore after this many appears within window
 
 -- Subscribe to an event
 -- @param event string: Event name (e.g., "creature:appear", "player:move")
@@ -95,19 +112,40 @@ end
 -- @param event string: Event name
 -- @param ... any: Arguments to pass to handlers
 function EventBus.queue(event, ...)
-  table.insert(eventQueue, {event = event, args = {...}})
+  -- Push to ring buffer queue
+  eventQueue.tail = eventQueue.tail + 1
+  eventQueue[eventQueue.tail] = { event = event, args = {...} }
+  -- Telemetry
+
+  -- Trim if backlog becomes excessive
+  local size = math.max(0, eventQueue.tail - eventQueue.head + 1)
+  if size > 2000 then
+    local drop = math.floor(size / 2)
+    for i = 1, drop do
+      eventQueue[eventQueue.head] = nil
+      eventQueue.head = eventQueue.head + 1
+    end
+    warn("[EventBus] High event backlog, dropped " .. tostring(drop) .. " oldest events")
+  end
 end
 
 -- Process all queued events
 function EventBus.flush()
   if processing then return end
   processing = true
-  
-  while #eventQueue > 0 do
-    local item = table.remove(eventQueue, 1)
-    EventBus.emit(item.event, table.unpack(item.args))
+
+  local processed = 0
+  while processed < FLUSH_BATCH and eventQueue.head <= eventQueue.tail do
+    local item = eventQueue[eventQueue.head]
+    eventQueue[eventQueue.head] = nil
+    eventQueue.head = eventQueue.head + 1
+    if item then
+      EventBus.emit(item.event, table.unpack(item.args))
+
+    end
+    processed = processed + 1
   end
-  
+
   processing = false
 end
 
@@ -136,6 +174,11 @@ function EventBus.listenerCount(event)
   return total
 end
 
+-- Get number of queued events currently waiting to be processed
+function EventBus.queueSize()
+  return math.max(0, eventQueue.tail - eventQueue.head + 1)
+end
+
 --------------------------------------------------------------------------------
 -- OTClient Native Event Registration
 -- Register once, dispatch through EventBus
@@ -144,6 +187,30 @@ end
 -- Creature events
 if onCreatureAppear then
   onCreatureAppear(function(creature)
+    -- Startup filter: protect from bursty spawns of problematic names (e.g., 'Elderane')
+    local ok, name = pcall(function() return creature:getName() end)
+    if ok and name and startupFilter[name] then
+      local now = math.floor(os.clock() * 1000)
+      local rec = startupCounts[name]
+      if not rec or (now - rec.first) > STARTUP_WINDOW_MS then
+        rec = { first = now, count = 0, warned = false }
+        startupCounts[name] = rec
+      end
+      rec.count = rec.count + 1
+      if rec.count > STARTUP_THRESHOLD then
+        if not rec.warned then
+          warn("[EventBus] Ignoring repeated spawn of '" .. tostring(name) .. "' (count=" .. tostring(rec.count) .. "), protecting main loop")
+          pcall(function()
+            if ProfileStorage then
+              ProfileStorage.set("bootFreezeLast", { name = name, count = rec.count, ts = now })
+            end
+          end)
+          rec.warned = true
+        end
+        -- return -- drop this appear event to avoid heavy processing
+      end
+    end
+
     if creature:isMonster() then
       EventBus.emit("monster:appear", creature)
     elseif creature:isPlayer() then
@@ -297,6 +364,6 @@ macro(200, function()
 end)
 
 -- Periodic flush for queued events
-macro(50, function()
+macro(25, function()
   EventBus.flush()
 end)

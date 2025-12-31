@@ -19,6 +19,8 @@ local dynamicLureDelay = false
 -- Use TargetCore if available (DRY - avoid duplicate implementations)
 local Core = TargetCore or {}
 local Geometry = Core.Geometry or {}
+-- Spectator cache (safe require)
+local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
 
 -- Helper: check MovementCoordinator for movement allowance
 local function movementAllowed()
@@ -410,7 +412,7 @@ local function avoidWaveAttacks()
   
   -- Get monsters in range FIRST (needed for scaling)
   local playerPos = player:getPosition()
-  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(7) or g_map.getSpectatorsInRange(playerPos, false, 7, 7)
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(7) or (SpectatorCache and SpectatorCache.getNearby(7, 7) or g_map.getSpectatorsInRange(playerPos, false, 7, 7))
   local monsters = {}
   
   for i = 1, #creatures do
@@ -530,9 +532,9 @@ nExBot.findSafeAdjacentTile = findSafeAdjacentTile
 
 -- Event-driven hookup: debounce avoidWaveAttacks on creature changes nearby
 if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
-  local debounceAvoid = nExBot.EventUtil.debounce(120, function()
-    -- Run avoidance in schedule to avoid blocking EventBus handlers
-    schedule(1, function()
+  local debounceAvoid = nExBot.EventUtil.debounce(200, function()
+    -- Run avoidance in schedule to avoid blocking EventBus handlers (debounced)
+    schedule(60, function()
       pcall(avoidWaveAttacks)
     end)
   end)
@@ -619,7 +621,7 @@ local function rePosition(minTiles, config)
   if currentWalkable >= minTiles then return end
   
   -- Get nearby monsters for scoring
-  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(5) or g_map.getSpectatorsInRange(playerPos, false, 5, 5)
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(5) or (SpectatorCache and SpectatorCache.getNearby(5, 5) or g_map.getSpectatorsInRange(playerPos, false, 5, 5))
   local monsters = {}
   for i = 1, #creatures do
     local c = creatures[i]
@@ -914,7 +916,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
   -- Get nearby monsters for danger analysis
   local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
     and MovementCoordinator.MonsterCache.getNearby(7)
-    or g_map.getSpectatorsInRange(pos, false, 7, 7)
+    or (SpectatorCache and SpectatorCache.getNearby(7, 7) or g_map.getSpectatorsInRange(pos, false, 7, 7))
   local monsters = {}
   for i = 1, #creatures do
     local c = creatures[i]
@@ -1178,15 +1180,25 @@ TargetBot.Creature.walk = function(creature, config, targets)
       -- warn("[TargetBot] CHASE entry #" .. tostring(TargetBot._followAttemptCount) .. ", autoFollow=" .. tostring(config.autoFollow) .. ", keepDistance=" .. tostring(config.keepDistance) .. ", pathLen=" .. tostring(pathLen))
     end
 
-    -- AUTO FOLLOW: Use OTClient's native g_game.follow() for smoother chasing
-    -- This is more performant as it delegates movement to the client
-    if TargetCore and TargetCore.DEBUG then
-      -- warn("[TargetBot] CHASE block: autoFollow=" .. tostring(config.autoFollow) .. ", keepDistance=" .. tostring(config.keepDistance) .. ", avoidAttacks=" .. tostring(config.avoidAttacks) .. ", rePosition=" .. tostring(config.rePosition) .. ", pathLen=" .. tostring(pathLen))
+    -- AUTO FOLLOW (native): Use OTClient native follow/chase for smoother automatic chasing
+    if movementAllowed() and not (config.avoidAttacks or config.keepDistance or config.rePosition) then
+      -- Use TargetCore native follow helper if available
+      if TargetCore and TargetCore.Native and TargetCore.Native.followCreature then
+        local curFollow = TargetCore.Native.getFollowingCreature and TargetCore.Native.getFollowingCreature()
+        if not curFollow or curFollow:getId() ~= creature:getId() then
+          TargetCore.Native.followCreature(creature)
+        end
+        return true
+      elseif g_game and g_game.follow then
+        local curFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+        if not curFollow or curFollow:getId() ~= creature:getId() then
+          pcall(function() g_game.follow(creature) end)
+        end
+        return true
+      end
     end
 
-    -- AUTO-FOLLOW: Native client-based follow is disabled in favor of manual path-based walking.
-    -- Manual chase will be handled by the CUSTOM PATHFINDING block below using TargetBot.walkTo/MovementCoordinator.
-    -- (This avoids native follow interfering with AttackBot and gives better control.)
+    -- Native follow not available or disabled for precision modes; fall back to manual pathfinding.
     
     
     -- CUSTOM PATHFINDING: Traditional walkTo-based chase
@@ -1222,6 +1234,16 @@ TargetBot.Creature.walk = function(creature, config, targets)
     end
   end
   
+  -- If using native follow and we've closed the gap, cancel follow to allow precise attacks
+  local following = (TargetCore and TargetCore.Native and TargetCore.Native.getFollowingCreature and TargetCore.Native.getFollowingCreature()) or (g_game.getFollowingCreature and g_game.getFollowingCreature())
+  if following and creature and following:getId() == creature:getId() and pathLen <= 1 then
+    if TargetCore and TargetCore.Native and TargetCore.Native.cancelFollow then
+      TargetCore.Native.cancelFollow()
+    elseif g_game and g_game.cancelFollow then
+      pcall(function() g_game.cancelFollow() end)
+    end
+  end
+
   -- ─────────────────────────────────────────────────────────────────────────
   -- INTENT 7: FACE MONSTER (Diagonal correction)
   -- ─────────────────────────────────────────────────────────────────────────

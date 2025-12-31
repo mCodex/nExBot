@@ -324,6 +324,28 @@ local DIR_OFFSET = {
   [7] = { x = -1, y = -1 }   -- NorthWest
 }
 
+-- Check for monsters within radius around a position
+local function hasMonstersInRadius(centerPos, radius)
+  if not centerPos or not radius then return false end
+  for dx = -radius, radius do
+    for dy = -radius, radius do
+      local pos = { x = centerPos.x + dx, y = centerPos.y + dy, z = centerPos.z }
+      local tile = g_map.getTile(pos)
+      if tile and tile:hasCreature() then
+        for _, c in ipairs(tile:getCreatures()) do
+          if c and c:isMonster() then
+            local hp = c:getHealthPercent()
+            if not hp or hp > 0 then
+              return true
+            end
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
 -- Check if path is blocked by attackable monster
 local function getBlockingMonster(playerPos, destPos, maxDist)
   -- Only check if we're close to destination
@@ -364,6 +386,24 @@ local function getBlockingMonster(playerPos, destPos, maxDist)
   end
   
   return nil
+end
+
+if EventBus then
+  EventBus.on("targetbot/combat_start", function(creature, payload)
+    storage.targetbotCombatActive = true
+  end, 20)
+
+  EventBus.on("targetbot/combat_end", function()
+    storage.targetbotCombatActive = false
+  end, 20)
+
+  EventBus.on("targetbot/emergency", function(hpPercent)
+    storage.targetbotEmergency = true
+  end, 20)
+
+  EventBus.on("targetbot/emergency_cleared", function(hpPercent)
+    storage.targetbotEmergency = false
+  end, 20)
 end
 
 CaveBot.registerAction("goto", "green", function(value, retries, prev)
@@ -408,6 +448,22 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false
   end
 
+  -- EventBus priority: if TargetBot emergency or combat priority is active, hold/retry instead of moving away
+  local tpConf = (ProfileStorage and ProfileStorage.get and ProfileStorage.get('targetPriority')) or {}
+  if storage.targetbotEmergency then
+    warn("CaveBot[Goto]: TargetBot emergency active, holding position")
+    return "retry"
+  end
+  if storage.targetbotCombatActive and tpConf and tpConf.enabled then
+    local scanRadius = tpConf.scanRadius or 2
+    local combatNearby = hasMonstersInRadius(playerPos, scanRadius) or hasMonstersInRadius(destPos, scanRadius)
+    if not combatNearby then
+      -- hold position to prioritize TargetBot combat
+      CaveBot.delay(200)
+      return "retry"
+    end
+  end
+
   -- Check if destination is floor-change tile (stairs, ladder, rope spot, hole)
   -- When user explicitly adds such a waypoint, they INTEND to use it
   local minimapColor = g_map.getMinimapColor(destPos)
@@ -424,6 +480,45 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Already at destination
   if distX <= precision and distY <= precision then
     noPath = 0
+
+    -- If there are monsters near the waypoint and combat is active (TargetBot on or player attacking),
+    -- wait for them to die before proceeding (timeout in seconds).
+    local function hasNearbyMonsters(radius)
+      for dx = -radius, radius do
+        for dy = -radius, radius do
+          local checkPos = { x = destPos.x + dx, y = destPos.y + dy, z = destPos.z }
+          local tile = g_map.getTile(checkPos)
+          if tile and tile:hasCreature() then
+            for _, c in ipairs(tile:getCreatures()) do
+              if c:isMonster() then
+                local hp = c:getHealthPercent()
+                if not hp or hp > 0 then
+                  return true
+                end
+              end
+            end
+          end
+        end
+      end
+      return false
+    end
+
+    local radius = 2
+    local combatActive = (TargetBot and TargetBot.isOn and TargetBot.isOn()) or g_game.getAttackingCreature()
+    if hasNearbyMonsters(radius) and combatActive then
+      local start = os.clock()
+      local maxWait = 8
+      while os.clock() - start < maxWait do
+        if not hasNearbyMonsters(radius) then
+          noPath = 0
+          return true
+        end
+        CaveBot.delay(200)
+      end
+      -- Still monsters after timeout: retry (stay on this waypoint and try again)
+      return "retry"
+    end
+
     return true
   end
 
@@ -446,8 +541,21 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
         attack(blocker)
       end
       g_game.setChaseMode(1)
-      CaveBot.delay(200)
-      return "retry"
+
+      -- Wait until blocking monster is gone/dead (timeout in seconds)
+      local start = os.clock()
+      local maxWait = 6
+      while os.clock() - start < maxWait do
+        if not getBlockingMonster(playerPos, destPos, maxDist) then
+          break
+        end
+        CaveBot.delay(200)
+      end
+
+      -- If still blocking after timeout, retry (retries++ will allow fallback later)
+      if getBlockingMonster(playerPos, destPos, maxDist) then
+        return "retry"
+      end
     end
   end
   

@@ -777,6 +777,8 @@ if EventBus then
       data.lastWaveTime = nowt
       data.observedWaveAttacks = data.observedWaveAttacks or {}
       table.insert(data.observedWaveAttacks, nowt)
+      -- Bound the sample history to avoid unbounded growth
+      if #data.observedWaveAttacks > 100 then table.remove(data.observedWaveAttacks, 1) end
       data.missileCount = (data.missileCount or 0) + 1
     end)
   end
@@ -797,13 +799,15 @@ function MonsterAI.updateAll()
   if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
     creatures = MovementCoordinator.MonsterCache.getNearby(8)
   else
-    local ok, res = pcall(function() return g_map.getSpectatorsInRange(playerPos, false, 8, 8) end)
-    if ok then creatures = res end
+    creatures = (SpectatorCache and SpectatorCache.getNearby(8, 8)) or (pcall(function() return g_map.getSpectatorsInRange(playerPos, false, 8, 8) end) and g_map.getSpectatorsInRange(playerPos, false, 8, 8) or {})
   end
 
   if not creatures then
     return
   end
+
+  -- telemetry
+
 
   local processed = 0
   for i = 1, #creatures do
@@ -816,6 +820,7 @@ function MonsterAI.updateAll()
       processed = processed + 1
     end
   end
+
 
   MonsterAI.lastUpdate = now or os.time() * 1000
   MonsterAI.lastUpdate = now or os.time() * 1000
@@ -830,7 +835,7 @@ nExBot.MonsterAI = MonsterAI
 MonsterAI.COLLECT_ENABLED = (MonsterAI.COLLECT_ENABLED == nil) and true or MonsterAI.COLLECT_ENABLED
 
 -- Periodic background updater that populates tracker info even if TargetBot isn't actively running
-macro(1000, function()
+macro(2000, function()
   if MonsterAI.COLLECT_ENABLED and MonsterAI.updateAll then
     pcall(function() MonsterAI.updateAll() end)
   end
@@ -838,4 +843,5 @@ end)
 
 -- Toggle to enable debug prints
 MonsterAI.DEBUG = MonsterAI.DEBUG or false
+local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
 if MonsterAI.DEBUG then print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded; automatic collection=%s" .. tostring(MonsterAI.COLLECT_ENABLED)) end

@@ -237,6 +237,12 @@ local DEFAULTS = {
   },
   eatFromCorpses = false,
   cavebotSell = { 23544, 3081 },
+  targetPriority = {
+    enabled = true,
+    emergencyHP = 25,
+    combatTimeout = 12,
+    scanRadius = 2
+  },
   -- Macro toggle states (all default to false/off)
   -- NOTE: These defaults are also defined in bot_database.lua SCHEMA.
   -- This duplication was originally for backward compatibility with legacy code
