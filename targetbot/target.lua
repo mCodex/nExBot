@@ -550,9 +550,8 @@ setWidgetTextSafe(ui.config.right, "-")
 ui.danger.left:setText("Danger:")
 setWidgetTextSafe(ui.danger.right, "0")
 
-ui.editor.debug.onClick = function() end
-ui.editor.debug:setOn(false)
-ui.editor.debug:setTooltip("")
+-- Debug toggle removed to avoid UI flooding
+ui.editor.debug:destroy()
 
 local oldTibia = g_game.getClientVersion() < 960
 
@@ -564,7 +563,7 @@ local oldTibia = g_game.getClientVersion() < 960
 ui.editor.buttons.add:setTooltip("Add a new creature targeting configuration.\nDefine which creatures to attack and how.")
 ui.editor.buttons.edit:setTooltip("Edit the selected creature targeting configuration.\nModify priority, distance, and behavior settings.")
 ui.editor.buttons.remove:setTooltip("Remove the selected creature targeting configuration.\nThis action cannot be undone.")
-ui.editor.debug:setTooltip("Show priority values on creatures in-game.\nUseful for debugging targeting decisions.")
+
 ui.configButton:setTooltip("Show/hide the target editor panel.\nUse to add, edit, or remove creature configurations.")
 
 -- setup ui
@@ -878,7 +877,7 @@ local function recalculateBestTarget()
           targetCount = targetCount + 1
           totalDanger = totalDanger + (params.danger or 0)
 
-          setCreatureTextSafe(creature, tostring(math.floor(params.priority * 10) / 10))
+
 
           if params.priority > bestPriority then
             bestPriority = params.priority
@@ -925,7 +924,7 @@ local function recalculateBestTarget()
               targetCount = targetCount + 1
               totalDanger = totalDanger + (params.danger or 0)
 
-              setCreatureTextSafe(creature, tostring(math.floor(params.priority * 10) / 10))
+    
 
               if params.priority > bestPriority then
                 bestPriority = params.priority
@@ -960,7 +959,9 @@ local function recalculateBestTarget()
               if path and params and params.config then
                 targetCount = targetCount + 1
                 totalDanger = totalDanger + (params.danger or 0)
-                setCreatureTextSafe(creature, tostring(math.floor(params.priority * 10) / 10))
+                if ui and ui.editor and ui.editor.debug and ui.editor.debug:isOn() then
+                  setCreatureTextSafe(creature, tostring(math.floor(params.priority * 10) / 10))
+                end
                 if params.priority > bestPriority then
                   bestPriority = params.priority
                   bestTarget = params
@@ -1117,9 +1118,7 @@ targetbotMacro = macro(100, function()
   
   -- Attack best target
   if bestTarget.creature and bestTarget.config then
-    if ui and ui.editor and ui.editor.debug and ui.editor.debug:isOn() then
-      warn("[TargetBot] Found bestTarget: " .. bestTarget.creature:getName() .. " with config: " .. (bestTarget.config.name or "unnamed"))
-    end
+
     lastAction = now
     setWidgetTextSafe(ui.target.right, bestTarget.creature:getName())
     setWidgetTextSafe(ui.config.right, bestTarget.config.name or "-")
@@ -1128,18 +1127,9 @@ targetbotMacro = macro(100, function()
     local isLooting = false
     setStatusRight("Targeting")
 
-    -- Follow the target if conditions met
-    local playerPos = pos
-    if playerPos then
-      local creaturePos = bestTarget.creature:getPosition()
-      if creaturePos then
-        local path = findPath(playerPos, creaturePos, 10, {ignoreNonPathable = true, precision = 1, ignoreCreatures = false})
-        local pathLen = path and #path or 0
-        if bestTarget.config.autoFollow and not bestTarget.config.keepDistance and not bestTarget.config.avoidAttacks and not bestTarget.config.rePosition and pathLen > 0 then
-          TargetCore.Native.followCreature(bestTarget.creature)
-        end
-      end
-    end
+    -- Delegate to unified attack/walk logic from creature_attack
+    -- This ensures chase, positioning, avoidance and AttackBot integration run correctly
+    pcall(function() TargetBot.Creature.attack(bestTarget, targetCount, false) end)
   else
     setWidgetTextSafe(ui.target.right, "-")
     setWidgetTextSafe(ui.config.right, "-")
@@ -1243,43 +1233,6 @@ end
 -- Note: Profile restoration is handled early in configs.lua
 -- before Config.setup() is called, so the dropdown loads correctly
 
--- Debug helper: print TargetBot configs and auto-follow related flags for current target
-TargetBot.debugShowCurrentTargetConfig = function(creature)
-  local c = creature or (g_game.getAttackingCreature and g_game.getAttackingCreature()) or (g_game.getFollowingCreature and g_game.getFollowingCreature())
-  if not c then
-    warn("[TargetBot Debug] No current attacking/following creature found")
-    return
-  end
-  local cname = (c.getName and c:getName()) or tostring(c)
-  warn("[TargetBot Debug] Creature: " .. tostring(cname) .. " (id=" .. tostring(c.getId and c:getId() or "?") .. ")")
 
-  local configs = TargetBot.Creature.getConfigs(c) or {}
-  if #configs == 0 then
-    warn("[TargetBot Debug] No TargetBot creature config matched this creature")
-  else
-    for i = 1, #configs do
-      local cfg = configs[i]
-      -- warn(string.format("[TargetBot Debug] Config #%d: name=%s, autoFollow=%s, chase=%s, keepDistance=%s, avoidAttacks=%s, rePosition=%s, anchor=%s, anchorRange=%s", 
-      --   i, tostring(cfg.name), tostring(cfg.autoFollow), tostring(cfg.chase), tostring(cfg.keepDistance), tostring(cfg.avoidAttacks), tostring(cfg.rePosition), tostring(cfg.anchor), tostring(cfg.anchorRange)
-      -- ))
-      -- If this config has lure values, show them
-      -- if cfg.dynamicLure then warn("[TargetBot Debug] dynamicLure enabled: lureMin=" .. tostring(cfg.lureMin) .. " lureMax=" .. tostring(cfg.lureMax)) end
-    end
-  end
-
-  -- Print following/followable state
-  local following = TargetCore and TargetCore.Native and TargetCore.Native.getFollowingCreature and TargetCore.Native.getFollowingCreature()
-  if following and following.getId then
-    -- warn("[TargetBot Debug] Currently following creature id=" .. tostring(following:getId()))
-  else
-    -- warn("[TargetBot Debug] Not currently following a creature")
-  end
-
-  if TargetCore and TargetCore.DEBUG then
-    -- warn("[TargetBot Debug] TargetCore.DEBUG is enabled; check CHASE block logs for follow attempts and anchors")
-  else
-    -- warn("[TargetBot Debug] Tip: enable TargetCore.DEBUG = true to see follow attempt logs in CHASE block")
-  end
-end
 
 -- End of TargetBot module

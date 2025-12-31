@@ -744,7 +744,12 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   -- Cache attacking creature check
   local currentTarget = g_game.getAttackingCreature()
   if currentTarget ~= creature then
-    g_game.attack(creature)
+    local ok, err = pcall(function() g_game.attack(creature) end)
+    if not ok then warn("[TargetBot] g_game.attack pcall failed: " .. tostring(err)) end
+    schedule(200, function()
+      local atk = g_game.getAttackingCreature and g_game.getAttackingCreature() or nil
+      -- No debug info emitted about registration status
+    end)
   end
 
   if not isLooting then
@@ -1179,72 +1184,10 @@ TargetBot.Creature.walk = function(creature, config, targets)
       -- warn("[TargetBot] CHASE block: autoFollow=" .. tostring(config.autoFollow) .. ", keepDistance=" .. tostring(config.keepDistance) .. ", avoidAttacks=" .. tostring(config.avoidAttacks) .. ", rePosition=" .. tostring(config.rePosition) .. ", pathLen=" .. tostring(pathLen))
     end
 
-    if config.autoFollow and creature then
-      -- Check anchor constraint before allowing follow
-      local anchorValid = true
-      if config.anchor and anchorPosition then
-        local anchorDist = math.max(
-          math.abs(cpos.x - anchorPosition.x),
-          math.abs(cpos.y - anchorPosition.y)
-        )
-        anchorValid = anchorDist <= (config.anchorRange or 5)
-      end
-
-      if TargetCore and TargetCore.DEBUG then
-        -- warn("[TargetBot] autoFollow pre-anchor: anchorValid=" .. tostring(anchorValid) .. ", anchor=" .. tostring(config.anchor) .. (anchorPosition and (" pos=" .. tostring(anchorPosition.x) .. "," .. tostring(anchorPosition.y)) or "") )
-      end
-
-      if anchorValid then
-        -- Use TargetCore.Native for cleaner API management
-        if TargetCore and TargetCore.Native and TargetCore.Native.followCreature then
-          if TargetCore.DEBUG then -- print("[TargetBot] attempting native follow to creature id=" .. tostring(creature:getId())) 
-          end
-          if TargetCore.Native.followCreature(creature) then
-            if TargetCore and TargetCore.DEBUG then print("[TargetBot] native follow initiated for id=" .. tostring(creature:getId())) end
-            return true  -- Native follow handles movement
-          else
-            if TargetCore and TargetCore.DEBUG then print("[TargetBot] native follow function returned false for id=" .. tostring(creature:getId())) end
-          end
-        end
-
-        -- Fallback: direct implementation
-        if TargetCore and TargetCore.DEBUG then print("[TargetBot] falling back to direct g_game.follow for id=" .. tostring(creature:getId())) end
-        local currentFollow = TargetCore.Native.getFollowingCreature()
-        local currentFollowId = nil
-        if currentFollow and currentFollow.getId then currentFollowId = currentFollow:getId() end
-        if not currentFollowId or currentFollowId ~= creature:getId() then
-          if g_game.follow then
-            pcall(g_game.follow, creature)
-          else
-            pcall(follow, creature)
-          end
-        end
-        -- Verify follow started (no logging)
-        local afterFollow = TargetCore.Native.getFollowingCreature()
-        local afterFollowId = nil
-        if afterFollow and afterFollow.getId then afterFollowId = afterFollow:getId() end
-        if afterFollowId and afterFollowId == creature:getId() then
-          if TargetCore and TargetCore.DEBUG then print("[TargetBot] direct follow confirmed for id=" .. tostring(creature:getId())) end
-        else
-          if TargetCore and TargetCore.DEBUG then print("[TargetBot] direct follow NOT confirmed for id=" .. tostring(creature:getId())) end
-        end
-        if g_game.setChaseMode and g_game.getChaseMode then
-          local currentChaseMode = g_game.getChaseMode()
-          if currentChaseMode ~= 1 then
-            g_game.setChaseMode(1)
-          end
-        end
-        return true
-      else
-        -- Anchor violated - cancel follow and let custom pathfinding handle it
-        if TargetCore and TargetCore.DEBUG then print("[TargetBot] anchor violated - cancelling follow") end
-        if TargetCore and TargetCore.Native and TargetCore.Native.cancelFollow then
-          TargetCore.Native.cancelFollow()
-        elseif g_game.cancelFollow then
-          g_game.cancelFollow()
-        end
-      end
-    end
+    -- AUTO-FOLLOW: Native client-based follow is disabled in favor of manual path-based walking.
+    -- Manual chase will be handled by the CUSTOM PATHFINDING block below using TargetBot.walkTo/MovementCoordinator.
+    -- (This avoids native follow interfering with AttackBot and gives better control.)
+    
     
     -- CUSTOM PATHFINDING: Traditional walkTo-based chase
     local confidence = 0.5
