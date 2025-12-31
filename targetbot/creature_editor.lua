@@ -177,26 +177,7 @@ Configure with: Pull Range (how far to check), Min Monsters (threshold), and Sha
 Useful for AoE hunting - ensures you always have enough monsters grouped before attacking.]])
   addCheckBox("rpSafe", "RP PVP SAFE - (DA)", false, "Safety mode for Royal Paladins - prevents Diamond Arrow usage near players.")
 
-  -- Attack settings
-  addCheckBox("useSpellAttack", "Use Spell Attack", false, "Enable spell attacks for this creature type.")
-  addTextEdit("attackSpell", "Attack Spell", "", "Spell to cast (e.g., 'exori gran', 'exevo gran mas vis').")
-  addScrollBar("attackSpellDelay", "Spell Delay (ms)", 500, 10000, 2000, "Cooldown between spell casts.")
-  addScrollBar("minMana", "Min Mana for Spells", 0, 10000, 0, "Minimum mana required to cast spells.")
-
-  addCheckBox("useRuneAttack", "Use Rune Attack", false, "Enable rune attacks for this creature type.")
-  addItem("attackRune", "Attack Rune", 0, "Rune item ID to use (e.g., 3155 for Sudden Death).")
-  addScrollBar("attackRuneDelay", "Rune Delay (ms)", 500, 10000, 2000, "Cooldown between rune uses.")
-
-  addCheckBox("useGroupAttackSpell", "Use Group Spell Attack", false, "Enable group spell attacks when multiple monsters are present.")
-  addTextEdit("groupAttackSpell", "Group Attack Spell", "", "Spell to cast on groups (e.g., 'exevo gran mas vis').")
-  addScrollBar("groupAttackDelay", "Group Spell Delay (ms)", 500, 10000, 2000, "Cooldown between group spell casts.")
-  addScrollBar("groupAttackTargets", "Min Targets for Group Spell", 2, 10, 3, "Minimum monsters needed to trigger group spell.")
-
-  addCheckBox("useGroupAttackRune", "Use Group Rune Attack", false, "Enable group rune attacks when multiple monsters are present.")
-  addItem("groupAttackRune", "Group Attack Rune", 0, "Rune item ID to use on groups.")
-  addScrollBar("groupRuneAttackDelay", "Group Rune Delay (ms)", 500, 10000, 2000, "Cooldown between group rune uses.")
-  addScrollBar("groupRuneAttackTargets", "Min Targets for Group Rune", 2, 10, 3, "Minimum monsters needed to trigger group rune.")
-
-  addCheckBox("groupAttackIgnorePlayers", "Group Attack Ignore Players", false, "Allow group attacks even when players are nearby.")
+  -- Attack settings have been moved to AttackBot and are no longer available in TargetBot.
+  -- If you need to configure attack spells/runes, use the dedicated AttackBot profile and UI.
 
 end

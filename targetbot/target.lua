@@ -722,7 +722,6 @@ end
 
 -- attacks
 local lastSpell = 0
-local lastAttackSpell = 0
 
 
 
@@ -761,9 +760,6 @@ end
 TargetBot.saySpell = function(text, delay)
   if type(text) ~= 'string' or text:len() < 1 then return false end
   if not delay then delay = 500 end
-  if g_game.getProtocolVersion() < 1090 then
-    lastAttackSpell = now -- pause attack spells, healing spells are more important
-  end
   if lastSpell + delay < now then
     if not doSay(text) then
       warn("[TargetBot] no suitable say/talk method; cannot cast: " .. tostring(text))
@@ -775,86 +771,32 @@ TargetBot.saySpell = function(text, delay)
   return false
 end
 
-TargetBot.sayAttackSpell = function(text, delay)
-  if type(text) ~= 'string' or text:len() < 1 then return false end
-  if not delay then delay = 2000 end
-  if lastAttackSpell + delay < now then
-    if not doSay(text) then
-      warn("[TargetBot] no suitable say/talk method; cannot cast attack spell: " .. tostring(text))
-      return false
-    end
-    lastAttackSpell = now
-    -- Track attack spell for Hunt Analyzer
-    if HuntAnalytics and HuntAnalytics.trackAttackSpell then
-      HuntAnalytics.trackAttackSpell(text, 0)  -- Mana cost unknown from here
-    end
-    return true
-  end
-  return false
-end
-
+-- Attack spells/items are handled by AttackBot; TargetBot keeps minimal stubs to avoid breaking callers.
 local lastItemUse = 0
 local lastRuneAttack = 0
 
--- Use item on target like hotkey (doesn't require open backpack)
--- Uses BotCore.Items for consolidated item usage with fallback
-local function useItemOnTargetLikeHotkey(item, target, subType)
-  -- Use BotCore.Items if available (handles all client compatibility)
-  if BotCore and BotCore.Items and BotCore.Items.useOn then
-    local ok, res = SafeCall.call(BotCore.Items.useOn, item, target, subType)
-    if ok then return true end
-    warn("[TargetBot] useItemOnTargetLikeHotkey: BotCore.Items.useOn failed for item=" .. tostring(item))
-    -- fallthrough to other methods
-  end
-  
-  -- Fallback: direct implementation
-  local thing = g_things.getThingType(item)
-  if not thing or not thing:isFluidContainer() then
-    subType = g_game.getClientVersion() >= 860 and 0 or 1
-  end
-  
-    if g_game.getClientVersion() >= 780 then
-    if g_game.useInventoryItemWith then
-      local ok, res = SafeCall.call(g_game.useInventoryItemWith, item, target, subType)
-      if ok then return true end
-    end
-  end
-  
-  local okf, tmpItem = SafeCall.call(g_game.findPlayerItem, item, subType)
-  if okf and tmpItem then
-    local oku = SafeCall.call(g_game.useWith, tmpItem, target, subType)
-    if oku then return true end
-    warn("[TargetBot] useItemOnTargetLikeHotkey: g_game.useWith failed for item instance")
-  end
-  
-  return false
-end
-
 TargetBot.useItem = function(item, subType, target, delay)
+  -- Prefer AttackBot implementation if available
+  if AttackBot and type(AttackBot.useItem) == 'function' then
+    return AttackBot.useItem(item, subType, target, delay)
+  end
   if not delay then delay = 200 end
   if lastItemUse + delay < now then
-    if useItemOnTargetLikeHotkey(item, target, subType) then
-      lastItemUse = now
-      return true
-    end
+    warn("[TargetBot] useItem called but AttackBot.useItem not available; item=" .. tostring(item))
+    lastItemUse = now
   end
   return false
 end
 
 TargetBot.useAttackItem = function(item, subType, target, delay)
+  -- Prefer AttackBot implementation if available
+  if AttackBot and type(AttackBot.useAttackItem) == 'function' then
+    return AttackBot.useAttackItem(item, subType, target, delay)
+  end
   if not delay then delay = 2000 end
   if lastRuneAttack + delay < now then
-    warn("[TargetBot] useAttackItem called: item=" .. tostring(item) .. ", target=" .. tostring(target and target:getName()) .. ", now=" .. tostring(now) .. ", last=" .. tostring(lastRuneAttack))
-    local ok = false
-    local okStatus, res = pcall(function() return useItemOnTargetLikeHotkey(item, target, subType) end)
-    if okStatus and res then ok = true end
-    if ok then
-      lastRuneAttack = now
-      -- Note: Rune tracking is now handled by onUseWith hook in smart_hunt.lua
-      return true
-    else
-      warn("[TargetBot] Failed to use rune/item id=" .. tostring(item) .. " on target=" .. tostring(target and target:getName()) .. "; okStatus=" .. tostring(okStatus) .. ", res=" .. tostring(res))
-    end
+    warn("[TargetBot] useAttackItem called but AttackBot.useAttackItem not available; item=" .. tostring(item))
+    lastRuneAttack = now
   else
     warn("[TargetBot] Rune on cooldown: last=" .. tostring(lastRuneAttack) .. ", now=" .. tostring(now) .. ", delay=" .. tostring(delay))
   end
@@ -1176,7 +1118,7 @@ targetbotMacro = macro(100, function()
   -- Attack best target
   if bestTarget.creature and bestTarget.config then
     if ui and ui.editor and ui.editor.debug and ui.editor.debug:isOn() then
-      print("[TargetBot] Found bestTarget: " .. bestTarget.creature:getName() .. " with config: " .. (bestTarget.config.name or "unnamed"))
+      warn("[TargetBot] Found bestTarget: " .. bestTarget.creature:getName() .. " with config: " .. (bestTarget.config.name or "unnamed"))
     end
     lastAction = now
     setWidgetTextSafe(ui.target.right, bestTarget.creature:getName())
@@ -1338,6 +1280,8 @@ TargetBot.stopAttack = function(clearWalk)
 schedule(1500, function()
   moduleInitialized = true
   pcall(function() performPendingEnableOnce() end)
+  -- Startup sanity log to confirm TargetBot module loaded
+  warn("[TargetBot] module initialized. TargetBot._removed=" .. tostring(TargetBot and TargetBot._removed) .. ", TargetBot.isOn=" .. tostring(TargetBot and TargetBot.isOn and TargetBot.isOn()))
 end)
 
 
@@ -1353,3 +1297,44 @@ end
 
 -- Note: Profile restoration is handled early in configs.lua
 -- before Config.setup() is called, so the dropdown loads correctly
+
+-- Debug helper: print TargetBot configs and auto-follow related flags for current target
+TargetBot.debugShowCurrentTargetConfig = function(creature)
+  local c = creature or (g_game.getAttackingCreature and g_game.getAttackingCreature()) or (g_game.getFollowingCreature and g_game.getFollowingCreature())
+  if not c then
+    warn("[TargetBot Debug] No current attacking/following creature found")
+    return
+  end
+  local cname = (c.getName and c:getName()) or tostring(c)
+  warn("[TargetBot Debug] Creature: " .. tostring(cname) .. " (id=" .. tostring(c.getId and c:getId() or "?") .. ")")
+
+  local configs = TargetBot.Creature.getConfigs(c) or {}
+  if #configs == 0 then
+    warn("[TargetBot Debug] No TargetBot creature config matched this creature")
+  else
+    for i = 1, #configs do
+      local cfg = configs[i]
+      warn(string.format("[TargetBot Debug] Config #%d: name=%s, autoFollow=%s, chase=%s, keepDistance=%s, avoidAttacks=%s, rePosition=%s, anchor=%s, anchorRange=%s", 
+        i, tostring(cfg.name), tostring(cfg.autoFollow), tostring(cfg.chase), tostring(cfg.keepDistance), tostring(cfg.avoidAttacks), tostring(cfg.rePosition), tostring(cfg.anchor), tostring(cfg.anchorRange)
+      ))
+      -- If this config has lure values, show them
+      if cfg.dynamicLure then warn("[TargetBot Debug] dynamicLure enabled: lureMin=" .. tostring(cfg.lureMin) .. " lureMax=" .. tostring(cfg.lureMax)) end
+    end
+  end
+
+  -- Print following/followable state
+  local following = TargetCore and TargetCore.Native and TargetCore.Native.getFollowingCreature and TargetCore.Native.getFollowingCreature()
+  if following and following.getId then
+    warn("[TargetBot Debug] Currently following creature id=" .. tostring(following:getId()))
+  else
+    warn("[TargetBot Debug] Not currently following a creature")
+  end
+
+  if TargetCore and TargetCore.DEBUG then
+    warn("[TargetBot Debug] TargetCore.DEBUG is enabled; check CHASE block logs for follow attempts and anchors")
+  else
+    warn("[TargetBot Debug] Tip: enable TargetCore.DEBUG = true to see follow attempt logs in CHASE block")
+  end
+end
+
+-- End of TargetBot module

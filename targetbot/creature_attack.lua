@@ -755,78 +755,8 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local mana = player:getMana()
   local playerPos = player:getPosition()
   
-  -- Group attack spell check
-  if config.useGroupAttackSpell and config.groupAttackSpell:len() > 1 and mana > (config.minMana or 0) then
-    local monsters = MovementCoordinator and MovementCoordinator.Scaling and MovementCoordinator.Scaling.getMonsterCount and MovementCoordinator.Scaling.getMonsterCount() or 0
-    local playersAround = false
-    
-    -- Check for nearby players if needed
-    if not config.groupAttackIgnorePlayers then
-      local creatures = g_map.getSpectatorsInRange(playerPos, false, 7, 7)
-      for i = 1, #creatures do
-        local c = creatures[i]
-        if c and c:isPlayer() and not c:isLocalPlayer() then
-          playersAround = true
-          break
-        end
-      end
-    end
-    
-    if monsters >= config.groupAttackTargets and (not playersAround or config.groupAttackIgnorePlayers) then
-      local okSpell = TargetBot.sayAttackSpell(config.groupAttackSpell, config.groupAttackDelay)
-      if okSpell then
-        return
-      end
-    end
-  end
-
-  -- Group attack rune check
-  if config.useGroupAttackRune and config.groupAttackRune > 100 then
-    local monsters = MovementCoordinator and MovementCoordinator.Scaling and MovementCoordinator.Scaling.getMonsterCount and MovementCoordinator.Scaling.getMonsterCount() or 0
-    local playersAround = false
-    
-    -- Check for nearby players if needed
-    if not config.groupAttackIgnorePlayers then
-      local creatures = g_map.getSpectatorsInRange(creaturePos, false, 7, 7)
-      for i = 1, #creatures do
-        local c = creatures[i]
-        if c and c:isPlayer() and not c:isLocalPlayer() then
-          playersAround = true
-          break
-        end
-      end
-    end
-    
-    if monsters >= config.groupRuneAttackTargets and (not playersAround or config.groupAttackIgnorePlayers) then
-      warn("[TargetBot] Attempting group rune attack: rune=" .. tostring(config.groupAttackRune) .. ", target=" .. tostring(creature:getName()) .. ", monsters=" .. tostring(monsters))
-      local okRune = TargetBot.useAttackItem(config.groupAttackRune, 0, creature, config.groupRuneAttackDelay)
-      if okRune then
-        return
-      else
-        warn("[TargetBot] Group rune attack failed for " .. tostring(config.groupAttackRune) .. " on " .. tostring(creature:getName()))
-      end
-    end
-  end
-  
-  -- Single target spell attack
-  if config.useSpellAttack and config.attackSpell:len() > 1 and mana > config.minMana then
-    local okSingleSpell = TargetBot.sayAttackSpell(config.attackSpell, config.attackSpellDelay)
-    
-    if okSingleSpell then
-      return
-    end
-  end
-  
-  -- Single target rune attack
-  if config.useRuneAttack and config.attackRune > 100 then
-    warn("[TargetBot] Attempting single rune attack: rune=" .. tostring(config.attackRune) .. ", target=" .. tostring(creature:getName()))
-    local okSingleRune = TargetBot.useAttackItem(config.attackRune, 0, creature, config.attackRuneDelay)
-    if okSingleRune then
-      return
-    else
-      warn("[TargetBot] Single rune attack failed for " .. tostring(config.attackRune) .. " on " .. tostring(creature:getName()))
-    end
-  end
+  -- Attack logic removed: Spell/rune attacks are handled by AttackBot now.
+  -- This block intentionally left empty to avoid duplicating attack behavior.
 end
 
 TargetBot.Creature.walk = function(creature, config, targets)
@@ -1236,8 +1166,19 @@ TargetBot.Creature.walk = function(creature, config, targets)
   -- Supports both custom pathfinding and native OTClient follow
   -- ─────────────────────────────────────────────────────────────────────────
   if config.chase and not config.keepDistance and pathLen > 1 then
+    -- Track attempt counts to confirm CHASE block is executed
+    TargetBot._followAttemptCount = TargetBot._followAttemptCount or 0
+    TargetBot._followAttemptCount = TargetBot._followAttemptCount + 1
+    if TargetBot._followAttemptCount <= 5 then
+      warn("[TargetBot] CHASE entry #" .. tostring(TargetBot._followAttemptCount) .. ", autoFollow=" .. tostring(config.autoFollow) .. ", keepDistance=" .. tostring(config.keepDistance) .. ", pathLen=" .. tostring(pathLen))
+    end
+
     -- AUTO FOLLOW: Use OTClient's native g_game.follow() for smoother chasing
     -- This is more performant as it delegates movement to the client
+    if TargetCore and TargetCore.DEBUG then
+      warn("[TargetBot] CHASE block: autoFollow=" .. tostring(config.autoFollow) .. ", keepDistance=" .. tostring(config.keepDistance) .. ", avoidAttacks=" .. tostring(config.avoidAttacks) .. ", rePosition=" .. tostring(config.rePosition) .. ", pathLen=" .. tostring(pathLen))
+    end
+
     if config.autoFollow and creature then
       -- Check anchor constraint before allowing follow
       local anchorValid = true
@@ -1248,38 +1189,54 @@ TargetBot.Creature.walk = function(creature, config, targets)
         )
         anchorValid = anchorDist <= (config.anchorRange or 5)
       end
-      
+
+      if TargetCore and TargetCore.DEBUG then
+        warn("[TargetBot] autoFollow pre-anchor: anchorValid=" .. tostring(anchorValid) .. ", anchor=" .. tostring(config.anchor) .. (anchorPosition and (" pos=" .. tostring(anchorPosition.x) .. "," .. tostring(anchorPosition.y)) or "") )
+      end
+
       if anchorValid then
         -- Use TargetCore.Native for cleaner API management
         if TargetCore and TargetCore.Native and TargetCore.Native.followCreature then
+          if TargetCore.DEBUG then print("[TargetBot] attempting native follow to creature id=" .. tostring(creature:getId())) end
           if TargetCore.Native.followCreature(creature) then
+            if TargetCore and TargetCore.DEBUG then print("[TargetBot] native follow initiated for id=" .. tostring(creature:getId())) end
             return true  -- Native follow handles movement
+          else
+            if TargetCore and TargetCore.DEBUG then print("[TargetBot] native follow function returned false for id=" .. tostring(creature:getId())) end
           end
-        else
-          -- Fallback: direct implementation
-          local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
-          if not currentFollow or currentFollow:getId() ~= creature:getId() then
-            if g_game.follow then
-              pcall(g_game.follow, creature)
-            else
-              pcall(follow, creature)
-            end
-          end
-          -- Verify follow started (no logging)
-          local afterFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
-          if afterFollow and afterFollow:getId() == creature:getId() then
-            -- follow confirmed
-          end
-          if g_game.setChaseMode and g_game.getChaseMode then
-            local currentChaseMode = g_game.getChaseMode()
-            if currentChaseMode ~= 1 then
-              g_game.setChaseMode(1)
-            end
-          end
-          return true
         end
+
+        -- Fallback: direct implementation
+        if TargetCore and TargetCore.DEBUG then print("[TargetBot] falling back to direct g_game.follow for id=" .. tostring(creature:getId())) end
+        local currentFollow = TargetCore.Native.getFollowingCreature()
+        local currentFollowId = nil
+        if currentFollow and currentFollow.getId then currentFollowId = currentFollow:getId() end
+        if not currentFollowId or currentFollowId ~= creature:getId() then
+          if g_game.follow then
+            pcall(g_game.follow, creature)
+          else
+            pcall(follow, creature)
+          end
+        end
+        -- Verify follow started (no logging)
+        local afterFollow = TargetCore.Native.getFollowingCreature()
+        local afterFollowId = nil
+        if afterFollow and afterFollow.getId then afterFollowId = afterFollow:getId() end
+        if afterFollowId and afterFollowId == creature:getId() then
+          if TargetCore and TargetCore.DEBUG then print("[TargetBot] direct follow confirmed for id=" .. tostring(creature:getId())) end
+        else
+          if TargetCore and TargetCore.DEBUG then print("[TargetBot] direct follow NOT confirmed for id=" .. tostring(creature:getId())) end
+        end
+        if g_game.setChaseMode and g_game.getChaseMode then
+          local currentChaseMode = g_game.getChaseMode()
+          if currentChaseMode ~= 1 then
+            g_game.setChaseMode(1)
+          end
+        end
+        return true
       else
         -- Anchor violated - cancel follow and let custom pathfinding handle it
+        if TargetCore and TargetCore.DEBUG then print("[TargetBot] anchor violated - cancelling follow") end
         if TargetCore and TargetCore.Native and TargetCore.Native.cancelFollow then
           TargetCore.Native.cancelFollow()
         elseif g_game.cancelFollow then
