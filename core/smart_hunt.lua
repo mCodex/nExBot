@@ -1181,7 +1181,7 @@ function Insights.analyze()
   end
   
   -- ========== PROTECTION ANALYSIS ==========
-  -- Blessings analysis removed - server-specific data
+
   
   -- ========== CONSISTENCY ANALYSIS ==========
   

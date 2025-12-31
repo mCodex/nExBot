@@ -896,7 +896,7 @@ bossPanel.add.onClick = function()
     saveConfig()  -- Persist to CharacterDB
 end
 
--- `interpreteCondition` removed: condition evaluation now delegated to `EquipperService.evalCondition` with a local fallback `LOCAL_CONDITIONS`.
+
 
 local function finalCheck(first,relation,second)
     if relation == "-" then

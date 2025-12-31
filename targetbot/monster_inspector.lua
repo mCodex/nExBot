@@ -151,7 +151,7 @@ local function updateWidgetRefs()
   end
 end
 
--- MonsterInspector.debugStatus removed (debug helpers cleaned up)
+
 
 -- Populate refs now (also called again on visibility change)
 updateWidgetRefs()
@@ -391,4 +391,4 @@ end
 -- Expose refreshPatterns function
 nExBot.MonsterInspector.refreshPatterns = refreshPatterns
 
--- Use nExBot.MonsterInspector.toggleWindow() to open the inspector (hint removed)
+

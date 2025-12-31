@@ -713,7 +713,7 @@ local function canRunHeavyOp()
   return true
 end
 
-cavebotMacro = macro(200, function()
+cavebotMacro = macro(250, function()
   -- Prevent execution before login is complete to avoid freezing
   if not g_game.isOnline() then return end
   -- SMART EXECUTION: Skip if we shouldn't execute this tick
@@ -1170,7 +1170,15 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
     
     -- Phase 3: Check pathfinding for top candidates (tiered approach)
     local checkCount = math.min(maxCandidates, #candidates)
+    -- Time budget to avoid blocking macro for too long (seconds)
+    local timeBudgetSec = options.timeBudgetSec or 0.25
+    local pfStart = os.clock()
     for i = 1, checkCount do
+      -- Break early if we've exceeded the time budget
+      if os.clock() - pfStart > timeBudgetSec then
+        break
+      end
+
       local candidate = candidates[i]
       local destPos = {x = candidate.waypoint.x, y = candidate.waypoint.y, z = candidate.waypoint.z}
       
@@ -1284,7 +1292,7 @@ checkStartupWaypoint = function()
   
   -- Extended search: larger distance, more candidates
   local extendedChild, extendedIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
-    maxCandidates = 40,
+    maxCandidates = 30,
     preferCurrentFloor = true,
     searchAllFloors = true  -- Try adjacent floors
   })

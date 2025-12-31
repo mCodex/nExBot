@@ -908,11 +908,11 @@ HealBot.resetAnalytics = function()
   analytics.log = {}
 end
 
--- Legacy healer removed; new engine is the single path
+
 
 -- Subscribe to EventBus for instant reaction to stat changes
 -- Note: BotCore handles event-driven stat updates, we just need to reset flags
--- Legacy event hooks removed; HealEngine runs on macro tick only
+
 
 -- Fast spell macro (driven by HealBot on/off state)
 -- Main healing macro loop (keeps heal engine ticking)

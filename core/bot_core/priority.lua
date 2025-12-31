@@ -125,7 +125,7 @@ function PriorityEngine.getCurrentPriority()
   local mpPercent = BotCore.Stats.getMpPercent()
   
   -- Health-based healing priority disabled by user request; skip emergency/critical checks
-  -- (HP checks intentionally removed to prevent auto-stop of attacks)
+
   
   -- LOW MANA: Need mana for heals
   if mpPercent < LOW_MANA_THRESHOLD then

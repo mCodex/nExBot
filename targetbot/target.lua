@@ -584,7 +584,6 @@ setWidgetTextSafe(ui.config.right, "-")
 ui.danger.left:setText("Danger:")
 setWidgetTextSafe(ui.danger.right, "0")
 
--- Debug toggle removed to avoid UI flooding
 if ui and ui.editor and ui.editor.debug then ui.editor.debug:destroy() end
 
 local oldTibia = g_game.getClientVersion() < 960
@@ -1090,6 +1089,8 @@ local function primeCreatureCache()
 end
 
 -- Main TargetBot loop - optimized with EventBus caching
+local lastRecalcTime = 0
+local RECALC_COOLDOWN_MS = 100
 targetbotMacro = macro(400, function()
   if not config or not config.isOn or not config.isOn() then
     return
@@ -1137,7 +1138,16 @@ targetbotMacro = macro(400, function()
   end
   
   -- Get best target (uses cache when possible)
-    local bestTarget, targetCount, totalDanger = recalculateBestTarget()
+    local bestTarget, targetCount, totalDanger
+    -- If cache is clean and recent and we recalculated very recently, use cached values to avoid heavy work
+    if not CreatureCache.dirty and (now - (CreatureCache.lastFullUpdate or 0)) < (CreatureCache.FULL_UPDATE_INTERVAL or 400) and (now - lastRecalcTime) < RECALC_COOLDOWN_MS then
+      bestTarget = CreatureCache.bestTarget
+      targetCount = 0
+      totalDanger = CreatureCache.totalDanger or 0
+    else
+      lastRecalcTime = now
+      bestTarget, targetCount, totalDanger = recalculateBestTarget()
+    end
   
   if not bestTarget then
     setWidgetTextSafe(ui.target.right, "-")
@@ -1241,10 +1251,6 @@ end)
 
 -- Stop attacking the current target
 TargetBot.stopAttack = function(clearWalk)
-
--- debugDumpSpectators removed (cleaned up)
-
--- debugForceAttackFirst removed (cleaned up)
 
 
 -- Module load diagnostics: print whether key functions are available shortly after load

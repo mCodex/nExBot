@@ -220,7 +220,7 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
           threat.predTTA = timeToAttack
           result.waveThreats = result.waveThreats + 1
           result.totalDanger = result.totalDanger + pdanger
-          -- Predicted wave threat (collection debug removed)
+        
         end
       else
         -- Fallback to simple front arc detection when prediction is not enabled
@@ -733,7 +733,6 @@ local function rePosition(minTiles, config)
 end
 
 TargetBot.Creature.attack = function(params, targets, isLooting)
-  -- Removed debug warning per user request (not required)
   if player:isWalking() then
     lastWalk = now
   end
@@ -741,7 +740,6 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local config = params.config
   local creature = params.creature
 
-  -- attack decision (debug output removed)
   
   -- Cache attacking creature check
   local currentTarget = g_game.getAttackingCreature()
@@ -762,8 +760,7 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local mana = player:getMana()
   local playerPos = player:getPosition()
   
-  -- Attack logic removed: Spell/rune attacks are handled by AttackBot now.
-  -- This block intentionally left empty to avoid duplicating attack behavior.
+
 end
 
 TargetBot.Creature.walk = function(creature, config, targets)

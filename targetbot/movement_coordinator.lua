@@ -875,7 +875,7 @@ end
 
 -- Emergency escape disabled per user request (no-op)
 function MovementCoordinator.emergencyEscape(escapePos, confidence)
-  -- intentionally disabled: emergency movement logic removed
+
   return
 end
 
@@ -931,7 +931,7 @@ end
 
 function MovementCoordinator.Tuning.report()
   local suggestions, tele = MovementCoordinator.Tuning.analyze()
-  -- Telemetry snapshot analyzed (debug prints removed)
+
   for k,v in pairs(tele) do
     -- data: k,v (silent)
   end

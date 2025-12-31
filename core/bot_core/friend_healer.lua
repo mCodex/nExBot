@@ -283,7 +283,7 @@ local function findBestTarget(spectators, config, selfHpPercent)
   return bestTarget, targetsInRange
 end
 
--- Cooldown helpers handled by HealEngine/HealContext; legacy checks removed
+
 
 -- Mark that we used a heal (update shared cooldown)
 local function markHealUsed()

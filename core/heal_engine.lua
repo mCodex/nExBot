@@ -493,7 +493,7 @@ function HealEngine.planSelf(snap)
     return true, nil
   end
 
-  -- Only run configured self spells when explicitly enabled by user (emergency-forcing removed)
+
   if options.selfSpells and #selfSpells > 0 then
     local rejectReasons = {}
     for _, spell in ipairs(selfSpells) do
@@ -522,7 +522,7 @@ function HealEngine.planSelf(snap)
     -- end
   end
 
-  -- Only run potions if user explicitly enabled potions (emergency-forcing removed)
+
   if options.potions and #selfPotions > 0 then
     for _, pot in ipairs(selfPotions) do
       -- Get the actual potion name - prefer pot.name, then try to look up by ID
@@ -547,7 +547,7 @@ function HealEngine.planSelf(snap)
       potionName = potionName or ("potion #" .. (pot.id or 0))
 
       -- Evaluate reasons for not selecting this pot
-      -- (removed debug logging)
+
 
       if pot.hp and hp <= pot.hp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
         if VERBOSE then print("[HealBot] Executing potion: " .. tostring(potionName) .. " (id=" .. tostring(pot.id) .. ") for HP " .. tostring(hp) .. "% <= " .. tostring(pot.hp) .. "%") end

@@ -1287,7 +1287,7 @@ end
 -- Uses BotCore.Items for consolidated item usage
 local function useRuneOnTarget(runeId, targetCreatureOrTile)
   lastAttackTime = now -- Update attack time for non-blocking cooldown
-  -- debug logs removed
+
   
   -- Simplified like vBot for better OTCv8 compatibility
   if useWith and targetCreatureOrTile then
