@@ -9,6 +9,7 @@ local looterStatus = ""
 local pendingEnable = false
 local pendingEnableDesired = nil
 local moduleInitialized = false
+local _lastTargetbotSlowWarn = 0
 
 -- Local cached reference to local player (updated on relogin)
 local player = g_game and g_game.getLocalPlayer() or nil
@@ -216,22 +217,22 @@ if not EventBus then
     onCreatureAppear(function(creature)
       if creature then
         invalidateCache()
-        -- Debounced (120ms) recalc to reduce CPU churn on rapid events
-        schedule(120, function() pcall(recalculateBestTarget) end)
+        -- Debounced recalc to reduce CPU churn on rapid events
+        if debouncedInvalidateAndRecalc then debouncedInvalidateAndRecalc() end
       end
     end)
   end
   if onCreatureDisappear then
     onCreatureDisappear(function(creature)
       invalidateCache()
-      schedule(80, function() pcall(recalculateBestTarget) end)
+      if debouncedInvalidateAndRecalc then debouncedInvalidateAndRecalc() end
     end)
   end
   if onCreatureMove then
     onCreatureMove(function(creature, oldPos)
       if creature and creature:isMonster() then
         invalidateCache()
-        schedule(80, function() pcall(recalculateBestTarget) end)
+        if debouncedInvalidateAndRecalc then debouncedInvalidateAndRecalc() end
       end
     end)
   end
@@ -1090,8 +1091,9 @@ end
 
 -- Main TargetBot loop - optimized with EventBus caching
 local lastRecalcTime = 0
-local RECALC_COOLDOWN_MS = 100
-targetbotMacro = macro(400, function()
+local RECALC_COOLDOWN_MS = 150
+targetbotMacro = macro(500, function()
+  local _msStart = os.clock()
   if not config or not config.isOn or not config.isOn() then
     return
   end
@@ -1184,6 +1186,13 @@ targetbotMacro = macro(400, function()
     -- No target, allow cavebot
     cavebotAllowance = now + 100
     setStatusRight(STATUS_WAITING)
+  end
+
+  -- Check macro execution time (throttled warning)
+  local _msElapsed = os.clock() - _msStart
+  if _msElapsed > 0.1 and (now - (_lastTargetbotSlowWarn or 0)) > 5000 then
+    warn("[TargetBot] Slow macro detected: " .. tostring(math.floor(_msElapsed * 1000)) .. "ms")
+    _lastTargetbotSlowWarn = now
   end
 end)
 

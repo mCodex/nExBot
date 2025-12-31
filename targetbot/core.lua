@@ -93,9 +93,9 @@ TargetCore.CONSTANTS = {
   
   -- Timing constants
   TIMING = {
-    PATH_CACHE_TTL = 250,       -- Path valid for 250ms
+    PATH_CACHE_TTL = 400,       -- Path valid for 400ms
     CREATURE_CACHE_TTL = 5000,  -- Creature entry valid for 5s
-    FULL_UPDATE_INTERVAL = 400, -- Full recalc every 400ms
+    FULL_UPDATE_INTERVAL = 600, -- Full recalc every 600ms
     AVOIDANCE_COOLDOWN = 250,   -- Min time between avoidance moves
     POSITION_STICKINESS = 400,  -- Stay at safe pos for 400ms
   },

@@ -35,7 +35,7 @@ local lastWalkZ = nil
 -- IMPORTANT: Game client's A* pathfinding has practical limits (~50-70 tiles)
 -- For longer distances, rely on waypoint-to-waypoint navigation
 local MAX_PATHFIND_DIST = 50   -- Realistic pathfinding limit
-local MAX_WALK_CHUNK = 25      -- Increased from 15 for faster walking
+local MAX_WALK_CHUNK = 20      -- Reduced for less freezing
 local THOROUGH_CHECK_DIST = 40 -- Increased thorough window to improve floor-change accuracy
 
 -- Config helper: read CaveBot.Config safely

@@ -27,6 +27,8 @@ nExBot.loadTimes = loadTimes  -- Expose for debugging
 -- Suppress noisy debug prints by default. Set `nExBot.showDebug = true` in console to allow them.
 nExBot.showDebug = nExBot.showDebug or false
 nExBot.suppressDebugPrefixes = nExBot.suppressDebugPrefixes or {"[HealBot]", "[MonsterInspector]"}
+-- Opt-in slow-op instrumentation. Enable with `nExBot.slowOpInstrumentation = true`.
+nExBot.slowOpInstrumentation = nExBot.slowOpInstrumentation or false
 local _orig_print = print
 print = function(...)
   if nExBot.showDebug then return _orig_print(...) end
