@@ -1170,13 +1170,13 @@ TargetBot.Creature.walk = function(creature, config, targets)
     TargetBot._followAttemptCount = TargetBot._followAttemptCount or 0
     TargetBot._followAttemptCount = TargetBot._followAttemptCount + 1
     if TargetBot._followAttemptCount <= 5 then
-      warn("[TargetBot] CHASE entry #" .. tostring(TargetBot._followAttemptCount) .. ", autoFollow=" .. tostring(config.autoFollow) .. ", keepDistance=" .. tostring(config.keepDistance) .. ", pathLen=" .. tostring(pathLen))
+      -- warn("[TargetBot] CHASE entry #" .. tostring(TargetBot._followAttemptCount) .. ", autoFollow=" .. tostring(config.autoFollow) .. ", keepDistance=" .. tostring(config.keepDistance) .. ", pathLen=" .. tostring(pathLen))
     end
 
     -- AUTO FOLLOW: Use OTClient's native g_game.follow() for smoother chasing
     -- This is more performant as it delegates movement to the client
     if TargetCore and TargetCore.DEBUG then
-      warn("[TargetBot] CHASE block: autoFollow=" .. tostring(config.autoFollow) .. ", keepDistance=" .. tostring(config.keepDistance) .. ", avoidAttacks=" .. tostring(config.avoidAttacks) .. ", rePosition=" .. tostring(config.rePosition) .. ", pathLen=" .. tostring(pathLen))
+      -- warn("[TargetBot] CHASE block: autoFollow=" .. tostring(config.autoFollow) .. ", keepDistance=" .. tostring(config.keepDistance) .. ", avoidAttacks=" .. tostring(config.avoidAttacks) .. ", rePosition=" .. tostring(config.rePosition) .. ", pathLen=" .. tostring(pathLen))
     end
 
     if config.autoFollow and creature then
@@ -1191,13 +1191,14 @@ TargetBot.Creature.walk = function(creature, config, targets)
       end
 
       if TargetCore and TargetCore.DEBUG then
-        warn("[TargetBot] autoFollow pre-anchor: anchorValid=" .. tostring(anchorValid) .. ", anchor=" .. tostring(config.anchor) .. (anchorPosition and (" pos=" .. tostring(anchorPosition.x) .. "," .. tostring(anchorPosition.y)) or "") )
+        -- warn("[TargetBot] autoFollow pre-anchor: anchorValid=" .. tostring(anchorValid) .. ", anchor=" .. tostring(config.anchor) .. (anchorPosition and (" pos=" .. tostring(anchorPosition.x) .. "," .. tostring(anchorPosition.y)) or "") )
       end
 
       if anchorValid then
         -- Use TargetCore.Native for cleaner API management
         if TargetCore and TargetCore.Native and TargetCore.Native.followCreature then
-          if TargetCore.DEBUG then print("[TargetBot] attempting native follow to creature id=" .. tostring(creature:getId())) end
+          if TargetCore.DEBUG then -- print("[TargetBot] attempting native follow to creature id=" .. tostring(creature:getId())) 
+          end
           if TargetCore.Native.followCreature(creature) then
             if TargetCore and TargetCore.DEBUG then print("[TargetBot] native follow initiated for id=" .. tostring(creature:getId())) end
             return true  -- Native follow handles movement

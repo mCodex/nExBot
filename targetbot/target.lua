@@ -1126,73 +1126,18 @@ targetbotMacro = macro(100, function()
     
     -- Pass lure status for status display
     local isLooting = false
-    -- Attack invocation (silent)
-    if storage.attackWatchdog == nil then storage.attackWatchdog = true end
+    setStatusRight("Targeting")
 
-    -- Resolve current following and attacking states
-    local currentFollow = (TargetCore and TargetCore.Native and TargetCore.Native.getFollowingCreature) and TargetCore.Native.getFollowingCreature() or (g_game.getFollowingCreature and g_game.getFollowingCreature())
-    local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature() or nil
-
-    -- Helper to compare creatures by id (safer across object refresh)
-    local function sameCreature(a, b)
-      if not a or not b then return false end
-      local ok, ai = pcall(function() return a:getId() end)
-      local ok2, bi = pcall(function() return b:getId() end)
-      if not ok or not ok2 then return false end
-      return ai == bi
-    end
-
-    -- If we are already attacking the target, reset watchdog and skip forcing
-    if storage.attackWatchdog and bestTarget.creature and sameCreature(currentAttack, bestTarget.creature) then
-      attackWatchdog.attempts = 0
-      if reloginRecovery.active then
-        reloginRecovery.active = false
-        reloginRecovery.endTime = 0
-        reloginRecovery.lastAttempt = 0
-      end
-    elseif storage.attackWatchdog and bestTarget.creature and not sameCreature(currentFollow, bestTarget.creature) then
-      -- Allow retrying after an extended recovery period (helps after relogin / creature object refresh)
-      local recoveryWindow = attackWatchdog.cooldown * 5
-      if now - attackWatchdog.lastForce > recoveryWindow then
-        attackWatchdog.attempts = 0
-      end
-
-      -- Aggressive relogin recovery mode: while active, force re-attempts more frequently for the recovery window
-      if reloginRecovery.active and now < reloginRecovery.endTime then
-        -- throttle rapid attempts by interval
-        if now - reloginRecovery.lastAttempt > reloginRecovery.interval then
-          pcall(function() g_game.attack(bestTarget.creature) end)
-          reloginRecovery.lastAttempt = now
-          attackWatchdog.lastForce = now
-          -- If the attack succeeded (client reports current attacking creature), reset attempts
-          if sameCreature(g_game.getAttackingCreature and g_game.getAttackingCreature() or nil, bestTarget.creature) then
-            attackWatchdog.attempts = 0
-          end
+    -- Follow the target if conditions met
+    local playerPos = pos
+    if playerPos then
+      local creaturePos = bestTarget.creature:getPosition()
+      if creaturePos then
+        local path = findPath(playerPos, creaturePos, 10, {ignoreNonPathable = true, precision = 1, ignoreCreatures = false})
+        local pathLen = path and #path or 0
+        if bestTarget.config.autoFollow and not bestTarget.config.keepDistance and not bestTarget.config.avoidAttacks and not bestTarget.config.rePosition and pathLen > 0 then
+          TargetCore.Native.followCreature(bestTarget.creature)
         end
-        -- If recovery window passed, disable
-        if now >= reloginRecovery.endTime then
-          reloginRecovery.active = false
-        end
-      else
-        -- Normal watchdog behavior (rate-limited, limited attempts)
-        if now - attackWatchdog.lastForce > attackWatchdog.cooldown and attackWatchdog.attempts < attackWatchdog.maxAttempts then
-          -- Try to force attack again
-          pcall(function() g_game.attack(bestTarget.creature) end)
-          attackWatchdog.lastForce = now
-          attackWatchdog.attempts = attackWatchdog.attempts + 1
-          -- If attack registered, reset attempts
-          if sameCreature(g_game.getAttackingCreature and g_game.getAttackingCreature() or nil, bestTarget.creature) then
-            attackWatchdog.attempts = 0
-          end
-        end
-      end
-    else
-      attackWatchdog.attempts = 0
-      -- If we resumed attacking, cancel any relogin recovery
-      if reloginRecovery.active then
-        reloginRecovery.active = false
-        reloginRecovery.endTime = 0
-        reloginRecovery.lastAttempt = 0
       end
     end
   else
@@ -1281,7 +1226,7 @@ schedule(1500, function()
   moduleInitialized = true
   pcall(function() performPendingEnableOnce() end)
   -- Startup sanity log to confirm TargetBot module loaded
-  warn("[TargetBot] module initialized. TargetBot._removed=" .. tostring(TargetBot and TargetBot._removed) .. ", TargetBot.isOn=" .. tostring(TargetBot and TargetBot.isOn and TargetBot.isOn()))
+  -- warn("[TargetBot] module initialized. TargetBot._removed=" .. tostring(TargetBot and TargetBot._removed) .. ", TargetBot.isOn=" .. tostring(TargetBot and TargetBot.isOn and TargetBot.isOn()))
 end)
 
 
@@ -1314,26 +1259,26 @@ TargetBot.debugShowCurrentTargetConfig = function(creature)
   else
     for i = 1, #configs do
       local cfg = configs[i]
-      warn(string.format("[TargetBot Debug] Config #%d: name=%s, autoFollow=%s, chase=%s, keepDistance=%s, avoidAttacks=%s, rePosition=%s, anchor=%s, anchorRange=%s", 
-        i, tostring(cfg.name), tostring(cfg.autoFollow), tostring(cfg.chase), tostring(cfg.keepDistance), tostring(cfg.avoidAttacks), tostring(cfg.rePosition), tostring(cfg.anchor), tostring(cfg.anchorRange)
-      ))
+      -- warn(string.format("[TargetBot Debug] Config #%d: name=%s, autoFollow=%s, chase=%s, keepDistance=%s, avoidAttacks=%s, rePosition=%s, anchor=%s, anchorRange=%s", 
+      --   i, tostring(cfg.name), tostring(cfg.autoFollow), tostring(cfg.chase), tostring(cfg.keepDistance), tostring(cfg.avoidAttacks), tostring(cfg.rePosition), tostring(cfg.anchor), tostring(cfg.anchorRange)
+      -- ))
       -- If this config has lure values, show them
-      if cfg.dynamicLure then warn("[TargetBot Debug] dynamicLure enabled: lureMin=" .. tostring(cfg.lureMin) .. " lureMax=" .. tostring(cfg.lureMax)) end
+      -- if cfg.dynamicLure then warn("[TargetBot Debug] dynamicLure enabled: lureMin=" .. tostring(cfg.lureMin) .. " lureMax=" .. tostring(cfg.lureMax)) end
     end
   end
 
   -- Print following/followable state
   local following = TargetCore and TargetCore.Native and TargetCore.Native.getFollowingCreature and TargetCore.Native.getFollowingCreature()
   if following and following.getId then
-    warn("[TargetBot Debug] Currently following creature id=" .. tostring(following:getId()))
+    -- warn("[TargetBot Debug] Currently following creature id=" .. tostring(following:getId()))
   else
-    warn("[TargetBot Debug] Not currently following a creature")
+    -- warn("[TargetBot Debug] Not currently following a creature")
   end
 
   if TargetCore and TargetCore.DEBUG then
-    warn("[TargetBot Debug] TargetCore.DEBUG is enabled; check CHASE block logs for follow attempts and anchors")
+    -- warn("[TargetBot Debug] TargetCore.DEBUG is enabled; check CHASE block logs for follow attempts and anchors")
   else
-    warn("[TargetBot Debug] Tip: enable TargetCore.DEBUG = true to see follow attempt logs in CHASE block")
+    -- warn("[TargetBot Debug] Tip: enable TargetCore.DEBUG = true to see follow attempt logs in CHASE block")
   end
 end
 

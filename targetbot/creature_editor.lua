@@ -161,7 +161,7 @@ CROSS (4): Cardinal directions only (N/E/S/W).
     table.insert(values, {"smartPullShape", function() return widget.scroll:getValue() end})
   end
 
-  addCheckBox("autoFollow", "Auto Follow", false, "Use OTClient's native follow system for smoother chasing. More performant but less precise than custom pathfinding. Disabled when 'Keep Distance' is active.")
+  addCheckBox("autoFollow", "Auto Follow", false, "Use OTClient's native follow system for smoother chasing. More performant but less precise than custom pathfinding. Disabled when 'Keep Distance' is active. Note: Auto-follow is disabled if 'Avoid Attacks' or 'Re-position' is enabled.")
   addCheckBox("chase", "Chase", true, "Chase the target, walking towards it until adjacent.")
   addCheckBox("keepDistance", "Keep Distance", false, "Maintain a specific distance from the target (set in Keep Distance slider).")
   addCheckBox("anchor", "Anchoring", false, "Stay within a radius of your initial position (set in Anchoring Range slider).")
