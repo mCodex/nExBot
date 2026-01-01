@@ -476,7 +476,12 @@ end
 local function executeRecovery()
   local attempt = WaypointEngine.recoveryAttempt
   local playerPos = player:getPosition()
-  local maxDist = storage.extras.gotoMaxDistance or 50
+  local maxDist = math.min(storage.extras.gotoMaxDistance or 50, 40)  -- Cap at 40 for performance
+  
+  -- Emergency break for combat/emergency
+  if storage.targetbotCombatActive or storage.targetbotEmergency then
+    return false
+  end
   
   -- Strategy 1: Find nearest reachable waypoint (forward search - fastest)
   if attempt <= 1 then
@@ -509,7 +514,9 @@ local function executeRecovery()
     end
 
     local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
-      maxCandidates = 15,
+      maxCandidates = 8,  -- Reduced from 15
+      maxCheck = 4,       -- Limit pathfinding calls
+      timeBudgetSec = 0.03,  -- 30ms budget
       preferCurrentFloor = true,
       searchAllFloors = false
     })
@@ -530,8 +537,10 @@ local function executeRecovery()
       return false
     end
 
-    local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
-      maxCandidates = 30,
+    local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, math.min(maxDist * 1.5, 60), {
+      maxCandidates = 10,  -- Reduced from 30
+      maxCheck = 5,        -- Limit pathfinding calls
+      timeBudgetSec = 0.04,  -- 40ms budget
       preferCurrentFloor = true,
       searchAllFloors = true  -- Check adjacent floors
     })
@@ -542,9 +551,11 @@ local function executeRecovery()
       transitionTo("NORMAL")
       return true
     end
+    WaypointEngine.recoveryAttempt = 5
+    return false
   end
   
-  -- Strategy 5: Skip current waypoint (last resort)
+  -- Strategy 5: Skip current waypoint (last resort - no pathfinding needed)
   if attempt <= 5 then
     if ui and ui.list then
       local actionCount = ui.list:getChildCount()
@@ -560,7 +571,7 @@ local function executeRecovery()
             transitionTo("NORMAL")
             return true
           end
-          WaypointEngine.recoveryAttempt = 5
+          WaypointEngine.recoveryAttempt = 6
           return false
         end
       end
@@ -711,25 +722,118 @@ local function initTargetBotCache()
   end
 end
 
--- Throttle for heavy operations (pathfinding/global searches)
-local lastHeavyOpTime = 0
-local HEAVY_OP_INTERVAL = 3000  -- ms (throttle heavy ops to reduce macro pressure)
-local function canRunHeavyOp()
-  if now and (now - lastHeavyOpTime) < HEAVY_OP_INTERVAL then return false end
-  lastHeavyOpTime = now or os.clock() * 1000
+-- ============================================================================
+-- SIMPLE WAYPOINT FINDER (Lightweight, no heavy pathfinding)
+-- ============================================================================
+
+-- Find closest waypoint by distance only (no pathfinding - very fast)
+local function findClosestWaypointByDistance(playerPos, maxDist)
+  if not playerPos then return nil, nil end
+  buildWaypointCache()
+  
+  local bestChild, bestIndex, bestDist = nil, nil, maxDist + 1
+  local px, py, pz = playerPos.x, playerPos.y, playerPos.z
+  
+  for i, wp in pairs(waypointPositionCache) do
+    -- Same floor only for simplicity
+    if wp.z == pz then
+      local dx = math.abs(wp.x - px)
+      local dy = math.abs(wp.y - py)
+      local dist = math.max(dx, dy)  -- Chebyshev distance
+      
+      if dist < bestDist and dist <= maxDist then
+        bestDist = dist
+        bestChild = wp.child
+        bestIndex = i
+      end
+    end
+  end
+  
+  return bestChild, bestIndex
+end
+
+-- Simple candidate collection (no pre-allocation needed for small lists)
+local function collectWaypointCandidates(playerPos, maxDist, options)
+  options = options or {}
+  local candidates = {}
+  candidatePoolSize = 0
+  
+  local collectionLimit = maxDist * (options.collectRangeMultiplier or 1)
+  local px, py, pz = playerPos.x, playerPos.y, playerPos.z
+  local preferCurrentFloor = options.preferCurrentFloor ~= false
+  local searchAllFloors = options.searchAllFloors or false
+  local collectionLimitSq = collectionLimit * collectionLimit  -- Avoid sqrt
+  
+  -- Early exit if cache is empty
+  local cacheEmpty = true
+  for _ in pairs(waypointPositionCache) do cacheEmpty = false; break end
+  if cacheEmpty then return {} end
+  
+  -- Single pass with early exits
+  for i, wp in pairs(waypointPositionCache) do
+    -- Quick Z check first (cheapest)
+    local isSameFloor = (wp.z == pz)
+    if not isSameFloor and (preferCurrentFloor or not searchAllFloors) then
+      -- Skip if different floor and we're preferring current floor
+      goto continue
+    end
+    
+    -- Inline distance calculation with early X exit
+    local dx = wp.x - px
+    if dx < 0 then dx = -dx end
+    if dx > collectionLimit then goto continue end
+    
+    local dy = wp.y - py
+    if dy < 0 then dy = -dy end  
+    if dy > collectionLimit then goto continue end
+    
+    -- Compute final distance (Chebyshev for same floor, Manhattan for cross-floor)
+    local dist = isSameFloor and (dx > dy and dx or dy) or (dx + dy)
+    if dist > collectionLimit then goto continue end
+    
+    -- Add to pool (reuse pre-allocated entry)
+    candidatePoolSize = candidatePoolSize + 1
+    if candidatePoolSize > MAX_CANDIDATE_POOL then
+      candidatePoolSize = MAX_CANDIDATE_POOL
+      break  -- Pool full, stop collecting
+    end
+    
+    local entry = candidatePool[candidatePoolSize]
+    entry.index = i
+    entry.waypoint = wp
+    entry.distance = dist
+    entry.child = wp.child
+    
+    ::continue::
+  end
+  
+  return candidates
+end
+
+-- Stub functions for compatibility (no-op, lightweight)
+local function cancelIncrementalSearch() end
+local function startIncrementalWaypointSearch() return false end
+local heavyOpInFlight = false
   return true
 end
 
 local _lastCavebotSlowWarn = 0
+local _macroHardTimeout = 0.15  -- 150ms hard timeout
 cavebotMacro = macro(500, function()
   local _msStart = os.clock()
   -- Prevent overlapping executions (freeze prevention)
   if _msStart - (lastMacroTime or 0) < 0.4 then return end
   lastMacroTime = _msStart
   
-  -- Total time budget to prevent freezing (200ms max execution)
-  local totalBudget = 0.2
+  -- Total time budget to prevent freezing (150ms max - reduced from 200ms)
+  local totalBudget = 0.15
   local budgetStart = _msStart
+  
+  -- Inline function for quick timeout check
+  local function checkTimeout()
+    return (os.clock() - budgetStart) > totalBudget
+  end
+  
   -- Prevent execution before login is complete to avoid freezing
   if not g_game.isOnline() then return end
   -- SMART EXECUTION: Skip if we shouldn't execute this tick
@@ -750,27 +854,35 @@ cavebotMacro = macro(500, function()
       warn("[CaveBot] Slow macro detected: " .. tostring(math.floor(_msElapsed * 1000)) .. "ms")
       _lastCavebotSlowWarn = now
     end
+    -- Circuit breaker: if macro is running dangerously long, pause to allow recovery
+    if _msElapsed > 0.8 then
+      warn("[CaveBot] Macro exceeded safe execution time; pausing for 1s to recover")
+      if cavebotMacro and cavebotMacro.delay ~= nil then
+        cavebotMacro.delay = math.max(cavebotMacro.delay, now + 1000)
+      else
+        cavebotMacro.delay = now + 1000
+      end
+      return
+    end
     if lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
       CaveBot.resetWalking()
       resetWaypointEngine()
       if resetStartupCheck then resetStartupCheck() end
-      if findNearestGlobalWaypoint and canRunHeavyOp() then
-        -- Avoid heavy global searches if TargetBot has combat priority or emergency
-        if not storage.targetbotCombatActive and not storage.targetbotEmergency then
-          local maxDist = storage.extras.gotoMaxDistance or 50
-          local child, idx = findNearestGlobalWaypoint(playerPos, maxDist * 2, {  -- Larger search
-            maxCandidates = 15,
-            preferCurrentFloor = true,
-            searchAllFloors = true  -- Allow cross-floor search
-          })
-          if child then
-            focusWaypointBefore(child, idx)
-          end
-        end
+      
+      -- SIMPLE APPROACH: Find closest waypoint by distance only (no pathfinding)
+      -- This is very fast and doesn't cause freezes
+      local maxDist = storage.extras.gotoMaxDistance or 50
+      local closestChild, closestIndex = findClosestWaypointByDistance(playerPos, maxDist)
+      if closestChild and closestIndex then
+        print("[CaveBot] Floor changed, focusing closest waypoint at index " .. closestIndex)
+        focusWaypointBefore(closestChild, closestIndex)
       end
     end
     lastPlayerFloor = playerPos.z
   end
+  
+  -- Hard timeout check
+  if checkTimeout() then return end
   
   -- STARTUP DETECTION: Find nearest waypoint on relog/load
   -- Note: checkStartupWaypoint is defined later in file, check if available
@@ -778,13 +890,16 @@ cavebotMacro = macro(500, function()
     checkStartupWaypoint()
   end
   
+  -- Hard timeout check
+  if checkTimeout() then return end
+  
   -- WAYPOINT ENGINE: High-performance stuck detection and recovery
   if runWaypointEngine() then
     return  -- Engine handled recovery, skip normal processing
   end
   
   -- Budget check before heavy operations
-  if os.clock() - budgetStart > totalBudget then return end
+  if checkTimeout() then return end
   
   -- Lazy-init TargetBot cache
   if not targetBotIsActive and TargetBot then
@@ -1101,31 +1216,6 @@ local function isValidPosition(pos)
   return pos and type(pos.x) == 'number' and type(pos.y) == 'number' and type(pos.z) == 'number'
 end
 
--- Pure: Collect waypoint candidates (DRY, SRP)
-local function collectWaypointCandidates(playerPos, maxDist, options)
-  local candidates = {}
-  local collectionLimit = maxDist * (options.collectRangeMultiplier or 1)
-  local playerZ = playerPos.z
-  local preferCurrentFloor = options.preferCurrentFloor ~= false
-  local searchAllFloors = options.searchAllFloors or false
-
-  for i, wp in pairs(waypointPositionCache) do
-    local isSameFloor = (wp.z == playerZ)
-    if isSameFloor or (searchAllFloors and not preferCurrentFloor) then
-      local dist = isSameFloor and chebyshevDist(playerPos, wp) or manhattanDist(playerPos, wp)
-      if dist <= collectionLimit then
-        candidates[#candidates + 1] = {
-          index = i,
-          waypoint = wp,
-          distance = dist,
-          child = wp.child
-        }
-      end
-    end
-  end
-  return candidates
-end
-
 -- Pure: Sort candidates by distance (KISS)
 local function sortCandidatesByDistance(candidates)
   table.sort(candidates, function(a, b) return a.distance < b.distance end)
@@ -1203,7 +1293,7 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
   buildWaypointCache()
   
   options = options or {}
-  local maxCandidates = options.maxCandidates or 15
+  local maxCandidates = math.min(options.maxCandidates or 10, 10)  -- Hard cap at 10
   
   -- Phase 1: Collect candidates (pure function)
   local candidates = collectWaypointCandidates(playerPos, maxDist, options)
@@ -1213,34 +1303,45 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
   sortCandidatesByDistance(candidates)
   
   -- Phase 3: Check pathfinding for top candidates
-  local checkCount = math.min(maxCandidates, #candidates, options.maxCheck or 8)
-  local timeBudgetSec = options.timeBudgetSec or 0.08
+  -- OPTIMIZED: Reduced checks and stricter time budget
+  local checkCount = math.min(maxCandidates, #candidates, options.maxCheck or 5)  -- Reduced from 8
+  local timeBudgetSec = options.timeBudgetSec or 0.04  -- Reduced from 0.08 to 40ms
   local _slowToken = slow_ops.start('findNearestGlobalWaypoint')
   local pfStart = os.clock()
+  
+  -- Pre-allocate destination position to avoid allocations in loop
+  local destPos = {x = 0, y = 0, z = 0}
+  
   for i = 1, checkCount do
-    if shouldBreakPathfindingCheck(pfStart, timeBudgetSec) then
-      break
-    end
+    -- Strict time check at start of each iteration
+    local elapsed = os.clock() - pfStart
+    if elapsed > timeBudgetSec then break end
+    
+    -- Emergency break for combat/emergency
+    if storage.targetbotCombatActive or storage.targetbotEmergency then break end
 
     local candidate = candidates[i]
-    local destPos = {x = candidate.waypoint.x, y = candidate.waypoint.y, z = candidate.waypoint.z}
+    destPos.x = candidate.waypoint.x
+    destPos.y = candidate.waypoint.y
+    destPos.z = candidate.waypoint.z
     
-    -- Avoid starting another heavy pathfind if we're close to the time budget (reserve ~20ms)
-    if os.clock() - pfStart + 0.02 > timeBudgetSec then break end
+    -- Quick distance sanity check (skip if too far for pathfinding)
+    local dx = math.abs(destPos.x - playerPos.x)
+    local dy = math.abs(destPos.y - playerPos.y)
+    if dx > 40 or dy > 40 then goto continue end  -- Skip unreasonably far candidates
 
-    -- Tier 1: Normal pathfinding
-    local path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true })
-    
-    -- Tier 2: Ignore creatures (maybe blocked by monsters)
-    if not path then
-      if os.clock() - pfStart + 0.02 > timeBudgetSec then break end
-      path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true, ignoreCreatures = true })
-    end
+    -- Single pathfind attempt with combined options (fewer calls)
+    local path = findPath(playerPos, destPos, math.min(maxDist, 40), { 
+      ignoreNonPathable = true, 
+      ignoreCreatures = true 
+    })
     
     if path then
       slow_ops.finish(_slowToken, 'findNearestGlobalWaypoint')
       return candidate.child, candidate.index
     end
+    
+    ::continue::
   end
   slow_ops.finish(_slowToken, 'findNearestGlobalWaypoint')
   

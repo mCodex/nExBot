@@ -324,19 +324,30 @@ local DIR_OFFSET = {
   [7] = { x = -1, y = -1 }   -- NorthWest
 }
 
--- Check for monsters within radius around a position
+-- Check for monsters within radius around a position (optimized)
+-- Uses early exits and avoids redundant tile lookups
 local function hasMonstersInRadius(centerPos, radius)
   if not centerPos or not radius then return false end
-  for dx = -radius, radius do
-    for dy = -radius, radius do
-      local pos = { x = centerPos.x + dx, y = centerPos.y + dy, z = centerPos.z }
-      local tile = g_map.getTile(pos)
-      if tile and tile:hasCreature() then
-        for _, c in ipairs(tile:getCreatures()) do
-          if c and c:isMonster() then
-            local hp = c:getHealthPercent()
-            if not hp or hp > 0 then
-              return true
+  local z = centerPos.z
+  local cx, cy = centerPos.x, centerPos.y
+  
+  -- Spiral search from center for faster discovery
+  for r = 0, radius do
+    for dx = -r, r do
+      for dy = -r, r do
+        -- Only check tiles on the ring (spiral pattern)
+        if r == 0 or math.abs(dx) == r or math.abs(dy) == r then
+          local tile = g_map.getTile({x = cx + dx, y = cy + dy, z = z})
+          if tile and tile:hasCreature() then
+            local creatures = tile:getCreatures()
+            for i = 1, #creatures do
+              local c = creatures[i]
+              if c and c:isMonster() then
+                local hp = c:getHealthPercent()
+                if not hp or hp > 0 then
+                  return true
+                end
+              end
             end
           end
         end
