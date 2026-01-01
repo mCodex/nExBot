@@ -1276,7 +1276,7 @@ checkStartupWaypoint = function()
   
   buildWaypointCache()
   
-  -- Check if current focused waypoint is already reachable
+  -- Check if current focused waypoint is already close enough (no pathfinding - fast)
   local currentAction = ui.list:getFocusedChild()
   if currentAction then
     local currentIndex = ui.list:getChildIndex(currentAction)
@@ -1287,12 +1287,9 @@ checkStartupWaypoint = function()
       local maxDist = storage.extras.gotoMaxDistance or 50
       
       if dist <= maxDist then
-        local path = findPath(playerPos, currentWp, maxDist, { ignoreNonPathable = true })
-        if path then
-          -- Current waypoint is reachable, no need to search
-          startupWaypointFound = true
-          return
-        end
+        -- Close enough on same floor - assume reachable (no pathfinding)
+        startupWaypointFound = true
+        return
       end
     end
   end
@@ -1381,30 +1378,16 @@ CaveBot.findBestWaypoint = function(searchForward)
     return a.distance < b.distance
   end)
   
-  -- Phase 2: Check pathfinding for candidates (check up to 10 for better recovery)
-  local maxCandidates = math.min(10, #candidates)
-  for i = 1, maxCandidates do
-    local candidate = candidates[i]
-    local wp = candidate.waypoint
-    local destPos = {x = wp.x, y = wp.y, z = wp.z}
-    
-    -- Check if path exists (try with and without creature ignore)
-    local path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true })
-    if not path then
-      -- Second attempt: ignore creatures
-      path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true, ignoreCreatures = true })
+  -- Phase 2: Use closest candidate by distance (no pathfinding - fast)
+  if #candidates > 0 then
+    local candidate = candidates[1]  -- Already sorted by distance
+    local prevChild = ui.list:getChildByIndex(candidate.index - 1)
+    if prevChild then
+      ui.list:focusChild(prevChild)
+    else
+      ui.list:focusChild(candidate.waypoint.child)
     end
-    
-    if path then
-      -- Found a reachable waypoint
-      local prevChild = ui.list:getChildByIndex(candidate.index - 1)
-      if prevChild then
-        ui.list:focusChild(prevChild)
-      else
-        ui.list:focusChild(candidate.waypoint.child)
-      end
-      return true
-    end
+    return true
   end
   
   return false
@@ -1421,7 +1404,7 @@ CaveBot.gotoNextWaypointInRangeLegacy = function()
   local index = ui.list:getChildIndex(currentAction)
   local actions = ui.list:getChildren()
 
-  -- start searching from current index
+  -- start searching from current index (distance only - no pathfinding)
   for i, child in ipairs(actions) do
     if i > index then
       local text = child:getText()
@@ -1432,17 +1415,16 @@ CaveBot.gotoNextWaypointInRangeLegacy = function()
         if posz() == pos.z then
           local maxDist = storage.extras.gotoMaxDistance
           if distanceFromPlayer(pos) <= maxDist then
-            if findPath(player:getPosition(), pos, maxDist, { ignoreNonPathable = true }) then
-              ui.list:focusChild(ui.list:getChildByIndex(i-1))
-              return true
-            end
+            -- Close enough on same floor - use it (no pathfinding)
+            ui.list:focusChild(ui.list:getChildByIndex(i-1))
+            return true
           end
         end
       end
     end
   end
 
-  -- if not found then damn go from start
+  -- if not found then damn go from start (distance only - no pathfinding)
   for i, child in ipairs(actions) do
     if i <= index then
       local text = child:getText()
@@ -1453,10 +1435,9 @@ CaveBot.gotoNextWaypointInRangeLegacy = function()
         if posz() == pos.z then
           local maxDist = storage.extras.gotoMaxDistance
           if distanceFromPlayer(pos) <= maxDist then
-            if findPath(player:getPosition(), pos, maxDist, { ignoreNonPathable = true }) then
-              ui.list:focusChild(ui.list:getChildByIndex(i-1))
-              return true
-            end
+            -- Close enough on same floor - use it (no pathfinding)
+            ui.list:focusChild(ui.list:getChildByIndex(i-1))
+            return true
           end
         end
       end
@@ -1516,14 +1497,10 @@ CaveBot.gotoFirstPreviousReachableWaypoint = function()
           if posz() == pos.z then
             local dist = distanceFromPlayer(pos)
             
-            -- First priority: Normal range with path validation
+            -- Use distance only - no pathfinding (fast)
             if dist <= halfDist then
-              local path = findPath(playerPos, pos, halfDist, { ignoreNonPathable = true })
-              if path then
-                print("CaveBot: Found previous waypoint at distance " .. dist .. ", going back " .. i .. " waypoints.")
-                return ui.list:focusChild(child)
-              end
-            -- Second priority: Extended range candidates
+              print("CaveBot: Found previous waypoint at distance " .. dist .. ", going back " .. i .. " waypoints.")
+              return ui.list:focusChild(child)
             elseif dist <= extendedDist then
               table.insert(extendedCandidates, {child = child, pos = pos, dist = dist, steps = i})
             end
@@ -1533,18 +1510,12 @@ CaveBot.gotoFirstPreviousReachableWaypoint = function()
     end
   end
 
-  -- If we didn't find anything in normal range, try extended range
+  -- If we didn't find anything in normal range, use closest extended range (no pathfinding)
   if #extendedCandidates > 0 then
-    -- Sort by distance (closest first)
     table.sort(extendedCandidates, function(a, b) return a.dist < b.dist end)
-    
-    for _, candidate in ipairs(extendedCandidates) do
-      local path = findPath(playerPos, candidate.pos, extendedDist, { ignoreNonPathable = true })
-      if path then
-        print("CaveBot: Found previous waypoint at extended range (distance " .. candidate.dist .. "), going back " .. candidate.steps .. " waypoints.")
-        return ui.list:focusChild(candidate.child)
-      end
-    end
+    local candidate = extendedCandidates[1]
+    print("CaveBot: Found previous waypoint at extended range (distance " .. candidate.dist .. "), going back " .. candidate.steps .. " waypoints.")
+    return ui.list:focusChild(candidate.child)
   end
 
   -- not found
@@ -1592,13 +1563,9 @@ CaveBot.getFirstWaypointBeforeLabel = function(label)
           if posz() == pos.z then
             local dist = distanceFromPlayer(pos)
             
-            -- First priority: Normal range with path validation
+            -- Use distance only - no pathfinding (fast)
             if dist <= halfDist then
-              local path = findPath(playerPos, pos, halfDist, { ignoreNonPathable = true })
-              if path then
-                return ui.list:focusChild(child)
-              end
-            -- Second priority: Extended range candidates
+              return ui.list:focusChild(child)
             elseif dist <= extendedDist then
               table.insert(extendedCandidates, {child = child, pos = pos, dist = dist})
             end
@@ -1608,15 +1575,10 @@ CaveBot.getFirstWaypointBeforeLabel = function(label)
     end
   end
 
-  -- Try extended range if nothing found
+  -- Use closest extended range if nothing found (no pathfinding)
   if #extendedCandidates > 0 then
     table.sort(extendedCandidates, function(a, b) return a.dist < b.dist end)
-    for _, candidate in ipairs(extendedCandidates) do
-      local path = findPath(playerPos, candidate.pos, extendedDist, { ignoreNonPathable = true })
-      if path then
-        return ui.list:focusChild(candidate.child)
-      end
-    end
+    return ui.list:focusChild(extendedCandidates[1].child)
   end
 
   return false
