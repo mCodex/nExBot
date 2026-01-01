@@ -417,8 +417,22 @@ if EventBus then
   end, 20)
 end
 
+-- State tracking for non-blocking waits (prevents 8-second blocking loops)
+local gotoWaitState = {
+  monsterWaitStart = 0,
+  blockerWaitStart = 0,
+  lastWaypointValue = nil
+}
+
 CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- ========== EARLY EXITS (no pathfinding) ==========
+  
+  -- Reset wait states when waypoint changes
+  if gotoWaitState.lastWaypointValue ~= value then
+    gotoWaitState.monsterWaitStart = 0
+    gotoWaitState.blockerWaitStart = 0
+    gotoWaitState.lastWaypointValue = value
+  end
   
   -- Skip if walking
   if player and player:isWalking() then
@@ -517,19 +531,31 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     local radius = 2
     local combatActive = (TargetBot and TargetBot.isOn and TargetBot.isOn()) or g_game.getAttackingCreature()
     if hasNearbyMonsters(radius) and combatActive then
-      local start = os.clock()
+      -- Non-blocking wait: use retry pattern instead of blocking while loop
+      local now = os.clock()
       local maxWait = 8
-      while os.clock() - start < maxWait do
-        if not hasNearbyMonsters(radius) then
-          noPath = 0
-          return true
-        end
-        CaveBot.delay(200)
+      
+      -- Start timer if not started
+      if gotoWaitState.monsterWaitStart == 0 then
+        gotoWaitState.monsterWaitStart = now
       end
-      -- Still monsters after timeout: retry (stay on this waypoint and try again)
+      
+      -- Check timeout
+      if (now - gotoWaitState.monsterWaitStart) >= maxWait then
+        -- Timeout reached, proceed to next waypoint (monsters still there but we waited long enough)
+        gotoWaitState.monsterWaitStart = 0
+        noPath = 0
+        return true
+      end
+      
+      -- Still waiting, delay and retry
+      CaveBot.delay(200)
       return "retry"
     end
-
+    
+    -- Monsters cleared, reset timer and proceed
+    gotoWaitState.monsterWaitStart = 0
+    noPath = 0
     return true
   end
 
@@ -553,20 +579,27 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
       end
       g_game.setChaseMode(1)
 
-      -- Wait until blocking monster is gone/dead (timeout in seconds)
-      local start = os.clock()
+      -- Non-blocking wait: use retry pattern instead of blocking while loop
+      local now = os.clock()
       local maxWait = 6
-      while os.clock() - start < maxWait do
-        if not getBlockingMonster(playerPos, destPos, maxDist) then
-          break
-        end
-        CaveBot.delay(200)
+      
+      -- Start timer if not started
+      if gotoWaitState.blockerWaitStart == 0 then
+        gotoWaitState.blockerWaitStart = now
       end
-
-      -- If still blocking after timeout, retry (retries++ will allow fallback later)
-      if getBlockingMonster(playerPos, destPos, maxDist) then
+      
+      -- Check timeout - proceed to walk attempt (will use ignoreCreatures fallback)
+      if (now - gotoWaitState.blockerWaitStart) >= maxWait then
+        gotoWaitState.blockerWaitStart = 0
+        -- Don't return, fall through to walkTo which will use ignoreCreatures on high retries
+      else
+        -- Still waiting for blocker to clear
+        CaveBot.delay(200)
         return "retry"
       end
+    else
+      -- Blocker cleared, reset timer
+      gotoWaitState.blockerWaitStart = 0
     end
   end
   
