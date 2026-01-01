@@ -399,7 +399,173 @@ local function getBlockingMonster(playerPos, destPos, maxDist)
   return nil
 end
 
+-- ============================================================================
+-- EVENT-DRIVEN MONSTER TRACKING (Fast screen monster detection via EventBus)
+-- ============================================================================
+-- Tracks monsters on screen in real-time via events instead of polling tiles.
+-- Provides O(1) check for "are there monsters on screen?" and emits events
+-- when the screen is cleared, allowing instant waypoint progression.
+
+local screenMonsters = {}  -- Set of monster IDs currently on screen
+local screenMonsterCount = 0
+local lastScreenClearTime = 0
+local lastMonsterValidation = 0  -- Last time we validated monster list
+local VALIDATION_INTERVAL = 2000  -- Validate every 2 seconds to prevent desync
+
+-- Fast O(1) check: are there any alive monsters on screen?
+local function hasScreenMonsters()
+  return screenMonsterCount > 0
+end
+
+-- Get count of monsters on screen
+local function getScreenMonsterCount()
+  return screenMonsterCount
+end
+
+-- Check if a creature is a valid alive monster
+local function isAliveMonster(creature)
+  if not creature then return false end
+  if not creature:isMonster() then return false end
+  local hp = creature:getHealthPercent()
+  return not hp or hp > 0
+end
+
+-- Add monster to tracking
+local function trackMonster(creature)
+  if not creature then return end
+  local id = creature:getId()
+  if id and not screenMonsters[id] then
+    screenMonsters[id] = true
+    screenMonsterCount = screenMonsterCount + 1
+  end
+end
+
+-- Remove monster from tracking (died or left screen)
+local function untrackMonster(creature)
+  if not creature then return end
+  local id = creature:getId()
+  if id and screenMonsters[id] then
+    screenMonsters[id] = nil
+    screenMonsterCount = screenMonsterCount - 1
+    
+    -- Emit event when screen is cleared of monsters
+    if screenMonsterCount <= 0 then
+      screenMonsterCount = 0  -- Safety clamp
+      lastScreenClearTime = now or os.clock() * 1000
+      if EventBus then
+        pcall(function() EventBus.emit("cavebot/screen_cleared") end)
+      end
+    end
+  end
+end
+
+-- Rebuild monster list (called on floor change or login)
+local function rebuildMonsterTracking()
+  screenMonsters = {}
+  screenMonsterCount = 0
+  
+  local playerPos = player and player:getPosition()
+  if not playerPos then return end
+  
+  -- Scan visible tiles for monsters
+  local specs = g_map.getSpectators(playerPos, false)
+  if specs then
+    for _, creature in ipairs(specs) do
+      if isAliveMonster(creature) then
+        trackMonster(creature)
+      end
+    end
+  end
+  lastMonsterValidation = now or (os.clock() * 1000)
+end
+
+-- Validate monster tracking against actual state (fixes desync issues)
+local function validateMonsterTracking()
+  local currentTime = now or (os.clock() * 1000)
+  if (currentTime - lastMonsterValidation) < VALIDATION_INTERVAL then
+    return  -- Not time to validate yet
+  end
+  lastMonsterValidation = currentTime
+  
+  local playerPos = player and player:getPosition()
+  if not playerPos then return end
+  
+  -- Get actual monsters on screen
+  local actualMonsters = {}
+  local actualCount = 0
+  local specs = g_map.getSpectators(playerPos, false)
+  if specs then
+    for _, creature in ipairs(specs) do
+      if isAliveMonster(creature) then
+        local id = creature:getId()
+        if id then
+          actualMonsters[id] = true
+          actualCount = actualCount + 1
+        end
+      end
+    end
+  end
+  
+  -- Check for desync: if our count differs significantly, rebuild
+  if math.abs(screenMonsterCount - actualCount) > 0 then
+    screenMonsters = actualMonsters
+    screenMonsterCount = actualCount
+    
+    -- Emit clear event if we just discovered there are no monsters
+    if actualCount == 0 and storage.cavebotScreenCleared ~= true then
+      if EventBus then
+        pcall(function() EventBus.emit("cavebot/screen_cleared") end)
+      end
+    end
+  end
+end
+
+-- Quick ground-truth check: actually scan for monsters (used as fallback)
+local function hasActualMonstersOnScreen()
+  local playerPos = player and player:getPosition()
+  if not playerPos then return false end
+  
+  local specs = g_map.getSpectators(playerPos, false)
+  if specs then
+    for _, creature in ipairs(specs) do
+      if isAliveMonster(creature) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- Register EventBus handlers for monster tracking
 if EventBus then
+  -- Monster appeared on screen
+  EventBus.on("monster:appear", function(creature)
+    if isAliveMonster(creature) then
+      trackMonster(creature)
+    end
+  end, 15)  -- Priority 15 (run before other handlers)
+  
+  -- Monster left screen or died
+  EventBus.on("monster:disappear", function(creature)
+    untrackMonster(creature)
+  end, 15)
+  
+  -- Monster health changed (check if died)
+  EventBus.on("monster:health", function(creature, percent)
+    if percent and percent <= 0 then
+      untrackMonster(creature)
+    end
+  end, 15)
+  
+  -- Player moved to new floor - rebuild tracking
+  EventBus.on("player:move", function(newPos, oldPos)
+    if oldPos and newPos and oldPos.z ~= newPos.z then
+      -- Floor changed, rebuild monster list
+      schedule(100, rebuildMonsterTracking)
+    end
+  end, 15)
+  
+  -- Combat state tracking (existing)
   EventBus.on("targetbot/combat_start", function(creature, payload)
     storage.targetbotCombatActive = true
   end, 20)
@@ -415,13 +581,75 @@ if EventBus then
   EventBus.on("targetbot/emergency_cleared", function(hpPercent)
     storage.targetbotEmergency = false
   end, 20)
+  
+  -- Screen cleared - can be used by other modules
+  EventBus.on("cavebot/screen_cleared", function()
+    -- Signal that CaveBot can proceed to next waypoint immediately
+    storage.cavebotScreenCleared = true
+  end, 20)
+end
+
+-- Initialize monster tracking on load
+schedule(500, rebuildMonsterTracking)
+
+-- ============================================================================
+-- EVENT-DRIVEN WAYPOINT ARRIVAL DETECTION
+-- ============================================================================
+-- Tracks the current target waypoint and instantly detects arrival via player:move event.
+-- This eliminates polling delay and makes waypoint progression instant.
+
+local waypointTarget = {
+  pos = nil,        -- Target position {x, y, z}
+  precision = 1,    -- Precision for arrival check
+  value = nil,      -- Waypoint value string (for matching)
+  arrived = false   -- Flag: have we arrived?
+}
+
+-- Set the current waypoint target (called when processing a goto action)
+local function setWaypointTarget(pos, precision, value)
+  waypointTarget.pos = pos
+  waypointTarget.precision = precision or 1
+  waypointTarget.value = value
+  waypointTarget.arrived = false
+end
+
+-- Check if player is at the target waypoint
+local function checkWaypointArrival(playerPos)
+  if not waypointTarget.pos or not playerPos then return false end
+  if playerPos.z ~= waypointTarget.pos.z then return false end
+  
+  local distX = math.abs(playerPos.x - waypointTarget.pos.x)
+  local distY = math.abs(playerPos.y - waypointTarget.pos.y)
+  local precision = waypointTarget.precision or 1
+  
+  return distX <= precision and distY <= precision
+end
+
+-- Clear waypoint target (called when waypoint is completed)
+local function clearWaypointTarget()
+  waypointTarget.pos = nil
+  waypointTarget.value = nil
+  waypointTarget.arrived = false
+end
+
+-- Register player move event for instant waypoint arrival detection
+if EventBus then
+  EventBus.on("player:move", function(newPos, oldPos)
+    -- Check if we arrived at target waypoint
+    if waypointTarget.pos and checkWaypointArrival(newPos) then
+      waypointTarget.arrived = true
+      -- Emit event for other modules
+      pcall(function() EventBus.emit("cavebot/waypoint_arrived", waypointTarget.pos, waypointTarget.value) end)
+    end
+  end, 10)  -- High priority (10) to run before other handlers
 end
 
 -- State tracking for non-blocking waits (prevents 8-second blocking loops)
 local gotoWaitState = {
   monsterWaitStart = 0,
   blockerWaitStart = 0,
-  lastWaypointValue = nil
+  lastWaypointValue = nil,
+  waitingForClear = false  -- Flag: are we waiting for monsters to clear?
 }
 
 CaveBot.registerAction("goto", "green", function(value, retries, prev)
@@ -432,7 +660,12 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     gotoWaitState.monsterWaitStart = 0
     gotoWaitState.blockerWaitStart = 0
     gotoWaitState.lastWaypointValue = value
+    waypointTarget.arrived = false  -- Reset arrival flag for new waypoint
+    storage.cavebotScreenCleared = false  -- Reset screen clear flag
   end
+  
+  -- Validate monster tracking periodically (fixes desync issues)
+  validateMonsterTracking()
   
   -- Skip if walking
   if player and player:isWalking() then
@@ -453,6 +686,69 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   }
   local precision = tonumber(posMatch[1][5]) or 1
   local playerPos = player:getPosition()
+  
+  -- Set waypoint target for event-driven arrival detection
+  setWaypointTarget(destPos, precision, value)
+  
+  -- ========== EVENT-DRIVEN ARRIVAL CHECK (FAST PATH) ==========
+  -- Check if player:move event already detected arrival (instant response)
+  if waypointTarget.arrived then
+    -- Arrived via event! Now check monster clearing...
+    local combatActive = (TargetBot and TargetBot.isOn and TargetBot.isOn()) or g_game.getAttackingCreature()
+    
+    -- FAST PATH: If no combat active, proceed immediately (no need to wait for monsters)
+    if not combatActive then
+      gotoWaitState.monsterWaitStart = 0
+      clearWaypointTarget()
+      return true
+    end
+    
+    -- Check if there are actually monsters (use ground-truth check after 1 second of waiting)
+    local now = os.clock()
+    local waitTime = gotoWaitState.monsterWaitStart > 0 and (now - gotoWaitState.monsterWaitStart) or 0
+    
+    -- After 1 second of waiting, do a ground-truth check to prevent false positives
+    local hasMonsters = hasScreenMonsters()
+    if waitTime > 1 and hasMonsters then
+      hasMonsters = hasActualMonstersOnScreen()
+      if not hasMonsters then
+        -- Event tracking was wrong, emit clear and proceed
+        screenMonsterCount = 0
+        screenMonsters = {}
+        storage.cavebotScreenCleared = true
+      end
+    end
+    
+    if hasMonsters then
+      -- Check if screen was just cleared
+      if storage.cavebotScreenCleared then
+        storage.cavebotScreenCleared = false
+        gotoWaitState.monsterWaitStart = 0
+        clearWaypointTarget()
+        return true  -- Proceed immediately!
+      end
+      
+      -- Start wait timer
+      if gotoWaitState.monsterWaitStart == 0 then
+        gotoWaitState.monsterWaitStart = now
+      end
+      
+      -- Timeout after 8 seconds
+      if waitTime >= 8 then
+        gotoWaitState.monsterWaitStart = 0
+        clearWaypointTarget()
+        return true
+      end
+      
+      CaveBot.delay(100)
+      return "retry"
+    end
+    
+    -- No monsters, proceed!
+    gotoWaitState.monsterWaitStart = 0
+    clearWaypointTarget()
+    return true
+  end
   
   -- Floor mismatch
   if destPos.z ~= playerPos.z then
@@ -502,60 +798,74 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- If destination is floor-change, use precision 0 and allow the floor change
   if isFloorChange then precision = 0 end
   
-  -- Already at destination
+  -- Already at destination (fallback check - event-driven should catch this first)
   if distX <= precision and distY <= precision then
     noPath = 0
+    
+    -- Mark as arrived for event system
+    waypointTarget.arrived = true
 
-    -- If there are monsters near the waypoint and combat is active (TargetBot on or player attacking),
-    -- wait for them to die before proceeding (timeout in seconds).
-    local function hasNearbyMonsters(radius)
-      for dx = -radius, radius do
-        for dy = -radius, radius do
-          local checkPos = { x = destPos.x + dx, y = destPos.y + dy, z = destPos.z }
-          local tile = g_map.getTile(checkPos)
-          if tile and tile:hasCreature() then
-            for _, c in ipairs(tile:getCreatures()) do
-              if c:isMonster() then
-                local hp = c:getHealthPercent()
-                if not hp or hp > 0 then
-                  return true
-                end
-              end
-            end
-          end
-        end
-      end
-      return false
-    end
-
-    local radius = 2
+    -- ========== MONSTER CLEARING CHECK ==========
     local combatActive = (TargetBot and TargetBot.isOn and TargetBot.isOn()) or g_game.getAttackingCreature()
-    if hasNearbyMonsters(radius) and combatActive then
-      -- Non-blocking wait: use retry pattern instead of blocking while loop
-      local now = os.clock()
-      local maxWait = 8
+    
+    -- FAST PATH: If no combat active, proceed immediately
+    if not combatActive then
+      gotoWaitState.monsterWaitStart = 0
+      gotoWaitState.waitingForClear = false
+      clearWaypointTarget()
+      return true
+    end
+    
+    -- Check monsters with ground-truth fallback after waiting
+    local now = os.clock()
+    local waitTime = gotoWaitState.monsterWaitStart > 0 and (now - gotoWaitState.monsterWaitStart) or 0
+    
+    local hasMonsters = hasScreenMonsters()
+    
+    -- After 1 second of waiting, verify with ground-truth check
+    if waitTime > 1 and hasMonsters then
+      hasMonsters = hasActualMonstersOnScreen()
+      if not hasMonsters then
+        screenMonsterCount = 0
+        screenMonsters = {}
+        storage.cavebotScreenCleared = true
+      end
+    end
+    
+    if hasMonsters then
+      -- Check if screen was just cleared
+      if storage.cavebotScreenCleared then
+        storage.cavebotScreenCleared = false
+        gotoWaitState.monsterWaitStart = 0
+        gotoWaitState.waitingForClear = false
+        clearWaypointTarget()
+        return true
+      end
+      
+      gotoWaitState.waitingForClear = true
       
       -- Start timer if not started
       if gotoWaitState.monsterWaitStart == 0 then
         gotoWaitState.monsterWaitStart = now
       end
       
-      -- Check timeout
-      if (now - gotoWaitState.monsterWaitStart) >= maxWait then
-        -- Timeout reached, proceed to next waypoint (monsters still there but we waited long enough)
+      -- Timeout after 8 seconds
+      if waitTime >= 8 then
         gotoWaitState.monsterWaitStart = 0
-        noPath = 0
+        gotoWaitState.waitingForClear = false
+        clearWaypointTarget()
         return true
       end
       
-      -- Still waiting, delay and retry
-      CaveBot.delay(200)
+      CaveBot.delay(100)
       return "retry"
     end
     
-    -- Monsters cleared, reset timer and proceed
+    -- No monsters, proceed immediately
     gotoWaitState.monsterWaitStart = 0
-    noPath = 0
+    gotoWaitState.waitingForClear = false
+    storage.cavebotScreenCleared = false
+    clearWaypointTarget()
     return true
   end
 
