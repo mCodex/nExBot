@@ -775,9 +775,6 @@ end
 -- Stub functions for compatibility (no-op, lightweight)
 local function cancelIncrementalSearch() end
 local function startIncrementalWaypointSearch() return false end
-local heavyOpInFlight = false
-  return true
-end
 
 local _lastCavebotSlowWarn = 0
 local _macroHardTimeout = 0.15  -- 150ms hard timeout
