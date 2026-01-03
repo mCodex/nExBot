@@ -74,29 +74,29 @@ MovementCoordinator.CONSTANTS = {
     [10] = 0    -- IDLE
   },
   
-  -- Minimum confidence to execute movement (raised for smoother behavior)
+  -- Minimum confidence to execute movement (tuned for responsiveness)
   CONFIDENCE_THRESHOLDS = {
-    [1] = 0.45,  -- EMERGENCY: Higher (avoid false emergencies)
-    [2] = 0.70,  -- WAVE_AVOIDANCE: High (only move when really needed)
-    [3] = 0.65,  -- FINISH_KILL: Medium-high
-    [4] = 0.80,  -- SPELL_POSITION: Very high (rarely move for spells)
-    [5] = 0.65,  -- KEEP_DISTANCE: Medium-high
-    [6] = 0.75,  -- REPOSITION: High (stay put unless clearly better)
-    [7] = 0.60,  -- CHASE: Medium
-    [8] = 0.55,  -- FACE_MONSTER: Medium
-    [9] = 0.60,  -- LURE: Medium
+    [1] = 0.40,  -- EMERGENCY: Responsive to danger
+    [2] = 0.55,  -- WAVE_AVOIDANCE: Lowered for faster reaction
+    [3] = 0.55,  -- FINISH_KILL: Chase wounded targets quickly
+    [4] = 0.70,  -- SPELL_POSITION: High (avoid unnecessary moves)
+    [5] = 0.55,  -- KEEP_DISTANCE: Responsive to range changes
+    [6] = 0.60,  -- REPOSITION: Moderate threshold
+    [7] = 0.50,  -- CHASE: Lower for faster target acquisition
+    [8] = 0.45,  -- FACE_MONSTER: Quick diagonal correction
+    [9] = 0.50,  -- LURE: Responsive to lure needs
     [10] = 1.0   -- IDLE: Never execute
   },
   
-  -- Timing (extended for smoother behavior)
+  -- Timing (tuned for responsiveness while preventing oscillation)
   TIMING = {
-    DECISION_COOLDOWN = 200,     -- Min time between decisions (ms)
-    EXECUTION_COOLDOWN = 350,    -- Min time between movements (slower)
-    INTENT_TTL = 400,            -- Intent valid for 400ms (shorter)
-    OSCILLATION_WINDOW = 2500,   -- Track moves in this window (longer)
-    MAX_OSCILLATIONS = 3,        -- Max moves before pause (stricter)
-    HYSTERESIS_BONUS = 0.15,     -- Extra confidence needed to leave safe pos
-    POSITION_MEMORY = 800        -- Remember safe position for 800ms
+    DECISION_COOLDOWN = 120,     -- Min time between decisions (ms) - faster
+    EXECUTION_COOLDOWN = 200,    -- Min time between movements - faster
+    INTENT_TTL = 350,            -- Intent valid for 350ms
+    OSCILLATION_WINDOW = 2000,   -- Track moves in this window
+    MAX_OSCILLATIONS = 4,        -- Max moves before pause (more forgiving)
+    HYSTERESIS_BONUS = 0.10,     -- Extra confidence needed to leave safe pos (reduced)
+    POSITION_MEMORY = 600        -- Remember safe position for 600ms (shorter)
   },
   
   -- Conflict resolution
@@ -228,14 +228,23 @@ if EventBus then
     
     -- Only register chase if target is moving away and out of melee range
     if dist > 1 then
-      -- Confidence values adjusted to pass CHASE threshold (0.60)
-      local confidence = 0.62  -- Base now passes threshold
-      if dist <= 3 then confidence = 0.68 end
-      if dist > 5 then confidence = 0.75 end
+      -- Confidence values - tuned to pass lowered CHASE threshold (0.50)
+      local confidence = 0.55  -- Base passes threshold
+      if dist <= 2 then confidence = 0.62 end  -- Very close - quick chase
+      if dist <= 4 then confidence = 0.68 end  -- Close - high priority
+      if dist > 5 then confidence = 0.75 end   -- Far - very high priority
+      
+      -- Boost confidence if target is wounded (finish kill priority)
+      local creatureHP = creature.getHealthPercent and creature:getHealthPercent() or 100
+      if creatureHP < 30 then
+        confidence = math.min(0.90, confidence + 0.15)  -- Boost for wounded targets
+      elseif creatureHP < 50 then
+        confidence = math.min(0.85, confidence + 0.08)
+      end
       
       -- Register chase intent immediately
       MovementCoordinator.Intent.register(
-        INTENT.CHASE, creaturePos, confidence, "chase_event", {triggered = "creature_move"}
+        INTENT.CHASE, creaturePos, confidence, "chase_event", {triggered = "creature_move", hp = creatureHP}
       )
       lastTargetMoveTime = now
     end
@@ -252,9 +261,9 @@ if EventBus then
     
     -- If monster appeared very close, may need reposition
     if dist <= 2 then
-      -- Trigger reposition check (low confidence, just a hint)
+      -- Trigger reposition check (higher confidence now to pass threshold)
       MovementCoordinator.Intent.register(
-        INTENT.REPOSITION, playerPos, 0.4, "monster_appear_reposition", {triggered = "monster_appear"}
+        INTENT.REPOSITION, playerPos, 0.55, "monster_appear_reposition", {triggered = "monster_appear"}
       )
     end
   end, 15)

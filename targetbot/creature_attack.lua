@@ -1736,3 +1736,181 @@ onPlayerPositionChange(function(newPos, oldPos)
   if targetCount < targetThreshold or not (target and target()) then return end
   CaveBot.delay(delayValue or 0)
 end)
+
+-- ============================================================================
+-- EVENT-DRIVEN LURE COORDINATION (DRY, SRP)
+-- 
+-- Integrates lure system with EventBus for instant responsiveness:
+-- - Emits lure state changes for CaveBot coordination
+-- - Registers LURE intents with MovementCoordinator
+-- - Provides pure function for lure eligibility check
+-- ============================================================================
+
+-- Pure function: Calculate lure eligibility (no side effects)
+-- @param config: creature config with lure settings
+-- @param targets: current target count
+-- @return table { shouldLure: boolean, confidence: number, reason: string }
+local function calculateLureEligibility(config, targets)
+  if not config then
+    return { shouldLure = false, confidence = 0, reason = "no_config" }
+  end
+  
+  if not config.dynamicLure then
+    return { shouldLure = false, confidence = 0, reason = "disabled" }
+  end
+  
+  local lureMin = config.lureMin or 3
+  local lurMax = config.lureMax or 6
+  
+  -- Not enough targets - should lure more
+  if targets < lureMin then
+    local deficit = lureMin - targets
+    local confidence = 0.5 + (deficit / lureMin) * 0.3
+    return { 
+      shouldLure = true, 
+      confidence = math.min(0.85, confidence), 
+      reason = "below_min",
+      deficit = deficit
+    }
+  end
+  
+  -- At max capacity - stop luring
+  if targets >= lurMax then
+    return { shouldLure = false, confidence = 0.9, reason = "at_max" }
+  end
+  
+  -- Between min and max - prefer fighting
+  return { shouldLure = false, confidence = 0.6, reason = "sufficient" }
+end
+
+-- Export pure function for external use
+nExBot.calculateLureEligibility = calculateLureEligibility
+
+-- Event-driven lure state management
+if EventBus then
+  -- Track lure state for change detection
+  local lastLureState = { active = false, time = 0 }
+  
+  -- React to target count changes for lure decisions
+  EventBus.on("targetbot/target_count_change", function(newCount, oldCount)
+    if not TargetBot or not TargetBot.isOn or not TargetBot.isOn() then return end
+    
+    -- Get current creature config
+    local activeConfig = TargetBot.ActiveMovementConfig
+    if not activeConfig then return end
+    
+    local eligibility = calculateLureEligibility(activeConfig, newCount)
+    
+    -- State changed - emit event
+    if eligibility.shouldLure ~= lastLureState.active then
+      lastLureState.active = eligibility.shouldLure
+      lastLureState.time = now
+      
+      if eligibility.shouldLure then
+        -- Start luring - emit event for CaveBot
+        pcall(function()
+          EventBus.emit("targetbot/lure_start", {
+            reason = eligibility.reason,
+            confidence = eligibility.confidence,
+            deficit = eligibility.deficit
+          })
+        end)
+        
+        -- Register LURE intent with MovementCoordinator
+        if MovementCoordinator and MovementCoordinator.Intent then
+          local playerPos = player and player:getPosition()
+          if playerPos then
+            -- Lure intent uses player's current position (CaveBot handles destination)
+            MovementCoordinator.Intent.register(
+              MovementCoordinator.CONSTANTS.INTENT.LURE,
+              playerPos,
+              eligibility.confidence,
+              "lure_event",
+              { triggered = "target_count", targets = newCount, deficit = eligibility.deficit }
+            )
+          end
+        end
+      else
+        -- Stop luring - emit event
+        pcall(function()
+          EventBus.emit("targetbot/lure_stop", {
+            reason = eligibility.reason,
+            targets = newCount
+          })
+        end)
+      end
+    end
+  end, 15)
+  
+  -- React to monster deaths to update lure decisions quickly
+  EventBus.on("monster:disappear", function(creature)
+    if not creature then return end
+    
+    -- Check if this affects our target count significantly
+    local monsterCount = 0
+    if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
+      local nearby = MovementCoordinator.MonsterCache.getNearby(7)
+      monsterCount = #nearby
+    end
+    
+    -- Emit target count change event
+    pcall(function()
+      EventBus.emit("targetbot/target_count_change", monsterCount, monsterCount + 1)
+    end)
+  end, 18)
+  
+  -- React to monster appearances
+  EventBus.on("monster:appear", function(creature)
+    if not creature then return end
+    
+    local playerPos = player and player:getPosition()
+    local creaturePos = creature:getPosition()
+    if not playerPos or not creaturePos then return end
+    
+    local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
+    
+    -- Only count nearby monsters
+    if dist <= 7 then
+      local monsterCount = 0
+      if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
+        local nearby = MovementCoordinator.MonsterCache.getNearby(7)
+        monsterCount = #nearby
+      end
+      
+      -- Emit target count change event
+      pcall(function()
+        EventBus.emit("targetbot/target_count_change", monsterCount, monsterCount - 1)
+      end)
+    end
+  end, 18)
+  
+  -- Emit pull system state changes for CaveBot coordination
+  local lastPullState = false
+  
+  EventBus.on("targetbot/combat_start", function(creature, data)
+    -- When combat starts, evaluate pull system state
+    schedule(100, function()
+      if TargetBot and TargetBot.smartPullActive ~= lastPullState then
+        lastPullState = TargetBot.smartPullActive
+        if TargetBot.smartPullActive then
+          pcall(function()
+            EventBus.emit("targetbot/pull_active", {
+              creature = creature,
+              time = now
+            })
+          end)
+        end
+      end
+    end)
+  end, 12)
+  
+  EventBus.on("targetbot/combat_end", function()
+    -- Combat ended - clear pull state
+    if lastPullState then
+      lastPullState = false
+      pcall(function()
+        EventBus.emit("targetbot/pull_inactive")
+      end)
+    end
+  end, 12)
+end

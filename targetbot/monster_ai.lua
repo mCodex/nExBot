@@ -537,6 +537,83 @@ function MonsterAI.RealTime.cleanup()
   end
 end
 
+-- ============================================================================
+-- GET IMMEDIATE THREAT (Pure function for wave avoidance integration)
+-- Returns a threat assessment suitable for instant decision-making
+-- @return table { immediateThreat: boolean, totalThreat: number, threatCount: number, highestConfidence: number }
+-- ============================================================================
+function MonsterAI.getImmediateThreat()
+  local nowt = nowMs()
+  local result = {
+    immediateThreat = false,
+    totalThreat = 0,
+    threatCount = 0,
+    highestConfidence = 0,
+    imminentMonsters = {}
+  }
+  
+  -- Check threat cache first (fast path)
+  local cache = MonsterAI.RealTime.threatCache
+  if cache and (nowt - (cache.lastUpdate or 0)) < CONST.EVENT_DRIVEN.THREAT_CACHE_TTL then
+    result.immediateThreat = cache.immediateThreat or false
+    result.totalThreat = cache.totalThreat or 0
+    result.threatCount = #(cache.highThreatMonsters or {})
+    for _, t in ipairs(cache.highThreatMonsters or {}) do
+      if t.confidence and t.confidence > result.highestConfidence then
+        result.highestConfidence = t.confidence
+      end
+    end
+    return result
+  end
+  
+  -- Recalculate from prediction queue
+  local queue = MonsterAI.RealTime.predictedAttacks
+  for i = 1, #queue do
+    local pred = queue[i]
+    if pred and pred.predictedTime then
+      local timeToAttack = pred.predictedTime - nowt
+      if timeToAttack <= CONST.EVENT_DRIVEN.IMMEDIATE_THREAT_WINDOW then
+        result.immediateThreat = true
+        result.threatCount = result.threatCount + 1
+        result.totalThreat = result.totalThreat + (pred.confidence or 0.5)
+        if (pred.confidence or 0) > result.highestConfidence then
+          result.highestConfidence = pred.confidence
+        end
+        table.insert(result.imminentMonsters, pred)
+      end
+    end
+  end
+  
+  -- Also check directions for monsters facing player with short cooldown
+  local playerPos = player and player:getPosition()
+  if playerPos then
+    for id, rt in pairs(MonsterAI.RealTime.directions) do
+      if rt.facingPlayerSince then
+        local facingDuration = nowt - rt.facingPlayerSince
+        -- Monster has been facing player for >500ms = likely attack incoming
+        if facingDuration > 500 then
+          local data = MonsterAI.Tracker.monsters[id]
+          if data and data.ewmaCooldown then
+            local lastAttack = data.lastWaveTime or data.lastAttackTime or 0
+            local elapsed = nowt - lastAttack
+            local cooldown = data.ewmaCooldown
+            if elapsed >= cooldown * 0.8 then
+              result.immediateThreat = true
+              result.totalThreat = result.totalThreat + 0.7
+              result.threatCount = result.threatCount + 1
+            end
+          end
+        end
+      end
+    end
+  end
+  
+  return result
+end
+
+-- Alias for backward compatibility
+MonsterAI.RealTime.getImmediateThreat = MonsterAI.getImmediateThreat
+
 -- Initialize tracking for a monster
 function MonsterAI.Tracker.track(creature)
   if not creature or creature:isDead() then return end
@@ -1273,24 +1350,10 @@ function MonsterAI.updateAll()
 end
 
 -- ============================================================================
--- PUBLIC API: Real-Time Threat Queries
+-- PUBLIC API: Real-Time Threat Queries  
+-- NOTE: getImmediateThreat() is defined earlier (after cleanup function)
+-- for better integration with wave avoidance and prediction queue
 -- ============================================================================
-
--- Get immediate threat level (for quick decision making)
--- Returns: { immediateThreat: bool, totalThreat: number, highThreatCount: number }
-function MonsterAI.getImmediateThreat()
-  if not MonsterAI.RealTime then
-    return { immediateThreat = false, totalThreat = 0, highThreatCount = 0 }
-  end
-  
-  local cache = MonsterAI.RealTime.updateThreatCache()
-  return {
-    immediateThreat = cache.immediateThreat or false,
-    totalThreat = cache.totalThreat or 0,
-    highThreatCount = cache.highThreatMonsters and #cache.highThreatMonsters or 0,
-    monsters = cache.highThreatMonsters or {}
-  }
-end
 
 -- Get prediction accuracy stats
 function MonsterAI.getPredictionStats()
