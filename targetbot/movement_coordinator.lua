@@ -199,6 +199,150 @@ if EventBus then
     removeCreatureFromCache(c)
     debounceUpdate()
   end, 10)
+  
+  -- ============================================================================
+  -- EVENT-DRIVEN INTENT SYSTEM
+  -- React immediately to game events instead of polling
+  -- ============================================================================
+  
+  -- Track current target creature for event-driven chase
+  local currentTargetId = nil
+  local lastTargetMoveTime = 0
+  local targetMoveIntent = nil
+  
+  -- When our target moves, instantly register chase intent
+  EventBus.on("creature:move", function(creature, oldPos)
+    if not creature then return end
+    
+    -- Check if this is our current attack target
+    local attackingCreature = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if not attackingCreature then return end
+    if creature:getId() ~= attackingCreature:getId() then return end
+    
+    -- Target moved! Calculate chase intent immediately
+    local playerPos = player and player:getPosition()
+    local creaturePos = creature:getPosition()
+    if not playerPos or not creaturePos then return end
+    
+    local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
+    
+    -- Only register chase if target is moving away and out of melee range
+    if dist > 1 then
+      -- Confidence values adjusted to pass CHASE threshold (0.60)
+      local confidence = 0.62  -- Base now passes threshold
+      if dist <= 3 then confidence = 0.68 end
+      if dist > 5 then confidence = 0.75 end
+      
+      -- Register chase intent immediately
+      MovementCoordinator.Intent.register(
+        INTENT.CHASE, creaturePos, confidence, "chase_event", {triggered = "creature_move"}
+      )
+      lastTargetMoveTime = now
+    end
+  end, 5)  -- High priority
+  
+  -- When monster appears nearby, check for danger
+  EventBus.on("monster:appear", function(creature)
+    if not creature then return end
+    local playerPos = player and player:getPosition()
+    local creaturePos = creature:getPosition()
+    if not playerPos or not creaturePos then return end
+    
+    local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
+    
+    -- If monster appeared very close, may need reposition
+    if dist <= 2 then
+      -- Trigger reposition check (low confidence, just a hint)
+      MovementCoordinator.Intent.register(
+        INTENT.REPOSITION, playerPos, 0.4, "monster_appear_reposition", {triggered = "monster_appear"}
+      )
+    end
+  end, 15)
+  
+  -- When monster health changes to low, register finish kill intent
+  EventBus.on("monster:health", function(creature, percent)
+    if not creature or not percent then return end
+    
+    -- Check if this is our target
+    local attackingCreature = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if not attackingCreature then return end
+    if creature:getId() ~= attackingCreature:getId() then return end
+    
+    local creaturePos = creature:getPosition()
+    local playerPos = player and player:getPosition()
+    if not creaturePos or not playerPos then return end
+    
+    local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
+    
+    -- Low HP target that moved away - high priority finish
+    if percent < 20 and dist > 1 then
+      local confidence = 0.70
+      if percent < 10 then confidence = 0.85 end
+      
+      MovementCoordinator.Intent.register(
+        INTENT.FINISH_KILL, creaturePos, confidence, "finish_kill_event", {triggered = "health_change", hp = percent}
+      )
+    end
+  end, 8)
+  
+  -- When player takes damage, consider emergency escape
+  EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
+    if not health or not maxHealth then return end
+    local percent = (health / maxHealth) * 100
+    local oldPercent = oldHealth and oldMax and ((oldHealth / oldMax) * 100) or 100
+    
+    -- Check if we took significant damage
+    local damageTaken = oldPercent - percent
+    if damageTaken >= 10 and percent < 40 then
+      -- Emergency! Find escape direction (opposite of closest monster)
+      local playerPos = player and player:getPosition()
+      if not playerPos then return end
+      
+      -- Simple escape: find walkable tile away from center of nearby monsters
+      local monsterCenterX, monsterCenterY = 0, 0
+      local monsterCount = 0
+      for id, c in pairs(MovementCoordinator.MonsterCache.monsters) do
+        if c and not c:isDead() then
+          local pos = c:getPosition()
+          if pos then
+            monsterCenterX = monsterCenterX + pos.x
+            monsterCenterY = monsterCenterY + pos.y
+            monsterCount = monsterCount + 1
+          end
+        end
+      end
+      
+      if monsterCount > 0 then
+        monsterCenterX = monsterCenterX / monsterCount
+        monsterCenterY = monsterCenterY / monsterCount
+        
+        -- Move away from monster center
+        local escapeX = playerPos.x + (playerPos.x > monsterCenterX and 1 or -1)
+        local escapeY = playerPos.y + (playerPos.y > monsterCenterY and 1 or -1)
+        local escapePos = {x = escapeX, y = escapeY, z = playerPos.z}
+        
+        local confidence = 0.5 + (40 - percent) / 100  -- Higher confidence at lower HP
+        MovementCoordinator.Intent.register(
+          INTENT.EMERGENCY_ESCAPE, escapePos, confidence, "emergency_event", {triggered = "damage", hp = percent}
+        )
+      end
+    end
+  end, 5)  -- High priority
+  
+  -- Clear stale intents when combat ends
+  EventBus.on("targetbot/combat_end", function()
+    MovementCoordinator.Intent.clear()
+  end, 20)
+  
+  -- Clear chase intents when target dies
+  EventBus.on("monster:disappear", function(creature)
+    if not creature then return end
+    local attackingCreature = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if attackingCreature and creature:getId() == attackingCreature:getId() then
+      -- Target died, clear movement intents
+      MovementCoordinator.Intent.clear()
+    end
+  end, 15)
 end
 
 -- Get current monster count (cached), uses MonsterCache when available
@@ -781,6 +925,15 @@ function MovementCoordinator.Execute.move(decision)
     if TargetBot and TargetBot.walkTo then
       success = TargetBot.walkTo(targetPos, 2, {ignoreNonPathable = true, precision = 0})
     end
+  elseif intent.type == INTENT.CHASE or intent.type == INTENT.FINISH_KILL then
+    -- CHASE/FINISH_KILL: Native chase mode handles this automatically
+    -- When g_game.setChaseMode(1) is set and we're attacking, client chases automatically
+    -- Just ensure chase mode is set and return success
+    if g_game.setChaseMode then
+      g_game.setChaseMode(1) -- ChaseOpponent
+    end
+    -- Native chase mode is now active - client handles chasing the attack target
+    success = true
   else
     -- Standard movement
     if TargetBot and TargetBot.walkTo then

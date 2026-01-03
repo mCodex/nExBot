@@ -36,6 +36,33 @@ end
 MonsterAI.COLLECT_EXTENDED = (MonsterAI.COLLECT_EXTENDED == nil) and true or MonsterAI.COLLECT_EXTENDED
 MonsterAI.DPS_WINDOW = MonsterAI.DPS_WINDOW or 5000 -- ms window for DPS calculation
 
+-- ============================================================================
+-- REAL-TIME EVENT-DRIVEN STATE (O(1) lookups)
+-- ============================================================================
+MonsterAI.RealTime = MonsterAI.RealTime or {
+  -- Direction tracking: id -> {dir, lastChangeTime, consecutiveChanges, turnRate}
+  directions = {},
+  
+  -- Threat level cache: refreshed on every direction/position change
+  threatCache = {
+    lastUpdate = 0,
+    totalThreat = 0,
+    highThreatMonsters = {},  -- monsters facing player
+    immediateThreat = false   -- true if any monster about to attack
+  },
+  
+  -- Attack prediction queue: sorted by predicted attack time
+  predictedAttacks = {},
+  
+  -- Performance metrics
+  metrics = {
+    eventsProcessed = 0,
+    predictionsCorrect = 0,
+    predictionsMissed = 0,
+    avgPredictionAccuracy = 0
+  }
+}
+
 
 -- ============================================================================
 -- CONSTANTS
@@ -93,6 +120,17 @@ MonsterAI.CONSTANTS = {
   DAMAGE = {
     CORRELATION_RADIUS = 7,        -- Tiles to search for likely source
     CORRELATION_THRESHOLD = 0.4    -- Minimum score to accept attribution
+  },
+  
+  -- Event-driven thresholds
+  EVENT_DRIVEN = {
+    DIRECTION_CHANGE_COOLDOWN = 150,    -- ms between direction change processing
+    TURN_RATE_WINDOW = 2000,            -- ms window for turn rate calculation
+    CONSECUTIVE_TURNS_ALERT = 2,        -- Number of quick turns to trigger alert
+    IMMEDIATE_THREAT_WINDOW = 800,      -- ms before predicted attack to flag immediate
+    THREAT_CACHE_TTL = 100,             -- ms to cache threat calculations
+    ATTACK_PREDICTION_HORIZON = 2000,   -- ms ahead to predict attacks
+    FACING_PLAYER_THRESHOLD = 0.6       -- Confidence threshold for "facing player"
   }
 }
 
@@ -196,6 +234,308 @@ MonsterAI.Tracker = {
     avoidanceFailures = 0
   }
 }
+
+-- ============================================================================
+-- REAL-TIME THREAT ANALYSIS (Event-Driven)
+-- ============================================================================
+
+-- Fast direction change detection (called on creature:move)
+function MonsterAI.RealTime.onDirectionChange(creature, oldDir, newDir)
+  if not creature then return end
+  local id = creature:getId()
+  if not id then return end
+  
+  local nowt = nowMs()
+  local rt = MonsterAI.RealTime.directions[id]
+  
+  if not rt then
+    rt = { dir = newDir, lastChangeTime = nowt, consecutiveChanges = 0, turnRate = 0, positions = {} }
+    MonsterAI.RealTime.directions[id] = rt
+  end
+  
+  -- Calculate turn rate (changes per second)
+  local dt = nowt - (rt.lastChangeTime or nowt)
+  if dt > 0 and dt < CONST.EVENT_DRIVEN.TURN_RATE_WINDOW then
+    rt.turnRate = rt.turnRate * 0.7 + (1000 / dt) * 0.3  -- EWMA
+    rt.consecutiveChanges = rt.consecutiveChanges + 1
+  else
+    rt.consecutiveChanges = 1
+    rt.turnRate = 0
+  end
+  
+  rt.dir = newDir
+  rt.lastChangeTime = nowt
+  
+  -- Check if now facing player (immediate threat signal)
+  local playerPos = player and player:getPosition()
+  local monsterPos = creature:getPosition()
+  if playerPos and monsterPos then
+    local isFacing = MonsterAI.Predictor.isFacingPosition(monsterPos, newDir, playerPos)
+    
+    if isFacing then
+      -- Monster just turned to face player - potential attack incoming
+      rt.facingPlayerSince = nowt
+      
+      -- High turn rate + now facing = high threat
+      if rt.consecutiveChanges >= CONST.EVENT_DRIVEN.CONSECUTIVE_TURNS_ALERT then
+        -- Emit immediate threat event
+        MonsterAI.RealTime.registerImmediateThreat(creature, "direction_lock", 0.75 + rt.turnRate * 0.05)
+      else
+        MonsterAI.RealTime.registerImmediateThreat(creature, "facing", 0.50)
+      end
+    else
+      rt.facingPlayerSince = nil
+    end
+  end
+  
+  MonsterAI.RealTime.metrics.eventsProcessed = (MonsterAI.RealTime.metrics.eventsProcessed or 0) + 1
+end
+
+-- Register an immediate threat from a monster
+function MonsterAI.RealTime.registerImmediateThreat(creature, reason, confidence)
+  if not creature then return end
+  local id = creature:getId()
+  if not id then return end
+  
+  local nowt = nowMs()
+  local pos = creature:getPosition()
+  local dir = creature:getDirection()
+  
+  -- Get learned cooldown for prediction
+  local data = MonsterAI.Tracker.monsters[id]
+  local pattern = MonsterAI.Patterns.get(creature:getName())
+  local cooldown = (data and data.ewmaCooldown) or (pattern and pattern.waveCooldown) or 2000
+  
+  -- Calculate time to attack based on cooldown and last attack
+  local lastAttack = (data and data.lastWaveTime) or (data and data.lastAttackTime) or 0
+  local elapsed = nowt - lastAttack
+  local timeToAttack = math.max(0, cooldown - elapsed)
+  
+  -- If cooldown is almost up and facing player, this is very high threat
+  if timeToAttack < CONST.EVENT_DRIVEN.IMMEDIATE_THREAT_WINDOW then
+    confidence = math.min(0.95, confidence + 0.25)
+  end
+  
+  -- Add to prediction queue
+  local prediction = {
+    id = id,
+    creature = creature,
+    pos = pos,
+    dir = dir,
+    reason = reason,
+    confidence = confidence,
+    predictedTime = nowt + timeToAttack,
+    registeredAt = nowt
+  }
+  
+  -- Insert sorted by predicted time
+  local queue = MonsterAI.RealTime.predictedAttacks
+  local inserted = false
+  for i = 1, #queue do
+    if queue[i].predictedTime > prediction.predictedTime then
+      table.insert(queue, i, prediction)
+      inserted = true
+      break
+    end
+  end
+  if not inserted then
+    table.insert(queue, prediction)
+  end
+  
+  -- Cap queue size
+  while #queue > 20 do
+    table.remove(queue)
+  end
+  
+  -- Emit event for immediate avoidance
+  if confidence >= CONST.EVENT_DRIVEN.FACING_PLAYER_THRESHOLD and EventBus then
+    pcall(function()
+      EventBus.emit("monsterai/threat_detected", creature, {
+        reason = reason,
+        confidence = confidence,
+        timeToAttack = timeToAttack,
+        pos = pos,
+        dir = dir
+      })
+    end)
+    
+    -- Also register intent with MovementCoordinator if high confidence
+    if confidence >= 0.65 and MovementCoordinator and MovementCoordinator.Intent then
+      local playerPos = player and player:getPosition()
+      if playerPos and pos then
+        -- Find safe tile away from attack arc
+        local safeTile = MonsterAI.RealTime.findSafeTileFromArc(playerPos, pos, dir, pattern)
+        if safeTile then
+          MovementCoordinator.Intent.register(
+            MovementCoordinator.CONSTANTS.INTENT.WAVE_AVOIDANCE,
+            safeTile,
+            confidence,
+            "MonsterAI.RealTime",
+            { reason = reason, timeToAttack = timeToAttack, source = id }
+          )
+        end
+      end
+    end
+  end
+end
+
+-- Find safe tile outside of monster's attack arc
+function MonsterAI.RealTime.findSafeTileFromArc(playerPos, monsterPos, monsterDir, pattern)
+  if not playerPos or not monsterPos then return nil end
+  
+  local range = (pattern and pattern.waveRange) or 5
+  local width = (pattern and pattern.waveWidth) or 1
+  
+  -- Direction vectors
+  local dirVecs = {
+    [0] = {x=0, y=-1}, [1] = {x=1, y=-1}, [2] = {x=1, y=0}, [3] = {x=1, y=1},
+    [4] = {x=0, y=1}, [5] = {x=-1, y=1}, [6] = {x=-1, y=0}, [7] = {x=-1, y=-1}
+  }
+  
+  local dirVec = dirVecs[monsterDir] or {x=0, y=0}
+  
+  -- Get perpendicular directions (safe directions)
+  local perpX, perpY = -dirVec.y, dirVec.x
+  
+  local candidates = {}
+  -- Check tiles perpendicular to attack direction
+  for dist = 1, 2 do
+    for _, mult in ipairs({1, -1}) do
+      local tile = {
+        x = playerPos.x + perpX * dist * mult,
+        y = playerPos.y + perpY * dist * mult,
+        z = playerPos.z
+      }
+      
+      -- Verify not in attack arc
+      if not MonsterAI.Predictor.isPositionInWavePath(tile, monsterPos, monsterDir, range, width) then
+        -- Check walkability
+        local walkable = true
+        if g_map and g_map.isTileWalkable then
+          local ok, result = pcall(g_map.isTileWalkable, tile)
+          walkable = ok and result
+        elseif g_map and g_map.getTile then
+          local ok, mapTile = pcall(g_map.getTile, tile)
+          walkable = ok and mapTile and mapTile:isWalkable()
+        end
+        
+        if walkable then
+          -- Score by distance from monster (further = safer)
+          local distFromMonster = math.abs(tile.x - monsterPos.x) + math.abs(tile.y - monsterPos.y)
+          table.insert(candidates, { pos = tile, score = distFromMonster })
+        end
+      end
+    end
+  end
+  
+  -- Also try diagonal escapes
+  for dx = -1, 1 do
+    for dy = -1, 1 do
+      if dx ~= 0 or dy ~= 0 then
+        local tile = { x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z }
+        if not MonsterAI.Predictor.isPositionInWavePath(tile, monsterPos, monsterDir, range, width) then
+          local walkable = true
+          if g_map and g_map.getTile then
+            local ok, mapTile = pcall(g_map.getTile, tile)
+            walkable = ok and mapTile and mapTile:isWalkable()
+          end
+          if walkable then
+            local distFromMonster = math.abs(tile.x - monsterPos.x) + math.abs(tile.y - monsterPos.y)
+            table.insert(candidates, { pos = tile, score = distFromMonster + 0.5 })  -- Slight penalty vs perpendicular
+          end
+        end
+      end
+    end
+  end
+  
+  -- Sort by score (higher = better)
+  table.sort(candidates, function(a, b) return a.score > b.score end)
+  
+  return candidates[1] and candidates[1].pos or nil
+end
+
+-- Update threat cache (called periodically or on significant events)
+function MonsterAI.RealTime.updateThreatCache()
+  local nowt = nowMs()
+  local cache = MonsterAI.RealTime.threatCache
+  
+  -- Skip if recently updated
+  if (nowt - cache.lastUpdate) < CONST.EVENT_DRIVEN.THREAT_CACHE_TTL then
+    return cache
+  end
+  
+  local playerPos = player and player:getPosition()
+  if not playerPos then return cache end
+  
+  cache.totalThreat = 0
+  cache.highThreatMonsters = {}
+  cache.immediateThreat = false
+  
+  -- Check all tracked directions for monsters facing player
+  for id, rt in pairs(MonsterAI.RealTime.directions) do
+    local data = MonsterAI.Tracker.monsters[id]
+    if data and data.creature and not data.creature:isDead() then
+      local monsterPos = data.creature:getPosition()
+      if monsterPos and monsterPos.z == playerPos.z then
+        local dist = math.max(math.abs(monsterPos.x - playerPos.x), math.abs(monsterPos.y - playerPos.y))
+        
+        if dist <= 7 then  -- Within threat range
+          local isFacing = MonsterAI.Predictor.isFacingPosition(monsterPos, rt.dir, playerPos)
+          if isFacing then
+            local pattern = MonsterAI.Patterns.get(data.name or "")
+            local cooldown = data.ewmaCooldown or (pattern and pattern.waveCooldown) or 2000
+            local lastAttack = data.lastWaveTime or data.lastAttackTime or 0
+            local elapsed = nowt - lastAttack
+            local timeToAttack = math.max(0, cooldown - elapsed)
+            
+            local threat = {
+              id = id,
+              creature = data.creature,
+              timeToAttack = timeToAttack,
+              confidence = data.confidence or 0.5,
+              turnRate = rt.turnRate or 0
+            }
+            
+            table.insert(cache.highThreatMonsters, threat)
+            
+            if timeToAttack < CONST.EVENT_DRIVEN.IMMEDIATE_THREAT_WINDOW then
+              cache.immediateThreat = true
+              cache.totalThreat = cache.totalThreat + 1.5
+            else
+              cache.totalThreat = cache.totalThreat + 0.5
+            end
+          end
+        end
+      end
+    end
+  end
+  
+  cache.lastUpdate = nowt
+  return cache
+end
+
+-- Clean up stale direction tracking
+function MonsterAI.RealTime.cleanup()
+  local nowt = nowMs()
+  local staleThreshold = 10000  -- 10 seconds
+  
+  for id, rt in pairs(MonsterAI.RealTime.directions) do
+    if (nowt - (rt.lastChangeTime or 0)) > staleThreshold then
+      MonsterAI.RealTime.directions[id] = nil
+    end
+  end
+  
+  -- Clean prediction queue
+  local queue = MonsterAI.RealTime.predictedAttacks
+  local i = 1
+  while i <= #queue do
+    if (nowt - queue[i].registeredAt) > 5000 then
+      table.remove(queue, i)
+    else
+      i = i + 1
+    end
+  end
+end
 
 -- Initialize tracking for a monster
 function MonsterAI.Tracker.track(creature)
@@ -645,26 +985,101 @@ function MonsterAI.Confidence.getCategory(confidence)
 end
 
 -- ============================================================================
--- EVENTBUS INTEGRATION
+-- EVENTBUS INTEGRATION (Enhanced for Real-Time Threat Detection)
 -- ============================================================================
 
 if EventBus then
   -- Track monsters when they appear
   EventBus.on("monster:appear", function(creature)
     MonsterAI.Tracker.track(creature)
-  end, 30)
+    
+    -- Initialize direction tracking immediately
+    if creature and creature:getId() then
+      local id = creature:getId()
+      local dir = creature:getDirection()
+      MonsterAI.RealTime.directions[id] = {
+        dir = dir,
+        lastChangeTime = nowMs(),
+        consecutiveChanges = 0,
+        turnRate = 0
+      }
+      
+      -- Check if already facing player (instant threat check)
+      local playerPos = player and player:getPosition()
+      local monsterPos = creature:getPosition()
+      if playerPos and monsterPos then
+        local dist = math.max(math.abs(monsterPos.x - playerPos.x), math.abs(monsterPos.y - playerPos.y))
+        if dist <= 5 then
+          local isFacing = MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition
+            and MonsterAI.Predictor.isFacingPosition(monsterPos, dir, playerPos)
+          if isFacing then
+            MonsterAI.RealTime.registerImmediateThreat(creature, "spawn_facing", 0.55)
+          end
+        end
+      end
+    end
+  end, 35)  -- Higher priority for faster registration
   
   -- Untrack monsters when they disappear
   EventBus.on("monster:disappear", function(creature)
     if creature then
-      MonsterAI.Tracker.untrack(creature:getId())
+      local id = creature:getId()
+      if id then
+        MonsterAI.Tracker.untrack(id)
+        MonsterAI.RealTime.directions[id] = nil
+        
+        -- Remove from prediction queue
+        local queue = MonsterAI.RealTime.predictedAttacks
+        for i = #queue, 1, -1 do
+          if queue[i].id == id then
+            table.remove(queue, i)
+          end
+        end
+      end
     end
-  end, 30)
+  end, 35)
+  
+  -- CRITICAL: Direction change detection (primary wave anticipation)
+  EventBus.on("creature:move", function(creature, oldPos)
+    if not creature or not creature:isMonster() then return end
+    
+    local id = creature:getId()
+    if not id then return end
+    
+    local newDir = creature:getDirection()
+    local rt = MonsterAI.RealTime.directions[id]
+    local oldDir = rt and rt.dir or newDir
+    
+    -- Direction changed - this is a key attack indicator
+    if oldDir ~= newDir then
+      MonsterAI.RealTime.onDirectionChange(creature, oldDir, newDir)
+    else
+      -- Position changed but direction same - update position tracking
+      if rt then
+        rt.positions = rt.positions or {}
+        table.insert(rt.positions, { pos = creature:getPosition(), time = nowMs() })
+        -- Keep last 10 positions
+        while #rt.positions > 10 do table.remove(rt.positions, 1) end
+      end
+    end
+    
+    -- Also update the general tracker
+    MonsterAI.Tracker.update(creature)
+  end, 40)  -- High priority for instant response
   
   -- Update tracking on monster health change (potential attack indicator)
   EventBus.on("monster:health", function(creature, percent)
     if creature then
       MonsterAI.Tracker.update(creature)
+      
+      -- Health change often indicates monster is active/attacking
+      local id = creature:getId()
+      if id then
+        local data = MonsterAI.Tracker.monsters[id]
+        if data then
+          data.lastActivityTime = nowMs()
+        end
+      end
     end
   end, 30)
   
@@ -785,7 +1200,7 @@ if EventBus then
 end
 
 -- ============================================================================
--- PERIODIC UPDATE (for monsters not triggering events)
+-- PERIODIC UPDATE (Enhanced with RealTime threat processing)
 -- ============================================================================
 
 -- Update all tracked monsters periodically
@@ -806,9 +1221,6 @@ function MonsterAI.updateAll()
     return
   end
 
-  -- telemetry
-
-
   local processed = 0
   for i = 1, #creatures do
     local creature = creatures[i]
@@ -821,9 +1233,137 @@ function MonsterAI.updateAll()
     end
   end
 
+  -- Update RealTime threat cache and cleanup stale entries
+  if MonsterAI.RealTime then
+    pcall(function() MonsterAI.RealTime.updateThreatCache() end)
+    pcall(function() MonsterAI.RealTime.cleanup() end)
+    
+    -- Process prediction queue - emit warnings for imminent attacks
+    local nowt = nowMs()
+    local queue = MonsterAI.RealTime.predictedAttacks
+    for i = #queue, 1, -1 do
+      local pred = queue[i]
+      local timeToAttack = (pred.predictedTime or 0) - nowt
+      
+      -- Imminent attack warning (within 300ms)
+      if timeToAttack > 0 and timeToAttack < 300 and pred.confidence >= 0.6 then
+        if EventBus then
+          pcall(function()
+            EventBus.emit("monsterai/imminent_attack", pred.creature, {
+              timeToAttack = timeToAttack,
+              confidence = pred.confidence,
+              pos = pred.pos,
+              dir = pred.dir
+            })
+          end)
+        end
+        table.remove(queue, i)
+      elseif timeToAttack < -1000 then
+        -- Attack should have happened, remove stale prediction
+        -- Check if it was a miss (no damage recorded)
+        if MonsterAI.RealTime.metrics then
+          MonsterAI.RealTime.metrics.predictionsMissed = (MonsterAI.RealTime.metrics.predictionsMissed or 0) + 1
+        end
+        table.remove(queue, i)
+      end
+    end
+  end
 
-  MonsterAI.lastUpdate = now or os.time() * 1000
-  MonsterAI.lastUpdate = now or os.time() * 1000
+  MonsterAI.lastUpdate = nowMs()
+end
+
+-- ============================================================================
+-- PUBLIC API: Real-Time Threat Queries
+-- ============================================================================
+
+-- Get immediate threat level (for quick decision making)
+-- Returns: { immediateThreat: bool, totalThreat: number, highThreatCount: number }
+function MonsterAI.getImmediateThreat()
+  if not MonsterAI.RealTime then
+    return { immediateThreat = false, totalThreat = 0, highThreatCount = 0 }
+  end
+  
+  local cache = MonsterAI.RealTime.updateThreatCache()
+  return {
+    immediateThreat = cache.immediateThreat or false,
+    totalThreat = cache.totalThreat or 0,
+    highThreatCount = cache.highThreatMonsters and #cache.highThreatMonsters or 0,
+    monsters = cache.highThreatMonsters or {}
+  }
+end
+
+-- Get prediction accuracy stats
+function MonsterAI.getPredictionStats()
+  local stats = {
+    eventsProcessed = 0,
+    predictionsCorrect = 0,
+    predictionsMissed = 0,
+    accuracy = 0
+  }
+  
+  if MonsterAI.RealTime and MonsterAI.RealTime.metrics then
+    local m = MonsterAI.RealTime.metrics
+    stats.eventsProcessed = m.eventsProcessed or 0
+    stats.predictionsCorrect = m.predictionsCorrect or 0
+    stats.predictionsMissed = m.predictionsMissed or 0
+    
+    local total = stats.predictionsCorrect + stats.predictionsMissed
+    if total > 0 then
+      stats.accuracy = stats.predictionsCorrect / total
+    end
+  end
+  
+  -- Also include WavePredictor stats if available
+  if WavePredictor and WavePredictor.getStats then
+    local wpStats = WavePredictor.getStats()
+    stats.wavePredictor = wpStats
+  end
+  
+  return stats
+end
+
+-- Check if a specific position is currently dangerous
+function MonsterAI.isPositionDangerous(pos)
+  if not pos then return false, 0 end
+  
+  local playerPos = player and player:getPosition()
+  if not playerPos or pos.z ~= playerPos.z then return false, 0 end
+  
+  local totalDanger = 0
+  local monstersChecked = 0
+  
+  for id, rt in pairs(MonsterAI.RealTime.directions or {}) do
+    local data = MonsterAI.Tracker.monsters[id]
+    if data and data.creature and not data.creature:isDead() then
+      local monsterPos = data.creature:getPosition()
+      if monsterPos and monsterPos.z == pos.z then
+        local pattern = MonsterAI.Patterns.get(data.name or "")
+        local inPath = MonsterAI.Predictor.isPositionInWavePath(
+          pos, monsterPos, rt.dir, pattern.waveRange, pattern.waveWidth
+        )
+        
+        if inPath then
+          -- Calculate threat based on cooldown timing
+          local cooldown = data.ewmaCooldown or (pattern.waveCooldown or 2000)
+          local elapsed = nowMs() - (data.lastWaveTime or data.lastAttackTime or 0)
+          local timeToAttack = math.max(0, cooldown - elapsed)
+          
+          -- Closer to attack = more danger
+          local urgency = 1 - math.min(1, timeToAttack / 2000)
+          local danger = urgency * (data.confidence or 0.5)
+          
+          -- Boost if monster is facing this position
+          local isFacing = rt.facingPlayerSince and (nowMs() - rt.facingPlayerSince) < 2000
+          if isFacing then danger = danger * 1.5 end
+          
+          totalDanger = totalDanger + danger
+          monstersChecked = monstersChecked + 1
+        end
+      end
+    end
+  end
+  
+  return totalDanger > 0.5, totalDanger
 end
 
 -- Export for external use
@@ -834,8 +1374,9 @@ nExBot.MonsterAI = MonsterAI
 -- You can disable via: MonsterAI.COLLECT_ENABLED = false
 MonsterAI.COLLECT_ENABLED = (MonsterAI.COLLECT_ENABLED == nil) and true or MonsterAI.COLLECT_ENABLED
 
--- Periodic background updater that populates tracker info even if TargetBot isn't actively running
-macro(2000, function()
+-- Periodic background updater - now faster (500ms) for better responsiveness
+-- The updateAll function is optimized and event-driven tracking handles most work
+macro(500, function()
   if MonsterAI.COLLECT_ENABLED and MonsterAI.updateAll then
     pcall(function() MonsterAI.updateAll() end)
   end
@@ -844,4 +1385,4 @@ end)
 -- Toggle to enable debug prints
 MonsterAI.DEBUG = MonsterAI.DEBUG or false
 local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
-if MonsterAI.DEBUG then print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded; automatic collection=%s" .. tostring(MonsterAI.COLLECT_ENABLED)) end
+if MonsterAI.DEBUG then print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded; automatic collection=" .. tostring(MonsterAI.COLLECT_ENABLED)) end

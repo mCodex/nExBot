@@ -472,6 +472,32 @@ local function focusWaypointBefore(targetChild, targetIndex)
   end
 end
 
+-- Find closest waypoint by distance only (no pathfinding - very fast)
+local function findClosestWaypointByDistance(playerPos, maxDist)
+  if not playerPos then return nil, nil end
+  buildWaypointCache()
+  
+  local bestChild, bestIndex, bestDist = nil, nil, maxDist + 1
+  local px, py, pz = playerPos.x, playerPos.y, playerPos.z
+  
+  for i, wp in pairs(waypointPositionCache) do
+    -- Same floor only for simplicity
+    if wp.z == pz then
+      local dx = math.abs(wp.x - px)
+      local dy = math.abs(wp.y - py)
+      local dist = math.max(dx, dy)  -- Chebyshev distance
+      
+      if dist < bestDist and dist <= maxDist then
+        bestDist = dist
+        bestChild = wp.child
+        bestIndex = i
+      end
+    end
+  end
+  
+  return bestChild, bestIndex
+end
+
 local function executeRecovery()
   local attempt = WaypointEngine.recoveryAttempt
   local playerPos = player:getPosition()
@@ -687,32 +713,6 @@ end
 -- ============================================================================
 -- SIMPLE WAYPOINT FINDER (Lightweight, no heavy pathfinding)
 -- ============================================================================
-
--- Find closest waypoint by distance only (no pathfinding - very fast)
-local function findClosestWaypointByDistance(playerPos, maxDist)
-  if not playerPos then return nil, nil end
-  buildWaypointCache()
-  
-  local bestChild, bestIndex, bestDist = nil, nil, maxDist + 1
-  local px, py, pz = playerPos.x, playerPos.y, playerPos.z
-  
-  for i, wp in pairs(waypointPositionCache) do
-    -- Same floor only for simplicity
-    if wp.z == pz then
-      local dx = math.abs(wp.x - px)
-      local dy = math.abs(wp.y - py)
-      local dist = math.max(dx, dy)  -- Chebyshev distance
-      
-      if dist < bestDist and dist <= maxDist then
-        bestDist = dist
-        bestChild = wp.child
-        bestIndex = i
-      end
-    end
-  end
-  
-  return bestChild, bestIndex
-end
 
 -- Simple candidate collection (no pre-allocation needed for small lists)
 local function collectWaypointCandidates(playerPos, maxDist, options)

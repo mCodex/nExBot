@@ -192,6 +192,41 @@ local function buildSummary()
   local lines = {}
   local stats = (MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.stats) or { waveAttacksObserved = 0, areaAttacksObserved = 0, totalDamageReceived = 0 }
   table.insert(lines, string.format("Stats: Damage=%s  Waves=%s  Area=%s", stats.totalDamageReceived or 0, stats.waveAttacksObserved or 0, stats.areaAttacksObserved or 0))
+  
+  -- Real-time prediction stats
+  if MonsterAI and MonsterAI.getPredictionStats then
+    local predStats = MonsterAI.getPredictionStats()
+    table.insert(lines, string.format("Predictions: Events=%d  Correct=%d  Missed=%d  Accuracy=%.1f%%",
+      predStats.eventsProcessed or 0,
+      predStats.predictionsCorrect or 0,
+      predStats.predictionsMissed or 0,
+      (predStats.accuracy or 0) * 100
+    ))
+    
+    -- WavePredictor stats if available
+    if predStats.wavePredictor then
+      local wp = predStats.wavePredictor
+      table.insert(lines, string.format("WavePredictor: Total=%d  Correct=%d  FalsePos=%d  Acc=%.1f%%",
+        wp.total or 0,
+        wp.correct or 0,
+        wp.falsePositive or 0,
+        (wp.accuracy or 0) * 100
+      ))
+    end
+  end
+  
+  -- Real-time threat status
+  if MonsterAI and MonsterAI.getImmediateThreat then
+    local threat = MonsterAI.getImmediateThreat()
+    local threatStatus = threat.immediateThreat and "DANGER!" or "Safe"
+    table.insert(lines, string.format("Threat: %s  Level=%.1f  HighThreat=%d",
+      threatStatus,
+      threat.totalThreat or 0,
+      threat.highThreatCount or 0
+    ))
+  end
+  
+  table.insert(lines, "")
   table.insert(lines, "Patterns:")
   local patterns = storage.monsterPatterns or {}
 
@@ -205,8 +240,8 @@ local function buildSummary()
       table.insert(lines, "  None")
     else
       table.insert(lines, string.format("  (Live tracking: %d monsters)", liveCount))
-      -- Header (columns)
-      table.insert(lines, string.format("  %-18s %6s %5s %6s %6s %7s %6s", "name","samps","conf","cd","dps","missiles","spd"))
+      -- Header (columns) - added facing column
+      table.insert(lines, string.format("  %-18s %6s %5s %6s %6s %7s %6s %6s", "name","samps","conf","cd","dps","missiles","spd","facing"))
 
       -- show up to 20 tracked monsters sorted by confidence (descending)
       local tbl = {}
@@ -215,7 +250,13 @@ local function buildSummary()
         local samples = d.samples and #d.samples or 0
         local conf = d.confidence or 0
         local cooldown = d.ewmaCooldown or d.predictedWaveCooldown or "-"
-        table.insert(tbl, { id = id, name = name, samples = samples, conf = conf, cooldown = cooldown })
+        -- Check if facing player from RealTime data
+        local facing = false
+        if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.directions[id] then
+          local rt = MonsterAI.RealTime.directions[id]
+          facing = rt.facingPlayerSince ~= nil
+        end
+        table.insert(tbl, { id = id, name = name, samples = samples, conf = conf, cooldown = cooldown, facing = facing })
       end
       table.sort(tbl, function(a, b) return (a.conf or 0) > (b.conf or 0) end)
       for i = 1, math.min(#tbl, 20) do
@@ -226,7 +267,8 @@ local function buildSummary()
         local dps = MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.getDPS and MonsterAI.Tracker.getDPS(e.id) or 0
         local missiles = d.missileCount or 0
         local spd = d.avgSpeed or 0
-        table.insert(lines, string.format("  %-18s %6d %5s %6s %6.2f %7d %6.2f", e.name, e.samples, confs, cd, (dps or 0), missiles, spd))
+        local facingStr = e.facing and "YES" or "no"
+        table.insert(lines, string.format("  %-18s %6d %5s %6s %6.2f %7d %6.2f %6s", e.name, e.samples, confs, cd, (dps or 0), missiles, spd, facingStr))
       end
       table.insert(lines, "  (Note: live tracker data and patterns persist after observed attacks)")
     end

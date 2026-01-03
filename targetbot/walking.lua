@@ -97,11 +97,46 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
   maxDist = _maxDist
   params = _params or {}
   
+  -- Don't interfere with native chase mode
+  -- When chase mode is 1 (ChaseOpponent), the client handles chasing automatically
+  if g_game.getChaseMode and g_game.getChaseMode() == 1 then
+    -- Native chase is active - check if we're attacking
+    local attackTarget = g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if attackTarget then
+      -- Native chase is handling movement to attack target, skip custom pathfinding
+      dest = nil
+      return
+    end
+  end
+  
   -- Cancel native follow when using custom pathfinding (prevents conflicts)
+  -- BUT preserve follow for player following feature
   if g_game.cancelFollow and g_game.getFollowingCreature then
     local currentFollow = g_game.getFollowingCreature()
     if currentFollow then
-      g_game.cancelFollow()
+      local shouldKeepFollow = false
+      
+      -- Check if following a player with "Follow While Attacking" enabled
+      if currentFollow:isPlayer() and not currentFollow:isLocalPlayer() then
+        if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+          local followConfig = CharacterDB.get("tools.followPlayer")
+          if followConfig and followConfig.enabled and followConfig.followWhileAttacking then
+            local targetName = followConfig.playerName and followConfig.playerName:trim():lower() or ""
+            local followName = currentFollow:getName():lower()
+            if targetName ~= "" and (followName == targetName or followName:find(targetName, 1, true)) then
+              shouldKeepFollow = true
+            end
+          end
+        end
+      end
+      
+      if not shouldKeepFollow then
+        g_game.cancelFollow()
+      else
+        -- Following a player, skip custom pathfinding
+        dest = nil
+        return
+      end
     end
   end
   

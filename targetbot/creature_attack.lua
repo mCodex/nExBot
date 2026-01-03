@@ -163,10 +163,11 @@ end
 
 -- Pure function: Score a position's danger level
 -- Returns detailed danger analysis for better decision making
+-- Enhanced with MonsterAI.RealTime metrics for high-accuracy threat assessment
 -- @param pos: position to check
 -- @param monsters: array of monster creatures
 -- @param usePrediction: when true, consult MonsterAI predictions (only enabled for rePosition)
--- @return table {totalDanger, waveThreats, meleeThreats, details}
+-- @return table {totalDanger, waveThreats, meleeThreats, details, realTimeMetrics}
 local function analyzePositionDanger(pos, monsters, usePrediction)
   -- Prefer TargetCore if available
   if Core and Core.calculatePositionDanger then
@@ -177,8 +178,31 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
     -- Wrap scalar danger value into expected table shape
     return { totalDanger = danger or 0, waveThreats = 0, meleeThreats = 0, details = {} }
   end
-  local result = { totalDanger = 0, waveThreats = 0, meleeThreats = 0, details = {} }
+  
+  local result = { 
+    totalDanger = 0, 
+    waveThreats = 0, 
+    meleeThreats = 0, 
+    details = {},
+    -- New: RealTime metrics summary
+    realTimeMetrics = {
+      monstersFacingPos = 0,
+      highTurnRateMonsters = 0,
+      imminentAttacks = 0,
+      avgPredictionConfidence = 0
+    }
+  }
+  
   local predCache = {}
+  local totalConfidence = 0
+  local confCount = 0
+  
+  -- Query MonsterAI.RealTime threat cache for fast O(1) threat assessment
+  local rtThreatCache = nil
+  if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.threatCache then
+    rtThreatCache = MonsterAI.RealTime.threatCache
+  end
+  
   for i = 1, #monsters do
     local monster = monsters[i]
     if monster and not monster:isDead() then
@@ -186,10 +210,57 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
       local mdir = monster:getDirection()
       local dist = math.max(math.abs(pos.x - mpos.x), math.abs(pos.y - mpos.y))
       local threat = { monster = monster, distance = dist, inWaveArc = false, arcDistance = 99 }
+      
+      local monsterId = monster:getId()
+      
+      -- ═══════════════════════════════════════════════════════════════════════
+      -- NEW: MonsterAI.RealTime Integration
+      -- Use direction tracking, turn rate, and facing detection for better accuracy
+      -- ═══════════════════════════════════════════════════════════════════════
+      local rtData = nil
+      if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.directions then
+        rtData = MonsterAI.RealTime.directions[monsterId]
+      end
+      
+      if rtData then
+        -- Check if monster is facing this position
+        local isFacing = false
+        if MonsterAI and MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition then
+          isFacing = MonsterAI.Predictor.isFacingPosition(mpos, mdir, pos)
+        end
+        
+        if isFacing then
+          result.realTimeMetrics.monstersFacingPos = result.realTimeMetrics.monstersFacingPos + 1
+          
+          -- High turn rate = monster actively tracking player = higher threat
+          local turnRate = rtData.turnRate or 0
+          if turnRate > 0.5 then
+            result.realTimeMetrics.highTurnRateMonsters = result.realTimeMetrics.highTurnRateMonsters + 1
+            -- Add extra danger for high turn rate (actively tracking)
+            result.totalDanger = result.totalDanger + turnRate * 1.5
+          end
+          
+          -- Check how long monster has been facing this direction
+          local facingDuration = 0
+          if rtData.facingPlayerSince then
+            facingDuration = (now or 0) - rtData.facingPlayerSince
+          end
+          
+          -- Long facing duration + in position = imminent attack
+          if facingDuration > 300 then
+            result.totalDanger = result.totalDanger + math.min(2, facingDuration / 500)
+          end
+        end
+        
+        -- Check consecutive direction changes (erratic = about to attack)
+        if rtData.consecutiveChanges and rtData.consecutiveChanges >= 2 then
+          result.totalDanger = result.totalDanger + rtData.consecutiveChanges * 0.5
+        end
+      end
 
       -- If prediction mode is active (only used by rePosition and our avoidance integration), prefer learned predictions
       if usePrediction and MonsterAI and MonsterAI.Predictor then
-        local pid = monster:getId()
+        local pid = monsterId
         local pattern = MonsterAI.Patterns.get(monster:getName())
         local isPred, confidence, timeToAttack = nil, nil, nil
         if predCache[pid] then
@@ -198,6 +269,29 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
           local ok, p, c, tta = pcall(function() return MonsterAI.Predictor.predictWaveAttack(monster) end)
           if ok then isPred, confidence, timeToAttack = p, c, tta else isPred, confidence, timeToAttack = false, 0, 999999 end
           predCache[pid] = { isPred = isPred, conf = confidence, tta = timeToAttack }
+        end
+        
+        -- Track confidence for averaging
+        if confidence then
+          totalConfidence = totalConfidence + confidence
+          confCount = confCount + 1
+        end
+        
+        -- NEW: Use learned tracker data for better cooldown estimation
+        local trackerData = nil
+        if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+          trackerData = MonsterAI.Tracker.monsters[pid]
+        end
+        
+        -- Override timeToAttack with more accurate tracker estimate if available
+        if trackerData and trackerData.ewmaCooldown and trackerData.ewmaCooldown > 0 then
+          local lastAttack = trackerData.lastWaveTime or trackerData.lastAttackTime or 0
+          local elapsed = (now or 0) - lastAttack
+          local cooldown = trackerData.ewmaCooldown
+          timeToAttack = math.max(0, cooldown - elapsed)
+          
+          -- Boost confidence if we have learned data
+          confidence = math.max(confidence or 0, trackerData.confidence or 0.5)
         end
 
         local inPredPath = false
@@ -213,6 +307,13 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
           local pdanger = (pattern.dangerLevel or 1) * urgency * (confidence or 1)
           -- Add a baseline predicted danger scaled by confidence to make avoidance decisive
           pdanger = pdanger + AVOID_PREDICT_DANGER * (confidence or 1)
+          
+          -- NEW: Boost danger if RealTime shows imminent attack
+          if timeToAttack < 800 then
+            result.realTimeMetrics.imminentAttacks = result.realTimeMetrics.imminentAttacks + 1
+            pdanger = pdanger * 1.3  -- 30% boost for imminent attacks
+          end
+          
           threat.inWaveArc = true
           threat.arcDistance = 0
           threat.predicted = true
@@ -242,6 +343,21 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
       result.details[#result.details + 1] = threat
     end
   end
+  
+  -- Calculate average prediction confidence
+  if confCount > 0 then
+    result.realTimeMetrics.avgPredictionConfidence = totalConfidence / confCount
+  end
+  
+  -- NEW: Query MonsterAI.isPositionDangerous for additional validation
+  if usePrediction and MonsterAI and MonsterAI.isPositionDangerous then
+    local isDangerous, dangerLevel = MonsterAI.isPositionDangerous(pos)
+    if isDangerous then
+      -- Blend MonsterAI danger assessment (it considers all direction tracking)
+      result.totalDanger = result.totalDanger + dangerLevel * 2
+    end
+  end
+  
   return result
 end
 
@@ -255,7 +371,7 @@ local function isDangerousPosition(pos, monsters)
 end
 
 -- Pure function: Find the safest adjacent tile with improved scoring
--- Uses multi-factor scoring: danger, target distance, escape routes, stability
+-- Enhanced with MonsterAI.RealTime metrics for smarter avoidance
 -- @param playerPos: current player position
 -- @param monsters: array of monsters
 -- @param currentTarget: current attack target (to maintain range)
@@ -271,6 +387,19 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
   -- Dynamic danger threshold based on monster count
   local dynamicDangerThreshold = avoidanceState.baseDangerThreshold * scaling.dangerThresholdMultiplier
   
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NEW: Check MonsterAI.RealTime for immediate threats
+  -- Lower threshold if under immediate threat for faster reaction
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local immediateThreat = false
+  if MonsterAI and MonsterAI.getImmediateThreat then
+    local threatData = MonsterAI.getImmediateThreat()
+    immediateThreat = threatData.immediateThreat or false
+    if immediateThreat then
+      dynamicDangerThreshold = dynamicDangerThreshold * 0.5  -- Lower threshold
+    end
+  end
+  
   -- Prefer Core's safest tile search if available
   if Core and Core.findSafestTile then
     local coreRes = Core.findSafestTile(playerPos, monsters, currentTarget)
@@ -278,22 +407,47 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
       return coreRes.pos, coreRes.score or 0
     end
   end
+  
   -- When many monsters (7+), any danger is concerning
-  if currentAnalysis.totalDanger < dynamicDangerThreshold then
+  -- Skip threshold check if under immediate threat
+  if not immediateThreat and currentAnalysis.totalDanger < dynamicDangerThreshold then
     return nil, 0
   end
   
-  -- Score weights for decision making (SRP: separated concerns)
-  -- Same weights, but threshold for movement is dynamic
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NEW: Get threat directions for perpendicular escape scoring
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local threatDirections = {}
+  if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.directions then
+    for id, rtData in pairs(MonsterAI.RealTime.directions) do
+      if rtData.facingPlayerSince then
+        local dir = rtData.dir
+        if DIR_VECTORS[dir] then
+          threatDirections[#threatDirections + 1] = {
+            vec = DIR_VECTORS[dir],
+            turnRate = rtData.turnRate or 0,
+            consecutiveChanges = rtData.consecutiveChanges or 0
+          }
+        end
+      end
+    end
+  end
+  
+  -- Score weights for decision making (enhanced with RealTime)
   local WEIGHTS = {
-    DANGER = -25,        -- Penalize danger heavily
-    TARGET_ADJACENT = 20,-- Bonus for being adjacent to target
-    TARGET_CLOSE = 10,   -- Bonus for being close to target
-    TARGET_FAR = -5,     -- Penalty per tile beyond range 3
-    ESCAPE_ROUTES = 4,   -- Bonus per escape route
-    STABILITY = 8,       -- Bonus for not being in any wave arc
-    PREVIOUS_SAFE = 15,  -- Bonus for returning to previous safe position
-    STAY_BONUS = 10      -- Bonus for current position (prefer staying)
+    DANGER = -25,              -- Penalize danger heavily
+    TARGET_ADJACENT = 20,      -- Bonus for being adjacent to target
+    TARGET_CLOSE = 10,         -- Bonus for being close to target
+    TARGET_FAR = -5,           -- Penalty per tile beyond range 3
+    ESCAPE_ROUTES = 4,         -- Bonus per escape route
+    STABILITY = 8,             -- Bonus for not being in any wave arc
+    PREVIOUS_SAFE = 15,        -- Bonus for returning to previous safe position
+    STAY_BONUS = 10,           -- Bonus for current position (prefer staying)
+    -- NEW: MonsterAI-enhanced weights
+    PERPENDICULAR = 10,        -- Bonus for perpendicular escape
+    NOT_FACING = 8,            -- Bonus if no monster facing this tile
+    LOW_TURN_RATE = 5,         -- Bonus for low turn rate zone
+    IMMINENT_SAFE = 12         -- Bonus if no imminent attacks here
   }
   
   -- Check all adjacent tiles (8 directions)
@@ -321,6 +475,50 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
       -- Factor 2: Stability bonus (no wave threats at all)
       if analysis.waveThreats == 0 then
         score = score + WEIGHTS.STABILITY
+      end
+      
+      -- ═══════════════════════════════════════════════════════════════════════
+      -- NEW: RealTime metrics scoring
+      -- ═══════════════════════════════════════════════════════════════════════
+      if analysis.realTimeMetrics then
+        local rtm = analysis.realTimeMetrics
+        
+        -- Bonus if no monsters facing this position
+        if rtm.monstersFacingPos == 0 then
+          score = score + WEIGHTS.NOT_FACING
+        end
+        
+        -- Bonus if no imminent attacks at this position
+        if rtm.imminentAttacks == 0 then
+          score = score + WEIGHTS.IMMINENT_SAFE
+        end
+        
+        -- Bonus for low turn rate zone
+        if rtm.highTurnRateMonsters == 0 then
+          score = score + WEIGHTS.LOW_TURN_RATE
+        end
+      end
+      
+      -- Perpendicular escape bonus
+      if #threatDirections > 0 then
+        local moveVec = { x = dir.x, y = dir.y }
+        local perpBonus = 0
+        for _, threat in ipairs(threatDirections) do
+          local threatVec = threat.vec
+          local dot = moveVec.x * threatVec.x + moveVec.y * threatVec.y
+          local moveMag = math.sqrt(moveVec.x^2 + moveVec.y^2)
+          local threatMag = math.sqrt(threatVec.x^2 + threatVec.y^2)
+          if moveMag > 0 and threatMag > 0 then
+            local normalizedDot = math.abs(dot) / (moveMag * threatMag)
+            perpBonus = perpBonus + (1 - normalizedDot) * WEIGHTS.PERPENDICULAR
+            
+            -- Extra bonus if moving away from high turn rate monster
+            if threat.turnRate > 0.5 then
+              perpBonus = perpBonus + (1 - normalizedDot) * 3
+            end
+          end
+        end
+        score = score + perpBonus / math.max(1, #threatDirections)
       end
       
       -- Factor 3: Distance to current target
@@ -521,6 +719,167 @@ if EventBus then
       end
     end
   end, 20)
+  
+  -- ============================================================================
+  -- EVENT-DRIVEN AVOIDANCE TRIGGERS
+  -- React immediately to monster direction changes and movements
+  -- ============================================================================
+  
+  -- Track monster facing direction for instant wave prediction
+  local monsterDirections = {}  -- id -> lastDirection
+  
+  EventBus.on("creature:move", function(creature, oldPos)
+    if not creature or not creature:isMonster() then return end
+    if creature:isDead() then return end
+    
+    local id = creature:getId()
+    local newDir = creature:getDirection()
+    local oldDir = monsterDirections[id]
+    
+    -- Store new direction
+    monsterDirections[id] = newDir
+    
+    -- If direction changed, monster might be turning to attack
+    if oldDir and oldDir ~= newDir then
+      local playerPos = player and player:getPosition()
+      local monsterPos = creature:getPosition()
+      if not playerPos or not monsterPos then return end
+      
+      local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
+      
+      -- Only react if monster is close
+      if dist <= 5 then
+        -- Check if player is now in the monster's attack arc
+        local inArc, arcDist = isInFrontArc(playerPos, monsterPos, newDir, 5, 1)
+        
+        if inArc then
+          -- Immediate danger! Register high-confidence wave avoidance
+          local monsters = {}
+          local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) 
+            and MovementCoordinator.MonsterCache.getNearby(7) 
+            or {}
+          for _, c in ipairs(creatures) do
+            if c and c:isMonster() and not c:isDead() then
+              monsters[#monsters + 1] = c
+            end
+          end
+          
+          if #monsters > 0 then
+            local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+            local safePos, score = findSafeAdjacentTile(playerPos, monsters, currentTarget)
+            
+            if safePos and MovementCoordinator and MovementCoordinator.Intent then
+              local confidence = 0.75 + (5 - dist) * 0.03  -- Higher confidence for closer monsters
+              MovementCoordinator.Intent.register(
+                MovementCoordinator.CONSTANTS.INTENT.WAVE_AVOIDANCE, 
+                safePos, 
+                confidence, 
+                "wave_direction_change",
+                {triggered = "direction_change", monster = creature:getName()}
+              )
+            end
+          end
+        end
+      end
+    end
+  end, 8)  -- High priority for quick response
+  
+  -- Pure function: Count walkable tiles around a position
+  -- Uses TargetBotCore.Geometry if available
+  -- @param position: center position
+  -- @return number
+  local function countWalkableTiles(position)
+    local count = 0
+    
+    for i = 1, 8 do
+      local dir = DIRECTIONS[i]
+      local checkPos = {
+        x = position.x + dir.x,
+        y = position.y + dir.y,
+        z = position.z
+      }
+      local safe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+        and TargetCore.PathSafety.isTileSafe(checkPos)
+        or (function()
+          local tile = g_map.getTile(checkPos)
+          return tile and tile:isWalkable()
+        end)()
+      if safe then
+        count = count + 1
+      end
+    end
+    
+    return count
+  end
+  
+  -- When monster appears close, immediately check if repositioning is needed
+  EventBus.on("monster:appear", function(creature)
+    if not creature or not creature:isMonster() then return end
+    
+    local playerPos = player and player:getPosition()
+    local monsterPos = creature:getPosition()
+    if not playerPos or not monsterPos then return end
+    
+    local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
+    
+    -- Monster appeared very close - immediate reposition check
+    if dist <= 2 then
+      -- Count walkable tiles
+      local walkable = countWalkableTiles(playerPos)
+      
+      if walkable < 5 then  -- Getting cornered
+        -- Find better position immediately
+        local monsters = {}
+        local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) 
+          and MovementCoordinator.MonsterCache.getNearby(5) 
+          or {}
+        for _, c in ipairs(creatures) do
+          if c and c:isMonster() and not c:isDead() then
+            monsters[#monsters + 1] = c
+          end
+        end
+        
+        -- Quick search for better tile
+        local bestPos, bestScore = nil, walkable * 12
+        for dx = -1, 1 do
+          for dy = -1, 1 do
+            if dx ~= 0 or dy ~= 0 then
+              local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
+              local tile = g_map.getTile(checkPos)
+              if tile and tile:isWalkable() and not tile:hasCreature() then
+                local newWalkable = countWalkableTiles(checkPos)
+                local score = newWalkable * 12
+                if score > bestScore + 15 then
+                  bestScore = score
+                  bestPos = checkPos
+                end
+              end
+            end
+          end
+        end
+        
+        if bestPos and MovementCoordinator and MovementCoordinator.Intent then
+          MovementCoordinator.Intent.register(
+            MovementCoordinator.CONSTANTS.INTENT.REPOSITION, 
+            bestPos, 
+            0.65, 
+            "reposition_monster_appear",
+            {triggered = "monster_appear", walkable = walkable}
+          )
+        end
+      end
+    end
+  end, 12)
+  
+  -- Clear direction tracking when monster disappears
+  EventBus.on("monster:disappear", function(creature)
+    if creature then
+      local id = creature:getId()
+      if id then
+        monsterDirections[id] = nil
+      end
+    end
+  end, 25)
 end
 
 -- Export functions for external use
@@ -569,34 +928,6 @@ end
 -- UTILITY FUNCTIONS (Optimized with TargetBotCore integration)
 --------------------------------------------------------------------------------
 
--- Pure function: Count walkable tiles around a position
--- Uses TargetBotCore.Geometry if available
--- @param position: center position
--- @return number
-local function countWalkableTiles(position)
-  local count = 0
-  
-  for i = 1, 8 do
-    local dir = DIRECTIONS[i]
-    local checkPos = {
-      x = position.x + dir.x,
-      y = position.y + dir.y,
-      z = position.z
-    }
-    local safe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
-      and TargetCore.PathSafety.isTileSafe(checkPos)
-      or (function()
-        local tile = g_map.getTile(checkPos)
-        return tile and tile:isWalkable()
-      end)()
-    if safe then
-      count = count + 1
-    end
-  end
-  
-  return count
-end
-
 -- Pure function: Check if player is trapped (no walkable adjacent tiles)
 -- @param playerPos: player position
 -- @return boolean
@@ -605,7 +936,7 @@ local function isPlayerTrapped(playerPos)
 end
 
 -- Reposition to tile with more escape routes and better tactical position
--- Conservative movement algorithm
+-- Enhanced with MonsterAI.RealTime metrics for smarter tile selection
 -- @param minTiles: minimum walkable tiles threshold
 -- @param config: creature config for context (includes anchor settings)
 local function rePosition(minTiles, config)
@@ -617,8 +948,24 @@ local function rePosition(minTiles, config)
   local playerPos = player:getPosition()
   local currentWalkable = countWalkableTiles(playerPos)
   
-  -- Don't reposition if we have enough space
-  if currentWalkable >= minTiles then return end
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NEW: Check MonsterAI.RealTime for immediate threats
+  -- If imminent threat detected, reduce minimum tile requirement for faster escape
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local immediateThreat = false
+  local threatBoost = 0
+  if MonsterAI and MonsterAI.getImmediateThreat then
+    local threatData = MonsterAI.getImmediateThreat()
+    immediateThreat = threatData.immediateThreat or false
+    if immediateThreat then
+      -- Under immediate threat - be more aggressive about repositioning
+      minTiles = math.max(3, minTiles - 2)  -- Lower threshold
+      threatBoost = threatData.totalThreat * 5  -- Boost urgency
+    end
+  end
+  
+  -- Don't reposition if we have enough space (unless under immediate threat)
+  if currentWalkable >= minTiles and not immediateThreat then return end
   
   -- Get nearby monsters for scoring
   local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(5) or (SpectatorCache and SpectatorCache.getNearby(5, 5) or g_map.getSpectatorsInRange(playerPos, false, 5, 5))
@@ -638,16 +985,37 @@ local function rePosition(minTiles, config)
   local anchorPos = config and config.anchor and anchorPosition
   local anchorRange = config and config.anchorRange or 5
   
-  -- Score weights (conservative tuning)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NEW: Get high-threat monster directions for perpendicular escape preference
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local threatDirections = {}  -- List of vectors monsters are facing
+  if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.directions then
+    for id, rtData in pairs(MonsterAI.RealTime.directions) do
+      if rtData.facingPlayerSince then
+        -- This monster is facing player - record its direction
+        local dir = rtData.dir
+        if DIR_VECTORS[dir] then
+          threatDirections[#threatDirections + 1] = DIR_VECTORS[dir]
+        end
+      end
+    end
+  end
+  
+  -- Score weights (enhanced with RealTime metrics)
   local WEIGHTS = {
-    WALKABLE = 15,      -- Per walkable tile (was 12)
-    DANGER = -22,       -- Per danger point (was -18)
-    TARGET_ADJ = 20,    -- Adjacent to target (was 25)
-    TARGET_CLOSE = 10,  -- Within 3 tiles (was 12)
-    TARGET_FAR = -4,    -- Per tile beyond 3 (was -3)
-    MOVE_COST = -4,     -- Per movement tile (was -2)
-    CARDINAL = 3,       -- Bonus for cardinal movement (was 4)
-    STAY_BONUS = 15     -- Bonus for not moving
+    WALKABLE = 15,           -- Per walkable tile
+    DANGER = -22,            -- Per danger point
+    TARGET_ADJ = 20,         -- Adjacent to target
+    TARGET_CLOSE = 10,       -- Within 3 tiles
+    TARGET_FAR = -4,         -- Per tile beyond 3
+    MOVE_COST = -4,          -- Per movement tile
+    CARDINAL = 3,            -- Bonus for cardinal movement
+    STAY_BONUS = 15,         -- Bonus for not moving
+    -- NEW: MonsterAI-enhanced weights
+    PERPENDICULAR_ESCAPE = 12,  -- Bonus for moving perpendicular to threats
+    AWAY_FROM_FACING = 8,       -- Bonus for moving away from facing monsters
+    LOW_TURN_RATE_ZONE = 6,     -- Bonus for positions where monsters have low turn rate
+    PREDICTION_SAFE = 10        -- Bonus if MonsterAI.isPositionDangerous returns false
   }
   
   -- Search in a 2-tile radius for better positions
@@ -688,9 +1056,47 @@ local function rePosition(minTiles, config)
             local walkable = countWalkableTiles(checkPos)
             score = score + walkable * WEIGHTS.WALKABLE
             
-            -- Factor 2: Danger analysis (uses improved analyzePositionDanger - prediction-enabled for reposition)
+            -- Factor 2: Danger analysis (uses improved analyzePositionDanger with RealTime metrics)
             local analysis = analyzePositionDanger(checkPos, monsters, true)
             score = score + analysis.totalDanger * WEIGHTS.DANGER
+            
+            -- ═══════════════════════════════════════════════════════════════
+            -- NEW: MonsterAI.RealTime Enhanced Scoring
+            -- ═══════════════════════════════════════════════════════════════
+            
+            -- Factor 2b: Bonus if no monsters facing this position
+            if analysis.realTimeMetrics and analysis.realTimeMetrics.monstersFacingPos == 0 then
+              score = score + WEIGHTS.AWAY_FROM_FACING
+            end
+            
+            -- Factor 2c: Bonus if no imminent attacks at this position
+            if analysis.realTimeMetrics and analysis.realTimeMetrics.imminentAttacks == 0 then
+              score = score + WEIGHTS.PREDICTION_SAFE
+            end
+            
+            -- Factor 2d: Bonus for low turn rate zone (monsters not actively tracking)
+            if analysis.realTimeMetrics and analysis.realTimeMetrics.highTurnRateMonsters == 0 then
+              score = score + WEIGHTS.LOW_TURN_RATE_ZONE
+            end
+            
+            -- Factor 2e: Perpendicular escape bonus
+            -- Moving perpendicular to threat direction is safer than moving along attack axis
+            if #threatDirections > 0 then
+              local moveVec = { x = dx, y = dy }
+              local perpBonus = 0
+              for _, threatVec in ipairs(threatDirections) do
+                -- Calculate dot product (0 = perpendicular, 1/-1 = parallel)
+                local dot = moveVec.x * threatVec.x + moveVec.y * threatVec.y
+                local moveMag = math.sqrt(moveVec.x^2 + moveVec.y^2)
+                local threatMag = math.sqrt(threatVec.x^2 + threatVec.y^2)
+                if moveMag > 0 and threatMag > 0 then
+                  local normalizedDot = math.abs(dot) / (moveMag * threatMag)
+                  -- Lower dot = more perpendicular = better
+                  perpBonus = perpBonus + (1 - normalizedDot) * WEIGHTS.PERPENDICULAR_ESCAPE
+                end
+              end
+              score = score + perpBonus / math.max(1, #threatDirections)
+            end
             
             -- Factor 3: Distance to current target
             if currentTarget then
@@ -712,6 +1118,13 @@ local function rePosition(minTiles, config)
             -- Factor 5: Cardinal direction bonus
             if dx == 0 or dy == 0 then
               score = score + WEIGHTS.CARDINAL
+            end
+            
+            -- Factor 6: Threat boost from immediate danger
+            if immediateThreat then
+              -- When under threat, prioritize safety over other factors
+              local safetyBonus = (8 - analysis.totalDanger) * 3
+              score = score + safetyBonus
             end
             
             if score > bestScore then
@@ -740,6 +1153,19 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local config = params.config
   local creature = params.creature
 
+  -- Set OTClient native chase mode based on config
+  -- When chase mode is 1 (ChaseOpponent), the client automatically follows the attack target
+  if config.chase and not config.keepDistance then
+    -- Enable native chase mode - client will automatically chase attack target
+    if g_game.setChaseMode then
+      g_game.setChaseMode(1) -- ChaseOpponent
+    end
+  elseif config.keepDistance or not config.chase then
+    -- Disable chase mode for keep distance or no chase config
+    if g_game.setChaseMode then
+      g_game.setChaseMode(0) -- Stand
+    end
+  end
   
   -- Cache attacking creature check
   local currentTarget = g_game.getAttackingCreature()
@@ -1167,35 +1593,26 @@ TargetBot.Creature.walk = function(creature, config, targets)
   
   -- ─────────────────────────────────────────────────────────────────────────
   -- INTENT 6: CHASE (Close gap to target)
-  -- Supports both custom pathfinding and native OTClient follow
+  -- Uses OTClient native chase mode - when chase mode is 1 (ChaseOpponent),
+  -- the client automatically moves towards the attack target
   -- ─────────────────────────────────────────────────────────────────────────
   if config.chase and not config.keepDistance and pathLen > 1 then
-    -- Track attempt counts to confirm CHASE block is executed
-    TargetBot._followAttemptCount = TargetBot._followAttemptCount or 0
-    TargetBot._followAttemptCount = TargetBot._followAttemptCount + 1
-    if TargetBot._followAttemptCount <= 5 then
-      -- warn("[TargetBot] CHASE entry #" .. tostring(TargetBot._followAttemptCount) .. ", autoFollow=" .. tostring(config.autoFollow) .. ", keepDistance=" .. tostring(config.keepDistance) .. ", pathLen=" .. tostring(pathLen))
+    -- Native chase mode is already set in attack() function above
+    -- The client will automatically chase the attack target
+    -- We only need fallback pathfinding if native chase is disabled/unavailable
+    
+    -- If we have avoidAttacks, keepDistance, or rePosition enabled,
+    -- those systems will handle movement - don't interfere with manual pathfinding
+    if config.avoidAttacks or config.keepDistance or config.rePosition then
+      -- Let other movement systems handle it - skip native chase
+      -- Fall through to manual pathfinding below
+    else
+      -- Native chase is handling movement via g_game.setChaseMode(1)
+      -- Just return true to indicate movement is being handled
+      return true
     end
 
-    -- AUTO FOLLOW (native): Use OTClient native follow/chase for smoother automatic chasing
-    if movementAllowed() and not (config.avoidAttacks or config.keepDistance or config.rePosition) then
-      -- Use TargetCore native follow helper if available
-      if TargetCore and TargetCore.Native and TargetCore.Native.followCreature then
-        local curFollow = TargetCore.Native.getFollowingCreature and TargetCore.Native.getFollowingCreature()
-        if not curFollow or curFollow:getId() ~= creature:getId() then
-          TargetCore.Native.followCreature(creature)
-        end
-        return true
-      elseif g_game and g_game.follow then
-        local curFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
-        if not curFollow or curFollow:getId() ~= creature:getId() then
-          pcall(function() g_game.follow(creature) end)
-        end
-        return true
-      end
-    end
-
-    -- Native follow not available or disabled for precision modes; fall back to manual pathfinding.
+    -- Manual pathfinding fallback for precision modes
     
     
     -- CUSTOM PATHFINDING: Traditional walkTo-based chase

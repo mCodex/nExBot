@@ -519,6 +519,160 @@ if EventBus then
       pcall(function() EventBus.emit("targetbot/emergency_cleared", percent) end)
     end
   end, 90)
+  
+  -- ============================================================================
+  -- EVENT-DRIVEN MOVEMENT INTENTS (Chase, KeepDistance, FinishKill)
+  -- React instantly to creature movements instead of polling
+  -- ============================================================================
+  
+  -- Track active movement config (set by creature_attack when processing targets)
+  TargetBot.ActiveMovementConfig = TargetBot.ActiveMovementConfig or {
+    chase = false,
+    keepDistance = false,
+    keepDistanceRange = 4,
+    finishKillThreshold = 30,
+    anchor = nil,
+    anchorRange = 5
+  }
+  
+  -- Event-driven keepDistance: when target moves, adjust position
+  EventBus.on("creature:move", function(creature, oldPos)
+    if not creature or not creature:isMonster() then return end
+    
+    -- Check if this is our current target
+    local target = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if not target then return end
+    if creature:getId() ~= target:getId() then return end
+    
+    local config = TargetBot.ActiveMovementConfig
+    if not config then return end
+    
+    local playerPos = player and player:getPosition()
+    local creaturePos = creature:getPosition()
+    if not playerPos or not creaturePos then return end
+    
+    local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
+    
+    -- KeepDistance: target moved, check if we need to reposition
+    if config.keepDistance then
+      local keepRange = config.keepDistanceRange or 4
+      
+      -- Only react if distance changed significantly
+      if dist < keepRange - 1 or dist > keepRange + 2 then
+        -- Calculate ideal position
+        local dx = creaturePos.x - playerPos.x
+        local dy = creaturePos.y - playerPos.y
+        local currentDist = math.sqrt(dx * dx + dy * dy)
+        
+        if currentDist > 0 then
+          local ratio = keepRange / currentDist
+          local keepPos = {
+            x = math.floor(creaturePos.x - dx * ratio + 0.5),
+            y = math.floor(creaturePos.y - dy * ratio + 0.5),
+            z = playerPos.z
+          }
+          
+          -- Check anchor constraint
+          local anchorValid = true
+          if config.anchor then
+            local anchorDist = math.max(
+              math.abs(keepPos.x - config.anchor.x),
+              math.abs(keepPos.y - config.anchor.y)
+            )
+            anchorValid = anchorDist <= (config.anchorRange or 5)
+          end
+          
+          if anchorValid and MovementCoordinator and MovementCoordinator.Intent then
+            local confidence = 0.55
+            if dist < keepRange - 1 then
+              confidence = 0.70  -- Too close - higher urgency
+            end
+            
+            MovementCoordinator.Intent.register(
+              MovementCoordinator.CONSTANTS.INTENT.KEEP_DISTANCE,
+              keepPos,
+              confidence,
+              "keepdist_event",
+              {triggered = "target_move", currentDist = dist, targetDist = keepRange}
+            )
+          end
+        end
+      end
+    end
+    
+    -- Chase: target moved away, register chase intent
+    if config.chase and not config.keepDistance and dist > 1 then
+      -- Confidence values adjusted to pass CHASE threshold (0.60)
+      local confidence = 0.62  -- Base now passes threshold
+      if dist <= 3 then confidence = 0.68 end
+      if dist >= 5 then confidence = 0.75 end
+      
+      -- Check anchor constraint
+      local anchorValid = true
+      if config.anchor then
+        local anchorDist = math.max(
+          math.abs(creaturePos.x - config.anchor.x),
+          math.abs(creaturePos.y - config.anchor.y)
+        )
+        anchorValid = anchorDist <= (config.anchorRange or 5)
+      end
+      
+      if anchorValid and MovementCoordinator and MovementCoordinator.Intent then
+        MovementCoordinator.Intent.register(
+          MovementCoordinator.CONSTANTS.INTENT.CHASE,
+          creaturePos,
+          confidence,
+          "chase_target_move",
+          {triggered = "target_move", dist = dist}
+        )
+      end
+    end
+  end, 15)  -- Medium-high priority
+  
+  -- Event-driven finish kill: when low-HP target moves
+  EventBus.on("monster:health", function(creature, percent)
+    if not creature then return end
+    
+    -- Check if this is our target
+    local target = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if not target then return end
+    if creature:getId() ~= target:getId() then return end
+    
+    local config = TargetBot.ActiveMovementConfig
+    local threshold = config and config.finishKillThreshold or 30
+    
+    if percent and percent < threshold and percent > 0 then
+      local playerPos = player and player:getPosition()
+      local creaturePos = creature:getPosition()
+      if not playerPos or not creaturePos then return end
+      
+      local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
+      
+      if dist > 1 and MovementCoordinator and MovementCoordinator.Intent then
+        local confidence = 0.65
+        if percent < 15 then confidence = 0.80 end
+        if percent < 10 then confidence = 0.90 end
+        
+        MovementCoordinator.Intent.register(
+          MovementCoordinator.CONSTANTS.INTENT.FINISH_KILL,
+          creaturePos,
+          confidence,
+          "finish_kill_hp",
+          {triggered = "health_change", hp = percent, dist = dist}
+        )
+      end
+    end
+  end, 25)
+  
+  -- Emit event when target is acquired for other modules
+  EventBus.on("combat:target", function(creature, oldCreature)
+    if creature and MovementCoordinator then
+      -- Notify MovementCoordinator of new target for chase tracking
+      pcall(function()
+        EventBus.emit("targetbot/target_acquired", creature, creature:getPosition())
+      end)
+    end
+  end, 65)
 end
 
 -- PERFORMANCE: Path cache for backward compatibility (optimized)
