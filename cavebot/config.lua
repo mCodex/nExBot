@@ -18,6 +18,7 @@ CaveBot.Config.setup = function()
   add("ping", "Server ping", 100)
   add("walkDelay", "Walk delay", 10)
   add("ignoreFields", "Ignore fields", false)  
+  add("walkingDebug", "Walking debug", false) -- Disabled by default for performance
   add("skipBlocked", "Skip blocked path", false)
   add("mapClick", "Map click walking", false)
   add("useDelay", "Delay after use", 400)
@@ -110,11 +111,16 @@ CaveBot.Config.set = function(id, value)
 
   if valueType == 'boolean' then
     CaveBot.Config.values[id] = value
-    panel.value:setOn(value, true)
+    if panel and panel.value and panel.value.setOn then panel.value:setOn(value, true) end
     CaveBot.save()
   else
     CaveBot.Config.values[id] = value
-    panel.value:setText(value, true)
+    if panel and panel.value and panel.value.setText then panel.value:setText(value, true) end
     CaveBot.save()
   end
+end
+
+-- Convenience helper to toggle walking debug at runtime
+CaveBot.setWalkingDebug = function(enabled)
+  CaveBot.Config.set("walkingDebug", enabled)
 end

@@ -35,6 +35,14 @@ local DIST_W = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.DIS
   [6] = 1, [7] = 1, [8] = 0, [9] = 0, [10] = 0
 }
 
+-- MonsterAI tuning knobs (can be overridden in TargetCore.CONSTANTS if desired)
+local MONSTER_AI_WAVE_MULT = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.MONSTER_AI_WAVE_MULT) or 30   -- multiplier for wave-confidence bonus
+local MONSTER_AI_WAVE_MIN_CONF = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.MONSTER_AI_WAVE_MIN_CONF) or 0.35 -- min confidence to apply wave bonus
+local MONSTER_AI_DPS_MULT = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.MONSTER_AI_DPS_MULT) or 1.0     -- multiplier applied to DPS
+local MONSTER_AI_DPS_CAP = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.MONSTER_AI_DPS_CAP) or 15      -- cap added to priority from DPS
+local MONSTER_AI_FACING_WEIGHT = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.MONSTER_AI_FACING_WEIGHT) or 10 -- maximum weight for facing% bonus
+
+
 -- Diamond arrow pattern for paladin optimization
 local DIAMOND_ARROW_AREA = {
   {0, 1}, {1, 0}, {0, -1}, {-1, 0},
@@ -50,7 +58,32 @@ local LARGE_RUNE_AREA = {
 -- Pure function: Get monsters in area around position
 local function getMonstersInArea(pos, offsets, maxDist)
   local count = 0
-  
+
+  -- Prefer MonsterCache for performance and accuracy
+  if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
+    local radius = maxDist or 8
+    local nearby = MovementCoordinator.MonsterCache.getNearby(radius)
+    if nearby then
+      local areaSet = {}
+      for i = 1, #offsets do
+        local offset = offsets[i]
+        local key = (pos.x + offset[1])..","..(pos.y + offset[2])
+        areaSet[key] = true
+      end
+      for i = 1, #nearby do
+        local c = nearby[i]
+        if c and c:isMonster() and not c:isDead() then
+          local p = c:getPosition()
+          if p and areaSet[p.x..","..p.y] then
+            count = count + 1
+          end
+        end
+      end
+      return count
+    end
+  end
+
+  -- Fallback to map scan
   for i = 1, #offsets do
     local offset = offsets[i]
     local checkPos = {
@@ -58,7 +91,7 @@ local function getMonstersInArea(pos, offsets, maxDist)
       y = pos.y + offset[2],
       z = pos.z
     }
-    
+
     local tile = g_map.getTile(checkPos)
     if tile then
       local creatures = tile:getCreatures()
@@ -72,7 +105,7 @@ local function getMonstersInArea(pos, offsets, maxDist)
       end
     end
   end
-  
+
   return count
 end
 
@@ -192,6 +225,31 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   if config.danger and config.danger > 0 then
     priority = priority + config.danger * 0.5
   end
-  
+
+  -- Integrate MonsterAI telemetry if available (improves targeting accuracy)
+  if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+    local id = creature:getId()
+    local data = id and MonsterAI.Tracker.monsters[id]
+    if data then
+      -- Predict imminent wave attack and increase priority to avoid being hit
+      local ok, predicted, conf, tta = pcall(function() return MonsterAI.Predictor.predictWaveAttack(creature) end)
+      if ok and predicted and conf and conf > MONSTER_AI_WAVE_MIN_CONF then
+        priority = priority + (conf * MONSTER_AI_WAVE_MULT) -- scale by confidence
+      end
+
+      -- High DPS monsters are more dangerous: add a capped bonus based on DPS
+      local dps = MonsterAI.Tracker.getDPS and MonsterAI.Tracker.getDPS(id) or 0
+      if dps and dps > 0.5 then
+        priority = priority + math.min(dps * MONSTER_AI_DPS_MULT, MONSTER_AI_DPS_CAP)
+      end
+
+      -- If monster frequently faces player, prefer it (it's about to attack)
+      local facePct = math.floor(((data.facingCount or 0) / math.max(1, data.movementSamples or 1)) * 100)
+      if facePct > 30 then
+        priority = priority + (facePct / 100) * MONSTER_AI_FACING_WEIGHT
+      end
+    end
+  end
+
   return priority
 end

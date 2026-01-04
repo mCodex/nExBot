@@ -110,6 +110,4 @@ TargetBotPanel < Panel
         text: Remove
         width: 56
     
-    BotSwitch
-      id: debug
-      text: Show target priority
+

@@ -24,6 +24,35 @@ local CORE_PATH = "/bot/" .. configName .. "/core"
 nExBot = nExBot or {}
 nExBot.loadTimes = loadTimes  -- Expose for debugging
 
+-- Suppress noisy debug prints by default. Set `nExBot.showDebug = true` in console to allow them.
+nExBot.showDebug = nExBot.showDebug or false
+nExBot.suppressDebugPrefixes = nExBot.suppressDebugPrefixes or {"[HealBot]", "[MonsterInspector]"}
+-- Opt-in slow-op instrumentation. Enable with `nExBot.slowOpInstrumentation = true`.
+nExBot.slowOpInstrumentation = nExBot.slowOpInstrumentation or false
+local _orig_print = print
+print = function(...)
+  if nExBot.showDebug then return _orig_print(...) end
+  -- Safely inspect first argument without relying on 'select' (may be missing in some environments)
+  local first = (...)
+  local firstStr = nil
+  if type(first) == "string" then
+    firstStr = first
+  else
+    local ok, s = pcall(tostring, first)
+    if ok then firstStr = s end
+  end
+  if firstStr then
+    for _, p in ipairs(nExBot.suppressDebugPrefixes) do
+      if firstStr:sub(1, #p) == p then
+        return
+      end
+    end
+  end
+  return _orig_print(...)
+end
+
+
+
 -- ============================================================================
 -- STORAGE SANITIZER (Fix sparse arrays that prevent saving)
 -- ============================================================================
@@ -73,22 +102,38 @@ local function sanitizeTable(tbl, path, depth)
   return tbl
 end
 
--- Sanitize storage on startup
+-- Sanitize storage on startup (non-blocking, chunked to avoid freezing)
 local function sanitizeStorage()
   if not storage then return end
   local sanitizeStart = os.clock()
-  
+  local keys = {}
   for k, v in pairs(storage) do
-    if type(v) == "table" then
-      storage[k] = sanitizeTable(v, k, 0)
+    if type(v) == "table" then keys[#keys + 1] = k end
+  end
+
+  local idx = 1
+  local chunkSize = 20 -- process 20 keys per tick
+  local function processChunk()
+    local stopAt = math.min(idx + chunkSize - 1, #keys)
+    for i = idx, stopAt do
+      local k = keys[i]
+      if type(storage[k]) == 'table' then
+        storage[k] = sanitizeTable(storage[k], k, 0)
+      end
+    end
+    idx = stopAt + 1
+    if idx <= #keys then
+      schedule(50, processChunk)
+    else
+      loadTimes["sanitize"] = math.floor((os.clock() - sanitizeStart) * 1000)
     end
   end
-  
-  loadTimes["sanitize"] = math.floor((os.clock() - sanitizeStart) * 1000)
+  -- Start asynchronous sanitization
+  schedule(1, processChunk)
 end
 
--- Run sanitizer before loading any modules
-pcall(sanitizeStorage)
+-- Run sanitizer before loading any modules (non-blocking)
+sanitizeStorage()
 
 -- ============================================================================
 -- OPTIMIZED STYLE LOADING
@@ -125,9 +170,6 @@ end
 local OPTIONAL_MODULES = {
   ["HealBot"] = true,
   ["bot_core/init"] = true,
-  ["performance_optimizer"] = true,
-  ["combat_intelligence"] = true,
-  ["state_machine"] = true,
 }
 
 -- Load a script with timing and error isolation
@@ -183,6 +225,7 @@ loadCategory("core", {
   "main",             -- Main initialization
   "items",            -- Item definitions
   "lib",              -- Utility library
+  "safe_call",        -- Safe function call utilities (MUST load after lib)
   "new_cavebot_lib",  -- CaveBot library
   "configs",          -- Configuration system
   "bot_database",     -- Unified database (BotDB) - load AFTER configs
@@ -194,9 +237,6 @@ loadCategory("architecture", {
   "event_bus",            -- Centralized event bus
   "door_items",           -- Door item database
   "global_config",        -- Global configuration
-  "state_machine",        -- FSM architecture
-  "performance_optimizer", -- Performance optimizations
-  "combat_intelligence",  -- Combat system
   "bot_core/init",        -- Unified BotCore system
 })
 
@@ -378,6 +418,9 @@ end
 
 -- Run the private scripts loader
 loadPrivateScripts()
+
+-- Initialize optional boot diagnostics (safe, tiny, runs only if enabled via ProfileStorage)
+-- schedule(100, function() pcall(require, 'utils.boot_diagnostics') end)
 
 -- Return to Main tab
 setDefaultTab("Main")

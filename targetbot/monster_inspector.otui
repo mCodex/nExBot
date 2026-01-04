@@ -1,0 +1,72 @@
+MonsterInspectorWindow < MainWindow
+  text: Monster Insights
+  width: 520
+  height: 480
+  @onEscape: self:hide()
+
+  VerticalScrollBar
+    id: contentScroll
+    anchors.top: parent.top
+    anchors.bottom: buttons.top
+    anchors.right: parent.right
+    margin-top: 5
+    margin-bottom: 10
+    step: 24
+    pixels-scroll: true
+
+  ScrollablePanel
+    id: content
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: contentScroll.left
+    anchors.bottom: buttons.top
+    margin-top: 5
+    margin-bottom: 10
+    margin-right: 5
+    vertical-scrollbar: contentScroll
+
+    Label
+      id: textContent
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      text-wrap: true
+      text-auto-resize: true
+      font: verdana-11px-monochrome
+
+  Panel
+    id: buttons
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 30
+
+    Button
+      id: refresh
+      text: Refresh
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      width: 80
+
+    Button
+      id: export
+      text: Export
+      anchors.left: refresh.right
+      anchors.verticalCenter: parent.verticalCenter
+      width: 90
+      margin-left: 6
+
+    Button
+      id: clear
+      text: Clear Patterns
+      anchors.left: export.right
+      anchors.verticalCenter: parent.verticalCenter
+      width: 120
+      margin-left: 6
+
+    Button
+      id: close
+      text: Close
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      width: 80

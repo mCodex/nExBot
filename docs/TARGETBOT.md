@@ -5,6 +5,8 @@
 
 **AI-powered creature targeting with behavior prediction, movement optimization, and intelligent spell selection**
 
+> Note: Casting of spells/runes and direct attack execution has been moved to the dedicated **AttackBot** module — TargetBot now focuses on target selection, positioning, movement coordination and tactical decisions.
+
 ---
 
 ## Table of Contents

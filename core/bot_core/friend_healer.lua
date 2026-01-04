@@ -283,7 +283,7 @@ local function findBestTarget(spectators, config, selfHpPercent)
   return bestTarget, targetsInRange
 end
 
--- Cooldown helpers handled by HealEngine/HealContext; legacy checks removed
+
 
 -- Mark that we used a heal (update shared cooldown)
 local function markHealUsed()
@@ -357,11 +357,7 @@ end
 -- Returns true if action was taken
 function FriendHealer.tick()
   if not FriendHealer.isEnabled() then return false end
-  if HealContext and HealContext.isCritical and HealContext.isCritical() then
-    _state.bestTarget = nil
-    return false
-  end
-  
+
   local config = _state.config
   if not config then return false end
   
@@ -410,7 +406,7 @@ function FriendHealer.tick()
   _state.lastScan = currentTime
   
   -- Get spectators
-  local spectators = getSpectators and getSpectators() or {}
+  local spectators = SafeCall.global("getSpectators") or {}
   
   -- Find best target
   local bestTarget, targetsInRange = findBestTarget(spectators, config, selfHpPercent)
@@ -427,7 +423,7 @@ end
 -- Event handler: Friend health changed (for instant response)
 function FriendHealer.onFriendHealthChange(creature, newHpPercent, oldHpPercent)
   if not FriendHealer.isEnabled() then return end
-  if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
+  
   if not creature or creature:isLocalPlayer() then return end
   
   local config = _state.config

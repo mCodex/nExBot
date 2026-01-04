@@ -16,7 +16,7 @@ CaveBot.Extensions.Travel.setup = function()
      return false
     end
 
-    local npc = getCreatureByName(npcName)
+    local npc = SafeCall.getCreatureByName(npcName)
     if not npc then 
       print("CaveBot[Travel]: NPC not found, can't travel")
      return false 

@@ -489,12 +489,12 @@ local function legacyHealAction(spec, targetsInRange)
             if action.mana and findItem(manaItem) and mana <= normalHeal and dist <= itemRange and now - lastItemUse > 1000 then
                 lastItemUse = now
                 if BotCore and BotCore.Cooldown then BotCore.Cooldown.markPotionUsed() end
-                return useWith(manaItem, spec)
+                return SafeCall.useWith(manaItem, spec)
             end
             if action.health and findItem(healItem) and health <= normalHeal and dist <= itemRange and now - lastItemUse > 1000 then
                 lastItemUse = now
                 if BotCore and BotCore.Cooldown then BotCore.Cooldown.markPotionUsed() end
-                return useWith(healItem, spec)
+                return SafeCall.useWith(healItem, spec)
             end
             if action.strong and health <= strongHeal then
                 local canCastGranSio = true
@@ -585,7 +585,7 @@ friendHealerMacro = macro(100, function()
     local inMasResRange = 0
 
     -- Scan spectators
-    local spectators = getSpectators()
+    local spectators = SafeCall.global("getSpectators") or {}
     for i, spec in ipairs(spectators) do
         local health, dist = legacyIsCandidate(spec)
         if dist then

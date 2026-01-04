@@ -161,7 +161,7 @@ CROSS (4): Cardinal directions only (N/E/S/W).
     table.insert(values, {"smartPullShape", function() return widget.scroll:getValue() end})
   end
 
-  addCheckBox("autoFollow", "Auto Follow", false, "Use OTClient's native follow system for smoother chasing. More performant but less precise than custom pathfinding. Disabled when 'Keep Distance' is active.")
+
   addCheckBox("chase", "Chase", true, "Chase the target, walking towards it until adjacent.")
   addCheckBox("keepDistance", "Keep Distance", false, "Maintain a specific distance from the target (set in Keep Distance slider).")
   addCheckBox("anchor", "Anchoring", false, "Stay within a radius of your initial position (set in Anchoring Range slider).")
@@ -176,4 +176,8 @@ CROSS (4): Cardinal directions only (N/E/S/W).
 Configure with: Pull Range (how far to check), Min Monsters (threshold), and Shape (accuracy).
 Useful for AoE hunting - ensures you always have enough monsters grouped before attacking.]])
   addCheckBox("rpSafe", "RP PVP SAFE - (DA)", false, "Safety mode for Royal Paladins - prevents Diamond Arrow usage near players.")
+
+  -- Attack settings have been moved to AttackBot and are no longer available in TargetBot.
+  -- If you need to configure attack spells/runes, use the dedicated AttackBot profile and UI.
+
 end

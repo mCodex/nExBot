@@ -1,9 +1,62 @@
 local cavebotMacro = nil
 local config = nil
+local slow_ops = nil
+pcall(function() slow_ops = dofile('/utils/slow_ops.lua') end)
+if not slow_ops then
+  slow_ops = {start = function() end, finish = function() end, with = function(f) return f() end, isEnabled = function() return false end}
+end
+local lastMacroTime = 0
+
+local function getCfg(key, def)
+  if CaveBot and CaveBot.Config and CaveBot.Config.get then
+    local ok, v = pcall(function() return CaveBot.Config.get(key) end)
+    if ok and v ~= nil then return v end
+  end
+  return def
+end
 
 -- ui
 local configWidget = UI.Config()  -- Create config widget first
 local ui = UI.createWidget("CaveBotPanel")
+
+-- Hide the global "Money Rune" icon while CaveBot UI is loaded (non-destructive)
+local function hideMoneyRuneIcon()
+  local ok, root = pcall(function() return g_ui.getRootWidget() end)
+  if not ok or not root then return false end
+
+  local function matchAndHide(widget)
+    if not widget then return false end
+    -- Check common text/tooltip properties
+    local ok1, txt = pcall(function() if type(widget.getText) == 'function' then return widget:getText() end end)
+    if ok1 and txt == 'Money Rune' then pcall(function() widget:setVisible(false) end); return true end
+    local ok2, tip = pcall(function() if type(widget.getTooltip) == 'function' then return widget:getTooltip() end end)
+    if ok2 and tip == 'Money Rune' then pcall(function() widget:setVisible(false) end); return true end
+
+    -- Recurse children
+    local ok3, children = pcall(function() return widget:getChildren() end)
+    if ok3 and children then
+      for _, ch in ipairs(children) do
+        if matchAndHide(ch) then return true end
+      end
+    end
+    return false
+  end
+
+  return matchAndHide(root)
+end
+
+-- Try once immediately, then retry after a short delay to handle load-order
+local function ensureHideMoneyRune()
+  if hideMoneyRuneIcon() then
+    print('[CaveBot] Hidden "Money Rune" icon from UI')
+  else
+    schedule(200, function()
+      if hideMoneyRuneIcon() then print('[CaveBot] Hidden "Money Rune" icon on retry') end
+    end)
+  end
+end
+
+ensureHideMoneyRune()
 
 -- Move the config widget into the placeholder panel at the top
 if ui.configWidgetPlaceholder and configWidget then
@@ -65,80 +118,257 @@ local uiList = nil
 local lastPlayerFloor = nil
 
 --[[
-  SMART EXECUTION SYSTEM
-  Reduces unnecessary macro executions by tracking walk state and using delays.
+  SIMPLIFIED WAYPOINT STATE MACHINE (Event-Driven)
   
-  Key optimizations:
-  1. Skip execution while player is walking (wait for walk to complete)
-  2. Skip execution if a delay is active (from previous action)
-  3. Track last action to avoid redundant recalculations
-  4. Only execute when there's actual work to do
+  States:
+  - IDLE: Not walking, ready for next action
+  - WALKING: Walk command issued, waiting for arrival
+  - ARRIVED: Reached destination, ready to advance
+  
+  Events:
+  - player:move -> Check arrival, emit cavebot/arrived
+  - cavebot/arrived -> Advance waypoint immediately
+  - cavebot/walk_timeout -> Handle stuck detection
 ]]
-local walkState = {
-  isWalkingToWaypoint = false,  -- Currently walking to a waypoint
-  targetPos = nil,              -- Target position we're walking to
-  lastActionTime = 0,           -- When we last executed an action
-  delayUntil = 0,               -- Don't execute until this time
-  lastPlayerPos = nil,          -- Last known player position
-  stuckCheckTime = 0,           -- When to check if stuck
-  STUCK_TIMEOUT = 3000          -- Consider stuck after 3 seconds of no movement
+
+-- ============================================================================
+-- CORE STATE (Minimal, single source of truth)
+-- ============================================================================
+local WaypointState = {
+  -- Current state
+  state = "IDLE",           -- IDLE, WALKING, ARRIVED
+  
+  -- Target tracking
+  targetPos = nil,          -- {x, y, z}
+  targetPrecision = 1,      -- Arrival precision
+  targetValue = nil,        -- Waypoint value string
+  
+  -- Timing
+  walkStartTime = 0,        -- When walk was issued
+  lastAdvanceTime = 0,      -- When last waypoint was advanced
+  delayUntil = 0,           -- Delay before next action
+  
+  -- Stuck detection
+  lastMoveTime = 0,         -- Last time player moved
+  lastPos = nil,            -- Last known position
+  
+  -- Configuration
+  WALK_TIMEOUT = 4000,      -- 4s max walk time before stuck
+  ADVANCE_COOLDOWN = 50,    -- 50ms between advances (prevents double-fire)
+  MAX_DELAY = 300,          -- Cap action delays to 300ms
 }
 
--- Check if player has moved since last check
-local function hasPlayerMoved()
-  local currentPos = pos()
-  if not currentPos or not walkState.lastPlayerPos then
-    walkState.lastPlayerPos = currentPos
-    return true
-  end
-  
-  local moved = (currentPos.x ~= walkState.lastPlayerPos.x or
-                 currentPos.y ~= walkState.lastPlayerPos.y or
-                 currentPos.z ~= walkState.lastPlayerPos.z)
-  
-  if moved then
-    walkState.lastPlayerPos = currentPos
-    walkState.stuckCheckTime = now + walkState.STUCK_TIMEOUT
-  end
-  
-  return moved
+-- ============================================================================
+-- PURE FUNCTIONS (No side effects, testable)
+-- ============================================================================
+
+-- Check if player is at target position
+local function isAtTarget(playerPos, targetPos, precision)
+  if not playerPos or not targetPos then return false end
+  if playerPos.z ~= targetPos.z then return false end
+  local dx = math.abs(playerPos.x - targetPos.x)
+  local dy = math.abs(playerPos.y - targetPos.y)
+  return dx <= precision and dy <= precision
 end
 
--- Check if we should skip execution
--- SIMPLIFIED: Only skip during active walking, don't block on walk state tracking
+-- Parse goto value to position
+local function parseGotoValue(value)
+  if not value then return nil, 1 end
+  local match = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+),?\\s*([0-9]?)")
+  if not match or not match[1] then return nil, 1 end
+  local pos = {
+    x = tonumber(match[1][2]),
+    y = tonumber(match[1][3]),
+    z = tonumber(match[1][4])
+  }
+  local precision = tonumber(match[1][5]) or 1
+  return pos, precision
+end
+
+-- ============================================================================
+-- STATE TRANSITIONS (Clean state machine)
+-- ============================================================================
+
+local function transitionTo(newState, data)
+  local oldState = WaypointState.state
+  WaypointState.state = newState
+  
+  if newState == "WALKING" then
+    WaypointState.walkStartTime = now
+    WaypointState.targetPos = data and data.pos
+    WaypointState.targetPrecision = data and data.precision or 1
+    WaypointState.targetValue = data and data.value
+  elseif newState == "ARRIVED" then
+    WaypointState.walkStartTime = 0
+  elseif newState == "IDLE" then
+    WaypointState.targetPos = nil
+    WaypointState.targetValue = nil
+    WaypointState.walkStartTime = 0
+  end
+end
+
+-- ============================================================================
+-- EVENT HANDLERS (Core event-driven logic)
+-- ============================================================================
+
+-- Handle player movement - check for arrival
+local function onPlayerMove(newPos, oldPos)
+  if not CaveBot or CaveBot.isOff() then return end
+  if not newPos then return end
+  
+  -- Update last move time for stuck detection
+  WaypointState.lastMoveTime = now
+  WaypointState.lastPos = newPos
+  
+  -- Check if we've arrived at target
+  if WaypointState.state == "WALKING" and WaypointState.targetPos then
+    if isAtTarget(newPos, WaypointState.targetPos, WaypointState.targetPrecision) then
+      transitionTo("ARRIVED")
+      -- Emit arrival event for immediate waypoint advancement
+      if EventBus then
+        EventBus.emit("cavebot/arrived", WaypointState.targetPos, WaypointState.targetValue)
+      end
+    end
+  end
+  
+  -- Also check current focused waypoint for direct arrival detection
+  if WaypointState.state ~= "ARRIVED" and ui and ui.list then
+    local currentAction = ui.list:getFocusedChild()
+    if currentAction and currentAction.action == "goto" then
+      local targetPos, precision = parseGotoValue(currentAction.value)
+      if targetPos and isAtTarget(newPos, targetPos, precision) then
+        transitionTo("ARRIVED", {pos = targetPos, precision = precision, value = currentAction.value})
+        if EventBus then
+          EventBus.emit("cavebot/arrived", targetPos, currentAction.value)
+        end
+      end
+    end
+  end
+end
+
+-- Handle arrival - advance waypoint immediately
+local function onWaypointArrived(targetPos, waypointValue)
+  if not CaveBot or CaveBot.isOff() then return end
+  if not ui or not ui.list then return end
+  
+  -- Cooldown check to prevent double-fire
+  if now - WaypointState.lastAdvanceTime < WaypointState.ADVANCE_COOLDOWN then
+    return
+  end
+  
+  local currentAction = ui.list:getFocusedChild()
+  if not currentAction then return end
+  
+  -- Advance to next waypoint
+  local currentIndex = ui.list:getChildIndex(currentAction)
+  local actionCount = ui.list:getChildCount()
+  if actionCount == 0 then return end
+  
+  local nextIndex = currentIndex + 1
+  if nextIndex > actionCount then nextIndex = 1 end
+  
+  local nextChild = ui.list:getChildByIndex(nextIndex)
+  if nextChild then
+    ui.list:focusChild(nextChild)
+    WaypointState.lastAdvanceTime = now
+    transitionTo("IDLE")
+    
+    -- Reset action state
+    actionRetries = 0
+    prevActionResult = true
+  end
+end
+
+-- ============================================================================
+-- REGISTER EVENT HANDLERS
+-- ============================================================================
+if EventBus then
+  -- Player movement - highest priority for fast arrival detection
+  EventBus.on("player:move", onPlayerMove, 15)
+  
+  -- Waypoint arrival - immediate advancement
+  EventBus.on("cavebot/arrived", onWaypointArrived, 15)
+end
+
+-- ============================================================================
+-- SIMPLIFIED EXECUTION CHECK
+-- ============================================================================
 local function shouldSkipExecution()
-  -- Active delay from previous action
-  if now < walkState.delayUntil then
+  -- Cap delays to prevent stuck states
+  if WaypointState.delayUntil > 0 and now < WaypointState.delayUntil then
+    if WaypointState.delayUntil - now > WaypointState.MAX_DELAY then
+      WaypointState.delayUntil = now + WaypointState.MAX_DELAY
+    end
     return true
   end
   
-  -- Player is actively walking - wait for walk to complete
-  -- This is the only reliable check - player:isWalking() is definitive
+  -- Skip if player is mid-step
   if player:isWalking() then
     return true
   end
   
-  -- If player stopped walking, clear the walking state
-  if walkState.isWalkingToWaypoint then
-    walkState.isWalkingToWaypoint = false
-    walkState.targetPos = nil
+  -- Check for stuck while walking
+  if WaypointState.state == "WALKING" then
+    local walkDuration = now - WaypointState.walkStartTime
+    if walkDuration > WaypointState.WALK_TIMEOUT then
+      -- Stuck - transition to IDLE and let macro retry
+      transitionTo("IDLE")
+      return false  -- Don't skip, try again
+    end
   end
   
   return false
 end
 
 -- Mark that we're walking to a waypoint
-CaveBot.setWalkingToWaypoint = function(targetPos)
-  walkState.isWalkingToWaypoint = true
-  walkState.targetPos = targetPos
-  walkState.stuckCheckTime = now + walkState.STUCK_TIMEOUT
-  walkState.lastPlayerPos = pos()
+CaveBot.setWalkingToWaypoint = function(targetPos, precision, value)
+  transitionTo("WALKING", {pos = targetPos, precision = precision or 1, value = value})
 end
 
 -- Clear walking state
 CaveBot.clearWalkingState = function()
-  walkState.isWalkingToWaypoint = false
-  walkState.targetPos = nil
+  transitionTo("IDLE")
+end
+
+-- Set delay
+CaveBot.delay = function(ms)
+  WaypointState.delayUntil = now + math.min(ms, WaypointState.MAX_DELAY)
+end
+
+-- Legacy compatibility
+local walkState = {
+  isWalkingToWaypoint = false,
+  targetPos = nil,
+  lastActionTime = 0,
+  delayUntil = 0,
+  lastPlayerPos = nil,
+  stuckCheckTime = 0,
+  STUCK_TIMEOUT = 3000
+}
+
+-- Sync legacy state for backward compatibility
+local function syncLegacyState()
+  walkState.isWalkingToWaypoint = (WaypointState.state == "WALKING")
+  walkState.targetPos = WaypointState.targetPos
+  walkState.delayUntil = WaypointState.delayUntil
+  walkState.lastPlayerPos = WaypointState.lastPos
+end
+
+-- Check if player has moved (legacy function)
+local function hasPlayerMoved()
+  local currentPos = pos()
+  if not currentPos or not WaypointState.lastPos then
+    WaypointState.lastPos = currentPos
+    return true
+  end
+  local moved = (currentPos.x ~= WaypointState.lastPos.x or
+                 currentPos.y ~= WaypointState.lastPos.y or
+                 currentPos.z ~= WaypointState.lastPos.z)
+  if moved then
+    WaypointState.lastPos = currentPos
+    WaypointState.lastMoveTime = now
+  end
+  return moved
 end
 
 -- ============================================================================
@@ -193,7 +423,7 @@ local WaypointEngine = {
   
   -- Thresholds (tuned for accuracy)
   STUCK_THRESHOLD = 8,           -- Failures before stuck
-  STUCK_TIMEOUT = 10000,         -- Max time in stuck state before recovery
+  STUCK_TIMEOUT = 5000,         -- Reduced from 10000 for faster stuck detection
   MOVEMENT_THRESHOLD = 3,        -- Min tiles to consider "progress"
   PROGRESS_WINDOW = 15000,       -- Time window for progress check (15s)
   RECOVERY_TIMEOUT = 25000,      -- Max recovery time before stop (increased for more strategies)
@@ -368,6 +598,44 @@ end
 -- Uses a tiered approach: fast local search → global search → skip strategies
 -- ============================================================================
 
+-- Oscillation protection (prevent rapid floor flip-flops between waypoints)
+local FLOOR_OSCILLATION_WINDOW = getCfg("floorOscillationWindow", 5000) -- ms
+local lastFloorChangeRecord = nil
+
+-- Called by walking layer when player's floor changes unexpectedly.
+-- Detects quick flip back between two floors and advances waypoint focus to escape loops.
+CaveBot.onFloorChanged = function(fromFloor, toFloor)
+  if not ui or not ui.list then return end
+  local nowTs = now or os.time() * 1000
+  if lastFloorChangeRecord and lastFloorChangeRecord.from == toFloor and lastFloorChangeRecord.to == fromFloor and (nowTs - lastFloorChangeRecord.ts) <= FLOOR_OSCILLATION_WINDOW then
+    -- Detected flip-flop between floors within window -> advance focused waypoint to escape loop
+    local current = ui.list:getFocusedChild() or ui.list:getFirstChild()
+    if current then
+      local idx = ui.list:getChildIndex(current) or 1
+      local actionCount = ui.list:getChildCount()
+      local nextIdx = idx + 1
+      if nextIdx > actionCount then nextIdx = 1 end
+      local nextChild = ui.list:getChildByIndex(nextIdx)
+      if nextChild then
+        -- mark the problematic waypoint (the one we just left) as snoozed to avoid immediate re-visit
+        local snoozeDur = getCfg("floorOscillationSnooze", 8000)
+        current.snoozedUntil = nowTs + snoozeDur
+        -- visually mark (best effort): set color to gray if widget supports setColor
+        pcall(function() current:setColor("#888888") end)
+
+        ui.list:focusChild(nextChild)
+        print(string.format('[CaveBot] Floor oscillation detected (%d <-> %d). Advancing waypoint index from %d to %d and snoozing waypoint for %dms.', fromFloor, toFloor, idx, nextIdx, snoozeDur))
+        -- reset walking and waypoint engine state to avoid immediate re-trigger
+        CaveBot.resetWalking()
+        resetWaypointEngine()
+      end
+    end
+    lastFloorChangeRecord = nil
+  else
+    lastFloorChangeRecord = { from = fromFloor, to = toFloor, ts = nowTs }
+  end
+end
+
 -- Helper function to focus a waypoint (DRY: used in recovery and startup)
 -- Focuses the waypoint BEFORE the target so next tick executes it
 -- @param targetChild widget The waypoint widget to focus
@@ -381,10 +649,41 @@ local function focusWaypointBefore(targetChild, targetIndex)
   end
 end
 
+-- Find closest waypoint by distance only (no pathfinding - very fast)
+local function findClosestWaypointByDistance(playerPos, maxDist)
+  if not playerPos then return nil, nil end
+  buildWaypointCache()
+  
+  local bestChild, bestIndex, bestDist = nil, nil, maxDist + 1
+  local px, py, pz = playerPos.x, playerPos.y, playerPos.z
+  
+  for i, wp in pairs(waypointPositionCache) do
+    -- Same floor only for simplicity
+    if wp.z == pz then
+      local dx = math.abs(wp.x - px)
+      local dy = math.abs(wp.y - py)
+      local dist = math.max(dx, dy)  -- Chebyshev distance
+      
+      if dist < bestDist and dist <= maxDist then
+        bestDist = dist
+        bestChild = wp.child
+        bestIndex = i
+      end
+    end
+  end
+  
+  return bestChild, bestIndex
+end
+
 local function executeRecovery()
   local attempt = WaypointEngine.recoveryAttempt
   local playerPos = player:getPosition()
   local maxDist = storage.extras.gotoMaxDistance or 50
+  
+  -- Emergency break for combat/emergency
+  if storage.targetbotCombatActive or storage.targetbotEmergency then
+    return false
+  end
   
   -- Strategy 1: Find nearest reachable waypoint (forward search - fastest)
   if attempt <= 1 then
@@ -408,17 +707,11 @@ local function executeRecovery()
     return false
   end
   
-  -- Strategy 3: GLOBAL SEARCH - Find ANY reachable waypoint on current floor
-  -- This is the key improvement for relog scenarios
-  if attempt <= 3 and playerPos and findNearestGlobalWaypoint then
-    local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
-      maxCandidates = 30,
-      preferCurrentFloor = true,
-      searchAllFloors = false
-    })
-    
-    if nearestChild then
-      print("[CaveBot] Recovery: Found waypoint via global search at index " .. nearestIndex)
+  -- Strategy 3: SIMPLE DISTANCE-BASED SEARCH (no pathfinding - very fast)
+  if attempt <= 3 and playerPos then
+    local nearestChild, nearestIndex = findClosestWaypointByDistance(playerPos, maxDist)
+    if nearestChild and nearestIndex then
+      print("[CaveBot] Recovery: Found closest waypoint by distance at index " .. nearestIndex)
       focusWaypointBefore(nearestChild, nearestIndex)
       transitionTo("NORMAL")
       return true
@@ -427,24 +720,8 @@ local function executeRecovery()
     return false
   end
   
-  -- Strategy 4: EXTENDED GLOBAL SEARCH with cross-floor support
-  if attempt <= 4 and playerPos and findNearestGlobalWaypoint then
-    local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
-      maxCandidates = 50,
-      preferCurrentFloor = true,
-      searchAllFloors = true  -- Check adjacent floors
-    })
-    
-    if nearestChild then
-      print("[CaveBot] Recovery: Found waypoint via extended global search at index " .. nearestIndex)
-      focusWaypointBefore(nearestChild, nearestIndex)
-      transitionTo("NORMAL")
-      return true
-    end
-  end
-  
-  -- Strategy 5: Skip current waypoint (last resort)
-  if attempt <= 5 then
+  -- Strategy 4: Skip current waypoint (no pathfinding needed)
+  if attempt <= 4 then
     if ui and ui.list then
       local actionCount = ui.list:getChildCount()
       if actionCount > 1 then
@@ -466,8 +743,8 @@ local function executeRecovery()
     end
   end
   
-  -- Strategy 6: Skip multiple waypoints (exponential skip - emergency)
-  if attempt <= 6 then
+  -- Strategy 5: Skip multiple waypoints (exponential skip - emergency)
+  if attempt <= 5 then
     if ui and ui.list then
       local actionCount = ui.list:getChildCount()
       local skipCount = math.min(5, math.floor(actionCount / 4))
@@ -484,7 +761,7 @@ local function executeRecovery()
             return true
           end
         end
-        WaypointEngine.recoveryAttempt = 6
+        WaypointEngine.recoveryAttempt = 5
         return false
       end
     end
@@ -610,87 +887,173 @@ local function initTargetBotCache()
   end
 end
 
-cavebotMacro = macro(250, function()
-  -- Safety-first gating: pause movement when healing/danger active
-  if HealContext and HealContext.isCritical and HealContext.isCritical() then
-    CaveBot.resetWalking()
-    return
-  end
-  if HealContext and HealContext.isDanger and HealContext.isDanger() then
-    CaveBot.resetWalking()
-    return
-  end
+-- ============================================================================
+-- SIMPLE WAYPOINT FINDER (Lightweight, no heavy pathfinding)
+-- ============================================================================
 
-  -- SMART EXECUTION: Skip if we shouldn't execute this tick
-  if shouldSkipExecution() then return end
+-- Simple candidate collection (no pre-allocation needed for small lists)
+local function collectWaypointCandidates(playerPos, maxDist, options)
+  options = options or {}
+  local candidates = {}
+  candidatePoolSize = 0
+  
+  local collectionLimit = maxDist * (options.collectRangeMultiplier or 1)
+  local px, py, pz = playerPos.x, playerPos.y, playerPos.z
+  local preferCurrentFloor = options.preferCurrentFloor ~= false
+  local searchAllFloors = options.searchAllFloors or false
+  local collectionLimitSq = collectionLimit * collectionLimit  -- Avoid sqrt
+  
+  -- Early exit if cache is empty
+  local cacheEmpty = true
+  for _ in pairs(waypointPositionCache) do cacheEmpty = false; break end
+  if cacheEmpty then return {} end
+  
+  -- Single pass with early exits
+  for i, wp in pairs(waypointPositionCache) do
+    -- Quick Z check first (cheapest)
+    local isSameFloor = (wp.z == pz)
+    if not isSameFloor and (preferCurrentFloor or not searchAllFloors) then
+      -- Skip if different floor and we're preferring current floor
+      goto continue
+    end
+    
+    -- Inline distance calculation with early X exit
+    local dx = wp.x - px
+    if dx < 0 then dx = -dx end
+    if dx > collectionLimit then goto continue end
+    
+    local dy = wp.y - py
+    if dy < 0 then dy = -dy end  
+    if dy > collectionLimit then goto continue end
+    
+    -- Compute final distance (Chebyshev for same floor, Manhattan for cross-floor)
+    local dist = isSameFloor and (dx > dy and dx or dy) or (dx + dy)
+    if dist > collectionLimit then goto continue end
+    
+    -- Add to pool (reuse pre-allocated entry)
+    candidatePoolSize = candidatePoolSize + 1
+    if candidatePoolSize > MAX_CANDIDATE_POOL then
+      candidatePoolSize = MAX_CANDIDATE_POOL
+      break  -- Pool full, stop collecting
+    end
+    
+    local entry = candidatePool[candidatePoolSize]
+    entry.index = i
+    entry.waypoint = wp
+    entry.distance = dist
+    entry.child = wp.child
+    
+    ::continue::
+  end
+  
+  return candidates
+end
+
+-- Stub functions for compatibility (no-op, lightweight)
+local function cancelIncrementalSearch() end
+local function startIncrementalWaypointSearch() return false end
+
+local _lastCavebotSlowWarn = 0
+local _macroHardTimeout = 0.12  -- 120ms hard timeout
+
+-- ============================================================================
+-- MAIN MACRO (Simplified - event handlers do most work)
+-- ============================================================================
+
+cavebotMacro = macro(150, function()
+  local _msStart = os.clock()
+  
+  -- Prevent overlapping executions
+  if _msStart - (lastMacroTime or 0) < 0.12 then return end
+  lastMacroTime = _msStart
+  
+  -- Time budget to prevent freezing
+  local totalBudget = 0.12
+  local budgetStart = _msStart
+  
+  -- Prevent execution before login
+  if not g_game.isOnline() then return end
+  
+  -- Skip if we shouldn't execute this tick
+  if shouldSkipExecution() then 
+    syncLegacyState()
+    return 
+  end
   
   -- Update player position tracking
   hasPlayerMoved()
 
-  -- Guard against unintended floor changes: realign to nearest waypoint on current floor
+  -- Get player position
   local playerPos = player:getPosition()
-  if playerPos then
-    if lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
-      CaveBot.resetWalking()
-      resetWaypointEngine()
-      if resetStartupCheck then resetStartupCheck() end
-      if findNearestGlobalWaypoint then
-        local maxDist = storage.extras.gotoMaxDistance or 50
-        local child, idx = findNearestGlobalWaypoint(playerPos, maxDist, {
-          maxCandidates = 25,
-          preferCurrentFloor = true,
-          searchAllFloors = false
-        })
-        if child then
-          focusWaypointBefore(child, idx)
-        end
-      end
-    end
-    lastPlayerFloor = playerPos.z
-  end
+  if not playerPos then return end
   
-  -- STARTUP DETECTION: Find nearest waypoint on relog/load
-  -- Note: checkStartupWaypoint is defined later in file, check if available
+  -- Floor change detection
+  if lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
+    CaveBot.clearWalkingState()
+    resetWaypointEngine()
+    if resetStartupCheck then resetStartupCheck() end
+    
+    -- Find closest waypoint on new floor
+    local maxDist = storage.extras.gotoMaxDistance or 50
+    local closestChild, closestIndex = findClosestWaypointByDistance(playerPos, maxDist)
+    if closestChild and closestIndex then
+      focusWaypointBefore(closestChild, closestIndex)
+    end
+  end
+  lastPlayerFloor = playerPos.z
+  
+  -- Budget check
+  if (os.clock() - budgetStart) > totalBudget then return end
+  
+  -- Startup detection (find nearest waypoint on relog)
   if checkStartupWaypoint then
     checkStartupWaypoint()
   end
   
-  -- WAYPOINT ENGINE: High-performance stuck detection and recovery
+  -- Budget check
+  if (os.clock() - budgetStart) > totalBudget then return end
+  
+  -- Waypoint engine stuck detection
   if runWaypointEngine() then
-    return  -- Engine handled recovery, skip normal processing
+    return
   end
   
-  -- Lazy-init TargetBot cache
+  -- Budget check
+  if (os.clock() - budgetStart) > totalBudget then return end
+  
+  -- TargetBot integration
   if not targetBotIsActive and TargetBot then
     initTargetBotCache()
   end
   
-  -- Check TargetBot allows CaveBot action (cached function refs)
   if targetBotIsActive and targetBotIsActive() then
     if targetBotIsCaveBotAllowed and not targetBotIsCaveBotAllowed() then
-      CaveBot.resetWalking()
       return
     end
-    
-    -- PULL SYSTEM PAUSE: If smartPull is active, pause waypoint walking
     if TargetBot.smartPullActive then
-      CaveBot.resetWalking()
       return
     end
   end
   
-  -- Use cached UI list reference
+  -- Get UI list
   uiList = uiList or ui.list
-  
-  -- Get action count
   local actionCount = uiList:getChildCount()
   if actionCount == 0 then return end
   
-  -- Get current action (single call pattern)
+  -- Get current action
   local currentAction = uiList:getFocusedChild() or uiList:getFirstChild()
   if not currentAction then return end
+
+  -- Skip snoozed waypoints
+  if currentAction.snoozedUntil and currentAction.snoozedUntil > now then
+    local currentIndex = uiList:getChildIndex(currentAction)
+    local nextIndex = (currentIndex % actionCount) + 1
+    local nextChild = uiList:getChildByIndex(nextIndex)
+    if nextChild then uiList:focusChild(nextChild) end
+    return
+  end
   
-  -- Direct table access (O(1))
+  -- Get action definition
   local actionType = currentAction.action
   local actionDef = CaveBot.Actions[actionType]
   
@@ -699,8 +1062,9 @@ cavebotMacro = macro(250, function()
     return
   end
   
-  -- Execute action (inline for performance)
-  CaveBot.resetWalking()
+  -- Execute action
+  -- Final budget check before action
+  if os.clock() - budgetStart > totalBudget * 0.8 then return end
   local result = actionDef.callback(currentAction.value, actionRetries, prevActionResult)
   
   -- Handle result
@@ -923,19 +1287,7 @@ end
 -- PURE UTILITY FUNCTIONS (SRP: Single responsibility, no side effects)
 -- ============================================================================
 
--- Parse position from goto waypoint text
--- @param text string "goto:1234,5678,7"
--- @return table {x, y, z} or nil
-local function parseGotoPosition(text)
-  if not text or not string.starts(text, "goto:") then return nil end
-  local re = regexMatch(text, [[(?:goto:)([^,]+),([^,]+),([^,]+)]])
-  if not re or not re[1] then return nil end
-  return {
-    x = tonumber(re[1][2]),
-    y = tonumber(re[1][3]),
-    z = tonumber(re[1][4])
-  }
-end
+-- NOTE: parseGotoPosition is defined earlier in the file (event-driven waypoint section)
 
 -- Calculate Chebyshev distance (max of dx, dy) - used for "within range" checks
 -- @param p1 table Table with x, y fields (first position)
@@ -953,11 +1305,55 @@ local function manhattanDist(p1, p2)
   return math.abs(p1.x - p2.x) + math.abs(p1.y - p2.y)
 end
 
+-- Pure: Check if position is valid (KISS)
+local function isValidPosition(pos)
+  return pos and type(pos.x) == 'number' and type(pos.y) == 'number' and type(pos.z) == 'number'
+end
+
+-- Pure: Sort candidates by distance (KISS)
+local function sortCandidatesByDistance(candidates)
+  table.sort(candidates, function(a, b) return a.distance < b.distance end)
+  return candidates
+end
+
+-- Pure: Check if we should break pathfinding check (SRP)
+local function shouldBreakPathfindingCheck(startTime, timeBudgetSec)
+  return os.clock() - startTime > timeBudgetSec or storage.targetbotCombatActive or storage.targetbotEmergency
+end
+
 -- ============================================================================
 -- WAYPOINT CACHE (DRY: Single source of truth for waypoint positions)
 -- ============================================================================
 
 -- Note: waypointPositionCache, waypointCacheValid, waypointCacheFloors declared at top
+
+-- Parse position from goto waypoint text
+-- @param text string "goto:1234,5678,7" or "1234,5678,7"
+-- @return table {x, y, z} or nil
+local function parseGotoPosition(text)
+  if not text then return nil end
+  -- Try "goto:x,y,z" format first
+  if string.starts and string.starts(text, "goto:") then
+    local re = regexMatch(text, [[(?:goto:)([^,]+),([^,]+),([^,]+)]])
+    if re and re[1] then
+      return {
+        x = tonumber(re[1][2]),
+        y = tonumber(re[1][3]),
+        z = tonumber(re[1][4])
+      }
+    end
+  end
+  -- Try plain "x,y,z" format
+  local match = regexMatch(text, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
+  if match and match[1] then
+    return {
+      x = tonumber(match[1][2]),
+      y = tonumber(match[1][3]),
+      z = tonumber(match[1][4])
+    }
+  end
+  return nil
+end
 
 invalidateWaypointCache = function()
   waypointPositionCache = {}
@@ -1015,100 +1411,9 @@ end
   @return child, index or nil, nil if not found
 ]]
 findNearestGlobalWaypoint = function(playerPos, maxDist, options)
-  buildWaypointCache()
-  
-  options = options or {}
-  local maxCandidates = options.maxCandidates or 20
-  local preferCurrentFloor = options.preferCurrentFloor ~= false
-  local searchAllFloors = options.searchAllFloors or false
-  local collectRangeMultiplier = options.collectRangeMultiplier or 1
-  local playerZ = playerPos.z
-  
-  -- Phase 1: Collect candidates on same floor with distance
-  local candidates = {}
-  local collectionLimit = maxDist * collectRangeMultiplier
-
-  for i, wp in pairs(waypointPositionCache) do
-    local isSameFloor = (wp.z == playerZ)
-    if isSameFloor then
-      local dist = chebyshevDist(playerPos, wp)
-      if dist <= collectionLimit then
-        candidates[#candidates + 1] = {
-          index = i,
-          waypoint = wp,
-          distance = dist,
-          child = wp.child
-        }
-      end
-    elseif searchAllFloors and not preferCurrentFloor then
-      -- When not prioritizing current floor, allow collecting cross-floor
-      local dist = manhattanDist(playerPos, wp)
-      candidates[#candidates + 1] = {
-        index = i,
-        waypoint = wp,
-        distance = dist,
-        child = wp.child
-      }
-    end
-  end
-  
-  -- Phase 2: Sort by distance (closest first)
-  if #candidates > 0 then
-    table.sort(candidates, function(a, b)
-      return a.distance < b.distance
-    end)
-    
-    -- Phase 3: Check pathfinding for top candidates (tiered approach)
-    local checkCount = math.min(maxCandidates, #candidates)
-    for i = 1, checkCount do
-      local candidate = candidates[i]
-      local destPos = {x = candidate.waypoint.x, y = candidate.waypoint.y, z = candidate.waypoint.z}
-      
-      -- Tier 1: Normal pathfinding
-      local path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true })
-      
-      -- Tier 2: Ignore creatures (maybe blocked by monsters)
-      if not path then
-        path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true, ignoreCreatures = true })
-      end
-      
-      if path then
-        return candidate.child, candidate.index
-      end
-    end
-  end
-  
-  -- No candidates found on current floor (or none collected when preferCurrentFloor=false)
-  if searchAllFloors then
-    -- Try adjacent floors (±1) - useful for stairs/holes
-    for _, floorZ in ipairs({playerZ - 1, playerZ + 1}) do
-      if waypointCacheFloors[floorZ] then
-        -- Collect candidates on this floor
-        local floorCandidates = {}
-        for i, wp in pairs(waypointPositionCache) do
-          if wp.z == floorZ then
-            local dist = manhattanDist(playerPos, wp)
-            floorCandidates[#floorCandidates + 1] = {
-              index = i,
-              waypoint = wp,
-              distance = dist,
-              child = wp.child
-            }
-          end
-        end
-        
-        -- Sort and return first (can't pathfind cross-floor, just return closest)
-        if #floorCandidates > 0 then
-          table.sort(floorCandidates, function(a, b)
-            return a.distance < b.distance
-          end)
-          return floorCandidates[1].child, floorCandidates[1].index
-        end
-      end
-    end
-  end
-  
-  return nil, nil
+  -- SIMPLIFIED: Use distance-only search (no pathfinding) to prevent freezes
+  -- This is much faster and sufficient for most cases
+  return findClosestWaypointByDistance(playerPos, maxDist)
 end
 
 -- ============================================================================
@@ -1127,14 +1432,14 @@ checkStartupWaypoint = function()
   end
   
   -- Small delay to ensure map is loaded
-  if now - startupCheckTime < 500 then return end
+  if now - startupCheckTime < 200 then return end
   
   local playerPos = player:getPosition()
   if not playerPos then return end
   
   buildWaypointCache()
   
-  -- Check if current focused waypoint is already reachable
+  -- Check if current focused waypoint is already close enough (no pathfinding - fast)
   local currentAction = ui.list:getFocusedChild()
   if currentAction then
     local currentIndex = ui.list:getChildIndex(currentAction)
@@ -1145,37 +1450,26 @@ checkStartupWaypoint = function()
       local maxDist = storage.extras.gotoMaxDistance or 50
       
       if dist <= maxDist then
-        local path = findPath(playerPos, currentWp, maxDist, { ignoreNonPathable = true })
-        if path then
-          -- Current waypoint is reachable, no need to search
-          startupWaypointFound = true
-          return
-        end
+        -- Close enough on same floor - assume reachable (no pathfinding)
+        startupWaypointFound = true
+        return
       end
     end
   end
   
-  -- Current waypoint not reachable - find nearest globally
+  -- Current waypoint not reachable - find nearest globally (lightweight distance-based search)
   local maxDist = storage.extras.gotoMaxDistance or 50
-  local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
-    maxCandidates = 25,
-    preferCurrentFloor = true,
-    searchAllFloors = false
-  })
+  local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2)
   
   if nearestChild then
-    print("[CaveBot] Startup: Found nearest reachable waypoint at index " .. nearestIndex)
+    print("[CaveBot] Startup: Found nearest waypoint at index " .. nearestIndex)
     focusWaypointBefore(nearestChild, nearestIndex)
     startupWaypointFound = true
     return
   end
   
-  -- Extended search: larger distance, more candidates
-  local extendedChild, extendedIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
-    maxCandidates = 40,
-    preferCurrentFloor = true,
-    searchAllFloors = true  -- Try adjacent floors
-  })
+  -- Extended search: larger distance
+  local extendedChild, extendedIndex = findNearestGlobalWaypoint(playerPos, maxDist * 3)
   
   if extendedChild then
     print("[CaveBot] Startup: Found waypoint at extended range, index " .. extendedIndex)
@@ -1247,30 +1541,16 @@ CaveBot.findBestWaypoint = function(searchForward)
     return a.distance < b.distance
   end)
   
-  -- Phase 2: Check pathfinding for candidates (check up to 10 for better recovery)
-  local maxCandidates = math.min(10, #candidates)
-  for i = 1, maxCandidates do
-    local candidate = candidates[i]
-    local wp = candidate.waypoint
-    local destPos = {x = wp.x, y = wp.y, z = wp.z}
-    
-    -- Check if path exists (try with and without creature ignore)
-    local path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true })
-    if not path then
-      -- Second attempt: ignore creatures
-      path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true, ignoreCreatures = true })
+  -- Phase 2: Use closest candidate by distance (no pathfinding - fast)
+  if #candidates > 0 then
+    local candidate = candidates[1]  -- Already sorted by distance
+    local prevChild = ui.list:getChildByIndex(candidate.index - 1)
+    if prevChild then
+      ui.list:focusChild(prevChild)
+    else
+      ui.list:focusChild(candidate.waypoint.child)
     end
-    
-    if path then
-      -- Found a reachable waypoint
-      local prevChild = ui.list:getChildByIndex(candidate.index - 1)
-      if prevChild then
-        ui.list:focusChild(prevChild)
-      else
-        ui.list:focusChild(candidate.waypoint.child)
-      end
-      return true
-    end
+    return true
   end
   
   return false
@@ -1287,7 +1567,7 @@ CaveBot.gotoNextWaypointInRangeLegacy = function()
   local index = ui.list:getChildIndex(currentAction)
   local actions = ui.list:getChildren()
 
-  -- start searching from current index
+  -- start searching from current index (distance only - no pathfinding)
   for i, child in ipairs(actions) do
     if i > index then
       local text = child:getText()
@@ -1298,17 +1578,16 @@ CaveBot.gotoNextWaypointInRangeLegacy = function()
         if posz() == pos.z then
           local maxDist = storage.extras.gotoMaxDistance
           if distanceFromPlayer(pos) <= maxDist then
-            if findPath(player:getPosition(), pos, maxDist, { ignoreNonPathable = true }) then
-              ui.list:focusChild(ui.list:getChildByIndex(i-1))
-              return true
-            end
+            -- Close enough on same floor - use it (no pathfinding)
+            ui.list:focusChild(ui.list:getChildByIndex(i-1))
+            return true
           end
         end
       end
     end
   end
 
-  -- if not found then damn go from start
+  -- if not found then damn go from start (distance only - no pathfinding)
   for i, child in ipairs(actions) do
     if i <= index then
       local text = child:getText()
@@ -1319,10 +1598,9 @@ CaveBot.gotoNextWaypointInRangeLegacy = function()
         if posz() == pos.z then
           local maxDist = storage.extras.gotoMaxDistance
           if distanceFromPlayer(pos) <= maxDist then
-            if findPath(player:getPosition(), pos, maxDist, { ignoreNonPathable = true }) then
-              ui.list:focusChild(ui.list:getChildByIndex(i-1))
-              return true
-            end
+            -- Close enough on same floor - use it (no pathfinding)
+            ui.list:focusChild(ui.list:getChildByIndex(i-1))
+            return true
           end
         end
       end
@@ -1382,14 +1660,10 @@ CaveBot.gotoFirstPreviousReachableWaypoint = function()
           if posz() == pos.z then
             local dist = distanceFromPlayer(pos)
             
-            -- First priority: Normal range with path validation
+            -- Use distance only - no pathfinding (fast)
             if dist <= halfDist then
-              local path = findPath(playerPos, pos, halfDist, { ignoreNonPathable = true })
-              if path then
-                print("CaveBot: Found previous waypoint at distance " .. dist .. ", going back " .. i .. " waypoints.")
-                return ui.list:focusChild(child)
-              end
-            -- Second priority: Extended range candidates
+              print("CaveBot: Found previous waypoint at distance " .. dist .. ", going back " .. i .. " waypoints.")
+              return ui.list:focusChild(child)
             elseif dist <= extendedDist then
               table.insert(extendedCandidates, {child = child, pos = pos, dist = dist, steps = i})
             end
@@ -1399,18 +1673,12 @@ CaveBot.gotoFirstPreviousReachableWaypoint = function()
     end
   end
 
-  -- If we didn't find anything in normal range, try extended range
+  -- If we didn't find anything in normal range, use closest extended range (no pathfinding)
   if #extendedCandidates > 0 then
-    -- Sort by distance (closest first)
     table.sort(extendedCandidates, function(a, b) return a.dist < b.dist end)
-    
-    for _, candidate in ipairs(extendedCandidates) do
-      local path = findPath(playerPos, candidate.pos, extendedDist, { ignoreNonPathable = true })
-      if path then
-        print("CaveBot: Found previous waypoint at extended range (distance " .. candidate.dist .. "), going back " .. candidate.steps .. " waypoints.")
-        return ui.list:focusChild(candidate.child)
-      end
-    end
+    local candidate = extendedCandidates[1]
+    print("CaveBot: Found previous waypoint at extended range (distance " .. candidate.dist .. "), going back " .. candidate.steps .. " waypoints.")
+    return ui.list:focusChild(candidate.child)
   end
 
   -- not found
@@ -1458,13 +1726,9 @@ CaveBot.getFirstWaypointBeforeLabel = function(label)
           if posz() == pos.z then
             local dist = distanceFromPlayer(pos)
             
-            -- First priority: Normal range with path validation
+            -- Use distance only - no pathfinding (fast)
             if dist <= halfDist then
-              local path = findPath(playerPos, pos, halfDist, { ignoreNonPathable = true })
-              if path then
-                return ui.list:focusChild(child)
-              end
-            -- Second priority: Extended range candidates
+              return ui.list:focusChild(child)
             elseif dist <= extendedDist then
               table.insert(extendedCandidates, {child = child, pos = pos, dist = dist})
             end
@@ -1474,15 +1738,10 @@ CaveBot.getFirstWaypointBeforeLabel = function(label)
     end
   end
 
-  -- Try extended range if nothing found
+  -- Use closest extended range if nothing found (no pathfinding)
   if #extendedCandidates > 0 then
     table.sort(extendedCandidates, function(a, b) return a.dist < b.dist end)
-    for _, candidate in ipairs(extendedCandidates) do
-      local path = findPath(playerPos, candidate.pos, extendedDist, { ignoreNonPathable = true })
-      if path then
-        return ui.list:focusChild(candidate.child)
-      end
-    end
+    return ui.list:focusChild(extendedCandidates[1].child)
   end
 
   return false

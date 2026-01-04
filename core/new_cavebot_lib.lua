@@ -336,7 +336,7 @@ function CaveBot.ReachNPC(name)
     name = name:lower()
     
     local npc = nil
-    for i, spec in pairs(getSpectators()) do
+    for i, spec in pairs(SafeCall.global("getSpectators") or {}) do
         if spec:isNpc() and spec:getName():lower() == name then
             npc = spec
         end
