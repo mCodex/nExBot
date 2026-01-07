@@ -474,6 +474,16 @@ onSpellCooldown(function(_, duration)
   end
 end)
 
+-- If the player logs back in (health becomes >0) start a fresh analytics session
+if onPlayerHealthChange then
+  onPlayerHealthChange(function(healthPercent)
+    if healthPercent and healthPercent > 0 and not isSessionActive() then
+      startSession()
+      print("[HuntAnalyzer] New session started on relogin")
+    end
+  end)
+end
+
 local lastHP, lastHpPercent = 0, 100
 onPlayerHealthChange(function(healthPercent)
   if not isSessionActive() then return end
