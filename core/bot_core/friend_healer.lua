@@ -35,6 +35,9 @@ local FriendHealerEnhanced = BotCore.FriendHealerEnhanced
 -- Also expose as BotCore.FriendHealer for backward compatibility with new_healer.lua
 BotCore.FriendHealer = BotCore.FriendHealerEnhanced
 
+-- Module version for debugging
+FriendHealer.VERSION = "3.0.0"
+
 -- ============================================================================
 -- CONSTANTS
 -- ============================================================================
@@ -43,7 +46,6 @@ local SELF_CRITICAL_HP = 30      -- Below this: NEVER heal friends
 local SELF_LOW_HP = 50           -- Below this: NEVER heal friends
 local FRIEND_CRITICAL_HP = 30    -- Friend emergency threshold
 local FRIEND_LOW_HP = 50         -- Friend needs urgent help
-
 local HEAL_COOLDOWN_MS = 1000    -- Minimum time between heals
 local POTION_COOLDOWN_MS = 1000  -- Potion exhaustion
 local RUNE_COOLDOWN_MS = 1000    -- Rune exhaustion
@@ -312,7 +314,8 @@ local function isFriend(creature, config)
   if not creature or not creature:isPlayer() then return false end
   if creature:isLocalPlayer() then return false end
   
-  local name = creature:getName()
+  local name = getCreatureName(creature)
+  if not name then return false end
   
   -- Check custom player list first (with custom HP threshold)
   if config.customPlayers and config.customPlayers[name] then
@@ -838,12 +841,12 @@ function FriendHealerEnhanced.onFriendHealthChange(creature, newHpPercent, oldHp
   if not _state.enabled then return end
   if not creature or creature:isLocalPlayer() then return end
   
-  local config = _state.config
-  if not config then return end
+  -- Skip local player
+  local ok, isLocal = pcall(function() return creature:isLocalPlayer() end)
+  if ok and isLocal then return end
   
-  -- Only react to significant drops
-  local drop = (oldHpPercent or 100) - newHpPercent
-  if drop < 10 then return end
+  local config = getConfig()
+  if not config.enabled then return end
   
   -- Check if this is a friend
   local isFriendMatch = isFriend(creature, config)

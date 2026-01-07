@@ -42,7 +42,7 @@ CaveBot.Extensions.Bank.setup = function()
      return false
     end
 
-    local npc = getCreatureByName(npcName)
+    local npc = SafeCall.getCreatureByName(npcName)
     if not npc then 
       print("CaveBot[Bank]: NPC not found, skipping")
      return false 

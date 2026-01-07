@@ -1,4 +1,5 @@
 setDefaultTab("Main")
+local SafeCall = SafeCall or require("core.safe_call")
 local panelName = "combobot"
 local ui = setupUI([[
 Panel
@@ -200,7 +201,8 @@ end
 local shouldCloseWindow = false
 local firstInvitee = true
 local isInComboTeam = false
-macro(10, function()
+-- Lower frequency (100ms) to reduce CPU when UI isn't changing rapidly
+macro(100, function()
   if shouldCloseWindow and config.serverEnabled and config.enabled then
     local channelsWindow = modules.game_console.channelsWindow
     if channelsWindow then
@@ -231,7 +233,7 @@ onTextMessage(function(mode, text)
         local regex = "[a-zA-Z]*"
         local regexData = regexMatch(text, regex)
         if regexData[1][1]:lower() == config.serverLeader:lower() then
-          local leader = getCreatureByName(regexData[1][1])
+          local leader = SafeCall.getCreatureByName(regexData[1][1])
           if leader then
             g_game.partyJoin(leader:getId())
             g_game.requestChannels()
@@ -250,7 +252,7 @@ onTalk(function(name, level, mode, text, channelId, pos)
       if string.find(text, "request invite") then
         local access = string.match(text, "%d.*")
         if access and access == storage.BotServerChannel then
-          local minion = getCreatureByName(name)
+          local minion = SafeCall.getCreatureByName(name)
           if minion then
             g_game.partyInvite(minion:getId())
             if firstInvitee then
@@ -271,7 +273,7 @@ onTalk(function(name, level, mode, text, channelId, pos)
     if name:lower() == config.sayLeader:lower() and string.find(text, config.sayPhrase) and config.onSayEnabled then
       startCombo = true
     end
-    if (config.castLeader and name:lower() == config.castLeader:lower()) and isAttSpell(text) and config.onCastEnabled then
+    if (config.castLeader and name:lower() == config.castLeader:lower()) and isAttSpell and isAttSpell(text) and config.onCastEnabled then
       startCombo = true
     end
   end
@@ -282,21 +284,23 @@ onTalk(function(name, level, mode, text, channelId, pos)
       local params = string.split(text, ",")
       if #params == 2 then
         local target = params[2]:trim()
-        if getCreatureByName(target) then
-          useWith(3155, getCreatureByName(target))
+        local creature = SafeCall.getCreatureByName(target)
+        if creature then
+          if useWith then useWith(3155, creature) end
         end
       end
     elseif string.find(text, "att") then
       local attParams = string.split(text, ",")
       if #attParams == 2 then
         local atTarget = attParams[2]:trim()
-        if getCreatureByName(atTarget) and config.attack == "COMMAND TARGET" then
-          g_game.attack(getCreatureByName(atTarget))
+        local creature = SafeCall.getCreatureByName(atTarget)
+        if creature and config.attack == "COMMAND TARGET" then
+          g_game.attack(creature)
         end
       end
     end
   end
-  if isAttSpell(text) and config.enabled and config.serverEnabled then
+  if isAttSpell and isAttSpell(text) and config.enabled and config.serverEnabled then
     BotServer.send("trigger", "start")
   end
 end)
@@ -324,8 +328,8 @@ onMissle(function(missle)
     local t1 = toCreatures[1]
     leaderTarget = t1
     if c1:getName():lower() == config.shootLeader:lower() then
-      if config.attackItemEnabled and config.item and config.item > 100 and findItem(config.item) then
-        useWith(config.item, t1)
+      if config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item) then
+        if useWith then useWith(config.item, t1) end
       end
       if config.attackSpellEnabled and config.spell:len() > 1 then
         say(config.spell)
@@ -334,16 +338,18 @@ onMissle(function(missle)
   end
 end)
 
-macro(10, function()
+-- Lower frequency (100ms) to reduce CPU usage
+macro(100, function()
   if not config.enabled or not config.attackLeaderTargetEnabled then return end
   if leaderTarget and config.attack == "LEADER TARGET" then
-    if not getTarget() or (getTarget() and getTarget():getName() ~= leaderTarget:getName()) then
+    local target = SafeCall.getTarget()
+    if not target or target:getName() ~= leaderTarget:getName() then
       g_game.attack(leaderTarget)
     end
   end
   if config.enabled and config.serverEnabled and config.attack == "SERVER LEADER TARGET" and serverTarget then
-    if serverTarget and not getTarget() or (getTarget() and getTarget():getname() ~= serverTarget)
-    then
+    local target = SafeCall.getTarget()
+    if serverTarget and not target or (target and target:getName() ~= serverTarget) then
       g_game.attack(serverTarget)
     end
   end
@@ -374,7 +380,7 @@ macro(100, function()
     end
   end
   if not toFollow then return end
-  local target = getCreatureByName(toFollow)
+  local target = SafeCall.getCreatureByName(toFollow)
   if target then
     local tpos = target:getPosition()
     toFollowPos[tpos.z] = tpos
@@ -398,10 +404,12 @@ onCreaturePositionChange(function(creature, oldPos, newPos)
 end)
 
 local timeout = now
-macro(10, function()
+-- Lower frequency (100ms) to reduce CPU usage
+macro(100, function()
   if config.enabled and startCombo then
-    if config.attackItemEnabled and config.item and config.item > 100 and findItem(config.item) then
-      useWith(config.item, getTarget())
+    if config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item) then
+      local target = SafeCall.getTarget()
+      if useWith and target then useWith(config.item, target) end
     end
     if config.attackSpellEnabled and config.spell:len() > 1 then
       say(config.spell)
@@ -410,7 +418,7 @@ macro(10, function()
   end
   -- attack part / server
   if BotServer._websocket and config.enabled and config.serverEnabled then
-    if target() and now - timeout > 500 then
+    if target and target() and now - timeout > 500 then
       targetPos = target():getName()
       BotServer.send("target", targetPos)
       timeout = now
@@ -432,18 +440,19 @@ if BotServer._websocket and config.enabled and config.serverEnabled then
   end)
   BotServer.listen("target", function(name, message)
     if name:lower() ~= player:getName():lower() and name:lower() == config.serverLeader:lower() then
-      if not target() or target():getName() == getCreatureByName(message) then
+      local msgCreature = SafeCall.getCreatureByName(message)
+      if not (target and target()) or (target and target():getName() == msgCreature) then
         if config.serverLeaderTarget then
-          serverTarget = getCreatureByName(message)
-          g_game.attack(getCreatureByName(message))
+          serverTarget = msgCreature
+          if g_game and g_game.attack then g_game.attack(msgCreature) end
         end
       end
     end
   end)
   BotServer.listen("useWith", function(name, message)
    local tile = g_map.getTile(message)
-   if config.serverTriggers and name:lower() ~= player:getName():lower() and name:lower() == config.serverLeader:lower() and config.attackItemEnabled and config.item and findItem(config.item) then
-    useWith(config.item, tile:getTopUseThing())
+   if config.serverTriggers and name:lower() ~= player:getName():lower() and name:lower() == config.serverLeader:lower() and config.attackItemEnabled and config.item and findItem and findItem(config.item) then
+    if useWith then useWith(config.item, tile:getTopUseThing()) end
    end
   end)
 end

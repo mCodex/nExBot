@@ -111,45 +111,6 @@ end
 --------------------------------------------------------------------------------
 local MemoCache = {}
 
--- Create a memoized version of a pure function
--- @param fn: the function to memoize
--- @param ttl: optional time-to-live in ms (nil = forever)
--- @return memoized function
-function nExBot.memoize(fn, ttl)
-  local cache = {}
-  local timestamps = {}
-  
-  return function(...)
-    local key = ""
-    for i = 1, select("#", ...) do
-      local v = select(i, ...)
-      key = key .. tostring(v) .. "|"
-    end
-    
-    local cached = cache[key]
-    local timestamp = timestamps[key]
-    
-    -- Check if cache is valid
-    if cached ~= nil then
-      if not ttl or (now - timestamp) < ttl then
-        return cached
-      end
-    end
-    
-    -- Compute and cache result
-    local result = fn(...)
-    cache[key] = result
-    timestamps[key] = now
-    return result
-  end
-end
-
--- Clear memoization cache for a specific function (if stored externally)
-function nExBot.clearMemo(memoizedFn)
-  -- This requires the user to store the cache reference
-  -- For now, just document that memoized functions can't be cleared easily
-end
-
 function logInfo(text)
     local timestamp = os.date("%H:%M:%S")
     text = tostring(text)
@@ -165,18 +126,6 @@ end)
 
 function standTime()
     return now - nExBot.standTime
-end
-
-function relogOnCharacter(charName)
-    local characters = g_ui.getRootWidget().charactersWindow.characters
-    for index, child in ipairs(characters:getChildren()) do
-        local name = child:getChildren()[1]:getText()
-    
-        if name:lower():find(charName:lower()) then
-            child:focus()
-            schedule(100, modules.client_entergame.CharacterList.doLogin)
-        end
-    end
 end
 
 function castSpell(text)
@@ -218,27 +167,8 @@ function burstDamageValue()
     return math.ceil(d / ((now - time) / 1000))
 end
 
--- simplified function from modules
--- displays string as white colour message
-function whiteInfoMessage(text)
-    return modules.game_textmessage.displayGameMessage(text)
-end
-
 function statusMessage(text, logInConsole)
     return not logInConsole and modules.game_textmessage.displayFailureMessage(text) or modules.game_textmessage.displayStatusMessage(text)
-end
-
--- same as above but red message
-function broadcastMessage(text)
-    return modules.game_textmessage.displayBroadcastMessage(text)
-end
-
--- almost every talk action inside cavebot has to be done by using schedule
--- therefore this is simplified function that doesn't require to build a body for schedule function
-function scheduleNpcSay(text, delay)
-    if not text or not delay then return false end
-
-    return schedule(delay, function() NPC.say(text) end)
 end
 
 -- returns first number in string, already formatted as number
@@ -247,38 +177,6 @@ function getFirstNumberInText(text)
     local n = nil
     if string.match(text, "%d+") then n = tonumber(string.match(text, "%d+")) end
     return n
-end
-
--- function to search if item of given ID can be found on certain tile
--- first argument is always ID 
--- the rest of aguments can be:
--- - tile
--- - position
--- - or x,y,z coordinates as p1, p2 and p3
--- returns boolean
-function isOnTile(id, p1, p2, p3)
-    if not id then return end
-    local tile
-    if type(p1) == "table" then
-        tile = g_map.getTile(p1)
-    elseif type(p1) ~= "number" then
-        tile = p1
-    else
-        local p = getPos(p1, p2, p3)
-        tile = g_map.getTile(p)
-    end
-    if not tile then return end
-
-    local item = false
-    if #tile:getItems() ~= 0 then
-        for i, v in ipairs(tile:getItems()) do
-            if v:getId() == id then item = true end
-        end
-    else
-        return false
-    end
-
-    return item
 end
 
 -- position is a special table, impossible to compare with normal one
@@ -292,12 +190,6 @@ function getPos(x, y, z)
     pos.z = z
 
     return pos
-end
-
--- opens purse... that's it
-function openPurse()
-    return g_game.use(g_game.getLocalPlayer():getInventoryItem(
-                          InventorySlotPurse))
 end
 
 -- check's whether container is full
@@ -449,7 +341,7 @@ end)
 
 if onSpellCooldown and onGroupSpellCooldown then
     onSpellCooldown(function(iconId, duration)
-        schedule(1, function()
+        schedule(40, function()
             if not nExBot.customCooldowns[lastPhrase] then
                 nExBot.customCooldowns[lastPhrase] = {id = iconId}
             end
@@ -457,7 +349,7 @@ if onSpellCooldown and onGroupSpellCooldown then
     end)
 
     onGroupSpellCooldown(function(iconId, duration)
-        schedule(2, function()
+        schedule(40, function()
             if nExBot.customCooldowns[lastPhrase] then
                 nExBot.customCooldowns[lastPhrase] = {id = nExBot.customCooldowns[lastPhrase].id, group = {[iconId] = duration}}
             end
@@ -616,7 +508,7 @@ function isFriend(c)
     if storage.playerList and storage.playerList.groupMembers then
         local p = creature
         if not p and type(c) == "string" then
-            p = getCreatureByName(c, true)
+            p = SafeCall.getCreatureByName(c, true)
         end
         if p and p:isPlayer() and p:isPartyMember() then
             CachedFriends[p] = true
@@ -665,7 +557,7 @@ function isEnemy(c)
     if not name then return false end
     
     if not p then
-        p = getCreatureByName(name, true)
+        p = SafeCall.getCreatureByName(name, true)
     end
     if not p then return false end
     if p:isLocalPlayer() then return false end
@@ -694,7 +586,7 @@ function getPlayerDistribution()
     local friends = {}
     local neutrals = {}
     local enemies = {}
-    for i, spec in ipairs(getSpectators()) do
+    for i, spec in ipairs(SafeCall.global("getSpectators") or {}) do
         if spec:isPlayer() and not spec:isLocalPlayer() then
             if isFriend(spec) then
                 table.insert(friends, spec)
@@ -841,7 +733,7 @@ end
 function getMonstersInRange(pos, range)
     if not pos or not range then return false end
     local monsters = 0
-    for i, spec in pairs(getSpectators()) do
+    for i, spec in pairs(SafeCall.global("getSpectators") or {}) do
         if spec:isMonster() and
             (g_game.getClientVersion() < 960 or spec:getType() < 3) and
             getDistanceBetween(pos, spec:getPosition()) < range then
@@ -1156,7 +1048,7 @@ function useOnInvertoryItem(a, b)
     local item = findItem(b)
     if not item then return end
 
-    return useWith(a, item)
+    return SafeCall.useWith(a, item)
 end
 
 -- Pre-computed direction offsets (static, never changes)
@@ -1269,7 +1161,7 @@ function useOnGroundItem(a, b)
     end
 
     if dest then
-        return useWith(item, dest)
+        return SafeCall.useWith(item, dest)
     else
         return false
     end

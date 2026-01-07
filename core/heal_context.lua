@@ -9,12 +9,12 @@ HealContext = {
   critical = false,
   dangerFlag = false,
   thresholds = {
-    hpCritical = 35,
-    dangerCritical = 50,
+    hpCritical = 20,
+    dangerCritical = 100,
   }
 }
 
-storage.healThresholds = storage.healThresholds or { hpCritical = 35, dangerCritical = 50 }
+storage.healThresholds = storage.healThresholds or { hpCritical = 20, dangerCritical = 100 }
 HealContext.thresholds = {
   hpCritical = storage.healThresholds.hpCritical or 35,
   dangerCritical = storage.healThresholds.dangerCritical or 50,
@@ -27,7 +27,7 @@ local function nowMs()
 end
 
 local function getTargetNameLower()
-  local t = target()
+  local t = target and target()
   return t and t:getName():lower() or nil
 end
 
@@ -49,10 +49,10 @@ local function snapshotOnce()
     hp = hppercent(),
     mp = manapercent(),
     currentMana = currentMana,  -- CRITICAL: Absolute mana value for spell cost checks
-    monsters = getMonsters(),
-    players = getPlayers(),
-    inPz = isInPz(),
-    paralyzed = isParalyzed(),
+    monsters = (getMonsters and getMonsters()) or 0,
+    players = (getPlayers and getPlayers()) or 0,
+    inPz = isInPz and isInPz() or false,
+    paralyzed = isParalyzed and isParalyzed() or false,
     burning = isBurning and isBurning() or false,
     poisoned = isPoisoned and isPoisoned() or false,
     targetName = getTargetNameLower(),
@@ -68,7 +68,8 @@ local function snapshotOnce()
   HealContext.snapshot = snap
   HealContext.lastSnapshotTime = nowTime
 
-  local crit = (snap.hp <= HealContext.thresholds.hpCritical) or (snap.danger >= HealContext.thresholds.dangerCritical and not snap.inPz)
+  -- HP-based critical detection disabled per user request; only danger triggers critical
+  local crit = (snap.danger >= HealContext.thresholds.dangerCritical and not snap.inPz)
   HealContext.critical = crit
   HealContext.dangerFlag = snap.danger >= HealContext.thresholds.dangerCritical
 

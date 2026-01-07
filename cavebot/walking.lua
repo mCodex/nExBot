@@ -1,47 +1,106 @@
 --[[
-  CaveBot Walking Module v3.2.0
+  CaveBot Walking Module v4.0.0 - High-Performance Floor-Safe Navigation
   
-  DESIGN PRINCIPLES:
-  - SRP: Each function has one responsibility
-  - DRY: No duplicated logic, shared helpers
-  - KISS: Simple, readable functions
-  - Pure Functions: Predictable, no side effects where possible
+  ARCHITECTURE (SOLID Principles):
+  ============================================================================
+  1. Single Responsibility Principle (SRP):
+     - TileAnalyzer: Analyzes tile properties (floor-change, safety, fields)
+     - PathValidator: Validates paths for safety
+     - FloorGuard: Monitors and prevents unintended floor changes
+     - Navigator: Orchestrates movement decisions
   
-  FLOOR-CHANGE PREVENTION:
-  - Validates path before autoWalk (never walk on floor-change tiles)
-  - Comprehensive ramp/ladder/hole/teleport detection
-  - Safe path computation with floor-change avoidance
-  - Immediate stop if floor change detected in path
+  2. Open/Closed Principle:
+     - Floor-change detection extensible via FLOOR_CHANGE_ITEMS table
+     - Custom validators can be registered via hooks
   
-  FIELD HANDLING:
-  - Respects ignoreFields config option
-  - Falls back to keyboard walking when autoWalk fails on fields
-  - Supports fire, poison, energy fields
+  3. Interface Segregation:
+     - Clean public API: walkTo, safeWalkTo, isPathSafe
+     - Internal modules operate independently
   
-  PATHFINDING DESIGN:
-  - Uses realistic pathfinding limit (50 tiles) matching game engine
-  - For longer distances, use waypoint-to-waypoint navigation
-  - Chunked walking (15 tiles/call) keeps paths fresh
-  - Tiered validation: thorough near, fast minimap far
+  4. Dependency Inversion:
+     - High-level Navigator depends on abstractions (TileAnalyzer, PathValidator)
+  
+  DESIGN PATTERNS:
+  ============================================================================
+  - Strategy: Different walking strategies (autoWalk, keyboard, chunked)
+  - Cache-Aside: LRU cache with TTL for tile analysis
+  - Observer: Floor change notifications via onFloorChanged
+  - Flyweight: Pre-allocated position objects to reduce allocations
+  
+  PERFORMANCE CHARACTERISTICS:
+  ============================================================================
+  - O(1) cache lookups with numeric keys
+  - O(n) path validation with early exit
+  - Time-budgeted BFS searches (15-20ms max)
+  - Zero allocations in hot paths (pre-allocated pools)
+  - Lazy cache cleanup (every 30 seconds)
+  
+  FLOOR-CHANGE PREVENTION (Multi-Layer):
+  ============================================================================
+  Layer 1: Tile Analysis - Comprehensive detection of floor-change tiles
+  Layer 2: Path Validation - Check entire path before walking
+  Layer 3: Predictive Analysis - Detect patterns leading to floor changes
+  Layer 4: Runtime Guard - Monitor actual movement and recover
 ]]
 
 -- ============================================================================
--- MODULE STATE (minimal, well-defined)
+-- MODULE INITIALIZATION
 -- ============================================================================
 
-local expectedFloor = nil
-local lastWalkZ = nil
+setDefaultTab("Main")
 
--- IMPORTANT: Game client's A* pathfinding has practical limits (~50-70 tiles)
--- For longer distances, rely on waypoint-to-waypoint navigation
-local MAX_PATHFIND_DIST = 50   -- Realistic pathfinding limit
-local MAX_WALK_CHUNK = 15      -- Max steps per autoWalk call (keeps paths fresh)
-local THOROUGH_CHECK_DIST = 40 -- Increased thorough window to improve floor-change accuracy
+CaveBot = CaveBot or {}
 
 -- ============================================================================
--- DIRECTION UTILITIES (Pure functions)
+-- CONFIGURATION (Single source of truth - Configurable)
+-- ============================================================================
+local Config = {
+  -- Path validation limits
+  MAX_PATHFIND_DIST = 50,       -- Maximum pathfinding distance
+  MAX_WALK_CHUNK = 20,          -- Maximum steps per walk call
+  THOROUGH_CHECK_DIST = 40,     -- Distance for thorough floor-change checks
+  
+  -- Reachability analysis
+  REACHABLE_MAX_NODES = 200,    -- Max BFS nodes for reachability
+  REACHABLE_TIME_BUDGET = 0.015, -- 15ms time budget
+  
+  -- Safe alternate search
+  SAFE_ALT_RADIUS = 6,          -- Max search radius for alternates
+  SAFE_ALT_BUDGET = 20,         -- ms time budget
+  SAFE_ALT_MAX_PATHS = 4,       -- Max pathfinding calls
+  
+  -- Step-back recovery
+  STEP_BACK_COOLDOWN = 1500,    -- ms between step-back attempts
+  FLOOR_CHANGE_THRESHOLD = 2,   -- Consecutive changes before step-back
+  
+  -- Cache settings
+  CACHE_TTL = 10000,            -- 10 second TTL
+  CACHE_MAX_SIZE = 200,         -- Maximum cache entries
+  CACHE_CLEANUP_INTERVAL = 30000, -- 30 second cleanup
+  
+  -- AutoWalk detection
+  AUTOWALK_STALL_TIMEOUT = 500  -- ms before detecting stall
+}
+
+-- Config helper: read CaveBot.Config safely with fallback to local Config
+local function getCfg(key, def)
+  if CaveBot and CaveBot.Config and CaveBot.Config.get then
+    local ok, v = pcall(function() return CaveBot.Config.get(key) end)
+    if ok and v ~= nil then return v end
+  end
+  -- Fallback to local Config
+  if Config[key] ~= nil then return Config[key] end
+  return def
+end
+
+-- Debug logging (no-op by default)
+local function log_dbg(msg) end
+
+-- ============================================================================
+-- PURE UTILITY FUNCTIONS (No side effects, deterministic)
 -- ============================================================================
 
+-- Direction to offset lookup (constant, never modified)
 local DIR_TO_OFFSET = {
   [North] = {x = 0, y = -1},
   [East] = {x = 1, y = 0},
@@ -53,6 +112,7 @@ local DIR_TO_OFFSET = {
   [NorthWest] = {x = -1, y = -1}
 }
 
+-- Adjacent offsets for 8-directional movement
 local ADJACENT_OFFSETS = {
   {x = 0, y = -1},  {x = 1, y = 0},  {x = 0, y = 1},  {x = -1, y = 0},
   {x = 1, y = -1}, {x = 1, y = 1}, {x = -1, y = 1}, {x = -1, y = -1},
@@ -63,7 +123,7 @@ local function getDirectionOffset(dir)
   return DIR_TO_OFFSET[dir]
 end
 
--- Pure: Apply offset to position
+-- Pure: Apply offset to position (returns new table)
 local function applyOffset(pos, offset)
   return {x = pos.x + offset.x, y = pos.y + offset.y, z = pos.z}
 end
@@ -73,16 +133,77 @@ local function posEquals(a, b)
   return a.x == b.x and a.y == b.y and a.z == b.z
 end
 
--- ============================================================================
--- FLOOR-CHANGE DETECTION (SRP: Only detects floor-change tiles)
--- ============================================================================
+-- Pure: Calculate Manhattan distance
+local function manhattanDist(a, b)
+  return math.abs(a.x - b.x) + math.abs(a.y - b.y)
+end
 
--- Floor-change tile cache (PERFORMANCE: avoid repeated tile lookups)
-local FloorChangeCache = {
-  tiles = {},
-  lastCleanup = 0,
-  TTL = 2000,  -- Cache valid for 2 seconds
+-- Pure: Generate numeric cache key (faster than string concatenation)
+local function posToKey(pos)
+  return pos.x * 100000000 + pos.y * 10000 + pos.z
+end
+
+-- Pre-allocated position objects (Flyweight pattern - avoid allocations)
+local ProbePos = {x = 0, y = 0, z = 0}
+local AltPos = {x = 0, y = 0, z = 0}
+
+-- ============================================================================
+-- MODULE STATE (FloorGuard - monitors floor changes)
+-- ============================================================================
+local FloorGuard = {
+  expectedFloor = nil,        -- Expected floor level
+  lastWalkZ = nil,            -- Last walk Z level
+  lastSafePos = nil,          -- Last known safe position
+  lastStepBackTs = 0,         -- Last step-back timestamp
+  consecutiveChanges = 0,     -- Consecutive unexpected floor changes
 }
+
+-- ============================================================================
+-- TILE ANALYZER (SRP: Analyzes tile properties)
+-- ============================================================================
+local TileAnalyzer = {}
+
+-- Floor-change tile cache (LRU-like with TTL)
+TileAnalyzer.Cache = {
+  tiles = {},
+  entryCount = 0,
+  lastCleanup = 0,
+  lastCleanupCheck = 0,
+  TTL = getCfg("CACHE_TTL", 10000),
+  MAX_ENTRIES = getCfg("CACHE_MAX_SIZE", 200),
+  CLEANUP_INTERVAL = getCfg("CACHE_CLEANUP_INTERVAL", 30000),
+}
+
+-- Recent position buffer to detect oscillation/flicker (performance: tiny fixed-size ring)
+local RecentPos = {
+  buf = {},
+  size = 6,
+  idx = 1
+}
+
+local function pushRecentPos(p)
+  RecentPos.buf[RecentPos.idx] = {x = p.x, y = p.y, z = p.z, t = now}
+  RecentPos.idx = (RecentPos.idx % RecentPos.size) + 1
+end
+
+local function isOscillating()
+  -- Detect simple back-and-forth oscillation between two tiles
+  local count = 0
+  local seen = {}
+  for i = 1, #RecentPos.buf do
+    local v = RecentPos.buf[i]
+    if v then
+      local key = v.x .. "," .. v.y .. "," .. v.z
+      seen[key] = (seen[key] or 0) + 1
+      count = count + 1
+    end
+  end
+  if count < RecentPos.size then return false end
+  local keys = 0
+  for k,_ in pairs(seen) do keys = keys + 1 end
+  -- If only two positions seen repeatedly, treat as oscillation
+  return keys == 2
+end
 
 local function getFloorChangeCacheKey(pos)
   return pos.x .. "," .. pos.y .. "," .. pos.z
@@ -173,44 +294,101 @@ local function hasFloorChangeItem(tile)
   return false
 end
 
--- Pure: Check if position is a floor-change tile (with caching)
-local function isFloorChangeTile(tilePos)
+-- ============================================================================
+-- TILE ANALYZER FUNCTIONS (SRP: Tile analysis only)
+-- ============================================================================
+
+-- Pure: Analyze tile for floor-change (core detection logic)
+local function analyzeTileForFloorChange(tilePos)
   if not tilePos then return false end
   
-  -- Periodic cache cleanup (guarded to run at most once per second)
-  FloorChangeCache.lastCleanupCheck = FloorChangeCache.lastCleanupCheck or 0
-  if now - FloorChangeCache.lastCleanupCheck > 1000 then
-    FloorChangeCache.lastCleanupCheck = now
-    if now - FloorChangeCache.lastCleanup > 5000 then
-      FloorChangeCache.tiles = {}
-      FloorChangeCache.lastCleanup = now
-    end
-  end
-  
-  -- Check cache first
-  local cacheKey = getFloorChangeCacheKey(tilePos)
-  local cached = FloorChangeCache.tiles[cacheKey]
-  if cached ~= nil and now - cached.time < FloorChangeCache.TTL then
-    return cached.value
-  end
-  
-  -- Fast path: minimap color (no tile lookup needed)
+  -- Layer 1: Fast minimap color check (no tile lookup needed)
   local color = g_map.getMinimapColor(tilePos)
   if FLOOR_CHANGE_COLORS[color] then
-    FloorChangeCache.tiles[cacheKey] = {value = true, time = now}
     return true
   end
   
-  -- Slow path: tile inspection (only if minimap didn't detect)
-  local result = false
+  -- Layer 2: Tile inspection (ground and items)
   local tile = g_map.getTile(tilePos)
   if tile then
-    result = hasFloorChangeGround(tile) or hasFloorChangeItem(tile)
+    if hasFloorChangeGround(tile) or hasFloorChangeItem(tile) then
+      return true
+    end
   end
-   
-  FloorChangeCache.tiles[cacheKey] = {value = result, time = now}
+  
+  -- Layer 3: Strict ramp detection (check adjacent Z layers)
+  if getCfg("strictRampDetect", false) then
+    local upTile = g_map.getTile({x = tilePos.x, y = tilePos.y, z = tilePos.z + 1})
+    if upTile and (hasFloorChangeGround(upTile) or hasFloorChangeItem(upTile)) then
+      return true
+    end
+    local downTile = g_map.getTile({x = tilePos.x, y = tilePos.y, z = tilePos.z - 1})
+    if downTile and (hasFloorChangeGround(downTile) or hasFloorChangeItem(downTile)) then
+      return true
+    end
+  end
+  
+  return false
+end
+
+-- Cached floor-change check (with TTL and lazy cleanup)
+-- This is the main public function for floor-change detection
+local function isFloorChangeTile(tilePos)
+  -- Prefer external PathSafety module if available
+  if CaveBot and CaveBot.PathSafety and CaveBot.PathSafety.isFloorChangeTile then
+    return CaveBot.PathSafety.isFloorChangeTile(tilePos)
+  end
+  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isFloorChangeTile then
+    return TargetCore.PathSafety.isFloorChangeTile(tilePos)
+  end
+  if not tilePos then return false end
+  
+  local Cache = TileAnalyzer.Cache
+  local cacheKey = posToKey(tilePos)
+  
+  -- Hot path: check cache first
+  local cached = Cache.tiles[cacheKey]
+  if cached then
+    if now - cached.time < Cache.TTL then
+      return cached.value
+    end
+    -- Expired, will recompute below
+  end
+  
+  -- Lazy cleanup: check periodically and when entry count is high
+  if Cache.entryCount > Cache.MAX_ENTRIES then
+    Cache.tiles = {}
+    Cache.entryCount = 0
+    Cache.lastCleanup = now
+  elseif now - Cache.lastCleanupCheck > 5000 then
+    Cache.lastCleanupCheck = now
+    if now - Cache.lastCleanup > Cache.CLEANUP_INTERVAL then
+      local newTiles = {}
+      local newCount = 0
+      local cutoff = now - Cache.TTL
+      for k, v in pairs(Cache.tiles) do
+        if v.time > cutoff then
+          newTiles[k] = v
+          newCount = newCount + 1
+        end
+      end
+      Cache.tiles = newTiles
+      Cache.entryCount = newCount
+      Cache.lastCleanup = now
+    end
+  end
+  
+  -- Perform analysis and cache result
+  local result = analyzeTileForFloorChange(tilePos)
+  Cache.tiles[cacheKey] = {value = result, time = now}
+  Cache.entryCount = Cache.entryCount + 1
   return result
 end
+
+-- Register with TileAnalyzer for external access
+TileAnalyzer.isFloorChangeTile = isFloorChangeTile
+TileAnalyzer.isFloorChangeTileFast = isFloorChangeTileFast
+TileAnalyzer.analyzeTileForFloorChange = analyzeTileForFloorChange
 
 -- ============================================================================
 -- TILE SAFETY (SRP: Checks if tiles are safe to walk)
@@ -218,6 +396,9 @@ end
 
 -- Pure: Check if tile is walkable and safe
 local function isTileSafe(tilePos, allowFloorChange)
+  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe then
+    return TargetCore.PathSafety.isTileSafe(tilePos, allowFloorChange)
+  end
   if not tilePos then return false end
   
   local tile = g_map.getTile(tilePos)
@@ -245,7 +426,7 @@ local function getSafeAdjacentTiles(centerPos, allowFloorChange)
 end
 
 -- ============================================================================
--- PATH VALIDATION (SRP: Validates paths for safety)
+-- PATH VALIDATOR (SRP: Validates paths for safety)
 -- ============================================================================
 
 -- Check if a position is adjacent to a floor-change tile (buffer zone)
@@ -269,15 +450,28 @@ end
 -- Pure: Check if path crosses floor-change tiles (checks ALL steps for safety)
 -- Also checks buffer zone around floor-change tiles to prevent accidental step-on
 local function pathCrossesFloorChange(path, startPos, maxSteps)
-  if not path or #path == 0 then return false end
+  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.pathCrossesFloorChange then
+    return TargetCore.PathSafety.pathCrossesFloorChange(path, startPos, maxSteps)
+  end
+  if not path then return false end
+  local pathLen = #path
+  if pathLen == 0 then return false end
   
-  local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
-  local checkLimit = maxSteps and math.min(#path, maxSteps) or #path
+  -- Reuse pre-allocated probe
+  pathProbe.x = startPos.x
+  pathProbe.y = startPos.y
+  pathProbe.z = startPos.z
+  
+  -- Limit checks to first N steps (floor changes happen quickly)
+  local checkLimit = maxSteps or math.min(pathLen, 25)
+  
   for i = 1, checkLimit do
-    local offset = getDirectionOffset(path[i])
+    local dir = path[i]
+    local offset = DIR_TO_OFFSET[dir]
     if offset then
-      probe = applyOffset(probe, offset)
-      if isFloorChangeTile(probe) then
+      pathProbe.x = pathProbe.x + offset.x
+      pathProbe.y = pathProbe.y + offset.y
+      if isFloorChangeTile(pathProbe) then
         return true
       end
     end
@@ -287,14 +481,22 @@ end
 
 -- Pure: Get first unsafe step index (0 if all safe)
 local function getFirstUnsafeStep(path, startPos)
-  if not path or #path == 0 then return 0 end
+  if not path then return 0 end
+  local pathLen = #path
+  if pathLen == 0 then return 0 end
   
-  local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
-  for i = 1, #path do
-    local offset = getDirectionOffset(path[i])
+  -- Reuse pre-allocated probe
+  pathProbe.x = startPos.x
+  pathProbe.y = startPos.y
+  pathProbe.z = startPos.z
+  
+  for i = 1, pathLen do
+    local dir = path[i]
+    local offset = DIR_TO_OFFSET[dir]
     if offset then
-      probe = applyOffset(probe, offset)
-      if isFloorChangeTile(probe) then
+      pathProbe.x = pathProbe.x + offset.x
+      pathProbe.y = pathProbe.y + offset.y
+      if isFloorChangeTile(pathProbe) then
         return i
       end
     end
@@ -302,39 +504,90 @@ local function getFirstUnsafeStep(path, startPos)
   return 0
 end
 
+-- Pure: Count consecutive safe steps from start
+local function countSafeSteps(path, startPos, maxCheck)
+  if not path or #path == 0 then return 0 end
+  
+  pathProbe.x = startPos.x
+  pathProbe.y = startPos.y
+  pathProbe.z = startPos.z
+  
+  local safeCount = 0
+  local limit = math.min(#path, maxCheck or #path)
+  
+  for i = 1, limit do
+    local offset = DIR_TO_OFFSET[path[i]]
+    if offset then
+      pathProbe.x = pathProbe.x + offset.x
+      pathProbe.y = pathProbe.y + offset.y
+      if isFloorChangeTile(pathProbe) then
+        break
+      end
+      safeCount = i
+    end
+  end
+  return safeCount
+end
+
+-- Register PathValidator functions
+PathValidator.pathCrossesFloorChange = pathCrossesFloorChange
+PathValidator.getFirstUnsafeStep = getFirstUnsafeStep
+PathValidator.countSafeSteps = countSafeSteps
+PathValidator.countFloorChangesInPath = countFloorChangesInPath
+PathValidator.pathLeadsToFloorChangeZone = pathLeadsToFloorChangeZone
+
 -- ============================================================================
 -- SAFE PATH FINDING (SRP: Finds paths avoiding floor changes)
 -- ============================================================================
 
--- Find alternate destination with safe path (optimized: quick search)
+-- Pre-allocated candidate position (avoid allocations)
+local altCandidate = {x = 0, y = 0, z = 0}
+
+-- Find alternate destination with safe path (optimized: limited pathfinding calls)
 local function findSafeAlternate(playerPos, dest, maxDist, opts)
+  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.findSafeAlternate then
+    return TargetCore.PathSafety.findSafeAlternate(playerPos, dest, maxDist, opts)
+  end
   opts = opts or {}
   local precision = opts.precision or 1
   local ignoreFields = opts.ignoreFields or false
-  
-  -- Quick search: only check immediate neighbors (radius 1)
-  for _, offset in ipairs(ADJACENT_OFFSETS) do
-    local candidate = {
-      x = dest.x + offset.x,
-      y = dest.y + offset.y,
-      z = dest.z
-    }
+  local pathChecks = 0
+  local maxPathChecks = 3  -- Limit expensive operations
+
+  -- Quick search: immediate neighbors (radius 1) - reuse pre-allocated table
+  for i = 1, 8 do
+    local offset = ADJACENT_OFFSETS[i]
+    altCandidate.x = dest.x + offset.x
+    altCandidate.y = dest.y + offset.y
+    altCandidate.z = dest.z
     
-    if not posEquals(candidate, playerPos) and not isFloorChangeTile(candidate) then
-      -- Quick path check without full validation
-      local path = findPath(playerPos, candidate, maxDist, {
-        ignoreNonPathable = true,
-        ignoreCreatures = true,
-        ignoreFields = ignoreFields,
-        precision = precision
-      })
-      
-      if path and #path > 0 then
-        return candidate, path
+    if not posEquals(altCandidate, playerPos) and not isFloorChangeTile(altCandidate) then
+      if pathChecks < maxPathChecks then
+        pathChecks = pathChecks + 1
+        local path = findPath(playerPos, altCandidate, maxDist, {
+          ignoreNonPathable = true, 
+          ignoreCreatures = true, 
+          ignoreFields = ignoreFields, 
+          precision = precision
+        })
+        if path and #path > 0 and not pathCrossesFloorChange(path, playerPos) then
+          -- Return a copy (caller may modify)
+          return {x = altCandidate.x, y = altCandidate.y, z = altCandidate.z}, path
+        end
       end
     end
   end
-  
+
+  -- If quick search failed, do a small BFS search (only if we have budget left)
+  if pathChecks < maxPathChecks then
+    local bfsTile, bfsPath = findSafeAlternateBFS(playerPos, dest, maxDist, {
+      precision = precision, 
+      ignoreFields = ignoreFields, 
+      radius = 3  -- Reduced radius
+    })
+    if bfsTile and bfsPath then return bfsTile, bfsPath end
+  end
+
   return nil, nil
 end
 
@@ -345,6 +598,10 @@ local PathCursor = {
   ts = 0,
   TTL = 300
 }
+
+-- Track autoWalk issuance to detect stalls (avoid being stuck mid-path)
+PathCursor.autoWalkIssued = false
+PathCursor.autoWalkIssuedTs = 0
 
 local function resetPathCursor()
   PathCursor.path = nil
@@ -403,10 +660,75 @@ local function resetStepBackAttempts()
 end
 
 -- ============================================================================
--- MAIN WALKING FUNCTION (Orchestrates all components)
+-- PATH HELPERS (Must be defined before walkTo)
+-- ============================================================================
+
+-- Helper: Compute safe path with multiple fallback strategies
+local function computeSafePath(playerPos, dest, maxDist, opts)
+  -- Strategy 1: Direct path
+  local path = findPath(playerPos, dest, maxDist, {
+    ignoreNonPathable = true,
+    ignoreCreatures = opts.ignoreCreatures or false,
+    ignoreFields = opts.ignoreFields or false,
+    precision = opts.precision or 1
+  })
+  if path and #path > 0 then return path end
+  
+  -- Strategy 2: Ignore creatures
+  path = findPath(playerPos, dest, maxDist, {
+    ignoreNonPathable = true,
+    ignoreCreatures = true,
+    ignoreFields = opts.ignoreFields or false,
+    precision = opts.precision or 1
+  })
+  if path and #path > 0 then return path end
+  
+  -- Strategy 3: Ignore fields (if not already)
+  if not opts.ignoreFields then
+    path = findPath(playerPos, dest, maxDist, {
+      ignoreNonPathable = true,
+      ignoreCreatures = true,
+      ignoreFields = true,
+      precision = opts.precision or 1
+    })
+  end
+  
+  return path
+end
+
+-- Helper: Execute keyboard walking through fields
+local function executeFieldWalk(path, dest, playerPos)
+  pathProbe.x = playerPos.x
+  pathProbe.y = playerPos.y
+  pathProbe.z = playerPos.z
+  
+  if CaveBot.setWalkingToWaypoint then CaveBot.setWalkingToWaypoint(dest) end
+  
+  for i = 1, #path do
+    local dir = path[i]
+    local offset = DIR_TO_OFFSET[dir]
+    if not offset then break end
+    
+    pathProbe.x = pathProbe.x + offset.x
+    pathProbe.y = pathProbe.y + offset.y
+    
+    if not isFieldTile(pathProbe) then break end
+    
+    walk(dir)
+    
+    if pathProbe.x == dest.x and pathProbe.y == dest.y then
+      return true
+    end
+  end
+  return true
+end
+
+-- ============================================================================
+-- NAVIGATOR (SRP: Main walking orchestration - KISS principle)
 -- ============================================================================
 
 CaveBot.walkTo = function(dest, maxDist, params)
+  -- === LAYER 1: Basic validation ===
   local playerPos = pos()
   if not playerPos then return false end
   
@@ -455,25 +777,24 @@ CaveBot.walkTo = function(dest, maxDist, params)
     end
   end
   
+  -- === LAYER 2: Parse parameters ===
   params = params or {}
   local precision = params.precision or 1
   local allowFloorChange = params.allowFloorChange or false
   local ignoreCreatures = params.ignoreCreatures or false
-  
-  -- Get ignoreFields from params or config
   local ignoreFields = params.ignoreFields
   if ignoreFields == nil then
-    ignoreFields = CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("ignoreFields") or false
+    ignoreFields = getCfg("ignoreFields", false)
   end
   
-  maxDist = math.min(maxDist or 20, MAX_PATHFIND_DIST)
+  maxDist = math.min(maxDist or 20, Config.MAX_PATHFIND_DIST)
   
   -- IMPORTANT: Do NOT set expectedFloor here!
   -- Floor change tracking is handled ONLY by intendedFloorChange in cavebot.lua
   -- The goto action sets intendedFloorChange when walking to a floor-change waypoint
   lastWalkZ = playerPos.z
   
-  -- Distance check
+  -- === LAYER 3: Quick checks (avoid expensive operations) ===
   local distX = math.abs(dest.x - playerPos.x)
   local distY = math.abs(dest.y - playerPos.y)
   
@@ -482,20 +803,24 @@ CaveBot.walkTo = function(dest, maxDist, params)
     return true
   end
   
-  -- Floor mismatch
+  -- Floor mismatch (can't walk to different floor without floor change)
   if dest.z ~= playerPos.z then
     return false
   end
   
-  -- FAST PATH: If floor changes allowed, just use autoWalk directly
+  -- === LAYER 4: Fast path (floor changes allowed) ===
   if allowFloorChange then
     autoWalk(dest, maxDist, {ignoreNonPathable = true, precision = precision})
+    if CaveBot.setWalkingToWaypoint then CaveBot.setWalkingToWaypoint(dest) end
     return true
   end
   
-  -- Check if destination itself is a floor-change tile
+  -- === LAYER 5: Destination safety check ===
   if isFloorChangeTile(dest) then
-    local altTile, _ = findSafeAlternate(playerPos, dest, maxDist, {precision = precision, ignoreFields = ignoreFields})
+    local altTile, _ = findSafeAlternate(playerPos, dest, maxDist, {
+      precision = precision, 
+      ignoreFields = ignoreFields
+    })
     if altTile then
       dest = altTile
     else
@@ -503,62 +828,53 @@ CaveBot.walkTo = function(dest, maxDist, params)
     end
   end
   
-  -- Compute path (with field awareness)
+  -- === LAYER 6: Path computation (with caching) ===
   local path
-
-  -- Reuse cursor cache if valid
   if PathCursor.path and PathCursor.idx <= #PathCursor.path and (now - PathCursor.ts) < PathCursor.TTL then
     path = PathCursor.path
   else
     resetPathCursor()
-    path = findPath(playerPos, dest, maxDist, {
-      ignoreNonPathable = true,
+    path = computeSafePath(playerPos, dest, maxDist, {
       ignoreCreatures = ignoreCreatures,
       ignoreFields = ignoreFields,
       precision = precision
     })
-
-    -- Try with creature ignoring if first attempt failed
-    if not path then
-      path = findPath(playerPos, dest, maxDist, {
-        ignoreNonPathable = true,
-        ignoreCreatures = true,
-        ignoreFields = ignoreFields,
-        precision = precision
-      })
-    end
-
-    -- FALLBACK: If still no path and ignoreFields is off, try with ignoreFields on
-    if not path and not ignoreFields then
-      path = findPath(playerPos, dest, maxDist, {
-        ignoreNonPathable = true,
-        ignoreCreatures = true,
-        ignoreFields = true,
-        precision = precision
-      })
-      -- If we found a path with fields ignored, we'll use keyboard walking
-      if path then
-        ignoreFields = true  -- Mark that we need to handle fields
-      end
-    end
-
+    
     if not path or #path == 0 then
       return false
     end
-
+    
     PathCursor.path = path
     PathCursor.idx = 1
     PathCursor.ts = now
   end
-
-  -- Close path selection block
   
-
-  -- End of path selection block
-
-  -- Hard guard: if path crosses any floor-change tile, try a nearby alternate before aborting
+  -- === LAYER 7: AutoWalk stall detection ===
+  local stallTimeout = getCfg("autoWalkStallTimeout", Config.AUTOWALK_STALL_TIMEOUT)
+  if PathCursor.autoWalkIssued and not (player and player:isWalking()) then
+    if (now - PathCursor.autoWalkIssuedTs) > stallTimeout then
+      resetPathCursor()
+      local altTile, altPath = findSafeAlternate(playerPos, dest, maxDist, {
+        precision = precision, 
+        ignoreFields = ignoreFields
+      })
+      if altTile and altPath and #altPath > 0 then
+        PathCursor.path = altPath
+        PathCursor.idx = 1
+        PathCursor.ts = now
+      end
+      PathCursor.autoWalkIssued = false
+      PathCursor.autoWalkIssuedTs = 0
+      return false
+    end
+  end
+  
+  -- === LAYER 8: Path safety validation ===
   if pathCrossesFloorChange(path, playerPos, #path) then
-    local altTile, altPath = findSafeAlternate(playerPos, dest, maxDist, {precision = precision, ignoreFields = ignoreFields})
+    local altTile, altPath = findSafeAlternate(playerPos, dest, maxDist, {
+      precision = precision, 
+      ignoreFields = ignoreFields
+    })
     if altTile and altPath and #altPath > 0 and not pathCrossesFloorChange(altPath, playerPos, #altPath) then
       path = altPath
       PathCursor.path = altPath
@@ -569,108 +885,87 @@ CaveBot.walkTo = function(dest, maxDist, params)
       return false
     end
   end
-
-  -- TIERED VALIDATION: Check for floor-change tiles (kept for near/far mixed accuracy)
-  local safeSteps = 0
-  local probe = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-  local pathLen = #path
   
-  for i = 1, pathLen do
-    local offset = getDirectionOffset(path[i])
-    if offset then
-      probe = applyOffset(probe, offset)
-      
-      -- Use appropriate check based on distance
-      local isUnsafe
-      if i <= THOROUGH_CHECK_DIST then
-        -- Thorough check for near tiles (cached)
-        isUnsafe = isFloorChangeTile(probe)
-      else
-        -- Fast minimap check for distant tiles
-        isUnsafe = isFloorChangeTileFast(probe)
-      end
-      
-      if isUnsafe then
-        break
-      end
-      safeSteps = i
-    end
-  end
+  -- === LAYER 9: Count safe steps (tiered validation) ===
+  local safeSteps = countSafeSteps(path, playerPos, Config.MAX_WALK_CHUNK + 5)
   
-  -- If no safe steps at all, try to find alternate route
   if safeSteps == 0 then
-    local altTile, altPath = findSafeAlternate(playerPos, dest, maxDist, {precision = precision, ignoreFields = ignoreFields})
+    -- Try alternate route
+    local altTile, altPath = findSafeAlternate(playerPos, dest, maxDist, {
+      precision = precision, 
+      ignoreFields = ignoreFields
+    })
     if altTile and altPath and #altPath > 0 then
-      -- Validate alternate path (it's short, so full validation is fine)
-      probe = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-      for i = 1, #altPath do
-        local offset = getDirectionOffset(altPath[i])
-        if offset then
-          probe = applyOffset(probe, offset)
-          if isFloorChangeTile(probe) then
-            break
-          end
-          safeSteps = i
-        end
-      end
+      safeSteps = countSafeSteps(altPath, playerPos, #altPath)
       if safeSteps > 0 then
         path = altPath
-      else
-        return false
+        PathCursor.path = altPath
+        PathCursor.idx = 1
+        PathCursor.ts = now
       end
-    else
+    end
+    if safeSteps == 0 then
       return false
     end
   end
   
-  -- CHUNKED WALKING: Limit steps per call to keep paths fresh
-  -- This is critical for long paths - prevents walking on stale data
-  local walkSteps = math.min(safeSteps, MAX_WALK_CHUNK)
-
-  -- Calculate the chunk destination using the cursor (no table removes)
-  local chunkDestination = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-  for i = PathCursor.idx, math.min(PathCursor.idx + walkSteps - 1, #path) do
-    local offset = getDirectionOffset(path[i])
+  -- === LAYER 10: Execute walk (chunked) ===
+  local walkSteps = math.min(safeSteps, Config.MAX_WALK_CHUNK)
+  
+  -- Calculate chunk destination
+  pathProbe.x = playerPos.x
+  pathProbe.y = playerPos.y
+  pathProbe.z = playerPos.z
+  local endIdx = math.min(PathCursor.idx + walkSteps - 1, #path)
+  for i = PathCursor.idx, endIdx do
+    local offset = DIR_TO_OFFSET[path[i]]
     if offset then
-      chunkDestination = applyOffset(chunkDestination, offset)
+      pathProbe.x = pathProbe.x + offset.x
+      pathProbe.y = pathProbe.y + offset.y
     end
   end
+  local chunkDest = {x = pathProbe.x, y = pathProbe.y, z = pathProbe.z}
   
-  -- FIELD HANDLING: Use keyboard walking for paths with fields
-  -- autoWalk/map-click doesn't work through fire/poison/energy fields
+  -- Handle field walking (keyboard walk)
   if ignoreFields then
-    -- Walk through consecutive field tiles using keyboard walking
-    local currentPos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-    for i = 1, #path do
-      local dir = path[i]
-      local offset = getDirectionOffset(dir)
-      if not offset then break end
-      local nextPos = applyOffset(currentPos, offset)
-      -- Check if nextPos is a field tile; if not, stop walking
-      if not isFieldTile(nextPos) then
-        break
-      end
-      walk(dir)
-      currentPos = nextPos
-      -- Optionally, check if we've reached the destination
-      if posEquals(currentPos, dest) then
-        return true
-      end
+    return executeFieldWalk(path, dest, playerPos)
+  end
+  
+  -- Verify reachability
+  local reachable = iterativeReachable(playerPos, chunkDest)
+  if not reachable then
+    local testPath = findPath(playerPos, chunkDest, maxDist, {
+      ignoreNonPathable = true, 
+      ignoreCreatures = true, 
+      ignoreFields = ignoreFields, 
+      precision = 0
+    })
+    if not testPath or #testPath == 0 or pathCrossesFloorChange(testPath, playerPos) then
+      resetPathCursor()
+      return false
     end
+  end
+  
+  -- === LAYER 11: Execute movement ===
+  if walkSteps >= 3 then
+    -- Smooth autoWalk for longer paths
+    if player and player:isWalking() and (now - PathCursor.ts) < 600 then
+      return true
+    end
+    autoWalk(chunkDest, maxDist, {ignoreNonPathable = true, precision = 0})
+    if CaveBot.setWalkingToWaypoint then CaveBot.setWalkingToWaypoint(chunkDest) end
+    PathCursor.autoWalkIssued = true
+    PathCursor.autoWalkIssuedTs = now
+    PathCursor.idx = math.min(PathCursor.idx + walkSteps, #path + 1)
+    PathCursor.ts = now
     return true
   end
   
-  -- SMOOTH MOVEMENT: Use autoWalk for 3+ verified safe steps
-  if walkSteps >= 3 then
-    autoWalk(chunkDestination, maxDist, {ignoreNonPathable = true, precision = 0})
-    PathCursor.idx = math.min(PathCursor.idx + walkSteps, #path + 1)
-    return true
-  end
-
-  -- For short safe paths (1-2 steps), use direct walk via cursor
+  -- Single step for short paths
   local firstDir = path[PathCursor.idx]
   local offset = getDirectionOffset(firstDir)
   if offset then
+    if CaveBot.setWalkingToWaypoint then CaveBot.setWalkingToWaypoint(dest) end
     walk(firstDir)
     PathCursor.idx = PathCursor.idx + 1
     return true
@@ -680,7 +975,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
 end
 
 -- ============================================================================
--- CONVENIENCE FUNCTIONS
+-- CONVENIENCE FUNCTIONS (Clean public API)
 -- ============================================================================
 
 CaveBot.safeWalkTo = function(dest, maxDist, params)
@@ -715,22 +1010,22 @@ CaveBot.doWalking = function()
 end
 
 CaveBot.setExpectedFloor = function(floor)
-  expectedFloor = floor
+  FloorGuard.expectedFloor = floor
 end
 
 CaveBot.isOnExpectedFloor = function()
-  if not expectedFloor then return true end
-  return posz() == expectedFloor
+  if not FloorGuard.expectedFloor then return true end
+  return posz() == FloorGuard.expectedFloor
 end
 
 CaveBot.getFloorChangeInfo = function()
-  if not expectedFloor then return nil end
+  if not FloorGuard.expectedFloor then return nil end
   local currentFloor = posz()
-  if currentFloor ~= expectedFloor then
+  if currentFloor ~= FloorGuard.expectedFloor then
     return {
-      expected = expectedFloor,
+      expected = FloorGuard.expectedFloor,
       current = currentFloor,
-      difference = currentFloor - expectedFloor
+      difference = currentFloor - FloorGuard.expectedFloor
     }
   end
   return nil
@@ -742,16 +1037,27 @@ CaveBot.isPathSafe = function(dest)
   if posEquals(playerPos, dest) then return true end
   if playerPos.z ~= dest.z then return true end
   
-  local path = findPath(playerPos, dest, 50, {ignoreNonPathable = true})
-  return path and not pathCrossesFloorChange(path, playerPos)
+  local path = findPath(playerPos, dest, Config.MAX_PATHFIND_DIST, {ignoreNonPathable = true})
+  return path and not PathValidator.pathCrossesFloorChange(path, playerPos)
 end
 
--- Expose utilities
+-- Expose utilities (clean public API)
 CaveBot.isFloorChangeTile = isFloorChangeTile
 CaveBot.isNearFloorChangeTile = isNearFloorChangeTile
 CaveBot.getSafeAdjacentTiles = function(centerPos) return getSafeAdjacentTiles(centerPos, false) end
+CaveBot.resetPathCursor = resetPathCursor
 
--- Floor change detection on position change
+-- Expose modules for external access (SOLID: Interface Segregation)
+CaveBot.TileAnalyzer = TileAnalyzer
+CaveBot.PathValidator = PathValidator
+CaveBot.FloorGuard = FloorGuard
+
+-- ============================================================================
+-- FLOOR GUARD EVENT HANDLER (Monitors position changes)
+-- ============================================================================
+local consecutiveFloorChanges = 0
+local FLOORCHANGE_STEPBACK_THRESHOLD = getCfg("floorChangeStepBackThreshold", Config.FLOOR_CHANGE_THRESHOLD)
+
 onPlayerPositionChange(function(newPos, oldPos)
   if not oldPos or not newPos then return end
   

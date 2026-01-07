@@ -499,6 +499,91 @@ end)
 BotDB.registerMacro(autoMountMacro, "autoMount")
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- AUTO RANDOM OUTFIT COLORS - Ultra-fast automatic color cycling
+-- Changes outfit colors every 0.2 seconds when enabled
+-- Uses BotSwitch UI like fishing for consistency
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Auto Random Outfit Colors
+local autoRandomOutfitEnabled = false
+
+local function randomizeOutfitColors()
+  local player = g_game.getLocalPlayer()
+  if not player then return end
+  
+  local currentOutfit = player:getOutfit()
+  if not currentOutfit then return end
+  
+  -- Generate 4 unique random colors from the full valid Tibia color range (1-132)
+  -- Color 0 is transparent/none, so we start from 1
+  -- This ensures maximum variety and prevents duplicate colors in the same outfit
+  local colors = {}
+  local used = {}
+  for i = 1, 4 do
+    local c
+    repeat
+      c = math.random(1, 132)  -- Exclude 0 (transparent)
+    until not used[c]
+    used[c] = true
+    colors[i] = c
+  end
+  
+  local newOutfit = {
+    type = currentOutfit.type,
+    head = colors[1],
+    body = colors[2],
+    legs = colors[3],
+    feet = colors[4],
+    addons = currentOutfit.addons or 0
+  }
+  
+  -- Preserve mount if present
+  if currentOutfit.mount then
+    newOutfit.mount = currentOutfit.mount
+  end
+  
+  -- Apply the new outfit
+  setOutfit(newOutfit)
+end
+
+local function autoRandomOutfitLoop()
+  if autoRandomOutfitEnabled then
+    randomizeOutfitColors()
+    -- Schedule next change in 0.2 seconds (60% faster)
+    schedule(200, autoRandomOutfitLoop)
+  end
+end
+
+local autoRandomOutfitUI = setupUI([[
+Panel
+  height: 19
+
+  BotSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    !text: tr('Auto Random Outfit Colors')
+]])
+
+-- Connect UI switch to macro state
+autoRandomOutfitUI.title.onClick = function(widget)
+  autoRandomOutfitEnabled = not autoRandomOutfitEnabled
+  widget:setOn(autoRandomOutfitEnabled)
+  if autoRandomOutfitEnabled then
+    -- Start the loop
+    randomizeOutfitColors() -- Apply immediately
+    schedule(500, autoRandomOutfitLoop)
+    modules.game_textmessage.displayStatusMessage("Auto random outfit colors enabled!")
+  else
+    modules.game_textmessage.displayStatusMessage("Auto random outfit colors disabled!")
+  end
+end
+
+UI.Separator()
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- FISHING - Random water tile selection + auto fish drop to water
 -- ═══════════════════════════════════════════════════════════════════════════
 
@@ -694,19 +779,21 @@ end
 UI.Separator()
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- FOLLOW PLAYER - Use OTClient's native follow system (like CTRL + Right Click)
+-- FOLLOW PLAYER - Enhanced version with EventBus for performance
+-- Supports following while attacking monsters (TargetBot compatible)
 -- Per-character settings via CharacterDB
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- Load follow player settings from CharacterDB (per-character)
 local function loadFollowPlayerConfig()
-  local config = { enabled = false, playerName = "" }
+  local config = { enabled = false, playerName = "", followWhileAttacking = true }
   
   if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
     local charConfig = CharacterDB.get("tools.followPlayer")
     if charConfig then
       config.enabled = charConfig.enabled or false
       config.playerName = charConfig.playerName or ""
+      config.followWhileAttacking = charConfig.followWhileAttacking ~= false -- default true
     end
     
     -- Migration from ProfileStorage
@@ -721,6 +808,7 @@ local function loadFollowPlayerConfig()
     if profileConfig then
       config.enabled = profileConfig.enabled or false
       config.playerName = profileConfig.playerName or ""
+      config.followWhileAttacking = profileConfig.followWhileAttacking ~= false
     end
   end
   
@@ -732,19 +820,259 @@ local followPlayerConfig = loadFollowPlayerConfig()
 -- Forward decl for UI switch so helper can sync it
 local followPlayerToggle = nil
 
-local lastFollowCheck = 0
-local FOLLOW_CHECK_COOLDOWN = 500  -- Check every 500ms
+-- State tracking
+local followedPlayerId = nil
+local followedPlayerCreature = nil  -- Cache the creature object
+local lastFollowAttempt = 0
+local FOLLOW_ATTEMPT_COOLDOWN = 150  -- Faster checks for responsiveness
+local lastPlayerPosition = nil  -- Track followed player's last known position
 
 -- Helper: save follow player settings
 local function saveFollowPlayerConfig()
   if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
     CharacterDB.set("tools.followPlayer", {
       enabled = followPlayerConfig.enabled,
-      playerName = followPlayerConfig.playerName
+      playerName = followPlayerConfig.playerName,
+      followWhileAttacking = followPlayerConfig.followWhileAttacking
     })
   else
     setProfileSetting("followPlayer", followPlayerConfig)
   end
+end
+
+-- Helper: Find player by name using OTClient's native functions for better performance
+local function findPlayerByName(name)
+  if not name or name == "" then return nil end
+
+  -- First try exact match using OTClient helper (works for off-screen known creatures)
+  local exact = SafeCall.getCreatureByName(name, true)
+  if exact and exact:isPlayer() and not exact:isLocalPlayer() then
+    return exact
+  end
+
+  -- Fallback: Search through visible spectators for partial matches
+  local lname = name:lower()
+  local spectators = SafeCall.global("getSpectators") or {}
+
+  for i, c in ipairs(spectators) do
+    if c and c:isPlayer() and not c:isLocalPlayer() then
+      local cname = c:getName()
+      if cname and (cname:lower() == lname or cname:lower():find(lname, 1, true)) then
+        return c
+      end
+    end
+  end
+
+  return nil
+end
+
+-- Follow manager: initiate follow on a creature
+local function followStartCreature(creature)
+  if not creature then return false end
+  
+  -- Store reference
+  followedPlayerId = creature:getId()
+  followedPlayerCreature = creature
+  lastPlayerPosition = creature:getPosition()
+  
+  -- Use native follow API
+  local ok = pcall(function()
+    if g_game and g_game.follow then
+      g_game.follow(creature)
+    else
+      SafeCall.global("follow", creature)
+    end
+  end)
+  
+  return ok
+end
+
+-- Follow manager: stop following
+local function followStop()
+  if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
+  followedPlayerId = nil
+  followedPlayerCreature = nil
+  lastPlayerPosition = nil
+end
+
+-- Check if we're currently following our target player
+local function isFollowingTarget()
+  if not followedPlayerId then return false end
+  local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+  return currentFollow and currentFollow:getId() == followedPlayerId
+end
+
+-- Smart follow: re-initiate follow if needed (called periodically and on events)
+local function ensureFollowing()
+  if not followPlayerConfig.enabled then return end
+  if (now - lastFollowAttempt) < FOLLOW_ATTEMPT_COOLDOWN then return end
+  lastFollowAttempt = now
+  
+  local name = followPlayerConfig.playerName and followPlayerConfig.playerName:trim() or ""
+  if name == "" then return end
+  
+  local localPlayer = g_game.getLocalPlayer()
+  if not localPlayer then return end
+  
+  -- Check if we're attacking and followWhileAttacking is disabled
+  local isAttacking = g_game.isAttacking and g_game.isAttacking()
+  if isAttacking and not followPlayerConfig.followWhileAttacking then
+    return -- Don't follow while attacking if option is disabled
+  end
+  
+  -- Try to find the target player
+  local target = findPlayerByName(name)
+  
+  if target then
+    -- Update our cached reference
+    followedPlayerId = target:getId()
+    followedPlayerCreature = target
+    lastPlayerPosition = target:getPosition()
+    
+    -- Check if we're already following them
+    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+    
+    if not currentFollow or currentFollow:getId() ~= target:getId() then
+      -- Not following our target - initiate follow
+      -- But only if we're not actively moving towards a monster (let TargetBot finish its move)
+      local isWalking = localPlayer:isWalking()
+      
+      if not isWalking or not isAttacking then
+        followStartCreature(target)
+      end
+    end
+  else
+    -- Player not visible - check if native follow is still tracking them
+    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+    if currentFollow and followedPlayerId and currentFollow:getId() == followedPlayerId then
+      -- Native follow is still tracking, let it continue
+      return
+    end
+    -- Otherwise, we've lost track - will try again next tick
+  end
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EVENT-DRIVEN FOLLOW (High performance using EventBus)
+-- Reacts instantly to player movements and combat state changes
+-- ═══════════════════════════════════════════════════════════════════════════
+
+if EventBus then
+  -- When followed player moves, ensure we're still following them
+  EventBus.on("creature:move", function(creature, oldPos)
+    if not followPlayerConfig.enabled then return end
+    if not creature or not creature:isPlayer() then return end
+    if not followedPlayerId then return end
+    
+    -- Check if this is our followed player
+    if creature:getId() ~= followedPlayerId then return end
+    
+    -- Update last known position
+    lastPlayerPosition = creature:getPosition()
+    followedPlayerCreature = creature
+    
+    -- Ensure we're still following them (they might have moved out of range briefly)
+    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+    if not currentFollow or currentFollow:getId() ~= followedPlayerId then
+      -- Re-initiate follow
+      schedule(50, function()
+        if followPlayerConfig.enabled and creature and not creature:isDead() then
+          followStartCreature(creature)
+        end
+      end)
+    end
+  end, 20)  -- Medium priority
+  
+  -- When we stop attacking, immediately resume following
+  EventBus.on("combat:end", function()
+    if not followPlayerConfig.enabled then return end
+    if not followedPlayerId then return end
+    
+    -- Small delay to let combat state settle
+    schedule(100, function()
+      ensureFollowing()
+    end)
+  end, 15)
+  
+  -- When target changes (new attack target), we might need to adjust
+  EventBus.on("combat:target", function(creature, oldCreature)
+    if not followPlayerConfig.enabled then return end
+    if not followPlayerConfig.followWhileAttacking then return end
+    if not followedPlayerId then return end
+    
+    -- If we just started attacking something new, we still want to follow
+    -- but the native follow might have been cancelled - re-initiate after brief delay
+    if creature then
+      schedule(200, function()
+        ensureFollowing()
+      end)
+    end
+  end, 10)
+  
+  -- When followed player appears (comes into view), start following
+  EventBus.on("creature:appear", function(creature)
+    if not followPlayerConfig.enabled then return end
+    if not creature or not creature:isPlayer() then return end
+    
+    local name = followPlayerConfig.playerName and followPlayerConfig.playerName:trim():lower() or ""
+    if name == "" then return end
+    
+    local creatureName = creature:getName():lower()
+    if creatureName == name or creatureName:find(name, 1, true) then
+      -- Our target player appeared! Start following
+      followStartCreature(creature)
+    end
+  end, 25)
+  
+  -- When followed player disappears, clear state
+  EventBus.on("creature:disappear", function(creature)
+    if not creature then return end
+    if followedPlayerId and creature:getId() == followedPlayerId then
+      -- Player went out of view, but native follow might still work
+      -- Don't clear followedPlayerId - native system can handle off-screen following
+      followedPlayerCreature = nil
+    end
+  end, 15)
+end
+
+-- Backup macro: Runs less frequently as a fallback for non-EventBus scenarios
+-- and to handle edge cases the events might miss
+local followPlayerMacro = macro(300, function()
+  ensureFollowing()
+end)
+
+-- Small status indicator (non-intrusive)
+local followStatusLabel = UI.Label((followPlayerConfig.playerName and followPlayerConfig.playerName ~= "") and ("Target: "..followPlayerConfig.playerName) or "Target: -")
+followStatusLabel:setId("followStatusLabel")
+followStatusLabel:setTooltip("Shows current follow target and status")
+
+-- Helper to update status label
+local function updateFollowStatusLabel()
+  local current = (g_game.getFollowingCreature and g_game.getFollowingCreature()) or nil
+  local isAttacking = g_game.isAttacking and g_game.isAttacking()
+  
+  if current and followedPlayerId and current:getId() == followedPlayerId then
+    local suffix = isAttacking and " (attacking)" or ""
+    followStatusLabel:setText("Following: " .. current:getName() .. suffix)
+  elseif followedPlayerId and followedPlayerCreature then
+    followStatusLabel:setText("Tracking: " .. (followedPlayerCreature:getName() or "..."))
+  else
+    followStatusLabel:setText("Target: " .. (followPlayerConfig.playerName ~= "" and followPlayerConfig.playerName or "-"))
+  end
+end
+
+-- Update label periodically
+schedule(1000, function()
+  if followStatusLabel and followStatusLabel:isVisible() then 
+    updateFollowStatusLabel() 
+  end
+end)
+
+-- Initialize macro state based on config
+if followPlayerConfig.enabled then
+  followPlayerMacro:setOn()
+else
+  followPlayerMacro:setOff()
 end
 
 -- Helper: sync state, UI, and side effects
@@ -754,52 +1082,63 @@ local function setFollowEnabled(state)
   if followPlayerToggle then
     followPlayerToggle:setOn(state)
   end
-  if not state then
-    g_game.cancelFollow()
+
+  if followPlayerMacro then
+    if state then
+      pcall(function() followPlayerMacro:setOn() end)
+
+      -- If we have a name set, attempt immediate follow
+      if followPlayerConfig.playerName and followPlayerConfig.playerName ~= "" then
+        local tgt = findPlayerByName(followPlayerConfig.playerName)
+        if tgt then
+          followStartCreature(tgt)
+        end
+      end
+    else
+      pcall(function() followPlayerMacro:setOff() end)
+      followStop()
+    end
   end
 end
 
--- Follow Player macro - Uses native OTClient follow system
-local followPlayerMacro = macro(500, function()
-  if not followPlayerConfig.enabled or not player then return end
-  if not followPlayerConfig.playerName or followPlayerConfig.playerName == "" then return end
-  
-  -- Cooldown check
-  if (now - lastFollowCheck) < FOLLOW_CHECK_COOLDOWN then return end
-  lastFollowCheck = now
-
-  -- If player started attacking, stop following and disable toggle
-  if getTarget() then
-    if followPlayerConfig.enabled then
-      setFollowEnabled(false)
-    end
-    return
-  end
-  
-  -- Find the target player
-  local target = getCreatureByName(followPlayerConfig.playerName)
-  
-  if target then
-    -- Start following the target (like CTRL + Right Click) only if not already
-    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
-    if not currentFollow or currentFollow:getId() ~= target:getId() then
-      follow(target)
-    end
-  else
-    -- Target not found, cancel follow if we were following someone
-    g_game.cancelFollow()
-  end
-end)
-
-BotDB.registerMacro(followPlayerMacro, "followPlayer")
-
--- Follow Player UI
-UI.Label("Follow Player:")
+-- Target input
+UI.Label("Target:")
 
 local followPlayerNameEdit = UI.TextEdit(followPlayerConfig.playerName, function(widget, text)
   followPlayerConfig.playerName = text:trim()
   saveFollowPlayerConfig()
+  -- If enabled, attempt to follow immediately
+  if followPlayerConfig.enabled and followPlayerConfig.playerName ~= "" then
+    local tgt = findPlayerByName(followPlayerConfig.playerName)
+    if tgt then
+      followStartCreature(tgt)
+    else
+      followStop()
+    end
+  end
 end)
+
+-- Follow while attacking toggle
+local followWhileAttackingUI = setupUI([[
+Panel
+  height: 19
+
+  BotSwitch
+    id: followWhileAttackingToggle
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    !text: tr('Follow While Attacking')
+    tooltip: Keep following player even when attacking monsters with TargetBot
+]])
+
+followWhileAttackingUI.followWhileAttackingToggle:setOn(followPlayerConfig.followWhileAttacking)
+followWhileAttackingUI.followWhileAttackingToggle.onClick = function(widget)
+  followPlayerConfig.followWhileAttacking = not followPlayerConfig.followWhileAttacking
+  widget:setOn(followPlayerConfig.followWhileAttacking)
+  saveFollowPlayerConfig()
+end
 
 local followToggleUI = setupUI([[
 Panel

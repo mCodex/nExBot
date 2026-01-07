@@ -144,11 +144,15 @@ local function initBotCoreHealer()
   return false
 end
 
--- Update BotCore when config changes
+-- Update BotCore when config changes (also syncs HealEngine spells)
 local function updateBotCoreConfig()
   if BotCore and BotCore.FriendHealer then
     local bcConfig = buildBotCoreConfig()
     BotCore.FriendHealer.init(bcConfig)
+    -- Sync spells to HealEngine
+    if BotCore.FriendHealer.syncHealEngineSpells then
+      BotCore.FriendHealer.syncHealEngineSpells()
+    end
   end
 end
 
@@ -156,12 +160,19 @@ end
 local friendHealerMacro = nil
 
 local function syncFriendHealerState()
+    -- Update BotCore FriendHealer
     if BotCore and BotCore.FriendHealer and BotCore.FriendHealer.setEnabled then
         BotCore.FriendHealer.setEnabled(config.enabled)
+        -- Also sync spell configuration
+        if BotCore.FriendHealer.syncHealEngineSpells then
+            BotCore.FriendHealer.syncHealEngineSpells()
+        end
     end
+    -- Update HealEngine directly too
     if HealEngine and HealEngine.setFriendHealingEnabled then
         HealEngine.setFriendHealingEnabled(config.enabled)
     end
+    -- Update macro state
     if friendHealerMacro and friendHealerMacro.setOn then
         friendHealerMacro:setOn(config.enabled)
     end
@@ -199,6 +210,7 @@ for name, health in pairs(config.customPlayers) do
     widget.remove.onClick = function()
         config.customPlayers[name] = nil
         widget:destroy()
+        updateBotCoreConfig()
     end
     widget:setText("["..health.."%]  "..name)
 end
@@ -244,8 +256,10 @@ customList.addPanel.add.onClick = function()
         widget.remove.onClick = function()
             config.customPlayers[name] = nil
             widget:destroy()
+            updateBotCoreConfig()
         end
         widget:setText("["..health.."%]  "..name)
+        updateBotCoreConfig()
     end
 
     clearFields()
@@ -287,6 +301,7 @@ targetSettings.vocations.box.knights.onClick = function(widget)
     config.conditions.knights = not config.conditions.knights
     widget:setChecked(config.conditions.knights)
     validate(widget, 2)
+    updateBotCoreConfig()
 end
 
 targetSettings.vocations.box.paladins:setChecked(config.conditions.paladins)
@@ -294,6 +309,7 @@ targetSettings.vocations.box.paladins.onClick = function(widget)
     config.conditions.paladins = not config.conditions.paladins
     widget:setChecked(config.conditions.paladins)
     validate(widget, 2)
+    updateBotCoreConfig()
 end
 
 targetSettings.vocations.box.druids:setChecked(config.conditions.druids)
@@ -301,6 +317,7 @@ targetSettings.vocations.box.druids.onClick = function(widget)
     config.conditions.druids = not config.conditions.druids
     widget:setChecked(config.conditions.druids)
     validate(widget, 2)
+    updateBotCoreConfig()
 end
 
 targetSettings.vocations.box.sorcerers:setChecked(config.conditions.sorcerers)
@@ -308,6 +325,7 @@ targetSettings.vocations.box.sorcerers.onClick = function(widget)
     config.conditions.sorcerers = not config.conditions.sorcerers
     widget:setChecked(config.conditions.sorcerers)
     validate(widget, 2)
+    updateBotCoreConfig()
 end
 
 targetSettings.groups.box.friends:setChecked(config.conditions.friends)
@@ -315,6 +333,7 @@ targetSettings.groups.box.friends.onClick = function(widget)
     config.conditions.friends = not config.conditions.friends
     widget:setChecked(config.conditions.friends)
     validate(widget)
+    updateBotCoreConfig()
 end
 
 targetSettings.groups.box.party:setChecked(config.conditions.party)
@@ -322,6 +341,7 @@ targetSettings.groups.box.party.onClick = function(widget)
     config.conditions.party = not config.conditions.party
     widget:setChecked(config.conditions.party)
     validate(widget)
+    updateBotCoreConfig()
 end
 
 targetSettings.groups.box.guild:setChecked(config.conditions.guild)
@@ -329,6 +349,7 @@ targetSettings.groups.box.guild.onClick = function(widget)
     config.conditions.guild = not config.conditions.guild
     widget:setChecked(config.conditions.guild)
     validate(widget)
+    updateBotCoreConfig()
 end
 
 targetSettings.groups.box.botserver:setChecked(config.conditions.botserver)
@@ -336,6 +357,7 @@ targetSettings.groups.box.botserver.onClick = function(widget)
     config.conditions.botserver = not config.conditions.botserver
     widget:setChecked(config.conditions.botserver)
     validate(widget)
+    updateBotCoreConfig()
 end
 
 validate(targetSettings.vocations.box.knights)
@@ -361,6 +383,8 @@ for i, setting in ipairs(config.settings) do
             if not (text:find("Range") or text:find("Mas Res")) then
                 widget.text:setText(widget.text:getText().."%")
             end
+            -- Sync config changes to BotCore when settings change
+            updateBotCoreConfig()
         end
         if text:find("Range") or text:find("Mas Res") then
             widget.scroll:setMaximum(10)
@@ -370,6 +394,8 @@ for i, setting in ipairs(config.settings) do
         widget.item:setShowCount(false)
         widget.item.onItemChange = function(widget)
             setting.value = widget:getItemId()
+            -- Sync config changes to BotCore when item changes
+            updateBotCoreConfig()
         end
     end
 end
@@ -416,7 +442,9 @@ for i, action in ipairs(config.priorities) do
         action.enabled = not action.enabled
         widget:setColor(action.enabled and "#98BF64" or "#dfdfdf")
         widget.enabled:setChecked(action.enabled)
-        validate(widget, 1)  
+        validate(widget, 1)
+        -- Sync config changes to BotCore
+        updateBotCoreConfig()  
     end
     if action.custom then
         widget.onDoubleClick = function()
@@ -449,9 +477,51 @@ local useBotCore = false
 -- Initialize on load
 schedule(100, function()
   useBotCore = initBotCoreHealer()
-    syncFriendHealerState()
+  syncFriendHealerState()
   if useBotCore then
-    -- BotCore high-performance mode enabled silently
+    -- BotCore high-performance mode enabled
+    -- Configure HealEngine friend spells based on UI priorities
+    if HealEngine and HealEngine.setFriendSpells then
+      local friendSpells = {}
+      local healAt = config.settings[5] and config.settings[5].value or 80
+      local granSioAt = config.settings[6] and config.settings[6].value or 40
+      
+      for i, action in ipairs(config.priorities or {}) do
+        if action.enabled then
+          if action.strong then
+            table.insert(friendSpells, {
+              name = "exura gran sio",
+              hp = granSioAt,
+              mpCost = 140,
+              cd = 1100,
+              prio = 1
+            })
+          end
+          if action.normal then
+            table.insert(friendSpells, {
+              name = "exura sio",
+              hp = healAt,
+              mpCost = 100,
+              cd = 1100,
+              prio = 2
+            })
+          end
+          if action.custom and action.name and action.name ~= "Custom Spell" then
+            table.insert(friendSpells, {
+              name = action.name,
+              hp = healAt,
+              mpCost = 50,
+              cd = 1100,
+              prio = 3
+            })
+          end
+        end
+      end
+      
+      if #friendSpells > 0 then
+        HealEngine.setFriendSpells(friendSpells)
+      end
+    end
   end
 end)
 
@@ -489,12 +559,12 @@ local function legacyHealAction(spec, targetsInRange)
             if action.mana and findItem(manaItem) and mana <= normalHeal and dist <= itemRange and now - lastItemUse > 1000 then
                 lastItemUse = now
                 if BotCore and BotCore.Cooldown then BotCore.Cooldown.markPotionUsed() end
-                return useWith(manaItem, spec)
+                return SafeCall.useWith(manaItem, spec)
             end
             if action.health and findItem(healItem) and health <= normalHeal and dist <= itemRange and now - lastItemUse > 1000 then
                 lastItemUse = now
                 if BotCore and BotCore.Cooldown then BotCore.Cooldown.markPotionUsed() end
-                return useWith(healItem, spec)
+                return SafeCall.useWith(healItem, spec)
             end
             if action.strong and health <= strongHeal then
                 local canCastGranSio = true
@@ -565,10 +635,15 @@ friendHealerMacro = macro(100, function()
     if useBotCore and BotCore and BotCore.FriendHealer then
         -- Let BotCore handle everything
         local actionTaken = BotCore.FriendHealer.tick()
+        -- If BotCore handled the heal, skip legacy fallback
         if actionTaken then return end
     end
     
-    -- Legacy fallback (or if BotCore didn't take action)
+    -- Only use legacy fallback if BotCore is not available
+    -- This prevents double-healing attempts
+    if useBotCore then return end
+    
+    -- Legacy fallback (only when BotCore is unavailable)
     
     -- Check healing cooldown
     if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive(2) then 
@@ -585,7 +660,14 @@ friendHealerMacro = macro(100, function()
     local inMasResRange = 0
 
     -- Scan spectators
-    local spectators = getSpectators()
+    local spectators = {}
+    if getSpectators then
+        local ok, specs = pcall(getSpectators)
+        if ok and specs then spectators = specs end
+    elseif SafeCall and SafeCall.global then
+        spectators = SafeCall.global("getSpectators") or {}
+    end
+    
     for i, spec in ipairs(spectators) do
         local health, dist = legacyIsCandidate(spec)
         if dist then
@@ -605,18 +687,27 @@ end)
 syncFriendHealerState()
 
 -- ============================================================================
--- EVENT-DRIVEN HEALING (instant response to friend health drops)
+-- EVENT-DRIVEN HEALING
+-- Note: EventBus handlers are registered by BotCore.FriendHealer module
+-- This section only provides legacy fallback when EventBus is unavailable
 -- ============================================================================
 
--- Hook into creature health changes for instant response
-if onCreatureHealthPercentChange then
+-- Fallback: Hook into creature health changes for instant response (legacy only)
+-- Only register if EventBus is NOT available (FriendHealer handles EventBus)
+if onCreatureHealthPercentChange and not EventBus then
     onCreatureHealthPercentChange(function(creature, newHp, oldHp)
         if not config.enabled then return end
-        if not creature or creature:isLocalPlayer() then return end
+        if not creature then return end
+        
+        -- Skip non-players and local player
+        local ok, isPlayer = pcall(function() return creature:isPlayer() end)
+        if not ok or not isPlayer then return end
+        local ok2, isLocal = pcall(function() return creature:isLocalPlayer() end)
+        if ok2 and isLocal then return end
         
         -- Only react to significant health drops
-        local drop = (oldHp or 100) - newHp
-        if drop < 15 then return end
+        local drop = (oldHp or 100) - (newHp or 100)
+        if drop < 10 then return end
         
         -- Use BotCore event handler if available
         if useBotCore and BotCore and BotCore.FriendHealer then

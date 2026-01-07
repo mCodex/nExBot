@@ -123,12 +123,7 @@ local function convertSpellsToEngineFormat(spellTable)
         })
     end
   end
-  if #invalidSpells > 0 then
-    warn("[HealBot] Some spells are invalid and will not be used:")
-    for _, s in ipairs(invalidSpells) do
-      warn("[HealBot] Invalid spell: " .. (s.spell.spell or "<no name>") .. " | Reason: " .. s.reason)
-    end
-  end
+
   return converted
 end
 
@@ -913,11 +908,11 @@ HealBot.resetAnalytics = function()
   analytics.log = {}
 end
 
--- Legacy healer removed; new engine is the single path
+
 
 -- Subscribe to EventBus for instant reaction to stat changes
 -- Note: BotCore handles event-driven stat updates, we just need to reset flags
--- Legacy event hooks removed; HealEngine runs on macro tick only
+
 
 -- Fast spell macro (driven by HealBot on/off state)
 -- Main healing macro loop (keeps heal engine ticking)

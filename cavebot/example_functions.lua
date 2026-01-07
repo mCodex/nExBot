@@ -40,7 +40,7 @@ addExampleFunction("Check for stamina and imbues", [[
 
 addExampleFunction("buy 200 mana potion from npc Eryn", [[
 --buy 200 mana potions
-local npc = getCreatureByName("Eryn")
+local npc = SafeCall.getCreatureByName("Eryn")
 if not npc then 
   return false 
 end

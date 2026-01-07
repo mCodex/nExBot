@@ -1,3 +1,6 @@
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 TargetBot.Looting = {}
 TargetBot.Looting.list = {} -- list of containers to loot
 
@@ -11,12 +14,13 @@ local dontSave = false
 TargetBot.Looting.setup = function()
   ui = UI.createWidget("TargetBotLootingPanel")
   UI.Container(TargetBot.Looting.onItemsUpdate, true, nil, ui.items)
-  UI.Container(TargetBot.Looting.onContainersUpdate, true, nil, ui.containers) 
+  UI.Container(TargetBot.Looting.onContainersUpdate, true, nil, ui.containers)
+
   ui.everyItem.onClick = function()
-    ui.everyItem:setOn(not ui.everyItem:isOn())
+    if ui.everyItem and ui.everyItem.isOn then ui.everyItem:setOn(not ui.everyItem:isOn()) end
     TargetBot.save()
   end
-  
+
   -- Eat food from corpses toggle
   ui.eatFromCorpses.onClick = function()
     ui.eatFromCorpses:setOn(not ui.eatFromCorpses:isOn())
@@ -25,7 +29,7 @@ TargetBot.Looting.setup = function()
     end
     TargetBot.save()
   end
-  
+
   ui.maxDangerPanel.value.onTextChange = function()
     local value = tonumber(ui.maxDangerPanel.value:getText())
     if not value then
@@ -41,6 +45,34 @@ TargetBot.Looting.setup = function()
     end
     if dontSave then return end
     TargetBot.save()
+  end
+
+  -- Event-driven triggers: mark loot state dirty when containers change
+  if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
+    local markDirtyDebounced = nExBot.EventUtil.debounce(120, function()
+      TargetBot.Looting.markDirty()
+    end)
+
+    EventBus.on("container:open", function(container, prev)
+      markDirtyDebounced()
+    end, 20)
+
+    EventBus.on("container:close", function(container)
+      markDirtyDebounced()
+    end, 20)
+
+    EventBus.on("container:update", function(container, slot, item, oldItem)
+      markDirtyDebounced()
+    end, 20)
+
+    -- Map tile changes can affect loot availability (containers added/removed)
+    EventBus.on("tile:add", function(tile, thing)
+      markDirtyDebounced()
+    end, 10)
+
+    EventBus.on("tile:remove", function(tile, thing)
+      markDirtyDebounced()
+    end, 10)
   end
 end
 
@@ -91,7 +123,7 @@ TargetBot.Looting.save = function(data)
   data['containers'] = ui.containers:getItems()
   data['maxDanger'] = tonumber(ui.maxDangerPanel.value:getText())
   data['minCapacity'] = tonumber(ui.minCapacityPanel.value:getText())
-  data['everyItem'] = ui.everyItem:isOn()
+  data['everyItem'] = (ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn() or false
   data['eatFromCorpses'] = ui.eatFromCorpses:isOn()
 end
 
@@ -112,21 +144,39 @@ local waitTill = 0
 local waitingForContainer = nil
 local status = ""
 local lastFoodConsumption = 0
+local lootDirty = false
 
 TargetBot.Looting.getStatus = function()
   return status
 end
 
+-- Mark looting state as needing re-evaluation
+TargetBot.Looting.markDirty = function()
+  lootDirty = true
+end
+
+-- Helper to reset dirty flag (called by TargetBot main loop)
+TargetBot.Looting.clearDirty = function()
+  lootDirty = false
+end
+
+TargetBot.Looting.isDirty = function()
+  return lootDirty
+end
+
 TargetBot.Looting.process = function(targets, dangerLevel)
-  if (not items[1] and not ui.everyItem:isOn()) or not containers[1] then
+  if (not items[1] and not ((ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn())) or not containers[1] then
     status = ""
     return false
   end
-  if dangerLevel > tonumber(ui.maxDangerPanel.value:getText()) then
+  local maxDanger = tonumber((ui and ui.maxDangerPanel and ui.maxDangerPanel.value and ui.maxDangerPanel.value.getText) and ui.maxDangerPanel.value:getText() or nil) or 0
+  if dangerLevel > maxDanger then
     status = "High danger"
     return false
   end
-  if player:getFreeCapacity() < tonumber(ui.minCapacityPanel.value:getText()) then
+  local minCap = tonumber((ui and ui.minCapacityPanel and ui.minCapacityPanel.value and ui.minCapacityPanel.value.getText) and ui.minCapacityPanel.value:getText() or nil) or 0
+  local freeCap = player and player.getFreeCapacity and player:getFreeCapacity() or 0
+  if freeCap < minCap then
     status = "No cap"
     TargetBot.Looting.list = {}
     return false
@@ -170,7 +220,13 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   local tile = g_map.getTile(loot.pos)
   if dist >= 3 or not tile then
     loot.tries = loot.tries + 1
-    TargetBot.walkTo(loot.pos, 20, { ignoreNonPathable = true, precision = 2 })
+    if nExBot and nExBot.MovementCoordinator and nExBot.MovementCoordinator.canMove then
+      if nExBot.MovementCoordinator.canMove() then
+        TargetBot.walkTo(loot.pos, 20, { ignoreNonPathable = true, precision = 2 })
+      end
+    else
+      TargetBot.walkTo(loot.pos, 20, { ignoreNonPathable = true, precision = 2 })
+    end
     return true
   end
 
@@ -244,7 +300,7 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
   for i, item in ipairs(container:getItems()) do
     if item:isContainer() and not itemsById[item:getId()] then
       nextContainer = item
-    elseif itemsById[item:getId()] or (ui.everyItem:isOn() and not item:isContainer()) then
+    elseif itemsById[item:getId()] or ((ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn() and not item:isContainer()) then
       item.lootTries = (item.lootTries or 0) + 1
       if item.lootTries < 5 then -- if can't be looted within 0.5s then skip it
         return TargetBot.Looting.lootItem(lootContainers, item)
@@ -350,9 +406,10 @@ local function getCachedPlayerPos()
 end
 
 onCreatureDisappear(function(creature)
-  if isInPz() then return end
-  if not TargetBot.isOn() then return end
-  if not creature:isMonster() then return end
+  if SafeCall.isInPz() then return end
+  -- Defensive: TargetBot or its isOn may not be ready during early load; guard safely
+  if not TargetBot or not TargetBot.isOn or type(TargetBot.isOn) ~= 'function' or not TargetBot.isOn() then return end
+  if not creature or type(creature.isMonster) ~= 'function' or not creature:isMonster() then return end
   
   local config = TargetBot.Creature.calculateParams(creature, {})
   if not config.config or config.config.dontLoot then

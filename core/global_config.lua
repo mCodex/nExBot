@@ -175,7 +175,7 @@ function GlobalConfig.useTool(toolName, target)
   
   -- Use the tool on target
   if target then
-    useWith(tool, target)
+    SafeCall.useWith(tool, target)
   else
     g_game.use(tool)
   end
@@ -218,7 +218,7 @@ function GlobalConfig.openDoor(tile, keyId)
   if GlobalConfig.isLockedDoor(itemId) and keyId then
     local key = findItem(keyId)
     if key then
-      useWith(key, topThing)
+      SafeCall.useWith(key, topThing)
       return true
     end
   elseif GlobalConfig.isClosedDoor(itemId) then
