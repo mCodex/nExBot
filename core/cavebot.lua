@@ -1,5 +1,6 @@
 -- Cavebot by otclient@otclient.ovh
--- visit http://bot.otclient.ovh/
+-- visit the documentation on GitHub
+-- https://github.com/mCodex/nExBot/blob/main/docs/CAVEBOT.md
 
 local cavebotTab = "Cave"
 local targetingTab = storage.extras.joinBot and "Cave" or "Target"

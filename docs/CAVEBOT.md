@@ -15,6 +15,17 @@ CaveBot automates your hunting route by following waypoints. It handles:
 
 ---
 
+## 🆕 What's New (Recent Improvements)
+
+- **Walking smoothing & tuning:** Movement timing and smoothing adjusted to reduce jitter and improve pathing stability across servers.
+- **Chunked walking:** Paths are split into short segments (max 15 tiles) to avoid stale pathing and repeated expensive calculations.
+- **Waypoint Guard improvements:** More robust distance checks and auto-skip for unreachable waypoints.
+- **Event-driven integration:** Better coordination with TargetBot (Pull System) and other modules using the EventBus.
+
+---
+
+---
+
 ## 🚀 Walking Module v3.2.0
 
 ### Key Features
