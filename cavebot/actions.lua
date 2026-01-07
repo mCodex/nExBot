@@ -366,9 +366,15 @@ end
 CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- ========== EARLY EXITS (no pathfinding) ==========
   
-  -- Skip if walking
+  -- Skip if actively walking (but don't delay - just retry next tick)
   if player and player:isWalking() then
-    return "retry"
+    -- Check if we've already arrived via EventBus
+    if CaveBot.hasArrivedAtWaypoint and CaveBot.hasArrivedAtWaypoint() then
+      CaveBot.clearWaypointTarget()
+      noPath = 0
+      return true
+    end
+    return "retry"  -- Quick retry, no delay
   end
 
   -- Parse position
@@ -500,6 +506,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Already at destination
   if distX <= precision and distY <= precision then
     noPath = 0
+    CaveBot.clearWaypointTarget()  -- Clear target on arrival
     -- If this was a floor-change tile and we're standing on it, wait for floor change
     if isFloorChange then
       -- Ensure intended floor change is set
@@ -521,7 +528,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
       end
       
       -- Still on the same floor - wait for floor change to occur
-      CaveBot.delay(300)
+      CaveBot.delay(100)  -- Reduced from 300ms for faster response
       return "retry"
     end
     return true
@@ -564,12 +571,16 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
   
   if CaveBot.walkTo(destPos, maxDist, walkParams) then
+    -- Set waypoint target for EventBus instant arrival detection
+    if CaveBot.setCurrentWaypointTarget then
+      CaveBot.setCurrentWaypointTarget(destPos, precision)
+    end
     -- Mark that we're walking to this waypoint (reduces unnecessary re-execution)
     if CaveBot.setWalkingToWaypoint then
       CaveBot.setWalkingToWaypoint(destPos)
     end
     noPath = 0
-    return "retry"
+    return "retry"  -- Continue checking for arrival
   end
   
   -- Walk failed - clear walking state

@@ -820,7 +820,63 @@ local function initTargetBotCache()
   end
 end
 
-cavebotMacro = macro(250, function()
+-- ============================================================================
+-- EVENTBUS INTEGRATION: Instant waypoint arrival detection
+-- ============================================================================
+
+-- Track current waypoint target for instant arrival detection
+local currentWaypointTarget = {
+  pos = nil,
+  precision = 1,
+  arrived = false,
+  arrivedTime = 0
+}
+
+-- Check if player is at waypoint position
+local function isAtWaypoint(playerPos, waypointPos, precision)
+  if not playerPos or not waypointPos then return false end
+  if playerPos.z ~= waypointPos.z then return false end
+  local dx = math.abs(playerPos.x - waypointPos.x)
+  local dy = math.abs(playerPos.y - waypointPos.y)
+  return dx <= precision and dy <= precision
+end
+
+-- Set current waypoint target (called from goto action)
+CaveBot.setCurrentWaypointTarget = function(pos, precision)
+  currentWaypointTarget.pos = pos
+  currentWaypointTarget.precision = precision or 1
+  currentWaypointTarget.arrived = false
+  currentWaypointTarget.arrivedTime = 0
+end
+
+-- Check if we've arrived at current waypoint
+CaveBot.hasArrivedAtWaypoint = function()
+  return currentWaypointTarget.arrived
+end
+
+-- Clear waypoint target
+CaveBot.clearWaypointTarget = function()
+  currentWaypointTarget.pos = nil
+  currentWaypointTarget.arrived = false
+end
+
+-- EventBus: Instant waypoint arrival detection
+if EventBus then
+  EventBus.on("player:move", function(newPos, oldPos)
+    if not currentWaypointTarget.pos then return end
+    if not newPos then return end
+    
+    -- Check if we arrived at the waypoint
+    if isAtWaypoint(newPos, currentWaypointTarget.pos, currentWaypointTarget.precision) then
+      currentWaypointTarget.arrived = true
+      currentWaypointTarget.arrivedTime = now
+      -- Emit event for other modules
+      pcall(function() EventBus.emit("cavebot:waypoint_arrived", currentWaypointTarget.pos) end)
+    end
+  end, 5)  -- High priority
+end
+
+cavebotMacro = macro(100, function()  -- Reduced from 250ms to 100ms for faster response
   -- Safety-first gating: pause movement when healing/danger active
   if HealContext and HealContext.isCritical and HealContext.isCritical() then
     CaveBot.resetWalking()
