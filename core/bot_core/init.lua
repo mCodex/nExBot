@@ -56,7 +56,11 @@ dofile(basePath .. "creatures.lua")
 dofile(basePath .. "items.lua")
 dofile(basePath .. "position.lua")
 
--- Friend Healer (depends on Stats, Cooldown, Priority)
+-- Attack System (depends on Cooldown, Items) - Hotkey-style attacks with EventBus
+dofile(basePath .. "attack_system.lua")
+
+-- Friend Healer (unified with hotkey-style healing and EventBus integration)
+-- Exposes as both BotCore.FriendHealer and BotCore.FriendHealerEnhanced for compatibility
 dofile(basePath .. "friend_healer.lua")
 
 -- ============================================================================

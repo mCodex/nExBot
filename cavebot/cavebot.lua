@@ -76,6 +76,128 @@ local intendedFloorChange = {
   TIMEOUT = 5000           -- Max time to wait for floor change to complete
 }
 
+-- FLOOR CHANGE LOOP PREVENTION: Track recent floor changes to prevent up/down loops
+local floorChangeHistory = {
+  changes = {},            -- Circular buffer of recent floor changes: {time, fromZ, toZ, waypointIdx}
+  maxSize = 6,             -- Track last 6 floor changes
+  cooldownTime = 3000,     -- Minimum time (ms) before allowing another floor change to same floor
+  loopThreshold = 4,       -- Number of changes to detect a loop pattern
+  lastChangeTime = 0,      -- Last floor change timestamp
+  lastFloorFrom = nil,     -- Last floor we changed FROM
+  lastFloorTo = nil,       -- Last floor we changed TO
+  completedFloorChange = nil,  -- Track that a floor change was just completed {time, toZ, fromZ}
+  lastCompletedWaypointPos = nil,  -- Position of last completed floor-change waypoint
+  lastCompletedWaypointTime = 0    -- When the floor-change waypoint was completed
+}
+
+-- Check if a floor change would create a loop (going back to a floor we just left)
+local function wouldCreateFloorLoop(targetZ)
+  if #floorChangeHistory.changes < 2 then return false end
+  
+  local recentTime = now - 8000  -- Look at last 8 seconds
+  local visitCount = {}
+  
+  -- Count how many times we visited each floor recently
+  for i = #floorChangeHistory.changes, 1, -1 do
+    local change = floorChangeHistory.changes[i]
+    if change.time < recentTime then break end
+    
+    visitCount[change.toZ] = (visitCount[change.toZ] or 0) + 1
+    visitCount[change.fromZ] = (visitCount[change.fromZ] or 0) + 1
+  end
+  
+  -- If we've visited the target floor 2+ times recently, it's likely a loop
+  if visitCount[targetZ] and visitCount[targetZ] >= 2 then
+    return true
+  end
+  
+  return false
+end
+
+-- Record a floor change
+local function recordFloorChange(fromZ, toZ, waypointIdx)
+  local change = {time = now, fromZ = fromZ, toZ = toZ, waypointIdx = waypointIdx}
+  table.insert(floorChangeHistory.changes, change)
+  
+  -- Trim to max size
+  while #floorChangeHistory.changes > floorChangeHistory.maxSize do
+    table.remove(floorChangeHistory.changes, 1)
+  end
+  
+  floorChangeHistory.lastChangeTime = now
+  floorChangeHistory.lastFloorFrom = fromZ
+  floorChangeHistory.lastFloorTo = toZ
+  floorChangeHistory.completedFloorChange = {time = now, toZ = toZ, fromZ = fromZ}
+end
+
+-- Mark a floor-change waypoint as completed (prevents re-execution)
+local function markFloorChangeWaypointCompleted(waypointPos)
+  floorChangeHistory.lastCompletedWaypointPos = waypointPos
+  floorChangeHistory.lastCompletedWaypointTime = now
+end
+
+-- Check if a waypoint was just completed (within timeout)
+local function wasWaypointJustCompleted(waypointPos, timeout)
+  timeout = timeout or 10000  -- 10 second default
+  if not floorChangeHistory.lastCompletedWaypointPos then return false end
+  if now - floorChangeHistory.lastCompletedWaypointTime > timeout then return false end
+  
+  local lastPos = floorChangeHistory.lastCompletedWaypointPos
+  return lastPos.x == waypointPos.x and lastPos.y == waypointPos.y and lastPos.z == waypointPos.z
+end
+
+-- Check if enough time has passed since last floor change
+local function canChangeFloorNow()
+  return (now - floorChangeHistory.lastChangeTime) >= floorChangeHistory.cooldownTime
+end
+
+-- Get recent floor change info (for skipping logic)
+CaveBot.getRecentFloorChange = function()
+  if floorChangeHistory.completedFloorChange then
+    local elapsed = now - floorChangeHistory.completedFloorChange.time
+    if elapsed < 8000 then  -- Within 8 seconds (increased from 2s)
+      return floorChangeHistory.completedFloorChange
+    end
+  end
+  return nil
+end
+
+-- Check if a floor-change waypoint was just completed
+CaveBot.wasFloorChangeWaypointCompleted = function(waypointPos)
+  return wasWaypointJustCompleted(waypointPos, 10000)  -- 10 second window
+end
+
+-- Mark a floor-change waypoint as completed
+CaveBot.markFloorChangeWaypointCompleted = function(waypointPos)
+  markFloorChangeWaypointCompleted(waypointPos)
+end
+
+-- Check if we would loop by going to target floor
+CaveBot.wouldFloorChangeLoop = function(targetZ)
+  return wouldCreateFloorLoop(targetZ)
+end
+
+-- Record a completed floor change (called from walking.lua)
+CaveBot.recordFloorChange = function(fromZ, toZ, waypointIdx)
+  recordFloorChange(fromZ, toZ, waypointIdx)
+end
+
+-- Check if floor change is allowed (cooldown check)
+CaveBot.canChangeFloor = function()
+  return canChangeFloorNow()
+end
+
+-- Clear floor change history (on config change)
+local function clearFloorChangeHistory()
+  floorChangeHistory.changes = {}
+  floorChangeHistory.lastChangeTime = 0
+  floorChangeHistory.lastFloorFrom = nil
+  floorChangeHistory.lastFloorTo = nil
+  floorChangeHistory.completedFloorChange = nil
+  floorChangeHistory.lastCompletedWaypointPos = nil
+  floorChangeHistory.lastCompletedWaypointTime = 0
+end
+
 -- Mark that we're intentionally changing floors (called from goto action)
 CaveBot.setIntendedFloorChange = function(expectedZ, waypointIndex)
   intendedFloorChange.active = true
@@ -94,22 +216,60 @@ CaveBot.clearIntendedFloorChange = function()
   intendedFloorChange.timestamp = 0
 end
 
+-- Full clear including history (for config changes)
+CaveBot.clearAllFloorChangeTracking = function()
+  CaveBot.clearIntendedFloorChange()
+  clearFloorChangeHistory()
+end
+
 -- Check if a floor change was intended (used by walking.lua to prevent step-back)
+-- This is the AUTHORITATIVE check for whether a floor change should be allowed
 CaveBot.isFloorChangeIntended = function(newFloor)
-  if not intendedFloorChange.active then return false end
+  if not intendedFloorChange.active then 
+    return false 
+  end
+  
+  -- Check timeout
   if now - intendedFloorChange.timestamp > intendedFloorChange.TIMEOUT then
     CaveBot.clearIntendedFloorChange()
     return false
   end
-  -- Check if this is the floor we expected, or an adjacent floor (for multi-level transitions)
+  
   local expectedZ = intendedFloorChange.expectedFloor
   local sourceZ = intendedFloorChange.sourceFloor
-  if not expectedZ or not sourceZ then return false end
+  if not expectedZ or not sourceZ then 
+    return false 
+  end
   
-  -- Moving in the right direction (towards expected floor)
+  -- EXACT MATCH: If we ended up exactly where expected, it's definitely intentional
+  if newFloor == expectedZ then
+    return true
+  end
+  
+  -- DIRECTION CHECK: If we moved in the right direction, allow it
+  -- This handles cases where floor change might go to adjacent floor
   local movingUp = newFloor < sourceZ
   local expectedUp = expectedZ < sourceZ
-  return movingUp == expectedUp
+  local movedInRightDirection = (movingUp == expectedUp)
+  
+  -- Only allow if we moved AND we're within 1 floor of expected
+  if movedInRightDirection and math.abs(newFloor - expectedZ) <= 1 then
+    return true
+  end
+  
+  return false
+end
+
+-- Get the current intended floor change state (for debugging/checks)
+CaveBot.getIntendedFloorChange = function()
+  if not intendedFloorChange.active then return nil end
+  return {
+    expectedFloor = intendedFloorChange.expectedFloor,
+    sourceFloor = intendedFloorChange.sourceFloor,
+    waypointIndex = intendedFloorChange.waypointIndex,
+    timestamp = intendedFloorChange.timestamp,
+    age = now - intendedFloorChange.timestamp
+  }
 end
 
 --[[
@@ -462,7 +622,8 @@ local function executeRecovery()
     local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
       maxCandidates = 30,
       preferCurrentFloor = true,
-      searchAllFloors = false
+      searchAllFloors = false,
+      excludeCompletedFloorChange = true  -- Don't select recently completed floor-change waypoints
     })
     
     if nearestChild then
@@ -480,7 +641,8 @@ local function executeRecovery()
     local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
       maxCandidates = 50,
       preferCurrentFloor = true,
-      searchAllFloors = true  -- Check adjacent floors
+      searchAllFloors = true,  -- Check adjacent floors
+      excludeCompletedFloorChange = true
     })
     
     if nearestChild then
@@ -680,15 +842,31 @@ cavebotMacro = macro(250, function()
   local playerPos = player:getPosition()
   if playerPos then
     if lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
-      -- Check if this floor change was intended
-      local wasIntended = CaveBot.isFloorChangeIntended(playerPos.z)
+      -- Check if this floor change was intended using multiple methods:
+      -- 1. intendedFloorChange is still active (rare - usually cleared by walking.lua)
+      -- 2. recentFloorChange matches this transition (most reliable)
+      local wasIntended = false
+      
+      -- Method 1: Check intendedFloorChange (might still be active)
+      if CaveBot.isFloorChangeIntended and CaveBot.isFloorChangeIntended(playerPos.z) then
+        wasIntended = true
+        CaveBot.clearIntendedFloorChange()
+      end
+      
+      -- Method 2: Check recentFloorChange (more reliable - persists for 8 seconds)
+      if not wasIntended and CaveBot.getRecentFloorChange then
+        local recent = CaveBot.getRecentFloorChange()
+        if recent and recent.toZ == playerPos.z and recent.fromZ == lastPlayerFloor then
+          -- This matches our floor transition - it was intended
+          wasIntended = true
+        end
+      end
       
       if wasIntended then
-        -- Intended floor change - clear the tracking but DON'T reset or search for waypoints
-        -- The waypoint system will naturally advance to the next waypoint
-        CaveBot.clearIntendedFloorChange()
-        CaveBot.resetWalking()  -- Still reset walking state for clean start
-        -- Don't reset waypoint engine or search for waypoints!
+        -- Intended floor change - just reset walking, don't search for waypoints
+        -- The cavebot will naturally advance to the next waypoint in the list
+        CaveBot.resetWalking()
+        -- Do NOT call resetWaypointEngine or findNearestGlobalWaypoint!
       else
         -- Unintended floor change - do the full reset and recovery
         CaveBot.resetWalking()
@@ -699,7 +877,8 @@ cavebotMacro = macro(250, function()
           local child, idx = findNearestGlobalWaypoint(playerPos, maxDist, {
             maxCandidates = 25,
             preferCurrentFloor = true,
-            searchAllFloors = false
+            searchAllFloors = false,
+            excludeCompletedFloorChange = true  -- NEW: Don't select recently completed waypoints
           })
           if child then
             focusWaypointBefore(child, idx)
@@ -865,7 +1044,12 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
   else
     CaveBot.resetWalking()
   end
-  CaveBot.clearIntendedFloorChange()  -- Clear any pending floor change tracking
+  -- Clear all floor change tracking including history
+  if CaveBot.clearAllFloorChangeTracking then
+    CaveBot.clearAllFloorChangeTracking()
+  else
+    CaveBot.clearIntendedFloorChange()  -- Fallback to just clearing intended
+  end
   resetWaypointEngine()  -- Reset waypoint engine state on config change
   if invalidateWaypointCache then invalidateWaypointCache() end  -- Clear waypoint position cache
   if resetStartupCheck then resetStartupCheck() end  -- Reset startup check to find nearest waypoint
@@ -1089,6 +1273,7 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
   local preferCurrentFloor = options.preferCurrentFloor ~= false
   local searchAllFloors = options.searchAllFloors or false
   local collectRangeMultiplier = options.collectRangeMultiplier or 1
+  local excludeCompletedFloorChange = options.excludeCompletedFloorChange or false
   local playerZ = playerPos.z
   
   -- Phase 1: Collect candidates on same floor with distance
@@ -1096,6 +1281,23 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
   local collectionLimit = maxDist * collectRangeMultiplier
 
   for i, wp in pairs(waypointPositionCache) do
+    -- Skip recently completed floor-change waypoints to prevent loops
+    if excludeCompletedFloorChange and CaveBot.wasFloorChangeWaypointCompleted then
+      if CaveBot.wasFloorChangeWaypointCompleted({x = wp.x, y = wp.y, z = wp.z}) then
+        -- This waypoint was just completed - skip it
+        goto continue
+      end
+    end
+    
+    -- Also skip waypoints that are on the floor we just came FROM
+    if excludeCompletedFloorChange and CaveBot.getRecentFloorChange then
+      local recent = CaveBot.getRecentFloorChange()
+      if recent and wp.z == recent.fromZ then
+        -- This waypoint is on the floor we just left - skip it
+        goto continue
+      end
+    end
+    
     local isSameFloor = (wp.z == playerZ)
     if isSameFloor then
       local dist = chebyshevDist(playerPos, wp)
@@ -1117,6 +1319,8 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
         child = wp.child
       }
     end
+    
+    ::continue::
   end
   
   -- Phase 2: Sort by distance (closest first)
@@ -1227,7 +1431,8 @@ checkStartupWaypoint = function()
   local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
     maxCandidates = 25,
     preferCurrentFloor = true,
-    searchAllFloors = false
+    searchAllFloors = false,
+    excludeCompletedFloorChange = true  -- Don't select recently completed floor-change waypoints
   })
   
   if nearestChild then
@@ -1241,7 +1446,8 @@ checkStartupWaypoint = function()
   local extendedChild, extendedIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
     maxCandidates = 40,
     preferCurrentFloor = true,
-    searchAllFloors = true  -- Try adjacent floors
+    searchAllFloors = true,  -- Try adjacent floors
+    excludeCompletedFloorChange = true
   })
   
   if extendedChild then

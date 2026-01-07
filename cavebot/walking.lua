@@ -248,7 +248,26 @@ end
 -- PATH VALIDATION (SRP: Validates paths for safety)
 -- ============================================================================
 
+-- Check if a position is adjacent to a floor-change tile (buffer zone)
+local function isNearFloorChangeTile(tilePos)
+  if not tilePos then return false end
+  
+  -- Check the tile itself first
+  if isFloorChangeTile(tilePos) then return true end
+  
+  -- Check adjacent tiles for floor-change (diagonal too - prevents diagonal step-on)
+  for _, offset in ipairs(ADJACENT_OFFSETS) do
+    local checkPos = applyOffset(tilePos, offset)
+    if isFloorChangeTile(checkPos) then
+      return true
+    end
+  end
+  
+  return false
+end
+
 -- Pure: Check if path crosses floor-change tiles (checks ALL steps for safety)
+-- Also checks buffer zone around floor-change tiles to prevent accidental step-on
 local function pathCrossesFloorChange(path, startPos, maxSteps)
   if not path or #path == 0 then return false end
   
@@ -336,7 +355,9 @@ end
 -- Track last safe position to allow a step-back on unexpected floor change
 local lastSafePos = nil
 local lastStepBackTs = 0
-local STEP_BACK_COOLDOWN = 1000 -- ms
+local STEP_BACK_COOLDOWN = 2000 -- ms - increased to prevent rapid step-back loops
+local stepBackAttempts = 0
+local MAX_STEP_BACK_ATTEMPTS = 3  -- Max attempts before giving up
 
 local function stepBackToLastSafe(currentPos)
   if not lastSafePos then return false end
@@ -344,6 +365,15 @@ local function stepBackToLastSafe(currentPos)
   if not currentPos then return false end
   if now - lastStepBackTs < STEP_BACK_COOLDOWN then return false end
   if posEquals(currentPos, lastSafePos) then return false end
+  
+  -- Limit step-back attempts to prevent infinite loops
+  stepBackAttempts = stepBackAttempts + 1
+  if stepBackAttempts > MAX_STEP_BACK_ATTEMPTS then
+    -- Too many attempts - give up and accept current position
+    lastSafePos = {x = currentPos.x, y = currentPos.y, z = currentPos.z}
+    stepBackAttempts = 0
+    return false
+  end
 
   lastStepBackTs = now
 
@@ -356,12 +386,20 @@ local function stepBackToLastSafe(currentPos)
   })
 
   if not path or #path == 0 then
+    -- Can't find path back - accept current position
+    lastSafePos = {x = currentPos.x, y = currentPos.y, z = currentPos.z}
+    stepBackAttempts = 0
     return false
   end
 
   autoWalk(lastSafePos, 10, {ignoreNonPathable = true, precision = 0})
   resetPathCursor()
   return true
+end
+
+-- Reset step-back attempts when we successfully complete a walk
+local function resetStepBackAttempts()
+  stepBackAttempts = 0
 end
 
 -- ============================================================================
@@ -371,26 +409,49 @@ end
 CaveBot.walkTo = function(dest, maxDist, params)
   local playerPos = pos()
   if not playerPos then return false end
+  
+  -- Initialize lastSafePos if not set, but ONLY if we're not near a floor-change tile
   if not lastSafePos then
-    lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+    if not isNearFloorChangeTile(playerPos) then
+      lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+    end
   end
   
-  -- Check for floor mismatch, but DON'T step back if floor change was intentional
+  -- Check for floor mismatch since last walk call
+  -- This catches floor changes that happened between walkTo calls
   if lastWalkZ and playerPos.z ~= lastWalkZ then
-    -- Check if this floor change was intended (multi-floor waypoint handling)
+    -- Check if this floor change was intended (via intendedFloorChange system)
     local wasIntentional = CaveBot.isFloorChangeIntended and CaveBot.isFloorChangeIntended(playerPos.z)
     
-    if not wasIntentional then
-      -- Unintended floor change - try to step back
-      stepBackToLastSafe(playerPos)
-      expectedFloor = nil
-      lastWalkZ = playerPos.z
-      return false
-    else
-      -- Intentional floor change - update tracking without stepping back
+    if wasIntentional then
+      -- Intentional floor change - update tracking, continue normally
       lastWalkZ = playerPos.z
       lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-      -- Don't return false - continue with the walk
+      resetStepBackAttempts()
+      -- Clear the intended flag since we've completed the floor change
+      if CaveBot.clearIntendedFloorChange then
+        CaveBot.clearIntendedFloorChange()
+      end
+    else
+      -- Unintended floor change - try to step back (with loop protection)
+      local shouldStepBack = true
+      if CaveBot.getRecentFloorChange then
+        local recent = CaveBot.getRecentFloorChange()
+        if recent and recent.toZ == lastWalkZ then
+          -- We'd be going back to a floor we just came from - loop detected
+          shouldStepBack = false
+        end
+      end
+      
+      if shouldStepBack then
+        stepBackToLastSafe(playerPos)
+      else
+        -- Accept the floor change to avoid loop
+        lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+      end
+      
+      lastWalkZ = playerPos.z
+      return false
     end
   end
   
@@ -407,8 +468,9 @@ CaveBot.walkTo = function(dest, maxDist, params)
   
   maxDist = math.min(maxDist or 20, MAX_PATHFIND_DIST)
   
-  -- Track expected floor
-  expectedFloor = dest.z
+  -- IMPORTANT: Do NOT set expectedFloor here!
+  -- Floor change tracking is handled ONLY by intendedFloorChange in cavebot.lua
+  -- The goto action sets intendedFloorChange when walking to a floor-change waypoint
   lastWalkZ = playerPos.z
   
   -- Distance check
@@ -633,6 +695,7 @@ CaveBot.resetWalking = function()
   lastWalkZ = nil
   FloorChangeCache.tiles = {}
   resetPathCursor()
+  resetStepBackAttempts()  -- Reset step-back counter
   -- Note: We intentionally do NOT clear intendedFloorChange here
   -- as it should persist across walking resets during floor transitions
 end
@@ -644,6 +707,7 @@ CaveBot.fullResetWalking = function()
     CaveBot.clearIntendedFloorChange()
   end
   lastSafePos = nil
+  stepBackAttempts = 0  -- Ensure full reset clears this too
 end
 
 CaveBot.doWalking = function()
@@ -684,40 +748,99 @@ end
 
 -- Expose utilities
 CaveBot.isFloorChangeTile = isFloorChangeTile
+CaveBot.isNearFloorChangeTile = isNearFloorChangeTile
 CaveBot.getSafeAdjacentTiles = function(centerPos) return getSafeAdjacentTiles(centerPos, false) end
 
 -- Floor change detection on position change
 onPlayerPositionChange(function(newPos, oldPos)
   if not oldPos or not newPos then return end
   
-  -- Always update last safe position to old position on same floor
+  -- Update last safe position when walking on same floor (away from floor-change tiles)
   if oldPos.z == newPos.z then
-    lastSafePos = {x = oldPos.x, y = oldPos.y, z = oldPos.z}
+    if not isNearFloorChangeTile(oldPos) then
+      lastSafePos = {x = oldPos.x, y = oldPos.y, z = oldPos.z}
+      resetStepBackAttempts()
+    end
+    return  -- No floor change, nothing more to do
   end
   
-  -- Check for floor changes
-  if newPos.z ~= oldPos.z then
-    -- Check if this floor change was intentional (from a floor-change waypoint)
-    local wasIntentional = CaveBot.isFloorChangeIntended and CaveBot.isFloorChangeIntended(newPos.z)
+  -- FLOOR CHANGE DETECTED
+  -- Check if this was intentional (via intendedFloorChange system set by goto action)
+  local wasIntentional = CaveBot.isFloorChangeIntended and CaveBot.isFloorChangeIntended(newPos.z)
+  
+  if wasIntentional then
+    -- INTENTIONAL floor change - accept it completely
+    lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
+    expectedFloor = nil  -- Clear any stale expectedFloor
+    FloorChangeCache.tiles = {}  -- Clear cache for new floor
+    resetStepBackAttempts()
     
-    if wasIntentional then
-      -- Intentional floor change - update safe position to new floor, don't step back
-      lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
-      expectedFloor = nil
-      FloorChangeCache.tiles = {}  -- Clear cache for new floor
-      -- Don't warn or step back for intentional changes
-    elseif expectedFloor and newPos.z ~= expectedFloor then
-      -- Unexpected floor change while we had an expected floor set
-      warn("[CaveBot] Unexpected floor change! Expected: " .. expectedFloor .. ", Current: " .. newPos.z)
-      stepBackToLastSafe(newPos)
-      expectedFloor = nil
-      FloorChangeCache.tiles = {}  -- Clear cache on floor change
-    else
-      -- Floor changed but no expected floor was set - just update state
-      lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
-      FloorChangeCache.tiles = {}
+    -- Record this floor change for loop prevention
+    if CaveBot.recordFloorChange then
+      CaveBot.recordFloorChange(oldPos.z, newPos.z, nil)
+    end
+    
+    -- Mark the floor-change waypoint (the old position) as completed
+    -- This prevents re-execution of the same waypoint
+    if CaveBot.markFloorChangeWaypointCompleted then
+      CaveBot.markFloorChangeWaypointCompleted({x = oldPos.x, y = oldPos.y, z = oldPos.z})
+    end
+    
+    -- Clear the intended flag now that floor change completed
+    if CaveBot.clearIntendedFloorChange then
+      CaveBot.clearIntendedFloorChange()
+    end
+    
+    return  -- Done - no warning, no step-back
+  end
+  
+  -- ACCIDENTAL floor change - not triggered by a floor-change waypoint
+  -- But it might still be from a recently completed floor change
+  -- (e.g., the intendedFloorChange was cleared but we're still processing)
+  
+  -- Check if this matches a recent floor change we recorded
+  local shouldStepBack = true
+  if CaveBot.getRecentFloorChange then
+    local recent = CaveBot.getRecentFloorChange()
+    if recent then
+      -- We have a recent floor change record
+      if recent.toZ == newPos.z then
+        -- We just changed TO this floor recently - this is probably intentional
+        -- Accept it without stepping back
+        shouldStepBack = false
+        lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
+        resetStepBackAttempts()
+        FloorChangeCache.tiles = {}
+        return  -- Done - treat as intentional
+      end
+      
+      if recent.toZ == oldPos.z then
+        -- We just came FROM that floor - stepping back would loop
+        shouldStepBack = false
+      end
     end
   end
+  
+  -- Also limit step-back attempts to prevent infinite loops
+  if stepBackAttempts >= MAX_STEP_BACK_ATTEMPTS then
+    shouldStepBack = false
+  end
+  
+  if shouldStepBack and lastSafePos and lastSafePos.z == oldPos.z then
+    -- Try to step back to the safe position on the previous floor
+    stepBackToLastSafe(newPos)
+  else
+    -- Accept the floor change (either to avoid loop or no safe pos)
+    lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
+    resetStepBackAttempts()
+  end
+  
+  -- Record this floor change for loop prevention
+  if CaveBot.recordFloorChange then
+    CaveBot.recordFloorChange(oldPos.z, newPos.z, nil)
+  end
+  
+  FloorChangeCache.tiles = {}  -- Clear cache on any floor change
 end)
 
 -- Safeguard: ensure module closes cleanly

@@ -572,6 +572,12 @@ end
 TargetBot.sayAttackSpell = function(text, delay)
   if type(text) ~= 'string' or text:len() < 1 then return end
   if not delay then delay = 2000 end
+  
+  -- Use new AttackSystem if available (EventBus integration, better cooldown tracking)
+  if BotCore and BotCore.AttackSystem and BotCore.AttackSystem.isEnabled and BotCore.AttackSystem.isEnabled() then
+    return BotCore.AttackSystem.executeSingleSpell(text, delay)
+  end
+  
   if lastAttackSpell + delay < now then
     say(text)
     lastAttackSpell = now
@@ -630,6 +636,12 @@ end
 
 TargetBot.useAttackItem = function(item, subType, target, delay)
   if not delay then delay = 2000 end
+  
+  -- Use new AttackSystem if available (EventBus integration, better cooldown tracking)
+  if BotCore and BotCore.AttackSystem and BotCore.AttackSystem.isEnabled and BotCore.AttackSystem.isEnabled() then
+    return BotCore.AttackSystem.executeSingleRune(item, target, delay)
+  end
+  
   if lastRuneAttack + delay < now then
     if useItemOnTargetLikeHotkey(item, target, subType) then
       lastRuneAttack = now
