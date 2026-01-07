@@ -585,9 +585,16 @@ end
 
 -- Select best friend action; target must include name and hp
 -- IMPORTANT: Shares cooldowns with self-healing via BotCore.Cooldown
+-- v2.1: Added custom HP threshold support and improved spell selection
 function HealEngine.planFriend(snap, target)
-  if not options.friendHeals then return nil end
-  if not target or not target.name then return nil end
+  if not options.friendHeals then 
+    logDebug("planFriend: friendHeals disabled")
+    return nil 
+  end
+  if not target or not target.name then 
+    logDebug("planFriend: no target or no target name")
+    return nil 
+  end
   
   local hp = target.hp or 100
   local currentMana = snap.currentMana or getCurrentMana()
@@ -595,32 +602,92 @@ function HealEngine.planFriend(snap, target)
   if inPz == nil then inPz = getInPz() end
   
   -- Don't heal friends in protection zone
-  if inPz then return nil end
+  if inPz then 
+    logDebug("planFriend: in protection zone, skipping")
+    return nil 
+  end
   
+  -- Get custom HP threshold for this specific player (from UI config)
+  local customThreshold = target.customHp
+  
+  logDebug(string.format("planFriend: evaluating '%s' hp=%d%% customThreshold=%s mana=%d", 
+    target.name, hp, tostring(customThreshold), currentMana))
+  
+  -- Check if friend actually needs healing
+  -- Use custom threshold if set, otherwise use spell's built-in threshold
+  local needsHealing = false
+  if customThreshold then
+    needsHealing = hp <= customThreshold
+  end
+  
+  -- Select best spell (sorted by priority - strongest first)
   for _, spell in ipairs(friendSpells) do
-    local hpThreshold = spell.hp or 0
-    local mpCost = spell.mpCost or spell.mp or 0
+    local spellThreshold = spell.hp or 0
+    local mpCost = spell.mpCost or spell.mana or spell.mp or 0
     
-    -- Check if friend needs healing
-    if hp <= hpThreshold then
+    -- Determine the effective threshold for this spell
+    -- Custom threshold overrides spell threshold, but only if friend HP is below it
+    local effectiveThreshold = spellThreshold
+    if customThreshold and customThreshold > spellThreshold then
+      -- For strong heals (gran sio), still require lower HP even with custom threshold
+      -- For normal heals (sio), use the custom threshold
+      if spell.prio == 1 then
+        -- Strong heal: use lower of custom/2 or spell threshold
+        effectiveThreshold = math.min(customThreshold / 2, spellThreshold)
+      else
+        effectiveThreshold = customThreshold
+      end
+    end
+    
+    -- Check if friend HP is at or below threshold
+    if hp <= effectiveThreshold or needsHealing then
       -- CRITICAL: Check if we have enough mana to cast!
       if currentMana >= mpCost then
         -- Check cooldowns (shared with self-healing)
         if healingGroupReady() and ready(spell.key, spell.cd or 1100) then
-          logDebug(string.format("planFriend: healing '%s' (hp=%d%%) with %s", target.name, hp, spell.name))
+          logDebug(string.format("planFriend: healing '%s' (hp=%d%%, threshold=%d) with %s", 
+            target.name, hp, effectiveThreshold, spell.name))
           return {
             kind = "spell",
             name = string.format('%s "%s"', spell.name, target.name),
             key = spell.key,
-            cd = spell.cd or 1100
+            cd = spell.cd or 1100,
+            targetName = target.name,
+            targetHp = hp
           }
+        else
+          logDebug(string.format("planFriend: cooldown not ready for %s", spell.name))
         end
       else
-        logDebug(string.format("planFriend: insufficient mana for %s (need %d, have %d)", spell.name, mpCost, currentMana))
+        logDebug(string.format("planFriend: insufficient mana for %s (need %d, have %d)", 
+          spell.name, mpCost, currentMana))
       end
     end
   end
+  
+  logDebug(string.format("planFriend: no suitable spell for '%s' at %d%% HP", target.name, hp))
   return nil
+end
+
+-- Set friend healing spells (allows customization from UI)
+function HealEngine.setFriendSpells(spellList)
+  if spellList and type(spellList) == "table" and #spellList > 0 then
+    friendSpells = {}
+    for i, s in ipairs(spellList) do
+      if s and s.name then
+        table.insert(friendSpells, {
+          name = s.name,
+          key = s.key or s.name:lower():gsub(" ", "_"),
+          hp = s.hp or 80,
+          mpCost = s.mpCost or s.mana or 100,
+          cd = s.cd or 1100,
+          prio = s.prio or i
+        })
+      end
+    end
+    sortByPrio(friendSpells)
+    logDebug(string.format("setFriendSpells: loaded %d friend spells", #friendSpells))
+  end
 end
 
 function HealEngine.execute(action)
