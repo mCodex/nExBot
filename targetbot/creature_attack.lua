@@ -1152,6 +1152,18 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
 
   local config = params.config
   local creature = params.creature
+  local creaturePos = creature:getPosition()
+  local playerPos = player:getPosition()
+
+  -- Update ActiveMovementConfig for EventBus-driven movement intents
+  if TargetBot.ActiveMovementConfig then
+    TargetBot.ActiveMovementConfig.chase = config.chase or false
+    TargetBot.ActiveMovementConfig.keepDistance = config.keepDistance or false
+    TargetBot.ActiveMovementConfig.keepDistanceRange = config.keepDistanceRange or 4
+    TargetBot.ActiveMovementConfig.finishKillThreshold = storage.extras and storage.extras.killUnder or 30
+    TargetBot.ActiveMovementConfig.anchor = config.anchor and playerPos or nil
+    TargetBot.ActiveMovementConfig.anchorRange = config.anchorRange or 5
+  end
 
   -- Set OTClient native chase mode based on config
   -- When chase mode is 1 (ChaseOpponent), the client automatically follows the attack target
@@ -1172,6 +1184,21 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   if currentTarget ~= creature then
     local ok, err = pcall(function() g_game.attack(creature) end)
     if not ok then warn("[TargetBot] g_game.attack pcall failed: " .. tostring(err)) end
+    
+    -- Notify EventTargeting of target acquisition
+    if EventTargeting and EventTargeting.CombatCoordinator then
+      local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
+      if dist > 1 then
+        pcall(function() EventTargeting.CombatCoordinator.registerChaseIntent(creature, creaturePos, dist) end)
+      end
+      pcall(function() EventTargeting.CombatCoordinator.pauseCaveBot() end)
+    end
+    
+    -- Emit target acquired event for other modules
+    if EventBus then
+      pcall(function() EventBus.emit("targetbot/target_acquired", creature, creaturePos) end)
+    end
+    
     schedule(200, function()
       local atk = g_game.getAttackingCreature and g_game.getAttackingCreature() or nil
       -- No debug info emitted about registration status

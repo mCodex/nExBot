@@ -1272,7 +1272,7 @@ end
 -- Main TargetBot loop - optimized with EventBus caching
 local lastRecalcTime = 0
 local RECALC_COOLDOWN_MS = 150
-targetbotMacro = macro(500, function()
+targetbotMacro = macro(400, function()
   local _msStart = os.clock()
   if not config or not config.isOn or not config.isOn() then
     return
@@ -1284,6 +1284,24 @@ targetbotMacro = macro(500, function()
   -- TargetBot never triggers friend-heal; keep that path dormant to save cycles
   if HealEngine and HealEngine.setFriendHealingEnabled then
     HealEngine.setFriendHealingEnabled(false)
+  end
+  
+  -- FAST PATH: If EventTargeting already has a valid target, use it
+  -- This skips the expensive recalculation when event-driven targeting is handling things
+  if EventTargeting and EventTargeting.isInCombat and EventTargeting.isInCombat() then
+    local eventTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
+    if eventTarget and not eventTarget:isDead() then
+      -- EventTargeting is handling combat - just ensure we're attacking
+      local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+      if not currentAttack or currentAttack:getId() ~= eventTarget:getId() then
+        -- Sync our attack target with EventTargeting's choice
+        pcall(function() g_game.attack(eventTarget) end)
+      end
+      -- Let EventTargeting handle movement coordination
+      setStatusRight("Targeting (Event)")
+      lastAction = now
+      return
+    end
   end
 
   -- Danger-based auto-stop disabled per user request (no-op)

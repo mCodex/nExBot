@@ -404,10 +404,12 @@ end
 
 -- priority and toggles
 local function setCrementalButtons()
-    for i, child in ipairs(priority.list:getChildren()) do
+    local children = priority.list:getChildren()
+    local count = #children
+    for i, child in ipairs(children) do
         if i == 1 then
             child.increment:disable()
-        elseif i == 6 then
+        elseif i == count then
             child.decrement:disable()
         else
             child.increment:enable()
@@ -416,25 +418,28 @@ local function setCrementalButtons()
     end
 end
 
-for i, action in ipairs(config.priorities) do
+-- Helper to create a priority entry widget
+local function createPriorityWidget(action, index)
     local widget = UI.createWidget("PriorityEntry", priority.list)
 
     widget:setText(action.name)
     widget.increment.onClick = function()
-        local index = priority.list:getChildIndex(widget)
-        local table = config.priorities
+        local idx = priority.list:getChildIndex(widget)
+        local tbl = config.priorities
 
-        priority.list:moveChildToIndex(widget, index-1)
-        table[index], table[index-1] = table[index-1], table[index]
+        priority.list:moveChildToIndex(widget, idx-1)
+        tbl[idx], tbl[idx-1] = tbl[idx-1], tbl[idx]
         setCrementalButtons()
+        updateBotCoreConfig()
     end
     widget.decrement.onClick = function()
-        local index = priority.list:getChildIndex(widget)
-        local table = config.priorities
+        local idx = priority.list:getChildIndex(widget)
+        local tbl = config.priorities
 
-        priority.list:moveChildToIndex(widget, index+1)
-        table[index], table[index+1] = table[index+1], table[index]
+        priority.list:moveChildToIndex(widget, idx+1)
+        tbl[idx], tbl[idx+1] = tbl[idx+1], tbl[idx]
         setCrementalButtons()
+        updateBotCoreConfig()
     end
     widget.enabled:setChecked(action.enabled)
     widget:setColor(action.enabled and "#98BF64" or "#dfdfdf")
@@ -443,10 +448,21 @@ for i, action in ipairs(config.priorities) do
         widget:setColor(action.enabled and "#98BF64" or "#dfdfdf")
         widget.enabled:setChecked(action.enabled)
         validate(widget, 1)
-        -- Sync config changes to BotCore
         updateBotCoreConfig()  
     end
+    
+    -- Show remove button for custom spells
     if action.custom then
+        widget.remove:show()
+        widget.remove.onClick = function()
+            -- Remove from config
+            local idx = priority.list:getChildIndex(widget)
+            table.remove(config.priorities, idx)
+            widget:destroy()
+            setCrementalButtons()
+            validate(priority.list:getFirstChild(), 1)
+            updateBotCoreConfig()
+        end
         widget.onDoubleClick = function()
             local window = modules.client_textedit.show(widget, {title = "Custom Spell", description = "Enter below formula for a custom healing spell"})
             schedule(50, function() 
@@ -454,16 +470,47 @@ for i, action in ipairs(config.priorities) do
               window:focus() 
             end)
         end
-        widget.onTextChange = function(widget,text)
+        widget.onTextChange = function(w, text)
             action.name = text
+            updateBotCoreConfig()
         end
-        widget:setTooltip("Double click to set spell formula.")
+        widget:setTooltip("Double click to edit. X to remove.")
     end
+    
+    return widget
+end
 
+-- Build initial priority list
+for i, action in ipairs(config.priorities) do
+    createPriorityWidget(action, i)
+    
     if i == #config.priorities then
-        validate(widget, 1)
+        validate(priority.list:getFirstChild(), 1)
         setCrementalButtons()
     end
+end
+
+-- Add Custom Spell button handler
+priority.addSpellButton.onClick = function()
+    -- Create new custom spell entry
+    local newSpell = {
+        name = "Custom Spell " .. (#config.priorities + 1),
+        enabled = true,
+        custom = true
+    }
+    table.insert(config.priorities, newSpell)
+    local widget = createPriorityWidget(newSpell, #config.priorities)
+    setCrementalButtons()
+    updateBotCoreConfig()
+    
+    -- Open text edit for the new spell
+    schedule(100, function()
+        local window = modules.client_textedit.show(widget, {title = "Custom Spell", description = "Enter below formula for a custom healing spell"})
+        schedule(50, function() 
+            window:raise()
+            window:focus() 
+        end)
+    end)
 end
 
 -- ============================================================================

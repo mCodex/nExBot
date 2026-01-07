@@ -77,6 +77,9 @@ dofile("/targetbot/movement_coordinator.lua") -- Coordinated movement system
 -- Load TargetBot modules
 dofile("/targetbot/creature.lua")
 
+-- Event-driven targeting system (uses EventBus + Creature configs)
+dofile("/targetbot/event_targeting.lua")      -- High-performance EventBus targeting
+
 -- Monster inspector UI (visualize learned patterns)
 dofile("/targetbot/monster_inspector.lua")
 dofile("/targetbot/creature_attack.lua")

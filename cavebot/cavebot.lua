@@ -973,6 +973,14 @@ cavebotMacro = macro(100, function()  -- Reduced from 250ms to 100ms for faster 
       CaveBot.resetWalking()
       return
     end
+    
+    -- EVENT-DRIVEN COMBAT PAUSE: If EventTargeting detected combat, pause walking
+    -- This ensures we stop and fight monsters that appear on screen with clean paths
+    -- Respects dynamicLure/smartPull modes (they handle their own pausing)
+    if EventTargeting and EventTargeting.isCombatActive and EventTargeting.isCombatActive() then
+      CaveBot.resetWalking()
+      return
+    end
   end
   
   -- Use cached UI list reference
