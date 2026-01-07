@@ -1302,6 +1302,11 @@ end
 
 -- Reopen all backpacks from back slot
 function reopenBackpacks()
+    -- Emit event so other modules know we're closing all containers
+    if EventBus and EventBus.emit then
+        EventBus.emit("containers:close_all")
+    end
+    
     -- Close all containers first
     for _, container in pairs(g_game.getContainers()) do 
         g_game.close(container) 
@@ -1334,7 +1339,10 @@ function reopenBackpacks()
         local attempts = 0
         local function waitForMainReopen()
             attempts = attempts + 1
-            if #g_game.getContainers() > 0 then
+            local containerCount = 0
+            for _ in pairs(g_game.getContainers()) do containerCount = containerCount + 1 end
+            
+            if containerCount > 0 then
                 startContainerBFS()
             elseif attempts < 12 then
                 schedule(150, waitForMainReopen)
@@ -1433,6 +1441,9 @@ end
   Uses onPlayerHealthChange to detect when player logs back in.
   When health changes from 0 (or initial state) to a positive value,
   it indicates a new login session.
+  
+  On relogin, we close all containers first and then reopen from backpack slot
+  to ensure a clean state.
 ]]
 
 local lastKnownHealth = 0
@@ -1447,10 +1458,10 @@ onPlayerHealthChange(function(healthPercent)
     if lastKnownHealth == 0 and healthPercent > 0 and not hasTriggeredThisSession then
         hasTriggeredThisSession = true
         
-        -- Delay to let game fully load
+        -- Delay to let game fully load, then close all and reopen
         schedule(1500, function()
-            -- Auto-opening containers on login
-            openAllContainers()
+            -- Use reopenBackpacks which closes all first, then opens from back slot
+            reopenBackpacks()
         end)
     end
     
@@ -1477,7 +1488,8 @@ schedule(1000, function()
     if #g_game.getContainers() == 0 then
         hasTriggeredThisSession = true
         schedule(1500, function()
-            openAllContainers()
+            -- Use reopenBackpacks for clean state
+            reopenBackpacks()
         end)
     end
 end)

@@ -388,5 +388,4 @@ ComboWindow < MainWindow
     anchors.top: closeButton.top
     margin-right: 10
     size: 45 21
-    -- Open ComboBot docs on GitHub
     @onClick: g_platform.openUrl("https://github.com/mCodex/nExBot/blob/main/docs/ATTACKBOT.md#combos")
