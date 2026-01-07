@@ -1,13 +1,16 @@
 
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 TargetBot.Creature = {}
 TargetBot.Creature.configsCache = {}
 TargetBot.Creature.cached = 0
 TargetBot.Creature.lastCacheClear = 0
 
--- Cache configuration optimized for memory efficiency
-local CACHE_MAX_SIZE = 200   -- Reduced for better memory management
-local CACHE_TTL = 30000      -- Clear cache every 30 seconds (reduced from 60)
-local CACHE_LRU_SIZE = 50    -- Keep only 50 most recent entries when pruning
+-- Cache configuration optimized for memory efficiency (tuned for lower memory usage)
+local CACHE_MAX_SIZE = 50   -- Reduced from 100 to limit memory per-character
+local CACHE_TTL = 10000      -- Clear cache every 10 seconds to free memory more aggressively
+local CACHE_LRU_SIZE = 20    -- Keep only 20 most recent entries when pruning
 
 -- LRU tracking for smart cache eviction
 local cacheAccessOrder = {}  -- Array of {name, accessTime}
@@ -181,13 +184,13 @@ TargetBot.Creature.getConfigs = function(creature)
     local excludeRegex = config.value.excludeRegex
     
     -- Check if name matches include pattern
-    local match = regexMatch(name, regex)
-    if match[1] then
+    local match = SafeCall.regexMatch(name, regex)
+    if match and match[1] then
       -- Check if name is excluded
       local excluded = false
       if excludeRegex then
-        local excludeMatch = regexMatch(name, excludeRegex)
-        if excludeMatch[1] then
+        local excludeMatch = SafeCall.regexMatch(name, excludeRegex)
+        if excludeMatch and excludeMatch[1] then
           excluded = true
         end
       end

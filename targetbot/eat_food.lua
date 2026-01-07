@@ -15,6 +15,9 @@
   - Toggle switch in TargetBot Looting panel
 ]]
 
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 TargetBot.EatFood = {}
 
 -- Food item IDs
@@ -370,14 +373,12 @@ local function eatFromInventory()
   if (now - lastEatTime) < EAT_COOLDOWN then return false end
   
   -- Try findItem first (searches all open containers including backpacks)
-  if findItem then
-    for foodId, _ in pairs(FOOD_IDS) do
-      local food = findItem(foodId)
-      if food then
-        g_game.use(food)
-        lastEatTime = now
-        return true
-      end
+  for foodId, _ in pairs(FOOD_IDS) do
+    local food = SafeCall.findItem(foodId)
+    if food then
+      g_game.use(food)
+      lastEatTime = now
+      return true
     end
   end
   
@@ -501,7 +502,7 @@ end
 TargetBot.EatFood.process = function()
   if not eatFromCorpsesEnabled then return false end
   if not player then return false end
-  if isInPz() then return false end
+  if SafeCall.isInPz() then return false end
   if not TargetBot.isOn() then return false end
   
   -- Clean old corpses
@@ -555,7 +556,7 @@ end
 onCreatureDisappear(function(creature)
   if not eatFromCorpsesEnabled then return end
   if not player then return end
-  if isInPz() then return end
+  if SafeCall.isInPz() then return end
   if not TargetBot.isOn() then return end
   if not creature:isMonster() then return end
   
@@ -585,12 +586,35 @@ onCreatureDisappear(function(creature)
   end)
 end)
 
+-- Also react to direct tile adds (faster / more robust than only relying on disappear schedule)
+if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
+  local addCorpseDebounced = nExBot.EventUtil.debounce(100, function(tile, thing)
+    -- Only containers are interesting for corpses
+    if not thing or not thing:isContainer() then return end
+    local pos = tile:getPosition()
+    -- Only consider nearby positions
+    local p = player and player:getPosition()
+    if not p or p.z ~= pos.z then return end
+    if getDistance(p, pos) > 8 then return end
+    schedule(50, function()
+      local topThing = tile:getTopUseThing()
+      if topThing and topThing:isContainer() then
+        addCorpseToQueue(pos, "")
+      end
+    end)
+  end)
+
+  EventBus.on("tile:add", function(tile, thing)
+    addCorpseDebounced(tile, thing)
+  end, 10)
+end
+
 -- Macro to process corpse eating (runs every 200ms)
 -- NOTE: For eating food from inventory, use the "Eat Food" macro in the HP tab
 macro(200, function()
   if not eatFromCorpsesEnabled then return end
   if not TargetBot or not TargetBot.isOn or not TargetBot.isOn() then return end
-  if isInPz() then return end
+  if SafeCall.isInPz() then return end
   if not player then return end
   
   -- Process corpse eating

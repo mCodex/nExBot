@@ -202,16 +202,16 @@ if true then
                         use(item)
                         return
                     elseif table.find(shovelId, item:getId()) then
-                        useWith(settings.shovel, item)
+                        SafeCall.useWith(settings.shovel, item)
                         return
                     elseif table.find(ropeId, item:getId()) then
-                        useWith(settings.rope, item) 
+                        SafeCall.useWith(settings.rope, item) 
                         return
                     elseif table.find(macheteId, item:getId()) then
-                        useWith(settings.machete, item)
+                        SafeCall.useWith(settings.machete, item)
                         return
                     elseif table.find(scytheId, item:getId()) then
-                        useWith(settings.scythe, item)
+                        SafeCall.useWith(settings.scythe, item)
                         return
                     end
                 end
@@ -376,7 +376,7 @@ if true then
     if bestCandidate then
       if bestDistance <= 1 then
         CaveBot.delay(450)
-        useWith(bestCandidate.toolId, bestCandidate.item)
+        SafeCall.useWith(bestCandidate.toolId, bestCandidate.item)
       else
         -- Walk to the corpse first
         CaveBot.walkTo(bestCandidate.pos, 7, {ignoreNonPathable = true, precision = 1})
@@ -620,7 +620,7 @@ addCheckBox("checkPlayer", "Check Players", true, rightPanel, "Auto look on play
 if true then
   local found
   local function checkPlayers()
-    for i, spec in ipairs(getSpectators()) do
+    for i, spec in ipairs(SafeCall.global("getSpectators") or {}) do
       if spec:isPlayer() and spec:getText() == "" and spec:getPosition().z == posz() and spec ~= player then
           g_game.look(spec)
           found = now
@@ -672,7 +672,7 @@ if true then
         elseif text:lower():find("paladin") then
             voc = "RP"
         end
-        local creature = getCreatureByName(name)
+        local creature = SafeCall.getCreatureByName(name)
         if creature then
             creature:setText("\n"..level..voc.."\n"..guild)
         end
@@ -719,7 +719,7 @@ end
 addCheckBox("highlightTarget", "Highlight Current Target", true, rightPanel, "Additionaly hightlight current target with red glow")
 if true then
   local function forceMarked(creature)
-    if target() == creature then
+    if target and target() == creature then
         creature:setMarked("red")
         return schedule(333, function() forceMarked(creature) end)
     end

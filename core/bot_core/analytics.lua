@@ -9,6 +9,9 @@
 
 local Analytics = {}
 
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 -- ============================================================================
 -- PRIVATE STATE
 -- ============================================================================
@@ -106,7 +109,7 @@ end
 
 function Analytics.startSession()
   _data.session.startTime = now or os.time() * 1000
-  _data.session.startXp = exp and exp() or 0
+  _data.session.startXp = SafeCall.exp() or 0
   _data.session.isActive = true
 end
 

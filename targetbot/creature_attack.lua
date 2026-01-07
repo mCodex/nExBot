@@ -4,6 +4,9 @@
 -- Dynamic scaling based on monster count for better reactivity
 --------------------------------------------------------------------------------
 
+-- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local SafeCall = SafeCall or require("core.safe_call")
+
 local targetBotLure = false
 local targetCount = 0 
 local delayValue = 0
@@ -16,9 +19,20 @@ local dynamicLureDelay = false
 -- Use TargetCore if available (DRY - avoid duplicate implementations)
 local Core = TargetCore or {}
 local Geometry = Core.Geometry or {}
+-- Spectator cache (safe require)
+local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
+
+-- Helper: check MovementCoordinator for movement allowance
+local function movementAllowed()
+  if nExBot and nExBot.MovementCoordinator and nExBot.MovementCoordinator.canMove then
+    return nExBot.MovementCoordinator.canMove()
+  end
+  return true
+end
 
 -- Pre-computed direction offsets (fallback if Core not available)
-local DIRECTIONS = Geometry.DIRECTIONS or {
+-- Adjacent offsets array (use Geometry.ADJACENT_OFFSETS if provided)
+local DIRECTIONS = Geometry.ADJACENT_OFFSETS or Geometry.DIRECTIONS or {
   {x = 0, y = -1},   -- North
   {x = 1, y = 0},    -- East  
   {x = 0, y = 1},    -- South
@@ -65,6 +79,11 @@ local avoidanceState = {
   lastMonsterCount = 0     -- Track monster count for scaling
 }
 
+-- Avoidance tuning knobs (can be tuned via TargetCore.CONSTANTS)
+local AVOID_PREDICT_CONF = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.AVOID_PREDICT_CONF) or 0.5 -- min confidence to treat predicted wave as threat
+local AVOID_PREDICT_DANGER = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.AVOID_PREDICT_DANGER) or 3.0 -- added danger weight for predicted wave
+
+
 -- Pure function: Calculate dynamic scaling factor based on monster count
 -- More monsters = more reactive (lower thresholds, shorter cooldowns)
 -- @param monsterCount: number of nearby monsters
@@ -106,6 +125,10 @@ end
 -- @param arcWidth: how wide the arc is (default 1 tile on each side)
 -- @return boolean, number (isInArc, distanceToCenter)
 local function isInFrontArc(pos, monsterPos, monsterDir, range, arcWidth)
+  -- Prefer TargetCore's implementation when available
+  if Core and Core.isInFrontArc then
+    return Core.isInFrontArc(pos, monsterPos, monsterDir, range, arcWidth)
+  end
   range = range or 5
   arcWidth = arcWidth or 1
   
@@ -121,24 +144,18 @@ local function isInFrontArc(pos, monsterPos, monsterDir, range, arcWidth)
     return false, dist
   end
   
-  -- Calculate distance from center of attack line
   local distFromCenter
-  
   if dirVec.x == 0 then
-    -- North or South: check vertical alignment
     local inDirection = (dy * dirVec.y) > 0
     distFromCenter = math.abs(dx)
     return inDirection and distFromCenter <= arcWidth, distFromCenter
   elseif dirVec.y == 0 then
-    -- East or West: check horizontal alignment
     local inDirection = (dx * dirVec.x) > 0
     distFromCenter = math.abs(dy)
     return inDirection and distFromCenter <= arcWidth, distFromCenter
   else
-    -- Diagonal: check if in the quadrant cone
     local inX = (dirVec.x > 0 and dx > 0) or (dirVec.x < 0 and dx < 0)
     local inY = (dirVec.y > 0 and dy > 0) or (dirVec.y < 0 and dy < 0)
-    -- For diagonals, use the perpendicular distance from the diagonal line
     distFromCenter = math.abs(dx - dy) / 2
     return inX and inY, distFromCenter
   end
@@ -146,16 +163,45 @@ end
 
 -- Pure function: Score a position's danger level
 -- Returns detailed danger analysis for better decision making
+-- Enhanced with MonsterAI.RealTime metrics for high-accuracy threat assessment
 -- @param pos: position to check
 -- @param monsters: array of monster creatures
--- @return table {totalDanger, waveThreats, meleeThreats, details}
-local function analyzePositionDanger(pos, monsters)
-  local result = {
-    totalDanger = 0,
-    waveThreats = 0,
-    meleeThreats = 0,
-    details = {}
+-- @param usePrediction: when true, consult MonsterAI predictions (only enabled for rePosition)
+-- @return table {totalDanger, waveThreats, meleeThreats, details, realTimeMetrics}
+local function analyzePositionDanger(pos, monsters, usePrediction)
+  -- Prefer TargetCore if available
+  if Core and Core.calculatePositionDanger then
+    local danger = Core.calculatePositionDanger(pos, monsters)
+    if type(danger) == 'table' then
+      return danger
+    end
+    -- Wrap scalar danger value into expected table shape
+    return { totalDanger = danger or 0, waveThreats = 0, meleeThreats = 0, details = {} }
+  end
+  
+  local result = { 
+    totalDanger = 0, 
+    waveThreats = 0, 
+    meleeThreats = 0, 
+    details = {},
+    -- New: RealTime metrics summary
+    realTimeMetrics = {
+      monstersFacingPos = 0,
+      highTurnRateMonsters = 0,
+      imminentAttacks = 0,
+      avgPredictionConfidence = 0
+    }
   }
+  
+  local predCache = {}
+  local totalConfidence = 0
+  local confCount = 0
+  
+  -- Query MonsterAI.RealTime threat cache for fast O(1) threat assessment
+  local rtThreatCache = nil
+  if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.threatCache then
+    rtThreatCache = MonsterAI.RealTime.threatCache
+  end
   
   for i = 1, #monsters do
     local monster = monsters[i]
@@ -163,33 +209,152 @@ local function analyzePositionDanger(pos, monsters)
       local mpos = monster:getPosition()
       local mdir = monster:getDirection()
       local dist = math.max(math.abs(pos.x - mpos.x), math.abs(pos.y - mpos.y))
+      local threat = { monster = monster, distance = dist, inWaveArc = false, arcDistance = 99 }
       
-      local threat = {
-        monster = monster,
-        distance = dist,
-        inWaveArc = false,
-        arcDistance = 99
-      }
+      local monsterId = monster:getId()
       
-      -- Check wave attack danger
-      local inArc, arcDist = isInFrontArc(pos, mpos, mdir, 5, 1)
-      if inArc then
-        threat.inWaveArc = true
-        threat.arcDistance = arcDist
-        result.waveThreats = result.waveThreats + 1
-        -- Closer to center of arc = more dangerous
-        result.totalDanger = result.totalDanger + (3 - arcDist)
+      -- ═══════════════════════════════════════════════════════════════════════
+      -- NEW: MonsterAI.RealTime Integration
+      -- Use direction tracking, turn rate, and facing detection for better accuracy
+      -- ═══════════════════════════════════════════════════════════════════════
+      local rtData = nil
+      if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.directions then
+        rtData = MonsterAI.RealTime.directions[monsterId]
       end
       
-      -- Check melee danger
+      if rtData then
+        -- Check if monster is facing this position
+        local isFacing = false
+        if MonsterAI and MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition then
+          isFacing = MonsterAI.Predictor.isFacingPosition(mpos, mdir, pos)
+        end
+        
+        if isFacing then
+          result.realTimeMetrics.monstersFacingPos = result.realTimeMetrics.monstersFacingPos + 1
+          
+          -- High turn rate = monster actively tracking player = higher threat
+          local turnRate = rtData.turnRate or 0
+          if turnRate > 0.5 then
+            result.realTimeMetrics.highTurnRateMonsters = result.realTimeMetrics.highTurnRateMonsters + 1
+            -- Add extra danger for high turn rate (actively tracking)
+            result.totalDanger = result.totalDanger + turnRate * 1.5
+          end
+          
+          -- Check how long monster has been facing this direction
+          local facingDuration = 0
+          if rtData.facingPlayerSince then
+            facingDuration = (now or 0) - rtData.facingPlayerSince
+          end
+          
+          -- Long facing duration + in position = imminent attack
+          if facingDuration > 300 then
+            result.totalDanger = result.totalDanger + math.min(2, facingDuration / 500)
+          end
+        end
+        
+        -- Check consecutive direction changes (erratic = about to attack)
+        if rtData.consecutiveChanges and rtData.consecutiveChanges >= 2 then
+          result.totalDanger = result.totalDanger + rtData.consecutiveChanges * 0.5
+        end
+      end
+
+      -- If prediction mode is active (only used by rePosition and our avoidance integration), prefer learned predictions
+      if usePrediction and MonsterAI and MonsterAI.Predictor then
+        local pid = monsterId
+        local pattern = MonsterAI.Patterns.get(monster:getName())
+        local isPred, confidence, timeToAttack = nil, nil, nil
+        if predCache[pid] then
+          isPred, confidence, timeToAttack = predCache[pid].isPred, predCache[pid].conf, predCache[pid].tta
+        else
+          local ok, p, c, tta = pcall(function() return MonsterAI.Predictor.predictWaveAttack(monster) end)
+          if ok then isPred, confidence, timeToAttack = p, c, tta else isPred, confidence, timeToAttack = false, 0, 999999 end
+          predCache[pid] = { isPred = isPred, conf = confidence, tta = timeToAttack }
+        end
+        
+        -- Track confidence for averaging
+        if confidence then
+          totalConfidence = totalConfidence + confidence
+          confCount = confCount + 1
+        end
+        
+        -- NEW: Use learned tracker data for better cooldown estimation
+        local trackerData = nil
+        if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+          trackerData = MonsterAI.Tracker.monsters[pid]
+        end
+        
+        -- Override timeToAttack with more accurate tracker estimate if available
+        if trackerData and trackerData.ewmaCooldown and trackerData.ewmaCooldown > 0 then
+          local lastAttack = trackerData.lastWaveTime or trackerData.lastAttackTime or 0
+          local elapsed = (now or 0) - lastAttack
+          local cooldown = trackerData.ewmaCooldown
+          timeToAttack = math.max(0, cooldown - elapsed)
+          
+          -- Boost confidence if we have learned data
+          confidence = math.max(confidence or 0, trackerData.confidence or 0.5)
+        end
+
+        local inPredPath = false
+        -- Use confidence threshold as the primary gating; allow TTA to be larger but scale urgency with a configurable window
+        if confidence and confidence >= AVOID_PREDICT_CONF then
+          inPredPath = pcall(function()
+            return MonsterAI.Predictor.isPositionInWavePath(pos, mpos, mdir, pattern.waveRange, pattern.waveWidth)
+          end)
+        end
+        if inPredPath then
+          local maxWindow = AVOID_PREDICT_TTA_WINDOW or 3000
+          local urgency = 1 - math.max(0, math.min(timeToAttack, maxWindow)) / maxWindow
+          local pdanger = (pattern.dangerLevel or 1) * urgency * (confidence or 1)
+          -- Add a baseline predicted danger scaled by confidence to make avoidance decisive
+          pdanger = pdanger + AVOID_PREDICT_DANGER * (confidence or 1)
+          
+          -- NEW: Boost danger if RealTime shows imminent attack
+          if timeToAttack < 800 then
+            result.realTimeMetrics.imminentAttacks = result.realTimeMetrics.imminentAttacks + 1
+            pdanger = pdanger * 1.3  -- 30% boost for imminent attacks
+          end
+          
+          threat.inWaveArc = true
+          threat.arcDistance = 0
+          threat.predicted = true
+          threat.predConf = confidence
+          threat.predTTA = timeToAttack
+          result.waveThreats = result.waveThreats + 1
+          result.totalDanger = result.totalDanger + pdanger
+        
+        end
+      else
+        -- Fallback to simple front arc detection when prediction is not enabled
+        local inArc, arcDist = isInFrontArc(pos, mpos, mdir, 5, 1)
+        if inArc then
+          threat.inWaveArc = true
+          threat.arcDistance = arcDist
+          result.waveThreats = result.waveThreats + 1
+          result.totalDanger = result.totalDanger + (3 - arcDist)
+        end
+      end
+
       if dist == 1 then
         result.meleeThreats = result.meleeThreats + 1
         result.totalDanger = result.totalDanger + 2
       elseif dist == 2 then
         result.totalDanger = result.totalDanger + 0.5
       end
-      
       result.details[#result.details + 1] = threat
+    end
+  end
+  
+  -- Calculate average prediction confidence
+  if confCount > 0 then
+    result.realTimeMetrics.avgPredictionConfidence = totalConfidence / confCount
+  end
+  
+  -- NEW: Query MonsterAI.isPositionDangerous for additional validation
+  if usePrediction and MonsterAI and MonsterAI.isPositionDangerous then
+    local isDangerous, dangerLevel = MonsterAI.isPositionDangerous(pos)
+    if isDangerous then
+      -- Blend MonsterAI danger assessment (it considers all direction tracking)
+      result.totalDanger = result.totalDanger + dangerLevel * 2
     end
   end
   
@@ -202,11 +367,11 @@ end
 -- @return boolean, number (isDangerous, dangerCount)
 local function isDangerousPosition(pos, monsters)
   local analysis = analyzePositionDanger(pos, monsters)
-  return analysis.totalDanger > 0, analysis.waveThreats + analysis.meleeThreats
+  return analysis.totalDanger > 0, (analysis.waveThreats or 0) + (analysis.meleeThreats or 0)
 end
 
 -- Pure function: Find the safest adjacent tile with improved scoring
--- Uses multi-factor scoring: danger, target distance, escape routes, stability
+-- Enhanced with MonsterAI.RealTime metrics for smarter avoidance
 -- @param playerPos: current player position
 -- @param monsters: array of monsters
 -- @param currentTarget: current attack target (to maintain range)
@@ -214,7 +379,7 @@ end
 -- @return position or nil, score
 local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
   local candidates = {}
-  local currentAnalysis = analyzePositionDanger(playerPos, monsters)
+  local currentAnalysis = analyzePositionDanger(playerPos, monsters, true)
   
   -- Default scaling if not provided (conservative behavior)
   scaling = scaling or calculateScaling(#monsters)
@@ -222,23 +387,67 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
   -- Dynamic danger threshold based on monster count
   local dynamicDangerThreshold = avoidanceState.baseDangerThreshold * scaling.dangerThresholdMultiplier
   
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NEW: Check MonsterAI.RealTime for immediate threats
+  -- Lower threshold if under immediate threat for faster reaction
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local immediateThreat = false
+  if MonsterAI and MonsterAI.getImmediateThreat then
+    local threatData = MonsterAI.getImmediateThreat()
+    immediateThreat = threatData.immediateThreat or false
+    if immediateThreat then
+      dynamicDangerThreshold = dynamicDangerThreshold * 0.5  -- Lower threshold
+    end
+  end
+  
+  -- Prefer Core's safest tile search if available
+  if Core and Core.findSafestTile then
+    local coreRes = Core.findSafestTile(playerPos, monsters, currentTarget)
+    if coreRes and coreRes.pos then
+      return coreRes.pos, coreRes.score or 0
+    end
+  end
+  
   -- When many monsters (7+), any danger is concerning
-  -- When few monsters (1-2), need more danger to trigger movement
-  if currentAnalysis.totalDanger < dynamicDangerThreshold then
+  -- Skip threshold check if under immediate threat
+  if not immediateThreat and currentAnalysis.totalDanger < dynamicDangerThreshold then
     return nil, 0
   end
   
-  -- Score weights for decision making (SRP: separated concerns)
-  -- Same weights, but threshold for movement is dynamic
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NEW: Get threat directions for perpendicular escape scoring
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local threatDirections = {}
+  if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.directions then
+    for id, rtData in pairs(MonsterAI.RealTime.directions) do
+      if rtData.facingPlayerSince then
+        local dir = rtData.dir
+        if DIR_VECTORS[dir] then
+          threatDirections[#threatDirections + 1] = {
+            vec = DIR_VECTORS[dir],
+            turnRate = rtData.turnRate or 0,
+            consecutiveChanges = rtData.consecutiveChanges or 0
+          }
+        end
+      end
+    end
+  end
+  
+  -- Score weights for decision making (enhanced with RealTime)
   local WEIGHTS = {
-    DANGER = -25,        -- Penalize danger heavily
-    TARGET_ADJACENT = 20,-- Bonus for being adjacent to target
-    TARGET_CLOSE = 10,   -- Bonus for being close to target
-    TARGET_FAR = -5,     -- Penalty per tile beyond range 3
-    ESCAPE_ROUTES = 4,   -- Bonus per escape route
-    STABILITY = 8,       -- Bonus for not being in any wave arc
-    PREVIOUS_SAFE = 15,  -- Bonus for returning to previous safe position
-    STAY_BONUS = 10      -- Bonus for current position (prefer staying)
+    DANGER = -25,              -- Penalize danger heavily
+    TARGET_ADJACENT = 20,      -- Bonus for being adjacent to target
+    TARGET_CLOSE = 10,         -- Bonus for being close to target
+    TARGET_FAR = -5,           -- Penalty per tile beyond range 3
+    ESCAPE_ROUTES = 4,         -- Bonus per escape route
+    STABILITY = 8,             -- Bonus for not being in any wave arc
+    PREVIOUS_SAFE = 15,        -- Bonus for returning to previous safe position
+    STAY_BONUS = 10,           -- Bonus for current position (prefer staying)
+    -- NEW: MonsterAI-enhanced weights
+    PERPENDICULAR = 10,        -- Bonus for perpendicular escape
+    NOT_FACING = 8,            -- Bonus if no monster facing this tile
+    LOW_TURN_RATE = 5,         -- Bonus for low turn rate zone
+    IMMINENT_SAFE = 12         -- Bonus if no imminent attacks here
   }
   
   -- Check all adjacent tiles (8 directions)
@@ -250,9 +459,14 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
       z = playerPos.z
     }
     
-    local tile = g_map.getTile(checkPos)
-    if tile and tile:isWalkable() and not tile:hasCreature() then
-      local analysis = analyzePositionDanger(checkPos, monsters)
+    local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+      and TargetCore.PathSafety.isTileSafe(checkPos)
+      or (function()
+        local tile = g_map.getTile(checkPos)
+        return tile and tile:isWalkable() and not tile:hasCreature()
+      end)()
+    if tileSafe then
+      local analysis = analyzePositionDanger(checkPos, monsters, true)
       local score = 0
       
       -- Factor 1: Danger level (most important)
@@ -261,6 +475,50 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
       -- Factor 2: Stability bonus (no wave threats at all)
       if analysis.waveThreats == 0 then
         score = score + WEIGHTS.STABILITY
+      end
+      
+      -- ═══════════════════════════════════════════════════════════════════════
+      -- NEW: RealTime metrics scoring
+      -- ═══════════════════════════════════════════════════════════════════════
+      if analysis.realTimeMetrics then
+        local rtm = analysis.realTimeMetrics
+        
+        -- Bonus if no monsters facing this position
+        if rtm.monstersFacingPos == 0 then
+          score = score + WEIGHTS.NOT_FACING
+        end
+        
+        -- Bonus if no imminent attacks at this position
+        if rtm.imminentAttacks == 0 then
+          score = score + WEIGHTS.IMMINENT_SAFE
+        end
+        
+        -- Bonus for low turn rate zone
+        if rtm.highTurnRateMonsters == 0 then
+          score = score + WEIGHTS.LOW_TURN_RATE
+        end
+      end
+      
+      -- Perpendicular escape bonus
+      if #threatDirections > 0 then
+        local moveVec = { x = dir.x, y = dir.y }
+        local perpBonus = 0
+        for _, threat in ipairs(threatDirections) do
+          local threatVec = threat.vec
+          local dot = moveVec.x * threatVec.x + moveVec.y * threatVec.y
+          local moveMag = math.sqrt(moveVec.x^2 + moveVec.y^2)
+          local threatMag = math.sqrt(threatVec.x^2 + threatVec.y^2)
+          if moveMag > 0 and threatMag > 0 then
+            local normalizedDot = math.abs(dot) / (moveMag * threatMag)
+            perpBonus = perpBonus + (1 - normalizedDot) * WEIGHTS.PERPENDICULAR
+            
+            -- Extra bonus if moving away from high turn rate monster
+            if threat.turnRate > 0.5 then
+              perpBonus = perpBonus + (1 - normalizedDot) * 3
+            end
+          end
+        end
+        score = score + perpBonus / math.max(1, #threatDirections)
       end
       
       -- Factor 3: Distance to current target
@@ -278,16 +536,21 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
       
       -- Factor 4: Escape routes (walkable adjacent tiles)
       local escapeRoutes = 0
-      for j = 1, 8 do
-        local escapeDir = DIRECTIONS[j]
-        local escapePos = {
-          x = checkPos.x + escapeDir.x,
-          y = checkPos.y + escapeDir.y,
-          z = checkPos.z
-        }
-        local escapeTile = g_map.getTile(escapePos)
-        if escapeTile and escapeTile:isWalkable() then
-          escapeRoutes = escapeRoutes + 1
+      if Core and Core.countEscapeRoutes then
+        escapeRoutes = Core.countEscapeRoutes(checkPos)
+      else
+        for j = 1, 8 do
+          local escapeDir = DIRECTIONS[j]
+          local escapePos = { x = checkPos.x + escapeDir.x, y = checkPos.y + escapeDir.y, z = checkPos.z }
+          local escapeSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+            and TargetCore.PathSafety.isTileSafe(escapePos)
+            or (function()
+              local et = g_map.getTile(escapePos)
+              return et and et:isWalkable()
+            end)()
+          if escapeSafe then
+            escapeRoutes = escapeRoutes + 1
+          end
         end
       end
       score = score + escapeRoutes * WEIGHTS.ESCAPE_ROUTES
@@ -347,12 +610,12 @@ local function avoidWaveAttacks()
   
   -- Get monsters in range FIRST (needed for scaling)
   local playerPos = player:getPosition()
-  local creatures = g_map.getSpectatorsInRange(playerPos, false, 7, 7)
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(7) or (SpectatorCache and SpectatorCache.getNearby(7, 7) or g_map.getSpectatorsInRange(playerPos, false, 7, 7))
   local monsters = {}
   
   for i = 1, #creatures do
     local c = creatures[i]
-    if c:isMonster() and not c:isDead() then
+    if c and c:isMonster() and not c:isDead() then
       monsters[#monsters + 1] = c
     end
   end
@@ -410,7 +673,7 @@ local function avoidWaveAttacks()
     if atSafePos and currentTime - avoidanceState.lastMove < dynamicStickiness then
       -- We're at a safe position and within stickiness window
       -- Check if danger has increased (new threats)
-      local analysis = analyzePositionDanger(playerPos, monsters)
+      local analysis = analyzePositionDanger(playerPos, monsters, true)
       -- Dynamic threshold to leave safe position
       local leaveThreshold = avoidanceState.baseDangerThreshold * scaling.dangerThresholdMultiplier + 0.5
       if analysis.totalDanger < leaveThreshold then
@@ -421,14 +684,16 @@ local function avoidWaveAttacks()
   end
   
   -- Find safe tile with dynamic thresholds
-  local currentTarget = target()
+  local currentTarget = target and target()
   local safePos, score = findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
   
   if safePos then
     avoidanceState.lastMove = currentTime
     avoidanceState.lastSafePos = safePos
     avoidanceState.consecutiveMoves = avoidanceState.consecutiveMoves + 1
-    TargetBot.walkTo(safePos, 2, {ignoreNonPathable = true, precision = 0})
+    if movementAllowed() then
+      TargetBot.walkTo(safePos, 2, {ignoreNonPathable = true, precision = 0})
+    end
     return true
   end
   
@@ -454,6 +719,167 @@ if EventBus then
       end
     end
   end, 20)
+  
+  -- ============================================================================
+  -- EVENT-DRIVEN AVOIDANCE TRIGGERS
+  -- React immediately to monster direction changes and movements
+  -- ============================================================================
+  
+  -- Track monster facing direction for instant wave prediction
+  local monsterDirections = {}  -- id -> lastDirection
+  
+  EventBus.on("creature:move", function(creature, oldPos)
+    if not creature or not creature:isMonster() then return end
+    if creature:isDead() then return end
+    
+    local id = creature:getId()
+    local newDir = creature:getDirection()
+    local oldDir = monsterDirections[id]
+    
+    -- Store new direction
+    monsterDirections[id] = newDir
+    
+    -- If direction changed, monster might be turning to attack
+    if oldDir and oldDir ~= newDir then
+      local playerPos = player and player:getPosition()
+      local monsterPos = creature:getPosition()
+      if not playerPos or not monsterPos then return end
+      
+      local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
+      
+      -- Only react if monster is close
+      if dist <= 5 then
+        -- Check if player is now in the monster's attack arc
+        local inArc, arcDist = isInFrontArc(playerPos, monsterPos, newDir, 5, 1)
+        
+        if inArc then
+          -- Immediate danger! Register high-confidence wave avoidance
+          local monsters = {}
+          local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) 
+            and MovementCoordinator.MonsterCache.getNearby(7) 
+            or {}
+          for _, c in ipairs(creatures) do
+            if c and c:isMonster() and not c:isDead() then
+              monsters[#monsters + 1] = c
+            end
+          end
+          
+          if #monsters > 0 then
+            local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+            local safePos, score = findSafeAdjacentTile(playerPos, monsters, currentTarget)
+            
+            if safePos and MovementCoordinator and MovementCoordinator.Intent then
+              local confidence = 0.75 + (5 - dist) * 0.03  -- Higher confidence for closer monsters
+              MovementCoordinator.Intent.register(
+                MovementCoordinator.CONSTANTS.INTENT.WAVE_AVOIDANCE, 
+                safePos, 
+                confidence, 
+                "wave_direction_change",
+                {triggered = "direction_change", monster = creature:getName()}
+              )
+            end
+          end
+        end
+      end
+    end
+  end, 8)  -- High priority for quick response
+  
+  -- Pure function: Count walkable tiles around a position
+  -- Uses TargetBotCore.Geometry if available
+  -- @param position: center position
+  -- @return number
+  local function countWalkableTiles(position)
+    local count = 0
+    
+    for i = 1, 8 do
+      local dir = DIRECTIONS[i]
+      local checkPos = {
+        x = position.x + dir.x,
+        y = position.y + dir.y,
+        z = position.z
+      }
+      local safe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+        and TargetCore.PathSafety.isTileSafe(checkPos)
+        or (function()
+          local tile = g_map.getTile(checkPos)
+          return tile and tile:isWalkable()
+        end)()
+      if safe then
+        count = count + 1
+      end
+    end
+    
+    return count
+  end
+  
+  -- When monster appears close, immediately check if repositioning is needed
+  EventBus.on("monster:appear", function(creature)
+    if not creature or not creature:isMonster() then return end
+    
+    local playerPos = player and player:getPosition()
+    local monsterPos = creature:getPosition()
+    if not playerPos or not monsterPos then return end
+    
+    local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
+    
+    -- Monster appeared very close - immediate reposition check
+    if dist <= 2 then
+      -- Count walkable tiles
+      local walkable = countWalkableTiles(playerPos)
+      
+      if walkable < 5 then  -- Getting cornered
+        -- Find better position immediately
+        local monsters = {}
+        local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) 
+          and MovementCoordinator.MonsterCache.getNearby(5) 
+          or {}
+        for _, c in ipairs(creatures) do
+          if c and c:isMonster() and not c:isDead() then
+            monsters[#monsters + 1] = c
+          end
+        end
+        
+        -- Quick search for better tile
+        local bestPos, bestScore = nil, walkable * 12
+        for dx = -1, 1 do
+          for dy = -1, 1 do
+            if dx ~= 0 or dy ~= 0 then
+              local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
+              local tile = g_map.getTile(checkPos)
+              if tile and tile:isWalkable() and not tile:hasCreature() then
+                local newWalkable = countWalkableTiles(checkPos)
+                local score = newWalkable * 12
+                if score > bestScore + 15 then
+                  bestScore = score
+                  bestPos = checkPos
+                end
+              end
+            end
+          end
+        end
+        
+        if bestPos and MovementCoordinator and MovementCoordinator.Intent then
+          MovementCoordinator.Intent.register(
+            MovementCoordinator.CONSTANTS.INTENT.REPOSITION, 
+            bestPos, 
+            0.65, 
+            "reposition_monster_appear",
+            {triggered = "monster_appear", walkable = walkable}
+          )
+        end
+      end
+    end
+  end, 12)
+  
+  -- Clear direction tracking when monster disappears
+  EventBus.on("monster:disappear", function(creature)
+    if creature then
+      local id = creature:getId()
+      if id then
+        monsterDirections[id] = nil
+      end
+    end
+  end, 25)
 end
 
 -- Export functions for external use
@@ -463,32 +889,44 @@ nExBot.isDangerousPosition = isDangerousPosition
 nExBot.analyzePositionDanger = analyzePositionDanger
 nExBot.findSafeAdjacentTile = findSafeAdjacentTile
 
+-- Event-driven hookup: debounce avoidWaveAttacks on creature changes nearby
+if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
+  local debounceAvoid = nExBot.EventUtil.debounce(200, function()
+    -- Run avoidance in schedule to avoid blocking EventBus handlers (debounced)
+    schedule(60, function()
+      pcall(avoidWaveAttacks)
+    end)
+  end)
+
+  EventBus.on("creature:appear", function(creature)
+    if creature and creature:isMonster() then
+      local p = player and player:getPosition()
+      local cpos = creature and creature:getPosition()
+      if p and cpos and math.max(math.abs(p.x-cpos.x), math.abs(p.y-cpos.y)) <= 7 then
+        debounceAvoid()
+      end
+    end
+  end, 10)
+
+  EventBus.on("creature:move", function(creature, oldPos)
+    if creature and creature:isMonster() then
+      local p = player and player:getPosition()
+      local cpos = creature and creature:getPosition()
+      if p and cpos and math.max(math.abs(p.x-cpos.x), math.abs(p.y-cpos.y)) <= 7 then
+        debounceAvoid()
+      end
+    end
+  end, 10)
+
+  EventBus.on("monster:disappear", function(creature)
+    -- disappear may reduce danger; trigger a check
+    debounceAvoid()
+  end, 10)
+end
+
 --------------------------------------------------------------------------------
 -- UTILITY FUNCTIONS (Optimized with TargetBotCore integration)
 --------------------------------------------------------------------------------
-
--- Pure function: Count walkable tiles around a position
--- Uses TargetBotCore.Geometry if available
--- @param position: center position
--- @return number
-local function countWalkableTiles(position)
-  local count = 0
-  
-  for i = 1, 8 do
-    local dir = DIRECTIONS[i]
-    local checkPos = {
-      x = position.x + dir.x,
-      y = position.y + dir.y,
-      z = position.z
-    }
-    local tile = g_map.getTile(checkPos)
-    if tile and tile:isWalkable() then
-      count = count + 1
-    end
-  end
-  
-  return count
-end
 
 -- Pure function: Check if player is trapped (no walkable adjacent tiles)
 -- @param playerPos: player position
@@ -498,7 +936,7 @@ local function isPlayerTrapped(playerPos)
 end
 
 -- Reposition to tile with more escape routes and better tactical position
--- Conservative movement algorithm
+-- Enhanced with MonsterAI.RealTime metrics for smarter tile selection
 -- @param minTiles: minimum walkable tiles threshold
 -- @param config: creature config for context (includes anchor settings)
 local function rePosition(minTiles, config)
@@ -510,20 +948,36 @@ local function rePosition(minTiles, config)
   local playerPos = player:getPosition()
   local currentWalkable = countWalkableTiles(playerPos)
   
-  -- Don't reposition if we have enough space
-  if currentWalkable >= minTiles then return end
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NEW: Check MonsterAI.RealTime for immediate threats
+  -- If imminent threat detected, reduce minimum tile requirement for faster escape
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local immediateThreat = false
+  local threatBoost = 0
+  if MonsterAI and MonsterAI.getImmediateThreat then
+    local threatData = MonsterAI.getImmediateThreat()
+    immediateThreat = threatData.immediateThreat or false
+    if immediateThreat then
+      -- Under immediate threat - be more aggressive about repositioning
+      minTiles = math.max(3, minTiles - 2)  -- Lower threshold
+      threatBoost = threatData.totalThreat * 5  -- Boost urgency
+    end
+  end
+  
+  -- Don't reposition if we have enough space (unless under immediate threat)
+  if currentWalkable >= minTiles and not immediateThreat then return end
   
   -- Get nearby monsters for scoring
-  local creatures = g_map.getSpectatorsInRange(playerPos, false, 5, 5)
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(5) or (SpectatorCache and SpectatorCache.getNearby(5, 5) or g_map.getSpectatorsInRange(playerPos, false, 5, 5))
   local monsters = {}
   for i = 1, #creatures do
     local c = creatures[i]
-    if c:isMonster() and not c:isDead() then
+    if c and c:isMonster() and not c:isDead() then
       monsters[#monsters + 1] = c
     end
   end
   
-  local currentTarget = target()
+  local currentTarget = target and target()
   local bestPos = nil
   local bestScore = -9999
   
@@ -531,16 +985,37 @@ local function rePosition(minTiles, config)
   local anchorPos = config and config.anchor and anchorPosition
   local anchorRange = config and config.anchorRange or 5
   
-  -- Score weights (conservative tuning)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NEW: Get high-threat monster directions for perpendicular escape preference
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local threatDirections = {}  -- List of vectors monsters are facing
+  if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.directions then
+    for id, rtData in pairs(MonsterAI.RealTime.directions) do
+      if rtData.facingPlayerSince then
+        -- This monster is facing player - record its direction
+        local dir = rtData.dir
+        if DIR_VECTORS[dir] then
+          threatDirections[#threatDirections + 1] = DIR_VECTORS[dir]
+        end
+      end
+    end
+  end
+  
+  -- Score weights (enhanced with RealTime metrics)
   local WEIGHTS = {
-    WALKABLE = 15,      -- Per walkable tile (was 12)
-    DANGER = -22,       -- Per danger point (was -18)
-    TARGET_ADJ = 20,    -- Adjacent to target (was 25)
-    TARGET_CLOSE = 10,  -- Within 3 tiles (was 12)
-    TARGET_FAR = -4,    -- Per tile beyond 3 (was -3)
-    MOVE_COST = -4,     -- Per movement tile (was -2)
-    CARDINAL = 3,       -- Bonus for cardinal movement (was 4)
-    STAY_BONUS = 15     -- Bonus for not moving
+    WALKABLE = 15,           -- Per walkable tile
+    DANGER = -22,            -- Per danger point
+    TARGET_ADJ = 20,         -- Adjacent to target
+    TARGET_CLOSE = 10,       -- Within 3 tiles
+    TARGET_FAR = -4,         -- Per tile beyond 3
+    MOVE_COST = -4,          -- Per movement tile
+    CARDINAL = 3,            -- Bonus for cardinal movement
+    STAY_BONUS = 15,         -- Bonus for not moving
+    -- NEW: MonsterAI-enhanced weights
+    PERPENDICULAR_ESCAPE = 12,  -- Bonus for moving perpendicular to threats
+    AWAY_FROM_FACING = 8,       -- Bonus for moving away from facing monsters
+    LOW_TURN_RATE_ZONE = 6,     -- Bonus for positions where monsters have low turn rate
+    PREDICTION_SAFE = 10        -- Bonus if MonsterAI.isPositionDangerous returns false
   }
   
   -- Search in a 2-tile radius for better positions
@@ -567,8 +1042,13 @@ local function rePosition(minTiles, config)
         end
         
         if not shouldSkip then
-          local tile = g_map.getTile(checkPos)
-          if tile and tile:isWalkable() and not tile:hasCreature() then
+          local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+            and TargetCore.PathSafety.isTileSafe(checkPos)
+            or (function()
+              local t = g_map.getTile(checkPos)
+              return t and t:isWalkable() and not t:hasCreature()
+            end)()
+          if tileSafe then
             -- Score this position using improved danger analysis
             local score = 0
             
@@ -576,9 +1056,47 @@ local function rePosition(minTiles, config)
             local walkable = countWalkableTiles(checkPos)
             score = score + walkable * WEIGHTS.WALKABLE
             
-            -- Factor 2: Danger analysis (uses improved analyzePositionDanger)
-            local analysis = analyzePositionDanger(checkPos, monsters)
+            -- Factor 2: Danger analysis (uses improved analyzePositionDanger with RealTime metrics)
+            local analysis = analyzePositionDanger(checkPos, monsters, true)
             score = score + analysis.totalDanger * WEIGHTS.DANGER
+            
+            -- ═══════════════════════════════════════════════════════════════
+            -- NEW: MonsterAI.RealTime Enhanced Scoring
+            -- ═══════════════════════════════════════════════════════════════
+            
+            -- Factor 2b: Bonus if no monsters facing this position
+            if analysis.realTimeMetrics and analysis.realTimeMetrics.monstersFacingPos == 0 then
+              score = score + WEIGHTS.AWAY_FROM_FACING
+            end
+            
+            -- Factor 2c: Bonus if no imminent attacks at this position
+            if analysis.realTimeMetrics and analysis.realTimeMetrics.imminentAttacks == 0 then
+              score = score + WEIGHTS.PREDICTION_SAFE
+            end
+            
+            -- Factor 2d: Bonus for low turn rate zone (monsters not actively tracking)
+            if analysis.realTimeMetrics and analysis.realTimeMetrics.highTurnRateMonsters == 0 then
+              score = score + WEIGHTS.LOW_TURN_RATE_ZONE
+            end
+            
+            -- Factor 2e: Perpendicular escape bonus
+            -- Moving perpendicular to threat direction is safer than moving along attack axis
+            if #threatDirections > 0 then
+              local moveVec = { x = dx, y = dy }
+              local perpBonus = 0
+              for _, threatVec in ipairs(threatDirections) do
+                -- Calculate dot product (0 = perpendicular, 1/-1 = parallel)
+                local dot = moveVec.x * threatVec.x + moveVec.y * threatVec.y
+                local moveMag = math.sqrt(moveVec.x^2 + moveVec.y^2)
+                local threatMag = math.sqrt(threatVec.x^2 + threatVec.y^2)
+                if moveMag > 0 and threatMag > 0 then
+                  local normalizedDot = math.abs(dot) / (moveMag * threatMag)
+                  -- Lower dot = more perpendicular = better
+                  perpBonus = perpBonus + (1 - normalizedDot) * WEIGHTS.PERPENDICULAR_ESCAPE
+                end
+              end
+              score = score + perpBonus / math.max(1, #threatDirections)
+            end
             
             -- Factor 3: Distance to current target
             if currentTarget then
@@ -600,6 +1118,13 @@ local function rePosition(minTiles, config)
             -- Factor 5: Cardinal direction bonus
             if dx == 0 or dy == 0 then
               score = score + WEIGHTS.CARDINAL
+            end
+            
+            -- Factor 6: Threat boost from immediate danger
+            if immediateThreat then
+              -- When under threat, prioritize safety over other factors
+              local safetyBonus = (8 - analysis.totalDanger) * 3
+              score = score + safetyBonus
             end
             
             if score > bestScore then
@@ -627,11 +1152,30 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
 
   local config = params.config
   local creature = params.creature
+
+  -- Set OTClient native chase mode based on config
+  -- When chase mode is 1 (ChaseOpponent), the client automatically follows the attack target
+  if config.chase and not config.keepDistance then
+    -- Enable native chase mode - client will automatically chase attack target
+    if g_game.setChaseMode then
+      g_game.setChaseMode(1) -- ChaseOpponent
+    end
+  elseif config.keepDistance or not config.chase then
+    -- Disable chase mode for keep distance or no chase config
+    if g_game.setChaseMode then
+      g_game.setChaseMode(0) -- Stand
+    end
+  end
   
   -- Cache attacking creature check
   local currentTarget = g_game.getAttackingCreature()
   if currentTarget ~= creature then
-    g_game.attack(creature)
+    local ok, err = pcall(function() g_game.attack(creature) end)
+    if not ok then warn("[TargetBot] g_game.attack pcall failed: " .. tostring(err)) end
+    schedule(200, function()
+      local atk = g_game.getAttackingCreature and g_game.getAttackingCreature() or nil
+      -- No debug info emitted about registration status
+    end)
   end
 
   if not isLooting then
@@ -642,68 +1186,7 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local mana = player:getMana()
   local playerPos = player:getPosition()
   
-  -- Group attack spell check
-  if config.useGroupAttack and config.groupAttackSpell:len() > 1 and mana > config.minManaGroup then
-    local creatures = g_map.getSpectatorsInRange(playerPos, false, config.groupAttackRadius, config.groupAttackRadius)
-    local playersAround = false
-    local monsters = 0
-    
-    for i = 1, #creatures do
-      local c = creatures[i]
-      if c:isPlayer() and not c:isLocalPlayer() then
-        if not config.groupAttackIgnoreParty or c:getShield() <= 2 then
-          playersAround = true
-        end
-      elseif c:isMonster() then
-        monsters = monsters + 1
-      end
-    end
-    
-    if monsters >= config.groupAttackTargets and (not playersAround or config.groupAttackIgnorePlayers) then
-      if TargetBot.sayAttackSpell(config.groupAttackSpell, config.groupAttackDelay) then
-        return
-      end
-    end
-  end
 
-  -- Group attack rune check
-  if config.useGroupAttackRune and config.groupAttackRune > 100 then
-    local creaturePos = creature:getPosition()
-    local creatures = g_map.getSpectatorsInRange(creaturePos, false, config.groupRuneAttackRadius, config.groupRuneAttackRadius)
-    local playersAround = false
-    local monsters = 0
-    
-    for i = 1, #creatures do
-      local c = creatures[i]
-      if c:isPlayer() and not c:isLocalPlayer() then
-        if not config.groupAttackIgnoreParty or c:getShield() <= 2 then
-          playersAround = true
-        end
-      elseif c:isMonster() then
-        monsters = monsters + 1
-      end
-    end
-    
-    if monsters >= config.groupRuneAttackTargets and (not playersAround or config.groupAttackIgnorePlayers) then
-      if TargetBot.useAttackItem(config.groupAttackRune, 0, creature, config.groupRuneAttackDelay) then
-        return
-      end
-    end
-  end
-  
-  -- Single target spell attack
-  if config.useSpellAttack and config.attackSpell:len() > 1 and mana > config.minMana then
-    if TargetBot.sayAttackSpell(config.attackSpell, config.attackSpellDelay) then
-      return
-    end
-  end
-  
-  -- Single target rune attack
-  if config.useRuneAttack and config.attackRune > 100 then
-    if TargetBot.useAttackItem(config.attackRune, 0, creature, config.attackRuneDelay) then
-      return
-    end
-  end
 end
 
 TargetBot.Creature.walk = function(creature, config, targets)
@@ -790,7 +1273,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
     if config.smartPull then
       -- SAFEGUARD: Only try to pull if there are ANY monsters on screen
       -- No point in pausing waypoints if there's nothing to fight
-      local screenMonsters = getMonsters(7)  -- Check entire visible range first
+      local screenMonsters = SafeCall.getMonsters(7)  -- Check entire visible range first
       if screenMonsters == 0 then
         -- No monsters on screen - don't activate pull system, let CaveBot work
         TargetBot.smartPullActive = false
@@ -801,7 +1284,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
         
         local nearbyMonsters
         if getMonstersAdvanced then
-          nearbyMonsters = getMonstersAdvanced(pullRange, pullShape)
+          nearbyMonsters = SafeCall.global("getMonstersAdvanced", pullRange, pullShape)
         else
           nearbyMonsters = getMonsters(pullRange)
         end
@@ -834,7 +1317,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
     
     -- Legacy closeLure support
     if config.closeLure and config.closeLureAmount then
-      if getMonsters(1) >= config.closeLureAmount then
+      if SafeCall.getMonsters(1) >= config.closeLureAmount then
         return TargetBot.allowCaveBot(150)
       end
     end
@@ -854,11 +1337,13 @@ TargetBot.Creature.walk = function(creature, config, targets)
   local useCoordinator = MovementCoordinator and MovementCoordinator.Intent
   
   -- Get nearby monsters for danger analysis
-  local creatures = g_map.getSpectatorsInRange(pos, false, 7, 7)
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
+    and MovementCoordinator.MonsterCache.getNearby(7)
+    or (SpectatorCache and SpectatorCache.getNearby(7, 7) or g_map.getSpectatorsInRange(pos, false, 7, 7))
   local monsters = {}
   for i = 1, #creatures do
     local c = creatures[i]
-    if c:isMonster() and not c:isDead() then
+    if c and c:isMonster() and not c:isDead() then
       monsters[#monsters + 1] = c
     end
   end
@@ -951,7 +1436,9 @@ TargetBot.Creature.walk = function(creature, config, targets)
     else
       -- Fallback: direct execution only for critical targets
       if confidence >= 0.70 then
-        return TargetBot.walkTo(cpos, 10, {ignoreNonPathable = true, precision = 1})
+        if movementAllowed() then
+          return TargetBot.walkTo(cpos, 10, {ignoreNonPathable = true, precision = 1})
+        end
       end
     end
   end
@@ -1028,7 +1515,9 @@ TargetBot.Creature.walk = function(creature, config, targets)
             if config.anchor and anchorPosition then
               walkParams.maxDistanceFrom = {anchorPosition, config.anchorRange or 5}
             end
-            return TargetBot.walkTo(cpos, 10, walkParams)
+            if movementAllowed() then
+              return TargetBot.walkTo(cpos, 10, walkParams)
+            end
           end
         end
       end
@@ -1052,9 +1541,14 @@ TargetBot.Creature.walk = function(creature, config, targets)
         for dy = -2, 2 do
           if dx ~= 0 or dy ~= 0 then
             local checkPos = {x = pos.x + dx, y = pos.y + dy, z = pos.z}
-            local tile = g_map.getTile(checkPos)
+            local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+              and TargetCore.PathSafety.isTileSafe(checkPos)
+              or (function()
+                local t = g_map.getTile(checkPos)
+                return t and t:isWalkable() and not t:hasCreature()
+              end)()
             
-            if tile and tile:isWalkable() and not tile:hasCreature() then
+            if tileSafe then
               -- Check anchor
               local anchorValid = true
               if config.anchor and anchorPosition then
@@ -1099,55 +1593,27 @@ TargetBot.Creature.walk = function(creature, config, targets)
   
   -- ─────────────────────────────────────────────────────────────────────────
   -- INTENT 6: CHASE (Close gap to target)
-  -- Supports both custom pathfinding and native OTClient follow
+  -- Uses OTClient native chase mode - when chase mode is 1 (ChaseOpponent),
+  -- the client automatically moves towards the attack target
   -- ─────────────────────────────────────────────────────────────────────────
   if config.chase and not config.keepDistance and pathLen > 1 then
-    -- AUTO FOLLOW: Use OTClient's native g_game.follow() for smoother chasing
-    -- This is more performant as it delegates movement to the client
-    if config.autoFollow and creature then
-      -- Check anchor constraint before allowing follow
-      local anchorValid = true
-      if config.anchor and anchorPosition then
-        local anchorDist = math.max(
-          math.abs(cpos.x - anchorPosition.x),
-          math.abs(cpos.y - anchorPosition.y)
-        )
-        anchorValid = anchorDist <= (config.anchorRange or 5)
-      end
-      
-      if anchorValid then
-        -- Use TargetCore.Native for cleaner API management
-        if TargetCore and TargetCore.Native and TargetCore.Native.followCreature then
-          if TargetCore.Native.followCreature(creature) then
-            return true  -- Native follow handles movement
-          end
-        else
-          -- Fallback: direct implementation
-          local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature() or nil
-          if not currentFollow or currentFollow:getId() ~= creature:getId() then
-            if g_game.follow then
-              g_game.follow(creature)
-            else
-              follow(creature)
-            end
-          end
-          if g_game.setChaseMode and g_game.getChaseMode then
-            local currentChaseMode = g_game.getChaseMode()
-            if currentChaseMode ~= 1 then
-              g_game.setChaseMode(1)
-            end
-          end
-          return true
-        end
-      else
-        -- Anchor violated - cancel follow and let custom pathfinding handle it
-        if TargetCore and TargetCore.Native and TargetCore.Native.cancelFollow then
-          TargetCore.Native.cancelFollow()
-        elseif g_game.cancelFollow then
-          g_game.cancelFollow()
-        end
-      end
+    -- Native chase mode is already set in attack() function above
+    -- The client will automatically chase the attack target
+    -- We only need fallback pathfinding if native chase is disabled/unavailable
+    
+    -- If we have avoidAttacks, keepDistance, or rePosition enabled,
+    -- those systems will handle movement - don't interfere with manual pathfinding
+    if config.avoidAttacks or config.keepDistance or config.rePosition then
+      -- Let other movement systems handle it - skip native chase
+      -- Fall through to manual pathfinding below
+    else
+      -- Native chase is handling movement via g_game.setChaseMode(1)
+      -- Just return true to indicate movement is being handled
+      return true
     end
+
+    -- Manual pathfinding fallback for precision modes
+    
     
     -- CUSTOM PATHFINDING: Traditional walkTo-based chase
     local confidence = 0.5
@@ -1175,11 +1641,23 @@ TargetBot.Creature.walk = function(creature, config, targets)
         if config.anchor and anchorPosition then
           walkParams.maxDistanceFrom = {anchorPosition, config.anchorRange or 5}
         end
-        return TargetBot.walkTo(cpos, 10, walkParams)
+        if movementAllowed() then
+          return TargetBot.walkTo(cpos, 10, walkParams)
+        end
       end
     end
   end
   
+  -- If using native follow and we've closed the gap, cancel follow to allow precise attacks
+  local following = (TargetCore and TargetCore.Native and TargetCore.Native.getFollowingCreature and TargetCore.Native.getFollowingCreature()) or (g_game.getFollowingCreature and g_game.getFollowingCreature())
+  if following and creature and following:getId() == creature:getId() and pathLen <= 1 then
+    if TargetCore and TargetCore.Native and TargetCore.Native.cancelFollow then
+      TargetCore.Native.cancelFollow()
+    elseif g_game and g_game.cancelFollow then
+      pcall(function() g_game.cancelFollow() end)
+    end
+  end
+
   -- ─────────────────────────────────────────────────────────────────────────
   -- INTENT 7: FACE MONSTER (Diagonal correction)
   -- ─────────────────────────────────────────────────────────────────────────
@@ -1196,8 +1674,13 @@ TargetBot.Creature.walk = function(creature, config, targets)
       }
       
       for i = 1, 2 do
-        local tile = g_map.getTile(candidates[i])
-        if tile and tile:isWalkable() and not tile:hasCreature() then
+        local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
+          and TargetCore.PathSafety.isTileSafe(candidates[i])
+          or (function()
+            local t = g_map.getTile(candidates[i])
+            return t and t:isWalkable() and not t:hasCreature()
+          end)()
+        if tileSafe then
           -- Check anchor
           local anchorValid = true
           if config.anchor and anchorPosition then
@@ -1212,7 +1695,9 @@ TargetBot.Creature.walk = function(creature, config, targets)
             if useCoordinator then
               MovementCoordinator.faceMonster(candidates[i], 0.45)
             else
-              return TargetBot.walkTo(candidates[i], 2, {ignoreNonPathable = true})
+              if movementAllowed() then
+                return TargetBot.walkTo(candidates[i], 2, {ignoreNonPathable = true})
+              end
             end
             break
           end
@@ -1248,6 +1733,184 @@ onPlayerPositionChange(function(newPos, oldPos)
   if not dynamicLureDelay then return end
 
   local targetThreshold = delayFrom or lureMax * 0.5
-  if targetCount < targetThreshold or not target() then return end
+  if targetCount < targetThreshold or not (target and target()) then return end
   CaveBot.delay(delayValue or 0)
 end)
+
+-- ============================================================================
+-- EVENT-DRIVEN LURE COORDINATION (DRY, SRP)
+-- 
+-- Integrates lure system with EventBus for instant responsiveness:
+-- - Emits lure state changes for CaveBot coordination
+-- - Registers LURE intents with MovementCoordinator
+-- - Provides pure function for lure eligibility check
+-- ============================================================================
+
+-- Pure function: Calculate lure eligibility (no side effects)
+-- @param config: creature config with lure settings
+-- @param targets: current target count
+-- @return table { shouldLure: boolean, confidence: number, reason: string }
+local function calculateLureEligibility(config, targets)
+  if not config then
+    return { shouldLure = false, confidence = 0, reason = "no_config" }
+  end
+  
+  if not config.dynamicLure then
+    return { shouldLure = false, confidence = 0, reason = "disabled" }
+  end
+  
+  local lureMin = config.lureMin or 3
+  local lurMax = config.lureMax or 6
+  
+  -- Not enough targets - should lure more
+  if targets < lureMin then
+    local deficit = lureMin - targets
+    local confidence = 0.5 + (deficit / lureMin) * 0.3
+    return { 
+      shouldLure = true, 
+      confidence = math.min(0.85, confidence), 
+      reason = "below_min",
+      deficit = deficit
+    }
+  end
+  
+  -- At max capacity - stop luring
+  if targets >= lurMax then
+    return { shouldLure = false, confidence = 0.9, reason = "at_max" }
+  end
+  
+  -- Between min and max - prefer fighting
+  return { shouldLure = false, confidence = 0.6, reason = "sufficient" }
+end
+
+-- Export pure function for external use
+nExBot.calculateLureEligibility = calculateLureEligibility
+
+-- Event-driven lure state management
+if EventBus then
+  -- Track lure state for change detection
+  local lastLureState = { active = false, time = 0 }
+  
+  -- React to target count changes for lure decisions
+  EventBus.on("targetbot/target_count_change", function(newCount, oldCount)
+    if not TargetBot or not TargetBot.isOn or not TargetBot.isOn() then return end
+    
+    -- Get current creature config
+    local activeConfig = TargetBot.ActiveMovementConfig
+    if not activeConfig then return end
+    
+    local eligibility = calculateLureEligibility(activeConfig, newCount)
+    
+    -- State changed - emit event
+    if eligibility.shouldLure ~= lastLureState.active then
+      lastLureState.active = eligibility.shouldLure
+      lastLureState.time = now
+      
+      if eligibility.shouldLure then
+        -- Start luring - emit event for CaveBot
+        pcall(function()
+          EventBus.emit("targetbot/lure_start", {
+            reason = eligibility.reason,
+            confidence = eligibility.confidence,
+            deficit = eligibility.deficit
+          })
+        end)
+        
+        -- Register LURE intent with MovementCoordinator
+        if MovementCoordinator and MovementCoordinator.Intent then
+          local playerPos = player and player:getPosition()
+          if playerPos then
+            -- Lure intent uses player's current position (CaveBot handles destination)
+            MovementCoordinator.Intent.register(
+              MovementCoordinator.CONSTANTS.INTENT.LURE,
+              playerPos,
+              eligibility.confidence,
+              "lure_event",
+              { triggered = "target_count", targets = newCount, deficit = eligibility.deficit }
+            )
+          end
+        end
+      else
+        -- Stop luring - emit event
+        pcall(function()
+          EventBus.emit("targetbot/lure_stop", {
+            reason = eligibility.reason,
+            targets = newCount
+          })
+        end)
+      end
+    end
+  end, 15)
+  
+  -- React to monster deaths to update lure decisions quickly
+  EventBus.on("monster:disappear", function(creature)
+    if not creature then return end
+    
+    -- Check if this affects our target count significantly
+    local monsterCount = 0
+    if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
+      local nearby = MovementCoordinator.MonsterCache.getNearby(7)
+      monsterCount = #nearby
+    end
+    
+    -- Emit target count change event
+    pcall(function()
+      EventBus.emit("targetbot/target_count_change", monsterCount, monsterCount + 1)
+    end)
+  end, 18)
+  
+  -- React to monster appearances
+  EventBus.on("monster:appear", function(creature)
+    if not creature then return end
+    
+    local playerPos = player and player:getPosition()
+    local creaturePos = creature:getPosition()
+    if not playerPos or not creaturePos then return end
+    
+    local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
+    
+    -- Only count nearby monsters
+    if dist <= 7 then
+      local monsterCount = 0
+      if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
+        local nearby = MovementCoordinator.MonsterCache.getNearby(7)
+        monsterCount = #nearby
+      end
+      
+      -- Emit target count change event
+      pcall(function()
+        EventBus.emit("targetbot/target_count_change", monsterCount, monsterCount - 1)
+      end)
+    end
+  end, 18)
+  
+  -- Emit pull system state changes for CaveBot coordination
+  local lastPullState = false
+  
+  EventBus.on("targetbot/combat_start", function(creature, data)
+    -- When combat starts, evaluate pull system state
+    schedule(100, function()
+      if TargetBot and TargetBot.smartPullActive ~= lastPullState then
+        lastPullState = TargetBot.smartPullActive
+        if TargetBot.smartPullActive then
+          pcall(function()
+            EventBus.emit("targetbot/pull_active", {
+              creature = creature,
+              time = now
+            })
+          end)
+        end
+      end
+    end)
+  end, 12)
+  
+  EventBus.on("targetbot/combat_end", function()
+    -- Combat ended - clear pull state
+    if lastPullState then
+      lastPullState = false
+      pcall(function()
+        EventBus.emit("targetbot/pull_inactive")
+      end)
+    end
+  end, 12)
+end

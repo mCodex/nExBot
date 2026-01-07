@@ -1,6 +1,9 @@
 CaveBot.Extensions.PosCheck = {}
 
+CaveBot.Extensions.PosCheck = {}
+
 local posCheckRetries = 0
+local POSCHECK_MAX_RETRIES = 6
 CaveBot.Extensions.PosCheck.setup = function()
   CaveBot.registerAction("PosCheck", "#00FFFF", function(value, retries)
     local tilePos
@@ -16,10 +19,13 @@ CaveBot.Extensions.PosCheck.setup = function()
     tilePos.y = tonumber(data[4])
     tilePos.z = tonumber(data[5])
 
-    if posCheckRetries > 10 then
-        posCheckRetries = 0
-        print("CaveBot[CheckPos]: waypoints locked, too many tries, unclogging cavebot and proceeding")
-        return false
+    if posCheckRetries > POSCHECK_MAX_RETRIES then
+      posCheckRetries = 0
+      print("CaveBot[CheckPos]: waypoints locked, too many tries — resetting walking state and proceeding")
+      -- Reset walking state to unclog cavebot (safe external API)
+      if CaveBot.resetWalking then CaveBot.resetWalking() end
+      if CaveBot.resetPathCursor then CaveBot.resetPathCursor() end
+      return false
     elseif (tilePos.z == player:getPosition().z) and (getDistanceBetween(player:getPosition(), tilePos) <= tonumber(data[2])) then
         posCheckRetries = 0
         print("CaveBot[CheckPos]: position reached, proceeding")

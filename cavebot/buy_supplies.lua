@@ -14,7 +14,7 @@ CaveBot.Extensions.BuySupplies.setup = function()
     end
 
     local npcName = val[1]:trim()
-    local npc = getCreatureByName(npcName)
+    local npc = SafeCall.getCreatureByName(npcName)
     if not npc then 
       print("CaveBot[BuySupplies]: NPC not found")
       return false 

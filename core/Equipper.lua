@@ -896,7 +896,7 @@ bossPanel.add.onClick = function()
     saveConfig()  -- Persist to CharacterDB
 end
 
--- `interpreteCondition` removed: condition evaluation now delegated to `EquipperService.evalCondition` with a local fallback `LOCAL_CONDITIONS`.
+
 
 local function finalCheck(first,relation,second)
     if relation == "-" then
@@ -947,8 +947,8 @@ end
 
 local snapshotContext = EquipperService and EquipperService.snapshotContext or function()
     return {
-        hp = hppercent(), mp = manapercent(), monsters = getMonsters(), players = getPlayers(),
-        target = target() and target():getName():lower() or nil, inPz = isInPz(), paralyzed = isParalyzed(),
+        hp = hppercent(), mp = manapercent(), monsters = (getMonsters and getMonsters()) or 0, players = (getPlayers and getPlayers()) or 0,
+        target = (target and target()) and target():getName():lower() or nil, inPz = isInPz and isInPz() or false, paralyzed = isParalyzed and isParalyzed() or false,
         danger = (TargetBot and TargetBot.Danger and TargetBot.Danger()) or 0,
         cavebotOn = CaveBot and CaveBot.isOn and CaveBot.isOn() or false,
         targetbotOn = TargetBot and TargetBot.isOn and TargetBot.isOn() or false,
@@ -959,7 +959,7 @@ end
 
 local isUnsafeToUnequip = EquipperService and EquipperService.isUnsafeToUnequip or function(ctx)
     if ctx.inPz then return false end
-    if ctx.hp <= 35 then return true end
+    -- HP-based unequip safety disabled per user request (allow unequip regardless of HP)
     if ctx.danger >= 50 then return true end
     return false
 end
@@ -1200,11 +1200,6 @@ local function throttledEquipCheck()
         return
     end
     
-    -- Skip during critical healing
-    if HealContext and HealContext.isCritical and HealContext.isCritical() then
-        return
-    end
-    
     local rules = getEnabledRules()
     if not rules or #rules == 0 then return end
     
@@ -1264,11 +1259,6 @@ end
 
 EquipManager = macro(300, function()
     if not config.enabled then return end
-
-    -- Skip gear swaps during critical healing/danger to avoid conflicts
-    if HealContext and HealContext.isCritical and HealContext.isCritical() then
-        return
-    end
 
     -- Run the throttled check (respects cooldowns internally)
     throttledEquipCheck()

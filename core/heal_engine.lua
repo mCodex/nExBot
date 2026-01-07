@@ -82,6 +82,13 @@ local function logCritical(msg)
   warn("[HealEngine][CRITICAL] " .. msg)
 end
 
+-- Optional potion debug mode (opt-in): when enabled, HealEngine will emit
+-- short diagnostics about why potions were/weren't selected or used.
+local _potionDebug = false
+function HealEngine.setPotionDebug(flag)
+  _potionDebug = not not flag
+end
+
 -- ============================================================================
 -- TIME UTILITIES
 -- ============================================================================
@@ -189,33 +196,50 @@ local function canUseItem()
 end
 
 -- ============================================================================
--- POTION USAGE (Safe wrapper)
+-- POTION USAGE (Safe wrapper - now prioritizes hotkey-style usage)
 -- ============================================================================
 
 local function useItemSafe(itemId)
   if not itemId or itemId <= 0 then return false end
-  
-  -- Try useWith pattern
-  if useWith and findItem and player then
+
+  -- Primary: prefer BotCore.Items abstraction when available
+  if BotCore and BotCore.Items and BotCore.Items.useOn then
+    local ok, res = SafeCall.call(BotCore.Items.useOn, itemId, player)
+    if ok then return true end
+  end
+
+  -- Try client hotkey-style API (works with closed containers on many OTC clients)
+  if g_game and g_game.useInventoryItemWith and player then
+    local ok, res = SafeCall.call(g_game.useInventoryItemWith, itemId, player, 0)
+    if ok then return true end
+  end
+
+  -- Fallback: direct useInventoryItem (some clients support this)
+  if g_game and g_game.useInventoryItem then
+    local ok, res = SafeCall.call(g_game.useInventoryItem, itemId)
+    if ok then return true end
+  end
+
+  -- Try to find the actual item instance in player's containers and useWith it
+  if g_game and g_game.findPlayerItem and player then
+    local ok, inst = SafeCall.call(g_game.findPlayerItem, itemId)
+    if ok and inst then
+      local ok2, res2 = SafeCall.call(g_game.useWith, inst, player)
+      if ok2 then return true end
+    end
+  end
+
+  -- Legacy fallback: global findItem + SafeCall
+  if findItem and player then
     local item = findItem(itemId)
     if item then
-      useWith(item, player)
+      SafeCall.useWith(item, player)
       return true
     end
   end
-  
-  -- Fallback: g_game.useInventoryItemWith
-  if g_game and g_game.useInventoryItemWith and player then
-    g_game.useInventoryItemWith(itemId, player, 0)
-    return true
-  end
-  
-  -- Alternative: try g_game.useInventoryItem (uses on self)
-  if g_game and g_game.useInventoryItem then
-    g_game.useInventoryItem(itemId)
-    return true
-  end
-  
+
+  -- Nothing worked
+  logDebug(string.format("useItemSafe: failed to use item id=%s", tostring(itemId)))
   return false
 end
 
@@ -312,6 +336,16 @@ function HealEngine.setCustomPotions(potionList)
   HealEngine._pendingPotions = nil
 end
 
+-- Debug helper: attempt to use a potion by id (returns true on success)
+function HealEngine.tryUsePotionById(itemId)
+  if not itemId or itemId <= 0 then return false end
+  local action = { kind = "potion", id = itemId, key = "potion_test_" .. tostring(itemId), cd = 1000, name = "potion_test", potionType = "mana" }
+  if _potionDebug then warn(string.format("[HealEngine][POTION_DEBUG] tryUsePotionById: attempting to use id=%d", itemId)) end
+  local ok = execute(action)
+  if _potionDebug then warn(string.format("[HealEngine][POTION_DEBUG] tryUsePotionById: result=%s", tostring(ok))) end
+  return ok
+end
+
 function HealEngine.setSelfSpellsEnabled(flag)
   options.selfSpells = not not flag
 end
@@ -355,7 +389,7 @@ function HealEngine.planSelf(snap)
   local mp = snap.mp or getMpPercent()
   local inPz = snap.inPz
   if inPz == nil then inPz = getInPz() end
-  local emergency = snap.emergency or (hp <= 15)
+  local emergency = false -- Emergency disabled by user request
 
   logDebug(string.format("planSelf: hp=%.1f mp=%.1f spells=%d potions=%d emergency=%s inPz=%s", 
     hp, mp, #selfSpells, #selfPotions, tostring(emergency), tostring(inPz)))
@@ -459,7 +493,8 @@ function HealEngine.planSelf(snap)
     return true, nil
   end
 
-  if (options.selfSpells or emergency) and #selfSpells > 0 then
+
+  if options.selfSpells and #selfSpells > 0 then
     local rejectReasons = {}
     for _, spell in ipairs(selfSpells) do
       local ok, reason = spellEligible(spell)
@@ -474,20 +509,21 @@ function HealEngine.planSelf(snap)
       logDebug('[HealEngine] No eligible spells. Reasons: ' .. table.concat(rejectReasons, ' | '))
     end
     
-    -- EMERGENCY FALLBACK: Cast fallbackSpell when HP critically low and no spell selected
-    -- This is the LAST LINE OF DEFENSE against player death!
-    if (emergency or hp <= 15) and fallbackSpell and healingGroupReady() and ready(fallbackSpell.key, fallbackSpell.cd) then
-      local fallbackManaCost = fallbackSpell.mpCost or 40
-      if currentMana >= fallbackManaCost then
-        logCritical(string.format('EMERGENCY FALLBACK: casting %s (HP=%.1f%%, mana=%d)', fallbackSpell.name, hp, currentMana))
-        return { kind = "spell", name = fallbackSpell.name, key = fallbackSpell.key, cd = fallbackSpell.cd, mana = fallbackManaCost }
-      else
-        logCritical(string.format('EMERGENCY FALLBACK FAILED: not enough mana for %s (need %d, have %d)', fallbackSpell.name, fallbackManaCost, currentMana))
-      end
-    end
+    -- EMERGENCY FALLBACK: disabled per user request
+    -- This block would cast a fallback spell when HP critically low. It has been disabled.
+    -- if (emergency or hp <= 15) and fallbackSpell and healingGroupReady() and ready(fallbackSpell.key, fallbackSpell.cd) then
+    --   local fallbackManaCost = fallbackSpell.mpCost or 40
+    --   if currentMana >= fallbackManaCost then
+    --     logCritical(string.format('EMERGENCY FALLBACK: casting %s (HP=%.1f%%, mana=%d)', fallbackSpell.name, hp, currentMana))
+    --     return { kind = "spell", name = fallbackSpell.name, key = fallbackSpell.key, cd = fallbackSpell.cd, mana = fallbackManaCost }
+    --   else
+    --     logCritical(string.format('EMERGENCY FALLBACK FAILED: not enough mana for %s (need %d, have %d)', fallbackSpell.name, fallbackManaCost, currentMana))
+    --   end
+    -- end
   end
 
-  if (options.potions or emergency) and #selfPotions > 0 then
+
+  if options.potions and #selfPotions > 0 then
     for _, pot in ipairs(selfPotions) do
       -- Get the actual potion name - prefer pot.name, then try to look up by ID
       local potionName = pot.name
@@ -508,15 +544,18 @@ function HealEngine.planSelf(snap)
           end
         end
       end
-      -- Final fallback
       potionName = potionName or ("potion #" .. (pot.id or 0))
-      
+
+      -- Evaluate reasons for not selecting this pot
+
+
       if pot.hp and hp <= pot.hp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
-        logDebug(string.format("planSelf: selected health potion '%s' (id=%d)", potionName, pot.id))
+        if VERBOSE then print("[HealBot] Executing potion: " .. tostring(potionName) .. " (id=" .. tostring(pot.id) .. ") for HP " .. tostring(hp) .. "% <= " .. tostring(pot.hp) .. "%") end
         return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "heal"}
       end
+
       if pot.mp and mp <= pot.mp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
-        logDebug(string.format("planSelf: selected mana potion '%s' (id=%d)", potionName, pot.id))
+        if VERBOSE then print("[HealBot] Executing potion: " .. tostring(potionName) .. " (id=" .. tostring(pot.id) .. ") for MP " .. tostring(mp) .. "% <= " .. tostring(pot.mp) .. "%") end
         return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "mana"}
       end
     end
@@ -526,11 +565,36 @@ function HealEngine.planSelf(snap)
   return nil
 end
 
+-- Debug helper: simulate a self snapshot and print planned action
+function HealEngine.debugPlan(hp, mp, inPz)
+  local snap = { hp = hp or getHpPercent(), mp = mp or getMpPercent(), inPz = inPz }
+  local action = HealEngine.planSelf(snap)
+  if not action then
+    print(string.format("HealEngine.debugPlan: no action for hp=%.1f mp=%.1f inPz=%s", snap.hp, snap.mp, tostring(snap.inPz)))
+    return nil
+  end
+  if action.kind == "potion" then
+    print(string.format("HealEngine.debugPlan: selected potion id=%d name=%s type=%s", action.id or 0, action.name or "-", action.potionType or "-"))
+  elseif action.kind == "spell" then
+    print(string.format("HealEngine.debugPlan: selected spell %s", action.name or "-"))
+  else
+    print("HealEngine.debugPlan: selected action of kind=" .. tostring(action.kind))
+  end
+  return action
+end
+
 -- Select best friend action; target must include name and hp
 -- IMPORTANT: Shares cooldowns with self-healing via BotCore.Cooldown
+-- v2.1: Added custom HP threshold support and improved spell selection
 function HealEngine.planFriend(snap, target)
-  if not options.friendHeals then return nil end
-  if not target or not target.name then return nil end
+  if not options.friendHeals then 
+    logDebug("planFriend: friendHeals disabled")
+    return nil 
+  end
+  if not target or not target.name then 
+    logDebug("planFriend: no target or no target name")
+    return nil 
+  end
   
   local hp = target.hp or 100
   local currentMana = snap.currentMana or getCurrentMana()
@@ -538,32 +602,92 @@ function HealEngine.planFriend(snap, target)
   if inPz == nil then inPz = getInPz() end
   
   -- Don't heal friends in protection zone
-  if inPz then return nil end
+  if inPz then 
+    logDebug("planFriend: in protection zone, skipping")
+    return nil 
+  end
   
+  -- Get custom HP threshold for this specific player (from UI config)
+  local customThreshold = target.customHp
+  
+  logDebug(string.format("planFriend: evaluating '%s' hp=%d%% customThreshold=%s mana=%d", 
+    target.name, hp, tostring(customThreshold), currentMana))
+  
+  -- Check if friend actually needs healing
+  -- Use custom threshold if set, otherwise use spell's built-in threshold
+  local needsHealing = false
+  if customThreshold then
+    needsHealing = hp <= customThreshold
+  end
+  
+  -- Select best spell (sorted by priority - strongest first)
   for _, spell in ipairs(friendSpells) do
-    local hpThreshold = spell.hp or 0
-    local mpCost = spell.mpCost or spell.mp or 0
+    local spellThreshold = spell.hp or 0
+    local mpCost = spell.mpCost or spell.mana or spell.mp or 0
     
-    -- Check if friend needs healing
-    if hp <= hpThreshold then
+    -- Determine the effective threshold for this spell
+    -- Custom threshold overrides spell threshold, but only if friend HP is below it
+    local effectiveThreshold = spellThreshold
+    if customThreshold and customThreshold > spellThreshold then
+      -- For strong heals (gran sio), still require lower HP even with custom threshold
+      -- For normal heals (sio), use the custom threshold
+      if spell.prio == 1 then
+        -- Strong heal: use lower of custom/2 or spell threshold
+        effectiveThreshold = math.min(customThreshold / 2, spellThreshold)
+      else
+        effectiveThreshold = customThreshold
+      end
+    end
+    
+    -- Check if friend HP is at or below threshold
+    if hp <= effectiveThreshold or needsHealing then
       -- CRITICAL: Check if we have enough mana to cast!
       if currentMana >= mpCost then
         -- Check cooldowns (shared with self-healing)
         if healingGroupReady() and ready(spell.key, spell.cd or 1100) then
-          logDebug(string.format("planFriend: healing '%s' (hp=%d%%) with %s", target.name, hp, spell.name))
+          logDebug(string.format("planFriend: healing '%s' (hp=%d%%, threshold=%d) with %s", 
+            target.name, hp, effectiveThreshold, spell.name))
           return {
             kind = "spell",
             name = string.format('%s "%s"', spell.name, target.name),
             key = spell.key,
-            cd = spell.cd or 1100
+            cd = spell.cd or 1100,
+            targetName = target.name,
+            targetHp = hp
           }
+        else
+          logDebug(string.format("planFriend: cooldown not ready for %s", spell.name))
         end
       else
-        logDebug(string.format("planFriend: insufficient mana for %s (need %d, have %d)", spell.name, mpCost, currentMana))
+        logDebug(string.format("planFriend: insufficient mana for %s (need %d, have %d)", 
+          spell.name, mpCost, currentMana))
       end
     end
   end
+  
+  logDebug(string.format("planFriend: no suitable spell for '%s' at %d%% HP", target.name, hp))
   return nil
+end
+
+-- Set friend healing spells (allows customization from UI)
+function HealEngine.setFriendSpells(spellList)
+  if spellList and type(spellList) == "table" and #spellList > 0 then
+    friendSpells = {}
+    for i, s in ipairs(spellList) do
+      if s and s.name then
+        table.insert(friendSpells, {
+          name = s.name,
+          key = s.key or s.name:lower():gsub(" ", "_"),
+          hp = s.hp or 80,
+          mpCost = s.mpCost or s.mana or 100,
+          cd = s.cd or 1100,
+          prio = s.prio or i
+        })
+      end
+    end
+    sortByPrio(friendSpells)
+    logDebug(string.format("setFriendSpells: loaded %d friend spells", #friendSpells))
+  end
 end
 
 function HealEngine.execute(action)
@@ -591,10 +715,9 @@ function HealEngine.execute(action)
     return true
     
   elseif action.kind == "potion" then
-    -- Use the potion
-    local success = useItemSafe(action.id)
-    
-    if success then
+    -- Use the potion (simplified like vBot for better OTCv8 compatibility)
+    if useWith and player then
+      useWith(action.id, player)
       -- Mark cooldowns
       stamp(action.key)
       markPotionUsed()
@@ -608,7 +731,7 @@ function HealEngine.execute(action)
       logDebug(string.format("execute: used potion '%s' (id=%d)", action.name or "?", action.id))
       return true
     else
-      logWarn(string.format("execute: failed to use potion id=%d", action.id))
+      logWarn("execute: useWith or player not available for potion")
       return false
     end
   end
@@ -619,54 +742,73 @@ end
 -- Event-driven fast-heal watcher: listen to player health/mana changes
 -- CRITICAL: This provides instant reaction to damage for player safety!
 do
-  if EventBus then
-    local _lastStatEvent = 0
-    local _debounceMs = 25 -- Reduced from 50ms for faster burst damage response
+  local registered = false
+  local _lastStatEvent = 0
+  local _debounceMs = 25 -- Reduced from 50ms for faster burst damage response
 
-    local function handleSnapshot()
-      local nowTime = nowMs()
-      if (nowTime - _lastStatEvent) < _debounceMs then return end
-      _lastStatEvent = nowTime
-      
-      local hpNow = getHpPercent()
-      local mpNow = getMpPercent()
-      local currentMana = getCurrentMana()
-      
-      logDebug(string.format("handleSnapshot triggered: hp=%.1f mp=%.1f mana=%d", hpNow, mpNow, currentMana))
-      
-      local snap = { 
-        hp = hpNow, 
-        mp = mpNow, 
-        currentMana = currentMana,
-        inPz = getInPz(),
-        emergency = (hpNow <= 15)  -- Emergency threshold raised from 10 to 15
-      }
-      
-      local action = HealEngine.planSelf(snap)
-      if action then
-        logDebug(string.format("handleSnapshot executing: %s", action.name or "unknown"))
-        HealEngine.execute(action)
-      end
+  local function handleSnapshot()
+    local nowTime = nowMs()
+    if (nowTime - _lastStatEvent) < _debounceMs then return end
+    _lastStatEvent = nowTime
+
+    local hpNow = getHpPercent()
+    local mpNow = getMpPercent()
+    local currentMana = getCurrentMana()
+
+    logDebug(string.format("handleSnapshot triggered: hp=%.1f mp=%.1f mana=%d", hpNow, mpNow, currentMana))
+
+    local snap = {
+      hp = hpNow,
+      mp = mpNow,
+      currentMana = currentMana,
+      inPz = getInPz(),
+      emergency = false -- Emergency disabled by user request
+    }
+
+    local action = HealEngine.planSelf(snap)
+    if action then
+      logDebug(string.format("handleSnapshot executing: %s", action.name or "unknown"))
+      HealEngine.execute(action)
     end
+  end
 
+  -- Primary: EventBus if available
+  if EventBus then
     EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMaxHealth)
-      -- Trigger on any HP drop for priority healing
       local hpNow = health and maxHealth and maxHealth > 0 and (health / maxHealth) * 100 or getHpPercent()
       local hpOld = oldHealth and oldMaxHealth and oldMaxHealth > 0 and (oldHealth / oldMaxHealth) * 100 or hpNow
       logDebug(string.format("player:health event: hpNow=%.1f hpOld=%.1f", hpNow, hpOld))
-      if hpNow < hpOld then
-        handleSnapshot()
-      end
+      if hpNow < hpOld then handleSnapshot() end
     end)
 
     EventBus.on("player:mana", function(mana, maxMana, oldMana, oldMaxMana)
-      -- Trigger on any mana drop
       local mpNow = mana and maxMana and maxMana > 0 and (mana / maxMana) * 100 or getMpPercent()
       local mpOld = oldMana and oldMaxMana and oldMaxMana > 0 and (oldMana / oldMaxMana) * 100 or mpNow
-      if mpNow < mpOld then
-        handleSnapshot()
-      end
+      if mpNow < mpOld then handleSnapshot() end
     end)
+    registered = true
+  end
+
+  -- Fallbacks for environments lacking EventBus: try client callback hooks
+  if not registered then
+    if type(onPlayerHealthChange) == 'function' then
+      onPlayerHealthChange(function(healthPercent)
+        -- healthPercent is absolute percent value
+        handleSnapshot()
+      end)
+      registered = true
+    end
+
+    if type(onPlayerManaChange) == 'function' then
+      onPlayerManaChange(function(manaPercent)
+        handleSnapshot()
+      end)
+      registered = true
+    end
+  end
+
+  if not registered then
+    logWarn("HealEngine: no event source found (EventBus or onPlayerHealthChange). Active polling may be required.")
   end
 end
 

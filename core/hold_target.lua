@@ -11,14 +11,14 @@ end)
 
 local holdTargetMacro = macro(100, "Hold Target", function()
     -- if attacking then save it as target, but check pos z in case of marking by mistake on other floor
-    if target() and target():getPosition().z == posz() and not target():isNpc() then
+    if target and target() and target():getPosition().z == posz() and not target():isNpc() then
         targetID = target():getId()
-    elseif not target() then
+    elseif not (target and target()) then
         -- there is no saved data, do nothing
         if not targetID then return end
 
         -- look for target
-        for i, spec in ipairs(getSpectators()) do
+        for i, spec in ipairs(SafeCall.global("getSpectators") or {}) do
             local sameFloor = spec:getPosition().z == posz()
             local oldTarget = spec:getId() == targetID
             

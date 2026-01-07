@@ -700,7 +700,7 @@ local function formatStr(str)
       str = str:sub(3, #str)
     end
 
-    local n = getFirstNumberInText(str)
+    local n = getFirstNumberInText and getFirstNumberInText(str)
     if n then
         str = string.split(str, tostring(n))[1]
         str = str:sub(1,#str-1)
@@ -968,7 +968,7 @@ onTextMessage(function(mode, text)
             local data = re[i][2] -- each looted item
             local formattedLoot = regexMatch(data, [[(^[^(]+)]])[1][1]
             formattedLoot = formattedLoot:trim()
-            local amount = getFirstNumberInText(formattedLoot) -- amount found in data
+            local amount = getFirstNumberInText and getFirstNumberInText(formattedLoot) -- amount found in data
             local price = amount and getPrice(formattedLoot) * amount or getPrice(formattedLoot) -- if amount then multity price, else just take price
             local color = getColor(price) -- generate hex string based off price
             local messageColor = getColor(getPrice(formattedLoot))
@@ -1296,7 +1296,7 @@ end
 
 local regex = "You lose ([0-9]*) hitpoints due to an attack by ([a-z]*) ([a-z A-z-]*)" 
 onTextMessage(function(mode, text)
-  local value = getFirstNumberInText(text)
+  local value = getFirstNumberInText and getFirstNumberInText(text)
     if mode == 21 then -- damage dealt
       totalDmg = totalDmg + value
         table.insert(dmgTable, {d = value, t = now})
@@ -1548,7 +1548,7 @@ onTextMessage(function(mode, text)
   text = text:lower()
   if not text:find("using one of") then return end
 
-  local amount = getFirstNumberInText(text)
+  local amount = getFirstNumberInText and getFirstNumberInText(text)
   local re = regexMatch(text, regex3)
   local name = re[1][2]
   local id = WasteItems[name]

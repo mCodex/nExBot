@@ -1181,7 +1181,7 @@ function Insights.analyze()
   end
   
   -- ========== PROTECTION ANALYSIS ==========
-  -- Blessings analysis removed - server-specific data
+
   
   -- ========== CONSISTENCY ANALYSIS ==========
   
@@ -1670,6 +1670,7 @@ local analyticsWindow = nil
 
 -- Live update flag for analytics window (must be defined before showAnalytics)
 local liveUpdatesActive = false
+local lastSummaryText = ""
 
 local function stopLiveUpdates()
   liveUpdatesActive = false
@@ -1680,7 +1681,11 @@ local function doLiveUpdate()
   
   if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
     pcall(function()
-      analyticsWindow.content.textContent:setText(buildSummary())
+      local newText = buildSummary()
+      if newText ~= lastSummaryText then
+        analyticsWindow.content.textContent:setText(newText)
+        lastSummaryText = newText
+      end
     end)
     -- Schedule next update
     schedule(1000, doLiveUpdate)
@@ -1783,6 +1788,32 @@ local btn = UI.Button("Hunt Analyzer", function()
   if not ok then warn("[HuntAnalyzer] " .. tostring(err)) print(buildSummary()) end
 end)
 if btn then btn:setTooltip("View hunting analytics") end
+
+-- Monster Insights button below Hunt Analyzer
+local monsterBtn = UI.Button("Monster Insights", function()
+  -- Ensure monster inspector is loaded and window exists
+  if not MonsterInspectorWindow then
+    if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.showWindow then
+      nExBot.MonsterInspector.showWindow()
+    else
+      -- Try to load it manually
+      pcall(function() dofile("/targetbot/monster_inspector.lua") end)
+      if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.showWindow then
+        nExBot.MonsterInspector.showWindow()
+      end
+    end
+  else
+    MonsterInspectorWindow:setVisible(not MonsterInspectorWindow:isVisible())
+    if MonsterInspectorWindow:isVisible() then
+      if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.refreshPatterns then
+        nExBot.MonsterInspector.refreshPatterns()
+      elseif refreshPatterns then
+        refreshPatterns()
+      end
+    end
+  end
+end)
+if monsterBtn then monsterBtn:setTooltip("View learned monster patterns and samples") end
 
 -- ============================================================================
 -- PUBLIC API
