@@ -64,6 +64,54 @@ local prevActionResult = true
 local uiList = nil
 local lastPlayerFloor = nil
 
+-- FLOOR CHANGE TRACKING: Prevent looping when waypoints span multiple Z levels
+-- When a floor-change waypoint is being executed, we set this to the expected floor
+-- so that when the floor actually changes, we know it was intentional
+local intendedFloorChange = {
+  active = false,          -- True when executing a floor-change waypoint
+  expectedFloor = nil,     -- The Z level we expect to end up on after the floor change
+  sourceFloor = nil,       -- The Z level we started from
+  waypointIndex = nil,     -- The waypoint index that triggered the floor change
+  timestamp = 0,           -- When the floor change was initiated
+  TIMEOUT = 5000           -- Max time to wait for floor change to complete
+}
+
+-- Mark that we're intentionally changing floors (called from goto action)
+CaveBot.setIntendedFloorChange = function(expectedZ, waypointIndex)
+  intendedFloorChange.active = true
+  intendedFloorChange.expectedFloor = expectedZ
+  intendedFloorChange.sourceFloor = posz()
+  intendedFloorChange.waypointIndex = waypointIndex
+  intendedFloorChange.timestamp = now
+end
+
+-- Clear the intended floor change tracking
+CaveBot.clearIntendedFloorChange = function()
+  intendedFloorChange.active = false
+  intendedFloorChange.expectedFloor = nil
+  intendedFloorChange.sourceFloor = nil
+  intendedFloorChange.waypointIndex = nil
+  intendedFloorChange.timestamp = 0
+end
+
+-- Check if a floor change was intended (used by walking.lua to prevent step-back)
+CaveBot.isFloorChangeIntended = function(newFloor)
+  if not intendedFloorChange.active then return false end
+  if now - intendedFloorChange.timestamp > intendedFloorChange.TIMEOUT then
+    CaveBot.clearIntendedFloorChange()
+    return false
+  end
+  -- Check if this is the floor we expected, or an adjacent floor (for multi-level transitions)
+  local expectedZ = intendedFloorChange.expectedFloor
+  local sourceZ = intendedFloorChange.sourceFloor
+  if not expectedZ or not sourceZ then return false end
+  
+  -- Moving in the right direction (towards expected floor)
+  local movingUp = newFloor < sourceZ
+  local expectedUp = expectedZ < sourceZ
+  return movingUp == expectedUp
+end
+
 --[[
   SMART EXECUTION SYSTEM
   Reduces unnecessary macro executions by tracking walk state and using delays.
@@ -628,21 +676,34 @@ cavebotMacro = macro(250, function()
   hasPlayerMoved()
 
   -- Guard against unintended floor changes: realign to nearest waypoint on current floor
+  -- BUT: If the floor change was intended (from a floor-change waypoint), don't reset!
   local playerPos = player:getPosition()
   if playerPos then
     if lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
-      CaveBot.resetWalking()
-      resetWaypointEngine()
-      if resetStartupCheck then resetStartupCheck() end
-      if findNearestGlobalWaypoint then
-        local maxDist = storage.extras.gotoMaxDistance or 50
-        local child, idx = findNearestGlobalWaypoint(playerPos, maxDist, {
-          maxCandidates = 25,
-          preferCurrentFloor = true,
-          searchAllFloors = false
-        })
-        if child then
-          focusWaypointBefore(child, idx)
+      -- Check if this floor change was intended
+      local wasIntended = CaveBot.isFloorChangeIntended(playerPos.z)
+      
+      if wasIntended then
+        -- Intended floor change - clear the tracking but DON'T reset or search for waypoints
+        -- The waypoint system will naturally advance to the next waypoint
+        CaveBot.clearIntendedFloorChange()
+        CaveBot.resetWalking()  -- Still reset walking state for clean start
+        -- Don't reset waypoint engine or search for waypoints!
+      else
+        -- Unintended floor change - do the full reset and recovery
+        CaveBot.resetWalking()
+        resetWaypointEngine()
+        if resetStartupCheck then resetStartupCheck() end
+        if findNearestGlobalWaypoint then
+          local maxDist = storage.extras.gotoMaxDistance or 50
+          local child, idx = findNearestGlobalWaypoint(playerPos, maxDist, {
+            maxCandidates = 25,
+            preferCurrentFloor = true,
+            searchAllFloors = false
+          })
+          if child then
+            focusWaypointBefore(child, idx)
+          end
         end
       end
     end
@@ -798,7 +859,13 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
   CaveBot.Config.onConfigChange(name, enabled, cavebotConfig)
   
   actionRetries = 0
-  CaveBot.resetWalking()
+  -- Use full reset on config change to clear all floor change tracking
+  if CaveBot.fullResetWalking then
+    CaveBot.fullResetWalking()
+  else
+    CaveBot.resetWalking()
+  end
+  CaveBot.clearIntendedFloorChange()  -- Clear any pending floor change tracking
   resetWaypointEngine()  -- Reset waypoint engine state on config change
   if invalidateWaypointCache then invalidateWaypointCache() end  -- Clear waypoint position cache
   if resetStartupCheck then resetStartupCheck() end  -- Reset startup check to find nearest waypoint

@@ -374,11 +374,24 @@ CaveBot.walkTo = function(dest, maxDist, params)
   if not lastSafePos then
     lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
   end
+  
+  -- Check for floor mismatch, but DON'T step back if floor change was intentional
   if lastWalkZ and playerPos.z ~= lastWalkZ then
-    stepBackToLastSafe(playerPos)
-    expectedFloor = nil
-    lastWalkZ = playerPos.z
-    return false
+    -- Check if this floor change was intended (multi-floor waypoint handling)
+    local wasIntentional = CaveBot.isFloorChangeIntended and CaveBot.isFloorChangeIntended(playerPos.z)
+    
+    if not wasIntentional then
+      -- Unintended floor change - try to step back
+      stepBackToLastSafe(playerPos)
+      expectedFloor = nil
+      lastWalkZ = playerPos.z
+      return false
+    else
+      -- Intentional floor change - update tracking without stepping back
+      lastWalkZ = playerPos.z
+      lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+      -- Don't return false - continue with the walk
+    end
   end
   
   params = params or {}
@@ -617,7 +630,20 @@ end
 CaveBot.resetWalking = function()
   -- Reset walking state
   expectedFloor = nil
+  lastWalkZ = nil
   FloorChangeCache.tiles = {}
+  resetPathCursor()
+  -- Note: We intentionally do NOT clear intendedFloorChange here
+  -- as it should persist across walking resets during floor transitions
+end
+
+-- Full reset including floor change tracking (used on config change/hard reset)
+CaveBot.fullResetWalking = function()
+  CaveBot.resetWalking()
+  if CaveBot.clearIntendedFloorChange then
+    CaveBot.clearIntendedFloorChange()
+  end
+  lastSafePos = nil
 end
 
 CaveBot.doWalking = function()
@@ -663,12 +689,34 @@ CaveBot.getSafeAdjacentTiles = function(centerPos) return getSafeAdjacentTiles(c
 -- Floor change detection on position change
 onPlayerPositionChange(function(newPos, oldPos)
   if not oldPos or not newPos then return end
-  lastSafePos = {x = oldPos.x, y = oldPos.y, z = oldPos.z}
-  if expectedFloor and newPos.z ~= expectedFloor then
-    warn("[CaveBot] Unexpected floor change! Expected: " .. expectedFloor .. ", Current: " .. newPos.z)
-    stepBackToLastSafe(newPos)
-    expectedFloor = nil
-    FloorChangeCache.tiles = {}  -- Clear cache on floor change
+  
+  -- Always update last safe position to old position on same floor
+  if oldPos.z == newPos.z then
+    lastSafePos = {x = oldPos.x, y = oldPos.y, z = oldPos.z}
+  end
+  
+  -- Check for floor changes
+  if newPos.z ~= oldPos.z then
+    -- Check if this floor change was intentional (from a floor-change waypoint)
+    local wasIntentional = CaveBot.isFloorChangeIntended and CaveBot.isFloorChangeIntended(newPos.z)
+    
+    if wasIntentional then
+      -- Intentional floor change - update safe position to new floor, don't step back
+      lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
+      expectedFloor = nil
+      FloorChangeCache.tiles = {}  -- Clear cache for new floor
+      -- Don't warn or step back for intentional changes
+    elseif expectedFloor and newPos.z ~= expectedFloor then
+      -- Unexpected floor change while we had an expected floor set
+      warn("[CaveBot] Unexpected floor change! Expected: " .. expectedFloor .. ", Current: " .. newPos.z)
+      stepBackToLastSafe(newPos)
+      expectedFloor = nil
+      FloorChangeCache.tiles = {}  -- Clear cache on floor change
+    else
+      -- Floor changed but no expected floor was set - just update state
+      lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
+      FloorChangeCache.tiles = {}
+    end
   end
 end)
 

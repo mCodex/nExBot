@@ -386,8 +386,24 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   local precision = tonumber(posMatch[1][5]) or 1
   local playerPos = player:getPosition()
   
-  -- Floor mismatch
+  -- MULTI-FLOOR WAYPOINT HANDLING
+  -- If the waypoint is on a different Z level, this waypoint might be AFTER a floor change
+  -- We should skip to it (the floor change already happened) rather than fail
   if destPos.z ~= playerPos.z then
+    -- Calculate 2D distance to check if we're close (just changed floors via adjacent waypoint)
+    local dist2D = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
+    local floorDiff = math.abs(destPos.z - playerPos.z)
+    
+    -- If we're very close in X/Y but different Z, we likely just changed floors
+    -- This happens when: ladder waypoint (z=7) -> next waypoint (z=6) and we're now on z=6
+    if dist2D <= 3 and floorDiff <= 2 then
+      -- We're close horizontally but on wrong floor - this waypoint was for a different floor
+      -- Advance to next waypoint (return true to move on)
+      noPath = 0
+      return true
+    end
+    
+    -- Otherwise, standard floor mismatch handling
     noPath = noPath + 1
     pathfinder()
     return false
@@ -416,11 +432,42 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
   
   -- If destination is floor-change, use precision 0 and allow the floor change
-  if isFloorChange then precision = 0 end
+  -- Also mark the intended floor change so we don't reset after using the ladder/stairs
+  if isFloorChange then 
+    precision = 0
+    -- Determine expected floor after using this tile
+    -- Going up: z decreases, Going down: z increases
+    -- Ladders/rope spots go up (z-1), stairs/holes can go either way
+    local expectedFloor = nil
+    if minimapColor == 210 or minimapColor == 211 then
+      expectedFloor = destPos.z - 1  -- Ladder/rope up
+    elseif minimapColor == 212 or minimapColor == 213 then
+      expectedFloor = destPos.z + 1  -- Stairs/hole down
+    else
+      -- Fallback: try to determine from tile
+      expectedFloor = destPos.z - 1  -- Assume up by default
+    end
+    
+    -- Get current waypoint index to track which waypoint initiated this
+    local currentAction = ui and ui.list and ui.list:getFocusedChild()
+    local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
+    
+    if CaveBot.setIntendedFloorChange then
+      CaveBot.setIntendedFloorChange(expectedFloor, waypointIdx)
+    end
+  end
   
   -- Already at destination
   if distX <= precision and distY <= precision then
     noPath = 0
+    -- If this was a floor-change tile and we're standing on it, the floor change
+    -- should happen when we step on it or use it
+    if isFloorChange then
+      -- We reached the floor-change tile - wait briefly for the floor change to occur
+      -- The actual use/step will be handled by the walking system
+      CaveBot.delay(300)
+      return "retry"
+    end
     return true
   end
 
