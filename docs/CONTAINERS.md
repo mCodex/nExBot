@@ -162,6 +162,92 @@ Slot 4: Quiver (if Paladin)
 3. Checks for quiver refill
 4. Triggers initial organization
 
+---
+
+## 🛠️ Developer Notes & Technical Details
+
+> [!NOTE]
+> This section documents internal behavior introduced in **ContainerOpener v6** (event-driven rewrite) and how to integrate with it.
+
+### Events & Integration
+
+- EventBus emits `container:open` (container, previousContainer) on every container open — this is used internally by the ContainerOpener and available for other modules.
+- After a full open-all run, ContainerOpener emits `containers:open_all_complete`.
+- The `onAddItem(container, slot, item, oldItem)` handler now queues new container items immediately using a `parentId_slot` key to avoid sibling conflicts.
+
+**Example: subscribe to container events**
+
+```lua
+-- Log every container open
+if EventBus and EventBus.on then
+  EventBus.on("container:open", function(container, previous)
+    local item = container:getContainerItem()
+    local name = item and item:getName() or "UNKNOWN"
+    print("[EventBus] Container opened: "..name)
+  end)
+end
+```
+
+**Advanced usage: queue a specific nested container manually**
+
+```lua
+-- Manually queue a nested container to open next (for custom scripts)
+local parent = g_game.getContainer(0) -- example container ID
+if parent then
+  local items = parent:getItems()
+  for slot, it in ipairs(items) do
+    if it and it:isContainer() then
+      -- Use the same slotKey format : parentId_slot
+      local slotKey = tostring(parent:getId()) .. "_" .. tostring(slot)
+      if not ContainerOpener.queuedSlots[slotKey] then
+        ContainerOpener.queuedSlots[slotKey] = true
+        table.insert(ContainerOpener.queue, { item = it, parentContainerId = parent:getId(), slot = slot, slotKey = slotKey })
+      end
+    end
+  end
+  schedule(20, ContainerOpener.processNext)
+end
+```
+
+> [!TIP]
+> Prefer EventBus hooks over direct modification when possible; direct queue manipulation should be reserved for advanced integration and managed carefully.
+
+### Behavior Guarantees
+
+- The opener uses direct `item` references when queuing; this avoids ambiguous type ID collisions when multiple identical backpacks are present.
+- Containers are scanned across all open containers each pass (rescan) — newly added containers are discovered immediately.
+- The opener respects `config.autoMinimize` and `config.renameEnabled` and will apply minimize/rename in the finalization phase.
+
+### Migration Guidance for Script Authors
+
+- Avoid relying on internal queue fields like `itemTypeId` or `itemUniqueId` — newer code stores `item` and `slotKey` for robust identification.
+- Prefer subscribing to EventBus `container:open` instead of internal hooks for compatibility.
+
+---
+
+## ⚠️ Common Issues (Updated)
+
+<details>
+<summary><b>Containers not opening on login (v6)</b></summary>
+
+**Check:**
+1. Is Auto-Open enabled?
+2. Are containers correctly assigned?
+3. Verify that the quiver is equipped (paladin-specific)
+4. Check logs for `containers:open_all_complete` event
+
+</details>
+
+### Logs & Debugging
+
+If you encounter `Schedule execution error` or errors like `attempt to call global 'isExcludedContainer' (a nil value)` or `attempt to call global 'minimizeContainer' (a nil value)`:
+
+1. Ensure you have the latest `core/Containers.lua` (v6 rewrite). Partial edits can leave helper functions out of order.
+2. Restart the client and check logs for `containers:open_all_complete` to confirm the opener finished its run.
+3. If `container:open` is not firing, verify EventBus is loaded and `EventBus.on` is available.
+
+These logfile messages usually indicate a partial load or outdated file ordering; updating to the latest release and restarting the client typically resolves them.
+
 ### During Hunting
 
 1. Monitors container contents

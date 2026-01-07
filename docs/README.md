@@ -13,6 +13,10 @@
 ## 🆕 What's New in v1.0
 
 - **🎯 Dynamic Scaling** - Movement thresholds scale with monster count
+- **📦 Container Panel v6** - Event-driven container opener (resolves nested/sibling backpack issues, improved quiver integration, reactive onAddItem scanning)
+
+> [!TIP]
+> See `docs/CONTAINERS.md` for developer notes and migration guidance. See `CHANGELOG.md` for full history.
 - **⚡ Adaptive Reactivity** - More reactive when surrounded (7+ monsters)
 - **🧠 Movement Coordinator** - Dynamic confidence thresholds
 - **🛡️ Balanced Behavior** - Conservative with few monsters, reactive with many
@@ -24,6 +28,8 @@
 
 | Module | Description | Link |
 |--------|-------------|------|
+| 📝 **Changelog** | Release notes and changes | [View](../CHANGELOG.md) |
+| 🛠️ **Contributing** | How to contribute & developer setup | [View](../CONTRIBUTING.md) |
 | 🎯 **TargetBot** | Creature targeting and combat | [View](./TARGETBOT.md) |
 | 🗺️ **CaveBot** | Automated waypoint navigation | [View](./CAVEBOT.md) |
 | 💊 **HealBot** | Healing spells and potions | [View](./HEALBOT.md) |
@@ -178,6 +184,6 @@ Each character remembers their own active profiles:
 
 **Made with ❤️ for the Tibia community**
 
-*Last updated: January 2025 - v1.0.0*
+*Last updated: January 2026 - v1.1.0*
 
 </div>

@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![OTClientV8](https://img.shields.io/badge/OTClientV8-compatible-orange.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1+-purple.svg)
@@ -13,6 +13,31 @@
 [🚀 Quick Start](#-quick-start) • [✨ Features](#-features) • [🏗️ How It Works](#-how-it-works) • [📚 Documentation](#-documentation) • [⚙️ Configuration](#-configuration)
 
 </div>
+
+---
+
+## 🆕 Recent Updates
+
+> [!TIP]
+> **Container Panel v6 (Event-Driven Rewrite)** — The container auto-opener was fully rewritten to an event-driven approach (`ContainerOpener v6`) using the OTClient API and EventBus. Major improvements include:
+>
+> **Other notable fixes:**
+> - Fixed `g_clock` nil error in core modules
+> - Friend Healer UI: add/remove spells support
+> - Walking smoothing parameters fine-tuned to reduce jitter and improve pathing
+>
+>
+> - Uses direct item references and unique slot keys (parentId_slot) to reliably open nested and sibling backpacks
+> - Reactive queuing via `onAddItem` and `onContainerOpen` for near-instant detection and processing
+> - Eliminated duplicate legacy code and fixed critical queue entry bug (missing `item` field)
+> - Proper quiver support for paladins (auto-open quiver from right-hand slot on login/reopen)
+>
+> [!WARNING]
+> If you previously had custom scripts relying on the old container internals, please review the **Developer Notes** in `docs/CONTAINERS.md` — the public API remains similar but the internals, event timing and emitted events are more reliable now.
+>
+> [!TIP]
+> See full changelog: ./CHANGELOG.md
+
 
 ---
 
@@ -680,6 +705,11 @@ end
 > 2. Lower CaveBot interval (not below 100ms)
 > 3. Disable Hunt Analyzer if not needed
 > 4. Clear old configs (takes memory)
+>
+> [!TIP]
+> **Container/Panel errors** (e.g. `attempt to call global 'isExcludedContainer' (a nil value)` or `minimizeContainer` nil errors):
+> - Ensure you have the updated `core/Containers.lua` (v6). Partial or out-of-order edits may cause missing helpers. Replace and restart the client to load the full module.
+> - Check logs for `containers:open_all_complete` or missing `container:open` events.
 
 See [FAQ.md](docs/FAQ.md) for more solutions.
 
@@ -731,8 +761,11 @@ Copyright © 2025 nExBot Contributors
 
 - 📖 **Documentation**: Read [docs/](docs/) folder
 - ❓ **FAQ**: Check [docs/FAQ.md](docs/FAQ.md)
-- 🐛 **Bug Report**: Document the issue clearly
+- 🐛 **Bug Report**: Document the issue clearly and include logs (`client logs`, `lua stack`) and steps to reproduce; attach your `core/Containers.lua` version if reporting container-related issues
 - 💡 **Feature Request**: Describe use case and implementation ideas
+
+> [!TIP]
+> For OSS contributions: open a small, focused PR and include tests or manual QA steps where possible.
 
 ---
 
