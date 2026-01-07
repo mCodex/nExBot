@@ -528,7 +528,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
       end
       
       -- Still on the same floor - wait for floor change to occur
-      CaveBot.delay(100)  -- Reduced from 300ms for faster response
+      CaveBot.delay(50)  -- Minimal delay for fast floor-change response
       return "retry"
     end
     return true
@@ -553,7 +553,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
         attack(blocker)
       end
       g_game.setChaseMode(1)
-      CaveBot.delay(200)
+      CaveBot.delay(100)  -- Reduced delay for faster recovery
       return "retry"
     end
   end
@@ -595,7 +595,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false
   end
   
-  CaveBot.delay(100)
+  CaveBot.delay(50)  -- Minimal delay for fast retry
   return "retry"
 end)
 

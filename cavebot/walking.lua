@@ -35,7 +35,7 @@ local lastWalkZ = nil
 -- IMPORTANT: Game client's A* pathfinding has practical limits (~50-70 tiles)
 -- For longer distances, rely on waypoint-to-waypoint navigation
 local MAX_PATHFIND_DIST = 50   -- Realistic pathfinding limit
-local MAX_WALK_CHUNK = 20      -- Increased from 15 for smoother walking
+local MAX_WALK_CHUNK = 30      -- Larger chunks for smoother, more linear walking
 local THOROUGH_CHECK_DIST = 40 -- Increased thorough window to improve floor-change accuracy
 
 -- ============================================================================
@@ -343,7 +343,7 @@ local PathCursor = {
   path = nil,
   idx = 1,
   ts = 0,
-  TTL = 300
+  TTL = 500  -- Extended TTL for smoother continuous walking
 }
 
 local function resetPathCursor()
@@ -660,8 +660,8 @@ CaveBot.walkTo = function(dest, maxDist, params)
     return true
   end
   
-  -- SMOOTH MOVEMENT: Use autoWalk for 3+ verified safe steps
-  if walkSteps >= 3 then
+  -- SMOOTH MOVEMENT: Use autoWalk for 2+ verified safe steps (more linear walking)
+  if walkSteps >= 2 then
     autoWalk(chunkDestination, maxDist, {ignoreNonPathable = true, precision = 0})
     PathCursor.idx = math.min(PathCursor.idx + walkSteps, #path + 1)
     return true

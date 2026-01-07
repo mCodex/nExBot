@@ -876,7 +876,7 @@ if EventBus then
   end, 5)  -- High priority
 end
 
-cavebotMacro = macro(100, function()  -- Reduced from 250ms to 100ms for faster response
+cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   -- Safety-first gating: pause movement when healing/danger active
   if HealContext and HealContext.isCritical and HealContext.isCritical() then
     CaveBot.resetWalking()
