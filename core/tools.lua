@@ -112,14 +112,19 @@ UI.Label("Tools:")
 
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- AUTO LEVITATE - Ultra-fast instant-cast for PVP
--- Moving: auto-levitates when running into wall/floor
--- Stopped: press direction key toward levitate point to turn & cast
+-- AUTO LEVITATE - Event-Driven with Z+1 Field Analysis (EventBus)
+-- Analyzes Z+1 fields in movement direction to detect levitate opportunities
+-- Works WITHOUT requiring walls - detects ground above adjacent tiles
+-- Keeps character moving smoothly while detecting up/down opportunities
 -- ═══════════════════════════════════════════════════════════════════════════
 
 local autoLevitateEnabled = false
 local lastLevCast = 0
 local LEV_CD = 1950  -- Slightly under 2s for faster re-cast
+local MIN_MANA = 50
+
+-- Cached depth setting
+local levDepth = BotDB.get("macros.autoLevitateDepth") or 1
 
 -- All 8 directions with offsets
 local DIRS = {
@@ -136,71 +141,74 @@ local DIRS = {
 -- Player direction (0-7) to DIRS index (1-8)
 local DIR_TO_IDX = {[0]=1, [1]=2, [2]=3, [3]=4, [4]=5, [5]=6, [6]=7, [7]=8}
 
--- Track which direction keys are currently held down
-local heldDirKeys = {}
-
 -- Map key names to direction indices
-local KEY_TO_DIR = {}
-KEY_TO_DIR["Up"] = 1
-KEY_TO_DIR["Numpad8"] = 1
-KEY_TO_DIR["W"] = 1
-KEY_TO_DIR["Right"] = 2
-KEY_TO_DIR["Numpad6"] = 2
-KEY_TO_DIR["D"] = 2
-KEY_TO_DIR["Down"] = 3
-KEY_TO_DIR["Numpad2"] = 3
-KEY_TO_DIR["S"] = 3
-KEY_TO_DIR["Left"] = 4
-KEY_TO_DIR["Numpad4"] = 4
-KEY_TO_DIR["A"] = 4
-KEY_TO_DIR["Numpad9"] = 5
-KEY_TO_DIR["Numpad3"] = 6
-KEY_TO_DIR["Numpad1"] = 7
-KEY_TO_DIR["Numpad7"] = 8
+local KEY_TO_DIR = {
+  ["Up"] = 1, ["Numpad8"] = 1, ["W"] = 1,
+  ["Right"] = 2, ["Numpad6"] = 2, ["D"] = 2,
+  ["Down"] = 3, ["Numpad2"] = 3, ["S"] = 3,
+  ["Left"] = 4, ["Numpad4"] = 4, ["A"] = 4,
+  ["Numpad9"] = 5, ["Numpad3"] = 6, ["Numpad1"] = 7, ["Numpad7"] = 8,
+}
 
--- Track key presses using bot callbacks
-onKeyDown(function(keys)
-  local dir = KEY_TO_DIR[keys]
-  if dir then
-    heldDirKeys[dir] = true
-  end
-end)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Z+1 FIELD ANALYSIS - Core detection logic
+-- ═══════════════════════════════════════════════════════════════════════════
 
-onKeyUp(function(keys)
-  local dir = KEY_TO_DIR[keys]
-  if dir then
-    heldDirKeys[dir] = false
-  end
-end)
-
--- Check levitate opportunity at adjacent position
-local function getLevType(px, py, pz, dx, dy)
-  local fx, fy = px + dx, py + dy
-  local tile = g_map.getTile({x = fx, y = fy, z = pz})
+-- Direct check for levitate opportunity in a specific direction (no caching)
+-- Returns "up", "down", or nil
+local function checkLevitateDirection(px, py, pz, dirIdx)
+  local d = DIRS[dirIdx]
+  if not d then return nil end
   
-  -- Check UP: blocked tile + ground above
-  if tile then
-    local blocked = false
-    if tile.isWalkable then
-      blocked = not tile:isWalkable()
-    else
-      blocked = not tile:getGround()
+  local fx, fy = px + d.dx, py + d.dy
+  
+  -- CHECK UP: Is there ground at Z-1 (one level above the adjacent tile)?
+  -- This works regardless of whether the current-level tile is walkable or not
+  if pz > 0 then
+    local aboveTile = g_map.getTile({x = fx, y = fy, z = pz - 1})
+    if aboveTile and aboveTile:getGround() then
+      -- Ground exists above! This is ALWAYS a levitate-up opportunity
+      return "up"
     end
-    if blocked and pz > 0 then
-      local above = g_map.getTile({x = fx, y = fy, z = pz - 1})
-      if above and above:getGround() then
+    
+    -- Check extra depth levels if configured
+    for depth = 2, levDepth do
+      local zcheck = pz - depth
+      if zcheck < 0 then break end
+      local aboveD = g_map.getTile({x = fx, y = fy, z = zcheck})
+      if aboveD and aboveD:getGround() then
         return "up"
       end
     end
   end
   
-  -- Check DOWN: no ground in front + ground below
-  if not tile or not tile:getGround() then
-    if pz < 15 then
-      local below = g_map.getTile({x = fx, y = fy, z = pz + 1})
-      if below and below:getGround() then
-        return "down"
-      end
+  -- CHECK DOWN: No ground at current level + ground below
+  local currentTile = g_map.getTile({x = fx, y = fy, z = pz})
+  local hasCurrentGround = currentTile and currentTile:getGround()
+  
+  if not hasCurrentGround and pz < 15 then
+    local belowTile = g_map.getTile({x = fx, y = fy, z = pz + 1})
+    if belowTile and belowTile:getGround() then
+      return "down"
+    end
+  end
+  
+  return nil
+end
+
+-- Check if we're standing on a tile where we could levitate up
+-- (checks the tile we're currently on, not adjacent)
+local function checkCurrentTileLevitate(px, py, pz, dirIdx)
+  local d = DIRS[dirIdx]
+  if not d then return nil end
+  
+  local fx, fy = px + d.dx, py + d.dy
+  
+  -- Check if there's ground above the adjacent tile
+  if pz > 0 then
+    local aboveTile = g_map.getTile({x = fx, y = fy, z = pz - 1})
+    if aboveTile and aboveTile:getGround() then
+      return "up"
     end
   end
   
@@ -217,54 +225,144 @@ local function castLev(levType)
   lastLevCast = now
 end
 
--- Track movement state
-local lastPx, lastPy = 0, 0
+-- Core levitate check - uses DIRECT check, no caching for immediate response
+local function tryLevitate(px, py, pz, dirIdx)
+  if not autoLevitateEnabled then return false end
+  if (now - lastLevCast) < LEV_CD then return false end
+  if mana() < MIN_MANA then return false end
+  
+  -- Direct check in the specified direction
+  local levType = checkLevitateDirection(px, py, pz, dirIdx)
+  
+  if levType then
+    -- Turn player to face the direction before casting
+    local newDir = dirIdx - 1  -- Convert back to 0-7
+    if turn then turn(newDir) end
+    castLev(levType)
+    return true
+  end
+  
+  return false
+end
 
--- Ultra-fast 2ms polling
-macro(2, function()
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EVENT-DRIVEN TRIGGERS (EventBus)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- TRIGGER 1: EventBus player:move - check from OLD position (before the move)
+-- This catches cases where player walked onto a tile that had levitate above
+if EventBus then
+  EventBus.on("player:move", function(newPos, oldPos)
+    if not autoLevitateEnabled then return end
+    if not player then return end
+    if (now - lastLevCast) < LEV_CD then return end
+    if mana() < MIN_MANA then return end
+    
+    -- Calculate movement direction
+    local moveDx = newPos.x - oldPos.x
+    local moveDy = newPos.y - oldPos.y
+    
+    -- Find direction index from movement delta
+    local dirIdx = nil
+    for i, d in ipairs(DIRS) do
+      if d.dx == moveDx and d.dy == moveDy then
+        dirIdx = i
+        break
+      end
+    end
+    
+    if not dirIdx then return end
+    
+    -- KEY FIX: Check from OLD position - this is where the levitate opportunity was
+    local levType = checkLevitateDirection(oldPos.x, oldPos.y, oldPos.z, dirIdx)
+    
+    if levType then
+      local newDir = dirIdx - 1
+      if turn then turn(newDir) end
+      castLev(levType)
+      return
+    end
+    
+    -- Also check if the NEW position has levitate opportunities in same direction
+    -- (for chained levitate scenarios)
+    local levType2 = checkLevitateDirection(newPos.x, newPos.y, newPos.z, dirIdx)
+    if levType2 then
+      local newDir = dirIdx - 1
+      if turn then turn(newDir) end
+      castLev(levType2)
+    end
+  end, 100)  -- High priority for instant response
+end
+
+-- TRIGGER 2: Key press - fires BEFORE movement, most reliable for wall-less levitate
+onKeyDown(function(keys)
   if not autoLevitateEnabled then return end
+  if (now - lastLevCast) < LEV_CD then return end
+  
+  local dirIdx = KEY_TO_DIR[keys]
+  if not dirIdx then return end
   
   local p = player
   if not p then return end
   
-  -- Fast cooldown check first
-  if (now - lastLevCast) < LEV_CD then return end
+  local pos = p:getPosition()
+  if not pos then return end
   
-  -- Mana check
-  if mana() < 50 then return end
+  if mana() < MIN_MANA then return end
+  
+  -- Direct check - this fires BEFORE the walk happens
+  local levType = checkLevitateDirection(pos.x, pos.y, pos.z, dirIdx)
+  
+  if levType then
+    local newDir = dirIdx - 1
+    if turn then turn(newDir) end
+    castLev(levType)
+  end
+end)
+
+-- TRIGGER 3: Lightweight backup macro (100ms) for held keys
+-- Faster polling for continuous walking scenarios
+local heldDirKeys = {}
+local lastBackupCheck = 0
+
+onKeyDown(function(keys)
+  local dir = KEY_TO_DIR[keys]
+  if dir then heldDirKeys[dir] = true end
+end)
+
+onKeyUp(function(keys)
+  local dir = KEY_TO_DIR[keys]
+  if dir then heldDirKeys[dir] = false end
+end)
+
+macro(100, function()
+  if not autoLevitateEnabled then return end
+  if (now - lastLevCast) < LEV_CD then return end
+  if (now - lastBackupCheck) < 90 then return end
+  lastBackupCheck = now
+  
+  -- Only check if a direction key is held
+  local anyHeld = false
+  for _, v in pairs(heldDirKeys) do
+    if v then anyHeld = true break end
+  end
+  if not anyHeld then return end
+  
+  local p = player
+  if not p then return end
   
   local pos = p:getPosition()
   if not pos then return end
   
-  local px, py, pz = pos.x, pos.y, pos.z
+  if mana() < MIN_MANA then return end
   
-  -- Detect if player moved this tick
-  local justMoved = (px ~= lastPx or py ~= lastPy)
-  lastPx, lastPy = px, py
-  
-  -- PRIORITY 1: Check all directions for held key (works when trapped/stopped)
+  -- Check all held directions with direct check
   for dirIdx = 1, 8 do
     if heldDirKeys[dirIdx] then
-      local d = DIRS[dirIdx]
-      local levType = getLevType(px, py, pz, d.dx, d.dy)
+      local levType = checkLevitateDirection(pos.x, pos.y, pos.z, dirIdx)
       if levType then
-        -- Turn player to face the direction before casting
-        local newDir = dirIdx - 1  -- Convert back to 0-7
+        local newDir = dirIdx - 1
         if turn then turn(newDir) end
-        castLev(levType)
-        return
-      end
-    end
-  end
-  
-  -- PRIORITY 2: If moving, also auto-levitate in facing direction
-  if justMoved then
-    local playerDir = p:getDirection()
-    local facingIdx = DIR_TO_IDX[playerDir] or 1
-    local fd = DIRS[facingIdx]
-    if fd then
-      local levType = getLevType(px, py, pz, fd.dx, fd.dy)
-      if levType then
         castLev(levType)
         return
       end
@@ -272,7 +370,10 @@ macro(2, function()
   end
 end)
 
--- Single UI Toggle for Auto Levitate
+-- ═══════════════════════════════════════════════════════════════════════════
+-- UI TOGGLE
+-- ═══════════════════════════════════════════════════════════════════════════
+
 local autoLevitateUI = setupUI([[
 Panel
   height: 19
@@ -284,7 +385,7 @@ Panel
     anchors.right: parent.right
     text-align: center
     !text: tr('Auto Levitate')
-    tooltip: Automatically casts levitate when moving into walls or when pressing direction keys toward walls
+    tooltip: Event-driven auto-levitate: triggers on movement and key presses for instant response
 ]])
 
 autoLevitateUI.autoLevitateToggle.onClick = function(widget)
@@ -297,6 +398,181 @@ end
 if BotDB.get("macros.autoLevitate") == true then
   autoLevitateEnabled = true
   autoLevitateUI.autoLevitateToggle:setOn(true)
+end
+
+-- Ensure a default depth value exists (number of extra Z levels to consider for UP; default=1)
+if BotDB.get("macros.autoLevitateDepth") == nil then
+  BotDB.set("macros.autoLevitateDepth", 1)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- DISPLAY INVISIBILITY - Event-Driven (EventBus)
+-- Shows invisible creatures (like Warlocks) by forcing their outfit to be visible
+-- Uses creature:isInvisible() to detect invisibility (outfit category Effect + auxId 13)
+-- Performance: Only triggers on creature appear/outfit change events, no polling
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local displayInvisibilityEnabled = false
+
+-- Cache of creatures we've modified (to restore later if feature is disabled)
+local revealedCreatures = {}  -- id -> {originalOutfit = Outfit, creature = CreaturePtr}
+
+-- Reveal a single invisible creature by showing it with a ghost-like effect
+local function revealInvisibleCreature(creature)
+  if not creature then return end
+  if not creature.isInvisible or not creature:isInvisible() then return end
+  if creature:isLocalPlayer() then return end  -- Don't mess with local player
+  
+  local id = creature:getId()
+  if revealedCreatures[id] then return end  -- Already revealed
+  
+  -- Store reference and mark as revealed
+  revealedCreatures[id] = {
+    creature = creature,
+    revealed = true
+  }
+  
+  -- Show the creature (unhide it) - this makes it render even when invisible
+  if creature.show then
+    creature:show()
+  end
+  
+  -- Add a visual indicator (static square) so player knows it's invisible
+  if creature.showStaticSquare then
+    creature:showStaticSquare(Color(128, 0, 255, 180))  -- Purple tint for invisible
+  end
+end
+
+-- Hide/restore a creature we previously revealed
+local function unreveaCreature(creature)
+  if not creature then return end
+  local id = creature:getId()
+  local data = revealedCreatures[id]
+  if not data then return end
+  
+  -- Remove our visual indicator
+  if creature.hideStaticSquare then
+    creature:hideStaticSquare()
+  end
+  
+  revealedCreatures[id] = nil
+end
+
+-- Scan all visible creatures and reveal invisible ones
+local function scanAndRevealInvisible()
+  if not displayInvisibilityEnabled then return end
+  
+  local spectators = getSpectators and getSpectators() or {}
+  for _, creature in ipairs(spectators) do
+    if creature and creature.isInvisible and creature:isInvisible() then
+      revealInvisibleCreature(creature)
+    end
+  end
+end
+
+-- Unreval all creatures when feature is disabled
+local function unrevealAll()
+  for id, data in pairs(revealedCreatures) do
+    if data.creature then
+      unreveaCreature(data.creature)
+    end
+  end
+  revealedCreatures = {}
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EVENT-DRIVEN TRIGGERS (EventBus)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+if EventBus then
+  -- When a monster appears, check if it's invisible
+  EventBus.on("monster:appear", function(creature)
+    if not displayInvisibilityEnabled then return end
+    if creature and creature.isInvisible and creature:isInvisible() then
+      revealInvisibleCreature(creature)
+    end
+  end, 90)
+  
+  -- When a monster disappears, clean up our tracking
+  EventBus.on("monster:disappear", function(creature)
+    if creature then
+      local id = creature:getId()
+      revealedCreatures[id] = nil
+    end
+  end, 50)
+end
+
+-- Also hook into creature outfit changes via onCreatureOutfitChange if available
+if onCreatureOutfitChange then
+  onCreatureOutfitChange(function(creature, newOutfit, oldOutfit)
+    if not displayInvisibilityEnabled then return end
+    if not creature then return end
+    
+    -- Check if creature just became invisible
+    if newOutfit and newOutfit.category == ThingCategoryEffect and newOutfit.auxId == 13 then
+      revealInvisibleCreature(creature)
+    else
+      -- Creature is no longer invisible, unreval if we were tracking
+      unreveaCreature(creature)
+    end
+  end)
+end
+
+-- Backup: Light macro to catch any missed creatures (runs every 2 seconds, very low overhead)
+macro(2000, function()
+  if not displayInvisibilityEnabled then return end
+  
+  -- Clean up dead references
+  for id, data in pairs(revealedCreatures) do
+    if not data.creature or (data.creature.isRemoved and data.creature:isRemoved()) then
+      revealedCreatures[id] = nil
+    end
+  end
+  
+  -- Scan for any new invisible creatures we might have missed
+  scanAndRevealInvisible()
+end)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- UI TOGGLE
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local displayInvisUI = setupUI([[
+Panel
+  height: 19
+
+  BotSwitch
+    id: displayInvisToggle
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    !text: tr('Display Invisibility')
+    tooltip: Reveals invisible creatures (like Warlocks) with a purple indicator.
+]])
+
+displayInvisUI.displayInvisToggle.onClick = function(widget)
+  displayInvisibilityEnabled = not displayInvisibilityEnabled
+  widget:setOn(displayInvisibilityEnabled)
+  BotDB.set("macros.displayInvisibility", displayInvisibilityEnabled)
+  
+  if displayInvisibilityEnabled then
+    -- Scan existing creatures
+    scanAndRevealInvisible()
+  else
+    -- Unreval all when disabled
+    unrevealAll()
+  end
+end
+
+-- Restore state on load
+if BotDB.get("macros.displayInvisibility") == true then
+  displayInvisibilityEnabled = true
+  displayInvisUI.displayInvisToggle:setOn(true)
+  -- Initial scan after a short delay to let creatures load
+  schedule(500, function()
+    scanAndRevealInvisible()
+  end)
 end
 
 -- Auto haste ---------------------------------------------------------------
