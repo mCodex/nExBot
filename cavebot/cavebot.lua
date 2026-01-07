@@ -335,6 +335,20 @@ end
   3. Track last action to avoid redundant recalculations
   4. Only execute when there's actual work to do
 ]]
+
+-- Initialize WaypointState globally BEFORE any code references it
+-- This prevents "attempt to index global 'WaypointState' (a nil value)" errors
+WaypointState = WaypointState or {
+  state = "IDLE",
+  delayUntil = 0,
+  MAX_DELAY = 5000,
+  WALK_TIMEOUT = 10000,
+  walkStartTime = 0,
+  targetPos = nil,
+  lastPos = nil,
+  lastMoveTime = 0
+}
+
 local walkState = {
   isWalkingToWaypoint = false,  -- Currently walking to a waypoint
   targetPos = nil,              -- Target position we're walking to
@@ -640,9 +654,23 @@ end
 -- STATE MACHINE (NORMAL -> STUCK -> RECOVERING -> STOPPED)
 -- ============================================================================
 
-local function transitionTo(newState)
+local function transitionTo(newState, data)
+  -- Keep engine state authoritative
   local oldState = WaypointEngine.state
   WaypointEngine.state = newState
+  -- Sync legacy WaypointState for backward compatibility
+  if not WaypointState then
+    WaypointState = {}
+  end
+  WaypointState.state = newState
+  if newState == "WALKING" then
+    WaypointState.walkStartTime = now
+    WaypointState.targetPos = data and data.pos or nil
+    WaypointState.lastPos = WaypointState.lastPos or pos()
+  elseif newState == "IDLE" or newState == "NORMAL" then
+    WaypointState.walkStartTime = 0
+    WaypointState.targetPos = nil
+  end
   
   if newState == "STUCK" then
     WaypointEngine.stuckStartTime = now
@@ -700,7 +728,7 @@ CaveBot.onFloorChanged = function(fromFloor, toFloor)
         ui.list:focusChild(nextChild)
         print(string.format('[CaveBot] Floor oscillation detected (%d <-> %d). Advancing waypoint index from %d to %d and snoozing waypoint for %dms.', fromFloor, toFloor, idx, nextIdx, snoozeDur))
         -- reset walking and waypoint engine state to avoid immediate re-trigger
-        CaveBot.resetWalking()
+        if CaveBot.resetWalking then CaveBot.resetWalking() end
         resetWaypointEngine()
       end
     end
@@ -1109,11 +1137,11 @@ cavebotMacro = macro(150, function()
       if wasIntended then
         -- Intended floor change - just reset walking, don't search for waypoints
         -- The cavebot will naturally advance to the next waypoint in the list
-        CaveBot.resetWalking()
+        if CaveBot.resetWalking then CaveBot.resetWalking() end
         -- Do NOT call resetWaypointEngine or findNearestGlobalWaypoint!
       else
         -- Unintended floor change - do the full reset and recovery
-        CaveBot.resetWalking()
+        if CaveBot.resetWalking then CaveBot.resetWalking() end
         resetWaypointEngine()
         if resetStartupCheck then resetStartupCheck() end
         if findNearestGlobalWaypoint then
@@ -1293,7 +1321,7 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
   -- Use full reset on config change to clear all floor change tracking
   if CaveBot.fullResetWalking then
     CaveBot.fullResetWalking()
-  else
+  elseif CaveBot.resetWalking then
     CaveBot.resetWalking()
   end
   -- Clear all floor change tracking including history
