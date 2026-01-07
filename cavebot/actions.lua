@@ -32,7 +32,7 @@ end
 local lastMoved = now - 200
 onTextMessage(function(mode, text)
   if text ~= 'There is not enough room.' then return end
-  if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
+  if CaveBot.isOff() then return end
 
   local playerPos = pos()
   local tiles = getNearTiles(playerPos)
@@ -126,15 +126,13 @@ local function pathfinder()
   if not storage.extras.pathfinding then return end
   if noPath < 10 then return end
 
-  if not CaveBot or not CaveBot.gotoNextWaypointInRange or not CaveBot.gotoNextWaypointInRange() then
+  if not CaveBot.gotoNextWaypointInRange() then
     if getConfigFromName and getConfigFromName() then
-      local profile = CaveBot and CaveBot.getCurrentProfile and CaveBot.getCurrentProfile() or nil
+      local profile = CaveBot.getCurrentProfile()
       local config = getConfigFromName()
       local newProfile = profile == '#Unibase' and config or '#Unibase'
       
-      if CaveBot and CaveBot.setCurrentProfile then
-        CaveBot.setCurrentProfile(newProfile)
-      end
+      CaveBot.setCurrentProfile(newProfile)
     end
   end
   noPath = 0
@@ -152,7 +150,6 @@ CaveBot.addAction = function(action, value, focus)
     value = tostring(value)
   end
   local widget = UI.createWidget("CaveBotAction", CaveBot.actionList)
-  if not widget then return end
   widget:setText(action .. ":" .. value:split("\n")[1])
   widget.action = action
   widget.value = value
@@ -258,7 +255,7 @@ CaveBot.registerAction("delay", "#AAAAAA", function(value, retries, prev)
 end)
 
 CaveBot.registerAction("follow", "#FF8400", function(value, retries, prev)
-  local c = SafeCall.getCreatureByName(value)
+  local c = getCreatureByName(value)
   if not c then
     print("CaveBot[follow]: can't find creature to follow")
     return false
@@ -269,7 +266,7 @@ CaveBot.registerAction("follow", "#FF8400", function(value, retries, prev)
     g_game.cancelFollow()
     return true
   else
-    SafeCall.global("follow", c)
+    follow(c)
     delay(200)
     return "retry"
   end
@@ -324,39 +321,6 @@ local DIR_OFFSET = {
   [7] = { x = -1, y = -1 }   -- NorthWest
 }
 
--- Check for monsters within radius around a position (optimized)
--- Uses early exits and avoids redundant tile lookups
-local function hasMonstersInRadius(centerPos, radius)
-  if not centerPos or not radius then return false end
-  local z = centerPos.z
-  local cx, cy = centerPos.x, centerPos.y
-  
-  -- Spiral search from center for faster discovery
-  for r = 0, radius do
-    for dx = -r, r do
-      for dy = -r, r do
-        -- Only check tiles on the ring (spiral pattern)
-        if r == 0 or math.abs(dx) == r or math.abs(dy) == r then
-          local tile = g_map.getTile({x = cx + dx, y = cy + dy, z = z})
-          if tile and tile:hasCreature() then
-            local creatures = tile:getCreatures()
-            for i = 1, #creatures do
-              local c = creatures[i]
-              if c and c:isMonster() then
-                local hp = c:getHealthPercent()
-                if not hp or hp > 0 then
-                  return true
-                end
-              end
-            end
-          end
-        end
-      end
-    end
-  end
-  return false
-end
-
 -- Check if path is blocked by attackable monster
 local function getBlockingMonster(playerPos, destPos, maxDist)
   -- Only check if we're close to destination
@@ -399,276 +363,18 @@ local function getBlockingMonster(playerPos, destPos, maxDist)
   return nil
 end
 
--- ============================================================================
--- EVENT-DRIVEN MONSTER TRACKING (Fast screen monster detection via EventBus)
--- ============================================================================
--- Tracks monsters on screen in real-time via events instead of polling tiles.
--- Provides O(1) check for "are there monsters on screen?" and emits events
--- when the screen is cleared, allowing instant waypoint progression.
-
-local screenMonsters = {}  -- Set of monster IDs currently on screen
-local screenMonsterCount = 0
-local lastScreenClearTime = 0
-local lastMonsterValidation = 0  -- Last time we validated monster list
-local VALIDATION_INTERVAL = 2000  -- Validate every 2 seconds to prevent desync
-
--- Fast O(1) check: are there any alive monsters on screen?
-local function hasScreenMonsters()
-  return screenMonsterCount > 0
-end
-
--- Get count of monsters on screen
-local function getScreenMonsterCount()
-  return screenMonsterCount
-end
-
--- Check if a creature is a valid alive monster
-local function isAliveMonster(creature)
-  if not creature then return false end
-  if not creature:isMonster() then return false end
-  local hp = creature:getHealthPercent()
-  return not hp or hp > 0
-end
-
--- Add monster to tracking
-local function trackMonster(creature)
-  if not creature then return end
-  local id = creature:getId()
-  if id and not screenMonsters[id] then
-    screenMonsters[id] = true
-    screenMonsterCount = screenMonsterCount + 1
-  end
-end
-
--- Remove monster from tracking (died or left screen)
-local function untrackMonster(creature)
-  if not creature then return end
-  local id = creature:getId()
-  if id and screenMonsters[id] then
-    screenMonsters[id] = nil
-    screenMonsterCount = screenMonsterCount - 1
-    
-    -- Emit event when screen is cleared of monsters
-    if screenMonsterCount <= 0 then
-      screenMonsterCount = 0  -- Safety clamp
-      lastScreenClearTime = now or os.clock() * 1000
-      if EventBus then
-        pcall(function() EventBus.emit("cavebot/screen_cleared") end)
-      end
-    end
-  end
-end
-
--- Rebuild monster list (called on floor change or login)
-local function rebuildMonsterTracking()
-  screenMonsters = {}
-  screenMonsterCount = 0
-  
-  local playerPos = player and player:getPosition()
-  if not playerPos then return end
-  
-  -- Scan visible tiles for monsters
-  local specs = g_map.getSpectators(playerPos, false)
-  if specs then
-    for _, creature in ipairs(specs) do
-      if isAliveMonster(creature) then
-        trackMonster(creature)
-      end
-    end
-  end
-  lastMonsterValidation = now or (os.clock() * 1000)
-end
-
--- Validate monster tracking against actual state (fixes desync issues)
-local function validateMonsterTracking()
-  local currentTime = now or (os.clock() * 1000)
-  if (currentTime - lastMonsterValidation) < VALIDATION_INTERVAL then
-    return  -- Not time to validate yet
-  end
-  lastMonsterValidation = currentTime
-  
-  local playerPos = player and player:getPosition()
-  if not playerPos then return end
-  
-  -- Get actual monsters on screen
-  local actualMonsters = {}
-  local actualCount = 0
-  local specs = g_map.getSpectators(playerPos, false)
-  if specs then
-    for _, creature in ipairs(specs) do
-      if isAliveMonster(creature) then
-        local id = creature:getId()
-        if id then
-          actualMonsters[id] = true
-          actualCount = actualCount + 1
-        end
-      end
-    end
-  end
-  
-  -- Check for desync: if our count differs significantly, rebuild
-  if math.abs(screenMonsterCount - actualCount) > 0 then
-    screenMonsters = actualMonsters
-    screenMonsterCount = actualCount
-    
-    -- Emit clear event if we just discovered there are no monsters
-    if actualCount == 0 and storage.cavebotScreenCleared ~= true then
-      if EventBus then
-        pcall(function() EventBus.emit("cavebot/screen_cleared") end)
-      end
-    end
-  end
-end
-
--- Quick ground-truth check: actually scan for monsters (used as fallback)
-local function hasActualMonstersOnScreen()
-  local playerPos = player and player:getPosition()
-  if not playerPos then return false end
-  
-  local specs = g_map.getSpectators(playerPos, false)
-  if specs then
-    for _, creature in ipairs(specs) do
-      if isAliveMonster(creature) then
-        return true
-      end
-    end
-  end
-  return false
-end
-
--- Register EventBus handlers for monster tracking
-if EventBus then
-  -- Monster appeared on screen
-  EventBus.on("monster:appear", function(creature)
-    if isAliveMonster(creature) then
-      trackMonster(creature)
-    end
-  end, 15)  -- Priority 15 (run before other handlers)
-  
-  -- Monster left screen or died
-  EventBus.on("monster:disappear", function(creature)
-    untrackMonster(creature)
-  end, 15)
-  
-  -- Monster health changed (check if died)
-  EventBus.on("monster:health", function(creature, percent)
-    if percent and percent <= 0 then
-      untrackMonster(creature)
-    end
-  end, 15)
-  
-  -- Player moved to new floor - rebuild tracking
-  EventBus.on("player:move", function(newPos, oldPos)
-    if oldPos and newPos and oldPos.z ~= newPos.z then
-      -- Floor changed, rebuild monster list
-      schedule(100, rebuildMonsterTracking)
-    end
-  end, 15)
-  
-  -- Combat state tracking (existing)
-  EventBus.on("targetbot/combat_start", function(creature, payload)
-    storage.targetbotCombatActive = true
-  end, 20)
-
-  EventBus.on("targetbot/combat_end", function()
-    storage.targetbotCombatActive = false
-  end, 20)
-
-  EventBus.on("targetbot/emergency", function(hpPercent)
-    storage.targetbotEmergency = true
-  end, 20)
-
-  EventBus.on("targetbot/emergency_cleared", function(hpPercent)
-    storage.targetbotEmergency = false
-  end, 20)
-  
-  -- Screen cleared - can be used by other modules
-  EventBus.on("cavebot/screen_cleared", function()
-    -- Signal that CaveBot can proceed to next waypoint immediately
-    storage.cavebotScreenCleared = true
-  end, 20)
-end
-
--- Initialize monster tracking on load
-schedule(500, rebuildMonsterTracking)
-
--- ============================================================================
--- EVENT-DRIVEN WAYPOINT ARRIVAL DETECTION
--- ============================================================================
--- Tracks the current target waypoint and instantly detects arrival via player:move event.
--- This eliminates polling delay and makes waypoint progression instant.
-
-local waypointTarget = {
-  pos = nil,        -- Target position {x, y, z}
-  precision = 1,    -- Precision for arrival check
-  value = nil,      -- Waypoint value string (for matching)
-  arrived = false   -- Flag: have we arrived?
-}
-
--- Set the current waypoint target (called when processing a goto action)
-local function setWaypointTarget(pos, precision, value)
-  waypointTarget.pos = pos
-  waypointTarget.precision = precision or 1
-  waypointTarget.value = value
-  waypointTarget.arrived = false
-end
-
--- Check if player is at the target waypoint
-local function checkWaypointArrival(playerPos)
-  if not waypointTarget.pos or not playerPos then return false end
-  if playerPos.z ~= waypointTarget.pos.z then return false end
-  
-  local distX = math.abs(playerPos.x - waypointTarget.pos.x)
-  local distY = math.abs(playerPos.y - waypointTarget.pos.y)
-  local precision = waypointTarget.precision or 1
-  
-  return distX <= precision and distY <= precision
-end
-
--- Clear waypoint target (called when waypoint is completed)
-local function clearWaypointTarget()
-  waypointTarget.pos = nil
-  waypointTarget.value = nil
-  waypointTarget.arrived = false
-end
-
--- Register player move event for instant waypoint arrival detection
-if EventBus then
-  EventBus.on("player:move", function(newPos, oldPos)
-    -- Check if we arrived at target waypoint
-    if waypointTarget.pos and checkWaypointArrival(newPos) then
-      waypointTarget.arrived = true
-      -- Emit event for other modules
-      pcall(function() EventBus.emit("cavebot/waypoint_arrived", waypointTarget.pos, waypointTarget.value) end)
-    end
-  end, 10)  -- High priority (10) to run before other handlers
-end
-
--- State tracking for non-blocking waits
-local gotoWaitState = {
-  monsterWaitStart = 0,
-  blockerWaitStart = 0,
-  lastWaypointValue = nil
-}
-
--- Maximum wait times (minimal for fast progression)
-local MONSTER_WAIT_MAX = 2  -- 2 seconds max waiting for monsters
-local BLOCKER_WAIT_MAX = 3  -- 3 seconds max waiting for blocker
-
 CaveBot.registerAction("goto", "green", function(value, retries, prev)
-  -- ========== EARLY EXITS ==========
+  -- ========== EARLY EXITS (no pathfinding) ==========
   
-  -- Reset wait states when waypoint changes
-  if gotoWaitState.lastWaypointValue ~= value then
-    gotoWaitState.monsterWaitStart = 0
-    gotoWaitState.blockerWaitStart = 0
-    gotoWaitState.lastWaypointValue = value
-    waypointTarget.arrived = false
-  end
-  
-  -- Skip if walking (let walk complete)
+  -- Skip if actively walking (but don't delay - just retry next tick)
   if player and player:isWalking() then
-    return "retry"
+    -- Check if we've already arrived via EventBus
+    if CaveBot.hasArrivedAtWaypoint and CaveBot.hasArrivedAtWaypoint() then
+      CaveBot.clearWaypointTarget()
+      noPath = 0
+      return true
+    end
+    return "retry"  -- Quick retry, no delay
   end
 
   -- Parse position
@@ -686,84 +392,143 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   local precision = tonumber(posMatch[1][5]) or 1
   local playerPos = player:getPosition()
   
+  -- EARLY CHECK: Was this exact floor-change waypoint just completed?
+  -- This is the most reliable way to prevent re-executing a waypoint we just used
+  if CaveBot.wasFloorChangeWaypointCompleted and CaveBot.wasFloorChangeWaypointCompleted(destPos) then
+    -- This waypoint was already completed - skip it immediately
+    noPath = 0
+    return true
+  end
+  
   -- MULTI-FLOOR WAYPOINT HANDLING
-  -- If the waypoint is on a different Z level, this waypoint might be AFTER a floor change
-  -- We should skip to it (the floor change already happened) rather than fail
+  -- If the waypoint is on a different Z level, determine how to handle it
   if destPos.z ~= playerPos.z then
-    -- Calculate 2D distance to check if we're close (just changed floors via adjacent waypoint)
     local dist2D = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
     local floorDiff = math.abs(destPos.z - playerPos.z)
     
-    -- If we're very close in X/Y but different Z, we likely just changed floors
-    -- This happens when: ladder waypoint (z=7) -> next waypoint (z=6) and we're now on z=6
-    if dist2D <= 3 and floorDiff <= 2 then
-      -- We're close horizontally but on wrong floor - this waypoint was for a different floor
-      -- Advance to next waypoint (return true to move on)
+    -- CASE 1: Check if we just completed a floor change TO our current floor
+    local recentChange = CaveBot.getRecentFloorChange and CaveBot.getRecentFloorChange()
+    if recentChange and recentChange.toZ == playerPos.z then
+      -- We recently changed TO this floor
+      -- Skip any waypoint that is for a DIFFERENT floor (the one we left)
+      if dist2D <= 15 then  -- Increased range - be aggressive about skipping
+        noPath = 0
+        return true
+      end
+    end
+    
+    -- CASE 2: Check if we recently came FROM this floor
+    -- If the waypoint is on a floor we just LEFT, skip it
+    if recentChange and recentChange.fromZ == destPos.z then
+      -- This waypoint is for the floor we just left - definitely skip
+      if dist2D <= 15 then
+        noPath = 0
+        return true
+      end
+    end
+    
+    -- CASE 3: We're close horizontally but on different floor
+    -- This often happens after using a ladder - waypoint was for the OLD floor
+    if dist2D <= 8 and floorDiff <= 2 then
+      -- Close in X/Y, small floor difference - likely we just changed floors
+      -- Skip this waypoint meant for the other floor
       noPath = 0
       return true
     end
     
-    -- Otherwise, standard floor mismatch handling
+    -- CASE 4: Standard floor mismatch - we need to find a path to this floor
     noPath = noPath + 1
     pathfinder()
     return false
   end
 
-  -- Distance check
-  local maxDist = storage.extras.gotoMaxDistance or 50
+  -- Distance calculations
+  local distX = math.abs(destPos.x - playerPos.x)
+  local distY = math.abs(destPos.y - playerPos.y)
+  local maxDist = storage.extras.gotoMaxDistance or 50  -- Realistic pathfinding limit
+  
+  -- Too far
   if (distX + distY) > maxDist then
     noPath = noPath + 1
     pathfinder()
     return false
   end
-  
-  -- TargetBot emergency check
-  if storage.targetbotEmergency then
-    return "retry"
-  end
 
-  -- Check if destination is floor-change tile
+  -- Check if destination is floor-change tile (stairs, ladder, rope spot, hole)
+  -- When user explicitly adds such a waypoint, they INTEND to use it
   local minimapColor = g_map.getMinimapColor(destPos)
   local isFloorChange = (minimapColor >= 210 and minimapColor <= 213)
+  
+  -- Also check tile items for floor-change detection (minimap might miss some)
   if not isFloorChange and CaveBot.isFloorChangeTile then
     isFloorChange = CaveBot.isFloorChangeTile(destPos)
   end
   
   -- If destination is floor-change, use precision 0 and allow the floor change
   -- Also mark the intended floor change so we don't reset after using the ladder/stairs
+  local expectedFloorAfterChange = nil
   if isFloorChange then 
     precision = 0
     -- Determine expected floor after using this tile
     -- Going up: z decreases, Going down: z increases
-    -- Ladders/rope spots go up (z-1), stairs/holes can go either way
-    local expectedFloor = nil
+    -- Minimap colors: 210=ladder up, 211=rope up, 212=stairs down, 213=hole down
     if minimapColor == 210 or minimapColor == 211 then
-      expectedFloor = destPos.z - 1  -- Ladder/rope up
+      expectedFloorAfterChange = destPos.z - 1  -- Ladder/rope up
     elseif minimapColor == 212 or minimapColor == 213 then
-      expectedFloor = destPos.z + 1  -- Stairs/hole down
+      expectedFloorAfterChange = destPos.z + 1  -- Stairs/hole down
     else
-      -- Fallback: try to determine from tile
-      expectedFloor = destPos.z - 1  -- Assume up by default
+      -- Fallback: check tile for clues, default to up
+      expectedFloorAfterChange = destPos.z - 1
+    end
+    
+    -- LOOP PREVENTION: Check if this floor change would create a loop
+    if CaveBot.wouldFloorChangeLoop and CaveBot.wouldFloorChangeLoop(expectedFloorAfterChange) then
+      -- We would be going back to a floor we just left - likely a loop
+      -- Check cooldown before allowing
+      if CaveBot.canChangeFloor and not CaveBot.canChangeFloor() then
+        -- Still in cooldown - skip this floor change waypoint
+        noPath = 0
+        return true  -- Move to next waypoint
+      end
     end
     
     -- Get current waypoint index to track which waypoint initiated this
     local currentAction = ui and ui.list and ui.list:getFocusedChild()
     local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
     
+    -- CRITICAL: Set intended floor change BEFORE we start walking
+    -- This ensures the floor change is marked as intentional before it happens
     if CaveBot.setIntendedFloorChange then
-      CaveBot.setIntendedFloorChange(expectedFloor, waypointIdx)
+      CaveBot.setIntendedFloorChange(expectedFloorAfterChange, waypointIdx)
     end
   end
   
   -- Already at destination
   if distX <= precision and distY <= precision then
     noPath = 0
-    -- If this was a floor-change tile and we're standing on it, the floor change
-    -- should happen when we step on it or use it
+    CaveBot.clearWaypointTarget()  -- Clear target on arrival
+    -- If this was a floor-change tile and we're standing on it, wait for floor change
     if isFloorChange then
-      -- We reached the floor-change tile - wait briefly for the floor change to occur
-      -- The actual use/step will be handled by the walking system
-      CaveBot.delay(300)
+      -- Ensure intended floor change is set
+      if expectedFloorAfterChange and CaveBot.setIntendedFloorChange then
+        local currentAction = ui and ui.list and ui.list:getFocusedChild()
+        local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
+        CaveBot.setIntendedFloorChange(expectedFloorAfterChange, waypointIdx)
+      end
+      
+      -- Check if we've already changed floors (floor change completed)
+      if playerPos.z == expectedFloorAfterChange then
+        -- Floor change completed successfully!
+        -- Mark this waypoint as completed so we don't re-execute it
+        if CaveBot.markFloorChangeWaypointCompleted then
+          CaveBot.markFloorChangeWaypointCompleted(destPos)
+        end
+        noPath = 0
+        return true
+      end
+      
+      -- Still on the same floor - wait for floor change to occur
+      CaveBot.delay(50)  -- Minimal delay for fast floor-change response
       return "retry"
     end
     return true
@@ -777,10 +542,10 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false
   end
 
-  -- ========== WALKING ==========
+  -- ========== WALKING (single attempt per retry) ==========
   
-  -- Handle blocking monster (only after a few retries)
-  if retries > 3 then
+  -- Check for blocking monster first (only on retry > 2)
+  if retries > 2 then
     local blocker = getBlockingMonster(playerPos, destPos, maxDist)
     if blocker then
       local currentTarget = g_game.getAttackingCreature()
@@ -788,43 +553,39 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
         attack(blocker)
       end
       g_game.setChaseMode(1)
-      
-      -- Quick timeout for blocker
-      local clockNow = os.clock()
-      if gotoWaitState.blockerWaitStart == 0 then
-        gotoWaitState.blockerWaitStart = clockNow
-      end
-      
-      if (clockNow - gotoWaitState.blockerWaitStart) >= BLOCKER_WAIT_MAX then
-        gotoWaitState.blockerWaitStart = 0
-        -- Fall through to walk with ignoreCreatures
-      else
-        return "retry"
-      end
-    else
-      gotoWaitState.blockerWaitStart = 0
+      CaveBot.delay(100)  -- Reduced delay for faster recovery
+      return "retry"
     end
   end
   
-  -- Walk parameters
+  -- Attempt to walk
   local walkParams = {
     ignoreNonPathable = true,
     precision = precision,
-    allowFloorChange = isFloorChange
+    allowFloorChange = isFloorChange  -- Allow if user explicitly added floor-change waypoint
   }
   
-  -- Ignore creatures on high retries
+  -- Use creature ignoring on higher retries
   if retries > 5 then
     walkParams.ignoreCreatures = true
   end
   
-  -- Attempt to walk
   if CaveBot.walkTo(destPos, maxDist, walkParams) then
+    -- Set waypoint target for EventBus instant arrival detection
+    if CaveBot.setCurrentWaypointTarget then
+      CaveBot.setCurrentWaypointTarget(destPos, precision)
+    end
+    -- Mark that we're walking to this waypoint (reduces unnecessary re-execution)
     if CaveBot.setWalkingToWaypoint then
-      CaveBot.setWalkingToWaypoint(destPos, precision, value)
+      CaveBot.setWalkingToWaypoint(destPos)
     end
     noPath = 0
-    return "retry"
+    return "retry"  -- Continue checking for arrival
+  end
+  
+  -- Walk failed - clear walking state
+  if CaveBot.clearWalkingState then
+    CaveBot.clearWalkingState()
   end
   
   -- Walk failed
@@ -834,6 +595,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false
   end
   
+  CaveBot.delay(50)  -- Minimal delay for fast retry
   return "retry"
 end)
 

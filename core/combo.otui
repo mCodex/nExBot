@@ -388,4 +388,4 @@ ComboWindow < MainWindow
     anchors.top: closeButton.top
     margin-right: 10
     size: 45 21
-    @onClick: g_platform.openUrl("http://bot.otclient.ovh/books/scripts/page/combobot")
+    @onClick: g_platform.openUrl("https://github.com/mCodex/nExBot/blob/main/docs/ATTACKBOT.md#combos")

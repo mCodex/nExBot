@@ -86,10 +86,20 @@ PriorityEntry < ToolTipLabel
     size: 15 15
     margin-top: 2
     margin-left: 3 
+
+  Button
+    id: remove
+    anchors.right: parent.right
+    margin-right: 2
+    anchors.verticalCenter: parent.verticalCenter
+    size: 14 14
+    text: X
+    tooltip: Remove spell
+    visible: false
   
   Button
     id: increment
-    anchors.right: parent.right
+    anchors.right: remove.left
     margin-right: 2
     anchors.verticalCenter: parent.verticalCenter
     size: 14 14
@@ -222,7 +232,7 @@ Vocations < FlatPanel
       text: Sorcerers
 
 Priority < Panel
-  size: 190 123
+  size: 190 155
   padding: 6
   padding-top: 3
   image-source: /images/ui/window
@@ -241,9 +251,20 @@ Priority < Panel
     margin-top: 3
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.bottom: parent.bottom
+    anchors.bottom: addSpellButton.top
+    margin-bottom: 3
     fit-children: true
     padding-top: 1
+
+  Button
+    id: addSpellButton
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    height: 20
+    font: verdana-11px-rounded
+    text: + Add Custom Spell
+    tooltip: Add a new custom healing spell
 
 AddPlayer < FlatPanel
   padding: 5
@@ -319,7 +340,7 @@ PlayerList < Panel
     pixels-scroll: true
 
 CustomList < Panel
-  size: 190 172
+  size: 190 140
   padding: 6
   padding-top: 3
   image-source: /images/ui/window

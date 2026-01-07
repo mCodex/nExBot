@@ -1,89 +1,42 @@
 --[[
-  BotCore: Friend Healer Module v3.0
+  BotCore: Friend Healer v2.0 (Unified)
   
-  High-performance, event-driven friend healing system.
-  Fully integrated with EventBus and HealEngine.
+  High-performance friend healing system with hotkey-style potion/rune usage
+  and EventBus integration for instant reaction to health changes.
   
-  Design Principles:
-    - Event-Driven: Instant response via EventBus
-    - Lazy Config: Safe access even before init
-    - Priority-Based: Self-healing ALWAYS takes precedence
-    - DRY: Uses HealEngine for spell execution
-    - SOLID: Single responsibility, easy to extend
-    - High Accuracy: Validates targets, checks cooldowns
+  This is the DEFAULT and ONLY friend healer implementation.
+  Replaces the old friend_healer.lua with full hotkey-style support.
   
-  Priority Order (hardcoded for safety):
-    1. Self HP critical (<30%) - NEVER heal friends
-    2. Self HP low (<50%) - NEVER heal friends  
-    3. Friend HP critical (<30%) - Emergency friend heal
-    4. Self HP medium (<80%) - Prefer self-heal
-    5. Friend HP low (<50%) - Friend needs help
-    6. Normal operation - Heal whoever needs it most
+  Features:
+    - Hotkey-style potion usage on friends (works without open backpack)
+    - EventBus integration for instant health drop reactions
+    - Shared cooldown management with HealBot
+    - Priority-based healing (self > critical friend > normal friend)
+    - Support for healing runes (UH on friend)
+    - Mana potion on friends (for druids supporting mages)
     
-  v3.0 Changes:
-    - Removed _G references (nil in sandboxed environment)
-    - Added safe config getter with defaults
-    - Single EventBus registration with deduplication
-    - Improved target validation with pcall safety
-    - Real-time config sync with HealEngine
-    - Better party/guild/custom player detection
-    - Accurate HP threshold handling per-player
-    - Added debug logging
+  Design Principles:
+    - SRP: Single responsibility for each function
+    - DRY: Uses shared BotCore modules
+    - Event-Driven: Responds to friend health changes instantly
+    - Safety-First: Self-healing ALWAYS takes precedence
+    
+  Potion Types Supported:
+    - Ultimate Spirit Potion (on friends for emergency healing)
+    - Great Spirit Potion
+    - Mana potions (on friend mages)
+    - Healing runes (UH)
 ]]
 
-BotCore.FriendHealer = BotCore.FriendHealer or {}
-local FriendHealer = BotCore.FriendHealer
+-- Initialize as both FriendHealerEnhanced and FriendHealer for full compatibility
+BotCore.FriendHealerEnhanced = BotCore.FriendHealerEnhanced or {}
+local FriendHealerEnhanced = BotCore.FriendHealerEnhanced
+
+-- Also expose as BotCore.FriendHealer for backward compatibility with new_healer.lua
+BotCore.FriendHealer = BotCore.FriendHealerEnhanced
 
 -- Module version for debugging
-FriendHealer.VERSION = "3.0.0"
-
--- ============================================================================
--- LOGGING
--- ============================================================================
-
-local VERBOSE = false -- Set to true for debug output
-
-local function logDebug(msg)
-  if VERBOSE then warn("[FriendHealer] " .. msg) end
-end
-
-local function logWarn(msg)
-  warn("[FriendHealer] " .. msg)
-end
-
--- ============================================================================
--- LAZY MODULE LOADING
--- ============================================================================
-
--- Get HealEngine at runtime (lazy loading)
-local function getHealEngine()
-  if HealEngine then return HealEngine end
-  local ok, eng = pcall(function()
-    if storage and storage.botFolder then
-      return dofile(storage.botFolder .. "/core/heal_engine.lua")
-    end
-  end)
-  if ok and eng then 
-    HealEngine = eng
-    return eng 
-  end
-  return nil
-end
-
--- Get HealContext at runtime (lazy loading)
-local function getHealContext()
-  if HealContext then return HealContext end
-  local ok, ctx = pcall(function()
-    if storage and storage.botFolder then
-      return dofile(storage.botFolder .. "/core/heal_context.lua")
-    end
-  end)
-  if ok and ctx then 
-    HealContext = ctx
-    return ctx 
-  end
-  return nil
-end
+FriendHealerEnhanced.VERSION = "3.0.0"
 
 -- ============================================================================
 -- CONSTANTS
@@ -91,134 +44,248 @@ end
 
 local SELF_CRITICAL_HP = 30      -- Below this: NEVER heal friends
 local SELF_LOW_HP = 50           -- Below this: NEVER heal friends
-local SELF_MEDIUM_HP = 80        -- Below this: Prefer self-heal
 local FRIEND_CRITICAL_HP = 30    -- Friend emergency threshold
 local FRIEND_LOW_HP = 50         -- Friend needs urgent help
-local MAX_HEAL_RANGE = 7         -- Maximum range for sio spells
-local SCAN_INTERVAL_MS = 100     -- How often to scan for friends
 local HEAL_COOLDOWN_MS = 1000    -- Minimum time between heals
+local POTION_COOLDOWN_MS = 1000  -- Potion exhaustion
+local RUNE_COOLDOWN_MS = 1000    -- Rune exhaustion
+local SPELL_COOLDOWN_MS = 1000   -- Healing spell cooldown
+
+local SCAN_INTERVAL_MS = 100     -- How often to scan for friends
+
+-- Common potion IDs
+local POTION_IDS = {
+  ULTIMATE_SPIRIT = 8472,
+  GREAT_SPIRIT = 8473,
+  SUPREME_HEALTH = 26031,
+  ULTIMATE_HEALTH = 8483,
+  GREAT_HEALTH = 239,
+  GREAT_MANA = 238,
+  ULTIMATE_MANA = 26029,
+}
+
+-- Healing rune IDs
+local RUNE_IDS = {
+  ULTIMATE_HEALING = 3160,  -- UH rune
+  INTENSE_HEALING = 3152,   -- IH rune
+}
 
 -- ============================================================================
 -- PRIVATE STATE
 -- ============================================================================
 
 local _state = {
-  -- Configuration reference (set by init)
-  config = nil,
-  
-  -- Module enabled state
-  enabled = false,
-  
-  -- Cached friend list
+  -- Cached friend list { name = { creature, lastHp, lastUpdate, priority } }
   friends = {},
+  
+  -- Last action timestamps
+  lastHeal = 0,
+  lastPotion = 0,
+  lastRune = 0,
+  lastSpell = 0,
+  lastScan = 0,
   
   -- Best target from last scan
   bestTarget = nil,
   
-  -- Timing
-  lastScan = 0,
-  lastHeal = 0,
+  -- Configuration
+  config = nil,
   
-  -- EventBus registration tracking
-  eventBusRegistered = false
+  -- Event subscriptions
+  subscriptions = {},
+  
+  -- Enabled state (DEFAULT: true for hotkey-style friend healing)
+  enabled = true,
+  
+  -- Statistics
+  healCount = 0,
+  potionCount = 0,
+  runeCount = 0,
+  spellCount = 0
 }
 
 -- ============================================================================
--- SAFE CONFIG ACCESS
+-- COOLDOWN INTEGRATION
 -- ============================================================================
 
--- Safe config getter (returns defaults if config not ready)
-local function getConfig()
-  local cfg = _state.config
-  if not cfg then
-    return {
-      enabled = false,
-      customPlayers = {},
-      conditions = {
-        party = true,
-        guild = false,
-        friends = false,
-        botserver = false,
-        knights = true,
-        paladins = true,
-        druids = false,
-        sorcerers = false
-      },
-      settings = {
-        healAt = 80,
-        granSioAt = 40,
-        minPlayerHp = 80,
-        minPlayerMp = 50
-      },
-      useSio = true,
-      useGranSio = true
-    }
+-- Check if healing group cooldown is active (group 2)
+local function isHealingGroupOnCooldown()
+  if BotCore.Cooldown and BotCore.Cooldown.isHealingOnCooldown then
+    return BotCore.Cooldown.isHealingOnCooldown()
   end
-  return cfg
+  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
+    return modules.game_cooldown.isGroupCooldownIconActive(2)
+  end
+  return false
+end
+
+-- Check if potion exhaustion is active (group 6)
+local function isPotionOnCooldown()
+  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
+    return modules.game_cooldown.isGroupCooldownIconActive(6)
+  end
+  local currentTime = now or os.time() * 1000
+  return currentTime < _state.lastPotion + POTION_COOLDOWN_MS
+end
+
+-- Check if rune exhaustion is active
+local function isRuneOnCooldown()
+  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
+    return modules.game_cooldown.isGroupCooldownIconActive(6)
+  end
+  local currentTime = now or os.time() * 1000
+  return currentTime < _state.lastRune + RUNE_COOLDOWN_MS
+end
+
+-- Check if can use action with custom delay
+local function canUseAction(lastTime, delay)
+  local currentTime = now or os.time() * 1000
+  return currentTime >= lastTime + (delay or HEAL_COOLDOWN_MS)
+end
+
+-- Mark healing action used
+local function markHealingUsed()
+  local currentTime = now or os.time() * 1000
+  _state.lastHeal = currentTime
+  
+  -- Update BotCore cooldown if available
+  if BotCore.Cooldown and BotCore.Cooldown.markHealingUsed then
+    BotCore.Cooldown.markHealingUsed(SPELL_COOLDOWN_MS)
+  end
 end
 
 -- ============================================================================
--- PLAYER STATS HELPERS
+-- HOTKEY-STYLE ITEM USAGE
 -- ============================================================================
 
+-- Use potion on friend using hotkey-style API
+-- @param potionId: potion item ID
+-- @param friend: creature to heal
+-- @return boolean success
+local function usePotionOnFriend(potionId, friend)
+  if not potionId or not friend then return false end
+  if isPotionOnCooldown() then return false end
+  
+  -- Use BotCore.Items if available
+  if BotCore.Items and BotCore.Items.useOn then
+    local success = BotCore.Items.useOn(potionId, friend, 0)
+    if success then
+      _state.lastPotion = now or os.time() * 1000
+      _state.potionCount = _state.potionCount + 1
+      return true
+    end
+    return false
+  end
+  
+  -- Fallback: Direct implementation
+  if g_game.getClientVersion() >= 780 and g_game.useInventoryItemWith then
+    g_game.useInventoryItemWith(potionId, friend, 0)
+    _state.lastPotion = now or os.time() * 1000
+    _state.potionCount = _state.potionCount + 1
+    return true
+  end
+  
+  -- Legacy fallback
+  if g_game.findPlayerItem then
+    local item = g_game.findPlayerItem(potionId, 0)
+    if item then
+      g_game.useWith(item, friend, 0)
+      _state.lastPotion = now or os.time() * 1000
+      _state.potionCount = _state.potionCount + 1
+      return true
+    end
+  end
+  
+  return false
+end
+
+-- Use healing rune on friend using hotkey-style API
+-- @param runeId: rune item ID
+-- @param friend: creature to heal
+-- @return boolean success
+local function useRuneOnFriend(runeId, friend)
+  if not runeId or not friend then return false end
+  if isRuneOnCooldown() then return false end
+  
+  -- Use BotCore.Items if available
+  if BotCore.Items and BotCore.Items.useOn then
+    local success = BotCore.Items.useOn(runeId, friend, 0)
+    if success then
+      _state.lastRune = now or os.time() * 1000
+      _state.runeCount = _state.runeCount + 1
+      return true
+    end
+    return false
+  end
+  
+  -- Fallback: Direct implementation
+  if g_game.getClientVersion() >= 780 and g_game.useInventoryItemWith then
+    g_game.useInventoryItemWith(runeId, friend, 0)
+    _state.lastRune = now or os.time() * 1000
+    _state.runeCount = _state.runeCount + 1
+    return true
+  end
+  
+  return false
+end
+
+-- Cast healing spell on friend
+-- @param spellName: spell name (e.g., "exura sio")
+-- @param friendName: friend's name
+-- @param manaCost: mana cost of spell
+-- @return boolean success
+local function castHealSpellOnFriend(spellName, friendName, manaCost)
+  if not spellName or not friendName then return false end
+  if isHealingGroupOnCooldown() then return false end
+  
+  -- Check mana
+  manaCost = manaCost or 0
+  local currentMana = mana and mana() or (player and player:getMana() or 0)
+  if currentMana < manaCost then return false end
+  
+  -- Cast the spell
+  local fullSpell = string.format('%s "%s"', spellName, friendName)
+  if say then
+    say(fullSpell)
+    _state.lastSpell = now or os.time() * 1000
+    _state.spellCount = _state.spellCount + 1
+    markHealingUsed()
+    
+    -- Track for analytics
+    if HuntAnalytics and HuntAnalytics.trackHealSpell then
+      HuntAnalytics.trackHealSpell(fullSpell, manaCost)
+    end
+    
+    return true
+  end
+  
+  return false
+end
+
+-- ============================================================================
+-- PURE FUNCTIONS: Targeting
+-- ============================================================================
+
+-- Get self HP percent
 local function getSelfHpPercent()
+  if hppercent then return hppercent() end
   if BotCore.Stats and BotCore.Stats.getHpPercent then
     return BotCore.Stats.getHpPercent()
   end
-  if hppercent then return hppercent() end
-  if player then
-    local ok, hp, maxHp = pcall(function() 
-      return player:getHealth(), player:getMaxHealth() 
-    end)
-    if ok and maxHp and maxHp > 0 then return (hp / maxHp) * 100 end
-  end
   return 100
 end
 
+-- Get self mana percent
 local function getSelfMpPercent()
+  if manapercent then return manapercent() end
   if BotCore.Stats and BotCore.Stats.getMpPercent then
     return BotCore.Stats.getMpPercent()
   end
-  if manapercent then return manapercent() end
-  if player then
-    local ok, mp, maxMp = pcall(function()
-      return player:getMana(), player:getMaxMana()
-    end)
-    if ok and maxMp and maxMp > 0 then return (mp / maxMp) * 100 end
-  end
   return 100
 end
 
-local function getCurrentMana()
-  if mana then return mana() end
-  if player and player.getMana then 
-    local ok, m = pcall(function() return player:getMana() end)
-    if ok then return m end
-  end
-  return 0
-end
-
--- ============================================================================
--- PURE FUNCTIONS: Health Calculations
--- ============================================================================
-
--- Calculate heal urgency score (0-100, higher = more urgent)
-local function calculateUrgency(hpPercent, distanceFromPlayer)
-  if not hpPercent or hpPercent >= 100 then return 0 end
-  
-  -- Base urgency: inverse of HP (100 - HP)
-  local urgency = 100 - hpPercent
-  
-  -- Distance penalty: further = less urgent
-  local distancePenalty = (distanceFromPlayer or 0) * 2
-  urgency = urgency - distancePenalty
-  
-  return math.max(0, math.min(100, urgency))
-end
-
--- Determine if we should heal friend over self
--- Pure function: returns decision based on both health states
-local function shouldHealFriend(selfHpPercent, friendHpPercent, friendUrgency)
+-- Check if we should heal friend (safety first)
+local function shouldHealFriend(selfHpPercent, friendHpPercent)
   -- RULE 1: Self is critical - NEVER heal friends
   if selfHpPercent < SELF_CRITICAL_HP then
     return false, "self_critical"
@@ -229,140 +296,82 @@ local function shouldHealFriend(selfHpPercent, friendHpPercent, friendUrgency)
     return false, "self_low"
   end
   
-  -- RULE 3: Friend is critical - ALWAYS help (if self is ok)
+  -- RULE 3: Friend is critical - ALWAYS help
   if friendHpPercent < FRIEND_CRITICAL_HP then
     return true, "friend_critical"
   end
   
-  -- RULE 4: Self is medium - Prefer self (but not mandatory)
-  if selfHpPercent < SELF_MEDIUM_HP then
-    return false, "self_medium"
-  end
-  
-  -- RULE 5: Friend is low - Help them
+  -- RULE 4: Friend is low - Help them
   if friendHpPercent < FRIEND_LOW_HP then
     return true, "friend_low"
   end
   
-  -- RULE 6: Both are fine - Heal based on urgency
-  return friendUrgency > 30, "normal"
+  return true, "normal"
 end
 
--- ============================================================================
--- CREATURE VALIDATION (with pcall safety)
--- ============================================================================
-
--- Get creature name safely
-local function getCreatureName(creature)
-  if not creature then return nil end
-  local ok, name = pcall(function() return creature:getName() end)
-  if ok and name and name ~= "" then return name end
-  return nil
-end
-
--- Get creature HP safely
-local function getCreatureHp(creature)
-  if not creature then return 100 end
-  local ok, hp = pcall(function() return creature:getHealthPercent() end)
-  if ok and hp then return hp end
-  return 100
-end
-
--- Get creature position safely
-local function getCreaturePos(creature)
-  if not creature then return nil end
-  local ok, pos = pcall(function() return creature:getPosition() end)
-  if ok and pos then return pos end
-  return nil
-end
-
--- Calculate distance from player to position
-local function getDistanceToPlayer(pos)
-  if not pos then return 99 end
-  if distanceFromPlayer then
-    local ok, dist = pcall(distanceFromPlayer, pos)
-    if ok and dist then return dist end
-  end
-  -- Fallback: manual calculation
-  if player then
-    local ok, playerPos = pcall(function() return player:getPosition() end)
-    if ok and playerPos then
-      local dx = math.abs(pos.x - playerPos.x)
-      local dy = math.abs(pos.y - playerPos.y)
-      return math.max(dx, dy)
-    end
-  end
-  return 99
-end
-
--- Check if creature can be shot (line of sight)
-local function canShootCreature(creature)
-  if not creature then return false end
-  local ok, canShoot = pcall(function() return creature:canShoot() end)
-  if ok then return canShoot end
-  return true -- Assume yes if we can't check
-end
-
--- Check if creature is a valid heal candidate
-local function isValidCreature(creature)
-  if not creature then return false end
-  local ok, isPlayer = pcall(function() return creature:isPlayer() end)
-  if not ok or not isPlayer then return false end
-  local ok2, isLocal = pcall(function() return creature:isLocalPlayer() end)
-  if ok2 and isLocal then return false end
-  return true
-end
-
--- ============================================================================
--- CONDITION MATCHING (with pcall safety)
--- ============================================================================
-
--- Check if creature matches configured conditions
-local function matchesConditions(creature, config)
-  if not isValidCreature(creature) then return false end
+-- Check if creature matches friend conditions
+local function isFriend(creature, config)
+  if not creature or not creature:isPlayer() then return false end
+  if creature:isLocalPlayer() then return false end
   
   local name = getCreatureName(creature)
   if not name then return false end
   
-  -- Check custom player list first (highest priority)
+  -- Check custom player list first (with custom HP threshold)
   if config.customPlayers and config.customPlayers[name] then
-    logDebug("matchesConditions: " .. name .. " is in custom list")
+    return true, config.customPlayers[name]  -- Returns custom HP threshold
+  end
+  
+  -- ========== Vocation filtering ==========
+  -- Get creature's vocation (if available via outfit or other means)
+  local voc = nil
+  if creature.getVocation then voc = creature:getVocation() end
+  
+  local vocConditions = config.conditions or {}
+  local function checkVocation()
+    -- If no vocation data available, allow all (fallback)
+    if not voc then return true end
+    
+    local vocLower = type(voc) == "string" and voc:lower() or ""
+    
+    -- Check enabled vocations
+    if vocConditions.knights and (voc == 8 or vocLower:find("knight")) then return true end
+    if vocConditions.paladins and (voc == 7 or vocLower:find("paladin")) then return true end
+    if vocConditions.druids and (voc == 6 or vocLower:find("druid")) then return true end
+    if vocConditions.sorcerers and (voc == 5 or vocLower:find("sorcerer")) then return true end
+    
+    -- If any vocation filter is enabled but doesn't match, reject
+    if vocConditions.knights or vocConditions.paladins or vocConditions.druids or vocConditions.sorcerers then
+      return false
+    end
+    
     return true
   end
   
+  if not checkVocation() then
+    return false
+  end
+  
+  -- ========== Group filtering ==========
   -- Check party membership
-  if config.conditions.party then
-    local ok, isParty = pcall(function() return creature:isPartyMember() end)
-    if ok and isParty then 
-      logDebug("matchesConditions: " .. name .. " is party member")
-      return true 
-    end
+  if vocConditions.party and creature:isPartyMember() then
+    return true
   end
   
-  -- Check guild membership (emblem = 1 means same guild)
-  if config.conditions.guild then
-    local ok, emblem = pcall(function() return creature:getEmblem() end)
-    if ok and emblem == 1 then 
-      logDebug("matchesConditions: " .. name .. " is guild member")
-      return true 
-    end
+  -- Check guild membership
+  if vocConditions.guild and creature:getEmblem() == 1 then
+    return true
   end
   
-  -- Check friends list (OTClient VIP list)
-  if config.conditions.friends then
-    if isFriend and type(isFriend) == "function" then
-      local ok, result = pcall(isFriend, creature)
-      if ok and result then 
-        logDebug("matchesConditions: " .. name .. " is in friends list")
-        return true 
-      end
-    end
+  -- Check friends list (g_game.isFriend)
+  if vocConditions.friends then
+    local friendCheck = g_game and g_game.isFriend and g_game.isFriend(name)
+    if friendCheck then return true end
   end
   
   -- Check BotServer members
-  if config.conditions.botserver then
-    if nExBot and nExBot.BotServerMembers and nExBot.BotServerMembers[name] then
-      logDebug("matchesConditions: " .. name .. " is BotServer member")
+  if vocConditions.botserver and nExBot and nExBot.BotServerMembers then
+    if nExBot.BotServerMembers[name] then
       return true
     end
   end
@@ -370,77 +379,303 @@ local function matchesConditions(creature, config)
   return false
 end
 
--- Check vocation filter
-local function matchesVocation(creature, config)
-  -- If checkPlayer is not enabled, allow all
-  if not storage or not storage.extras or not storage.extras.checkPlayer then
-    return true
-  end
+-- Calculate urgency score for friend
+local function calculateUrgency(hpPercent, distance)
+  if not hpPercent or hpPercent >= 100 then return 0 end
   
-  local ok, specText = pcall(function() return creature:getText() or "" end)
-  if not ok or not specText or specText == "" then 
-    return true -- No info available, allow
-  end
+  local urgency = 100 - hpPercent
+  local distancePenalty = (distance or 0) * 2
+  urgency = urgency - distancePenalty
   
-  -- Check each vocation - if detected and not allowed, return false
-  if specText:find("EK") and not config.conditions.knights then return false end
-  if specText:find("RP") and not config.conditions.paladins then return false end
-  if specText:find("ED") and not config.conditions.druids then return false end
-  if specText:find("MS") and not config.conditions.sorcerers then return false end
-  
-  return true
+  return math.max(0, math.min(100, urgency))
 end
 
 -- ============================================================================
--- TARGET SELECTION
+-- HEALING ACTIONS (Fully integrated with UI config)
 -- ============================================================================
 
--- Find best healing target from spectators
-local function findBestTarget(config, selfHpPercent)
+-- Count friends in range for area heals
+local function countFriendsInRange(config, maxRange)
+  local count = 0
+  local spectators = getSpectators and getSpectators() or {}
+  
+  for _, spec in ipairs(spectators) do
+    if spec:isPlayer() and not spec:isLocalPlayer() then
+      local hp = spec:getHealthPercent()
+      local pos = spec:getPosition()
+      local dist = pos and distanceFromPlayer and distanceFromPlayer(pos) or 99
+      local isFriendMatch = isFriend(spec, config)
+      
+      if isFriendMatch and dist <= maxRange and hp < (config.settings and config.settings.healAt or 80) then
+        count = count + 1
+      end
+    end
+  end
+  
+  return count
+end
+
+-- Plan the best healing action for a friend
+-- @param friend: creature object
+-- @param friendHp: friend's HP percent
+-- @param config: healing configuration from UI
+-- @return action table or nil
+--
+-- UI Config Fields Used:
+--   config.useHealthItem      - Enable UH rune on friend (hotkey-style)
+--   config.useManaItem        - Enable mana potion on friend
+--   config.useSio             - Enable exura sio spell
+--   config.useGranSio         - Enable exura gran sio spell
+--   config.useMasRes          - Enable exura gran mas res (area heal)
+--   config.customSpell        - Enable custom healing spell
+--   config.customSpellName    - Name of custom spell
+--   config.settings.healAt    - HP% threshold to heal (default 80)
+--   config.settings.granSioAt - HP% threshold for gran sio (default 40)
+--   config.settings.itemRange - Max range for item use (default 6)
+--   config.settings.masResPlayers - Min players for mas res (default 2)
+--   config.settings.healthItem - UH rune ID (default 3160)
+--   config.settings.manaItem  - Mana potion ID (default 268)
+--   config.settings.minPlayerHp - Min self HP% to help friends
+--   config.settings.minPlayerMp - Min self MP% to help friends
+--
+function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
+  if not friend or not config then return nil end
+  
+  local settings = config.settings or {}
+  local selfHp = getSelfHpPercent()
+  local selfMp = getSelfMpPercent()
+  local currentMana = mana and mana() or 0
+  local friendName = friend:getName()
+  local friendPos = friend:getPosition()
+  local distance = friendPos and distanceFromPlayer and distanceFromPlayer(friendPos) or 99
+  
+  -- Config values from UI
+  local healAt = settings.healAt or 80
+  local granSioAt = settings.granSioAt or 40
+  local itemRange = settings.itemRange or 6
+  local masResPlayers = settings.masResPlayers or 2
+  local minSelfHp = settings.minPlayerHp or 80
+  local minSelfMp = settings.minPlayerMp or 50
+  local healthItemId = settings.healthItem or RUNE_IDS.ULTIMATE_HEALING
+  local manaItemId = settings.manaItem or POTION_IDS.GREAT_MANA
+  
+  -- Safety check - self first
+  local shouldHeal, reason = shouldHealFriend(selfHp, friendHp)
+  if not shouldHeal then
+    return nil
+  end
+  
+  -- Check minimum self requirements from UI
+  if selfHp < minSelfHp or selfMp < minSelfMp then
+    return nil
+  end
+  
+  -- ========== PRIORITY 1: Custom Spell (user-defined spell like "exura" variations) ==========
+  if config.customSpell and config.customSpellName and friendHp < healAt then
+    local customSpell = config.customSpellName
+    local manaCost = 100  -- Default, could be configurable
+    if currentMana >= manaCost and not isHealingGroupOnCooldown() and distance <= 7 then
+      return {
+        type = "spell",
+        spell = customSpell,
+        targetName = friendName,
+        manaCost = manaCost,
+        urgency = calculateUrgency(friendHp, distance),
+        source = "customSpell"
+      }
+    end
+  end
+  
+  -- ========== PRIORITY 2: Exura Gran Sio (strong single target heal) ==========
+  if config.useGranSio and friendHp < granSioAt then
+    local manaCost = 140
+    if currentMana >= manaCost and not isHealingGroupOnCooldown() and distance <= 7 then
+      return {
+        type = "spell",
+        spell = "exura gran sio",
+        targetName = friendName,
+        manaCost = manaCost,
+        urgency = calculateUrgency(friendHp, distance),
+        source = "granSio"
+      }
+    end
+  end
+  
+  -- ========== PRIORITY 3: Exura Sio (normal single target heal) ==========
+  if config.useSio and friendHp < healAt then
+    local manaCost = 100
+    if currentMana >= manaCost and not isHealingGroupOnCooldown() and distance <= 7 then
+      return {
+        type = "spell",
+        spell = "exura sio",
+        targetName = friendName,
+        manaCost = manaCost,
+        urgency = calculateUrgency(friendHp, distance),
+        source = "sio"
+      }
+    end
+  end
+  
+  -- ========== PRIORITY 4: Exura Gran Mas Res (area heal, requires min players) ==========
+  if config.useMasRes and friendHp < healAt then
+    local friendsNeedingHeal = countFriendsInRange(config, 7)
+    if friendsNeedingHeal >= masResPlayers then
+      local manaCost = 150
+      if currentMana >= manaCost and not isHealingGroupOnCooldown() then
+        return {
+          type = "area_spell",
+          spell = "exura gran mas res",
+          manaCost = manaCost,
+          friendCount = friendsNeedingHeal,
+          urgency = calculateUrgency(friendHp, distance),
+          source = "masRes"
+        }
+      end
+    end
+  end
+  
+  -- ========== PRIORITY 5: Health Item / UH Rune (hotkey-style) ==========
+  if config.useHealthItem and friendHp < healAt then
+    if not isRuneOnCooldown() and distance <= itemRange and friend:canShoot() then
+      return {
+        type = "rune",
+        runeId = healthItemId,
+        target = friend,
+        name = friendName,
+        urgency = calculateUrgency(friendHp, distance),
+        source = "healthItem"
+      }
+    end
+  end
+  
+  -- ========== PRIORITY 6: Mana Item (for supporting mage friends) ==========
+  -- Note: Mana potions typically require close range (distance <= 1)
+  if config.useManaItem then
+    -- Only use mana items if friend's mana is low (requires BotServer sync)
+    -- For now, only use on friends explicitly marked for mana support
+    if config.manaFriends and config.manaFriends[friendName] then
+      if not isPotionOnCooldown() and distance <= 1 then
+        return {
+          type = "mana_potion",
+          potionId = manaItemId,
+          target = friend,
+          name = friendName,
+          source = "manaItem"
+        }
+      end
+    end
+  end
+  
+  return nil
+end
+
+-- Execute a planned healing action (with hotkey-style support)
+-- @param action: action from planHealAction()
+-- @return boolean success
+function FriendHealerEnhanced.executeAction(action)
+  if not action then return false end
+  
+  if action.type == "rune" then
+    -- Hotkey-style UH rune on friend
+    local success = useRuneOnFriend(action.runeId, action.target)
+    if success then
+      markHealingUsed()
+      _state.healCount = (_state.healCount or 0) + 1
+      if EventBus then
+        EventBus.emit("friend:heal_rune", action.name, action.runeId, action.source)
+      end
+    end
+    return success
+    
+  elseif action.type == "potion" or action.type == "mana_potion" then
+    -- Hotkey-style potion on friend
+    local success = usePotionOnFriend(action.potionId, action.target)
+    if success then
+      _state.potionCount = (_state.potionCount or 0) + 1
+      if EventBus then
+        EventBus.emit("friend:heal_potion", action.name, action.potionId, action.source)
+      end
+    end
+    return success
+    
+  elseif action.type == "spell" then
+    -- Single target heal spell (exura sio, exura gran sio, custom)
+    local success = castHealSpellOnFriend(action.spell, action.targetName, action.manaCost)
+    if success then
+      _state.spellCount = (_state.spellCount or 0) + 1
+      if EventBus then
+        EventBus.emit("friend:heal_spell", action.targetName, action.spell, action.source)
+      end
+    end
+    return success
+    
+  elseif action.type == "area_spell" then
+    -- Area heal spell (exura gran mas res) - no target needed
+    if isHealingGroupOnCooldown() then return false end
+    
+    local currentMana = mana and mana() or 0
+    if currentMana < action.manaCost then return false end
+    
+    if say then
+      say(action.spell)
+      _state.lastSpell = now or os.time() * 1000
+      _state.spellCount = (_state.spellCount or 0) + 1
+      markHealingUsed()
+      
+      -- Track for analytics
+      if HuntAnalytics and HuntAnalytics.trackHealSpell then
+        HuntAnalytics.trackHealSpell(action.spell, action.manaCost)
+      end
+      
+      if EventBus then
+        EventBus.emit("friend:area_heal", action.spell, action.friendCount, action.source)
+      end
+      
+      return true
+    end
+    return false
+  end
+  
+  return false
+end
+
+-- ============================================================================
+-- MAIN TICK AND SCANNING
+-- ============================================================================
+
+-- Find best friend to heal from spectators
+function FriendHealerEnhanced.findBestTarget(config)
+  local spectators = getSpectators and getSpectators() or {}
+  local selfHp = getSelfHpPercent()
   local bestTarget = nil
   local bestUrgency = 0
   
-  -- Get spectators
-  local spectators = {}
-  if getSpectators then
-    local ok, specs = pcall(getSpectators)
-    if ok and specs then spectators = specs end
-  end
-  
-  for _, creature in ipairs(spectators) do
-    -- Skip non-matching creatures
-    if matchesConditions(creature, config) and matchesVocation(creature, config) then
-      local name = getCreatureName(creature)
-      local hp = getCreatureHp(creature)
-      local pos = getCreaturePos(creature)
-      local dist = getDistanceToPlayer(pos)
+  for _, spec in ipairs(spectators) do
+    local isFriendMatch, customHp = isFriend(spec, config)
+    if isFriendMatch then
+      local hp = spec:getHealthPercent()
+      local pos = spec:getPosition()
+      local dist = pos and distanceFromPlayer and distanceFromPlayer(pos) or 99
       
-      -- Check if in healing range and has line of sight
-      if dist <= MAX_HEAL_RANGE and canShootCreature(creature) then
-        -- Get custom HP threshold for this player
-        local customHp = config.customPlayers and config.customPlayers[name]
-        local healThreshold = customHp or config.settings.healAt or 80
+      -- Check if in healing range
+      if dist <= 7 and spec:canShoot() then
+        local healThreshold = customHp or config.settings and config.settings.healAt or 80
         
-        -- Check if needs healing
-        if hp <= healThreshold then
-          local urgency = calculateUrgency(hp, dist)
-          
-          -- Should we heal this friend?
-          local shouldHeal, reason = shouldHealFriend(selfHpPercent, hp, urgency)
-          
-          if shouldHeal and urgency > bestUrgency then
-            bestTarget = {
-              creature = creature,
-              name = name,
-              hp = hp,
-              distance = dist,
-              urgency = urgency,
-              reason = reason,
-              customHp = customHp
-            }
-            bestUrgency = urgency
-            logDebug(string.format("Found target: %s hp=%d%% dist=%d urgency=%.1f", 
-              name, hp, dist, urgency))
+        if hp < healThreshold then
+          local shouldHeal = shouldHealFriend(selfHp, hp)
+          if shouldHeal then
+            local urgency = calculateUrgency(hp, dist)
+            if urgency > bestUrgency then
+              bestTarget = {
+                creature = spec,
+                name = spec:getName(),
+                hp = hp,
+                distance = dist,
+                urgency = urgency,
+                customHp = customHp
+              }
+              bestUrgency = urgency
+            end
           end
         end
       end
@@ -450,271 +685,161 @@ local function findBestTarget(config, selfHpPercent)
   return bestTarget
 end
 
-
-
--- Mark that we used a heal
-local function markHealUsed()
-  local currentTime = now or os.time() * 1000
-  _state.lastHeal = currentTime
-  
-  if BotCore.Cooldown and BotCore.Cooldown.markHealingUsed then
-    BotCore.Cooldown.markHealingUsed(HEAL_COOLDOWN_MS)
-  elseif BotCore.Priority and BotCore.Priority.markExhausted then
-    BotCore.Priority.markExhausted("healing", HEAL_COOLDOWN_MS)
-  end
-end
-
--- Check if healing is on cooldown
-local function isHealingOnCooldown()
-  if BotCore.Cooldown and BotCore.Cooldown.isHealingOnCooldown then
-    return BotCore.Cooldown.isHealingOnCooldown()
-  end
-  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
-    return modules.game_cooldown.isGroupCooldownIconActive(2)
-  end
-  return false
-end
-
--- ============================================================================
--- HEAL EXECUTION
--- ============================================================================
-
--- Execute heal on target using HealEngine or direct cast
-local function executeHeal(target, config)
-  if not target or not target.creature or not target.name then 
-    return false 
-  end
-  
-  -- Check cooldown first
-  if isHealingOnCooldown() then
-    logDebug("Heal on cooldown, skipping")
-    return false
-  end
-  
-  local engine = getHealEngine()
-  local context = getHealContext()
-  
-  -- Try HealEngine first (proper cooldown sync, mana checks)
-  if engine and engine.planFriend and engine.execute then
-    local snap = context and context.get() or {}
-    
-    -- Ensure currentMana is passed
-    if not snap.currentMana then
-      snap.currentMana = getCurrentMana()
-    end
-    
-    -- Check protection zone
-    if not snap.inPz then
-      if getInPz then
-        local ok, inPz = pcall(getInPz)
-        if ok then snap.inPz = inPz end
-      end
-    end
-    
-    if snap.inPz then
-      logDebug("In protection zone, skipping heal")
-      return false
-    end
-    
-    local action = engine.planFriend(snap, target)
-    if action then
-      local success = engine.execute(action)
-      if success then
-        markHealUsed()
-        logDebug(string.format("Healed %s with %s", target.name, action.name or "spell"))
-        return true
-      end
-    end
-  end
-  
-  -- Fallback: Direct spell cast
-  if say then
-    local hp = target.hp or 100
-    local granSioAt = config.settings.granSioAt or 40
-    
-    -- Choose spell based on HP
-    local spellName = "exura sio"
-    if hp <= granSioAt and config.useGranSio then
-      spellName = "exura gran sio"
-    end
-    
-    -- Check mana
-    local currentMana = getCurrentMana()
-    local requiredMana = spellName == "exura gran sio" and 140 or 100
-    
-    if currentMana < requiredMana then
-      logDebug(string.format("Insufficient mana for %s (need %d, have %d)", 
-        spellName, requiredMana, currentMana))
-      return false
-    end
-    
-    -- Cast spell
-    say(string.format('%s "%s"', spellName, target.name))
-    markHealUsed()
-    logDebug(string.format("Fallback heal: %s on %s", spellName, target.name))
-    return true
-  end
-  
-  return false
-end
-
--- ============================================================================
--- PUBLIC API
--- ============================================================================
-
--- Initialize with config reference
-function FriendHealer.init(config)
-  _state.config = config
-  _state.enabled = config and config.enabled or false
-  logDebug(string.format("Initialized v%s with enabled=%s", FriendHealer.VERSION, tostring(_state.enabled)))
-  
-  -- Sync HealEngine friend spells
-  FriendHealer.syncHealEngineSpells()
-end
-
--- Set enabled state
-function FriendHealer.setEnabled(enabled)
-  _state.enabled = enabled
-  logDebug(string.format("setEnabled: %s", tostring(enabled)))
-  
-  -- Also sync to HealEngine
-  local engine = getHealEngine()
-  if engine and engine.setFriendHealingEnabled then
-    engine.setFriendHealingEnabled(enabled)
-  end
-end
-
--- Check if enabled
-function FriendHealer.isEnabled()
-  return _state.enabled and _state.config and _state.config.enabled
-end
-
--- Get current best target (for UI display)
-function FriendHealer.getBestTarget()
-  return _state.bestTarget
-end
-
--- Sync friend spells to HealEngine based on current config
-function FriendHealer.syncHealEngineSpells()
-  local config = getConfig()
-  local engine = getHealEngine()
-  
-  if not engine then
-    logDebug("syncHealEngineSpells: HealEngine not available")
-    return
-  end
-  
-  -- Enable/disable friend healing in engine
-  if engine.setFriendHealingEnabled then
-    engine.setFriendHealingEnabled(_state.enabled and config.enabled)
-  end
-  
-  -- Configure spells if function available
-  if not engine.setFriendSpells then
-    logDebug("syncHealEngineSpells: setFriendSpells not available")
-    return
-  end
-  
-  local friendSpells = {}
-  local healAt = config.settings.healAt or 80
-  local granSioAt = config.settings.granSioAt or 40
-  
-  if config.useGranSio then
-    table.insert(friendSpells, {
-      name = "exura gran sio",
-      hp = granSioAt,
-      mpCost = 140,
-      cd = 1100,
-      prio = 1
-    })
-  end
-  
-  if config.useSio then
-    table.insert(friendSpells, {
-      name = "exura sio",
-      hp = healAt,
-      mpCost = 100,
-      cd = 1100,
-      prio = 2
-    })
-  end
-  
-  if config.customSpell and config.customSpellName and config.customSpellName ~= "Custom Spell" then
-    table.insert(friendSpells, {
-      name = config.customSpellName,
-      hp = healAt,
-      mpCost = 50,
-      cd = 1100,
-      prio = 3
-    })
-  end
-  
-  if #friendSpells > 0 then
-    engine.setFriendSpells(friendSpells)
-    logDebug(string.format("Synced %d friend spells to HealEngine", #friendSpells))
-  end
-end
-
--- Main tick function - called by macro
-function FriendHealer.tick()
-  if not FriendHealer.isEnabled() then return false end
-
-  local config = getConfig()
-  
-  -- Get self HP/MP using safe helpers
-  local selfHpPercent = getSelfHpPercent()
-  local selfMpPercent = getSelfMpPercent()
-  
-  -- SAFETY: Never heal friends if self is in danger
-  if selfHpPercent < SELF_LOW_HP then
-    _state.bestTarget = nil
-    return false
-  end
-  
-  -- Check minimum HP/MP requirements from config
-  local minSelfHp = config.settings.minPlayerHp or 80
-  local minSelfMp = config.settings.minPlayerMp or 50
-  
-  if selfHpPercent < minSelfHp or selfMpPercent < minSelfMp then
-    _state.bestTarget = nil
-    return false
-  end
+-- Main tick function
+function FriendHealerEnhanced.tick()
+  if not _state.enabled or not _state.config then return false end
   
   -- Rate limit scanning
   local currentTime = now or os.time() * 1000
   if (currentTime - _state.lastScan) < SCAN_INTERVAL_MS then
-    -- Use cached target if still valid
+    -- Use cached target
     if _state.bestTarget and _state.bestTarget.creature then
-      local hp = getCreatureHp(_state.bestTarget.creature)
-      local customHp = config.customPlayers and config.customPlayers[_state.bestTarget.name]
-      local healThreshold = customHp or config.settings.healAt or 80
-      
-      if hp <= healThreshold and hp < 100 then
-        return executeHeal(_state.bestTarget, config)
-      else
-        _state.bestTarget = nil
+      local hp = _state.bestTarget.creature:getHealthPercent()
+      if hp and hp < 100 then
+        local action = FriendHealerEnhanced.planHealAction(
+          _state.bestTarget.creature,
+          hp,
+          _state.config
+        )
+        return FriendHealerEnhanced.executeAction(action)
       end
     end
     return false
   end
   _state.lastScan = currentTime
   
-  -- Find best target (spectators are fetched inside)
-  local bestTarget = findBestTarget(config, selfHpPercent)
+  -- Find best target
+  local bestTarget = FriendHealerEnhanced.findBestTarget(_state.config)
   _state.bestTarget = bestTarget
   
-  -- Execute heal if target found
   if bestTarget then
-    return executeHeal(bestTarget, config)
+    local action = FriendHealerEnhanced.planHealAction(
+      bestTarget.creature,
+      bestTarget.hp,
+      _state.config
+    )
+    return FriendHealerEnhanced.executeAction(action)
   end
   
   return false
 end
 
--- Event handler: Friend health changed (for instant response)
-function FriendHealer.onFriendHealthChange(creature, newHpPercent, oldHpPercent)
-  if not FriendHealer.isEnabled() then return end
-  if not creature then return end
+-- ============================================================================
+-- EVENTBUS INTEGRATION
+-- ============================================================================
+
+function FriendHealerEnhanced.setupEventListeners()
+  if not EventBus then return end
+  
+  -- Clean up old subscriptions
+  FriendHealerEnhanced.cleanup()
+  
+  -- React to friend health drops (instant response)
+  _state.subscriptions[#_state.subscriptions + 1] = EventBus.on("creature:health", function(creature, percent)
+    if not _state.enabled or not _state.config then return end
+    if not creature or creature:isLocalPlayer() then return end
+    
+    -- Check if this is a friend
+    local isFriendMatch = isFriend(creature, _state.config)
+    if not isFriendMatch then return end
+    
+    -- Check if HP dropped significantly (burst damage detection)
+    local lastHp = _state.friends[creature:getName()] and _state.friends[creature:getName()].lastHp or 100
+    local drop = lastHp - percent
+    
+    -- Update tracking
+    _state.friends[creature:getName()] = {
+      creature = creature,
+      lastHp = percent,
+      lastUpdate = now or os.time() * 1000
+    }
+    
+    -- React to significant drops (10% or more)
+    if drop >= 10 and percent < 70 then
+      schedule(25, function()
+        if creature and not creature:isDead() then
+          local action = FriendHealerEnhanced.planHealAction(creature, percent, _state.config)
+          FriendHealerEnhanced.executeAction(action)
+        end
+      end)
+    end
+  end, 60)  -- High priority
+  
+  -- React to friend appearing (track HP)
+  _state.subscriptions[#_state.subscriptions + 1] = EventBus.on("player:appear", function(creature)
+    if not _state.enabled or not _state.config then return end
+    
+    local isFriendMatch = isFriend(creature, _state.config)
+    if isFriendMatch then
+      _state.friends[creature:getName()] = {
+        creature = creature,
+        lastHp = creature:getHealthPercent(),
+        lastUpdate = now or os.time() * 1000
+      }
+    end
+  end, 30)
+  
+  -- Clean up when friend disappears
+  _state.subscriptions[#_state.subscriptions + 1] = EventBus.on("player:disappear", function(creature)
+    if creature then
+      _state.friends[creature:getName()] = nil
+    end
+  end, 30)
+end
+
+-- ============================================================================
+-- PUBLIC API
+-- ============================================================================
+
+function FriendHealerEnhanced.init(config)
+  _state.config = config
+  _state.enabled = true
+  FriendHealerEnhanced.setupEventListeners()
+end
+
+function FriendHealerEnhanced.setConfig(config)
+  _state.config = config
+end
+
+function FriendHealerEnhanced.setEnabled(enabled)
+  _state.enabled = enabled
+end
+
+function FriendHealerEnhanced.isEnabled()
+  return _state.enabled
+end
+
+function FriendHealerEnhanced.getBestTarget()
+  return _state.bestTarget
+end
+
+function FriendHealerEnhanced.getStats()
+  return {
+    healCount = _state.healCount,
+    potionCount = _state.potionCount,
+    runeCount = _state.runeCount,
+    spellCount = _state.spellCount
+  }
+end
+
+function FriendHealerEnhanced.cleanup()
+  for _, unsub in ipairs(_state.subscriptions) do
+    if type(unsub) == "function" then
+      unsub()
+    end
+  end
+  _state.subscriptions = {}
+  _state.friends = {}
+end
+
+-- ============================================================================
+-- BACKWARD COMPATIBILITY (for new_healer.lua integration)
+-- ============================================================================
+
+-- Event handler: Friend health changed (legacy API - EventBus handles this internally)
+function FriendHealerEnhanced.onFriendHealthChange(creature, newHpPercent, oldHpPercent)
+  if not _state.enabled then return end
+  if not creature or creature:isLocalPlayer() then return end
   
   -- Skip local player
   local ok, isLocal = pcall(function() return creature:isLocalPlayer() end)
@@ -723,114 +848,23 @@ function FriendHealer.onFriendHealthChange(creature, newHpPercent, oldHpPercent)
   local config = getConfig()
   if not config.enabled then return end
   
-  -- Get creature name
-  local name = getCreatureName(creature)
-  if not name then return end
+  -- Check if this is a friend
+  local isFriendMatch = isFriend(creature, config)
+  if not isFriendMatch then return end
   
-  -- Check if this is a configured friend
-  if not matchesConditions(creature, config) then return end
-  
-  -- Get self HP for safety check
+  -- Get self HP
   local selfHpPercent = getSelfHpPercent()
   
-  -- Safety check: don't heal friends if self is low
+  -- Safety check - never heal friends if we're low
   if selfHpPercent < SELF_LOW_HP then return end
   
-  -- Check min HP/MP requirements
-  local minSelfHp = config.settings.minPlayerHp or 80
-  local minSelfMp = config.settings.minPlayerMp or 50
-  local selfMpPercent = getSelfMpPercent()
-  
-  if selfHpPercent < minSelfHp or selfMpPercent < minSelfMp then return end
-  
-  -- Get custom HP threshold for this player
-  local customHp = config.customPlayers and config.customPlayers[name]
-  local healThreshold = customHp or config.settings.healAt or 80
-  
-  -- Check if friend needs healing
-  if newHpPercent > healThreshold then return end
-  
-  -- Calculate urgency based on HP drop
-  local drop = (oldHpPercent or 100) - (newHpPercent or 100)
-  local urgency = calculateUrgency(newHpPercent, 3) -- Assume medium distance
-  
-  -- For event-driven healing, respond to significant drops or low HP
-  if urgency > 30 or drop >= 10 or newHpPercent < FRIEND_CRITICAL_HP then
-    -- Get distance for range check
-    local pos = getCreaturePos(creature)
-    local dist = getDistanceToPlayer(pos)
-    
-    -- Check if in healing range
-    if dist <= MAX_HEAL_RANGE and canShootCreature(creature) then
-      local target = {
-        creature = creature,
-        name = name,
-        hp = newHpPercent,
-        distance = dist,
-        urgency = urgency,
-        reason = "event_response",
-        customHp = customHp
-      }
-      
-      -- Update cached target
-      _state.bestTarget = target
-      
-      logDebug(string.format("Event heal: %s dropped to %d%% (was %d%%)", 
-        name, newHpPercent, oldHpPercent or 100))
-      
-      -- Execute heal immediately
-      executeHeal(target, config)
-    end
+  -- Check urgency
+  local urgency = calculateUrgency(newHpPercent, 3)
+  if urgency > 50 then
+    -- This is urgent! Try to heal immediately
+    local action = FriendHealerEnhanced.planHealAction(creature, newHpPercent, config)
+    FriendHealerEnhanced.executeAction(action)
   end
 end
 
--- ============================================================================
--- EVENTBUS REGISTRATION (Single point, with deduplication)
--- ============================================================================
-
-local function registerEventBusHandlers()
-  -- Prevent double registration
-  if _state.eventBusRegistered then 
-    logDebug("EventBus handlers already registered")
-    return true 
-  end
-  
-  if not EventBus then 
-    logDebug("EventBus not available")
-    return false 
-  end
-  
-  -- Subscribe to friend health changes with high priority (150)
-  EventBus.on("friend:health", function(creature, newHp, oldHp)
-    FriendHealer.onFriendHealthChange(creature, newHp, oldHp)
-  end, 150)
-  
-  -- Also listen to generic creature health for backup
-  -- (catches party members before they're detected as friends)
-  EventBus.on("creature:health", function(creature, newHp, oldHp)
-    -- Skip monsters
-    local ok, isPlayer = pcall(function() return creature:isPlayer() end)
-    if not ok or not isPlayer then return end
-    
-    -- Skip local player
-    local ok2, isLocal = pcall(function() return creature:isLocalPlayer() end)
-    if ok2 and isLocal then return end
-    
-    -- Forward to handler (it will check conditions)
-    FriendHealer.onFriendHealthChange(creature, newHp, oldHp)
-  end, 100)
-  
-  _state.eventBusRegistered = true
-  logDebug("EventBus handlers registered successfully")
-  return true
-end
-
--- Initialize EventBus handlers
-registerEventBusHandlers()
-
--- ============================================================================
--- EXPORT
--- ============================================================================
-
-BotCore.FriendHealer = FriendHealer
-logDebug("FriendHealer v" .. FriendHealer.VERSION .. " loaded")
+return FriendHealerEnhanced

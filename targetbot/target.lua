@@ -958,7 +958,27 @@ TargetBot.saySpell = function(text, delay)
   return false
 end
 
--- Attack spells/items are handled by AttackBot; TargetBot keeps minimal stubs to avoid breaking callers.
+TargetBot.sayAttackSpell = function(text, delay)
+  if type(text) ~= 'string' or text:len() < 1 then return end
+  if not delay then delay = 2000 end
+  
+  -- Use new AttackSystem if available (EventBus integration, better cooldown tracking)
+  if BotCore and BotCore.AttackSystem and BotCore.AttackSystem.isEnabled and BotCore.AttackSystem.isEnabled() then
+    return BotCore.AttackSystem.executeSingleSpell(text, delay)
+  end
+  
+  if lastAttackSpell + delay < now then
+    say(text)
+    lastAttackSpell = now
+    -- Track attack spell for Hunt Analyzer
+    if HuntAnalytics and HuntAnalytics.trackAttackSpell then
+      HuntAnalytics.trackAttackSpell(text, 0)  -- Mana cost unknown from here
+    end
+    return true
+  end
+  return false
+end
+
 local lastItemUse = 0
 local lastRuneAttack = 0
 
@@ -981,6 +1001,12 @@ TargetBot.useAttackItem = function(item, subType, target, delay)
     return AttackBot.useAttackItem(item, subType, target, delay)
   end
   if not delay then delay = 2000 end
+  
+  -- Use new AttackSystem if available (EventBus integration, better cooldown tracking)
+  if BotCore and BotCore.AttackSystem and BotCore.AttackSystem.isEnabled and BotCore.AttackSystem.isEnabled() then
+    return BotCore.AttackSystem.executeSingleRune(item, target, delay)
+  end
+  
   if lastRuneAttack + delay < now then
     warn("[TargetBot] useAttackItem called but AttackBot.useAttackItem not available; item=" .. tostring(item))
     lastRuneAttack = now
@@ -1246,7 +1272,7 @@ end
 -- Main TargetBot loop - optimized with EventBus caching
 local lastRecalcTime = 0
 local RECALC_COOLDOWN_MS = 150
-targetbotMacro = macro(500, function()
+targetbotMacro = macro(400, function()
   local _msStart = os.clock()
   if not config or not config.isOn or not config.isOn() then
     return
@@ -1258,6 +1284,24 @@ targetbotMacro = macro(500, function()
   -- TargetBot never triggers friend-heal; keep that path dormant to save cycles
   if HealEngine and HealEngine.setFriendHealingEnabled then
     HealEngine.setFriendHealingEnabled(false)
+  end
+  
+  -- FAST PATH: If EventTargeting already has a valid target, use it
+  -- This skips the expensive recalculation when event-driven targeting is handling things
+  if EventTargeting and EventTargeting.isInCombat and EventTargeting.isInCombat() then
+    local eventTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
+    if eventTarget and not eventTarget:isDead() then
+      -- EventTargeting is handling combat - just ensure we're attacking
+      local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+      if not currentAttack or currentAttack:getId() ~= eventTarget:getId() then
+        -- Sync our attack target with EventTargeting's choice
+        pcall(function() g_game.attack(eventTarget) end)
+      end
+      -- Let EventTargeting handle movement coordination
+      setStatusRight("Targeting (Event)")
+      lastAction = now
+      return
+    end
   end
 
   -- Danger-based auto-stop disabled per user request (no-op)

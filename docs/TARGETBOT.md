@@ -32,6 +32,17 @@ TargetBot is the **combat intelligence system** that handles:
 4. **Spell Selection** - Optimizes positioning for area damage spells
 5. **Combat Tactics** - Adapts to danger levels and group attacks
 
+---
+
+## 🆕 What's New (Recent Improvements)
+
+- **Movement Coordinator enhancements:** Intent-voting improved to reduce erratic movement and better arbitrate between CaveBot and TargetBot intents.
+- **Wave detection & reactivity:** TargetBot increases reactivity and movement strategy when wave attacks are detected.
+- **Separation of concerns:** Attack execution is focused in AttackBot; TargetBot now emphasises selection, positioning and tactical coordination.
+- **EventBus-first design:** Uses EventBus events for coordinated decisions across modules for more predictable behavior.
+
+---
+
 > [!TIP]
 > TargetBot works seamlessly with CaveBot (pauses nav during combat) and HealBot (focused on survival). All systems share one unified event bus for coordinated decisions.
 

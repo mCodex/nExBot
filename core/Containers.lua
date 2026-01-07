@@ -789,59 +789,47 @@ local function syncSetupWindowCheckboxes()
 end
 
 --[[
-  Container Opening System v4 - Slot-Based Tracking
+  Container Opening System v5 - Event-Driven with Deep Nesting Support
   
-  Key Fix: Track opened containers by (parentContainerId, slotIndex) pairs.
-  This uniquely identifies each nested container and prevents reopening loops.
+  Key Improvements:
+  1. EventBus integration for instant container open detection
+  2. Proper depth tracking with level-by-level processing
+  3. Exponential backoff on failures
+  4. Queue-based processing for reliable ordering
+  5. Container ID tracking to prevent duplicate opens
   
   Algorithm:
-  1. Maintain a set of "opened slots" as "containerId_slot" strings
-  2. When scanning, skip any container item at a slot we've already opened
-  3. When we successfully open, mark that slot as opened
-  4. Reset the set when starting a new open-all operation
+  1. Open main backpack, wait for container:open event
+  2. Scan all open containers for nested containers
+  3. Queue nested containers for opening (tracks container item IDs to prevent duplicates)
+  4. Process queue one at a time, wait for container:open event
+  5. When container opens, re-scan for more nested containers
+  6. Repeat until queue is empty and no more nested containers found
 ]]
 
--- ============================================================================
--- BFS CONTAINER OPENING STATE
--- ============================================================================
-local isProcessing = false
-local lastOpenTime = 0
-local openedSlots = {}              -- "containerId_slot" -> true (tracks what we've opened)
-local pendingSlotKey = nil          -- The slot we're currently trying to open
-local openAttempts = 0
-local MAX_ATTEMPTS = 2
-local initialContainerCount = 0
+-- Helper: Check if container name should be excluded from operations
+-- (defined early so ContainerOpener can use it)
+local function isExcludedContainer(containerName)
+    if not containerName then return false end
+    local name = containerName:lower()
+    return name:find("depot") or name:find("inbox") or name:find("quiver")
+end
 
--- Timing
-local OPEN_DELAY = 250              -- ms between opens
-local WAIT_FOR_OPEN = 400           -- ms to wait for container to appear
-
--- ============================================================================
--- PURE HELPER FUNCTIONS
--- ============================================================================
-
--- Pure function: Get container window from game_containers module
--- Uses multiple fallback methods for better compatibility
+-- Helper: Get container window from game_containers module
+-- (defined early so ContainerOpener can use it)
 local function getContainerWindow(containerId)
-    -- Method 1: Try the standard game_containers module
     local gameContainers = modules.game_containers
     if gameContainers then
-        -- Try getContainerWindow function
         if gameContainers.getContainerWindow then
             local window = gameContainers.getContainerWindow(containerId)
             if window then return window end
         end
-        
-        -- Try containerWindows table directly (some OTClient versions)
         if gameContainers.containerWindows and gameContainers.containerWindows[containerId] then
             return gameContainers.containerWindows[containerId]
         end
     end
-    
-    -- Method 2: Try finding by widget ID in the root
     local rootWidget = g_ui.getRootWidget()
     if rootWidget then
-        -- Try common container window naming patterns
         local patterns = {
             "containerWindow" .. containerId,
             "container" .. containerId,
@@ -852,18 +840,11 @@ local function getContainerWindow(containerId)
             if window then return window end
         end
     end
-    
     return nil
 end
 
--- Pure function: Check if container name should be excluded from operations
-local function isExcludedContainer(containerName)
-    if not containerName then return false end
-    local name = containerName:lower()
-    return name:find("depot") or name:find("inbox") or name:find("quiver")
-end
-
--- Pure function: Get configured entry for a container by its item ID
+-- Helper: Get configured entry for a container by its item ID
+-- (defined early so ContainerOpener can use it)
 local function getContainerConfig(itemId)
     for _, entry in ipairs(config.containerList) do
         if entry.enabled and entry.itemId == itemId then
@@ -873,21 +854,8 @@ local function getContainerConfig(itemId)
     return nil
 end
 
--- ============================================================================
--- CONTAINER OPERATIONS
--- ============================================================================
-
--- Open equipped quiver from right hand slot if available (always runs)
-local function openQuiver()
-    local rightItem = getRight()
-    if rightItem and rightItem:isContainer() then
-        g_game.open(rightItem)
-        return true
-    end
-    return false
-end
-
--- Minimize a container window
+-- Helper: Minimize a container window
+-- (defined early so ContainerOpener can use it)
 local function minimizeContainer(container)
     if not config.autoMinimize then return end
     if not container then return end
@@ -904,23 +872,8 @@ local function minimizeContainer(container)
     end
 end
 
--- Maximize a container window
-local function maximizeContainer(container)
-    if not container then return end
-    
-    local window = getContainerWindow(container:getId())
-    if window then
-        if window.maximize then
-            window:maximize()
-        elseif window.setOn then
-            window:setOn(true)
-        elseif window.minimizeButton then
-            window.minimizeButton:onClick()
-        end
-    end
-end
-
--- Rename a container window based on config
+-- Helper: Rename a container window based on config
+-- (defined early so ContainerOpener can use it)
 local function renameContainer(container)
     if not config.renameEnabled then return end
     if not container then return end
@@ -939,181 +892,366 @@ local function renameContainer(container)
     end
 end
 
--- Count open containers
-local function countContainers()
-    local count = 0
-    for _ in pairs(g_game.getContainers()) do
-        count = count + 1
+-- Helper: Open equipped quiver from right hand slot (for paladins)
+-- (defined early so it can be called from openAllContainers)
+local function openQuiver()
+    local rightItem = getRight()
+    if rightItem and rightItem:isContainer() then
+        g_game.open(rightItem)
+        return true
     end
-    return count
-end
-
--- Find the first unopened nested container
--- Returns: item, slotKey or nil if none found
-local function findNextContainer()
-    for containerId, container in pairs(g_game.getContainers()) do
-        local items = container:getItems()
-        for slot, item in ipairs(items) do
-            if item and item:isContainer() then
-                local slotKey = containerId .. "_" .. slot
-                -- Only return if we haven't already opened this slot
-                if not openedSlots[slotKey] then
-                    return item, slotKey, containerId, slot
-                end
-            end
-        end
-    end
-    return nil
+    return false
 end
 
 -- ============================================================================
--- MAIN PROCESSOR
+-- BFS CONTAINER OPENING STATE (Event-Driven v6 - Complete Rewrite)
 -- ============================================================================
-local function processNext()
-    if not isProcessing then return end
-    
-    -- Respect timing
-    local elapsed = now - lastOpenTime
-    if elapsed < OPEN_DELAY then
-        schedule(OPEN_DELAY - elapsed + 10, processNext)
-        return
+--[[
+  This rewrite uses the OTCv8 API properly:
+  - Container:getItems() returns a deque of ItemPtr
+  - Item:isContainer() checks if item is a container
+  - Item:getId() returns the item type ID
+  - g_game.open(item, previousContainer) opens a container
+  - onContainerOpen fires when a container is opened
+  
+  The algorithm:
+  1. When triggered, scan all open containers for nested containers
+  2. Queue each nested container by storing a reference to the actual item object
+  3. Process queue: open one container, wait for onContainerOpen event
+  4. When container opens, scan it for more nested containers, continue
+]]
+
+local ContainerOpener = {
+  -- State
+  isProcessing = false,
+  isPaused = false,
+  
+  -- Queue of container items to open
+  -- Each entry: { item = ItemPtr, parentContainerId = number, slot = number }
+  queue = {},
+  
+  -- Tracking which containers we've queued (by "parentId_slot" key)
+  queuedSlots = {},
+  
+  -- Tracking which game container IDs we've already scanned
+  scannedContainerIds = {},
+  
+  -- Timing
+  openDelay = 200,       -- Delay between open attempts (ms)
+  lastOpenTime = 0,
+  
+  -- Retry tracking
+  currentAttempt = 0,
+  maxAttempts = 3,
+  
+  -- Depth tracking
+  maxDepth = 15,
+  
+  -- Callbacks
+  onComplete = nil,
+}
+
+-- Reset all state
+function ContainerOpener.reset()
+  ContainerOpener.isProcessing = false
+  ContainerOpener.isPaused = false
+  ContainerOpener.queue = {}
+  ContainerOpener.queuedSlots = {}
+  ContainerOpener.scannedContainerIds = {}
+  ContainerOpener.lastOpenTime = 0
+  ContainerOpener.currentAttempt = 0
+  ContainerOpener.onComplete = nil
+end
+
+-- Generate a unique key for a slot
+local function makeSlotKey(containerId, slot)
+  return tostring(containerId) .. "_" .. tostring(slot)
+end
+
+-- Scan a single container for nested containers and add them to queue
+function ContainerOpener.scanContainer(container)
+  if not container then return 0 end
+  
+  local containerId = container:getId()
+  local containerName = container:getName() or ""
+  
+  -- Skip excluded containers
+  if isExcludedContainer(containerName) then
+    return 0
+  end
+  
+  -- Mark as scanned
+  ContainerOpener.scannedContainerIds[containerId] = true
+  
+  local items = container:getItems()
+  local foundCount = 0
+  
+  for slot, item in ipairs(items) do
+    if item and item:isContainer() then
+      local slotKey = makeSlotKey(containerId, slot)
+      
+      -- Only queue if not already queued
+      if not ContainerOpener.queuedSlots[slotKey] then
+        ContainerOpener.queuedSlots[slotKey] = true
+        
+        table.insert(ContainerOpener.queue, {
+          item = item,
+          parentContainerId = containerId,
+          slot = slot,
+          slotKey = slotKey
+        })
+        foundCount = foundCount + 1
+      end
     end
-    
-    -- Find next container to open
-    local item, slotKey, parentId, slot = findNextContainer()
-    
-    if not item then
-        -- No more containers to open - we're done!
-        isProcessing = false
-        pendingSlotKey = nil
-        
-        -- Final minimize pass
-        if config.autoMinimize then
-            schedule(100, function()
-                for _, container in pairs(g_game.getContainers()) do
-                    minimizeContainer(container)
-                end
-            end)
-        end
-        return
+  end
+  
+  return foundCount
+end
+
+-- Scan all open containers
+function ContainerOpener.scanAllContainers()
+  local totalFound = 0
+  
+  for containerId, container in pairs(g_game.getContainers()) do
+    -- Scan even if previously scanned (items may have been added)
+    totalFound = totalFound + ContainerOpener.scanContainer(container)
+  end
+  
+  return totalFound
+end
+
+-- Process the next item in the queue
+function ContainerOpener.processNext()
+  if not ContainerOpener.isProcessing then return end
+  if ContainerOpener.isPaused then return end
+  
+  -- Respect timing
+  local currentTime = now or (os.time() * 1000)
+  local elapsed = currentTime - ContainerOpener.lastOpenTime
+  if elapsed < ContainerOpener.openDelay then
+    schedule(ContainerOpener.openDelay - elapsed + 20, ContainerOpener.processNext)
+    return
+  end
+  
+  -- First scan all open containers to find any new nested containers
+  ContainerOpener.scanAllContainers()
+  
+  -- Check if queue is empty
+  if #ContainerOpener.queue == 0 then
+    -- All done
+    ContainerOpener.finish()
+    return
+  end
+  
+  -- Get next entry
+  local entry = table.remove(ContainerOpener.queue, 1)
+  if not entry then
+    schedule(50, ContainerOpener.processNext)
+    return
+  end
+  
+  -- Verify the parent container still exists
+  local parentContainer = g_game.getContainer(entry.parentContainerId)
+  if not parentContainer then
+    -- Parent closed, skip this entry
+    schedule(50, ContainerOpener.processNext)
+    return
+  end
+  
+  -- Get fresh item reference from the slot
+  local items = parentContainer:getItems()
+  local item = nil
+  
+  -- First try the original slot
+  if entry.slot and items[entry.slot] then
+    local candidate = items[entry.slot]
+    if candidate and candidate:isContainer() then
+      item = candidate
     end
-    
-    -- Mark this slot as being opened (prevent re-attempts)
-    openedSlots[slotKey] = true
-    pendingSlotKey = slotKey
-    lastOpenTime = now
-    openAttempts = 0
-    
-    local countBefore = countContainers()
-    
-    -- Open the container
-    g_game.open(item, nil)
-    
-    -- Wait and verify
-    schedule(WAIT_FOR_OPEN, function()
-        if not isProcessing then return end
-        
-        local countAfter = countContainers()
-        
-        if countAfter > countBefore then
-            -- Success! Continue to next
-            pendingSlotKey = nil
-            schedule(50, processNext)
-        else
-            -- Failed - but slot is already marked, so we won't retry this one
-            -- Just move on to the next
-            pendingSlotKey = nil
-            openAttempts = openAttempts + 1
-            
-            if openAttempts < MAX_ATTEMPTS then
-                -- Try to re-fetch and open again
-                local parentContainer = g_game.getContainer(parentId)
-                if parentContainer then
-                    local items = parentContainer:getItems()
-                    local freshItem = items[slot]
-                    if freshItem and freshItem:isContainer() then
-                        g_game.open(freshItem, nil)
-                        schedule(WAIT_FOR_OPEN, processNext)
-                        return
-                    end
-                end
-            end
-            
-            -- Move on
-            schedule(50, processNext)
+  end
+  
+  -- If not found at slot, search for any container in the parent
+  if not item then
+    for idx, candidate in ipairs(items) do
+      if candidate and candidate:isContainer() then
+        local candidateKey = makeSlotKey(entry.parentContainerId, idx)
+        -- Check if this slot wasn't already queued
+        if not ContainerOpener.queuedSlots[candidateKey] then
+          ContainerOpener.queuedSlots[candidateKey] = true
+          item = candidate
+          break
         end
+      end
+    end
+  end
+  
+  if not item then
+    -- No valid container found, move on
+    schedule(50, ContainerOpener.processNext)
+    return
+  end
+  
+  -- Record timing
+  ContainerOpener.lastOpenTime = currentTime
+  
+  -- Open the container
+  -- g_game.open(item, nil) opens in a new window
+  g_game.open(item, nil)
+  
+  -- Schedule next processing after a delay
+  -- The onContainerOpen handler will also trigger scan + processNext
+  schedule(ContainerOpener.openDelay + 100, ContainerOpener.processNext)
+end
+
+-- Finish the opening process
+function ContainerOpener.finish()
+  ContainerOpener.isProcessing = false
+  
+  -- Apply final minimize pass
+  if config.autoMinimize then
+    schedule(100, function()
+      for _, container in pairs(g_game.getContainers()) do
+        minimizeContainer(container)
+      end
     end)
+  end
+  
+  -- Apply renaming
+  if config.renameEnabled then
+    schedule(150, function()
+      for _, container in pairs(g_game.getContainers()) do
+        renameContainer(container)
+      end
+    end)
+  end
+  
+  -- Call completion callback
+  if ContainerOpener.onComplete then
+    local cb = ContainerOpener.onComplete
+    ContainerOpener.onComplete = nil
+    schedule(50, cb)
+  end
+  
+  -- Emit event
+  if EventBus and EventBus.emit then
+    EventBus.emit("containers:open_all_complete")
+  end
+end
+
+-- Start the container opening process
+function ContainerOpener.start(onComplete)
+  ContainerOpener.reset()
+  ContainerOpener.isProcessing = true
+  ContainerOpener.onComplete = onComplete
+  ContainerOpener.lastOpenTime = 0
+  
+  -- Initial scan
+  ContainerOpener.scanAllContainers()
+  
+  -- Start processing
+  schedule(50, ContainerOpener.processNext)
+end
+
+-- Stop the opening process
+function ContainerOpener.stop()
+  ContainerOpener.isProcessing = false
+  ContainerOpener.isPaused = false
+end
+
+-- Called when a container opens (from event handler)
+function ContainerOpener.onContainerOpened(container)
+  if not ContainerOpener.isProcessing then return end
+  if not container then return end
+  
+  -- Scan the newly opened container for nested containers
+  ContainerOpener.scanContainer(container)
+  
+  -- Trigger processing immediately
+  schedule(50, ContainerOpener.processNext)
 end
 
 -- ============================================================================
--- EVENT HANDLER
+-- EVENTBUS INTEGRATION (for instant container detection)
 -- ============================================================================
-onContainerOpen(function(container, previousContainer)
+
+-- Register container open event handler
+if EventBus and EventBus.on then
+  EventBus.on("container:open", function(container, previousContainer)
     if not container then return end
-    
+
+    -- Trigger the new ContainerOpener's event handler
+    if ContainerOpener and ContainerOpener.onContainerOpened then
+      ContainerOpener.onContainerOpened(container)
+    end
+
     local containerItem = container:getContainerItem()
     local itemId = containerItem and containerItem:getId() or 0
     local entry = getContainerConfig(itemId)
-    
+
     -- Apply minimize based on config entry or global auto-minimize during processing
     if entry and entry.minimize then
-        schedule(50, function()
-            local window = getContainerWindow(container:getId())
-            if window then
-                if window.minimize then
-                    window:minimize()
-                elseif window.setOn then
-                    window:setOn(false)
-                elseif window.minimizeButton then
-                    window.minimizeButton:onClick()
-                end
-            end
-        end)
-    elseif isProcessing and config.autoMinimize then
-        schedule(50, function()
-            minimizeContainer(container)
-        end)
+      schedule(50, function()
+        local window = getContainerWindow(container:getId())
+        if window then
+          if window.minimize then
+            window:minimize()
+          elseif window.setOn then
+            window:setOn(false)
+          end
+        end
+      end)
+    elseif ContainerOpener.isProcessing and config.autoMinimize then
+      schedule(50, function()
+        minimizeContainer(container)
+      end)
     end
-    
+
     -- Apply rename if enabled
     if config.renameEnabled then
-        schedule(60, function()
-            renameContainer(container)
-        end)
+      schedule(60, function()
+        renameContainer(container)
+      end)
     end
-    
+
     -- Open nested containers if configured
     if entry and entry.openNested then
-        schedule(300, function()
-            for _, item in ipairs(container:getItems()) do
-                if item:isContainer() and item:getId() == itemId then
-                    g_game.open(item)
-                    break  -- Only open one at a time
-                end
-            end
-        end)
+      schedule(200, function()
+        for _, item in ipairs(container:getItems()) do
+          if item:isContainer() and item:getId() == itemId then
+            g_game.open(item)
+            break
+          end
+        end
+      end)
     end
-    
+
     -- Trigger sorting macro
     if sortingMacro then
-        sortingMacro:setOn()
+      sortingMacro:setOn()
     end
-end)
+  end, 10)  -- Priority 10
+end
+
+-- Legacy compatibility: also use onContainerOpen
+local _legacyContainerOpenRegistered = false
+if not _legacyContainerOpenRegistered then
+  _legacyContainerOpenRegistered = true
+  
+  onContainerOpen(function(container, previousContainer)
+    if not container then return end
+    
+    -- Emit to EventBus for unified handling (include previous container for context)
+    if EventBus and EventBus.emit then
+      EventBus.emit("container:open", container, previousContainer)
+    end
+  end)
+end
 
 -- ============================================================================
--- PUBLIC API
+-- PUBLIC API (using ContainerOpener)
 -- ============================================================================
 local function startContainerBFS()
-    -- Reset all state
-    isProcessing = true
-    lastOpenTime = 0
-    openedSlots = {}                -- Clear the opened slots tracker
-    pendingSlotKey = nil
-    openAttempts = 0
-    initialContainerCount = countContainers()
-    
-    -- Start processing
-    schedule(100, processNext)
+    ContainerOpener.start()
 end
 
 -- Open main backpack first, then start BFS
@@ -1134,12 +1272,23 @@ local function openAllContainers()
         local bpItem = getBack()
         if bpItem then
             g_game.open(bpItem)
-            -- Wait for main BP to open, then start BFS
-            schedule(400, function()
-                startContainerBFS()
-                -- Open quiver after a small delay
-                schedule(200, openQuiver)
-            end)
+            -- Wait until a container appears (the main backpack) then start BFS and open quiver
+            local attempts = 0
+            local function waitForMain()
+                attempts = attempts + 1
+                if #g_game.getContainers() > 0 then
+                    startContainerBFS()
+                    schedule(200, openQuiver)
+                elseif attempts < 12 then
+                    -- retry a few times (~1.8s total)
+                    schedule(150, waitForMain)
+                else
+                    -- Fallback: start anyway after retries
+                    startContainerBFS()
+                    schedule(200, openQuiver)
+                end
+            end
+            schedule(150, waitForMain)
         else
             warn("[Container Panel] No backpack in back slot!")
         end
@@ -1153,6 +1302,11 @@ end
 
 -- Reopen all backpacks from back slot
 function reopenBackpacks()
+    -- Emit event so other modules know we're closing all containers
+    if EventBus and EventBus.emit then
+        EventBus.emit("containers:close_all")
+    end
+    
     -- Close all containers first
     for _, container in pairs(g_game.getContainers()) do 
         g_game.close(container) 
@@ -1181,10 +1335,23 @@ function reopenBackpacks()
         -- Always open quiver (default behavior)
         schedule(350, openQuiver)
         
-        -- Start BFS after a small delay to let main backpack open
-        schedule(500, function()
-            startContainerBFS()
-        end)
+        -- Start BFS after main backpack opens; poll until a container appears
+        local attempts = 0
+        local function waitForMainReopen()
+            attempts = attempts + 1
+            local containerCount = 0
+            for _ in pairs(g_game.getContainers()) do containerCount = containerCount + 1 end
+            
+            if containerCount > 0 then
+                startContainerBFS()
+            elseif attempts < 12 then
+                schedule(150, waitForMainReopen)
+            else
+                -- Fallback
+                startContainerBFS()
+            end
+        end
+        schedule(150, waitForMainReopen)
     end)
 end
 
@@ -1274,6 +1441,9 @@ end
   Uses onPlayerHealthChange to detect when player logs back in.
   When health changes from 0 (or initial state) to a positive value,
   it indicates a new login session.
+  
+  On relogin, we close all containers first and then reopen from backpack slot
+  to ensure a clean state.
 ]]
 
 local lastKnownHealth = 0
@@ -1288,10 +1458,10 @@ onPlayerHealthChange(function(healthPercent)
     if lastKnownHealth == 0 and healthPercent > 0 and not hasTriggeredThisSession then
         hasTriggeredThisSession = true
         
-        -- Delay to let game fully load
+        -- Delay to let game fully load, then close all and reopen
         schedule(1500, function()
-            -- Auto-opening containers on login
-            openAllContainers()
+            -- Use reopenBackpacks which closes all first, then opens from back slot
+            reopenBackpacks()
         end)
     end
     
@@ -1318,7 +1488,8 @@ schedule(1000, function()
     if #g_game.getContainers() == 0 then
         hasTriggeredThisSession = true
         schedule(1500, function()
-            openAllContainers()
+            -- Use reopenBackpacks for clean state
+            reopenBackpacks()
         end)
     end
 end)
@@ -1468,6 +1639,32 @@ end)
 
 -- Event handlers to trigger sorting
 onAddItem(function(container, slot, item, oldItem)
+    -- If a container item is added into an open container, queue it for opening
+    if item and item:isContainer() then
+        local parentId = container and container.getId and container:getId() or 0
+        local containerName = container and container.getName and container:getName() or ""
+        if not isExcludedContainer(containerName) then
+            local slotKey = tostring(parentId) .. "_" .. tostring(slot)
+            
+            -- Only queue if not already queued
+            if not ContainerOpener.queuedSlots[slotKey] then
+                ContainerOpener.queuedSlots[slotKey] = true
+                
+                table.insert(ContainerOpener.queue, {
+                    item = item,
+                    parentContainerId = parentId,
+                    slot = slot,
+                    slotKey = slotKey
+                })
+                
+                -- If opener is active, process immediately for realtime behavior
+                if ContainerOpener.isProcessing then
+                    schedule(10, ContainerOpener.processNext)
+                end
+            end
+        end
+    end
+
     if sortingMacro and (config.sortEnabled or config.forceOpen) then
         sortingMacro:setOn()
     end
