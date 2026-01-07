@@ -49,14 +49,6 @@ MonsterInspectorWindow < MainWindow
       width: 80
 
     Button
-      id: export
-      text: Export
-      anchors.left: refresh.right
-      anchors.verticalCenter: parent.verticalCenter
-      width: 90
-      margin-left: 6
-
-    Button
       id: clear
       text: Clear Patterns
       anchors.left: export.right
