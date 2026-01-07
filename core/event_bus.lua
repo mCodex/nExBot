@@ -233,11 +233,24 @@ if onCreatureDisappear then
   end)
 end
 
+-- Track creature health for detecting changes
+local creatureHealthCache = {}
+setmetatable(creatureHealthCache, { __mode = "k" }) -- Weak keys for auto-cleanup
+
 if onCreatureHealthPercentChange then
   onCreatureHealthPercentChange(function(creature, percent)
-    EventBus.emit("creature:health", creature, percent)
+    -- Get cached old HP (default to 100 if not tracked)
+    local oldPercent = creatureHealthCache[creature] or 100
+    creatureHealthCache[creature] = percent
+    
+    -- Emit with both old and new values for proper change detection
+    EventBus.emit("creature:health", creature, percent, oldPercent)
+    
     if creature:isMonster() then
-      EventBus.emit("monster:health", creature, percent)
+      EventBus.emit("monster:health", creature, percent, oldPercent)
+    elseif creature:isPlayer() and not creature:isLocalPlayer() then
+      -- Emit dedicated friend/player health event for FriendHealer
+      EventBus.emit("friend:health", creature, percent, oldPercent)
     end
   end)
 end
