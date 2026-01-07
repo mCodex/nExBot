@@ -736,6 +736,10 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false
   end
 
+  -- Calculate distance to destination
+  local distX = math.abs(playerPos.x - destPos.x)
+  local distY = math.abs(playerPos.y - destPos.y)
+
   -- Distance check
   local maxDist = storage.extras.gotoMaxDistance or 50
   if (distX + distY) > maxDist then

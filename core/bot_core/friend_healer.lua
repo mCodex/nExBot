@@ -36,7 +36,7 @@ local FriendHealerEnhanced = BotCore.FriendHealerEnhanced
 BotCore.FriendHealer = BotCore.FriendHealerEnhanced
 
 -- Module version for debugging
-FriendHealer.VERSION = "3.0.0"
+FriendHealerEnhanced.VERSION = "3.0.0"
 
 -- ============================================================================
 -- CONSTANTS

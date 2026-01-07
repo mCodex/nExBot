@@ -146,6 +146,7 @@ end
 -- Pre-allocated position objects (Flyweight pattern - avoid allocations)
 local ProbePos = {x = 0, y = 0, z = 0}
 local AltPos = {x = 0, y = 0, z = 0}
+local pathProbe = {x = 0, y = 0, z = 0}  -- Used by path validation functions
 
 -- ============================================================================
 -- MODULE STATE (FloorGuard - monitors floor changes)
@@ -163,6 +164,9 @@ local FloorGuard = {
 -- ============================================================================
 local TileAnalyzer = {}
 
+-- Initialize PathValidator table for later function assignment
+local PathValidator = {}
+
 -- Floor-change tile cache (LRU-like with TTL)
 TileAnalyzer.Cache = {
   tiles = {},
@@ -173,6 +177,9 @@ TileAnalyzer.Cache = {
   MAX_ENTRIES = getCfg("CACHE_MAX_SIZE", 200),
   CLEANUP_INTERVAL = getCfg("CACHE_CLEANUP_INTERVAL", 30000),
 }
+
+-- Alias for backward compatibility with code that references FloorChangeCache
+local FloorChangeCache = TileAnalyzer.Cache
 
 -- Recent position buffer to detect oscillation/flicker (performance: tiny fixed-size ring)
 local RecentPos = {
@@ -931,19 +938,16 @@ CaveBot.walkTo = function(dest, maxDist, params)
     return executeFieldWalk(path, dest, playerPos)
   end
   
-  -- Verify reachability
-  local reachable = iterativeReachable(playerPos, chunkDest)
-  if not reachable then
-    local testPath = findPath(playerPos, chunkDest, maxDist, {
-      ignoreNonPathable = true, 
-      ignoreCreatures = true, 
-      ignoreFields = ignoreFields, 
-      precision = 0
-    })
-    if not testPath or #testPath == 0 or pathCrossesFloorChange(testPath, playerPos) then
-      resetPathCursor()
-      return false
-    end
+  -- Verify path is still valid
+  local testPath = findPath(playerPos, chunkDest, maxDist, {
+    ignoreNonPathable = true, 
+    ignoreCreatures = true, 
+    ignoreFields = ignoreFields, 
+    precision = 0
+  })
+  if not testPath or #testPath == 0 or pathCrossesFloorChange(testPath, playerPos) then
+    resetPathCursor()
+    return false
   end
   
   -- === LAYER 11: Execute movement ===
