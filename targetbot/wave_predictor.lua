@@ -203,10 +203,16 @@ if EventBus then
 
   -- Enhanced creature:move with direction change detection
   EventBus.on("creature:move", function(c, oldPos)
-    if not c or not c:isMonster() then return end
+    -- Safe check for monster
+    local okMonster, isMonster = pcall(function() return c and c:isMonster() end)
+    if not okMonster or not isMonster then return end
     
     local p = ensurePattern(c)
-    local newDir = c:getDirection()
+    
+    -- Safe direction access
+    local okDir, newDir = pcall(function() return c:getDirection() end)
+    if not okDir then return end
+    
     local oldDir = p.lastDirection
     
     -- Sync with MonsterAI for shared intelligence
@@ -221,10 +227,10 @@ if EventBus then
     if oldDir ~= nil and oldDir ~= newDir then
       p.lastDirectionChange = nowMs()
       
-      -- Check if now facing player
-      local playerPos = player and player:getPosition()
-      local monsterPos = c:getPosition()
-      if playerPos and monsterPos then
+      -- Check if now facing player (safe)
+      local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
+      local okMpos, monsterPos = pcall(function() return c:getPosition() end)
+      if okPpos and playerPos and okMpos and monsterPos then
         local isFacing = false
         if MonsterAI and MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition then
           isFacing = MonsterAI.Predictor.isFacingPosition(monsterPos, newDir, playerPos)
@@ -333,7 +339,9 @@ if EventBus then
 
   -- Hook into monster health events to detect attacks
   EventBus.on("monster:health", function(c, percent)
-    if c and c:isMonster() then
+    -- Safe check for monster
+    local okMonster, isMonster = pcall(function() return c and c:isMonster() end)
+    if okMonster and isMonster then
       onAttackLike(c)
       
       -- Validate any pending predictions for this monster
@@ -389,7 +397,9 @@ WavePredictor.syncWithMonsterAI = syncWithMonsterAI
 WavePredictor.buildThreatMap = buildThreatMap
 WavePredictor.predictArc = predictArc
 WavePredictor.onMove = function(c, oldPos)
-  if c and c:isMonster() then
+  -- Safe check for monster
+  local okMonster, isMonster = pcall(function() return c and c:isMonster() end)
+  if okMonster and isMonster then
     local p = ensurePattern(c)
     syncWithMonsterAI(c, p)
     p.observedWidth = math.max(1, (p.observedWidth or 1))

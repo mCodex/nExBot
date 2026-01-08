@@ -729,11 +729,18 @@ if EventBus then
   local monsterDirections = {}  -- id -> lastDirection
   
   EventBus.on("creature:move", function(creature, oldPos)
-    if not creature or not creature:isMonster() then return end
-    if creature:isDead() then return end
+    -- Safe creature checks
+    local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
+    if not okMonster or not isMonster then return end
     
-    local id = creature:getId()
-    local newDir = creature:getDirection()
+    local okDead, isDead = pcall(function() return creature:isDead() end)
+    if okDead and isDead then return end
+    
+    -- Safe property access
+    local okId, id = pcall(function() return creature:getId() end)
+    local okDir, newDir = pcall(function() return creature:getDirection() end)
+    if not okId or not id or not okDir then return end
+    
     local oldDir = monsterDirections[id]
     
     -- Store new direction
@@ -741,9 +748,9 @@ if EventBus then
     
     -- If direction changed, monster might be turning to attack
     if oldDir and oldDir ~= newDir then
-      local playerPos = player and player:getPosition()
-      local monsterPos = creature:getPosition()
-      if not playerPos or not monsterPos then return end
+      local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
+      local okMpos, monsterPos = pcall(function() return creature:getPosition() end)
+      if not okPpos or not playerPos or not okMpos or not monsterPos then return end
       
       local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
       
@@ -759,7 +766,10 @@ if EventBus then
             and MovementCoordinator.MonsterCache.getNearby(7) 
             or {}
           for _, c in ipairs(creatures) do
-            if c and c:isMonster() and not c:isDead() then
+            -- Safe monster check
+            local okCm, isCm = pcall(function() return c and c:isMonster() end)
+            local okCd, isCd = pcall(function() return c and c:isDead() end)
+            if okCm and isCm and (not okCd or not isCd) then
               monsters[#monsters + 1] = c
             end
           end
@@ -770,12 +780,13 @@ if EventBus then
             
             if safePos and MovementCoordinator and MovementCoordinator.Intent then
               local confidence = 0.75 + (5 - dist) * 0.03  -- Higher confidence for closer monsters
+              local okName, mName = pcall(function() return creature:getName() end)
               MovementCoordinator.Intent.register(
                 MovementCoordinator.CONSTANTS.INTENT.WAVE_AVOIDANCE, 
                 safePos, 
                 confidence, 
                 "wave_direction_change",
-                {triggered = "direction_change", monster = creature:getName()}
+                {triggered = "direction_change", monster = okName and mName or "unknown"}
               )
             end
           end
@@ -814,11 +825,14 @@ if EventBus then
   
   -- When monster appears close, immediately check if repositioning is needed
   EventBus.on("monster:appear", function(creature)
-    if not creature or not creature:isMonster() then return end
+    -- Safe creature checks
+    local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
+    if not okMonster or not isMonster then return end
     
-    local playerPos = player and player:getPosition()
-    local monsterPos = creature:getPosition()
-    if not playerPos or not monsterPos then return end
+    -- Safe position access
+    local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
+    local okMpos, monsterPos = pcall(function() return creature:getPosition() end)
+    if not okPpos or not playerPos or not okMpos or not monsterPos then return end
     
     local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
     
@@ -834,7 +848,10 @@ if EventBus then
           and MovementCoordinator.MonsterCache.getNearby(5) 
           or {}
         for _, c in ipairs(creatures) do
-          if c and c:isMonster() and not c:isDead() then
+          -- Safe monster check
+          local okCm, isCm = pcall(function() return c and c:isMonster() end)
+          local okCd, isCd = pcall(function() return c and c:isDead() end)
+          if okCm and isCm and (not okCd or not isCd) then
             monsters[#monsters + 1] = c
           end
         end
@@ -1165,17 +1182,20 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     TargetBot.ActiveMovementConfig.anchorRange = config.anchorRange or 5
   end
 
-  -- Set OTClient native chase mode based on config
-  -- When chase mode is 1 (ChaseOpponent), the client automatically follows the attack target
-  if config.chase and not config.keepDistance then
-    -- Enable native chase mode - client will automatically chase attack target
-    if g_game.setChaseMode then
-      g_game.setChaseMode(1) -- ChaseOpponent
-    end
-  elseif config.keepDistance or not config.chase then
-    -- Disable chase mode for keep distance or no chase config
-    if g_game.setChaseMode then
-      g_game.setChaseMode(0) -- Stand
+  -- Set OTClient native chase mode based on config using centralized enforcer
+  -- This ensures consistent chase mode handling through EventBus coordination
+  if TargetBot.enforceChaseModeNow then
+    pcall(TargetBot.enforceChaseModeNow)
+  else
+    -- Fallback: direct API call if enforcer not available
+    if config.chase and not config.keepDistance then
+      if g_game.setChaseMode then
+        g_game.setChaseMode(1) -- ChaseOpponent
+      end
+    elseif config.keepDistance or not config.chase then
+      if g_game.setChaseMode then
+        g_game.setChaseMode(0) -- Stand
+      end
     end
   end
   
@@ -1219,6 +1239,17 @@ end
 TargetBot.Creature.walk = function(creature, config, targets)
   local cpos = creature:getPosition()
   local pos = player:getPosition()
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- PARTY HUNT: Force Follow Mode Check
+  -- When force follow mode is active from Follow Player, skip TargetBot's
+  -- movement logic to allow the follower to catch up to the party leader
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if TargetBot.isForceFollowActive and TargetBot.isForceFollowActive() then
+    -- Skip all TargetBot movement - let Follow Player take control
+    -- The attack function will still run, but we won't chase or reposition
+    return
+  end
   
   --[[
     ═══════════════════════════════════════════════════════════════════════════

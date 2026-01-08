@@ -842,6 +842,7 @@ TargetCore.Native = {
 }
 
 -- Set chase mode with caching (avoids redundant packets)
+-- This function now also emits EventBus events for coordination
 -- @param mode: 0 = Stand, 1 = Chase
 -- @return boolean: true if mode was changed
 function TargetCore.Native.setChaseMode(mode)
@@ -852,17 +853,32 @@ function TargetCore.Native.setChaseMode(mode)
   if g_game.setChaseMode then
     g_game.setChaseMode(mode)
     TargetCore.Native.lastChaseMode = mode
+    
+    -- Emit EventBus event for coordination with other modules
+    if EventBus then
+      pcall(function()
+        EventBus.emit("targetbot/chase_mode_set", mode, mode == 1 and "chase" or "stand")
+      end)
+    end
+    
     return true
   end
   return false
 end
 
--- Get current chase mode (cached)
+-- Get current chase mode (cached, synced with native API)
 function TargetCore.Native.getChaseMode()
   if g_game.getChaseMode then
     TargetCore.Native.lastChaseMode = g_game.getChaseMode()
   end
   return TargetCore.Native.lastChaseMode or 0
+end
+
+-- Sync cache with native API (call when external changes may have occurred)
+function TargetCore.Native.syncChaseMode()
+  if g_game.getChaseMode then
+    TargetCore.Native.lastChaseMode = g_game.getChaseMode()
+  end
 end
 
 -- Follow creature with validation

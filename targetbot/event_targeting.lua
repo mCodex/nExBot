@@ -1,10 +1,12 @@
 --[[
-  Event-Driven Targeting System v1.0
+  Event-Driven Targeting System v2.0
   
   High-performance monster detection and targeting using EventBus.
+  IMPROVED: More accurate monster counting using direct g_map API calls.
   
   Features:
   - Instant monster detection when creatures appear on screen
+  - ACCURATE monster counting using g_map.getSpectators directly
   - Path validation for reachable targets (uses existing pathfinding)
   - Automatic target acquisition for monsters in targetbot config
   - Smooth chase integration using MovementCoordinator
@@ -12,6 +14,7 @@
   - O(1) lookups with optimized caching
   
   Architecture:
+  - EventTargeting.LiveMonsterCount: Direct API count (most accurate)
   - EventTargeting.Cache: Fast creature tracking with LRU eviction
   - EventTargeting.PathValidator: Validates reachability
   - EventTargeting.TargetAcquisition: Instant target selection
@@ -23,7 +26,7 @@
 -- ============================================================================
 
 EventTargeting = EventTargeting or {}
-EventTargeting.VERSION = "1.0"
+EventTargeting.VERSION = "2.0"
 EventTargeting.DEBUG = false
 
 -- ============================================================================
@@ -37,31 +40,35 @@ local SafeCall = SafeCall or require("core.safe_call")
 -- ============================================================================
 
 EventTargeting.CONSTANTS = {
-  -- Detection range (tiles from player)
-  DETECTION_RANGE = 10,
+  -- Detection range (tiles from player) - matches visible screen
+  DETECTION_RANGE = 8,            -- 8 tiles = visible screen area
   
   -- Maximum distance to chase a target
-  MAX_CHASE_RANGE = 8,
+  MAX_CHASE_RANGE = 10,
   
   -- Path validation settings
-  PATH_CACHE_TTL = 300,           -- Path valid for 300ms
+  PATH_CACHE_TTL = 200,           -- Path valid for 200ms (faster invalidation)
   PATH_MAX_LENGTH = 15,           -- Max path length to consider reachable
   
   -- Target acquisition timing
-  ACQUISITION_COOLDOWN = 100,     -- Min time between target changes
-  INSTANT_ATTACK_THRESHOLD = 3,   -- Attack immediately if within this range
+  ACQUISITION_COOLDOWN = 50,      -- Reduced from 100ms for faster targeting
+  INSTANT_ATTACK_THRESHOLD = 5,   -- Attack immediately if within this range
   
   -- Cache settings
-  CREATURE_CACHE_SIZE = 50,       -- Max tracked creatures
-  CREATURE_CACHE_TTL = 5000,      -- Creature entry valid for 5s
+  CREATURE_CACHE_SIZE = 100,      -- Increased for larger spawns
+  CREATURE_CACHE_TTL = 3000,      -- Reduced to 3s for faster cleanup
   
   -- Combat coordination
   COMBAT_PAUSE_DURATION = 300,    -- How long to pause CaveBot when engaging
-  LURE_CHECK_INTERVAL = 250,      -- How often to check lure conditions
+  LURE_CHECK_INTERVAL = 150,      -- Faster lure checks (was 250)
   
   -- Performance thresholds
-  MAX_PROCESS_PER_TICK = 5,       -- Max creatures to process per event batch
-  DEBOUNCE_INTERVAL = 50          -- Debounce rapid events
+  MAX_PROCESS_PER_TICK = 10,      -- Increased for faster processing
+  DEBOUNCE_INTERVAL = 25,         -- Reduced from 50ms for faster response
+  
+  -- LIVE COUNTING - uses direct API for accuracy
+  LIVE_COUNT_INTERVAL = 100,      -- How often to refresh live count
+  LIVE_COUNT_RANGE = 8            -- Range for live monster counting
 }
 
 local CONST = EventTargeting.CONSTANTS
@@ -99,6 +106,117 @@ local PATH_PARAMS = {
   ignoreCost = true,
   ignoreCreatures = true
 }
+
+-- ============================================================================
+-- LIVE MONSTER COUNTING (Direct API - Most Accurate)
+-- Uses g_map.getSpectators/getSpectatorsInRange directly for accurate counting
+-- This bypasses the cache which may have stale data
+-- ============================================================================
+
+local liveMonsterState = {
+  count = 0,              -- Live count from direct API call
+  lastUpdate = 0,         -- When we last updated
+  creatures = {},         -- Array of live monster references
+  oldTibia = g_game and g_game.getClientVersion and g_game.getClientVersion() < 960 or false
+}
+
+-- Check if a creature is a targetable monster (not summon)
+local function isTargetableMonster(creature)
+  if not creature then return false end
+  
+  -- Check basic conditions
+  local ok, isDead = pcall(function() return creature:isDead() end)
+  if ok and isDead then return false end
+  
+  local ok2, isMonster = pcall(function() return creature:isMonster() end)
+  if not ok2 or not isMonster then return false end
+  
+  -- Health check - skip dead monsters
+  local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+  if okHp and hp and hp <= 0 then return false end
+  
+  -- For old Tibia, all monsters are targetable
+  if liveMonsterState.oldTibia then return true end
+  
+  -- For new Tibia, check creature type to exclude other player's summons
+  local okType, creatureType = pcall(function() return creature:getType() end)
+  if okType and creatureType then
+    -- Type 0 = player, 1 = monster, 2 = NPC, 3+ = summons
+    return creatureType < 3
+  end
+  
+  return true  -- Default to true if we can't determine type
+end
+
+-- Get live count of targetable monsters using direct API
+-- This is the AUTHORITATIVE count - always accurate
+function EventTargeting.getLiveMonsterCount()
+  local currentTime = now or (os.time() * 1000)
+  
+  -- Update cached player reference
+  if not player or not player:getPosition() then
+    player = g_game and g_game.getLocalPlayer() or player
+  end
+  if not player then return 0, {} end
+  
+  local playerPos = player:getPosition()
+  if not playerPos then return 0, {} end
+  
+  -- Only refresh if interval elapsed (but with a short interval for accuracy)
+  if (currentTime - liveMonsterState.lastUpdate) < CONST.LIVE_COUNT_INTERVAL then
+    return liveMonsterState.count, liveMonsterState.creatures
+  end
+  
+  -- Get creatures using the most reliable API available
+  local creatures = nil
+  local range = CONST.LIVE_COUNT_RANGE
+  
+  -- Try getSpectatorsInRange first (most common)
+  if g_map and g_map.getSpectatorsInRange then
+    creatures = g_map.getSpectatorsInRange(playerPos, false, range, range)
+  elseif g_map and g_map.getSpectators then
+    creatures = g_map.getSpectators(playerPos, false)
+  end
+  
+  if not creatures then
+    return liveMonsterState.count, liveMonsterState.creatures
+  end
+  
+  -- Count targetable monsters on same floor
+  local count = 0
+  local monsters = {}
+  local playerZ = playerPos.z
+  
+  for i = 1, #creatures do
+    local creature = creatures[i]
+    if isTargetableMonster(creature) then
+      local okPos, cpos = pcall(function() return creature:getPosition() end)
+      if okPos and cpos and cpos.z == playerZ then
+        count = count + 1
+        monsters[#monsters + 1] = creature
+      end
+    end
+  end
+  
+  -- Update state
+  liveMonsterState.count = count
+  liveMonsterState.creatures = monsters
+  liveMonsterState.lastUpdate = currentTime
+  
+  return count, monsters
+end
+
+-- Check if there are ANY monsters on screen (fast check)
+function EventTargeting.hasAnyMonsters()
+  local count = EventTargeting.getLiveMonsterCount()
+  return count > 0
+end
+
+-- Force refresh of live count (useful after events)
+function EventTargeting.refreshLiveCount()
+  liveMonsterState.lastUpdate = 0
+  return EventTargeting.getLiveMonsterCount()
+end
 
 -- ============================================================================
 -- UTILITY FUNCTIONS
@@ -187,7 +305,7 @@ local function evictOldEntries()
   end
 end
 
--- Cleanup stale entries
+-- Cleanup stale entries (improved with safe API calls)
 local function cleanupCache()
   if now - creatureCache.lastCleanup < creatureCache.CLEANUP_INTERVAL then
     return
@@ -203,7 +321,9 @@ local function cleanupCache()
     local entry = creatureCache.entries[id]
     if entry and entry.lastSeen > cutoff then
       local creature = entry.creature
-      if creature and not creature:isDead() then
+      -- Safe dead check
+      local okDead, isDead = pcall(function() return creature and creature:isDead() end)
+      if creature and (not okDead or not isDead) then
         newEntries[id] = entry
         newOrder[#newOrder + 1] = id
         count = count + 1
@@ -297,10 +417,14 @@ function EventTargeting.PathValidator.validate(playerPos, targetPos)
 end
 
 -- Get cached or fresh path
+-- Get cached or fresh path (improved with safe API calls)
 function EventTargeting.PathValidator.getPath(creature)
   if not creature then return nil, 999, false end
   
-  local id = creature:getId()
+  -- Safe ID access
+  local okId, id = pcall(function() return creature:getId() end)
+  if not okId or not id then return nil, 999, false end
+  
   local entry = creatureCache.entries[id]
   
   -- Check cached path
@@ -312,8 +436,13 @@ function EventTargeting.PathValidator.getPath(creature)
   updatePlayerRef()
   if not player then return nil, 999, false end
   
-  local playerPos = player:getPosition()
-  local creaturePos = creature:getPosition()
+  -- Safe position access
+  local okPpos, playerPos = pcall(function() return player:getPosition() end)
+  local okCpos, creaturePos = pcall(function() return creature:getPosition() end)
+  
+  if not okPpos or not playerPos or not okCpos or not creaturePos then
+    return nil, 999, false
+  end
   
   return EventTargeting.PathValidator.validate(playerPos, creaturePos)
 end
@@ -324,11 +453,17 @@ end
 
 EventTargeting.TargetAcquisition = {}
 
--- Check if creature is in targetbot config
+-- Check if creature is in targetbot config (improved with safe API calls)
 function EventTargeting.TargetAcquisition.isValidTarget(creature)
   if not creature then return false end
-  if creature:isDead() then return false end
-  if not creature:isMonster() then return false end
+  
+  -- Safe dead check
+  local okDead, isDead = pcall(function() return creature:isDead() end)
+  if okDead and isDead then return false end
+  
+  -- Safe monster check
+  local okMonster, isMonster = pcall(function() return creature:isMonster() end)
+  if not okMonster or not isMonster then return false end
   
   -- Check against targetbot configs
   if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
@@ -339,12 +474,16 @@ function EventTargeting.TargetAcquisition.isValidTarget(creature)
   return false
 end
 
--- Calculate target priority (higher = better)
+-- Calculate target priority (higher = better) - improved with safe API calls
 function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
   if not creature then return 0 end
   
   local priority = 100  -- Base priority
-  local hp = creature:getHealthPercent() or 100
+  
+  -- Safe HP access
+  local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+  hp = (okHp and hp) or 100
+  
   local pathLen = path and #path or 10
   
   -- HP-based priority (wounded targets get higher priority)
@@ -369,13 +508,17 @@ function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
     priority = priority + 5
   end
   
-  -- Current attack target bonus
+  -- Current attack target bonus (safe)
   local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
-  if currentTarget and currentTarget:getId() == creature:getId() then
-    priority = priority + 25
-    -- Extra bonus for wounded current target
-    if hp < 50 then
-      priority = priority + 20
+  if currentTarget then
+    local okCid, cid = pcall(function() return creature:getId() end)
+    local okTid, tid = pcall(function() return currentTarget:getId() end)
+    if okCid and okTid and cid == tid then
+      priority = priority + 25
+      -- Extra bonus for wounded current target
+      if hp < 50 then
+        priority = priority + 20
+      end
     end
   end
   
@@ -390,7 +533,7 @@ function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
   return priority
 end
 
--- Process a newly appeared creature
+-- Process a newly appeared creature (improved with safe API calls)
 function EventTargeting.TargetAcquisition.processCreature(creature)
   if not creature then return end
   if not EventTargeting.TargetAcquisition.isValidTarget(creature) then return end
@@ -398,9 +541,12 @@ function EventTargeting.TargetAcquisition.processCreature(creature)
   updatePlayerRef()
   if not player then return end
   
-  local id = creature:getId()
-  local playerPos = player:getPosition()
-  local creaturePos = creature:getPosition()
+  -- Safe access to positions and ID
+  local okId, id = pcall(function() return creature:getId() end)
+  local okPpos, playerPos = pcall(function() return player:getPosition() end)
+  local okCpos, creaturePos = pcall(function() return creature:getPosition() end)
+  
+  if not okId or not id or not okPpos or not playerPos or not okCpos or not creaturePos then return end
   
   -- Check same floor and range
   if not sameFloor(playerPos, creaturePos) then return end
@@ -886,9 +1032,10 @@ end
 
 -- Scan interval for full screen scan (catch any monsters EventBus missed)
 local lastFullScan = 0
-local FULL_SCAN_INTERVAL = 400  -- Scan every 400ms for missed monsters
+local FULL_SCAN_INTERVAL = 150  -- IMPROVED: Scan every 150ms for faster detection
 
 -- Full screen scan - catches monsters that EventBus may have missed
+-- IMPROVED: Uses the live count system for accurate detection
 local function scanVisibleMonsters()
   updatePlayerRef()
   if not player then return end
@@ -896,15 +1043,41 @@ local function scanVisibleMonsters()
   local playerPos = player:getPosition()
   if not playerPos then return end
   
-  -- Get all creatures in range using best available API
+  -- IMPROVED: First refresh live count
+  local liveCount, liveCreatures = EventTargeting.getLiveMonsterCount()
+  
+  -- If live count found monsters, process them
+  if liveCreatures and #liveCreatures > 0 then
+    local currentTime = now or (os.time() * 1000)
+    local processedCount = 0
+    for i = 1, #liveCreatures do
+      local creature = liveCreatures[i]
+      if creature then
+        local okId, id = pcall(function() return creature:getId() end)
+        if okId and id then
+          -- Only process if not already in cache or cache entry is stale
+          local entry = creatureCache.entries[id]
+          if not entry or (currentTime - (entry.lastSeen or 0)) > 500 then
+            -- Queue for processing
+            table.insert(pendingCreatures, creature)
+            processedCount = processedCount + 1
+            if processedCount >= 8 then break end  -- Process more per scan
+          end
+        end
+      end
+    end
+    
+    if EventTargeting.DEBUG and processedCount > 0 then
+      print("[EventTargeting] Full scan queued " .. processedCount .. " creatures (live count: " .. liveCount .. ")")
+    end
+    return
+  end
+  
+  -- Fallback: Use direct API if live count didn't work
   local creatures = nil
   local range = CONST.DETECTION_RANGE
   
-  if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
-    creatures = MovementCoordinator.MonsterCache.getNearby(range)
-  elseif SpectatorCache and SpectatorCache.getNearby then
-    creatures = SpectatorCache.getNearby(range, range)
-  elseif g_map and g_map.getSpectatorsInRange then
+  if g_map and g_map.getSpectatorsInRange then
     creatures = g_map.getSpectatorsInRange(playerPos, false, range, range)
   end
   
@@ -912,28 +1085,35 @@ local function scanVisibleMonsters()
   
   local currentTime = now or (os.time() * 1000)
   local processedCount = 0
+  local playerZ = playerPos.z
   for i = 1, #creatures do
     local creature = creatures[i]
-    if creature and creature:isMonster() and not creature:isDead() then
-      local id = creature:getId()
-      -- Only process if not already in cache or cache entry is stale
-      local entry = creatureCache.entries[id]
-      if not entry or (currentTime - (entry.lastSeen or 0)) > 800 then
-        -- Queue for processing
-        table.insert(pendingCreatures, creature)
-        processedCount = processedCount + 1
-        if processedCount >= 5 then break end  -- Limit per scan to spread work
+    if isTargetableMonster(creature) then
+      local okPos, cpos = pcall(function() return creature:getPosition() end)
+      if okPos and cpos and cpos.z == playerZ then
+        local okId, id = pcall(function() return creature:getId() end)
+        if okId and id then
+          -- Only process if not already in cache or cache entry is stale
+          local entry = creatureCache.entries[id]
+          if not entry or (currentTime - (entry.lastSeen or 0)) > 500 then
+            -- Queue for processing
+            table.insert(pendingCreatures, creature)
+            processedCount = processedCount + 1
+            if processedCount >= 8 then break end
+          end
+        end
       end
     end
   end
   
   if EventTargeting.DEBUG and processedCount > 0 then
-    print("[EventTargeting] Full scan queued " .. processedCount .. " creatures")
+    print("[EventTargeting] Full scan queued " .. processedCount .. " creatures (fallback)")
   end
 end
 
 -- Fast macro for processing queued creatures and combat checks
-macro(75, function()
+-- IMPROVED: Runs at 50ms for faster response
+macro(50, function()
   -- Skip if TargetBot is off
   if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
     return
@@ -1028,8 +1208,34 @@ function EventTargeting.shouldPauseCaveBot()
 end
 
 -- Export combat active state
+-- Returns true if there are monsters on screen to kill
+-- This helps CaveBot know when to pause and wait for monsters to die
+-- IMPROVED: Uses LIVE monster count from direct API for accuracy
 function EventTargeting.isCombatActive()
+  -- PRIORITY 1: Use live count from direct API (most accurate)
+  local liveCount = EventTargeting.getLiveMonsterCount()
+  if liveCount > 0 then
+    return true
+  end
+  
+  -- PRIORITY 2: Check TargetBot cache as backup
+  if TargetBot and TargetBot.hasTargetableMonsters and TargetBot.hasTargetableMonsters() then
+    return true
+  end
+  
+  -- PRIORITY 3: Check our local cache
+  if creatureCache.count > 0 then
+    return true
+  end
+  
+  -- Original logic: combat state AND not in lure mode
   return targetState.combatActive and not EventTargeting.CombatCoordinator.isLureModeActive()
+end
+
+-- Get authoritative monster count for external modules
+function EventTargeting.getMonsterCount()
+  local count = EventTargeting.getLiveMonsterCount()
+  return count
 end
 
 print("[EventTargeting] Module loaded v" .. EventTargeting.VERSION)
