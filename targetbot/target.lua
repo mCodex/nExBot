@@ -170,11 +170,15 @@ if EventBus then
 
   -- Debounced invalidation + optional immediate lightweight recalc for responsiveness
   -- Assign to outer variable (do NOT use local here) so external callers use the debounce
-  debouncedInvalidateAndRecalc = makeDebounce(120, function()
+  -- IMPROVED: Faster debounce (50ms) for quicker monster detection
+  debouncedInvalidateAndRecalc = makeDebounce(50, function()
     invalidateCache()
+    -- Also refresh live count for accuracy
+    if EventTargeting and EventTargeting.refreshLiveCount then
+      EventTargeting.refreshLiveCount()
+    end
     -- Schedule a lightweight recalc to update cache quickly (non-blocking)
-    -- Schedule a lightweight recalc after debounce (short delay)
-    schedule(40, function()
+    schedule(20, function()
       pcall(function()
         if recalculateBestTarget then
           recalculateBestTarget()
@@ -192,7 +196,9 @@ if EventBus then
   end, 20)
 
   EventBus.on("creature:move", function(creature, oldPos)
-    if creature and creature:isMonster() then
+    -- Safe check for monster
+    local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
+    if okMonster and isMonster then
       debouncedInvalidateAndRecalc()
     end
   end, 20)
@@ -209,6 +215,59 @@ if EventBus then
   EventBus.on("combat:target", function(creature, oldCreature)
     debouncedInvalidateAndRecalc()
   end, 20)
+
+  --------------------------------------------------------------------------------
+  -- FOLLOW PLAYER INTEGRATION (Party Hunt Support)
+  -- When Force Follow mode is active, TargetBot should reduce aggression
+  -- to allow the follower to catch up with the party leader
+  --------------------------------------------------------------------------------
+  local followPlayerForceMode = false
+  local followPlayerForceExpiry = 0
+  local FORCE_FOLLOW_COMBAT_WINDOW_MS = 2500  -- How long to allow combat before forcing follow
+  
+  -- Listen for force follow mode activation from tools.lua
+  EventBus.on("followplayer/force_follow", function(leaderPos, distance)
+    pcall(function()
+      followPlayerForceMode = true
+      followPlayerForceExpiry = now + FORCE_FOLLOW_COMBAT_WINDOW_MS
+      -- When force follow triggers, allow CaveBot/walking immediately
+      -- This ensures the follower can catch up to the leader
+      cavebotAllowance = now + 100
+    end)
+  end, 100)  -- High priority to ensure timely response
+  
+  -- Listen for follow player being enabled/disabled
+  EventBus.on("followplayer/enabled", function(playerName)
+    pcall(function()
+      -- Reset force mode when following starts
+      followPlayerForceMode = false
+      followPlayerForceExpiry = 0
+    end)
+  end, 80)
+  
+  EventBus.on("followplayer/disabled", function()
+    pcall(function()
+      -- Clear force mode when following stops
+      followPlayerForceMode = false
+      followPlayerForceExpiry = 0
+    end)
+  end, 80)
+  
+  -- Export force follow check for use in main targeting loop
+  TargetBot.isForceFollowActive = function()
+    if not followPlayerForceMode then return false end
+    if now > followPlayerForceExpiry then
+      followPlayerForceMode = false
+      return false
+    end
+    return true
+  end
+  
+  -- Allow external access to reset force follow (e.g., when monsters are all dead)
+  TargetBot.clearForceFollow = function()
+    followPlayerForceMode = false
+    followPlayerForceExpiry = 0
+  end
 end
 
 -- Fallback: If EventBus isn't available (older clients or different environments), hook into global creature events
@@ -230,7 +289,9 @@ if not EventBus then
   end
   if onCreatureMove then
     onCreatureMove(function(creature, oldPos)
-      if creature and creature:isMonster() then
+      -- Safe check for monster
+      local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
+      if okMonster and isMonster then
         invalidateCache()
         if debouncedInvalidateAndRecalc then debouncedInvalidateAndRecalc() end
       end
@@ -355,11 +416,13 @@ local function cleanupCache()
 end
 
 -- Update a single creature in cache (called on events)
--- Improved with LRU tracking and distance-based filtering
+-- Improved with LRU tracking, distance-based filtering, and safe API calls
 local function updateCreatureInCache(creature)
-  if not creature or creature:isDead() then
-    local id = creature and creature:getId()
-    if id and CreatureCache.monsters[id] then
+  -- Safe check for dead creature
+  local okDead, isDead = pcall(function() return creature and creature:isDead() end)
+  if not creature or (okDead and isDead) then
+    local okId, id = pcall(function() return creature and creature:getId() end)
+    if okId and id and CreatureCache.monsters[id] then
       CreatureCache.monsters[id] = nil
       CreatureCache.monsterCount = CreatureCache.monsterCount - 1
       -- Remove from access order
@@ -374,11 +437,17 @@ local function updateCreatureInCache(creature)
     return
   end
   
-  if not creature:isMonster() then return end
+  -- Safe check for monster
+  local okMonster, isMonster = pcall(function() return creature:isMonster() end)
+  if not okMonster or not isMonster then return end
   
-  local id = creature:getId()
-  local pos = player:getPosition()
-  local cpos = creature:getPosition()
+  -- Safe get ID and positions
+  local okId, id = pcall(function() return creature:getId() end)
+  if not okId or not id then return end
+  
+  local okPos, pos = pcall(function() return player:getPosition() end)
+  local okCpos, cpos = pcall(function() return creature:getPosition() end)
+  if not okPos or not pos or not okCpos or not cpos then return end
   
   -- Use TargetBotCore distance if available, otherwise calculate
   local dist
@@ -537,19 +606,26 @@ if EventBus then
   
   -- Event-driven keepDistance: when target moves, adjust position
   EventBus.on("creature:move", function(creature, oldPos)
-    if not creature or not creature:isMonster() then return end
+    -- Safe check for monster
+    local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
+    if not okMonster or not isMonster then return end
     
     -- Check if this is our current target
     local target = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
     if not target then return end
-    if creature:getId() ~= target:getId() then return end
+    
+    -- Safe ID comparison
+    local okCid, cid = pcall(function() return creature:getId() end)
+    local okTid, tid = pcall(function() return target:getId() end)
+    if not okCid or not okTid or cid ~= tid then return end
     
     local config = TargetBot.ActiveMovementConfig
     if not config then return end
     
-    local playerPos = player and player:getPosition()
-    local creaturePos = creature:getPosition()
-    if not playerPos or not creaturePos then return end
+    -- Safe position access
+    local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
+    local okCpos, creaturePos = pcall(function() return creature:getPosition() end)
+    if not okPpos or not playerPos or not okCpos or not creaturePos then return end
     
     local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
     
@@ -633,18 +709,23 @@ if EventBus then
   EventBus.on("monster:health", function(creature, percent)
     if not creature then return end
     
-    -- Check if this is our target
+    -- Check if this is our target (safe)
     local target = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
     if not target then return end
-    if creature:getId() ~= target:getId() then return end
+    
+    -- Safe ID comparison
+    local okCid, cid = pcall(function() return creature:getId() end)
+    local okTid, tid = pcall(function() return target:getId() end)
+    if not okCid or not okTid or cid ~= tid then return end
     
     local config = TargetBot.ActiveMovementConfig
     local threshold = config and config.finishKillThreshold or 30
     
     if percent and percent < threshold and percent > 0 then
-      local playerPos = player and player:getPosition()
-      local creaturePos = creature:getPosition()
-      if not playerPos or not creaturePos then return end
+      -- Safe position access
+      local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
+      local okCpos, creaturePos = pcall(function() return creature:getPosition() end)
+      if not okPpos or not playerPos or not okCpos or not creaturePos then return end
       
       local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
       
@@ -667,13 +748,178 @@ if EventBus then
   -- Emit event when target is acquired for other modules
   EventBus.on("combat:target", function(creature, oldCreature)
     if creature and MovementCoordinator then
-      -- Notify MovementCoordinator of new target for chase tracking
+      -- Notify MovementCoordinator of new target for chase tracking (safe)
       pcall(function()
-        EventBus.emit("targetbot/target_acquired", creature, creature:getPosition())
+        local okPos, pos = pcall(function() return creature:getPosition() end)
+        EventBus.emit("targetbot/target_acquired", creature, okPos and pos or nil)
       end)
     end
   end, 65)
 end
+
+--------------------------------------------------------------------------------
+-- NATIVE CHASE MODE ENFORCEMENT (EventBus-Driven)
+-- 
+-- When TargetBot has "Chase" enabled for the current target config, force the
+-- client's native chase mode to stay active. This uses the OTClient API:
+--   g_game.setChaseMode(0) = DontChase (Stand)
+--   g_game.setChaseMode(1) = ChaseOpponent (Chase)
+-- 
+-- The client emits "onChaseModeChange" when the UI or other modules change it.
+-- We listen for this and re-enforce chase mode if TargetBot requires it.
+--------------------------------------------------------------------------------
+
+-- Chase mode enforcement state
+local ChaseModeEnforcer = {
+  enabled = false,               -- Whether enforcement is active
+  lastEnforcedMode = nil,        -- Last mode we enforced
+  lastEnforceTime = 0,           -- Timestamp of last enforcement
+  enforceCooldown = 100,         -- Minimum ms between enforcements to avoid spam
+  shouldChase = false,           -- Current desired chase state from config
+  keepDistance = false           -- Keep distance mode (overrides chase)
+}
+
+-- Update chase mode based on current config
+local function updateChaseModeFromConfig()
+  local config = TargetBot.ActiveMovementConfig
+  if not config then return end
+  
+  ChaseModeEnforcer.shouldChase = config.chase == true
+  ChaseModeEnforcer.keepDistance = config.keepDistance == true
+end
+
+-- Enforce the chase mode based on TargetBot config
+local function enforceChaseModeNow()
+  if not TargetBot.isOn or not TargetBot.isOn() then
+    ChaseModeEnforcer.enabled = false
+    return
+  end
+  
+  -- Rate limiting
+  local currentTime = now or (os.time() * 1000)
+  if (currentTime - ChaseModeEnforcer.lastEnforceTime) < ChaseModeEnforcer.enforceCooldown then
+    return
+  end
+  
+  updateChaseModeFromConfig()
+  
+  -- Determine desired mode: chase=1, keepDistance or no chase=0
+  local desiredMode = 0  -- Default: Stand
+  if ChaseModeEnforcer.shouldChase and not ChaseModeEnforcer.keepDistance then
+    desiredMode = 1  -- ChaseOpponent
+  end
+  
+  -- Only enforce if we're actively attacking
+  local isAttacking = g_game.isAttacking and g_game.isAttacking()
+  if not isAttacking then
+    ChaseModeEnforcer.enabled = false
+    return
+  end
+  
+  ChaseModeEnforcer.enabled = true
+  
+  -- Check current mode and enforce if different
+  local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+  if currentMode ~= desiredMode then
+    if g_game.setChaseMode then
+      g_game.setChaseMode(desiredMode)
+      ChaseModeEnforcer.lastEnforcedMode = desiredMode
+      ChaseModeEnforcer.lastEnforceTime = currentTime
+      
+      -- Emit event for other modules
+      if EventBus then
+        pcall(function()
+          EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand")
+        end)
+      end
+    end
+  end
+end
+
+-- EventBus integration for chase mode enforcement
+if EventBus then
+  -- When target is acquired, enforce chase mode
+  EventBus.on("targetbot/target_acquired", function(creature, creaturePos)
+    pcall(function()
+      enforceChaseModeNow()
+    end)
+  end, 60)
+  
+  -- When combat starts, enforce chase mode
+  EventBus.on("targetbot/combat_start", function(creature, data)
+    pcall(function()
+      enforceChaseModeNow()
+    end)
+  end, 60)
+  
+  -- When combat ends, reset enforcement
+  EventBus.on("targetbot/combat_end", function()
+    pcall(function()
+      ChaseModeEnforcer.enabled = false
+    end)
+  end, 60)
+  
+  -- Listen for player movement - re-check chase mode
+  EventBus.on("player:move", function(newPos, oldPos)
+    if ChaseModeEnforcer.enabled then
+      pcall(function()
+        enforceChaseModeNow()
+      end)
+    end
+  end, 5)  -- Low priority, after other handlers
+  
+  -- Listen for target movement - re-check chase mode
+  EventBus.on("creature:move", function(creature, oldPos)
+    if not ChaseModeEnforcer.enabled then return end
+    
+    -- Safe check if this is our target
+    local target = g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if not target then return end
+    
+    local okCid, cid = pcall(function() return creature:getId() end)
+    local okTid, tid = pcall(function() return target:getId() end)
+    if okCid and okTid and cid == tid then
+      pcall(function()
+        enforceChaseModeNow()
+      end)
+    end
+  end, 5)
+end
+
+-- Hook into OTClient's native chase mode change callback
+-- This fires when the UI or other modules change chase mode
+if g_game and type(g_game) == "table" then
+  -- Use connect to listen for onChaseModeChange if available
+  local function onNativeChaseModeChange(newMode)
+    if not ChaseModeEnforcer.enabled then return end
+    if not TargetBot.isOn or not TargetBot.isOn() then return end
+    
+    updateChaseModeFromConfig()
+    
+    local desiredMode = 0
+    if ChaseModeEnforcer.shouldChase and not ChaseModeEnforcer.keepDistance then
+      desiredMode = 1
+    end
+    
+    -- If someone changed it to something we don't want, re-enforce after a short delay
+    if newMode ~= desiredMode then
+      schedule(50, function()
+        if ChaseModeEnforcer.enabled and TargetBot.isOn and TargetBot.isOn() then
+          enforceChaseModeNow()
+        end
+      end)
+    end
+  end
+  
+  -- Try to connect to the native callback
+  pcall(function()
+    connect(g_game, { onChaseModeChange = onNativeChaseModeChange })
+  end)
+end
+
+-- Public API for other modules
+TargetBot.ChaseModeEnforcer = ChaseModeEnforcer
+TargetBot.enforceChaseModeNow = enforceChaseModeNow
 
 -- PERFORMANCE: Path cache for backward compatibility (optimized)
 local PathCache = {
@@ -1020,24 +1266,68 @@ TargetBot.canLure = function()
   return lureEnabled
 end
 
+-- Kill Before Walk: Always enabled - wait for monsters to be killed before walking
+-- This is the default behavior. DynamicLure and SmartPull can bypass when needed.
+TargetBot.isKillBeforeWalkEnabled = function()
+  return true  -- Always ON
+end
+
+-- Check if there are any targetable monsters on screen
+-- IMPROVED: Uses EventTargeting live count for accuracy, falls back to cache
+TargetBot.hasTargetableMonsters = function()
+  -- PRIORITY 1: Use EventTargeting live count (most accurate)
+  if EventTargeting and EventTargeting.getLiveMonsterCount then
+    local liveCount = EventTargeting.getLiveMonsterCount()
+    if liveCount > 0 then
+      return true
+    end
+  end
+  -- PRIORITY 2: Fall back to cache
+  return CreatureCache.monsterCount > 0
+end
+
+-- Get count of targetable monsters on screen
+-- IMPROVED: Uses EventTargeting live count for accuracy
+TargetBot.getTargetableMonsterCount = function()
+  -- PRIORITY 1: Use EventTargeting live count (most accurate)
+  if EventTargeting and EventTargeting.getLiveMonsterCount then
+    local liveCount = EventTargeting.getLiveMonsterCount()
+    if liveCount > 0 then
+      return liveCount
+    end
+  end
+  -- PRIORITY 2: Fall back to cache
+  return CreatureCache.monsterCount or 0
+end
+
 -- Helper function to check if creature is targetable
 local function isTargetableCreature(creature)
-  if not creature or creature:isDead() then
-    return false
-  end
+  if not creature then return false end
   
-  if not creature:isMonster() then
-    return false
-  end
+  -- Safe check for isDead
+  local okDead, isDead = pcall(function() return creature:isDead() end)
+  if okDead and isDead then return false end
+  
+  -- Safe check for isMonster
+  local okMonster, isMonster = pcall(function() return creature:isMonster() end)
+  if not okMonster or not isMonster then return false end
+  
+  -- Health check - skip monsters with 0 HP
+  local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+  if okHp and hp and hp <= 0 then return false end
   
   -- Old Tibia clients don't have creature types
   if oldTibia then
     return true
   end
   
-  local creatureType = creature:getType()
-  -- Target monsters (type 1) and some summons (type < 3)
-  return creatureType < 3
+  -- For new Tibia, check creature type to exclude other player's summons
+  local okType, creatureType = pcall(function() return creature:getType() end)
+  if okType and creatureType then
+    return creatureType < 3
+  end
+  
+  return true  -- Default to true if we can't determine type
 end
 
 --------------------------------------------------------------------------------
@@ -1058,6 +1348,7 @@ local function processCandidate(creature, pos)
 end
 
 -- Recalculate best target from cache
+-- IMPROVED: Uses live creature detection for accuracy
 local function recalculateBestTarget()
   local pos = player:getPosition()
   if not pos then return end
@@ -1067,32 +1358,67 @@ local function recalculateBestTarget()
   local totalDanger = 0
   local targetCount = 0
 
+  -- IMPROVED: Get creatures from live detection first
+  local creatures = nil
+  local liveCount, liveCreatures = 0, nil
+  if EventTargeting and EventTargeting.getLiveMonsterCount then
+    liveCount, liveCreatures = EventTargeting.getLiveMonsterCount()
+  end
   
-  -- Use cached creatures if available, otherwise fetch fresh
-  local useCache = CreatureCache.monsterCount > 0 and not CreatureCache.dirty
-  
-  if useCache and now - CreatureCache.lastFullUpdate < CreatureCache.FULL_UPDATE_INTERVAL then
-    -- Fast path: use cached data
+  -- If we have live creatures, use those as the authoritative source
+  if liveCreatures and #liveCreatures > 0 then
+    creatures = liveCreatures
+  elseif CreatureCache.monsterCount > 0 and not CreatureCache.dirty then
+    -- Fall back to cache only if live detection found nothing
+    -- This handles edge cases where EventTargeting hasn't initialized
+    local cacheCreatures = {}
     for id, data in pairs(CreatureCache.monsters) do
-      local creature = data.creature
-      if creature and not creature:isDead() and isTargetableCreature(creature) then
-        local params, path
-        if data.path then
-          params = TargetBot.Creature.calculateParams(creature, data.path)
-        else
-          params, path = processCandidate(creature, pos)
-          if path then
-            data.path = path
-            data.pathTime = now
-          end
-        end
-
-        if params and params.config then
+      if data.creature and not data.creature:isDead() then
+        cacheCreatures[#cacheCreatures + 1] = data.creature
+      end
+    end
+    creatures = cacheCreatures
+  end
+  
+  -- If still no creatures, do a fresh scan
+  if not creatures or #creatures == 0 then
+    creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
+      and MovementCoordinator.MonsterCache.getNearby(10)
+      or (SpectatorCache and SpectatorCache.getNearby(10, 10)
+      or g_map.getSpectatorsInRange(pos, false, 10, 10))
+  end
+  
+  if not creatures then return nil, 0, 0 end
+  
+  -- Rebuild cache from live creatures
+  CreatureCache.monsters = {}
+  CreatureCache.monsterCount = 0
+  
+  local playerZ = pos.z
+  for i = 1, #creatures do
+    local creature = creatures[i]
+    if creature and isTargetableCreature(creature) then
+      local okPos, cpos = pcall(function() return creature:getPosition() end)
+      if okPos and cpos and cpos.z == playerZ then
+        local okId, id = pcall(function() return creature:getId() end)
+        id = id or i
+        
+        -- Calculate path and params
+        local params, path = processCandidate(creature, pos)
+        
+        -- Add to cache
+        CreatureCache.monsters[id] = {
+          creature = creature,
+          path = path,
+          pathTime = now,
+          lastUpdate = now
+        }
+        CreatureCache.monsterCount = CreatureCache.monsterCount + 1
+        
+        if path and params and params.config then
           targetCount = targetCount + 1
           totalDanger = totalDanger + (params.danger or 0)
-
-
-
+          
           if params.priority > bestPriority then
             bestPriority = params.priority
             bestTarget = params
@@ -1100,104 +1426,15 @@ local function recalculateBestTarget()
         end
       end
     end
-  else
-    -- Slow path: full refresh from Observed monsters (fallback to getSpectators)
-    local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(10) or (SpectatorCache and SpectatorCache.getNearby(10, 10) or g_map.getSpectatorsInRange(pos, false, 10, 10))
-    
-
-    
-    -- Clear and rebuild cache
-    CreatureCache.monsters = {}
-    CreatureCache.monsterCount = 0
-    
-    if creatures then
-      local sawAny = false
-      for i = 1, #creatures do
-        local creature = creatures[i]
-        sawAny = true
-        local okName, name = pcall(function() return creature:getName() end)
-        local okId, cid = pcall(function() return creature:getId() end)
-        local isTarget = isTargetableCreature(creature)
-
-        if isTarget then
-          local params, path = processCandidate(creature, pos)
-          local okId, id = pcall(function() return creature:getId() end)
-
-          -- Add to cache (even if path nil)
-          CreatureCache.monsters[id] = {
-            creature = creature,
-            path = path,
-            pathTime = now,
-            lastUpdate = now
-          }
-          CreatureCache.monsterCount = CreatureCache.monsterCount + 1
-
-          if path then
-            -- params may be nil if calculateParams fails silently
-            if params and params.config then
-              targetCount = targetCount + 1
-              totalDanger = totalDanger + (params.danger or 0)
-
-    
-
-              if params.priority > bestPriority then
-                bestPriority = params.priority
-                bestTarget = params
-              end
-            end
-          else
-            -- no path to creature (silent)
-          end
-        end
-      end
-      if not sawAny then
-        -- No spectators found; if we have a recent prime snapshot, use it as a silent short-lived fallback
-        local snap = CreatureCache.primeSnapshot
-        if snap and (now - snap.ts) < 5000 then
-          for i = 1, #snap.creatures do
-            local s = snap.creatures[i]
-            local creature = s and s.creature
-            if creature and not creature:isDead() and isTargetableCreature(creature) then
-              local params, path = processCandidate(creature, pos)
-              local okId, id = pcall(function() return creature:getId() end)
-              id = id or 0
-
-              CreatureCache.monsters[id] = {
-                creature = creature,
-                path = path,
-                pathTime = now,
-                lastUpdate = now
-              }
-              CreatureCache.monsterCount = CreatureCache.monsterCount + 1
-
-              if path and params and params.config then
-                targetCount = targetCount + 1
-                totalDanger = totalDanger + (params.danger or 0)
-                if ui and ui.editor and ui.editor.debug and ui.editor.debug:isOn() then
-                  setCreatureTextSafe(creature, tostring(math.floor(params.priority * 10) / 10))
-                end
-                if params.priority > bestPriority then
-                  bestPriority = params.priority
-                  bestTarget = params
-                end
-              end
-            end
-          end
-        end
-      end
-    else
-      -- no creatures returned by getSpectatorsInRange (silent)
-    end
-    
-    CreatureCache.lastFullUpdate = now
   end
+  
+  CreatureCache.lastFullUpdate = now
   
   -- Update cache state
   CreatureCache.bestTarget = bestTarget
   CreatureCache.bestPriority = bestPriority
   CreatureCache.totalDanger = totalDanger
   CreatureCache.dirty = false
-  -- Final decision: cache updated silently
 
   return bestTarget, targetCount, totalDanger
 end
@@ -1270,9 +1507,10 @@ local function primeCreatureCache()
 end
 
 -- Main TargetBot loop - optimized with EventBus caching
+-- IMPROVED: Faster macro interval (200ms) for better responsiveness
 local lastRecalcTime = 0
-local RECALC_COOLDOWN_MS = 150
-targetbotMacro = macro(400, function()
+local RECALC_COOLDOWN_MS = 100  -- IMPROVED: Faster recalc cooldown
+targetbotMacro = macro(200, function()
   local _msStart = os.clock()
   if not config or not config.isOn or not config.isOn() then
     return
@@ -1349,11 +1587,36 @@ targetbotMacro = macro(400, function()
       bestTarget, targetCount, totalDanger = recalculateBestTarget()
     end
   
+  -- IMPROVED: Get live monster count from EventTargeting (most accurate)
+  local liveMonsterCount = 0
+  if EventTargeting and EventTargeting.getLiveMonsterCount then
+    liveMonsterCount = EventTargeting.getLiveMonsterCount()
+  else
+    liveMonsterCount = CreatureCache.monsterCount or 0
+  end
+  
   if not bestTarget then
     setWidgetTextSafe(ui.target.right, "-")
     setWidgetTextSafe(ui.danger.right, "0")
     setWidgetTextSafe(ui.config.right, "-")
     dangerValue = 0
+    
+    -- KILL BEFORE WALK: Even with no best target, check if monsters exist on screen
+    -- If there are still targetable monsters, don't allow CaveBot to proceed
+    -- DynamicLure and SmartPull can bypass this by calling allowCaveBot()
+    -- IMPROVED: Use live count for more accurate detection
+    if liveMonsterCount > 0 then
+      -- There are monsters but no valid target (possibly unreachable or being processed)
+      -- Keep CaveBot paused briefly to allow re-evaluation
+      setStatusRight("Clearing (" .. tostring(liveMonsterCount) .. ")")
+      -- Force cache refresh to pick up these monsters
+      if EventTargeting and EventTargeting.refreshLiveCount then
+        EventTargeting.refreshLiveCount()
+      end
+      invalidateCache()
+      return
+    end
+    
     cavebotAllowance = now + 100
     setStatusRight(STATUS_WAITING)
     return
@@ -1363,6 +1626,19 @@ targetbotMacro = macro(400, function()
   dangerValue = totalDanger
   setWidgetTextSafe(ui.danger.right, tostring(totalDanger))
   
+  -- PARTY HUNT: Check if force follow mode is active
+  -- When force follow is triggered and combat window expires, pause targeting to let follower catch up
+  if TargetBot.isForceFollowActive and TargetBot.isForceFollowActive() then
+    -- Allow CaveBot to walk (which triggers follow movement)
+    cavebotAllowance = now + 100
+    setStatusRight("Following Leader")
+    -- Still show target info but don't attack
+    if bestTarget.creature then
+      pcall(function() setWidgetTextSafe(ui.target.right, bestTarget.creature:getName() .. " (paused)") end)
+    end
+    return
+  end
+  
   -- Attack best target
   if bestTarget.creature and bestTarget.config then
 
@@ -1370,18 +1646,28 @@ targetbotMacro = macro(400, function()
     setWidgetTextSafe(ui.target.right, bestTarget.creature:getName())
     setWidgetTextSafe(ui.config.right, bestTarget.config.name or "-")
     
-    -- Pass lure status for status display
-    local isLooting = false
-    setStatusRight("Targeting")
+    -- KILL BEFORE WALK: Block CaveBot while we have monsters to kill
+    -- DynamicLure and SmartPull can bypass by calling allowCaveBot() in creature_attack.lua
+    -- Do NOT set cavebotAllowance here - this keeps CaveBot paused until all monsters are dead
+    -- IMPROVED: Use live count for accurate status
+    local displayCount = liveMonsterCount > 0 and liveMonsterCount or targetCount
+    setStatusRight("Killing (" .. tostring(displayCount) .. ")")
 
     -- Delegate to unified attack/walk logic from creature_attack
     -- This ensures chase, positioning, avoidance and AttackBot integration run correctly
+    -- DynamicLure/SmartPull will call allowCaveBot() if lure conditions are met
     pcall(function() TargetBot.Creature.attack(bestTarget, targetCount, false) end)
   else
     setWidgetTextSafe(ui.target.right, "-")
     setWidgetTextSafe(ui.config.right, "-")
     
-    -- No target, allow cavebot
+    -- No valid target config - check if monsters still exist
+    -- IMPROVED: Use live count for accuracy
+    if liveMonsterCount > 0 then
+      setStatusRight("Clearing (" .. tostring(liveMonsterCount) .. ")")
+      return
+    end
+    
     cavebotAllowance = now + 100
     setStatusRight(STATUS_WAITING)
   end

@@ -877,16 +877,6 @@ if EventBus then
 end
 
 cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
-  -- Safety-first gating: pause movement when healing/danger active
-  if HealContext and HealContext.isCritical and HealContext.isCritical() then
-    CaveBot.resetWalking()
-    return
-  end
-  if HealContext and HealContext.isDanger and HealContext.isDanger() then
-    CaveBot.resetWalking()
-    return
-  end
-
   -- SMART EXECUTION: Skip if we shouldn't execute this tick
   if shouldSkipExecution() then return end
   
@@ -972,6 +962,22 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     if TargetBot.smartPullActive then
       CaveBot.resetWalking()
       return
+    end
+    
+    -- IMPROVED MONSTER DETECTION: Use EventTargeting's live count for accurate detection
+    -- This directly checks the g_map API for monsters on screen
+    -- NOTE: This check is BYPASSED if TargetBot.isCaveBotActionAllowed() returns true
+    -- (dynamicLure/smartPull call allowCaveBot() to set cavebotAllowance)
+    if EventTargeting and EventTargeting.getLiveMonsterCount then
+      local liveCount = EventTargeting.getLiveMonsterCount()
+      if liveCount > 0 then
+        -- Check if TargetBot is allowing CaveBot to proceed (lure modes)
+        if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
+          -- There are monsters on screen - pause and let TargetBot handle them
+          CaveBot.resetWalking()
+          return
+        end
+      end
     end
     
     -- EVENT-DRIVEN COMBAT PAUSE: If EventTargeting detected combat, pause walking

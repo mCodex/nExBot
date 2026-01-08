@@ -309,13 +309,21 @@ local function shouldHealFriend(selfHpPercent, friendHpPercent)
   return true, "normal"
 end
 
--- Check if creature matches friend conditions
+-- Check if creature matches friend conditions (improved with safe API calls)
 local function isFriend(creature, config)
-  if not creature or not creature:isPlayer() then return false end
-  if creature:isLocalPlayer() then return false end
+  if not creature then return false end
   
-  local name = getCreatureName(creature)
-  if not name then return false end
+  -- Safely check if player
+  local okPlayer, isPlayer = pcall(function() return creature:isPlayer() end)
+  if not okPlayer or not isPlayer then return false end
+  
+  -- Safely check if local player
+  local okLocal, isLocal = pcall(function() return creature:isLocalPlayer() end)
+  if okLocal and isLocal then return false end
+  
+  -- Safe way to get creature name
+  local okName, name = pcall(function() return creature:getName() end)
+  if not okName or not name then return false end
   
   -- Check custom player list first (with custom HP threshold)
   if config.customPlayers and config.customPlayers[name] then
@@ -325,7 +333,10 @@ local function isFriend(creature, config)
   -- ========== Vocation filtering ==========
   -- Get creature's vocation (if available via outfit or other means)
   local voc = nil
-  if creature.getVocation then voc = creature:getVocation() end
+  if creature.getVocation then
+    local okVoc, v = pcall(function() return creature:getVocation() end)
+    if okVoc then voc = v end
+  end
   
   local vocConditions = config.conditions or {}
   local function checkVocation()
@@ -353,14 +364,16 @@ local function isFriend(creature, config)
   end
   
   -- ========== Group filtering ==========
-  -- Check party membership
-  if vocConditions.party and creature:isPartyMember() then
-    return true
+  -- Check party membership (safe)
+  if vocConditions.party then
+    local okParty, isParty = pcall(function() return creature:isPartyMember() end)
+    if okParty and isParty then return true end
   end
   
-  -- Check guild membership
-  if vocConditions.guild and creature:getEmblem() == 1 then
-    return true
+  -- Check guild membership (safe)
+  if vocConditions.guild then
+    local okEmblem, emblem = pcall(function() return creature:getEmblem() end)
+    if okEmblem and emblem == 1 then return true end
   end
   
   -- Check friends list (g_game.isFriend)
@@ -394,20 +407,27 @@ end
 -- HEALING ACTIONS (Fully integrated with UI config)
 -- ============================================================================
 
--- Count friends in range for area heals
+-- Count friends in range for area heals (improved with safe API calls)
 local function countFriendsInRange(config, maxRange)
   local count = 0
   local spectators = getSpectators and getSpectators() or {}
   
   for _, spec in ipairs(spectators) do
-    if spec:isPlayer() and not spec:isLocalPlayer() then
-      local hp = spec:getHealthPercent()
-      local pos = spec:getPosition()
-      local dist = pos and distanceFromPlayer and distanceFromPlayer(pos) or 99
-      local isFriendMatch = isFriend(spec, config)
+    -- Safely check if player
+    local okPlayer, isPlayer = pcall(function() return spec:isPlayer() end)
+    local okLocal, isLocal = pcall(function() return spec:isLocalPlayer() end)
+    
+    if okPlayer and isPlayer and (not okLocal or not isLocal) then
+      local okHp, hp = pcall(function() return spec:getHealthPercent() end)
+      local okPos, pos = pcall(function() return spec:getPosition() end)
       
-      if isFriendMatch and dist <= maxRange and hp < (config.settings and config.settings.healAt or 80) then
-        count = count + 1
+      if okHp and hp then
+        local dist = (okPos and pos and distanceFromPlayer) and distanceFromPlayer(pos) or 99
+        local isFriendMatch = isFriend(spec, config)
+        
+        if isFriendMatch and dist <= maxRange and hp < (config.settings and config.settings.healAt or 80) then
+          count = count + 1
+        end
       end
     end
   end
@@ -445,9 +465,13 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
   local selfHp = getSelfHpPercent()
   local selfMp = getSelfMpPercent()
   local currentMana = mana and mana() or 0
-  local friendName = friend:getName()
-  local friendPos = friend:getPosition()
-  local distance = friendPos and distanceFromPlayer and distanceFromPlayer(friendPos) or 99
+  
+  -- Safely get friend properties
+  local okName, friendName = pcall(function() return friend:getName() end)
+  local okPos, friendPos = pcall(function() return friend:getPosition() end)
+  if not okName or not friendName then return nil end
+  
+  local distance = (okPos and friendPos and distanceFromPlayer) and distanceFromPlayer(friendPos) or 99
   
   -- Config values from UI
   local healAt = settings.healAt or 80
@@ -536,7 +560,9 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
   
   -- ========== PRIORITY 5: Health Item / UH Rune (hotkey-style) ==========
   if config.useHealthItem and friendHp < healAt then
-    if not isRuneOnCooldown() and distance <= itemRange and friend:canShoot() then
+    -- Safely check if we can shoot the friend
+    local okShoot, canShoot = pcall(function() return friend:canShoot() end)
+    if not isRuneOnCooldown() and distance <= itemRange and (not okShoot or canShoot) then
       return {
         type = "rune",
         runeId = healthItemId,
@@ -643,7 +669,7 @@ end
 -- MAIN TICK AND SCANNING
 -- ============================================================================
 
--- Find best friend to heal from spectators
+-- Find best friend to heal from spectators (improved with safe API calls)
 function FriendHealerEnhanced.findBestTarget(config)
   local spectators = getSpectators and getSpectators() or {}
   local selfHp = getSelfHpPercent()
@@ -651,30 +677,38 @@ function FriendHealerEnhanced.findBestTarget(config)
   local bestUrgency = 0
   
   for _, spec in ipairs(spectators) do
+    -- Safely check if this is a friend
     local isFriendMatch, customHp = isFriend(spec, config)
     if isFriendMatch then
-      local hp = spec:getHealthPercent()
-      local pos = spec:getPosition()
-      local dist = pos and distanceFromPlayer and distanceFromPlayer(pos) or 99
+      -- Safely get creature properties
+      local okHp, hp = pcall(function() return spec:getHealthPercent() end)
+      local okPos, pos = pcall(function() return spec:getPosition() end)
+      local okName, name = pcall(function() return spec:getName() end)
+      local okShoot, canShoot = pcall(function() return spec:canShoot() end)
       
-      -- Check if in healing range
-      if dist <= 7 and spec:canShoot() then
-        local healThreshold = customHp or config.settings and config.settings.healAt or 80
+      -- Skip if we can't get basic info
+      if okHp and okName and hp and name then
+        local dist = (okPos and pos and distanceFromPlayer) and distanceFromPlayer(pos) or 99
         
-        if hp < healThreshold then
-          local shouldHeal = shouldHealFriend(selfHp, hp)
-          if shouldHeal then
-            local urgency = calculateUrgency(hp, dist)
-            if urgency > bestUrgency then
-              bestTarget = {
-                creature = spec,
-                name = spec:getName(),
-                hp = hp,
-                distance = dist,
-                urgency = urgency,
-                customHp = customHp
-              }
-              bestUrgency = urgency
+        -- Check if in healing range
+        if dist <= 7 and (not okShoot or canShoot) then
+          local healThreshold = customHp or config.settings and config.settings.healAt or 80
+          
+          if hp < healThreshold then
+            local shouldHeal = shouldHealFriend(selfHp, hp)
+            if shouldHeal then
+              local urgency = calculateUrgency(hp, dist)
+              if urgency > bestUrgency then
+                bestTarget = {
+                  creature = spec,
+                  name = name,
+                  hp = hp,
+                  distance = dist,
+                  urgency = urgency,
+                  customHp = customHp
+                }
+                bestUrgency = urgency
+              end
             end
           end
         end
@@ -685,17 +719,18 @@ function FriendHealerEnhanced.findBestTarget(config)
   return bestTarget
 end
 
--- Main tick function
+-- Main tick function (improved with safe getters)
 function FriendHealerEnhanced.tick()
   if not _state.enabled or not _state.config then return false end
   
   -- Rate limit scanning
   local currentTime = now or os.time() * 1000
   if (currentTime - _state.lastScan) < SCAN_INTERVAL_MS then
-    -- Use cached target
+    -- Use cached target for faster response
     if _state.bestTarget and _state.bestTarget.creature then
-      local hp = _state.bestTarget.creature:getHealthPercent()
-      if hp and hp < 100 then
+      -- Safely get current HP
+      local ok, hp = pcall(function() return _state.bestTarget.creature:getHealthPercent() end)
+      if ok and hp and hp < 100 then
         local action = FriendHealerEnhanced.planHealAction(
           _state.bestTarget.creature,
           hp,
@@ -725,8 +760,29 @@ function FriendHealerEnhanced.tick()
 end
 
 -- ============================================================================
--- EVENTBUS INTEGRATION
+-- EVENTBUS INTEGRATION (Improved for accuracy and performance)
 -- ============================================================================
+
+-- Safe helper to get creature name
+local function safeGetName(creature)
+  if not creature then return nil end
+  local ok, name = pcall(function() return creature:getName() end)
+  return ok and name or nil
+end
+
+-- Safe helper to get creature HP percent
+local function safeGetHpPercent(creature)
+  if not creature then return nil end
+  local ok, hp = pcall(function() return creature:getHealthPercent() end)
+  return ok and hp or nil
+end
+
+-- Safe helper to check if creature is dead
+local function safeIsDead(creature)
+  if not creature then return true end
+  local ok, isDead = pcall(function() return creature:isDead() end)
+  return ok and isDead or true
+end
 
 function FriendHealerEnhanced.setupEventListeners()
   if not EventBus then return end
@@ -734,55 +790,116 @@ function FriendHealerEnhanced.setupEventListeners()
   -- Clean up old subscriptions
   FriendHealerEnhanced.cleanup()
   
-  -- React to friend health drops (instant response)
-  _state.subscriptions[#_state.subscriptions + 1] = EventBus.on("creature:health", function(creature, percent)
+  -- PRIORITY 1: React to friend:health event (directly emitted for friends/party members)
+  -- This is more efficient as it's pre-filtered by EventBus
+  _state.subscriptions[#_state.subscriptions + 1] = EventBus.on("friend:health", function(creature, percent, oldPercent)
     if not _state.enabled or not _state.config then return end
-    if not creature or creature:isLocalPlayer() then return end
+    if not creature then return end
     
-    -- Check if this is a friend
+    local name = safeGetName(creature)
+    if not name then return end
+    
+    -- Check if this is a friend according to our config
     local isFriendMatch = isFriend(creature, _state.config)
     if not isFriendMatch then return end
     
-    -- Check if HP dropped significantly (burst damage detection)
-    local lastHp = _state.friends[creature:getName()] and _state.friends[creature:getName()].lastHp or 100
-    local drop = lastHp - percent
+    -- Calculate drop
+    local drop = (oldPercent or 100) - percent
     
     -- Update tracking
-    _state.friends[creature:getName()] = {
+    _state.friends[name] = {
       creature = creature,
       lastHp = percent,
       lastUpdate = now or os.time() * 1000
     }
     
-    -- React to significant drops (10% or more)
-    if drop >= 10 and percent < 70 then
-      schedule(25, function()
-        if creature and not creature:isDead() then
-          local action = FriendHealerEnhanced.planHealAction(creature, percent, _state.config)
+    -- React immediately if:
+    -- 1. Significant drop (10%+) OR
+    -- 2. Friend is below critical threshold
+    local healAt = _state.config.settings and _state.config.settings.healAt or 80
+    local shouldReact = (drop >= 10 and percent < 70) or (percent < healAt and percent < 50)
+    
+    if shouldReact then
+      -- React with minimal delay for responsiveness
+      schedule(15, function()
+        if not safeIsDead(creature) then
+          local currentHp = safeGetHpPercent(creature) or percent
+          local action = FriendHealerEnhanced.planHealAction(creature, currentHp, _state.config)
           FriendHealerEnhanced.executeAction(action)
         end
       end)
     end
-  end, 60)  -- High priority
+  end, 80)  -- Very high priority for friend healing
+  
+  -- PRIORITY 2: React to creature:health for any creatures (backup)
+  _state.subscriptions[#_state.subscriptions + 1] = EventBus.on("creature:health", function(creature, percent, oldPercent)
+    if not _state.enabled or not _state.config then return end
+    if not creature then return end
+    
+    -- Skip local player
+    local okLocal, isLocal = pcall(function() return creature:isLocalPlayer() end)
+    if okLocal and isLocal then return end
+    
+    -- Only process players
+    local okPlayer, isPlayer = pcall(function() return creature:isPlayer() end)
+    if not okPlayer or not isPlayer then return end
+    
+    local name = safeGetName(creature)
+    if not name then return end
+    
+    -- Check if this is a friend
+    local isFriendMatch = isFriend(creature, _state.config)
+    if not isFriendMatch then return end
+    
+    -- Calculate drop
+    local prevHp = _state.friends[name] and _state.friends[name].lastHp or (oldPercent or 100)
+    local drop = prevHp - percent
+    
+    -- Update tracking
+    _state.friends[name] = {
+      creature = creature,
+      lastHp = percent,
+      lastUpdate = now or os.time() * 1000
+    }
+    
+    -- React to significant drops
+    if drop >= 10 and percent < 70 then
+      schedule(25, function()
+        if not safeIsDead(creature) then
+          local currentHp = safeGetHpPercent(creature) or percent
+          local action = FriendHealerEnhanced.planHealAction(creature, currentHp, _state.config)
+          FriendHealerEnhanced.executeAction(action)
+        end
+      end)
+    end
+  end, 50)  -- Medium-high priority (lower than friend:health)
   
   -- React to friend appearing (track HP)
   _state.subscriptions[#_state.subscriptions + 1] = EventBus.on("player:appear", function(creature)
     if not _state.enabled or not _state.config then return end
+    if not creature then return end
     
     local isFriendMatch = isFriend(creature, _state.config)
     if isFriendMatch then
-      _state.friends[creature:getName()] = {
-        creature = creature,
-        lastHp = creature:getHealthPercent(),
-        lastUpdate = now or os.time() * 1000
-      }
+      local name = safeGetName(creature)
+      local hp = safeGetHpPercent(creature)
+      if name and hp then
+        _state.friends[name] = {
+          creature = creature,
+          lastHp = hp,
+          lastUpdate = now or os.time() * 1000
+        }
+      end
     end
   end, 30)
   
   -- Clean up when friend disappears
   _state.subscriptions[#_state.subscriptions + 1] = EventBus.on("player:disappear", function(creature)
     if creature then
-      _state.friends[creature:getName()] = nil
+      local name = safeGetName(creature)
+      if name then
+        _state.friends[name] = nil
+      end
     end
   end, 30)
 end
@@ -839,9 +956,9 @@ end
 -- Event handler: Friend health changed (legacy API - EventBus handles this internally)
 function FriendHealerEnhanced.onFriendHealthChange(creature, newHpPercent, oldHpPercent)
   if not _state.enabled then return end
-  if not creature or creature:isLocalPlayer() then return end
+  if not creature then return end
   
-  -- Skip local player
+  -- Skip local player (safe)
   local ok, isLocal = pcall(function() return creature:isLocalPlayer() end)
   if ok and isLocal then return end
   

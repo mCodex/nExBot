@@ -779,14 +779,27 @@ end
 UI.Separator()
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- FOLLOW PLAYER - Enhanced version with EventBus for performance
--- Supports following while attacking monsters (TargetBot compatible)
--- Per-character settings via CharacterDB
+-- FOLLOW PLAYER v2.0 - Party Hunt Optimized
+-- Enhanced for party hunting with TargetBot integration
+-- Features:
+-- - Smart distance tracking with path-based following
+-- - TargetBot & MovementCoordinator integration
+-- - Priority-based movement (follow leader > kill monsters)
+-- - EventBus for instant reaction to leader movements
+-- - Map API for accurate path calculations
+-- - Combat window system (finish current monster, then follow)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- Load follow player settings from CharacterDB (per-character)
 local function loadFollowPlayerConfig()
-  local config = { enabled = false, playerName = "", followWhileAttacking = true }
+  local config = { 
+    enabled = false, 
+    playerName = "", 
+    followWhileAttacking = true,
+    maxDistance = 5,           -- Max distance before prioritizing follow over combat
+    combatWindowMs = 2000,     -- Max time to finish a monster before forced follow
+    smartFollow = true         -- Use pathfinding when native follow fails
+  }
   
   if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
     local charConfig = CharacterDB.get("tools.followPlayer")
@@ -794,6 +807,9 @@ local function loadFollowPlayerConfig()
       config.enabled = charConfig.enabled or false
       config.playerName = charConfig.playerName or ""
       config.followWhileAttacking = charConfig.followWhileAttacking ~= false -- default true
+      config.maxDistance = charConfig.maxDistance or 5
+      config.combatWindowMs = charConfig.combatWindowMs or 2000
+      config.smartFollow = charConfig.smartFollow ~= false
     end
     
     -- Migration from ProfileStorage
@@ -809,6 +825,7 @@ local function loadFollowPlayerConfig()
       config.enabled = profileConfig.enabled or false
       config.playerName = profileConfig.playerName or ""
       config.followWhileAttacking = profileConfig.followWhileAttacking ~= false
+      config.maxDistance = profileConfig.maxDistance or 5
     end
   end
   
@@ -821,11 +838,24 @@ local followPlayerConfig = loadFollowPlayerConfig()
 local followPlayerToggle = nil
 
 -- State tracking
-local followedPlayerId = nil
-local followedPlayerCreature = nil  -- Cache the creature object
-local lastFollowAttempt = 0
-local FOLLOW_ATTEMPT_COOLDOWN = 150  -- Faster checks for responsiveness
-local lastPlayerPosition = nil  -- Track followed player's last known position
+local followState = {
+  targetPlayerId = nil,
+  targetPlayerCreature = nil,
+  targetPlayerPosition = nil,
+  lastFollowAttempt = 0,
+  lastPathFollow = 0,
+  combatStartTime = 0,
+  pathToLeader = nil,
+  pathTime = 0,
+  lastLeaderDistance = 0,
+  lostLeaderTime = 0,
+  forceFollowMode = false      -- When true, prioritize following over combat
+}
+
+local FOLLOW_ATTEMPT_COOLDOWN = 100  -- Fast checks for responsiveness
+local PATH_RECALC_INTERVAL = 300     -- Path recalculation interval
+local FORCE_FOLLOW_DISTANCE = 7      -- Distance at which we force follow over combat
+local PATH_PARAMS = { ignoreCreatures = true, ignoreCost = true }
 
 -- Helper: save follow player settings
 local function saveFollowPlayerConfig()
@@ -833,11 +863,45 @@ local function saveFollowPlayerConfig()
     CharacterDB.set("tools.followPlayer", {
       enabled = followPlayerConfig.enabled,
       playerName = followPlayerConfig.playerName,
-      followWhileAttacking = followPlayerConfig.followWhileAttacking
+      followWhileAttacking = followPlayerConfig.followWhileAttacking,
+      maxDistance = followPlayerConfig.maxDistance,
+      combatWindowMs = followPlayerConfig.combatWindowMs,
+      smartFollow = followPlayerConfig.smartFollow
     })
   else
     setProfileSetting("followPlayer", followPlayerConfig)
   end
+end
+
+-- Safe creature getters
+local function safeGetId(creature)
+  if not creature then return nil end
+  local ok, id = pcall(function() return creature:getId() end)
+  return ok and id or nil
+end
+
+local function safeGetPosition(creature)
+  if not creature then return nil end
+  local ok, pos = pcall(function() return creature:getPosition() end)
+  return ok and pos or nil
+end
+
+local function safeGetName(creature)
+  if not creature then return nil end
+  local ok, name = pcall(function() return creature:getName() end)
+  return ok and name or nil
+end
+
+local function safeIsDead(creature)
+  if not creature then return true end
+  local ok, dead = pcall(function() return creature:isDead() end)
+  return ok and dead or true
+end
+
+-- Calculate distance between positions
+local function calcDistance(pos1, pos2)
+  if not pos1 or not pos2 then return 999 end
+  return math.max(math.abs(pos1.x - pos2.x), math.abs(pos1.y - pos2.y))
 end
 
 -- Helper: Find player by name using OTClient's native functions for better performance
@@ -846,8 +910,12 @@ local function findPlayerByName(name)
 
   -- First try exact match using OTClient helper (works for off-screen known creatures)
   local exact = SafeCall.getCreatureByName(name, true)
-  if exact and exact:isPlayer() and not exact:isLocalPlayer() then
-    return exact
+  if exact then
+    local okPlayer, isPlayer = pcall(function() return exact:isPlayer() end)
+    local okLocal, isLocal = pcall(function() return exact:isLocalPlayer() end)
+    if okPlayer and isPlayer and (not okLocal or not isLocal) then
+      return exact
+    end
   end
 
   -- Fallback: Search through visible spectators for partial matches
@@ -855,8 +923,10 @@ local function findPlayerByName(name)
   local spectators = SafeCall.global("getSpectators") or {}
 
   for i, c in ipairs(spectators) do
-    if c and c:isPlayer() and not c:isLocalPlayer() then
-      local cname = c:getName()
+    local okPlayer, isPlayer = pcall(function() return c and c:isPlayer() end)
+    local okLocal, isLocal = pcall(function() return c and c:isLocalPlayer() end)
+    if okPlayer and isPlayer and (not okLocal or not isLocal) then
+      local cname = safeGetName(c)
       if cname and (cname:lower() == lname or cname:lower():find(lname, 1, true)) then
         return c
       end
@@ -871,9 +941,9 @@ local function followStartCreature(creature)
   if not creature then return false end
   
   -- Store reference
-  followedPlayerId = creature:getId()
-  followedPlayerCreature = creature
-  lastPlayerPosition = creature:getPosition()
+  followState.targetPlayerId = safeGetId(creature)
+  followState.targetPlayerCreature = creature
+  followState.targetPlayerPosition = safeGetPosition(creature)
   
   -- Use native follow API
   local ok = pcall(function()
@@ -890,23 +960,138 @@ end
 -- Follow manager: stop following
 local function followStop()
   if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
-  followedPlayerId = nil
-  followedPlayerCreature = nil
-  lastPlayerPosition = nil
+  followState.targetPlayerId = nil
+  followState.targetPlayerCreature = nil
+  followState.targetPlayerPosition = nil
+  followState.pathToLeader = nil
+  followState.forceFollowMode = false
 end
 
 -- Check if we're currently following our target player
 local function isFollowingTarget()
-  if not followedPlayerId then return false end
+  if not followState.targetPlayerId then return false end
   local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
-  return currentFollow and currentFollow:getId() == followedPlayerId
+  return currentFollow and safeGetId(currentFollow) == followState.targetPlayerId
 end
 
--- Smart follow: re-initiate follow if needed (called periodically and on events)
+-- Get path to leader using map API
+local function getPathToLeader(leaderPos)
+  local player = g_game.getLocalPlayer()
+  if not player or not leaderPos then return nil, 999 end
+  
+  local playerPos = safeGetPosition(player)
+  if not playerPos then return nil, 999 end
+  
+  -- Same floor check
+  if playerPos.z ~= leaderPos.z then return nil, 999 end
+  
+  -- Calculate path
+  local path = nil
+  if findPath then
+    path = findPath(playerPos, leaderPos, 15, PATH_PARAMS)
+  elseif getPath then
+    path = getPath(playerPos, leaderPos, 15, PATH_PARAMS)
+  end
+  
+  local pathLen = path and #path or 999
+  return path, pathLen
+end
+
+-- Smart walk towards leader when native follow fails
+local function smartWalkToLeader(leaderPos)
+  if not leaderPos then return false end
+  if not followPlayerConfig.smartFollow then return false end
+  
+  local currentTime = now or (os.time() * 1000)
+  if (currentTime - followState.lastPathFollow) < PATH_RECALC_INTERVAL then
+    return false
+  end
+  followState.lastPathFollow = currentTime
+  
+  local player = g_game.getLocalPlayer()
+  if not player then return false end
+  
+  local playerPos = safeGetPosition(player)
+  if not playerPos then return false end
+  
+  -- Calculate fresh path
+  local path, pathLen = getPathToLeader(leaderPos)
+  
+  if path and pathLen > 0 and pathLen < 20 then
+    followState.pathToLeader = path
+    followState.pathTime = currentTime
+    
+    -- Use MovementCoordinator if available (integrates with TargetBot)
+    if MovementCoordinator and MovementCoordinator.Intent then
+      local confidence = 0.85  -- High priority for following leader
+      if followState.forceFollowMode then
+        confidence = 0.95  -- Very high when in force follow mode
+      end
+      
+      MovementCoordinator.Intent.register(
+        MovementCoordinator.CONSTANTS and MovementCoordinator.CONSTANTS.INTENT and 
+          MovementCoordinator.CONSTANTS.INTENT.FOLLOW or "follow",
+        leaderPos,
+        confidence,
+        "party_follow",
+        { leader = followPlayerConfig.playerName, distance = pathLen }
+      )
+      return true
+    else
+      -- Fallback: Direct walk
+      local nextDir = path[1]
+      if nextDir and g_game.walk then
+        pcall(function() g_game.walk(nextDir) end)
+        return true
+      end
+    end
+  end
+  
+  return false
+end
+
+-- Check combat window - should we stop fighting to follow?
+local function shouldForceFollow()
+  if not followPlayerConfig.enabled then return false end
+  if not followState.targetPlayerPosition then return false end
+  
+  local player = g_game.getLocalPlayer()
+  if not player then return false end
+  
+  local playerPos = safeGetPosition(player)
+  if not playerPos then return false end
+  
+  local leaderPos = followState.targetPlayerPosition
+  local distance = calcDistance(playerPos, leaderPos)
+  followState.lastLeaderDistance = distance
+  
+  -- Check if we're too far from leader
+  if distance > FORCE_FOLLOW_DISTANCE then
+    -- Check if we've been in combat too long
+    local currentTime = now or (os.time() * 1000)
+    if followState.combatStartTime > 0 then
+      local combatDuration = currentTime - followState.combatStartTime
+      if combatDuration > (followPlayerConfig.combatWindowMs or 2000) then
+        return true
+      end
+    end
+    
+    -- Or if we're very far, force follow immediately
+    if distance > (followPlayerConfig.maxDistance or 5) + 3 then
+      return true
+    end
+  end
+  
+  return false
+end
+
+-- Main follow logic - called periodically and on events
 local function ensureFollowing()
   if not followPlayerConfig.enabled then return end
-  if (now - lastFollowAttempt) < FOLLOW_ATTEMPT_COOLDOWN then return end
-  lastFollowAttempt = now
+  
+  local currentTime = now or (os.time() * 1000)
+  if (currentTime - followState.lastFollowAttempt) < FOLLOW_ATTEMPT_COOLDOWN then return end
+  followState.lastFollowAttempt = currentTime
   
   local name = followPlayerConfig.playerName and followPlayerConfig.playerName:trim() or ""
   if name == "" then return end
@@ -914,10 +1099,39 @@ local function ensureFollowing()
   local localPlayer = g_game.getLocalPlayer()
   if not localPlayer then return end
   
-  -- Check if we're attacking and followWhileAttacking is disabled
+  local playerPos = safeGetPosition(localPlayer)
+  if not playerPos then return end
+  
+  -- Check if we're attacking and handle combat window
   local isAttacking = g_game.isAttacking and g_game.isAttacking()
-  if isAttacking and not followPlayerConfig.followWhileAttacking then
-    return -- Don't follow while attacking if option is disabled
+  
+  if isAttacking then
+    if followState.combatStartTime == 0 then
+      followState.combatStartTime = currentTime
+    end
+    
+    -- Check if we should force follow (leader too far or combat too long)
+    if shouldForceFollow() then
+      followState.forceFollowMode = true
+      
+      -- Cancel attack to follow leader (party survival priority)
+      if g_game.cancelAttack then
+        pcall(g_game.cancelAttack)
+      end
+      
+      -- Emit event for TargetBot to know we're prioritizing follow
+      if EventBus then
+        pcall(function()
+          EventBus.emit("followplayer/force_follow", followState.targetPlayerPosition, followState.lastLeaderDistance)
+        end)
+      end
+    elseif not followPlayerConfig.followWhileAttacking then
+      return -- Don't follow while attacking if option is disabled
+    end
+  else
+    -- Reset combat tracking when not attacking
+    followState.combatStartTime = 0
+    followState.forceFollowMode = false
   end
   
   -- Try to find the target player
@@ -925,30 +1139,57 @@ local function ensureFollowing()
   
   if target then
     -- Update our cached reference
-    followedPlayerId = target:getId()
-    followedPlayerCreature = target
-    lastPlayerPosition = target:getPosition()
+    followState.targetPlayerId = safeGetId(target)
+    followState.targetPlayerCreature = target
+    followState.targetPlayerPosition = safeGetPosition(target)
+    followState.lostLeaderTime = 0
+    
+    local leaderPos = followState.targetPlayerPosition
+    local distance = calcDistance(playerPos, leaderPos)
+    followState.lastLeaderDistance = distance
     
     -- Check if we're already following them
     local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+    local isFollowing = currentFollow and safeGetId(currentFollow) == followState.targetPlayerId
     
-    if not currentFollow or currentFollow:getId() ~= target:getId() then
-      -- Not following our target - initiate follow
-      -- But only if we're not actively moving towards a monster (let TargetBot finish its move)
+    if not isFollowing then
+      -- Not following our target
       local isWalking = localPlayer:isWalking()
       
-      if not isWalking or not isAttacking then
-        followStartCreature(target)
+      if followState.forceFollowMode or not isWalking or not isAttacking then
+        -- Try native follow first
+        local followOk = followStartCreature(target)
+        
+        -- If native follow failed or we're far, use smart pathfinding
+        if (not followOk or distance > 3) and followPlayerConfig.smartFollow then
+          smartWalkToLeader(leaderPos)
+        end
       end
+    elseif distance > 5 and followPlayerConfig.smartFollow then
+      -- We're "following" but still far - use smart walk to catch up
+      smartWalkToLeader(leaderPos)
     end
   else
-    -- Player not visible - check if native follow is still tracking them
+    -- Player not visible
+    if followState.lostLeaderTime == 0 then
+      followState.lostLeaderTime = currentTime
+    end
+    
+    -- Check if native follow is still tracking them
     local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
-    if currentFollow and followedPlayerId and currentFollow:getId() == followedPlayerId then
-      -- Native follow is still tracking, let it continue
+    if currentFollow and followState.targetPlayerId and safeGetId(currentFollow) == followState.targetPlayerId then
+      -- Native follow is still tracking, update position
+      followState.targetPlayerPosition = safeGetPosition(currentFollow)
       return
     end
-    -- Otherwise, we've lost track - will try again next tick
+    
+    -- If we have last known position and haven't been lost long, walk there
+    if followState.targetPlayerPosition and followPlayerConfig.smartFollow then
+      local timeLost = currentTime - followState.lostLeaderTime
+      if timeLost < 5000 then  -- Try for 5 seconds
+        smartWalkToLeader(followState.targetPlayerPosition)
+      end
+    end
   end
 end
 
@@ -961,108 +1202,201 @@ if EventBus then
   -- When followed player moves, ensure we're still following them
   EventBus.on("creature:move", function(creature, oldPos)
     if not followPlayerConfig.enabled then return end
-    if not creature or not creature:isPlayer() then return end
-    if not followedPlayerId then return end
+    
+    -- Safe player check
+    local okPlayer, isPlayer = pcall(function() return creature and creature:isPlayer() end)
+    if not okPlayer or not isPlayer then return end
+    if not followState.targetPlayerId then return end
     
     -- Check if this is our followed player
-    if creature:getId() ~= followedPlayerId then return end
+    local creatureId = safeGetId(creature)
+    if creatureId ~= followState.targetPlayerId then return end
     
     -- Update last known position
-    lastPlayerPosition = creature:getPosition()
-    followedPlayerCreature = creature
+    local newPos = safeGetPosition(creature)
+    followState.targetPlayerPosition = newPos
+    followState.targetPlayerCreature = creature
     
-    -- Ensure we're still following them (they might have moved out of range briefly)
+    -- Check distance
+    local player = g_game.getLocalPlayer()
+    if player then
+      local playerPos = safeGetPosition(player)
+      if playerPos and newPos then
+        local distance = calcDistance(playerPos, newPos)
+        followState.lastLeaderDistance = distance
+        
+        -- If leader is getting far, boost follow priority
+        if distance > 4 then
+          schedule(25, ensureFollowing)
+        end
+      end
+    end
+    
+    -- Ensure we're still following them
     local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
-    if not currentFollow or currentFollow:getId() ~= followedPlayerId then
+    if not currentFollow or safeGetId(currentFollow) ~= followState.targetPlayerId then
       -- Re-initiate follow
       schedule(50, function()
-        if followPlayerConfig.enabled and creature and not creature:isDead() then
+        if followPlayerConfig.enabled and creature and not safeIsDead(creature) then
           followStartCreature(creature)
         end
       end)
     end
-  end, 20)  -- Medium priority
+  end, 25)  -- Higher priority for party following
   
   -- When we stop attacking, immediately resume following
   EventBus.on("combat:end", function()
     if not followPlayerConfig.enabled then return end
-    if not followedPlayerId then return end
+    if not followState.targetPlayerId then return end
     
-    -- Small delay to let combat state settle
-    schedule(100, function()
-      ensureFollowing()
-    end)
+    followState.combatStartTime = 0
+    followState.forceFollowMode = false
+    
+    -- Immediate follow resume
+    schedule(50, ensureFollowing)
+  end, 20)
+  
+  -- When we start attacking, track combat start time
+  EventBus.on("combat:start", function(creature)
+    if not followPlayerConfig.enabled then return end
+    
+    local currentTime = now or (os.time() * 1000)
+    if followState.combatStartTime == 0 then
+      followState.combatStartTime = currentTime
+    end
   end, 15)
   
-  -- When target changes (new attack target), we might need to adjust
+  -- When target changes (new attack target), manage combat window
   EventBus.on("combat:target", function(creature, oldCreature)
     if not followPlayerConfig.enabled then return end
     if not followPlayerConfig.followWhileAttacking then return end
-    if not followedPlayerId then return end
+    if not followState.targetPlayerId then return end
     
-    -- If we just started attacking something new, we still want to follow
-    -- but the native follow might have been cancelled - re-initiate after brief delay
+    local currentTime = now or (os.time() * 1000)
+    
     if creature then
-      schedule(200, function()
-        ensureFollowing()
-      end)
+      -- Started attacking new target
+      if oldCreature == nil then
+        -- Fresh combat start
+        followState.combatStartTime = currentTime
+      end
+      -- Continue following even while attacking
+      schedule(100, ensureFollowing)
+    else
+      -- Stopped attacking
+      followState.combatStartTime = 0
+      followState.forceFollowMode = false
+      schedule(50, ensureFollowing)
+    end
+  end, 15)
+  
+  -- When player moves (self), check if we need to catch up
+  EventBus.on("player:move", function(newPos, oldPos)
+    if not followPlayerConfig.enabled then return end
+    if not followState.targetPlayerPosition then return end
+    
+    local distance = calcDistance(newPos, followState.targetPlayerPosition)
+    followState.lastLeaderDistance = distance
+    
+    -- If we're getting close, native follow should work
+    -- If we're still far, keep smart walking
+    if distance > 5 then
+      schedule(100, ensureFollowing)
     end
   end, 10)
   
   -- When followed player appears (comes into view), start following
   EventBus.on("creature:appear", function(creature)
     if not followPlayerConfig.enabled then return end
-    if not creature or not creature:isPlayer() then return end
+    
+    -- Safe player check
+    local okPlayer, isPlayer = pcall(function() return creature and creature:isPlayer() end)
+    if not okPlayer or not isPlayer then return end
     
     local name = followPlayerConfig.playerName and followPlayerConfig.playerName:trim():lower() or ""
     if name == "" then return end
     
-    local creatureName = creature:getName():lower()
-    if creatureName == name or creatureName:find(name, 1, true) then
-      -- Our target player appeared! Start following
-      followStartCreature(creature)
+    local creatureName = safeGetName(creature)
+    if creatureName then
+      creatureName = creatureName:lower()
+      if creatureName == name or creatureName:find(name, 1, true) then
+        -- Our target player appeared! Start following
+        followState.lostLeaderTime = 0
+        followStartCreature(creature)
+      end
     end
-  end, 25)
+  end, 30)
   
-  -- When followed player disappears, clear state
+  -- When followed player disappears, track lost time but don't clear state
   EventBus.on("creature:disappear", function(creature)
     if not creature then return end
-    if followedPlayerId and creature:getId() == followedPlayerId then
-      -- Player went out of view, but native follow might still work
-      -- Don't clear followedPlayerId - native system can handle off-screen following
-      followedPlayerCreature = nil
+    local creatureId = safeGetId(creature)
+    if followState.targetPlayerId and creatureId == followState.targetPlayerId then
+      -- Player went out of view
+      followState.targetPlayerCreature = nil
+      followState.lostLeaderTime = now or (os.time() * 1000)
+      -- Keep targetPlayerId and targetPlayerPosition for recovery
     end
   end, 15)
+  
+  -- Integration with TargetBot: When TargetBot wants to move, coordinate
+  EventBus.on("targetbot/movement_intent", function(intentType, targetPos, confidence)
+    if not followPlayerConfig.enabled then return end
+    if not followState.forceFollowMode then return end
+    
+    -- In force follow mode, reject low-confidence movement intents
+    -- This helps prevent getting pulled away by TargetBot when we need to catch up
+    if confidence and confidence < 0.80 then
+      -- Emit that we're overriding
+      pcall(function()
+        EventBus.emit("followplayer/override_movement", intentType, "force_follow_active")
+      end)
+    end
+  end, 5)  -- Very high priority to intercept
+  
+  -- Listen for TargetBot allowing CaveBot (we can piggyback on this)
+  EventBus.on("targetbot/cavebot_allowed", function()
+    if not followPlayerConfig.enabled then return end
+    -- Good time to ensure following since TargetBot isn't busy
+    schedule(25, ensureFollowing)
+  end, 10)
 end
 
--- Backup macro: Runs less frequently as a fallback for non-EventBus scenarios
+-- Backup macro: Runs as a fallback for non-EventBus scenarios
 -- and to handle edge cases the events might miss
-local followPlayerMacro = macro(300, function()
+local followPlayerMacro = macro(200, function()
   ensureFollowing()
 end)
 
 -- Small status indicator (non-intrusive)
 local followStatusLabel = UI.Label((followPlayerConfig.playerName and followPlayerConfig.playerName ~= "") and ("Target: "..followPlayerConfig.playerName) or "Target: -")
 followStatusLabel:setId("followStatusLabel")
-followStatusLabel:setTooltip("Shows current follow target and status")
+followStatusLabel:setTooltip("Shows current follow target, distance, and status")
 
 -- Helper to update status label
 local function updateFollowStatusLabel()
   local current = (g_game.getFollowingCreature and g_game.getFollowingCreature()) or nil
   local isAttacking = g_game.isAttacking and g_game.isAttacking()
+  local distance = followState.lastLeaderDistance or 0
   
-  if current and followedPlayerId and current:getId() == followedPlayerId then
-    local suffix = isAttacking and " (attacking)" or ""
-    followStatusLabel:setText("Following: " .. current:getName() .. suffix)
-  elseif followedPlayerId and followedPlayerCreature then
-    followStatusLabel:setText("Tracking: " .. (followedPlayerCreature:getName() or "..."))
+  if current and followState.targetPlayerId and safeGetId(current) == followState.targetPlayerId then
+    local suffix = ""
+    if followState.forceFollowMode then
+      suffix = " [CATCH UP!]"
+    elseif isAttacking then
+      suffix = " (attacking)"
+    end
+    followStatusLabel:setText("Following: " .. safeGetName(current) .. " [" .. distance .. "m]" .. suffix)
+  elseif followState.targetPlayerId and followState.targetPlayerCreature then
+    local name = safeGetName(followState.targetPlayerCreature) or "..."
+    followStatusLabel:setText("Tracking: " .. name .. " [" .. distance .. "m]")
   else
     followStatusLabel:setText("Target: " .. (followPlayerConfig.playerName ~= "" and followPlayerConfig.playerName or "-"))
   end
 end
 
 -- Update label periodically
-schedule(1000, function()
+schedule(500, function()
   if followStatusLabel and followStatusLabel:isVisible() then 
     updateFollowStatusLabel() 
   end
@@ -1094,9 +1428,22 @@ local function setFollowEnabled(state)
           followStartCreature(tgt)
         end
       end
+      
+      -- Emit event for other modules
+      if EventBus then
+        pcall(function()
+          EventBus.emit("followplayer/enabled", followPlayerConfig.playerName)
+        end)
+      end
     else
       pcall(function() followPlayerMacro:setOff() end)
       followStop()
+      
+      if EventBus then
+        pcall(function()
+          EventBus.emit("followplayer/disabled")
+        end)
+      end
     end
   end
 end
