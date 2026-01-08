@@ -16,31 +16,6 @@
 
 ---
 
-## 🆕 Recent Updates
-
-> [!TIP]
-> **Container Panel v6 (Event-Driven Rewrite)** — The container auto-opener was fully rewritten to an event-driven approach (`ContainerOpener v6`) using the OTClient API and EventBus. Major improvements include:
->
-> **Other notable fixes:**
-> - Fixed `g_clock` nil error in core modules
-> - Friend Healer UI: add/remove spells support
-> - Walking smoothing parameters fine-tuned to reduce jitter and improve pathing
->
->
-> - Uses direct item references and unique slot keys (parentId_slot) to reliably open nested and sibling backpacks
-> - Reactive queuing via `onAddItem` and `onContainerOpen` for near-instant detection and processing
-> - Eliminated duplicate legacy code and fixed critical queue entry bug (missing `item` field)
-> - Proper quiver support for paladins (auto-open quiver from right-hand slot on login/reopen)
->
-> [!WARNING]
-> If you previously had custom scripts relying on the old container internals, please review the **Developer Notes** in `docs/CONTAINERS.md` — the public API remains similar but the internals, event timing and emitted events are more reliable now.
->
-> [!TIP]
-> See full changelog: ./CHANGELOG.md
-
-
----
-
 ## 📋 Table of Contents
 
 - [What is nExBot?](#what-is-nexbot)
