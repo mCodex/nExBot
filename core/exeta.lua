@@ -49,7 +49,6 @@ if voc == 1 or voc == 11 then
 
     -- Non-blocking cooldowns and telemetry (player / amp)
     local lastExetaPlayer = 0
-    local lastExetaAmp = 0
 
     -- extend telemetry
     exetaStats.playerTriggeredCasts = exetaStats.playerTriggeredCasts or 0
