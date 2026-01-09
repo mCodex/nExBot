@@ -47,15 +47,23 @@ if voc == 1 or voc == 11 then
       end)
     end
 
-    -- Non-blocking cooldown for exeta if player nearby
+    -- Non-blocking cooldowns and telemetry (player / amp)
     local lastExetaPlayer = 0
-    local exetaStats = { lowHpCasts = 0, playerTriggeredCasts = 0 }
+    local lastExetaAmp = 0
+
+    -- extend telemetry
+    exetaStats.playerTriggeredCasts = exetaStats.playerTriggeredCasts or 0
+    exetaStats.ampCasts = exetaStats.ampCasts or 0
     nExBot = nExBot or {}
     nExBot.Exeta = nExBot.Exeta or {}
     nExBot.Exeta.getStats = function() return exetaStats end
 
-    local exetaIfPlayerMacro = macro(100000, "ExetaIfPlayer", function() end)
+    local exetaIfPlayerMacro = macro(100000, "Exeta If Player", function() end)
     BotDB.registerMacro(exetaIfPlayerMacro, "exetaIfPlayer")
+
+    -- "Amp" (ranged attacker) macro: cast when a distant creature is attacking you
+    local exetaAmpMacro = macro(100000, "Exeta Amp Res", function() end)
+    BotDB.registerMacro(exetaAmpMacro, "exetaAmpRes")
 
     -- Robust safe_unpack helper (handles missing table.unpack/unpack)
     local function safe_unpack(tbl)
