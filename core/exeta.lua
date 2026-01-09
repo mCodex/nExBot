@@ -47,15 +47,19 @@ if voc == 1 or voc == 11 then
       end)
     end
 
-    -- Non-blocking cooldown for exeta if player nearby
+    -- Non-blocking cooldowns and telemetry (player / amp)
     local lastExetaPlayer = 0
-    local exetaStats = { lowHpCasts = 0, playerTriggeredCasts = 0 }
-    nExBot = nExBot or {}
-    nExBot.Exeta = nExBot.Exeta or {}
-    nExBot.Exeta.getStats = function() return exetaStats end
 
-    local exetaIfPlayerMacro = macro(100000, "ExetaIfPlayer", function() end)
+    -- extend telemetry
+    exetaStats.playerTriggeredCasts = exetaStats.playerTriggeredCasts or 0
+    exetaStats.ampCasts = exetaStats.ampCasts or 0
+
+    local exetaIfPlayerMacro = macro(100000, "Exeta If Player", function() end)
     BotDB.registerMacro(exetaIfPlayerMacro, "exetaIfPlayer")
+
+    -- "Amp" (ranged attacker) macro: cast when a distant creature is attacking you
+    local exetaAmpMacro = macro(100000, "Exeta Amp Res", function() end)
+    BotDB.registerMacro(exetaAmpMacro, "exetaAmpRes")
 
     -- Robust safe_unpack helper (handles missing table.unpack/unpack)
     local function safe_unpack(tbl)
@@ -151,6 +155,59 @@ if voc == 1 or voc == 11 then
         debouncedCheck()
       end, 10)
 
+      -- Exeta Amp: trigger when a distant creature damages the player
+      EventBus.on("player:damage", function(damage, source)
+        if not exetaAmpMacro:isOn() then return end
+        if (now - lastExetaAmp) < 6000 then return end
+        if not CaveBot or CaveBot.isOff() then return end
+        if modules.game_cooldown.isGroupCooldownIconActive(3) then return end
+        if not canCast("exeta res") then return end
+        if not source then return end
+        local ok, spos = pcall(function() return source and source:getPosition() end)
+        if not ok or not spos then return end
+        if getDistanceBetween(pos(), spos) <= 1 then return end -- only distant
+        say("exeta res")
+        lastExetaAmp = now
+        exetaStats.ampCasts = (exetaStats.ampCasts or 0) + 1
+      end, 20)
+
+    end
+
+    -- Fallback: native health change detection for environments without EventBus
+    if not EventBus and onHealthChange then
+      onHealthChange(function(localPlayer, health, maxHealth, oldHealth, oldMax)
+        if not exetaAmpMacro:isOn() then return end
+        if not oldHealth or not health then return end
+        local dmg = oldHealth - health
+        if dmg <= 0 then return end
+        if (now - lastExetaAmp) < 6000 then return end
+        if not CaveBot or CaveBot.isOff() then return end
+        if modules.game_cooldown.isGroupCooldownIconActive(3) then return end
+        if not canCast("exeta res") then return end
+
+        -- Best-effort attribution: find a distant monster near player
+        local playerPos = player and player:getPosition()
+        if not playerPos then return end
+        local radius = 7
+        local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
+          and MovementCoordinator.MonsterCache.getNearby(radius)
+          or g_map.getSpectatorsInRange(playerPos, false, radius, radius)
+        local best = nil
+        for i = 1, #creatures do
+          local m = creatures[i]
+          if m and m:isMonster() and not m:isDead() and m:getPosition() then
+            local mpos = m:getPosition()
+            local dist = math.max(math.abs(playerPos.x - mpos.x), math.abs(playerPos.y - mpos.y))
+            if dist > 1 then best = m; break end
+          end
+        end
+
+        if best and canCast("exeta res") then
+          say("exeta res")
+          lastExetaAmp = now
+          exetaStats.ampCasts = (exetaStats.ampCasts or 0) + 1
+        end
+      end)
     end
 
     UI.Separator()
