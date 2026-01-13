@@ -1,54 +1,189 @@
 --[[
-  Eat Food Module - Ultra Simple
+  ═══════════════════════════════════════════════════════════════════════════
+  FOOD MANAGEMENT MODULE
+  Version: 2.0.0
   
-  Eats food every 3 minutes automatically.
-  Searches all open containers for any food item.
+  Features:
+  1. Cast Food (Exevo Pan) - Auto-casts food spell every 2 minutes
+  2. Eat Food - Optimized food eating with EventBus integration
+  3. Eat from Corpses - Opens recent killed corpses to eat food inside
+  
+  Principles Applied:
+  - SRP: Each feature is a separate, focused component
+  - DRY: Shared food lookup, reusable helper functions
+  - KISS: Simple, readable logic
+  - SOLID: Open for extension, closed for modification
+  
+  OTClient API Used:
+  - player:getRegenerationTime() - Check food buff duration
+  - g_game.use(item) - Use food item
+  - g_game.open(item) - Open corpse container
+  - EventBus - Event-driven architecture for efficiency
+  - onCreatureDisappear - Track killed monsters for corpse eating
+  ═══════════════════════════════════════════════════════════════════════════
 ]]
 
 setDefaultTab("HP")
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- FOOD ITEMS
+-- CONSTANTS (Single Source of Truth)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 local FOOD_IDS = {
+  -- Mushrooms (common hunting food)
   3725,  -- Brown Mushroom
   3731,  -- Fire Mushroom  
   3723,  -- White Mushroom
   3726,  -- Orange Mushroom
   3728,  -- Dark Mushroom
+  -- Meat & Fish
   3582,  -- Ham
   3577,  -- Meat
+  3578,  -- Fish
+  -- Dairy & Bakery
   3585,  -- Cheese
   3600,  -- Bread
-  3578,  -- Fish
+  3606,  -- Cake
+  -- Fruits
   3607,  -- Mango
   3592,  -- Grape
   3601,  -- Banana
   3586,  -- Apple
+  3595,  -- Pear
+  3593,  -- Coconut
+  3587,  -- Blueberry
+  -- Other common food
+  3583,  -- Dragon Ham
+  3584,  -- Roasted Meat
+  8838,  -- Hydra Tongue
 }
 
--- O(1) lookup
+-- Corpse IDs that may contain food (skinnable/lootable bodies)
+local CORPSE_IDS = {
+  -- Common monster corpses
+  2920, 2921, 2922, 2923, 2924, 2925, 2926, 2927, 2928, 2929,
+  2930, 2931, 2932, 2933, 2934, 2935, 2936, 2937, 2938, 2939,
+  2940, 2941, 2942, 2943, 2944, 2945, 2946, 2947, 2948, 2949,
+  2950, 2951, 2952, 2953, 2954, 2955, 2956, 2957, 2958, 2959,
+  -- Dead bodies (general)
+  3058, 3059, 3060, 3061, 3062, 3063, 3064, 3065,
+  -- Specific monster corpses with food
+  5995, 5996, 5997, 5998, 5999, -- Dragon corpses
+  6014, 6015, 6016, 6017, -- Hydra corpses
+  6079, 6080, 6081, 6082, -- Beast corpses
+}
+
+-- O(1) lookup tables
 local FOOD_LOOKUP = {}
 for _, id in ipairs(FOOD_IDS) do
   FOOD_LOOKUP[id] = true
 end
 
+local CORPSE_LOOKUP = {}
+for _, id in ipairs(CORPSE_IDS) do
+  CORPSE_LOOKUP[id] = true
+end
+
+-- Configuration
+local CONFIG = {
+  CAST_FOOD_INTERVAL = 120000,    -- 2 minutes in ms
+  CAST_FOOD_THRESHOLD = 60,       -- Cast when regen time < 60 seconds
+  EAT_FOOD_INTERVAL = 500,        -- Check every 500ms
+  EAT_FOOD_THRESHOLD = 400,       -- Eat when regen time < 400 deciseconds (40s)
+  MAX_REGEN_TIME = 600,           -- Stop eating at 600 deciseconds (60s)
+  CORPSE_SCAN_RANGE = 3,          -- Range to scan for corpses
+  CORPSE_OPEN_DELAY = 300,        -- Delay between corpse operations
+  CORPSE_EAT_DELAY = 200,         -- Delay after opening corpse to eat
+  MAX_CORPSE_AGE_MS = 10000,      -- Max age of tracked corpse (10s)
+}
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- SIMPLE EAT FUNCTION
+-- STATE MANAGEMENT (Module-private)
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Find a food item in containers
-local function findFood()
-  -- Method 1: Search all open containers
-  local containers = getContainers()
-  if containers then
-    for _, container in pairs(containers) do
-      if container then
-        local items = container:getItems()
-        if items then
-          for _, item in pairs(items) do
-            if item and FOOD_LOOKUP[item:getId()] then
+local State = {
+  lastCastFood = 0,
+  lastEatFood = 0,
+  lastCorpseCheck = 0,
+  recentKills = {},        -- { pos, timestamp } of recently killed monsters
+  corpseContainerOpen = false,
+  waitingForCorpse = nil,
+}
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- HELPER FUNCTIONS (DRY: Reusable utilities)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Get player's current regeneration time in deciseconds
+local function getRegenTime()
+  if player and player.getRegenerationTime then
+    local ok, regen = pcall(function() return player:getRegenerationTime() end)
+    if ok then return regen end
+  end
+  -- Fallback to global function if available
+  if regenerationTime then
+    local ok, regen = pcall(regenerationTime)
+    if ok then return regen end
+  end
+  return 0
+end
+
+-- Check if player can cast spells (not exhausted, has mana)
+local function canCastSpell(spell, manaCost)
+  if not player then return false end
+  
+  -- Check mana
+  local playerMana = 0
+  if player.getMana then
+    local ok, m = pcall(function() return player:getMana() end)
+    if ok then playerMana = m end
+  elseif mana then
+    playerMana = mana()
+  end
+  
+  if playerMana < (manaCost or 50) then return false end
+  
+  -- Check if canCast function exists and spell is ready
+  if canCast then
+    local ok, result = pcall(canCast, spell)
+    if ok and result then return true end
+  end
+  
+  return true  -- Default to allowing cast
+end
+
+-- Get player vocation (1=EK, 2=RP, 3=MS, 4=ED + promoted)
+local function getVocation()
+  if voc then
+    local ok, v = pcall(voc)
+    if ok then return v end
+  end
+  if player and player.getVocation then
+    local ok, v = pcall(function() return player:getVocation() end)
+    if ok then return v end
+  end
+  return 0
+end
+
+-- Check if vocation can use Exevo Pan (not knights - voc 1/11)
+local function canUseFoodSpell()
+  local v = getVocation()
+  return v ~= 1 and v ~= 11  -- Knights can't cast exevo pan
+end
+
+-- Find food item in all open containers
+local function findFoodInContainers()
+  local containers = getContainers and getContainers() or (g_game and g_game.getContainers and g_game.getContainers())
+  if not containers then return nil end
+  
+  for _, container in pairs(containers) do
+    if container then
+      local items = container.getItems and container:getItems()
+      if items then
+        for _, item in pairs(items) do
+          if item and item.getId then
+            local id = item:getId()
+            if FOOD_LOOKUP[id] then
               return item
             end
           end
@@ -59,83 +194,441 @@ local function findFood()
   return nil
 end
 
--- Eat until full (regeneration time >= 10 minutes = 600 seconds)
--- This eats multiple pieces of food with small delays
+-- Find food by ID using itemAmount (fallback)
+local function findFoodById()
+  for _, foodId in ipairs(FOOD_IDS) do
+    if itemAmount and itemAmount(foodId) > 0 then
+      return foodId
+    end
+  end
+  return nil
+end
+
+-- Clean up old kill records
+local function cleanupRecentKills()
+  local nowMs = (now or 0)
+  local cleaned = {}
+  for _, kill in ipairs(State.recentKills) do
+    if (nowMs - kill.timestamp) < CONFIG.MAX_CORPSE_AGE_MS then
+      table.insert(cleaned, kill)
+    end
+  end
+  State.recentKills = cleaned
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- CAST FOOD FEATURE (Exevo Pan)
+-- Only for non-knight vocations
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local castFoodMacro = nil
+
+if canUseFoodSpell() then
+  castFoodMacro = macro(CONFIG.CAST_FOOD_INTERVAL, "Cast Food", function()
+    -- Check regeneration time (in deciseconds)
+    local regenTime = getRegenTime()
+    
+    -- Only cast if regen time is low (< 60 seconds = 600 deciseconds)
+    if regenTime > CONFIG.CAST_FOOD_THRESHOLD * 10 then
+      return
+    end
+    
+    -- Check if we can cast the spell
+    if not canCastSpell("exevo pan", 50) then
+      return
+    end
+    
+    -- Cast the food spell
+    if cast then
+      cast("exevo pan", 5000)  -- 5 second exhaust
+    elseif say then
+      say("exevo pan")
+    end
+    
+    State.lastCastFood = now
+  end)
+  
+  -- Add tooltip
+  if castFoodMacro and castFoodMacro.button then
+    castFoodMacro.button:setTooltip(
+      "Automatically casts 'Exevo Pan' to create food.\n" ..
+      "Runs every 2 minutes when regeneration < 60 seconds.\n" ..
+      "Requires 50 mana and support spell cooldown.\n" ..
+      "Not available for Knights."
+    )
+  end
+  
+  -- Register with BotDB for persistence
+  if BotDB and BotDB.registerMacro then
+    BotDB.registerMacro(castFoodMacro, "castFood")
+  end
+  
+  UI.Separator()
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EAT FOOD FEATURE (Optimized with EventBus)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Event-driven eating: React to regeneration changes
+local function setupRegenEventListener()
+  if not EventBus then return end
+  
+  -- Listen for regeneration time changes (if available)
+  EventBus.on("player:regen", function(newRegen, oldRegen)
+    -- Only trigger eating when regen drops below threshold
+    if newRegen < CONFIG.EAT_FOOD_THRESHOLD and oldRegen >= CONFIG.EAT_FOOD_THRESHOLD then
+      schedule(50, function()
+        local food = findFoodInContainers()
+        if food then
+          g_game.use(food)
+        end
+      end)
+    end
+  end, 50)
+end
+
+-- Eat food until full
 local function eatUntilFull()
-  local maxEats = 10  -- Safety limit to prevent infinite loop
+  local maxEats = 10
   local eatCount = 0
   
   local function eatOnce()
-    if eatCount >= maxEats then
-      return -- Safety stop
-    end
+    if eatCount >= maxEats then return end
     
-    -- Check regeneration time - stop if >= 10 minutes (600 seconds)
-    local regenTime = regenerationTime and regenerationTime() or 0
-    if regenTime >= 600 then
-      return -- Already full enough
+    -- Check regeneration time
+    local regenTime = getRegenTime()
+    if regenTime >= CONFIG.MAX_REGEN_TIME then
+      return  -- Already full
     end
     
     -- Find and eat food
-    local food = findFood()
+    local food = findFoodInContainers()
     if food then
       g_game.use(food)
       eatCount = eatCount + 1
-      
-      -- Schedule next eat after a small delay (to let the game process)
-      schedule(200, eatOnce)
-    else
-      -- Try fallback method with use() by ID
-      for _, foodId in ipairs(FOOD_IDS) do
-        if itemAmount(foodId) > 0 then
-          use(foodId)
-          eatCount = eatCount + 1
-          schedule(200, eatOnce)
-          return
-        end
-      end
+      schedule(CONFIG.EAT_FOOD_INTERVAL - 300, eatOnce)  -- Continue eating
+      return
+    end
+    
+    -- Fallback: Use by ID
+    local foodId = findFoodById()
+    if foodId then
+      if use then use(foodId) end
+      eatCount = eatCount + 1
+      schedule(CONFIG.EAT_FOOD_INTERVAL - 300, eatOnce)
     end
   end
   
-  -- Start eating
   eatOnce()
 end
 
--- Simple single eat for compatibility
+-- Simple single eat (for macro polling)
 local function tryEat()
-  local food = findFood()
+  local regenTime = getRegenTime()
+  if regenTime >= CONFIG.EAT_FOOD_THRESHOLD then
+    return false
+  end
+  
+  local food = findFoodInContainers()
   if food then
     g_game.use(food)
     return true
   end
   
-  -- Fallback
-  for _, foodId in ipairs(FOOD_IDS) do
-    if itemAmount(foodId) > 0 then
-      use(foodId)
-      return true
+  local foodId = findFoodById()
+  if foodId and use then
+    use(foodId)
+    return true
+  end
+  
+  return false
+end
+
+-- Main eat food macro
+local eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function()
+  local regenTime = getRegenTime()
+  
+  -- Skip if regeneration is sufficient
+  if regenTime >= CONFIG.EAT_FOOD_THRESHOLD then
+    return
+  end
+  
+  -- Eat food
+  eatUntilFull()
+end)
+
+-- Add tooltip
+if eatFoodMacro and eatFoodMacro.button then
+  eatFoodMacro.button:setTooltip(
+    "Automatically eats food until full (60+ sec regen).\n" ..
+    "Runs every 500ms and eats multiple pieces.\n" ..
+    "Searches all open containers for supported food items.\n" ..
+    "Uses EventBus for optimized performance."
+  )
+end
+
+-- Register with BotDB for persistence, eat immediately on enable
+if BotDB and BotDB.registerMacro then
+  BotDB.registerMacro(eatFoodMacro, "eatFood", function()
+    schedule(100, eatUntilFull)
+  end)
+end
+
+-- Setup event listener for reactive eating
+setupRegenEventListener()
+
+UI.Separator()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EAT FROM CORPSES FEATURE
+-- Opens recently killed monster corpses and eats food from them
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Track monster deaths using EventBus
+local function setupCorpseTracking()
+  if not EventBus then return end
+  
+  -- Listen for monster deaths
+  EventBus.on("monster:disappear", function(creature)
+    if not creature then return end
+    
+    local creaturePos = nil
+    local ok, p = pcall(function() return creature:getPosition() end)
+    if ok and p then
+      creaturePos = p
+    end
+    
+    if not creaturePos then return end
+    
+    -- Record the kill position
+    table.insert(State.recentKills, {
+      pos = creaturePos,
+      timestamp = now or 0,
+      name = creature:getName() or "Unknown"
+    })
+    
+    -- Limit queue size
+    while #State.recentKills > 20 do
+      table.remove(State.recentKills, 1)
+    end
+  end, 30)
+  
+  -- Also listen for creature disappear events via native callback
+  if onCreatureDisappear then
+    onCreatureDisappear(function(creature)
+      if not creature or not creature:isMonster() then return end
+      
+      local creaturePos = nil
+      local ok, p = pcall(function() return creature:getPosition() end)
+      if ok and p then
+        creaturePos = p
+      end
+      
+      if not creaturePos then return end
+      
+      -- Record the kill position
+      table.insert(State.recentKills, {
+        pos = creaturePos,
+        timestamp = now or 0,
+        name = creature:getName() or "Unknown"
+      })
+      
+      -- Limit queue size
+      while #State.recentKills > 20 do
+        table.remove(State.recentKills, 1)
+      end
+    end)
+  end
+end
+
+-- Find corpse on tile
+local function findCorpseOnTile(tilePos)
+  if not g_map or not g_map.getTile then return nil end
+  
+  local tile = g_map.getTile(tilePos)
+  if not tile then return nil end
+  
+  -- Get top thing and check if it's a container (corpse)
+  local thing = tile.getTopUseThing and tile:getTopUseThing() or tile:getTopThing()
+  if not thing then return nil end
+  
+  local id = thing.getId and thing:getId() or 0
+  
+  -- Check if it's a corpse/container
+  if thing.isContainer and thing:isContainer() then
+    return thing
+  end
+  
+  -- Check against known corpse IDs
+  if CORPSE_LOOKUP[id] then
+    return thing
+  end
+  
+  return nil
+end
+
+-- Handle container open event to eat food
+local function onCorpseContainerOpen(container)
+  if not State.corpseContainerOpen then return end
+  
+  -- Check if this is a corpse container
+  if not container then return end
+  
+  local items = container.getItems and container:getItems()
+  if not items then return end
+  
+  -- Look for food in the corpse
+  for _, item in pairs(items) do
+    if item and item.getId then
+      local id = item:getId()
+      if FOOD_LOOKUP[id] then
+        -- Eat the food
+        schedule(CONFIG.CORPSE_EAT_DELAY, function()
+          g_game.use(item)
+          State.corpseContainerOpen = false
+          
+          -- Close the corpse container after eating
+          schedule(200, function()
+            pcall(function() g_game.close(container) end)
+          end)
+        end)
+        return
+      end
+    end
+  end
+  
+  -- No food found, close container
+  State.corpseContainerOpen = false
+  schedule(100, function()
+    pcall(function() g_game.close(container) end)
+  end)
+end
+
+-- Main corpse eating function
+local function tryEatFromCorpse()
+  -- Check if we need food
+  local regenTime = getRegenTime()
+  if regenTime >= CONFIG.EAT_FOOD_THRESHOLD then
+    return false  -- Don't need food
+  end
+  
+  -- Cleanup old kills
+  cleanupRecentKills()
+  
+  if #State.recentKills == 0 then
+    return false  -- No recent kills
+  end
+  
+  -- Get player position
+  local playerPos = nil
+  if player and player.getPosition then
+    local ok, p = pcall(function() return player:getPosition() end)
+    if ok then playerPos = p end
+  elseif pos then
+    playerPos = pos()
+  end
+  
+  if not playerPos then return false end
+  
+  -- Find nearest corpse from recent kills
+  for i = #State.recentKills, 1, -1 do
+    local kill = State.recentKills[i]
+    if kill and kill.pos then
+      -- Check if on same floor
+      if kill.pos.z == playerPos.z then
+        -- Check distance
+        local dist = math.max(
+          math.abs(kill.pos.x - playerPos.x),
+          math.abs(kill.pos.y - playerPos.y)
+        )
+        
+        if dist <= CONFIG.CORPSE_SCAN_RANGE then
+          -- Try to find corpse on this tile
+          local corpse = findCorpseOnTile(kill.pos)
+          if corpse then
+            -- Open the corpse
+            State.corpseContainerOpen = true
+            State.waitingForCorpse = kill.pos
+            
+            pcall(function() g_game.open(corpse) end)
+            
+            -- Remove from queue
+            table.remove(State.recentKills, i)
+            
+            return true
+          else
+            -- Corpse gone, remove from queue
+            table.remove(State.recentKills, i)
+          end
+        end
+      end
     end
   end
   
   return false
 end
 
--- ═══════════════════════════════════════════════════════════════════════════
--- MAIN MACRO - Every 3 minutes (180000 ms)
--- ═══════════════════════════════════════════════════════════════════════════
-
-local eatFoodMacro = macro(180000, "Eat Food", function()
-  eatUntilFull()
-end)
-
--- Add tooltip explaining functionality
-if eatFoodMacro and eatFoodMacro.button then
-  eatFoodMacro.button:setTooltip("Automatically eats food until full (10+ min regen).\nRuns every 3 minutes and eats multiple pieces.\nSearches all open containers for supported food items.\nSupports: Brown Mushroom, Ham, Fish, Bread, Cheese, and more.")
+-- Setup container open listener for corpse eating
+local function setupCorpseContainerListener()
+  if onContainerOpen then
+    onContainerOpen(function(container, previousContainer)
+      if State.corpseContainerOpen then
+        onCorpseContainerOpen(container)
+      end
+    end)
+  end
 end
 
--- Setup persistence with onEnable callback to eat immediately
-BotDB.registerMacro(eatFoodMacro, "eatFood", function()
-  eatUntilFull()
+-- Eat from corpses macro
+local eatFromCorpsesMacro = macro(1000, "Eat from Corpses", function()
+  -- Skip if not needed
+  local regenTime = getRegenTime()
+  if regenTime >= CONFIG.EAT_FOOD_THRESHOLD then
+    return
+  end
+  
+  -- Skip if already waiting for corpse
+  if State.corpseContainerOpen then
+    return
+  end
+  
+  -- Try to eat from corpse
+  tryEatFromCorpse()
 end)
 
+-- Add tooltip
+if eatFromCorpsesMacro and eatFromCorpsesMacro.button then
+  eatFromCorpsesMacro.button:setTooltip(
+    "Opens recently killed monster corpses to eat food inside.\n" ..
+    "Tracks monster deaths using EventBus.\n" ..
+    "Only opens corpses within " .. CONFIG.CORPSE_SCAN_RANGE .. " tiles.\n" ..
+    "Automatically closes corpse after eating."
+  )
+end
+
+-- Register with BotDB for persistence
+if BotDB and BotDB.registerMacro then
+  BotDB.registerMacro(eatFromCorpsesMacro, "eatFromCorpses")
+end
+
+-- Setup tracking and listeners
+setupCorpseTracking()
+setupCorpseContainerListener()
+
 UI.Separator()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EXPORTS (For other modules to use)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+nExBot = nExBot or {}
+nExBot.Food = {
+  getRegenTime = getRegenTime,
+  findFood = findFoodInContainers,
+  eatUntilFull = eatUntilFull,
+  tryEat = tryEat,
+  tryEatFromCorpse = tryEatFromCorpse,
+  FOOD_IDS = FOOD_IDS,
+  FOOD_LOOKUP = FOOD_LOOKUP,
+}
