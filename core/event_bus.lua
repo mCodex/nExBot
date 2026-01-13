@@ -233,9 +233,28 @@ if onCreatureDisappear then
   end)
 end
 
--- Track creature health for detecting changes
+-- Track creature health for detecting changes and kills
 local creatureHealthCache = {}
 setmetatable(creatureHealthCache, { __mode = "k" }) -- Weak keys for auto-cleanup
+
+-- Track killed monsters with their positions for corpse access
+local killedMonsters = {}  -- { [creatureId] = { pos, name, timestamp } }
+local KILLED_MONSTER_EXPIRY_MS = 15000  -- 15 seconds
+
+-- Public accessor for killed monsters list
+function EventBus.getKilledMonsters()
+  return killedMonsters
+end
+
+-- Clean up old killed monster entries
+local function cleanupKilledMonsters()
+  local nowMs = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+  for id, data in pairs(killedMonsters) do
+    if (nowMs - data.timestamp) > KILLED_MONSTER_EXPIRY_MS then
+      killedMonsters[id] = nil
+    end
+  end
+end
 
 if onCreatureHealthPercentChange then
   onCreatureHealthPercentChange(function(creature, percent)
@@ -248,9 +267,41 @@ if onCreatureHealthPercentChange then
     
     if creature:isMonster() then
       EventBus.emit("monster:health", creature, percent, oldPercent)
+      
+      -- MONSTER KILLED: Detect when health drops to 0
+      if percent <= 0 and oldPercent > 0 then
+        local creatureId = nil
+        local creatureName = nil
+        local creaturePos = nil
+        
+        pcall(function() creatureId = creature:getId() end)
+        pcall(function() creatureName = creature:getName() end)
+        pcall(function() creaturePos = creature:getPosition() end)
+        
+        if creatureId and creaturePos then
+          local nowMs = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+          killedMonsters[creatureId] = {
+            pos = { x = creaturePos.x, y = creaturePos.y, z = creaturePos.z },
+            name = creatureName or "Unknown",
+            timestamp = nowMs
+          }
+          
+          -- Emit monster:killed event with full info
+          EventBus.emit("monster:killed", creature, creaturePos, creatureName)
+        end
+        
+        -- Cleanup old entries periodically
+        cleanupKilledMonsters()
+      end
+      
     elseif creature:isPlayer() and not creature:isLocalPlayer() then
       -- Emit dedicated friend/player health event for FriendHealer
       EventBus.emit("friend:health", creature, percent, oldPercent)
+      
+      -- Detect player death (for party members)
+      if percent <= 0 and oldPercent > 0 then
+        EventBus.emit("player:killed", creature)
+      end
     end
   end)
 end
@@ -449,7 +500,151 @@ end)
 -- Slow tick for periodic tasks (backup, cleanup, etc.)
 macro(5000, function()
   EventBus.emit("tick:slow")
+  -- Cleanup killed monsters periodically
+  cleanupKilledMonsters()
 end)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EXTENDED OTCLIENT API EVENTS
+-- More comprehensive event coverage for smooth integration
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Spell cooldown events
+if onSpellCooldown then
+  onSpellCooldown(function(iconId, duration)
+    EventBus.emit("spell:cooldown", iconId, duration)
+  end)
+end
+
+if onGroupSpellCooldown then
+  onGroupSpellCooldown(function(iconId, duration)
+    EventBus.emit("spell:groupCooldown", iconId, duration)
+  end)
+end
+
+-- Creature walk events
+if onWalk then
+  onWalk(function(creature, oldPos, newPos)
+    EventBus.emit("creature:walk", creature, oldPos, newPos)
+    if creature:isMonster() then
+      EventBus.emit("monster:walk", creature, oldPos, newPos)
+    elseif creature:isPlayer() then
+      EventBus.emit("player:walk", creature, oldPos, newPos)
+    end
+  end)
+end
+
+-- Creature turn events
+if onTurn then
+  onTurn(function(creature, direction)
+    EventBus.emit("creature:turn", creature, direction)
+  end)
+end
+
+-- Missile (projectile) events
+if onMissle then
+  onMissle(function(missile)
+    EventBus.emit("effect:missile", missile)
+  end)
+end
+
+-- Animated text events (damage numbers, healing, etc.)
+if onAnimatedText then
+  onAnimatedText(function(thing, text)
+    EventBus.emit("effect:animatedText", thing, text)
+  end)
+end
+
+-- Static text events (creature speech bubbles)
+if onStaticText then
+  onStaticText(function(thing, text)
+    EventBus.emit("effect:staticText", thing, text)
+  end)
+end
+
+-- Use item events
+if onUse then
+  onUse(function(pos, itemId, stackPos, subType)
+    EventBus.emit("item:use", pos, itemId, stackPos, subType)
+  end)
+end
+
+if onUseWith then
+  onUseWith(function(pos, itemId, target, subType)
+    EventBus.emit("item:useWith", pos, itemId, target, subType)
+  end)
+end
+
+-- Container item events
+if onAddItem then
+  onAddItem(function(container, slot, item)
+    EventBus.emit("container:addItem", container, slot, item)
+  end)
+end
+
+if onRemoveItem then
+  onRemoveItem(function(container, slot, item)
+    EventBus.emit("container:removeItem", container, slot, item)
+  end)
+end
+
+-- Inventory change events
+if onInventoryChange then
+  onInventoryChange(function(player, slot, item, oldItem)
+    EventBus.emit("inventory:change", player, slot, item, oldItem)
+  end)
+end
+
+-- Player state change events (buffs, conditions)
+if onStatesChange then
+  onStatesChange(function(player, states, oldStates)
+    EventBus.emit("player:statesChange", states, oldStates)
+  end)
+end
+
+-- Modal dialog events
+if onModalDialog then
+  onModalDialog(function(id, title, message, buttons, enterButton, escapeButton, choices, priority)
+    EventBus.emit("dialog:modal", id, title, message, buttons, enterButton, escapeButton, choices)
+  end)
+end
+
+-- Channel events
+if onChannelList then
+  onChannelList(function(channels)
+    EventBus.emit("channel:list", channels)
+  end)
+end
+
+if onOpenChannel then
+  onOpenChannel(function(channelId, channelName)
+    EventBus.emit("channel:open", channelId, channelName)
+  end)
+end
+
+if onCloseChannel then
+  onCloseChannel(function(channelId)
+    EventBus.emit("channel:close", channelId)
+  end)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- LOOT MESSAGE PARSING
+-- Parse loot messages to emit structured loot events
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Listen for loot messages and parse them
+EventBus.on("message:text", function(mode, text)
+  -- Loot message mode is typically 19 or 20 depending on server
+  if mode == 19 or mode == 20 then
+    -- Pattern: "Loot of a <monster>: <items>"
+    local monsterName = text:match("Loot of [an]* (.-):%s")
+    if monsterName then
+      local itemsStr = text:match(": (.+)$")
+      EventBus.emit("loot:received", monsterName, itemsStr or "", text)
+    end
+  end
+end, 10)
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- STORAGE PERSISTENCE EVENTS
