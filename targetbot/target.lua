@@ -355,7 +355,8 @@ if onPlayerHealthChange then
       attackWatchdog.attempts = 0
       attackWatchdog.lastForce = 0
       -- Start an aggressive relogin recovery window if TargetBot was enabled before or is currently on
-      if TargetBot and TargetBot.isOn and (TargetBot.isOn() or storage.targetbotEnabled == true) then
+      local storedEnabled = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled")) or storage.targetbotEnabled
+      if TargetBot and TargetBot.isOn and (TargetBot.isOn() or storedEnabled == true) then
         reloginRecovery.active = true
         reloginRecovery.endTime = now + reloginRecovery.duration
         reloginRecovery.lastAttempt = 0
@@ -366,7 +367,7 @@ if onPlayerHealthChange then
         debouncedInvalidateAndRecalc()
 
         -- If TargetBot was previously enabled via storage, ensure it's on now to allow recovery
-        if storage.targetbotEnabled == true and not TargetBot.isOn() then
+        if storedEnabled == true and not TargetBot.isOn() then
           pcall(function() TargetBot.setOn() end)
         end
 
@@ -377,7 +378,8 @@ if onPlayerHealthChange then
         if targetbotMacro then
           local function attemptRecovery()
             -- Only attempt recovery runs if targetbot should be enabled
-            if storage.targetbotEnabled == true or TargetBot.isOn() then
+            local storedEnabled2 = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled")) or storage.targetbotEnabled
+            if storedEnabled2 == true or TargetBot.isOn() then
               pcall(targetbotMacro)
               -- After macro run, try recalc and a direct attack as a backup
               local ok2, best2 = pcall(function() return recalculateBestTarget() end)
@@ -610,13 +612,13 @@ if EventBus then
     if newId ~= lastCombatTargetId then
       if creature then
         -- Combat started
-        storage.targetbotCombatActive = true
+        if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", true) else storage.targetbotCombatActive = true end
         pcall(function()
           EventBus.emit("targetbot/combat_start", creature, { id = newId, pos = creature:getPosition() })
         end)
       else
         -- Combat ended
-        storage.targetbotCombatActive = false
+        if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", false) else storage.targetbotCombatActive = false end
         pcall(function() EventBus.emit("targetbot/combat_end") end)
       end
       lastCombatTargetId = newId
@@ -625,15 +627,16 @@ if EventBus then
 
   -- Monitor player health to emit emergency events
   EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
-    local cfg = ProfileStorage and ProfileStorage.get and ProfileStorage.get('targetPriority') or {}
+    local cfg = (UnifiedStorage and UnifiedStorage.get("targetbot.priority")) or (ProfileStorage and ProfileStorage.get and ProfileStorage.get('targetPriority')) or {}
     local threshold = cfg and cfg.emergencyHP or 25
     local percent = 100
     if maxHealth and maxHealth > 0 then percent = math.floor(health / maxHealth * 100) end
-    if percent <= threshold and not storage.targetbotEmergency then
-      storage.targetbotEmergency = true
+    local currentEmergency = (UnifiedStorage and UnifiedStorage.get("targetbot.emergency")) or storage.targetbotEmergency
+    if percent <= threshold and not currentEmergency then
+      if UnifiedStorage then UnifiedStorage.set("targetbot.emergency", true) else storage.targetbotEmergency = true end
       pcall(function() EventBus.emit("targetbot/emergency", percent) end)
-    elseif percent > threshold and storage.targetbotEmergency then
-      storage.targetbotEmergency = false
+    elseif percent > threshold and currentEmergency then
+      if UnifiedStorage then UnifiedStorage.set("targetbot.emergency", false) else storage.targetbotEmergency = false end
       pcall(function() EventBus.emit("targetbot/emergency_cleared", percent) end)
     end
   end, 90)
@@ -1128,6 +1131,9 @@ TargetBot.setOff = function(val)
 end
 
 TargetBot.getCurrentProfile = function()
+  if UnifiedStorage and UnifiedStorage.get("targetbot.selectedConfig") then
+    return UnifiedStorage.get("targetbot.selectedConfig")
+  end
   return storage._configs.targetbot_configs.selected
 end
 
@@ -1139,6 +1145,13 @@ TargetBot.setCurrentProfile = function(name)
   end
   TargetBot.setOff()
   storage._configs.targetbot_configs.selected = name
+  -- Save to UnifiedStorage for per-character persistence
+  if UnifiedStorage then
+    UnifiedStorage.set("targetbot.selectedConfig", name)
+    if EventBus and EventBus.emitConfigChange then
+      EventBus.emitConfigChange("targetbot", name)
+    end
+  end
   -- Save character's profile preference for multi-client support
   if setCharacterProfile then
     setCharacterProfile("targetbotProfile", name)
@@ -1807,8 +1820,14 @@ pcall(function() performPendingEnableOnce() end)
 -- Config setup (moved here so macro/recalc are defined before callback runs)
 config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
   -- Save character's profile preference when profile changes (multi-client support)
-  if enabled and name and name ~= "" and setCharacterProfile then
-    setCharacterProfile("targetbotProfile", name)
+  if enabled and name and name ~= "" then
+    if setCharacterProfile then
+      setCharacterProfile("targetbotProfile", name)
+    end
+    -- Persist to UnifiedStorage for character isolation
+    if UnifiedStorage then
+      UnifiedStorage.set("targetbot.selectedConfig", name)
+    end
   end
 
   if not data then
@@ -1824,18 +1843,23 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
   end
   TargetBot.Looting.update(data["looting"] or {})
 
-  -- Determine final enabled state:
+  -- Determine final enabled state (check UnifiedStorage first for character isolation)
   local finalEnabled = enabled
+  local storedEnabled = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled"))
+  if storedEnabled == nil then
+    storedEnabled = storage.targetbotEnabled
+  end
+  
   if not TargetBot._initialized then
     TargetBot._initialized = true
-    if storage.targetbotEnabled == true or storage.targetbotEnabled == false then
-      finalEnabled = storage.targetbotEnabled
+    if storedEnabled == true or storedEnabled == false then
+      finalEnabled = storedEnabled
     end
   else
     if enabled == (data and data.enabled) then
-      storage.targetbotEnabled = nil
+      if UnifiedStorage then UnifiedStorage.set("targetbot.enabled", nil) else storage.targetbotEnabled = nil end
     else
-      storage.targetbotEnabled = enabled
+      if UnifiedStorage then UnifiedStorage.set("targetbot.enabled", enabled) else storage.targetbotEnabled = enabled end
     end
   end
 

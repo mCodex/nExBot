@@ -441,7 +441,38 @@ macro(200, function()
   checkEquipmentChanges()
 end)
 
--- Periodic flush for queued events
+-- Periodic flush for queued events (fast tick)
 macro(25, function()
   EventBus.flush()
 end)
+
+-- Slow tick for periodic tasks (backup, cleanup, etc.)
+macro(5000, function()
+  EventBus.emit("tick:slow")
+end)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- STORAGE PERSISTENCE EVENTS
+-- These events are emitted by modules when settings change
+-- UnifiedStorage listens to these for real-time persistence
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Helper function to emit config change events
+function EventBus.emitConfigChange(moduleName, configName)
+  EventBus.emit(moduleName .. ":configChanged", configName)
+end
+
+-- Helper function to emit macro toggle events
+function EventBus.emitMacroToggle(macroName, enabled)
+  EventBus.emit("macro:toggled", macroName, enabled)
+end
+
+-- Helper function to emit module toggle events
+function EventBus.emitModuleToggle(moduleName, enabled)
+  EventBus.emit("module:toggled", moduleName, enabled)
+end
+
+-- Helper function to emit setting change events
+function EventBus.emitSettingChange(path, value)
+  EventBus.emit("setting:changed", path, value)
+end

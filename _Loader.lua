@@ -235,6 +235,7 @@ loadCategory("core", {
 -- 2. Architecture Layer (Event system, state management)
 loadCategory("architecture", {
   "event_bus",            -- Centralized event bus
+  "unified_storage",      -- Per-character unified storage (MUST load after event_bus)
   "door_items",           -- Door item database
   "global_config",        -- Global configuration
   "bot_core/init",        -- Unified BotCore system

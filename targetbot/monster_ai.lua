@@ -171,9 +171,30 @@ function MonsterAI.Patterns.get(monsterName)
          or MonsterAI.Patterns.default
 end
 
+-- Helper to get monster patterns from storage (UnifiedStorage with fallback)
+local function getStoredPatterns()
+  if UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() then
+    return UnifiedStorage.get("targetbot.monsterPatterns") or {}
+  end
+  return storage.monsterPatterns or {}
+end
+
+-- Helper to save monster patterns to storage (UnifiedStorage with fallback)
+local function setStoredPatterns(patterns)
+  if UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() then
+    UnifiedStorage.set("targetbot.monsterPatterns", patterns)
+    -- Emit event for real-time sync
+    if EventBus and EventBus.emit then
+      EventBus.emit("monsterAI:patternsUpdated", patterns)
+    end
+  end
+  -- Also keep in global storage for compatibility
+  storage.monsterPatterns = patterns
+end
+
 -- Load persisted patterns from storage (if any)
-storage.monsterPatterns = storage.monsterPatterns or {}
-for k,v in pairs(storage.monsterPatterns) do
+local storedPatterns = getStoredPatterns()
+for k,v in pairs(storedPatterns) do
   MonsterAI.Patterns.knownMonsters[k] = v
 end
 
@@ -181,8 +202,13 @@ end
 function MonsterAI.savePattern(monsterName)
   if not monsterName then return end
   local name = monsterName:lower()
-  storage.monsterPatterns = storage.monsterPatterns or {}
-  storage.monsterPatterns[name] = MonsterAI.Patterns.knownMonsters[name]
+  local patterns = getStoredPatterns()
+  patterns[name] = MonsterAI.Patterns.knownMonsters[name]
+  setStoredPatterns(patterns)
+  -- Emit individual pattern update event
+  if EventBus and EventBus.emit then
+    EventBus.emit("monsterAI:patternUpdated", name, MonsterAI.Patterns.knownMonsters[name])
+  end
 end
 
 -- Persist partial updates to a known monster pattern (SRP)
@@ -191,21 +217,24 @@ function MonsterAI.Patterns.persist(monsterName, updates)
   local name = monsterName:lower()
   MonsterAI.Patterns.knownMonsters[name] = MonsterAI.Patterns.knownMonsters[name] or {}
   for k,v in pairs(updates) do MonsterAI.Patterns.knownMonsters[name][k] = v end
-  storage.monsterPatterns = storage.monsterPatterns or {}
-  storage.monsterPatterns[name] = MonsterAI.Patterns.knownMonsters[name]
+  local patterns = getStoredPatterns()
+  patterns[name] = MonsterAI.Patterns.knownMonsters[name]
+  setStoredPatterns(patterns)
 end
 -- Simple decay: slowly reduce confidence and nudge cooldown toward default when long unseen
 function MonsterAI.decayPatterns()
   local nowt = nowMs()
   local decayWindow = 7 * 24 * 3600 * 1000 -- 7 days
-  for k, v in pairs(storage.monsterPatterns) do
+  local patterns = getStoredPatterns()
+  for k, v in pairs(patterns) do
     if v.lastSeen and (nowt - v.lastSeen) > decayWindow then
       v.confidence = (v.confidence or 0.5) * 0.9
       if v.waveCooldown then v.waveCooldown = v.waveCooldown * 1.05 end
-      storage.monsterPatterns[k] = v
+      patterns[k] = v
       MonsterAI.Patterns.knownMonsters[k] = v
     end
   end
+  setStoredPatterns(patterns)
 end
 
 -- Schedule recurring decay (hourly)
