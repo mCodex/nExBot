@@ -1,9 +1,10 @@
 -- WavePredictor: lightweight per-monster pattern learner to predict wave/beam attacks
 -- Emits WAVE_AVOIDANCE intents into MovementCoordinator when immediate threats exist
 -- Enhanced with MonsterAI.RealTime integration for shared intelligence
+-- OTCLIENT API OPTIMIZATIONS: Uses creature:getPosition(), tile:isWalkable(), player:canWalk()
 
 WavePredictor = WavePredictor or {}
-WavePredictor.VERSION = "0.2"
+WavePredictor.VERSION = "0.3"  -- Updated for OTClient API integration
 
 -- Per-creature state
 local patterns = {} -- id -> { lastAttack = ts, cooldownEMA, directionBias, observedWidth, ... }
@@ -44,7 +45,7 @@ local function ensurePattern(c)
     -- Initialize with data from MonsterAI if available
     local learned = nil
     if MonsterAI and MonsterAI.Patterns and MonsterAI.Patterns.get then
-      local name = c and c:getName and c:getName()
+      local name = c and (c.getName and c:getName())
       if name then
         learned = MonsterAI.Patterns.get(name)
       end
@@ -67,6 +68,26 @@ local function ensurePattern(c)
     }
   end
   return patterns[k]
+end
+
+-- Calculate EWMA variance penalty (reduces confidence when timing is noisy)
+-- This is the same formula used in MonsterAI.Predictor.predictWaveAttack
+local function computeVariancePenalty(pattern)
+  if not pattern or not pattern.cooldownVariance or not pattern.cooldownEMA then return 0 end
+  if pattern.cooldownEMA <= 0 then return 0 end
+  
+  -- Use MonsterAI constants if available, else fallback
+  local VARIANCE_PENALTY_SCALE = 0.28
+  local VARIANCE_PENALTY_MAX = 0.45
+  if MonsterAI and MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.EWMA then
+    VARIANCE_PENALTY_SCALE = MonsterAI.CONSTANTS.EWMA.VARIANCE_PENALTY_SCALE or VARIANCE_PENALTY_SCALE
+    VARIANCE_PENALTY_MAX = MonsterAI.CONSTANTS.EWMA.VARIANCE_PENALTY_MAX or VARIANCE_PENALTY_MAX
+  end
+  
+  local std = math.sqrt(pattern.cooldownVariance or 0)
+  local ratio = std / (pattern.cooldownEMA + 1e-6)
+  local penalty = math.min(VARIANCE_PENALTY_MAX, ratio * VARIANCE_PENALTY_SCALE)
+  return penalty
 end
 
 -- Sync pattern data with MonsterAI.RealTime
@@ -92,7 +113,11 @@ local function syncWithMonsterAI(creature, pattern)
         pattern.cooldownEMA = data.ewmaCooldown
       end
       pattern.cooldownVariance = data.ewmaVariance or 0
-      pattern.confidence = math.max(pattern.confidence, data.confidence or 0.3)
+      
+      -- IMPROVED: Apply variance penalty to confidence
+      local variancePenalty = computeVariancePenalty(pattern)
+      local baseConfidence = math.max(pattern.confidence, data.confidence or 0.3)
+      pattern.confidence = baseConfidence * (1 - variancePenalty)
     end
   end
 end
@@ -138,6 +163,71 @@ local function scoreThreatForPlayer(threatMap, playerPos)
   return safe, bestScore
 end
 
+-- OTCLIENT API: Enhanced safe tile validation using tile:isWalkable()
+local function isTileSafeForWaveAvoidance(tilePos)
+  if not tilePos then return false end
+  
+  -- Use OTClient tile API for fast validation
+  local tile = g_map.getTile(tilePos)
+  if not tile then return false end
+  
+  -- Must be walkable (ignore creatures for emergency evasion)
+  if not tile:isWalkable(true) then return false end
+  
+  -- Check if player can actually walk there
+  if player and player.canWalk then
+    -- Get direction to tile
+    local playerPos = player:getPosition()
+    if playerPos then
+      local dx = tilePos.x - playerPos.x
+      local dy = tilePos.y - playerPos.y
+      
+      -- Convert to direction
+      local dir = nil
+      if dx == 0 and dy == -1 then dir = North
+      elseif dx == 1 and dy == 0 then dir = East
+      elseif dx == 0 and dy == 1 then dir = South
+      elseif dx == -1 and dy == 0 then dir = West
+      elseif dx == 1 and dy == -1 then dir = NorthEast
+      elseif dx == 1 and dy == 1 then dir = SouthEast
+      elseif dx == -1 and dy == 1 then dir = SouthWest
+      elseif dx == -1 and dy == -1 then dir = NorthWest
+      end
+      
+      if dir and not player:canWalk(dir) then
+        return false
+      end
+    end
+  end
+  
+  return true
+end
+
+-- Enhanced threat scoring with OTClient API validation
+local function findSafeTileWithValidation(threatMap, playerPos)
+  local safe = nil
+  local bestScore = 1e9
+  local dirs = {{0,0},{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}}
+  
+  for i=1,#dirs do
+    local d = dirs[i]
+    local candidatePos = {x=playerPos.x+d[1], y=playerPos.y+d[2], z=playerPos.z}
+    
+    -- OTCLIENT API: Validate tile is actually walkable
+    if isTileSafeForWaveAvoidance(candidatePos) then
+      local tkey = candidatePos.x..","..candidatePos.y
+      local threatScore = threatMap[tkey] or 0
+      
+      if threatScore < bestScore then
+        bestScore = threatScore
+        safe = candidatePos
+      end
+    end
+  end
+  
+  return safe, bestScore
+end
+
 -- Build threat map (tile string -> probability [0,1]) from recent attack
 local function buildThreatMap(creature, pattern)
   local arc = predictArc(creature, pattern)
@@ -174,8 +264,8 @@ local function onAttackLike(creature)
 
   if maxThreat > 0.2 then
     incr('wavePredictions')
-    -- choose safe tile
-    local safeTile, score = scoreThreatForPlayer(threatMap, playerPos)
+    -- OTCLIENT API: Use enhanced safe tile finding with walkability validation
+    local safeTile, score = findSafeTileWithValidation(threatMap, playerPos)
     local confidence = math.min(1, maxThreat + 0.1)
     
     -- VALIDATE SAFE TILE: Ensure it's not a floor change position

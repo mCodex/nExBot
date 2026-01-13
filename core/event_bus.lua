@@ -291,33 +291,37 @@ if onHealthChange then
           or g_map.getSpectatorsInRange(playerPos, false, radius, radius)
 
         local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
-        for i = 1, #creatures do
-          local m = creatures[i]
-          local okm = pcall(function() return m and m:isMonster() and not m:isDead() end)
-          if okm and m then
-            local mpos
-            pcall(function() mpos = m:getPosition() end)
-            if mpos then
-              local dist = math.max(math.abs(playerPos.x - mpos.x), math.abs(playerPos.y - mpos.y))
-              local score = 1 / (1 + dist)
+        -- FIXED: Add nil check for creatures before iterating
+        if creatures then
+          for i = 1, #creatures do
+            local m = creatures[i]
+            -- FIXED: Properly capture both pcall return values
+            local okm, isValidMonster = pcall(function() return m and m:isMonster() and not m:isDead() end)
+            if okm and isValidMonster and m then
+              local mpos
+              pcall(function() mpos = m:getPosition() end)
+              if mpos then
+                local dist = math.max(math.abs(playerPos.x - mpos.x), math.abs(playerPos.y - mpos.y))
+                local score = 1 / (1 + dist)
 
-              -- Boost score with MonsterAI tracker info if available
-              local okid, mid = pcall(function() return m and m:getId() end)
-              if okid and mid and MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
-                local data = MonsterAI.Tracker.monsters[mid]
-                if data then
-                  if data.lastWaveTime and math.abs(nowt - data.lastWaveTime) < 800 then score = score + 1.2 end
-                  if data.lastAttackTime and math.abs(nowt - data.lastAttackTime) < 1500 then score = score + 0.8 end
+                -- Boost score with MonsterAI tracker info if available
+                local okid, mid = pcall(function() return m and m:getId() end)
+                if okid and mid and MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+                  local data = MonsterAI.Tracker.monsters[mid]
+                  if data then
+                    if data.lastWaveTime and math.abs(nowt - data.lastWaveTime) < 800 then score = score + 1.2 end
+                    if data.lastAttackTime and math.abs(nowt - data.lastAttackTime) < 1500 then score = score + 0.8 end
+                  end
                 end
-              end
 
-              -- Prefer monsters facing player when possible
-              if MonsterAI and MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition then
-                local okf, facing = pcall(function() return MonsterAI.Predictor.isFacingPosition(mpos, m:getDirection(), playerPos) end)
-                if okf and facing then score = score + 0.6 end
-              end
+                -- Prefer monsters facing player when possible
+                if MonsterAI and MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition then
+                  local okf, facing = pcall(function() return MonsterAI.Predictor.isFacingPosition(mpos, m:getDirection(), playerPos) end)
+                  if okf and facing then score = score + 0.6 end
+                end
 
-              if score > bestScore then bestScore = score; bestMonster = m end
+                if score > bestScore then bestScore = score; bestMonster = m end
+              end
             end
           end
         end

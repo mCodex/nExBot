@@ -475,16 +475,60 @@ function EventTargeting.TargetAcquisition.isValidTarget(creature)
 end
 
 -- Calculate target priority (higher = better) - improved with safe API calls
+-- FIXED: Now properly uses config.priority for multi-monster priority detection
 function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
   if not creature then return 0 end
   
-  local priority = 100  -- Base priority
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- PREFER TargetBot.Creature.calculateParams for consistency with main loop
+  -- This ensures the same priority logic is used everywhere
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if TargetBot and TargetBot.Creature and TargetBot.Creature.calculateParams then
+    local params = TargetBot.Creature.calculateParams(creature, path or {})
+    if params and params.priority and params.priority > 0 then
+      -- Return the calculated priority directly - this uses the full algorithm
+      -- including config.priority, health bonuses, distance, etc.
+      return params.priority
+    end
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- FALLBACK: Manual calculation if TargetBot.Creature not available
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local priority = 0  -- Start at 0, build up from config priority
   
   -- Safe HP access
   local okHp, hp = pcall(function() return creature:getHealthPercent() end)
   hp = (okHp and hp) or 100
   
   local pathLen = path and #path or 10
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- CONFIG PRIORITY: The user-defined priority is THE PRIMARY FACTOR
+  -- This is what distinguishes different monster types
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+    local configs = TargetBot.Creature.getConfigs(creature)
+    if configs and #configs > 0 then
+      -- Find highest priority config for this creature
+      local highestConfigPriority = 0
+      local highestDanger = 0
+      for i = 1, #configs do
+        local cfg = configs[i]
+        if cfg.priority and cfg.priority > highestConfigPriority then
+          highestConfigPriority = cfg.priority
+          highestDanger = cfg.danger or 0
+        end
+      end
+      -- Config priority is multiplied by 100 to make it the dominant factor
+      -- A monster with priority 2 will ALWAYS beat priority 1 unless critically wounded
+      priority = priority + (highestConfigPriority * 100)
+      priority = priority + (highestDanger * 2)
+    else
+      -- No config found = not a valid target
+      return 0
+    end
+  end
   
   -- HP-based priority (wounded targets get higher priority)
   if hp <= 10 then
@@ -519,14 +563,6 @@ function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
       if hp < 50 then
         priority = priority + 20
       end
-    end
-  end
-  
-  -- Config danger value (if available)
-  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
-    local configs = TargetBot.Creature.getConfigs(creature)
-    if configs and configs[1] and configs[1].danger then
-      priority = priority + (configs[1].danger * 2)
     end
   end
   
@@ -593,6 +629,11 @@ end
 function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, path)
   if not creature then return end
   
+  -- Skip if TargetBot is disabled
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+    return
+  end
+  
   -- Check cooldown
   if now - targetState.lastAcquisition < CONST.ACQUISITION_COOLDOWN then
     -- Queue for later evaluation
@@ -613,7 +654,51 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
     return
   end
   
-  -- Compare priorities
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- IMPROVED: Check CONFIG PRIORITY first for instant high-priority switching
+  -- Config priority differences should override other factors
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local newConfigPriority = 0
+  local currentConfigPriority = 0
+  
+  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+    -- Get new creature's config priority
+    local newConfigs = TargetBot.Creature.getConfigs(creature)
+    if newConfigs and #newConfigs > 0 then
+      for i = 1, #newConfigs do
+        local cfg = newConfigs[i]
+        if cfg.priority and cfg.priority > newConfigPriority then
+          newConfigPriority = cfg.priority
+        end
+      end
+    end
+    
+    -- Get current target's config priority
+    local currentConfigs = TargetBot.Creature.getConfigs(currentTarget)
+    if currentConfigs and #currentConfigs > 0 then
+      for i = 1, #currentConfigs do
+        local cfg = currentConfigs[i]
+        if cfg.priority and cfg.priority > currentConfigPriority then
+          currentConfigPriority = cfg.priority
+        end
+      end
+    end
+    
+    -- If new creature has HIGHER config priority, switch immediately!
+    -- This is the KEY fix for the user's issue
+    if newConfigPriority > currentConfigPriority then
+      if EventTargeting.DEBUG then
+        local name = creature:getName() or "Unknown"
+        local currentName = currentTarget:getName() or "Unknown"
+        print("[EventTargeting] Priority switch: " .. name .. " (priority=" .. newConfigPriority .. 
+              ") > " .. currentName .. " (priority=" .. currentConfigPriority .. ")")
+      end
+      EventTargeting.TargetAcquisition.acquireTarget(creature, path)
+      return
+    end
+  end
+  
+  -- Compare calculated priorities (for same config priority level)
   local currentPriority = 0
   local currentId = currentTarget:getId()
   local currentEntry = creatureCache.entries[currentId]
@@ -626,8 +711,9 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
     currentPriority = EventTargeting.TargetAcquisition.calculatePriority(currentTarget, currentPath)
   end
   
-  -- Switch if new target has significantly higher priority
-  local priorityThreshold = 25  -- Need 25+ priority advantage to switch
+  -- Switch if new target has significantly higher priority (same config level)
+  -- Use lower threshold since config priority is already checked above
+  local priorityThreshold = 50  -- Within same config priority tier
   if priority > currentPriority + priorityThreshold then
     EventTargeting.TargetAcquisition.acquireTarget(creature, path)
   end
@@ -635,6 +721,11 @@ end
 
 -- Acquire a new target
 function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
+  -- CRITICAL: Do not attack if TargetBot is disabled
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+    return
+  end
+  
   if not creature or creature:isDead() then return end
   
   updatePlayerRef()
@@ -643,7 +734,27 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
   local id = creature:getId()
   local playerPos = player:getPosition()
   local creaturePos = creature:getPosition()
+  if not playerPos or not creaturePos then return end
+  
   local dist = chebyshev(playerPos, creaturePos)
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- PATH VALIDATION: Never attack unreachable targets
+  -- Verify path exists before attacking (prevents attacking through walls, etc.)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if dist > 1 then
+    -- Re-validate path if not provided or stale
+    if not path then
+      local validatedPath, pathLen, reachable = EventTargeting.PathValidator.validate(playerPos, creaturePos)
+      if not reachable then
+        if EventTargeting.DEBUG then
+          print("[EventTargeting] BLOCKED: " .. creature:getName() .. " is unreachable (no path)")
+        end
+        return  -- Do NOT attack unreachable targets
+      end
+      path = validatedPath
+    end
+  end
   
   -- Attack the creature
   if g_game and g_game.attack then
@@ -685,12 +796,24 @@ function EventTargeting.TargetAcquisition.processPending()
   for i = 1, #targetState.pendingTargets do
     local pending = targetState.pendingTargets[i]
     if pending.creature and not pending.creature:isDead() then
-      if pending.priority > bestPriority then
+      -- Re-validate path for pending targets (they may have become unreachable)
+      local stillReachable = true
+      updatePlayerRef()
+      if player then
+        local playerPos = player:getPosition()
+        local creaturePos = pending.creature:getPosition()
+        if playerPos and creaturePos and chebyshev(playerPos, creaturePos) > 1 then
+          local _, _, reachable = EventTargeting.PathValidator.validate(playerPos, creaturePos)
+          stillReachable = reachable
+        end
+      end
+      
+      if stillReachable and pending.priority > bestPriority then
         bestPriority = pending.priority
         best = pending
       end
-      -- Keep recent valid targets
-      if now - pending.time < 500 then
+      -- Keep recent valid targets that are still reachable
+      if now - pending.time < 500 and stillReachable then
         table.insert(validTargets, pending)
       end
     end
@@ -874,6 +997,7 @@ end
 -- Register EventBus handlers
 if EventBus then
   -- Monster appeared - queue for processing
+  -- IMPROVED: Instant high-priority monster detection and target switching
   EventBus.on("monster:appear", function(creature)
     if not creature then return end
     
@@ -888,9 +1012,69 @@ if EventBus then
     local dist = chebyshev(playerPos, creaturePos)
     if dist > CONST.DETECTION_RANGE then return end
     
-    -- Close creature - process immediately for instant targeting
-    if dist <= CONST.INSTANT_ATTACK_THRESHOLD then
+    -- ═══════════════════════════════════════════════════════════════════════════
+    -- HIGH-PRIORITY MONSTER DETECTION
+    -- Immediately check if this monster has higher priority than current target
+    -- This ensures priority-based targeting works when different monsters are configured
+    -- ═══════════════════════════════════════════════════════════════════════════
+    local isHighPriority = false
+    local newPriority = 0
+    local newConfigPriority = 0
+    
+    -- Get the new creature's config priority
+    if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+      local configs = TargetBot.Creature.getConfigs(creature)
+      if configs and #configs > 0 then
+        for i = 1, #configs do
+          local cfg = configs[i]
+          if cfg.priority and cfg.priority > newConfigPriority then
+            newConfigPriority = cfg.priority
+          end
+        end
+      end
+    end
+    
+    -- Check if this is a higher priority than current target
+    local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if newConfigPriority > 0 and currentTarget and not currentTarget:isDead() then
+      local currentConfigPriority = 0
+      if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+        local currentConfigs = TargetBot.Creature.getConfigs(currentTarget)
+        if currentConfigs and #currentConfigs > 0 then
+          for i = 1, #currentConfigs do
+            local cfg = currentConfigs[i]
+            if cfg.priority and cfg.priority > currentConfigPriority then
+              currentConfigPriority = cfg.priority
+            end
+          end
+        end
+      end
+      
+      -- If new monster has HIGHER config priority, mark for immediate processing
+      if newConfigPriority > currentConfigPriority then
+        isHighPriority = true
+        if EventTargeting.DEBUG then
+          local name = creature:getName() or "Unknown"
+          local currentName = currentTarget:getName() or "Unknown"
+          print("[EventTargeting] HIGH PRIORITY: " .. name .. " (priority=" .. newConfigPriority .. 
+                ") > " .. currentName .. " (priority=" .. currentConfigPriority .. ")")
+        end
+      end
+    elseif newConfigPriority > 0 and (not currentTarget or currentTarget:isDead()) then
+      -- No current target - this is a valid high-priority target
+      isHighPriority = true
+    end
+    
+    -- High-priority or close creatures - process immediately for instant targeting
+    if isHighPriority or dist <= CONST.INSTANT_ATTACK_THRESHOLD then
       EventTargeting.TargetAcquisition.processCreature(creature)
+      
+      -- Emit high priority event for other systems
+      if isHighPriority and EventBus then
+        pcall(function()
+          EventBus.emit("targeting/high_priority_appear", creature, newConfigPriority, dist)
+        end)
+      end
     else
       -- Queue for batch processing
       table.insert(pendingCreatures, creature)
@@ -1236,6 +1420,106 @@ end
 function EventTargeting.getMonsterCount()
   local count = EventTargeting.getLiveMonsterCount()
   return count
+end
+
+-- ============================================================================
+-- NATIVE OTCLIENT CALLBACK INTEGRATION
+-- Direct hook into OTClient's onCreatureAppear for fastest possible detection
+-- This bypasses EventBus for even faster high-priority monster switching
+-- ============================================================================
+
+-- Register native callback if available (fastest path)
+if onCreatureAppear then
+  onCreatureAppear(function(creature)
+    if not creature then return end
+    if not creature:isMonster() then return end
+    if creature:isDead() then return end
+    
+    -- Skip if TargetBot is off
+    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+      return
+    end
+    
+    -- Quick validation
+    updatePlayerRef()
+    if not player then return end
+    
+    local okPpos, playerPos = pcall(function() return player:getPosition() end)
+    local okCpos, creaturePos = pcall(function() return creature:getPosition() end)
+    if not okPpos or not playerPos or not okCpos or not creaturePos then return end
+    if playerPos.z ~= creaturePos.z then return end
+    
+    local dist = chebyshev(playerPos, creaturePos)
+    if dist > CONST.DETECTION_RANGE then return end
+    
+    -- Check if this is a high-priority monster
+    if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+      local configs = TargetBot.Creature.getConfigs(creature)
+      if configs and #configs > 0 then
+        local newConfigPriority = 0
+        for i = 1, #configs do
+          local cfg = configs[i]
+          if cfg.priority and cfg.priority > newConfigPriority then
+            newConfigPriority = cfg.priority
+          end
+        end
+        
+        -- Check current target's priority
+        local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+        if newConfigPriority > 0 then
+          local currentConfigPriority = 0
+          if currentTarget and not currentTarget:isDead() then
+            local currentConfigs = TargetBot.Creature.getConfigs(currentTarget)
+            if currentConfigs and #currentConfigs > 0 then
+              for i = 1, #currentConfigs do
+                local cfg = currentConfigs[i]
+                if cfg.priority and cfg.priority > currentConfigPriority then
+                  currentConfigPriority = cfg.priority
+                end
+              end
+            end
+          end
+          
+          -- INSTANT SWITCH for higher priority monster!
+          if newConfigPriority > currentConfigPriority then
+            if EventTargeting.DEBUG then
+              local name = creature:getName() or "Unknown"
+              print("[EventTargeting] NATIVE: High priority monster appeared: " .. name .. 
+                    " (priority=" .. newConfigPriority .. ")")
+            end
+            
+            -- Immediate attack!
+            if g_game and g_game.attack then
+              g_game.attack(creature)
+            end
+            
+            -- Also update our state
+            local okId, id = pcall(function() return creature:getId() end)
+            if okId and id then
+              targetState.currentTarget = creature
+              targetState.currentTargetId = id
+              targetState.lastAcquisition = now or (os.time() * 1000)
+              targetState.combatActive = true
+            end
+            
+            -- Emit event for other systems
+            if EventBus then
+              pcall(function()
+                EventBus.emit("targeting/high_priority_appear", creature, newConfigPriority, dist)
+              end)
+            end
+            return
+          end
+        end
+      end
+    end
+    
+    -- Not high priority - let normal flow handle it via EventBus
+  end)
+  
+  if EventTargeting.DEBUG then
+    print("[EventTargeting] Native onCreatureAppear callback registered")
+  end
 end
 
 print("[EventTargeting] Module loaded v" .. EventTargeting.VERSION)

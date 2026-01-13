@@ -410,8 +410,8 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     local recentChange = CaveBot.getRecentFloorChange and CaveBot.getRecentFloorChange()
     if recentChange and recentChange.toZ == playerPos.z then
       -- We recently changed TO this floor
-      -- Skip any waypoint that is for a DIFFERENT floor (the one we left)
-      if dist2D <= 15 then  -- Increased range - be aggressive about skipping
+      -- Only skip if we're close horizontally AND this waypoint is for the floor we left
+      if recentChange.fromZ == destPos.z and dist2D <= 10 then
         noPath = 0
         return true
       end
@@ -420,21 +420,16 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     -- CASE 2: Check if we recently came FROM this floor
     -- If the waypoint is on a floor we just LEFT, skip it
     if recentChange and recentChange.fromZ == destPos.z then
-      -- This waypoint is for the floor we just left - definitely skip
-      if dist2D <= 15 then
+      -- This waypoint is for the floor we just left - skip if close
+      if dist2D <= 10 then
         noPath = 0
         return true
       end
     end
     
-    -- CASE 3: We're close horizontally but on different floor
-    -- This often happens after using a ladder - waypoint was for the OLD floor
-    if dist2D <= 8 and floorDiff <= 2 then
-      -- Close in X/Y, small floor difference - likely we just changed floors
-      -- Skip this waypoint meant for the other floor
-      noPath = 0
-      return true
-    end
+    -- REMOVED CASE 3: The aggressive 8-tile skip was causing back-and-forth issues
+    -- by skipping valid waypoints that the player needs to reach
+    -- Now we only skip based on actual floor change history, not proximity alone
     
     -- CASE 4: Standard floor mismatch - we need to find a path to this floor
     noPath = noPath + 1

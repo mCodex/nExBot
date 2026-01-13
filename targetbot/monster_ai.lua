@@ -948,6 +948,11 @@ function MonsterAI.Predictor.predictPositionDanger(position, monsters)
       local isPredicted, confidence, timeToAttack = 
         MonsterAI.Predictor.predictWaveAttack(monster)
       
+      -- Emit wave prediction event for other modules (Exeta Amp, etc.)
+      if isPredicted and confidence >= 0.5 and EventBus then
+        EventBus.emit("monsterai:wave_predicted", monster, confidence, timeToAttack)
+      end
+      
       if isPredicted and timeToAttack < 1000 then
         -- Check if position is in attack path
         local mpos = monster:getPosition()
@@ -1274,6 +1279,95 @@ if EventBus then
       data.missileCount = (data.missileCount or 0) + 1
     end)
   end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NATIVE OTCLIENT TURN CALLBACK
+  -- Direct hook into OTClient's onCreatureTurn for fastest direction change detection
+  -- This is critical for wave attack prediction as monsters turn before attacking
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if onCreatureTurn then
+    onCreatureTurn(function(creature, direction)
+      if not creature then return end
+      if not creature:isMonster() then return end
+      if creature:isDead() then return end
+      
+      local id = creature:getId()
+      if not id then return end
+      
+      local nowt = nowMs()
+      local rt = MonsterAI.RealTime.directions[id]
+      local oldDir = rt and rt.dir or direction
+      
+      -- Only process if direction actually changed
+      if oldDir == direction then return end
+      
+      -- Initialize if not tracked
+      if not rt then
+        rt = {
+          dir = direction,
+          lastChangeTime = nowt,
+          consecutiveChanges = 0,
+          turnRate = 0
+        }
+        MonsterAI.RealTime.directions[id] = rt
+        return
+      end
+      
+      -- Calculate turn rate
+      local deltaT = nowt - (rt.lastChangeTime or nowt)
+      if deltaT > 50 then
+        rt.turnRate = 1000 / deltaT  -- turns per second
+      end
+      
+      -- Track consecutive changes
+      rt.consecutiveChanges = (rt.consecutiveChanges or 0) + 1
+      rt.dir = direction
+      rt.lastChangeTime = nowt
+      
+      -- Emit creature:turn event for other modules (Exeta Amp, etc.)
+      if EventBus then
+        EventBus.emit("creature:turn", creature, direction, oldDir)
+      end
+      
+      -- Check if now facing player
+      local playerPos = player and player:getPosition()
+      local monsterPos = creature:getPosition()
+      if playerPos and monsterPos then
+        local dist = math.max(math.abs(monsterPos.x - playerPos.x), math.abs(monsterPos.y - playerPos.y))
+        if dist <= 6 then
+          local isFacing = MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition
+            and MonsterAI.Predictor.isFacingPosition(monsterPos, direction, playerPos)
+          
+          if isFacing then
+            rt.facingPlayerSince = rt.facingPlayerSince or nowt
+            
+            -- High turn rate + now facing = imminent attack!
+            if rt.turnRate > 1.5 or rt.consecutiveChanges >= 2 then
+              MonsterAI.RealTime.registerImmediateThreat(creature, "turn_facing", 
+                math.min(0.4 + rt.turnRate * 0.2, 0.9))
+              
+              if EventTargeting and EventTargeting.DEBUG then
+                local name = creature:getName() or "Unknown"
+                print("[MonsterAI] Turn threat: " .. name .. 
+                      " turnRate=" .. string.format("%.2f", rt.turnRate) ..
+                      " changes=" .. rt.consecutiveChanges)
+              end
+            end
+          else
+            rt.facingPlayerSince = nil
+          end
+        end
+      end
+      
+      -- Reset consecutive changes after delay
+      schedule(400, function()
+        if rt and rt.lastChangeTime and (nowMs() - rt.lastChangeTime) > 350 then
+          rt.consecutiveChanges = 0
+          rt.turnRate = 0
+        end
+      end)
+    end)
+  end
 end
 
 -- ============================================================================
@@ -1287,11 +1381,21 @@ function MonsterAI.updateAll()
     return
   end
 
+  -- OPTIMIZED: Prefer MonsterCache for O(1) cached creature lookup
+  -- This avoids expensive g_map.getSpectatorsInRange calls
   local creatures = nil
   if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
     creatures = MovementCoordinator.MonsterCache.getNearby(8)
-  else
-    creatures = (SpectatorCache and SpectatorCache.getNearby(8, 8)) or (pcall(function() return g_map.getSpectatorsInRange(playerPos, false, 8, 8) end) and g_map.getSpectatorsInRange(playerPos, false, 8, 8) or {})
+  end
+  
+  -- Fallback only if MonsterCache is empty or unavailable
+  if not creatures or #creatures == 0 then
+    if SpectatorCache and SpectatorCache.getNearby then
+      creatures = SpectatorCache.getNearby(8, 8) or {}
+    else
+      local ok, result = pcall(function() return g_map.getSpectatorsInRange(playerPos, false, 8, 8) end)
+      creatures = ok and result or {}
+    end
   end
 
   if not creatures then

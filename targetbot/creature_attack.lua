@@ -1328,6 +1328,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
   if not targetIsLowHealth and not isTrapped then
     -- Pull System: Pause CaveBot when monster pack is too small but we have targets
     -- This prevents running to next waypoint and losing the respawn
+    -- ENHANCED: Consider MonsterAI threat data for smarter decisions
     if config.smartPull then
       -- SAFEGUARD: Only try to pull if there are ANY monsters on screen
       -- No point in pausing waypoints if there's nothing to fight
@@ -1347,9 +1348,17 @@ TargetBot.Creature.walk = function(creature, config, targets)
           nearbyMonsters = getMonsters(pullRange)
         end
         
-        -- If we have fewer monsters than minimum, PAUSE waypoint movement
-        -- but keep attacking current targets (don't walk to next waypoint!)
-        if nearbyMonsters < pullMin then
+        -- ENHANCED: Check MonsterAI for imminent threats
+        -- If under immediate threat, DON'T pause waypoints - stay mobile
+        local underImmediateThreat = false
+        if MonsterAI and MonsterAI.getImmediateThreat then
+          local threatData = MonsterAI.getImmediateThreat()
+          underImmediateThreat = threatData.immediateThreat and threatData.highestConfidence >= 0.7
+        end
+        
+        -- If we have fewer monsters than minimum AND not under immediate threat
+        -- PAUSE waypoint movement but keep attacking current targets
+        if nearbyMonsters < pullMin and not underImmediateThreat then
           -- Signal to CaveBot that smartPull is active (pause waypoints)
           -- But DON'T call allowCaveBot - we want to FIGHT, not walk away
           TargetBot.smartPullActive = true
@@ -1357,7 +1366,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
           -- Stay here and fight - don't walk to waypoint
           -- Return nil to continue with normal attack/positioning below
         else
-          -- Enough monsters - clear the pause
+          -- Enough monsters OR under threat - clear the pause
           TargetBot.smartPullActive = false
         end
       end  -- end screenMonsters check

@@ -347,21 +347,35 @@ local function clearPatterns()
   print("[MonsterInspector] Cleared stored monster patterns")
 end
 
--- Buttons
-if MonsterInspectorWindow then
-  local refreshBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.refresh
-  local exportBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.export
-  local clearBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.clear
-  local closeBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.close
-
+-- Buttons - use proper widget lookup via getChildById
+local function bindInspectorButtons()
+  if not MonsterInspectorWindow then return end
+  
+  -- Find buttons panel first
+  local buttonsPanel = nil
+  pcall(function() buttonsPanel = MonsterInspectorWindow:getChildById("buttons") end)
+  if not buttonsPanel then
+    pcall(function() buttonsPanel = MonsterInspectorWindow.buttons end)
+  end
+  
+  if not buttonsPanel then
+    warn("[MonsterInspector] Could not find buttons panel")
+    return
+  end
+  
+  -- Find individual buttons
+  local refreshBtn, clearBtn, closeBtn = nil, nil, nil
+  pcall(function() refreshBtn = buttonsPanel:getChildById("refresh") end)
+  pcall(function() clearBtn = buttonsPanel:getChildById("clear") end)
+  pcall(function() closeBtn = buttonsPanel:getChildById("close") end)
+  
   if refreshBtn then
     refreshBtn.onClick = function() refreshPatterns() end
   end
-  if exportBtn then
-    exportBtn.onClick = function() exportPatterns() end
-  end
   if clearBtn then
-    clearBtn.onClick = function() clearPatterns() end
+    clearBtn.onClick = function()
+      clearPatterns()
+    end
   end
   if closeBtn then
     closeBtn.onClick = function() MonsterInspectorWindow:hide() end
@@ -377,13 +391,16 @@ if MonsterInspectorWindow then
   end
 end
 
+-- Bind buttons on load
+bindInspectorButtons()
+
 -- Initialize (load current data)
 refreshPatterns()
 
 nExBot.MonsterInspector = {
   refresh = refreshPatterns,
-  export = exportPatterns,
-  clear = clearPatterns
+  clear = clearPatterns,
+  rebindButtons = bindInspectorButtons
 }
 
 -- Convenience helpers to show/toggle the inspector from console or other modules
