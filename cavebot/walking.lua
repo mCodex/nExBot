@@ -257,6 +257,78 @@ local function posEquals(a, b)
 end
 
 -- ============================================================================
+-- FIELD DETECTION (Fire, Energy, Poison Fields)
+-- ============================================================================
+
+-- Field item IDs (fire, energy, poison, magic walls)
+local FIELD_ITEM_IDS = {
+  -- Fire Fields
+  [1487] = true, [1488] = true, [1489] = true, [1490] = true, [1491] = true,
+  [1492] = true, [1493] = true, [1494] = true, [1495] = true, [1496] = true,
+  [1497] = true, [1498] = true, [1499] = true, [1500] = true, [1501] = true,
+  [1502] = true, [1503] = true, [1504] = true, [1505] = true, [1506] = true,
+  -- Old fire IDs
+  [2120] = true, [2121] = true, [2122] = true, [2123] = true, [2124] = true,
+  [2125] = true, [2126] = true, [2127] = true, [2128] = true,
+  
+  -- Energy Fields  
+  [1491] = true, [1495] = true,
+  [2119] = true, [2124] = true, [2125] = true,
+  [7487] = true, [7488] = true, [7489] = true, [7490] = true,
+  [8069] = true, [8070] = true, [8071] = true, [8072] = true,
+  
+  -- Poison Fields
+  [1490] = true, [1496] = true,
+  [1503] = true, [1504] = true, [1505] = true, [1506] = true,
+  [2118] = true, [2119] = true,
+  [7465] = true, [7466] = true, [7467] = true, [7468] = true,
+  
+  -- Magic Walls (treat as fields - block path)
+  [2128] = true, [2129] = true, [2130] = true,
+  [7491] = true, [7492] = true, [7493] = true, [7494] = true,
+  
+  -- Wild Growth
+  [2130] = true, [2131] = true,
+}
+
+-- Check if a tile contains a field (fire/energy/poison/magic wall)
+local function isFieldTile(tilePos)
+  if not tilePos then return false end
+  
+  local tile = g_map.getTile(tilePos)
+  if not tile then return false end
+  
+  -- Check ground for field
+  local ground = tile:getGround()
+  if ground and FIELD_ITEM_IDS[ground:getId()] then
+    return true
+  end
+  
+  -- Check items on tile for fields
+  local topUseThing = tile:getTopUseThing()
+  if topUseThing and topUseThing:isItem() and FIELD_ITEM_IDS[topUseThing:getId()] then
+    return true
+  end
+  
+  local topThing = tile:getTopThing()
+  if topThing and topThing:isItem() and FIELD_ITEM_IDS[topThing:getId()] then
+    return true
+  end
+  
+  -- Check all items on tile (thorough check)
+  local items = tile:getItems()
+  if items then
+    for _, item in ipairs(items) do
+      if FIELD_ITEM_IDS[item:getId()] then
+        return true
+      end
+    end
+  end
+  
+  return false
+end
+
+-- ============================================================================
 -- FLOOR-CHANGE DETECTION (SRP: Only detects floor-change tiles)
 -- ============================================================================
 

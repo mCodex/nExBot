@@ -259,6 +259,4 @@ TargetBot.Creature.calculateParams = function(creature, path)
   }
 end
 
-TargetBot.Creature.calculateDanger = function(creature, config, path)
-  return config.danger
-end
+-- NOTE: calculateDanger was removed (unused) - danger is accessed directly via config.danger

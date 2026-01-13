@@ -91,32 +91,8 @@ local PATH_PARAMS = {
   precision = 1
 }
 
--- OTCLIENT API: Enhanced pathfinding parameters for different scenarios
-local PATH_PARAMS_AGGRESSIVE = {
-  ignoreLastCreature = true,
-  ignoreNonPathable = true,
-  ignoreCost = true,
-  ignoreCreatures = false,  -- Allow weaving through creatures for evasion
-  allowOnlyVisibleTiles = true,
-  precision = 0  -- Faster for emergency moves
-}
-
-local PATH_PARAMS_CONSERVATIVE = {
-  ignoreLastCreature = true,
-  ignoreNonPathable = true,
-  ignoreCost = true,
-  ignoreCreatures = true,
-  allowOnlyVisibleTiles = true,
-  allowUnseen = false,  -- Never use unseen tiles for safety
-  precision = 2  -- More precise for positioning
-}
-
 -- Pre-allocated status strings (PERFORMANCE: avoid string concatenation)
-local STATUS_ATTACKING = "Attacking"
-local STATUS_ATTACKING_LURE_OFF = "Attacking (luring off)"
-local STATUS_PULLING = "Pulling (using CaveBot)"
 local STATUS_WAITING = "Waiting"
-local STATUS_ATTACK_PREFIX = "Attack & "
 
 --------------------------------------------------------------------------------
 -- PERFORMANCE: Optimized Creature Cache
@@ -154,16 +130,6 @@ local function setStatusRight(text)
     pcall(function() ui.status.right:setText(text) end)
     _lastStatusRight = text
   end
-end
-
--- Safe creature text setter: only set when different to avoid constant layout updates
-local function setCreatureTextSafe(creature, text)
-  if not creature or not text then return end
-  pcall(function()
-    local cur = nil
-    if type(creature.getText) == 'function' then cur = creature:getText() end
-    if cur ~= text then creature:setText(text) end
-  end)
 end
 
 -- Generic safe setter for UI labels/widgets
