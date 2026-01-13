@@ -171,9 +171,30 @@ function MonsterAI.Patterns.get(monsterName)
          or MonsterAI.Patterns.default
 end
 
+-- Helper to get monster patterns from storage (UnifiedStorage with fallback)
+local function getStoredPatterns()
+  if UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() then
+    return UnifiedStorage.get("targetbot.monsterPatterns") or {}
+  end
+  return storage.monsterPatterns or {}
+end
+
+-- Helper to save monster patterns to storage (UnifiedStorage with fallback)
+local function setStoredPatterns(patterns)
+  if UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() then
+    UnifiedStorage.set("targetbot.monsterPatterns", patterns)
+    -- Emit event for real-time sync
+    if EventBus and EventBus.emit then
+      EventBus.emit("monsterAI:patternsUpdated", patterns)
+    end
+  end
+  -- Also keep in global storage for compatibility
+  storage.monsterPatterns = patterns
+end
+
 -- Load persisted patterns from storage (if any)
-storage.monsterPatterns = storage.monsterPatterns or {}
-for k,v in pairs(storage.monsterPatterns) do
+local storedPatterns = getStoredPatterns()
+for k,v in pairs(storedPatterns) do
   MonsterAI.Patterns.knownMonsters[k] = v
 end
 
@@ -181,8 +202,13 @@ end
 function MonsterAI.savePattern(monsterName)
   if not monsterName then return end
   local name = monsterName:lower()
-  storage.monsterPatterns = storage.monsterPatterns or {}
-  storage.monsterPatterns[name] = MonsterAI.Patterns.knownMonsters[name]
+  local patterns = getStoredPatterns()
+  patterns[name] = MonsterAI.Patterns.knownMonsters[name]
+  setStoredPatterns(patterns)
+  -- Emit individual pattern update event
+  if EventBus and EventBus.emit then
+    EventBus.emit("monsterAI:patternUpdated", name, MonsterAI.Patterns.knownMonsters[name])
+  end
 end
 
 -- Persist partial updates to a known monster pattern (SRP)
@@ -191,21 +217,24 @@ function MonsterAI.Patterns.persist(monsterName, updates)
   local name = monsterName:lower()
   MonsterAI.Patterns.knownMonsters[name] = MonsterAI.Patterns.knownMonsters[name] or {}
   for k,v in pairs(updates) do MonsterAI.Patterns.knownMonsters[name][k] = v end
-  storage.monsterPatterns = storage.monsterPatterns or {}
-  storage.monsterPatterns[name] = MonsterAI.Patterns.knownMonsters[name]
+  local patterns = getStoredPatterns()
+  patterns[name] = MonsterAI.Patterns.knownMonsters[name]
+  setStoredPatterns(patterns)
 end
 -- Simple decay: slowly reduce confidence and nudge cooldown toward default when long unseen
 function MonsterAI.decayPatterns()
   local nowt = nowMs()
   local decayWindow = 7 * 24 * 3600 * 1000 -- 7 days
-  for k, v in pairs(storage.monsterPatterns) do
+  local patterns = getStoredPatterns()
+  for k, v in pairs(patterns) do
     if v.lastSeen and (nowt - v.lastSeen) > decayWindow then
       v.confidence = (v.confidence or 0.5) * 0.9
       if v.waveCooldown then v.waveCooldown = v.waveCooldown * 1.05 end
-      storage.monsterPatterns[k] = v
+      patterns[k] = v
       MonsterAI.Patterns.knownMonsters[k] = v
     end
   end
+  setStoredPatterns(patterns)
 end
 
 -- Schedule recurring decay (hourly)
@@ -948,6 +977,11 @@ function MonsterAI.Predictor.predictPositionDanger(position, monsters)
       local isPredicted, confidence, timeToAttack = 
         MonsterAI.Predictor.predictWaveAttack(monster)
       
+      -- Emit wave prediction event for other modules (Exeta Amp, etc.)
+      if isPredicted and confidence >= 0.5 and EventBus then
+        EventBus.emit("monsterai:wave_predicted", monster, confidence, timeToAttack)
+      end
+      
       if isPredicted and timeToAttack < 1000 then
         -- Check if position is in attack path
         local mpos = monster:getPosition()
@@ -1274,6 +1308,95 @@ if EventBus then
       data.missileCount = (data.missileCount or 0) + 1
     end)
   end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NATIVE OTCLIENT TURN CALLBACK
+  -- Direct hook into OTClient's onCreatureTurn for fastest direction change detection
+  -- This is critical for wave attack prediction as monsters turn before attacking
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if onCreatureTurn then
+    onCreatureTurn(function(creature, direction)
+      if not creature then return end
+      if not creature:isMonster() then return end
+      if creature:isDead() then return end
+      
+      local id = creature:getId()
+      if not id then return end
+      
+      local nowt = nowMs()
+      local rt = MonsterAI.RealTime.directions[id]
+      local oldDir = rt and rt.dir or direction
+      
+      -- Only process if direction actually changed
+      if oldDir == direction then return end
+      
+      -- Initialize if not tracked
+      if not rt then
+        rt = {
+          dir = direction,
+          lastChangeTime = nowt,
+          consecutiveChanges = 0,
+          turnRate = 0
+        }
+        MonsterAI.RealTime.directions[id] = rt
+        return
+      end
+      
+      -- Calculate turn rate
+      local deltaT = nowt - (rt.lastChangeTime or nowt)
+      if deltaT > 50 then
+        rt.turnRate = 1000 / deltaT  -- turns per second
+      end
+      
+      -- Track consecutive changes
+      rt.consecutiveChanges = (rt.consecutiveChanges or 0) + 1
+      rt.dir = direction
+      rt.lastChangeTime = nowt
+      
+      -- Emit creature:turn event for other modules (Exeta Amp, etc.)
+      if EventBus then
+        EventBus.emit("creature:turn", creature, direction, oldDir)
+      end
+      
+      -- Check if now facing player
+      local playerPos = player and player:getPosition()
+      local monsterPos = creature:getPosition()
+      if playerPos and monsterPos then
+        local dist = math.max(math.abs(monsterPos.x - playerPos.x), math.abs(monsterPos.y - playerPos.y))
+        if dist <= 6 then
+          local isFacing = MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition
+            and MonsterAI.Predictor.isFacingPosition(monsterPos, direction, playerPos)
+          
+          if isFacing then
+            rt.facingPlayerSince = rt.facingPlayerSince or nowt
+            
+            -- High turn rate + now facing = imminent attack!
+            if rt.turnRate > 1.5 or rt.consecutiveChanges >= 2 then
+              MonsterAI.RealTime.registerImmediateThreat(creature, "turn_facing", 
+                math.min(0.4 + rt.turnRate * 0.2, 0.9))
+              
+              if EventTargeting and EventTargeting.DEBUG then
+                local name = creature:getName() or "Unknown"
+                print("[MonsterAI] Turn threat: " .. name .. 
+                      " turnRate=" .. string.format("%.2f", rt.turnRate) ..
+                      " changes=" .. rt.consecutiveChanges)
+              end
+            end
+          else
+            rt.facingPlayerSince = nil
+          end
+        end
+      end
+      
+      -- Reset consecutive changes after delay
+      schedule(400, function()
+        if rt and rt.lastChangeTime and (nowMs() - rt.lastChangeTime) > 350 then
+          rt.consecutiveChanges = 0
+          rt.turnRate = 0
+        end
+      end)
+    end)
+  end
 end
 
 -- ============================================================================
@@ -1287,11 +1410,21 @@ function MonsterAI.updateAll()
     return
   end
 
+  -- OPTIMIZED: Prefer MonsterCache for O(1) cached creature lookup
+  -- This avoids expensive g_map.getSpectatorsInRange calls
   local creatures = nil
   if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
     creatures = MovementCoordinator.MonsterCache.getNearby(8)
-  else
-    creatures = (SpectatorCache and SpectatorCache.getNearby(8, 8)) or (pcall(function() return g_map.getSpectatorsInRange(playerPos, false, 8, 8) end) and g_map.getSpectatorsInRange(playerPos, false, 8, 8) or {})
+  end
+  
+  -- Fallback only if MonsterCache is empty or unavailable
+  if not creatures or #creatures == 0 then
+    if SpectatorCache and SpectatorCache.getNearby then
+      creatures = SpectatorCache.getNearby(8, 8) or {}
+    else
+      local ok, result = pcall(function() return g_map.getSpectatorsInRange(playerPos, false, 8, 8) end)
+      creatures = ok and result or {}
+    end
   end
 
   if not creatures then

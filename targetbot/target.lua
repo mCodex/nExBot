@@ -3,6 +3,13 @@ local config = nil
 local lastAction = 0
 local cavebotAllowance = 0
 local lureEnabled = true
+
+-- MonsterAI automatic integration (hidden internals, not exposed to UI/storage)
+local MONSTERAI_INTEGRATION = true
+local MONSTERAI_IMMINENT_ACTION = "avoid"  -- "avoid" = attempt escape, "wait" = pause attacking
+local MONSTERAI_MIN_CONF = 0.6
+local monsterAIWaitUntil = 0
+
 local dangerValue = 0
 local looterStatus = ""
 -- initialization state
@@ -79,15 +86,13 @@ local PATH_PARAMS = {
   ignoreLastCreature = true,
   ignoreNonPathable = true,
   ignoreCost = true,
-  ignoreCreatures = true
+  ignoreCreatures = true,
+  allowOnlyVisibleTiles = true,  -- OTCLIENT API: Safety first
+  precision = 1
 }
 
 -- Pre-allocated status strings (PERFORMANCE: avoid string concatenation)
-local STATUS_ATTACKING = "Attacking"
-local STATUS_ATTACKING_LURE_OFF = "Attacking (luring off)"
-local STATUS_PULLING = "Pulling (using CaveBot)"
 local STATUS_WAITING = "Waiting"
-local STATUS_ATTACK_PREFIX = "Attack & "
 
 --------------------------------------------------------------------------------
 -- PERFORMANCE: Optimized Creature Cache
@@ -125,16 +130,6 @@ local function setStatusRight(text)
     pcall(function() ui.status.right:setText(text) end)
     _lastStatusRight = text
   end
-end
-
--- Safe creature text setter: only set when different to avoid constant layout updates
-local function setCreatureTextSafe(creature, text)
-  if not creature or not text then return end
-  pcall(function()
-    local cur = nil
-    if type(creature.getText) == 'function' then cur = creature:getText() end
-    if cur ~= text then creature:setText(text) end
-  end)
 end
 
 -- Generic safe setter for UI labels/widgets
@@ -215,6 +210,60 @@ if EventBus then
   EventBus.on("combat:target", function(creature, oldCreature)
     debouncedInvalidateAndRecalc()
   end, 20)
+
+  -- MonsterAI: React to imminent attacks and threat notifications
+  EventBus.on("monsterai/imminent_attack", function(creature, data)
+    -- data: { confidence = 0..1, timeToAttack = ms, reason = "wave"|"melee", ... }
+    if not MONSTERAI_INTEGRATION then return end
+    if not creature or not data then return end
+    local conf = data.confidence or 0
+    if conf < MONSTERAI_MIN_CONF then return end
+
+    -- Compute simple escape tile away from monster
+    local okP, ppos = pcall(function() return player and player:getPosition() end)
+    local okC, cpos = pcall(function() return creature and creature:getPosition() end)
+    if not okP or not okC or not ppos or not cpos then return end
+
+    local dx = (ppos.x - cpos.x)
+    local dy = (ppos.y - cpos.y)
+    local moveX = (dx ~= 0) and (dx > 0 and 1 or -1) or 0
+    local moveY = (dy ~= 0) and (dy > 0 and 1 or -1) or 0
+    local escapePos = { x = ppos.x + moveX, y = ppos.y + moveY, z = ppos.z }
+
+    local action = MONSTERAI_IMMINENT_ACTION
+    if action == "avoid" then
+      if MovementCoordinator and MovementCoordinator.Intent and MovementCoordinator.CONSTANTS then
+        MovementCoordinator.Intent.register(
+          MovementCoordinator.CONSTANTS.INTENT.EMERGENCY_ESCAPE,
+          escapePos,
+          math.min(0.95, conf),
+          "monsterai_imminent",
+          { src = creature, tta = data.timeToAttack }
+        )
+      end
+      -- Pause attacking briefly to let movement coordinator act
+      monsterAIWaitUntil = now + math.max(900, data.timeToAttack or 900)
+    elseif action == "wait" then
+      -- Pause attacking but don't register a move intent
+      monsterAIWaitUntil = now + math.max(800, data.timeToAttack or 800)
+    end
+
+    -- Force cache/invalidation so we re-evaluate target priorities asap
+    invalidateCache()
+  end, 50)
+
+  EventBus.on("monsterai/threat_detected", function(creature, data)
+    if not MONSTERAI_INTEGRATION then return end
+    -- Record AI threat and force a recalc so priorities react quickly
+    if creature then
+      local okId, id = pcall(function() return creature and creature:getId() end)
+      if okId and id and CreatureCache.monsters[id] then
+        -- store last known threat for display or debug
+        CreatureCache.monsters[id].lastAIThreat = data
+      end
+    end
+    invalidateCache()
+  end, 40)
 
   --------------------------------------------------------------------------------
   -- FOLLOW PLAYER INTEGRATION (Party Hunt Support)
@@ -306,7 +355,8 @@ if onPlayerHealthChange then
       attackWatchdog.attempts = 0
       attackWatchdog.lastForce = 0
       -- Start an aggressive relogin recovery window if TargetBot was enabled before or is currently on
-      if TargetBot and TargetBot.isOn and (TargetBot.isOn() or storage.targetbotEnabled == true) then
+      local storedEnabled = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled")) or storage.targetbotEnabled
+      if TargetBot and TargetBot.isOn and (TargetBot.isOn() or storedEnabled == true) then
         reloginRecovery.active = true
         reloginRecovery.endTime = now + reloginRecovery.duration
         reloginRecovery.lastAttempt = 0
@@ -317,7 +367,7 @@ if onPlayerHealthChange then
         debouncedInvalidateAndRecalc()
 
         -- If TargetBot was previously enabled via storage, ensure it's on now to allow recovery
-        if storage.targetbotEnabled == true and not TargetBot.isOn() then
+        if storedEnabled == true and not TargetBot.isOn() then
           pcall(function() TargetBot.setOn() end)
         end
 
@@ -328,7 +378,8 @@ if onPlayerHealthChange then
         if targetbotMacro then
           local function attemptRecovery()
             -- Only attempt recovery runs if targetbot should be enabled
-            if storage.targetbotEnabled == true or TargetBot.isOn() then
+            local storedEnabled2 = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled")) or storage.targetbotEnabled
+            if storedEnabled2 == true or TargetBot.isOn() then
               pcall(targetbotMacro)
               -- After macro run, try recalc and a direct attack as a backup
               local ok2, best2 = pcall(function() return recalculateBestTarget() end)
@@ -561,13 +612,13 @@ if EventBus then
     if newId ~= lastCombatTargetId then
       if creature then
         -- Combat started
-        storage.targetbotCombatActive = true
+        if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", true) else storage.targetbotCombatActive = true end
         pcall(function()
           EventBus.emit("targetbot/combat_start", creature, { id = newId, pos = creature:getPosition() })
         end)
       else
         -- Combat ended
-        storage.targetbotCombatActive = false
+        if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", false) else storage.targetbotCombatActive = false end
         pcall(function() EventBus.emit("targetbot/combat_end") end)
       end
       lastCombatTargetId = newId
@@ -576,15 +627,16 @@ if EventBus then
 
   -- Monitor player health to emit emergency events
   EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
-    local cfg = ProfileStorage and ProfileStorage.get and ProfileStorage.get('targetPriority') or {}
+    local cfg = (UnifiedStorage and UnifiedStorage.get("targetbot.priority")) or (ProfileStorage and ProfileStorage.get and ProfileStorage.get('targetPriority')) or {}
     local threshold = cfg and cfg.emergencyHP or 25
     local percent = 100
     if maxHealth and maxHealth > 0 then percent = math.floor(health / maxHealth * 100) end
-    if percent <= threshold and not storage.targetbotEmergency then
-      storage.targetbotEmergency = true
+    local currentEmergency = (UnifiedStorage and UnifiedStorage.get("targetbot.emergency")) or storage.targetbotEmergency
+    if percent <= threshold and not currentEmergency then
+      if UnifiedStorage then UnifiedStorage.set("targetbot.emergency", true) else storage.targetbotEmergency = true end
       pcall(function() EventBus.emit("targetbot/emergency", percent) end)
-    elseif percent > threshold and storage.targetbotEmergency then
-      storage.targetbotEmergency = false
+    elseif percent > threshold and currentEmergency then
+      if UnifiedStorage then UnifiedStorage.set("targetbot.emergency", false) else storage.targetbotEmergency = false end
       pcall(function() EventBus.emit("targetbot/emergency_cleared", percent) end)
     end
   end, 90)
@@ -1079,6 +1131,9 @@ TargetBot.setOff = function(val)
 end
 
 TargetBot.getCurrentProfile = function()
+  if UnifiedStorage and UnifiedStorage.get("targetbot.selectedConfig") then
+    return UnifiedStorage.get("targetbot.selectedConfig")
+  end
   return storage._configs.targetbot_configs.selected
 end
 
@@ -1090,6 +1145,13 @@ TargetBot.setCurrentProfile = function(name)
   end
   TargetBot.setOff()
   storage._configs.targetbot_configs.selected = name
+  -- Save to UnifiedStorage for per-character persistence
+  if UnifiedStorage then
+    UnifiedStorage.set("targetbot.selectedConfig", name)
+    if EventBus and EventBus.emitConfigChange then
+      EventBus.emitConfigChange("targetbot", name)
+    end
+  end
   -- Save character's profile preference for multi-client support
   if setCharacterProfile then
     setCharacterProfile("targetbotProfile", name)
@@ -1337,18 +1399,63 @@ end
 --------------------------------------------------------------------------------
 
 -- Helper: process a creature into target params (returns params, path) - pure helper to reduce duplication
+-- IMPROVED: Enhanced path validation to reject blocked/unreachable creatures
 local function processCandidate(creature, pos)
   if not creature or creature:isDead() or not isTargetableCreature(creature) then return nil, nil end
   local cpos = creature:getPosition()
   if not cpos then return nil, nil end
+  
+  -- CRITICAL: Verify path exists and is reachable
   local path = findPath(pos, cpos, 10, PATH_PARAMS)
-  if not path then return nil, nil end
+  if not path or #path == 0 then 
+    -- No path found - creature is unreachable
+    return nil, nil 
+  end
+  
+  -- ADDITIONAL CHECK: Verify path doesn't cross blocked tiles
+  -- This catches cases where findPath returns a path but it's actually blocked
+  local pathLength = #path
+  if pathLength > 15 then
+    -- For long paths, do a quick walkability check on first few tiles
+    local probe = {x = pos.x, y = pos.y, z = pos.z}
+    for i = 1, math.min(5, pathLength) do
+      local dir = path[i]
+      local offset = nil
+      -- Get offset for direction
+      if dir == North or dir == 0 then offset = {x = 0, y = -1}
+      elseif dir == East or dir == 1 then offset = {x = 1, y = 0}
+      elseif dir == South or dir == 2 then offset = {x = 0, y = 1}
+      elseif dir == West or dir == 3 then offset = {x = -1, y = 0}
+      elseif dir == NorthEast or dir == 4 then offset = {x = 1, y = -1}
+      elseif dir == SouthEast or dir == 5 then offset = {x = 1, y = 1}
+      elseif dir == SouthWest or dir == 6 then offset = {x = -1, y = 1}
+      elseif dir == NorthWest or dir == 7 then offset = {x = -1, y = -1}
+      end
+      
+      if offset then
+        probe = {x = probe.x + offset.x, y = probe.y + offset.y, z = probe.z}
+        local tile = g_map.getTile(probe)
+        if tile and not tile:isWalkable() then
+          -- Path crosses a blocked tile - creature is unreachable
+          return nil, nil
+        end
+      end
+    end
+  end
+  
   local params = TargetBot.Creature.calculateParams(creature, path)
+  
+  -- ADDITIONAL CHECK: Verify priority is non-zero (creature is actually targetable)
+  if not params or not params.config or params.priority <= 0 then
+    return nil, nil
+  end
+  
   return params, path
 end
 
 -- Recalculate best target from cache
 -- IMPROVED: Uses live creature detection for accuracy
+-- FIXED: Only count creatures with valid reachable paths
 local function recalculateBestTarget()
   local pos = player:getPosition()
   if not pos then return end
@@ -1357,6 +1464,8 @@ local function recalculateBestTarget()
   local bestPriority = 0
   local totalDanger = 0
   local targetCount = 0
+  local reachableCount = 0  -- NEW: Track only reachable creatures
+  local unreachableCount = 0  -- NEW: Track blocked path creatures
 
   -- IMPROVED: Get creatures from live detection first
   local creatures = nil
@@ -1406,16 +1515,19 @@ local function recalculateBestTarget()
         -- Calculate path and params
         local params, path = processCandidate(creature, pos)
         
-        -- Add to cache
-        CreatureCache.monsters[id] = {
-          creature = creature,
-          path = path,
-          pathTime = now,
-          lastUpdate = now
-        }
-        CreatureCache.monsterCount = CreatureCache.monsterCount + 1
-        
+        -- FIXED: Only add to cache if creature has a valid reachable path
+        -- Creatures with blocked paths should not be counted as targetable
         if path and params and params.config then
+          -- Creature is reachable - add to cache
+          CreatureCache.monsters[id] = {
+            creature = creature,
+            path = path,
+            pathTime = now,
+            lastUpdate = now,
+            reachable = true  -- Mark as reachable
+          }
+          CreatureCache.monsterCount = CreatureCache.monsterCount + 1
+          reachableCount = reachableCount + 1
           targetCount = targetCount + 1
           totalDanger = totalDanger + (params.danger or 0)
           
@@ -1423,6 +1535,10 @@ local function recalculateBestTarget()
             bestPriority = params.priority
             bestTarget = params
           end
+        else
+          -- Creature has blocked path - don't add to active targeting
+          -- Track for display purposes only
+          unreachableCount = unreachableCount + 1
         end
       end
     end
@@ -1435,8 +1551,9 @@ local function recalculateBestTarget()
   CreatureCache.bestPriority = bestPriority
   CreatureCache.totalDanger = totalDanger
   CreatureCache.dirty = false
+  CreatureCache.unreachableCount = unreachableCount  -- Track blocked creatures
 
-  return bestTarget, targetCount, totalDanger
+  return bestTarget, reachableCount, totalDanger
 end
 
 -- If we deferred enabling steps because core functions weren't ready, perform them now (with retries)
@@ -1518,6 +1635,13 @@ targetbotMacro = macro(200, function()
 
   -- Prevent execution before login is complete to avoid freezing
   if not g_game.isOnline() then return end
+
+  -- If MonsterAI requested an imminent-attack pause, honor it briefly
+  if monsterAIWaitUntil and now < monsterAIWaitUntil then
+    cavebotAllowance = now + 100
+    setStatusRight("Evading (MonsterAI)")
+    return
+  end
 
   -- TargetBot never triggers friend-heal; keep that path dormant to save cycles
   if HealEngine and HealEngine.setFriendHealingEnabled then
@@ -1601,19 +1725,26 @@ targetbotMacro = macro(200, function()
     setWidgetTextSafe(ui.config.right, "-")
     dangerValue = 0
     
-    -- KILL BEFORE WALK: Even with no best target, check if monsters exist on screen
-    -- If there are still targetable monsters, don't allow CaveBot to proceed
-    -- DynamicLure and SmartPull can bypass this by calling allowCaveBot()
-    -- IMPROVED: Use live count for more accurate detection
-    if liveMonsterCount > 0 then
-      -- There are monsters but no valid target (possibly unreachable or being processed)
-      -- Keep CaveBot paused briefly to allow re-evaluation
-      setStatusRight("Clearing (" .. tostring(liveMonsterCount) .. ")")
-      -- Force cache refresh to pick up these monsters
+    -- FIXED: Check for unreachable creatures (blocked paths)
+    -- If there are only unreachable creatures, allow CaveBot to proceed immediately
+    local unreachableCount = CreatureCache.unreachableCount or 0
+    local reachableOnScreen = CreatureCache.monsterCount or 0
+    
+    -- Check if there are REACHABLE monsters on screen
+    if reachableOnScreen > 0 then
+      -- There are reachable monsters but no valid target (edge case)
+      setStatusRight("Targeting (" .. tostring(reachableOnScreen) .. ")")
       if EventTargeting and EventTargeting.refreshLiveCount then
         EventTargeting.refreshLiveCount()
       end
       invalidateCache()
+      cavebotAllowance = now + 300
+      return
+    elseif unreachableCount > 0 then
+      -- All creatures have blocked paths - allow CaveBot to proceed
+      -- Don't waste time trying to attack creatures we can't reach
+      setStatusRight("Blocked (" .. tostring(unreachableCount) .. ")")
+      cavebotAllowance = now + 100  -- Allow CaveBot immediately
       return
     end
     
@@ -1665,6 +1796,8 @@ targetbotMacro = macro(200, function()
     -- IMPROVED: Use live count for accuracy
     if liveMonsterCount > 0 then
       setStatusRight("Clearing (" .. tostring(liveMonsterCount) .. ")")
+      -- FIXED: Set cavebotAllowance to prevent indefinite blocking
+      cavebotAllowance = now + 300
       return
     end
     
@@ -1687,8 +1820,14 @@ pcall(function() performPendingEnableOnce() end)
 -- Config setup (moved here so macro/recalc are defined before callback runs)
 config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
   -- Save character's profile preference when profile changes (multi-client support)
-  if enabled and name and name ~= "" and setCharacterProfile then
-    setCharacterProfile("targetbotProfile", name)
+  if enabled and name and name ~= "" then
+    if setCharacterProfile then
+      setCharacterProfile("targetbotProfile", name)
+    end
+    -- Persist to UnifiedStorage for character isolation
+    if UnifiedStorage then
+      UnifiedStorage.set("targetbot.selectedConfig", name)
+    end
   end
 
   if not data then
@@ -1704,18 +1843,23 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
   end
   TargetBot.Looting.update(data["looting"] or {})
 
-  -- Determine final enabled state:
+  -- Determine final enabled state (check UnifiedStorage first for character isolation)
   local finalEnabled = enabled
+  local storedEnabled = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled"))
+  if storedEnabled == nil then
+    storedEnabled = storage.targetbotEnabled
+  end
+  
   if not TargetBot._initialized then
     TargetBot._initialized = true
-    if storage.targetbotEnabled == true or storage.targetbotEnabled == false then
-      finalEnabled = storage.targetbotEnabled
+    if storedEnabled == true or storedEnabled == false then
+      finalEnabled = storedEnabled
     end
   else
     if enabled == (data and data.enabled) then
-      storage.targetbotEnabled = nil
+      if UnifiedStorage then UnifiedStorage.set("targetbot.enabled", nil) else storage.targetbotEnabled = nil end
     else
-      storage.targetbotEnabled = enabled
+      if UnifiedStorage then UnifiedStorage.set("targetbot.enabled", enabled) else storage.targetbotEnabled = enabled end
     end
   end
 

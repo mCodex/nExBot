@@ -271,6 +271,71 @@ end
 if onHealthChange then
   onHealthChange(function(localPlayer, health, maxHealth, oldHealth, oldMaxHealth)
     EventBus.emit("player:health", health, maxHealth, oldHealth, oldMaxHealth)
+
+    -- Emit a damage event when player's health drops so modules can correlate source
+    if oldHealth and health and oldHealth > health then
+      local damage = oldHealth - health
+      -- Best-effort attribution: search nearby monsters and pick best candidate
+      local playerPos = nil
+      local ok, lp = pcall(function() return g_game and g_game.getLocalPlayer and g_game.getLocalPlayer() end)
+      if ok and lp then pcall(function() playerPos = lp:getPosition() end) end
+      if not playerPos and player and player.getPosition then pcall(function() playerPos = player:getPosition() end) end
+
+      local bestMonster, bestScore = nil, 0
+      if playerPos then
+        local radius = (MonsterAI and MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.DAMAGE and MonsterAI.CONSTANTS.DAMAGE.CORRELATION_RADIUS) or 7
+        local threshold = (MonsterAI and MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.DAMAGE and MonsterAI.CONSTANTS.DAMAGE.CORRELATION_THRESHOLD) or 0.4
+
+        local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
+          and MovementCoordinator.MonsterCache.getNearby(radius)
+          or g_map.getSpectatorsInRange(playerPos, false, radius, radius)
+
+        local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
+        -- FIXED: Add nil check for creatures before iterating
+        if creatures then
+          for i = 1, #creatures do
+            local m = creatures[i]
+            -- FIXED: Properly capture both pcall return values
+            local okm, isValidMonster = pcall(function() return m and m:isMonster() and not m:isDead() end)
+            if okm and isValidMonster and m then
+              local mpos
+              pcall(function() mpos = m:getPosition() end)
+              if mpos then
+                local dist = math.max(math.abs(playerPos.x - mpos.x), math.abs(playerPos.y - mpos.y))
+                local score = 1 / (1 + dist)
+
+                -- Boost score with MonsterAI tracker info if available
+                local okid, mid = pcall(function() return m and m:getId() end)
+                if okid and mid and MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+                  local data = MonsterAI.Tracker.monsters[mid]
+                  if data then
+                    if data.lastWaveTime and math.abs(nowt - data.lastWaveTime) < 800 then score = score + 1.2 end
+                    if data.lastAttackTime and math.abs(nowt - data.lastAttackTime) < 1500 then score = score + 0.8 end
+                  end
+                end
+
+                -- Prefer monsters facing player when possible
+                if MonsterAI and MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition then
+                  local okf, facing = pcall(function() return MonsterAI.Predictor.isFacingPosition(mpos, m:getDirection(), playerPos) end)
+                  if okf and facing then score = score + 0.6 end
+                end
+
+                if score > bestScore then bestScore = score; bestMonster = m end
+              end
+            end
+          end
+        end
+
+        if bestScore and bestScore >= threshold then
+          EventBus.emit("player:damage", damage, bestMonster)
+        else
+          EventBus.emit("player:damage", damage, nil)
+        end
+      else
+        -- No player position available: emit damage with unknown source
+        EventBus.emit("player:damage", damage, nil)
+      end
+    end
   end)
 end
 
@@ -376,7 +441,38 @@ macro(200, function()
   checkEquipmentChanges()
 end)
 
--- Periodic flush for queued events
+-- Periodic flush for queued events (fast tick)
 macro(25, function()
   EventBus.flush()
 end)
+
+-- Slow tick for periodic tasks (backup, cleanup, etc.)
+macro(5000, function()
+  EventBus.emit("tick:slow")
+end)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- STORAGE PERSISTENCE EVENTS
+-- These events are emitted by modules when settings change
+-- UnifiedStorage listens to these for real-time persistence
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Helper function to emit config change events
+function EventBus.emitConfigChange(moduleName, configName)
+  EventBus.emit(moduleName .. ":configChanged", configName)
+end
+
+-- Helper function to emit macro toggle events
+function EventBus.emitMacroToggle(macroName, enabled)
+  EventBus.emit("macro:toggled", macroName, enabled)
+end
+
+-- Helper function to emit module toggle events
+function EventBus.emitModuleToggle(moduleName, enabled)
+  EventBus.emit("module:toggled", moduleName, enabled)
+end
+
+-- Helper function to emit setting change events
+function EventBus.emitSettingChange(path, value)
+  EventBus.emit("setting:changed", path, value)
+end

@@ -79,38 +79,91 @@ end
   EARLY PROFILE RESTORATION
   This runs BEFORE cavebot/targetbot modules load their Config.setup()
   So the storage will have the correct profile when the dropdown initializes
+  
+  Priority order for profile sources:
+  1. UnifiedStorage (per-character, if available)
+  2. CharacterProfiles mapping (legacy)
+  3. Current storage._configs (fallback)
 ]]
 local function earlyRestoreProfiles()
   local charName = getCharacterName()
   if not charName then return end
   
-  local charProfiles = CharacterProfiles[charName]
-  if not charProfiles then return end
-  
   -- Ensure storage._configs exists
   storage._configs = storage._configs or {}
   
+  -- Try UnifiedStorage first (per-character isolation)
+  -- Note: UnifiedStorage may not be loaded yet at this point, so we also check CharacterProfiles
+  local targetbotConfig = nil
+  local cavebotConfig = nil
+  
+  -- Check CharacterProfiles mapping
+  local charProfiles = CharacterProfiles[charName]
+  if charProfiles then
+    cavebotConfig = charProfiles.cavebotProfile
+    targetbotConfig = charProfiles.targetbotProfile
+  end
+  
   -- Restore CaveBot profile before cavebot.lua loads
-  if charProfiles.cavebotProfile and type(charProfiles.cavebotProfile) == "string" then
-    local cavebotFile = "/bot/" .. configName .. "/cavebot_configs/" .. charProfiles.cavebotProfile .. ".cfg"
+  if cavebotConfig and type(cavebotConfig) == "string" then
+    local cavebotFile = "/bot/" .. configName .. "/cavebot_configs/" .. cavebotConfig .. ".cfg"
     if g_resources.fileExists(cavebotFile) then
       storage._configs.cavebot_configs = storage._configs.cavebot_configs or {}
-      storage._configs.cavebot_configs.selected = charProfiles.cavebotProfile
+      storage._configs.cavebot_configs.selected = cavebotConfig
     end
   end
   
   -- Restore TargetBot profile before targetbot loads
-  if charProfiles.targetbotProfile and type(charProfiles.targetbotProfile) == "string" then
-    local targetFile = "/bot/" .. configName .. "/targetbot_configs/" .. charProfiles.targetbotProfile .. ".json"
+  if targetbotConfig and type(targetbotConfig) == "string" then
+    local targetFile = "/bot/" .. configName .. "/targetbot_configs/" .. targetbotConfig .. ".json"
     if g_resources.fileExists(targetFile) then
       storage._configs.targetbot_configs = storage._configs.targetbot_configs or {}
-      storage._configs.targetbot_configs.selected = charProfiles.targetbotProfile
+      storage._configs.targetbot_configs.selected = targetbotConfig
     end
   end
 end
 
 -- Run early restoration NOW, before cavebot/targetbot modules load
 earlyRestoreProfiles()
+
+-- Late profile restoration from UnifiedStorage (runs after UnifiedStorage is loaded)
+local function lateRestoreFromUnifiedStorage()
+  if not UnifiedStorage or not UnifiedStorage.isReady or not UnifiedStorage.isReady() then return end
+  
+  local charName = getCharacterName()
+  if not charName then return end
+  
+  -- Restore from UnifiedStorage (overrides if present)
+  local targetbotConfig = UnifiedStorage.get("targetbot.selectedConfig")
+  local cavebotConfig = UnifiedStorage.get("cavebot.selectedConfig")
+  
+  if targetbotConfig and type(targetbotConfig) == "string" and targetbotConfig ~= "" then
+    local targetFile = "/bot/" .. configName .. "/targetbot_configs/" .. targetbotConfig .. ".json"
+    if g_resources.fileExists(targetFile) then
+      storage._configs = storage._configs or {}
+      storage._configs.targetbot_configs = storage._configs.targetbot_configs or {}
+      if storage._configs.targetbot_configs.selected ~= targetbotConfig then
+        storage._configs.targetbot_configs.selected = targetbotConfig
+      end
+    end
+  end
+  
+  if cavebotConfig and type(cavebotConfig) == "string" and cavebotConfig ~= "" then
+    local cavebotFile = "/bot/" .. configName .. "/cavebot_configs/" .. cavebotConfig .. ".cfg"
+    if g_resources.fileExists(cavebotFile) then
+      storage._configs = storage._configs or {}
+      storage._configs.cavebot_configs = storage._configs.cavebot_configs or {}
+      if storage._configs.cavebot_configs.selected ~= cavebotConfig then
+        storage._configs.cavebot_configs.selected = cavebotConfig
+      end
+    end
+  end
+end
+
+-- Schedule late restoration after UnifiedStorage is loaded
+schedule(200, function()
+  lateRestoreFromUnifiedStorage()
+end)
 
 -- Get character's last used profile for a specific bot
 function getCharacterProfile(botType)
@@ -315,7 +368,17 @@ local function saveToolsConfig()
 end
 
 -- Get a setting value (with default fallback)
+-- Now checks UnifiedStorage first for per-character isolation
 function ProfileStorage.get(key)
+  -- Check UnifiedStorage first (per-character isolation)
+  if UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() then
+    local unifiedValue = UnifiedStorage.get("tools." .. key)
+    if unifiedValue ~= nil then
+      return unifiedValue
+    end
+  end
+  
+  -- Fall back to profile storage
   local data = loadToolsConfig()
   if data[key] ~= nil then
     return data[key]
@@ -324,10 +387,21 @@ function ProfileStorage.get(key)
 end
 
 -- Set a setting value and auto-save
+-- Now also saves to UnifiedStorage for per-character persistence
 function ProfileStorage.set(key, value)
   local data = loadToolsConfig()
   data[key] = value
   saveToolsConfig()
+  
+  -- Also save to UnifiedStorage for character isolation
+  if UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() then
+    UnifiedStorage.set("tools." .. key, value)
+  end
+  
+  -- Emit change event for real-time sync
+  if EventBus and EventBus.emitSettingChange then
+    EventBus.emitSettingChange("tools." .. key, value)
+  end
 end
 
 -- Get default value for a key

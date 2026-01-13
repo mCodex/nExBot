@@ -57,6 +57,11 @@ local LARGE_RUNE_AREA = {
 
 -- Pure function: Get monsters in area around position
 local function getMonstersInArea(pos, offsets, maxDist)
+  -- Guard against nil position
+  if not pos or not pos.x or not pos.y then
+    return 0
+  end
+  
   local count = 0
 
   -- Prefer MonsterCache for performance and accuracy
@@ -226,6 +231,44 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
     priority = priority + config.danger * 0.5
   end
 
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- OTCLIENT API ENHANCEMENTS (Speed, Walk State, Line-of-Sight)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  
+  -- Speed-based priority: Slower monsters are easier to kill and corner
+  local creatureSpeed = creature.getSpeed and creature:getSpeed() or 0
+  if creatureSpeed > 0 then
+    local playerSpeed = player.getSpeed and player:getSpeed() or 220 -- default player speed
+    local speedRatio = creatureSpeed / math.max(1, playerSpeed)
+    
+    if speedRatio < 0.6 then
+      -- Very slow monster - easy target, slight priority boost
+      priority = priority + 8
+    elseif speedRatio < 0.8 then
+      -- Slower than player - still catchable
+      priority = priority + 4
+    elseif speedRatio > 1.3 then
+      -- Very fast monster - harder to catch, slight penalty when chasing
+      if config.chase then
+        priority = priority - 5
+      end
+    end
+  end
+  
+  -- Walk prediction: Prefer stationary targets for easier hits
+  local isWalking = creature.isWalking and creature:isWalking() or false
+  if not isWalking then
+    -- Stationary target - easier to hit, especially for ranged
+    priority = priority + 3
+  else
+    -- Moving target - check if walking toward or away from player
+    local stepTicksLeft = creature.getStepTicksLeft and creature:getStepTicksLeft() or 0
+    if stepTicksLeft > 200 then
+      -- Mid-step, position will change - slight uncertainty penalty
+      priority = priority - 2
+    end
+  end
+
   -- Integrate MonsterAI telemetry if available (improves targeting accuracy)
   if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
     local id = creature:getId()
@@ -235,6 +278,13 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
       local ok, predicted, conf, tta = pcall(function() return MonsterAI.Predictor.predictWaveAttack(creature) end)
       if ok and predicted and conf and conf > MONSTER_AI_WAVE_MIN_CONF then
         priority = priority + (conf * MONSTER_AI_WAVE_MULT) -- scale by confidence
+        
+        -- Extra urgency if attack is imminent (tta = time to attack)
+        if tta and tta < 1000 then
+          priority = priority + 15 -- Attack within 1 second!
+        elseif tta and tta < 2000 then
+          priority = priority + 8
+        end
       end
 
       -- High DPS monsters are more dangerous: add a capped bonus based on DPS
@@ -247,6 +297,55 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
       local facePct = math.floor(((data.facingCount or 0) / math.max(1, data.movementSamples or 1)) * 100)
       if facePct > 30 then
         priority = priority + (facePct / 100) * MONSTER_AI_FACING_WEIGHT
+      end
+      
+      -- ═══════════════════════════════════════════════════════════════════════
+      -- ENHANCED MONSTER AI METRICS (turnRate, cooldown prediction, variance)
+      -- ═══════════════════════════════════════════════════════════════════════
+      
+      -- Turn rate: Rapid direction changes indicate aggressive behavior
+      if MonsterAI.RealTime and MonsterAI.RealTime.directions then
+        local dirData = MonsterAI.RealTime.directions[id]
+        if dirData then
+          local turnRate = dirData.turnRate or 0
+          local consecutiveChanges = dirData.consecutiveChanges or 0
+          
+          -- Monster turning rapidly toward player = imminent attack
+          if turnRate > 2 or consecutiveChanges >= 3 then
+            priority = priority + 10
+          elseif turnRate > 1 then
+            priority = priority + 5
+          end
+          
+          -- Facing player for extended time = locked onto target
+          local facingSince = dirData.facingPlayerSince
+          if facingSince and (os.time() * 1000 - facingSince) > 1500 then
+            priority = priority + 8 -- Sustained facing = preparing attack
+          end
+        end
+      end
+      
+      -- Attack cooldown prediction: prioritize monsters off cooldown
+      local cooldown = data.ewmaCooldown or 0
+      local lastAttack = data.lastAttackTime or 0
+      local timeSinceAttack = (os.time() * 1000) - lastAttack
+      
+      if cooldown > 0 and timeSinceAttack > cooldown * 0.8 then
+        -- Monster is near end of cooldown, likely to attack soon
+        priority = priority + 7
+      end
+      
+      -- Variance-based confidence: Low variance = predictable, high variance = unpredictable
+      local variance = data.ewmaVariance or 0
+      if variance > 0 and cooldown > 0 then
+        local cvRatio = math.sqrt(variance) / cooldown -- coefficient of variation
+        if cvRatio < 0.2 then
+          -- Very predictable attack pattern - we can anticipate better
+          priority = priority + 3
+        elseif cvRatio > 0.5 then
+          -- Unpredictable - might attack anytime, stay cautious
+          priority = priority + 5
+        end
       end
     end
   end

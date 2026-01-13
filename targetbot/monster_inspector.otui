@@ -51,7 +51,7 @@ MonsterInspectorWindow < MainWindow
     Button
       id: clear
       text: Clear Patterns
-      anchors.left: export.right
+      anchors.left: refresh.right
       anchors.verticalCenter: parent.verticalCenter
       width: 120
       margin-left: 6

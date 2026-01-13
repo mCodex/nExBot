@@ -296,8 +296,9 @@ function refreshPatterns()
     warn("[MonsterInspector] refreshPatterns: textContent widget missing after updateWidgetRefs; aborting refresh.")
     -- Diagnostic dump to help root-cause: storage and tracker stats
     local count = 0
-    if storage and storage.monsterPatterns then for _ in pairs(storage.monsterPatterns) do count = count + 1 end end
-    print(string.format("[MonsterInspector][DIAG] storage.monsterPatterns count=%d", count))
+    local patterns = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or (storage and storage.monsterPatterns) or {}
+    for _ in pairs(patterns) do count = count + 1 end
+    print(string.format("[MonsterInspector][DIAG] monsterPatterns count=%d", count))
     if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.stats then
       local s = MonsterAI.Tracker.stats
       print(string.format("[MonsterInspector][DIAG] MonsterAI stats: damage=%d waves=%d area=%d", s.totalDamageReceived or 0, s.waveAttacksObserved or 0, s.areaAttacksObserved or 0))
@@ -325,7 +326,8 @@ end
 local function exportPatterns()
   local lines = {}
   table.insert(lines, "name,cooldown_ms,variance,confidence,last_seen")
-  for name, p in pairs(storage.monsterPatterns or {}) do
+  local patterns = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or storage.monsterPatterns or {}
+  for name, p in pairs(patterns) do
     local cd = p.waveCooldown and tostring(math.floor(p.waveCooldown)) or ""
     local var = p.waveVariance and tostring(p.waveVariance) or ""
     local conf = p.confidence and tostring(p.confidence) or ""
@@ -341,27 +343,44 @@ end
 
 -- Clear persisted patterns and in-memory knownMonsters
 local function clearPatterns()
+  if UnifiedStorage then
+    UnifiedStorage.set("targetbot.monsterPatterns", {})
+  end
   storage.monsterPatterns = {}
   MonsterAI.Patterns.knownMonsters = {}
   refreshPatterns()
   print("[MonsterInspector] Cleared stored monster patterns")
 end
 
--- Buttons
-if MonsterInspectorWindow then
-  local refreshBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.refresh
-  local exportBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.export
-  local clearBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.clear
-  local closeBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.close
-
+-- Buttons - use proper widget lookup via getChildById
+local function bindInspectorButtons()
+  if not MonsterInspectorWindow then return end
+  
+  -- Find buttons panel first
+  local buttonsPanel = nil
+  pcall(function() buttonsPanel = MonsterInspectorWindow:getChildById("buttons") end)
+  if not buttonsPanel then
+    pcall(function() buttonsPanel = MonsterInspectorWindow.buttons end)
+  end
+  
+  if not buttonsPanel then
+    warn("[MonsterInspector] Could not find buttons panel")
+    return
+  end
+  
+  -- Find individual buttons
+  local refreshBtn, clearBtn, closeBtn = nil, nil, nil
+  pcall(function() refreshBtn = buttonsPanel:getChildById("refresh") end)
+  pcall(function() clearBtn = buttonsPanel:getChildById("clear") end)
+  pcall(function() closeBtn = buttonsPanel:getChildById("close") end)
+  
   if refreshBtn then
     refreshBtn.onClick = function() refreshPatterns() end
   end
-  if exportBtn then
-    exportBtn.onClick = function() exportPatterns() end
-  end
   if clearBtn then
-    clearBtn.onClick = function() clearPatterns() end
+    clearBtn.onClick = function()
+      clearPatterns()
+    end
   end
   if closeBtn then
     closeBtn.onClick = function() MonsterInspectorWindow:hide() end
@@ -377,13 +396,16 @@ if MonsterInspectorWindow then
   end
 end
 
+-- Bind buttons on load
+bindInspectorButtons()
+
 -- Initialize (load current data)
 refreshPatterns()
 
 nExBot.MonsterInspector = {
   refresh = refreshPatterns,
-  export = exportPatterns,
-  clear = clearPatterns
+  clear = clearPatterns,
+  rebindButtons = bindInspectorButtons
 }
 
 -- Convenience helpers to show/toggle the inspector from console or other modules
@@ -400,7 +422,8 @@ nExBot.MonsterInspector.showWindow = function()
     refreshPatterns()
 
     -- If storage is empty, retry after a short delay to let updater collect samples
-    local hasPatterns = storage and storage.monsterPatterns and next(storage.monsterPatterns) ~= nil
+    local patterns = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or (storage and storage.monsterPatterns)
+    local hasPatterns = patterns and next(patterns) ~= nil
     if not hasPatterns then
       schedule(500, function()
         if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end
@@ -423,7 +446,8 @@ nExBot.MonsterInspector.toggleWindow = function()
       if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end
       refreshPatterns()
       -- Retry shortly if no patterns yet
-      if not (storage and storage.monsterPatterns and next(storage.monsterPatterns) ~= nil) then
+      local patterns2 = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or (storage and storage.monsterPatterns)
+      if not (patterns2 and next(patterns2) ~= nil) then
         schedule(500, function() if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end; refreshPatterns() end)
       end
     end

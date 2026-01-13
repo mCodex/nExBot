@@ -781,12 +781,11 @@ local function runWaypointEngine()
     return true  -- Recovery in progress
     
   elseif state == "STOPPED" then
-    -- CaveBot should stop
-    if config and config.setOff then
-      warn("[CaveBot] Unable to recover. Stopping.")
-      config.setOff()
-    end
-    return true
+    -- SIMPLIFIED: Instead of stopping, reset and try again
+    -- This prevents permanent stops during hunts
+    warn("[CaveBot] Recovery exhausted - resetting to try again")
+    resetWaypointEngine()
+    return false  -- Allow normal processing to continue
   end
   
   return false
@@ -964,28 +963,15 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       return
     end
     
-    -- IMPROVED MONSTER DETECTION: Use EventTargeting's live count for accurate detection
-    -- This directly checks the g_map API for monsters on screen
-    -- NOTE: This check is BYPASSED if TargetBot.isCaveBotActionAllowed() returns true
-    -- (dynamicLure/smartPull call allowCaveBot() to set cavebotAllowance)
-    if EventTargeting and EventTargeting.getLiveMonsterCount then
-      local liveCount = EventTargeting.getLiveMonsterCount()
-      if liveCount > 0 then
-        -- Check if TargetBot is allowing CaveBot to proceed (lure modes)
-        if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
-          -- There are monsters on screen - pause and let TargetBot handle them
-          CaveBot.resetWalking()
-          return
-        end
-      end
-    end
-    
-    -- EVENT-DRIVEN COMBAT PAUSE: If EventTargeting detected combat, pause walking
-    -- This ensures we stop and fight monsters that appear on screen with clean paths
-    -- Respects dynamicLure/smartPull modes (they handle their own pausing)
+    -- SIMPLIFIED MONSTER DETECTION: Only pause if TargetBot is actively fighting
+    -- Don't block indefinitely just because monsters exist on screen
+    -- The targetBotIsCaveBotAllowed check already handles this properly
     if EventTargeting and EventTargeting.isCombatActive and EventTargeting.isCombatActive() then
-      CaveBot.resetWalking()
-      return
+      -- Only pause if we're NOT allowed by TargetBot
+      if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
+        CaveBot.resetWalking()
+        return
+      end
     end
   end
   

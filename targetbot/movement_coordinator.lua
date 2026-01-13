@@ -197,6 +197,16 @@ if EventBus then
 
   EventBus.on("monster:disappear", function(c)
     removeCreatureFromCache(c)
+    
+    -- IMPROVED: Also clean up MonsterAI tracker data for this creature
+    -- This ensures all modules stay in sync when monsters disappear
+    if c and MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.untrack then
+      local ok, id = pcall(function() return c:getId() end)
+      if ok and id then
+        pcall(function() MonsterAI.Tracker.untrack(id) end)
+      end
+    end
+    
     debounceUpdate()
   end, 10)
   
@@ -210,7 +220,7 @@ if EventBus then
   local lastTargetMoveTime = 0
   local targetMoveIntent = nil
   
-  -- When our target moves, instantly register chase intent
+  -- When our target moves, instantly register chase intent with walk prediction
   EventBus.on("creature:move", function(creature, oldPos)
     if not creature then return end
     
@@ -228,11 +238,28 @@ if EventBus then
     
     -- Only register chase if target is moving away and out of melee range
     if dist > 1 then
+      -- Use walk prediction to get optimal intercept position
+      local targetPos = creaturePos
+      local interceptConfidence = 0
+      
+      if MovementCoordinator.WalkPrediction and MovementCoordinator.WalkPrediction.calculateIntercept then
+        local interceptPos, conf = MovementCoordinator.WalkPrediction.calculateIntercept(creature, playerPos)
+        if interceptPos then
+          targetPos = interceptPos
+          interceptConfidence = conf or 0
+        end
+      end
+      
       -- Confidence values - tuned to pass lowered CHASE threshold (0.50)
       local confidence = 0.55  -- Base passes threshold
       if dist <= 2 then confidence = 0.62 end  -- Very close - quick chase
       if dist <= 4 then confidence = 0.68 end  -- Close - high priority
       if dist > 5 then confidence = 0.75 end   -- Far - very high priority
+      
+      -- Boost confidence if walk prediction was successful
+      if interceptConfidence > 0.7 then
+        confidence = math.min(0.90, confidence + 0.05)
+      end
       
       -- Boost confidence if target is wounded (finish kill priority)
       local creatureHP = creature.getHealthPercent and creature:getHealthPercent() or 100
@@ -242,9 +269,13 @@ if EventBus then
         confidence = math.min(0.85, confidence + 0.08)
       end
       
-      -- Register chase intent immediately
+      -- Register chase intent with predicted intercept position
       MovementCoordinator.Intent.register(
-        INTENT.CHASE, creaturePos, confidence, "chase_event", {triggered = "creature_move", hp = creatureHP}
+        INTENT.CHASE, targetPos, confidence, "chase_event", {
+          triggered = "creature_move", 
+          hp = creatureHP,
+          predicted = (targetPos ~= creaturePos)
+        }
       )
       lastTargetMoveTime = now
     end
@@ -403,6 +434,124 @@ function MovementCoordinator.MonsterCache.getNearby(radius)
     MovementCoordinator.MonsterCache.stats.misses = MovementCoordinator.MonsterCache.stats.misses + 1
   end
   return res
+end
+
+-- ============================================================================
+-- WALK PREDICTION (OTClient API Enhancement)
+-- Predicts where a creature will be based on current walk state
+-- ============================================================================
+
+MovementCoordinator.WalkPrediction = {}
+
+-- Direction vectors for walk prediction
+local DIR_VECTORS = {
+  [0] = {x = 0, y = -1},  -- North
+  [1] = {x = 1, y = 0},   -- East
+  [2] = {x = 0, y = 1},   -- South
+  [3] = {x = -1, y = 0},  -- West
+  [4] = {x = 1, y = -1},  -- NE
+  [5] = {x = 1, y = 1},   -- SE
+  [6] = {x = -1, y = 1},  -- SW
+  [7] = {x = -1, y = -1}, -- NW
+}
+
+-- Predict where creature will be after its current step completes
+-- @param creature The creature to predict
+-- @return pos, isWalking, ticksLeft - predicted position, walk state, time until arrival
+function MovementCoordinator.WalkPrediction.predictPosition(creature)
+  if not creature then return nil, false, 0 end
+  
+  local currentPos = creature:getPosition()
+  if not currentPos then return nil, false, 0 end
+  
+  -- Check if creature has OTClient walk API
+  local isWalking = creature.isWalking and creature:isWalking() or false
+  if not isWalking then
+    return currentPos, false, 0
+  end
+  
+  -- Get walk completion time
+  local ticksLeft = creature.getStepTicksLeft and creature:getStepTicksLeft() or 0
+  
+  -- Get walk direction if available
+  local direction = creature.getDirection and creature:getDirection()
+  if direction and DIR_VECTORS[direction] then
+    local vec = DIR_VECTORS[direction]
+    -- Creature is walking toward this position
+    local targetPos = {
+      x = currentPos.x + vec.x,
+      y = currentPos.y + vec.y,
+      z = currentPos.z
+    }
+    return targetPos, true, ticksLeft
+  end
+  
+  -- Fallback: try getLastStepToPosition
+  if creature.getLastStepToPosition then
+    local lastDest = creature:getLastStepToPosition()
+    if lastDest and lastDest.x then
+      return lastDest, true, ticksLeft
+    end
+  end
+  
+  return currentPos, true, ticksLeft
+end
+
+-- Calculate optimal intercept position for chasing a walking creature
+-- @param creature The creature to intercept
+-- @param playerPos Player's current position
+-- @return interceptPos, confidence - best position to move to
+function MovementCoordinator.WalkPrediction.calculateIntercept(creature, playerPos)
+  if not creature or not playerPos then return nil, 0 end
+  
+  local predictedPos, isWalking, ticksLeft = MovementCoordinator.WalkPrediction.predictPosition(creature)
+  if not predictedPos then return nil, 0 end
+  
+  -- If not walking, just chase to current position
+  if not isWalking then
+    return predictedPos, 0.8
+  end
+  
+  -- Get creature speed for prediction accuracy
+  local creatureSpeed = creature.getSpeed and creature:getSpeed() or 200
+  local playerSpeed = player and player.getSpeed and player:getSpeed() or 220
+  
+  -- If we're faster, intercept at predicted position
+  if playerSpeed >= creatureSpeed then
+    -- High confidence - we can catch up
+    return predictedPos, 0.85
+  else
+    -- Slower than target - try to cut them off
+    -- Calculate where creature will be after 2 steps
+    local direction = creature.getDirection and creature:getDirection()
+    if direction and DIR_VECTORS[direction] then
+      local vec = DIR_VECTORS[direction]
+      local futurePos = {
+        x = predictedPos.x + vec.x,
+        y = predictedPos.y + vec.y,
+        z = predictedPos.z
+      }
+      -- Lower confidence since we're predicting further ahead
+      return futurePos, 0.65
+    end
+  end
+  
+  return predictedPos, 0.7
+end
+
+-- Get walk state information for a creature
+-- @return table with isWalking, progress, ticksLeft, speed
+function MovementCoordinator.WalkPrediction.getWalkState(creature)
+  if not creature then return nil end
+  
+  return {
+    isWalking = creature.isWalking and creature:isWalking() or false,
+    progress = creature.getStepProgress and creature:getStepProgress() or 0,
+    ticksLeft = creature.getStepTicksLeft and creature:getStepTicksLeft() or 0,
+    elapsed = creature.getWalkTicksElapsed and creature:getWalkTicksElapsed() or 0,
+    speed = creature.getSpeed and creature:getSpeed() or 0,
+    stepDuration = creature.getStepDuration and creature:getStepDuration() or 0
+  }
 end
 
 -- Calculate scaling factor based on monster count
@@ -921,6 +1070,18 @@ function MovementCoordinator.Execute.move(decision)
   -- Execute the move
   local success = false
   
+  -- OTCLIENT API: Check if player is already walking to avoid interrupting smooth movement
+  if player and (player.isWalking and player:isWalking()) then
+    -- Check if current movement is already heading toward target
+    local currentTarget = player:getPosition()
+    if currentTarget then
+      local distToTarget = math.abs(currentTarget.x - targetPos.x) + math.abs(currentTarget.y - targetPos.y)
+      if distToTarget <= 3 then  -- Close enough, let current walk continue
+        return true, "already_moving_to_target"
+      end
+    end
+  end
+  
   -- Use appropriate movement method based on intent type
   if intent.type == INTENT.LURE then
     -- Delegate to CaveBot
@@ -930,9 +1091,13 @@ function MovementCoordinator.Execute.move(decision)
     end
   elseif intent.type == INTENT.WAVE_AVOIDANCE or 
          intent.type == INTENT.EMERGENCY_ESCAPE then
-    -- Quick movement for emergencies
+    -- OTCLIENT API: Quick emergency movement with optimized parameters
     if TargetBot and TargetBot.walkTo then
-      success = TargetBot.walkTo(targetPos, 2, {ignoreNonPathable = true, precision = 0})
+      success = TargetBot.walkTo(targetPos, 2, {
+        ignoreNonPathable = true, 
+        precision = 0,
+        ignoreCreatures = false  -- Allow weaving through creatures in emergencies
+      })
     end
   elseif intent.type == INTENT.CHASE or intent.type == INTENT.FINISH_KILL then
     -- CHASE/FINISH_KILL: Native chase mode handles this automatically
@@ -944,9 +1109,13 @@ function MovementCoordinator.Execute.move(decision)
     -- Native chase mode is now active - client handles chasing the attack target
     success = true
   else
-    -- Standard movement
+    -- OTCLIENT API: Standard movement with walkability validation
     if TargetBot and TargetBot.walkTo then
-      success = TargetBot.walkTo(targetPos, 10, {ignoreNonPathable = true, precision = 1})
+      success = TargetBot.walkTo(targetPos, 10, {
+        ignoreNonPathable = true, 
+        precision = 1,
+        allowOnlyVisibleTiles = true  -- Safety first
+      })
     elseif CaveBot and CaveBot.GoTo then
       success = CaveBot.GoTo(targetPos, 0)
     end
