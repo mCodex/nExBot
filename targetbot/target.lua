@@ -1417,17 +1417,45 @@ end
 --------------------------------------------------------------------------------
 
 -- Helper: process a creature into target params (returns params, path) - pure helper to reduce duplication
--- IMPROVED: Enhanced path validation to reject blocked/unreachable creatures
+-- IMPROVED v2.1: Uses MonsterAI.Reachability for accurate blocked path detection
 local function processCandidate(creature, pos)
   if not creature or creature:isDead() or not isTargetableCreature(creature) then return nil, nil end
   local cpos = creature:getPosition()
   if not cpos then return nil, nil end
   
-  -- CRITICAL: Verify path exists and is reachable
-  local path = findPath(pos, cpos, 10, PATH_PARAMS)
-  if not path or #path == 0 then 
-    -- No path found - creature is unreachable
-    return nil, nil 
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- REACHABILITY CHECK (v2.1): Use MonsterAI.Reachability for smart detection
+  -- This prevents "Creature not reachable" errors by pre-validating targets
+  -- ═══════════════════════════════════════════════════════════════════════════
+  
+  local path = nil
+  local isReachable = true
+  local reachReason = "unknown"
+  
+  -- Use MonsterAI.Reachability if available (v2.1 enhancement)
+  if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable then
+    local reachResult, reason, cachedPath = MonsterAI.Reachability.isReachable(creature)
+    isReachable = reachResult
+    reachReason = reason or "unknown"
+    path = cachedPath
+    
+    if not isReachable then
+      -- Creature is blocked - don't waste time calculating params
+      return nil, nil
+    end
+  end
+  
+  -- If Reachability didn't give us a path, calculate one
+  if not path then
+    path = findPath(pos, cpos, 10, PATH_PARAMS)
+    if not path or #path == 0 then 
+      -- No path found - creature is unreachable
+      -- Mark in Reachability cache if available
+      if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.markBlocked then
+        MonsterAI.Reachability.markBlocked(creature:getId(), "no_path")
+      end
+      return nil, nil 
+    end
   end
   
   -- ADDITIONAL CHECK: Verify path doesn't cross blocked tiles
@@ -1455,6 +1483,9 @@ local function processCandidate(creature, pos)
         local tile = g_map.getTile(probe)
         if tile and not tile:isWalkable() then
           -- Path crosses a blocked tile - creature is unreachable
+          if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.markBlocked then
+            MonsterAI.Reachability.markBlocked(creature:getId(), "blocked_tile")
+          end
           return nil, nil
         end
       end

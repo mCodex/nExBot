@@ -1100,14 +1100,28 @@ function MovementCoordinator.Execute.move(decision)
       })
     end
   elseif intent.type == INTENT.CHASE or intent.type == INTENT.FINISH_KILL then
-    -- CHASE/FINISH_KILL: Native chase mode handles this automatically
-    -- When g_game.setChaseMode(1) is set and we're attacking, client chases automatically
-    -- Just ensure chase mode is set and return success
+    -- CHASE/FINISH_KILL: Use custom pathfinding with native chase mode as backup
+    -- Many servers don't properly support native chase mode, so we use walkTo
+    -- to ensure the character actually moves toward the target
+    
+    -- Set native chase mode as well (helps on servers that support it)
     if g_game.setChaseMode then
       g_game.setChaseMode(1) -- ChaseOpponent
     end
-    -- Native chase mode is now active - client handles chasing the attack target
-    success = true
+    
+    -- Use custom pathfinding to actually move toward the target
+    if TargetBot and TargetBot.walkTo then
+      success = TargetBot.walkTo(targetPos, 10, {
+        ignoreNonPathable = true,
+        precision = 1,
+        allowOnlyVisibleTiles = true
+      })
+    end
+    
+    -- If walkTo didn't work, still consider it partial success since chase mode is set
+    if not success then
+      success = true -- Native chase mode is set, may still work on some servers
+    end
   else
     -- OTCLIENT API: Standard movement with walkability validation
     if TargetBot and TargetBot.walkTo then

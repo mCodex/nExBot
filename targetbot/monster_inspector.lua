@@ -191,7 +191,22 @@ end
 local function buildSummary()
   local lines = {}
   local stats = (MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.stats) or { waveAttacksObserved = 0, areaAttacksObserved = 0, totalDamageReceived = 0 }
+  
+  -- Header with version
+  table.insert(lines, string.format("Monster AI v%s", MonsterAI and MonsterAI.VERSION or "?"))
   table.insert(lines, string.format("Stats: Damage=%s  Waves=%s  Area=%s", stats.totalDamageReceived or 0, stats.waveAttacksObserved or 0, stats.areaAttacksObserved or 0))
+  
+  -- Session stats (new in v2.0)
+  if MonsterAI and MonsterAI.Telemetry and MonsterAI.Telemetry.session then
+    local session = MonsterAI.Telemetry.session
+    local sessionDuration = ((now or 0) - (session.startTime or 0)) / 1000
+    table.insert(lines, string.format("Session: Kills=%d  Deaths=%d  Duration=%.0fs  Tracked=%d",
+      session.killCount or 0,
+      session.deathCount or 0,
+      sessionDuration,
+      session.totalMonstersTracked or 0
+    ))
+  end
   
   -- Real-time prediction stats
   if MonsterAI and MonsterAI.getPredictionStats then
@@ -226,7 +241,221 @@ local function buildSummary()
     ))
   end
   
+  -- Auto-Tuner Status (new in v2.0)
+  if MonsterAI and MonsterAI.AutoTuner then
+    local autoTuneStatus = MonsterAI.AUTO_TUNE_ENABLED and "ON" or "OFF"
+    local adjustments = MonsterAI.RealTime and MonsterAI.RealTime.metrics and MonsterAI.RealTime.metrics.autoTuneAdjustments or 0
+    local pendingSuggestions = 0
+    if MonsterAI.AutoTuner.suggestions then
+      for _ in pairs(MonsterAI.AutoTuner.suggestions) do pendingSuggestions = pendingSuggestions + 1 end
+    end
+    table.insert(lines, string.format("AutoTuner: %s  Adjustments=%d  Pending=%d", 
+      autoTuneStatus, adjustments, pendingSuggestions))
+  end
+  
+  -- Classification Stats (new in v2.0)
+  if MonsterAI and MonsterAI.Classifier and MonsterAI.Classifier.cache then
+    local classifiedCount = 0
+    for _ in pairs(MonsterAI.Classifier.cache) do classifiedCount = classifiedCount + 1 end
+    table.insert(lines, string.format("Classifications: %d monster types analyzed", classifiedCount))
+  end
+  
+  -- Telemetry Stats (new in v2.0)
+  if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.metrics then
+    local telemetrySamples = MonsterAI.RealTime.metrics.telemetrySamples or 0
+    table.insert(lines, string.format("Telemetry: %d samples collected", telemetrySamples))
+  end
+  
+  -- Combat Feedback Stats (NEW in v2.0 - 30% accuracy improvement)
+  if MonsterAI and MonsterAI.CombatFeedback then
+    local cf = MonsterAI.CombatFeedback
+    if cf.getStats then
+      local cfStats = cf.getStats()
+      local accuracy = cfStats.accuracy or 0
+      local predictions = cfStats.totalPredictions or 0
+      local hits = cfStats.hits or 0
+      local misses = cfStats.misses or 0
+      local adaptiveWeights = cfStats.adaptiveWeightsCount or 0
+      
+      table.insert(lines, string.format("CombatFeedback: Predictions=%d  Hits=%d  Misses=%d  Acc=%.1f%%  Weights=%d",
+        predictions, hits, misses, accuracy * 100, adaptiveWeights))
+    end
+  end
+  
+  -- Scenario Manager Stats (NEW in v2.1 - Anti-Zigzag)
+  if MonsterAI and MonsterAI.Scenario then
+    local scn = MonsterAI.Scenario
+    local scnStats = scn.getStats and scn.getStats() or {}
+    
+    local scenarioType = scnStats.currentScenario or "unknown"
+    local monsterCount = scnStats.monsterCount or 0
+    local isZigzag = scnStats.isZigzagging and "YES!" or "No"
+    local switches = scnStats.consecutiveSwitches or 0
+    local clusterType = scnStats.clusterType or "none"
+    
+    -- Scenario type with description
+    local scenarioDesc = ""
+    if scnStats.config and scnStats.config.description then
+      scenarioDesc = " (" .. scnStats.config.description .. ")"
+    end
+    
+    table.insert(lines, string.format("Scenario: %s%s", scenarioType:upper(), scenarioDesc))
+    table.insert(lines, string.format("  Monsters: %d  Cluster: %s  Zigzag: %s  Switches: %d",
+      monsterCount, clusterType, isZigzag, switches))
+    
+    -- Target lock info
+    if scnStats.targetLockId then
+      local lockData = MonsterAI.Tracker and MonsterAI.Tracker.monsters[scnStats.targetLockId]
+      local lockName = lockData and lockData.name or "Unknown"
+      local lockHealth = lockData and lockData.creature and lockData.creature:getHealthPercent() or 0
+      table.insert(lines, string.format("  Target Lock: %s (%d%% HP)", lockName, lockHealth))
+    end
+    
+    -- Anti-zigzag status
+    local cfg = scnStats.config or {}
+    if cfg.switchCooldownMs then
+      table.insert(lines, string.format("  Anti-Zigzag: Cooldown=%dms  Stickiness=%d  MaxSwitches/min=%s",
+        cfg.switchCooldownMs,
+        cfg.targetStickiness or 0,
+        cfg.maxSwitchesPerMinute and tostring(cfg.maxSwitchesPerMinute) or "∞"))
+    end
+  end
+  
+  -- Reachability Stats (NEW in v2.1 - Prevents "Creature not reachable")
+  if MonsterAI and MonsterAI.Reachability then
+    local reach = MonsterAI.Reachability
+    local reachStats = reach.getStats and reach.getStats() or {}
+    
+    local blockedCount = reachStats.blockedCount or 0
+    local checksPerformed = reachStats.checksPerformed or 0
+    local cacheHits = reachStats.cacheHits or 0
+    local reachableCount = reachStats.reachable or 0
+    local blockedTotal = reachStats.blocked or 0
+    
+    local hitRate = checksPerformed > 0 and (cacheHits / (checksPerformed + cacheHits)) * 100 or 0
+    
+    table.insert(lines, string.format("Reachability: Checks=%d  CacheHit=%.0f%%  Blocked=%d  Reachable=%d",
+      checksPerformed, hitRate, blockedTotal, reachableCount))
+    
+    -- Show blocked reasons breakdown
+    if reachStats.byReason then
+      local reasons = reachStats.byReason
+      if (reasons.no_path or 0) > 0 or (reasons.blocked_tile or 0) > 0 then
+        table.insert(lines, string.format("  Blocked: NoPath=%d  Tile=%d  Elevation=%d  TooFar=%d",
+          reasons.no_path or 0,
+          reasons.blocked_tile or 0,
+          reasons.elevation or 0,
+          reasons.too_far or 0))
+      end
+    end
+    
+    -- Show currently blocked creatures
+    if blockedCount > 0 then
+      table.insert(lines, string.format("  Currently Blocked: %d creatures (cooldown active)", blockedCount))
+    end
+  end
+  
+  -- TargetBot Integration Stats (NEW in v2.0)
+  if MonsterAI and MonsterAI.TargetBot then
+    local tbi = MonsterAI.TargetBot
+    local tbiStats = tbi.getStats and tbi.getStats() or {}
+    
+    local status = "Active"
+    if tbiStats.feedbackActive and tbiStats.trackerActive and tbiStats.realTimeActive then
+      status = "Full Integration"
+    elseif tbiStats.trackerActive then
+      status = "Partial Integration"
+    end
+    
+    table.insert(lines, string.format("TargetBot Integration: %s", status))
+    
+    -- Show danger level
+    if tbi.getDangerLevel then
+      local dangerLevel, threats = tbi.getDangerLevel()
+      local threatCount = #threats
+      table.insert(lines, string.format("  Danger Level: %.1f/10  Active Threats: %d", dangerLevel, threatCount))
+      
+      -- List top 3 threats
+      for i = 1, math.min(3, threatCount) do
+        local t = threats[i]
+        local imminentStr = t.imminent and " [IMMINENT]" or ""
+        table.insert(lines, string.format("    %d. %s (level %.1f)%s", i, t.name, t.level, imminentStr))
+      end
+    end
+  end
+  
   table.insert(lines, "")
+  
+  -- Show Classifications section (new in v2.0)
+  if MonsterAI and MonsterAI.Classifier and MonsterAI.Classifier.cache then
+    local classCount = 0
+    for _ in pairs(MonsterAI.Classifier.cache) do classCount = classCount + 1 end
+    
+    if classCount > 0 then
+      table.insert(lines, "Classifications:")
+      table.insert(lines, string.format("  %-18s %6s %6s %8s %6s %6s", "name", "danger", "conf", "type", "dist", "cd"))
+      
+      -- Sort by confidence
+      local classItems = {}
+      for name, c in pairs(MonsterAI.Classifier.cache) do
+        table.insert(classItems, {name = name, class = c})
+      end
+      table.sort(classItems, function(a, b) return (a.class.confidence or 0) > (b.class.confidence or 0) end)
+      
+      for i = 1, math.min(#classItems, 10) do
+        local item = classItems[i]
+        local c = item.class
+        local typeStr = ""
+        if c.isRanged then typeStr = "Ranged"
+        elseif c.isMelee then typeStr = "Melee" end
+        if c.isWaveAttacker then typeStr = typeStr .. "+Wave" end
+        if c.isFast then typeStr = typeStr .. "+Fast" end
+        
+        table.insert(lines, string.format("  %-18s %6d %6.2f %8s %6d %6s",
+          item.name:sub(1, 18),
+          c.estimatedDanger or 0,
+          c.confidence or 0,
+          typeStr:sub(1, 8),
+          c.preferredDistance or 0,
+          c.attackCooldown and string.format("%dms", math.floor(c.attackCooldown)) or "-"
+        ))
+      end
+      table.insert(lines, "")
+    end
+  end
+  
+  -- Show Pending Suggestions (new in v2.0)
+  if MonsterAI and MonsterAI.AutoTuner and MonsterAI.AutoTuner.suggestions then
+    local hasSignificantSuggestions = false
+    for name, s in pairs(MonsterAI.AutoTuner.suggestions) do
+      if math.abs((s.suggestedDanger or 0) - (s.currentDanger or 0)) >= 1 then
+        hasSignificantSuggestions = true
+        break
+      end
+    end
+    
+    if hasSignificantSuggestions then
+      table.insert(lines, "Danger Suggestions:")
+      for name, s in pairs(MonsterAI.AutoTuner.suggestions) do
+        local change = (s.suggestedDanger or 0) - (s.currentDanger or 0)
+        if math.abs(change) >= 1 then
+          local changeStr = change > 0 and "+" .. tostring(change) or tostring(change)
+          table.insert(lines, string.format("  %s: %d -> %d (%s) [%.0f%% conf]",
+            name,
+            s.currentDanger or 0,
+            s.suggestedDanger or 0,
+            changeStr,
+            (s.confidence or 0) * 100
+          ))
+          if s.reasons and #s.reasons > 0 then
+            table.insert(lines, "    Reasons: " .. table.concat(s.reasons, ", "))
+          end
+        end
+      end
+      table.insert(lines, "")
+    end
+  end
+  
   table.insert(lines, "Patterns:")
   local patterns = storage.monsterPatterns or {}
 

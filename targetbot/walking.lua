@@ -97,45 +97,31 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
   maxDist = _maxDist
   params = _params or {}
   
-  -- Don't interfere with native chase mode
-  -- When chase mode is 1 (ChaseOpponent), the client handles chasing automatically
-  if g_game.getChaseMode and g_game.getChaseMode() == 1 then
-    -- Native chase is active - check if we're attacking
-    local attackTarget = g_game.getAttackingCreature and g_game.getAttackingCreature()
-    if attackTarget then
-      -- Native chase is handling movement to attack target, skip custom pathfinding
-      dest = nil
-      return
-    end
-  end
-  
-  -- Cancel native follow when using custom pathfinding (prevents conflicts)
-  -- BUT preserve follow for player following feature
-  if g_game.cancelFollow and g_game.getFollowingCreature then
+  -- Check if following a player (for "Follow While Attacking" feature)
+  -- We don't skip pathfinding for monsters anymore since we use custom pathfinding for chase
+  if g_game.getFollowingCreature then
     local currentFollow = g_game.getFollowingCreature()
-    if currentFollow then
-      local shouldKeepFollow = false
-      
+    if currentFollow and currentFollow:isPlayer() and not currentFollow:isLocalPlayer() then
       -- Check if following a player with "Follow While Attacking" enabled
-      if currentFollow:isPlayer() and not currentFollow:isLocalPlayer() then
-        if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
-          local followConfig = CharacterDB.get("tools.followPlayer")
-          if followConfig and followConfig.enabled and followConfig.followWhileAttacking then
-            local targetName = followConfig.playerName and followConfig.playerName:trim():lower() or ""
-            local followName = currentFollow:getName():lower()
-            if targetName ~= "" and (followName == targetName or followName:find(targetName, 1, true)) then
-              shouldKeepFollow = true
-            end
+      local shouldKeepFollow = false
+      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        local followConfig = CharacterDB.get("tools.followPlayer")
+        if followConfig and followConfig.enabled and followConfig.followWhileAttacking then
+          local targetName = followConfig.playerName and followConfig.playerName:trim():lower() or ""
+          local followName = currentFollow:getName():lower()
+          if targetName ~= "" and (followName == targetName or followName:find(targetName, 1, true)) then
+            shouldKeepFollow = true
           end
         end
       end
       
-      if not shouldKeepFollow then
-        g_game.cancelFollow()
-      else
+      if shouldKeepFollow then
         -- Following a player, skip custom pathfinding
         dest = nil
         return
+      else
+        -- Not a configured follow target, cancel and use custom pathfinding
+        g_game.cancelFollow()
       end
     end
   end
@@ -147,6 +133,12 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
     WalkCache.destKey = newKey
     WalkCache.timestamp = 0
     WalkCache.idx = 1
+  end
+  
+  -- IMMEDIATE WALK: Execute first step right away instead of waiting for next tick
+  -- This fixes the timing issue where TargetBot.walk() was called before walkTo()
+  if dest and not player:isWalking() then
+    TargetBot.walk()
   end
 end
 
