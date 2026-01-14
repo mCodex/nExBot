@@ -357,8 +357,22 @@ if onPlayerHealthChange then
       attackWatchdog.attempts = 0
       attackWatchdog.lastForce = 0
       -- Start an aggressive relogin recovery window if TargetBot was enabled before or is currently on
-      local storedEnabled = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled")) or storage.targetbotEnabled
-      if TargetBot and TargetBot.isOn and (TargetBot.isOn() or storedEnabled == true) then
+      -- Check UnifiedStorage first, only fallback to storage.targetbotEnabled if UnifiedStorage value is nil
+      local storedEnabled = nil
+      if UnifiedStorage then
+        storedEnabled = UnifiedStorage.get("targetbot.enabled")
+      end
+      if storedEnabled == nil then
+        storedEnabled = storage.targetbotEnabled
+      end
+      
+      -- Only start recovery if user EXPLICITLY enabled it (storedEnabled == true), not nil
+      if storedEnabled == false then
+        -- User explicitly turned it off, don't do anything
+        return
+      end
+      
+      if TargetBot and TargetBot.isOn and storedEnabled == true then
         reloginRecovery.active = true
         reloginRecovery.endTime = now + reloginRecovery.duration
         reloginRecovery.lastAttempt = 0
@@ -369,12 +383,8 @@ if onPlayerHealthChange then
         debouncedInvalidateAndRecalc()
 
         -- If TargetBot was previously enabled via storage, ensure it's on now to allow recovery
-        -- BUT only if storedEnabled is EXPLICITLY true, not nil or false
         if storedEnabled == true and not TargetBot.isOn() then
           pcall(function() TargetBot.setOn() end)
-        elseif storedEnabled == false then
-          -- User explicitly turned it off, don't auto-enable
-          reloginRecovery.active = false
         end
 
         -- Update UI status so user sees recovery in progress
@@ -1163,6 +1173,7 @@ TargetBot.setCurrentProfile = function(name)
   if not g_resources.fileExists("/bot/"..botConfigName.."/targetbot_configs/"..name..".json") then
     return warn("there is no targetbot profile with that name!")
   end
+  local wasOn = TargetBot.isOn()
   TargetBot.setOff()
   storage._configs.targetbot_configs.selected = name
   -- Save to UnifiedStorage for per-character persistence
@@ -1176,7 +1187,9 @@ TargetBot.setCurrentProfile = function(name)
   if setCharacterProfile then
     setCharacterProfile("targetbotProfile", name)
   end
-  TargetBot.setOn()
+  if wasOn then
+    TargetBot.setOn()
+  end
 end
 
 TargetBot.delay = function(value)

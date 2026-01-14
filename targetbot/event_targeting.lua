@@ -571,6 +571,11 @@ end
 
 -- Process a newly appeared creature (improved with safe API calls)
 function EventTargeting.TargetAcquisition.processCreature(creature)
+  -- CRITICAL: Do not process any creature if TargetBot is disabled
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+    return
+  end
+  
   if not creature then return end
   if not EventTargeting.TargetAcquisition.isValidTarget(creature) then return end
   
@@ -781,6 +786,11 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
   end
   
   -- Attack the creature
+  -- CRITICAL: Final check that TargetBot is enabled before any attack
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+    return
+  end
+  
   if g_game and g_game.attack then
     g_game.attack(creature)
   end
@@ -810,6 +820,12 @@ end
 
 -- Process pending targets (called from macro)
 function EventTargeting.TargetAcquisition.processPending()
+  -- CRITICAL: Do not process if TargetBot is disabled
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+    targetState.pendingTargets = {}  -- Clear queue when disabled
+    return
+  end
+  
   if #targetState.pendingTargets == 0 then return end
   
   -- Find best pending target
@@ -1002,6 +1018,12 @@ local lastProcessTime = 0
 local pendingCreatures = {}
 
 local function debouncedProcess()
+  -- CRITICAL: Do not process if TargetBot is disabled
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+    pendingCreatures = {}  -- Clear queue when disabled
+    return
+  end
+  
   if now - lastProcessTime < CONST.DEBOUNCE_INTERVAL then
     return
   end
@@ -1024,6 +1046,11 @@ if EventBus then
   -- IMPROVED: Instant high-priority monster detection and target switching
   EventBus.on("monster:appear", function(creature)
     if not creature then return end
+    
+    -- CRITICAL: Do not process if TargetBot is disabled
+    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+      return
+    end
     
     -- Quick distance check before queuing
     updatePlayerRef()
@@ -1134,6 +1161,11 @@ if EventBus then
   
   -- Monster health changed - update priority
   EventBus.on("monster:health", function(creature, percent, oldPercent)
+    -- Skip processing if TargetBot is disabled
+    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+      return
+    end
+    
     if not creature then return end
     local id = creature:getId()
     local entry = creatureCache.entries[id]
@@ -1506,6 +1538,11 @@ if onCreatureAppear then
           
           -- INSTANT SWITCH for higher priority monster!
           if newConfigPriority > currentConfigPriority then
+            -- CRITICAL: Double-check TargetBot is actually enabled before attacking
+            if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+              return
+            end
+            
             if EventTargeting.DEBUG then
               local name = creature:getName() or "Unknown"
               print("[EventTargeting] NATIVE: High priority monster appeared: " .. name .. 

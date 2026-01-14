@@ -1163,6 +1163,11 @@ local function rePosition(minTiles, config)
 end
 
 TargetBot.Creature.attack = function(params, targets, isLooting)
+  -- CRITICAL: Do not attack if TargetBot is disabled
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+    return
+  end
+  
   if player:isWalking() then
     lastWalk = now
   end
