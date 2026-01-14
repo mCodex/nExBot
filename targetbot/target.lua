@@ -367,8 +367,12 @@ if onPlayerHealthChange then
         debouncedInvalidateAndRecalc()
 
         -- If TargetBot was previously enabled via storage, ensure it's on now to allow recovery
+        -- BUT only if storedEnabled is EXPLICITLY true, not nil or false
         if storedEnabled == true and not TargetBot.isOn() then
           pcall(function() TargetBot.setOn() end)
+        elseif storedEnabled == false then
+          -- User explicitly turned it off, don't auto-enable
+          reloginRecovery.active = false
         end
 
         -- Update UI status so user sees recovery in progress
@@ -378,8 +382,10 @@ if onPlayerHealthChange then
         if targetbotMacro then
           local function attemptRecovery()
             -- Only attempt recovery runs if targetbot should be enabled
-            local storedEnabled2 = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled")) or storage.targetbotEnabled
-            if storedEnabled2 == true or TargetBot.isOn() then
+            local storedEnabled2 = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled"))
+            if storedEnabled2 == nil then storedEnabled2 = storage.targetbotEnabled end
+            -- Only attempt recovery if EXPLICITLY enabled, not just nil
+            if storedEnabled2 == true and TargetBot.isOn() then
               pcall(targetbotMacro)
               -- After macro run, try recalc and a direct attack as a backup
               local ok2, best2 = pcall(function() return recalculateBestTarget() end)
@@ -1120,14 +1126,26 @@ TargetBot.setOn = function(val)
   if val == false then  
     return TargetBot.setOff(true)
   end
-  config.setOn()  -- This triggers callback which handles storage
+  -- Save user's choice to storage BEFORE triggering config callback
+  if UnifiedStorage then 
+    UnifiedStorage.set("targetbot.enabled", true) 
+  else 
+    storage.targetbotEnabled = true 
+  end
+  config.setOn()  -- This triggers callback which handles UI update
 end
 
 TargetBot.setOff = function(val)
   if val == false then  
     return TargetBot.setOn(true)
   end
-  config.setOff()  -- This triggers callback which handles storage
+  -- Save user's choice to storage BEFORE triggering config callback
+  if UnifiedStorage then 
+    UnifiedStorage.set("targetbot.enabled", false) 
+  else 
+    storage.targetbotEnabled = false 
+  end
+  config.setOff()  -- This triggers callback which handles UI update
 end
 
 TargetBot.getCurrentProfile = function()
@@ -1582,7 +1600,8 @@ local function performPendingEnableOnce()
   invalidateCache()
   if debouncedInvalidateAndRecalc then debouncedInvalidateAndRecalc() end
   schedule(10, function() pcall(function() if type(recalculateBestTarget) == 'function' then recalculateBestTarget() end end) end)
-  schedule(20, function() pcall(function() if type(targetbotMacro) == 'function' then targetbotMacro() elseif targetbotMacro and type(targetbotMacro.setOn) == 'function' then targetbotMacro.setOn(true) end end) end)
+  -- DON'T force enable here - respect the user's choice from pendingEnableDesired or storage
+  -- The macro was already set in the block above if pendingEnableDesired was set
   return true
 end
 
@@ -1844,23 +1863,21 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
   TargetBot.Looting.update(data["looting"] or {})
 
   -- Determine final enabled state (check UnifiedStorage first for character isolation)
+  -- PRIORITY: stored enabled state ALWAYS takes precedence over config file's enabled state
   local finalEnabled = enabled
   local storedEnabled = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled"))
   if storedEnabled == nil then
     storedEnabled = storage.targetbotEnabled
   end
   
+  -- If user explicitly set an enabled state (true or false), always respect it
+  if storedEnabled == true or storedEnabled == false then
+    finalEnabled = storedEnabled
+  end
+  
+  -- Track that we've initialized (for other purposes)
   if not TargetBot._initialized then
     TargetBot._initialized = true
-    if storedEnabled == true or storedEnabled == false then
-      finalEnabled = storedEnabled
-    end
-  else
-    if enabled == (data and data.enabled) then
-      if UnifiedStorage then UnifiedStorage.set("targetbot.enabled", nil) else storage.targetbotEnabled = nil end
-    else
-      if UnifiedStorage then UnifiedStorage.set("targetbot.enabled", enabled) else storage.targetbotEnabled = enabled end
-    end
   end
 
   -- Update UI to reflect final state
