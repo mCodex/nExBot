@@ -1100,27 +1100,43 @@ function MovementCoordinator.Execute.move(decision)
       })
     end
   elseif intent.type == INTENT.CHASE or intent.type == INTENT.FINISH_KILL then
-    -- CHASE/FINISH_KILL: Use custom pathfinding with native chase mode as backup
-    -- Many servers don't properly support native chase mode, so we use walkTo
-    -- to ensure the character actually moves toward the target
+    -- ═══════════════════════════════════════════════════════════════════════════
+    -- CHASE/FINISH_KILL: Leverage OTClient Native Chase Mode
+    --
+    -- OTClient ChaseModes (from const.h):
+    --   DontChase = 0 (Stand mode - player won't auto-walk)
+    --   ChaseOpponent = 1 (Chase mode - client auto-walks to attacked creature)
+    --
+    -- When chase mode is set to 1 and we're attacking, the client AUTOMATICALLY
+    -- handles pathfinding and walking to the target. We should NOT interfere
+    -- with custom walking unless the native chase fails or is unavailable.
+    -- ═══════════════════════════════════════════════════════════════════════════
     
-    -- Set native chase mode as well (helps on servers that support it)
+    -- Set native chase mode (this is the primary mechanism)
     if g_game.setChaseMode then
       g_game.setChaseMode(1) -- ChaseOpponent
+      if TargetCore and TargetCore.Native then
+        TargetCore.Native.lastChaseMode = 1
+      end
+      TargetBot.usingNativeChase = true
     end
     
-    -- Use custom pathfinding to actually move toward the target
-    if TargetBot and TargetBot.walkTo then
-      success = TargetBot.walkTo(targetPos, 10, {
-        ignoreNonPathable = true,
-        precision = 1,
-        allowOnlyVisibleTiles = true
-      })
-    end
+    -- Check if we're attacking - native chase only works when attacking
+    local isAttacking = g_game.isAttacking and g_game.isAttacking()
     
-    -- If walkTo didn't work, still consider it partial success since chase mode is set
-    if not success then
-      success = true -- Native chase mode is set, may still work on some servers
+    if isAttacking then
+      -- Native chase mode is active and we're attacking
+      -- The client will handle walking automatically - consider this success
+      success = true
+    else
+      -- Not attacking yet, use custom pathfinding as fallback
+      if TargetBot and TargetBot.walkTo then
+        success = TargetBot.walkTo(targetPos, 10, {
+          ignoreNonPathable = true,
+          precision = 1,
+          allowOnlyVisibleTiles = true
+        })
+      end
     end
   else
     -- OTCLIENT API: Standard movement with walkability validation

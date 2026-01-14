@@ -1,11 +1,13 @@
 local targetbotMacro = nil
 local config = nil
-local lastAction = 0
+lastAction = 0
 local cavebotAllowance = 0
 local lureEnabled = true
 
 -- MonsterAI automatic integration (hidden internals, not exposed to UI/storage)
-local MONSTERAI_INTEGRATION = true
+-- DISABLED: MonsterAI was blocking chase mode by pausing movement for up to 900ms
+-- This caused players to stand still while attacking instead of chasing
+local MONSTERAI_INTEGRATION = false  -- DISABLED to fix chase mode
 local MONSTERAI_IMMINENT_ACTION = "avoid"  -- "avoid" = attempt escape, "wait" = pause attacking
 local MONSTERAI_MIN_CONF = 0.6
 local monsterAIWaitUntil = 0
@@ -1686,12 +1688,13 @@ targetbotMacro = macro(200, function()
   -- Prevent execution before login is complete to avoid freezing
   if not g_game.isOnline() then return end
 
-  -- If MonsterAI requested an imminent-attack pause, honor it briefly
-  if monsterAIWaitUntil and now < monsterAIWaitUntil then
-    cavebotAllowance = now + 100
-    setStatusRight("Evading (MonsterAI)")
-    return
-  end
+  -- MonsterAI imminent-attack pause DISABLED (was blocking chase mode)
+  -- If re-enabling, reduce the wait time significantly (max 100ms, not 900ms)
+  -- if monsterAIWaitUntil and now < monsterAIWaitUntil then
+  --   cavebotAllowance = now + 100
+  --   setStatusRight("Evading (MonsterAI)")
+  --   return
+  -- end
 
   -- TargetBot never triggers friend-heal; keep that path dormant to save cycles
   if HealEngine and HealEngine.setFriendHealingEnabled then
@@ -1703,8 +1706,19 @@ targetbotMacro = macro(200, function()
   if EventTargeting and EventTargeting.isInCombat and EventTargeting.isInCombat() then
     local eventTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
     if eventTarget and not eventTarget:isDead() then
-      -- EventTargeting is handling combat - just ensure we're attacking
+      -- EventTargeting is handling combat - ensure we're attacking AND chase mode is set
       local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+      
+      -- CRITICAL: Always enforce chase mode when in EventTargeting fast path
+      -- This ensures native chase works even when EventTargeting handles targeting
+      if g_game.setChaseMode then
+        local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+        if currentMode ~= 1 then
+          g_game.setChaseMode(1)  -- ChaseOpponent
+          if TargetBot then TargetBot.usingNativeChase = true end
+        end
+      end
+      
       if not currentAttack or currentAttack:getId() ~= eventTarget:getId() then
         -- Sync our attack target with EventTargeting's choice
         pcall(function() g_game.attack(eventTarget) end)

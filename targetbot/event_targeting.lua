@@ -756,6 +756,30 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
     end
   end
   
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- SET CHASE MODE BEFORE ATTACKING (Critical for OTClient)
+  -- 
+  -- OTClient ChaseModes (from const.h):
+  --   DontChase = 0 (Stand mode)
+  --   ChaseOpponent = 1 (Client auto-walks to attacked creature)
+  --
+  -- When chase mode is set BEFORE attacking, OTClient handles pathfinding
+  -- and walking automatically. This is the native chase behavior.
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if g_game.setChaseMode then
+    local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+    if currentMode ~= 1 then
+      g_game.setChaseMode(1)  -- ChaseOpponent
+      -- Update cache for other modules
+      if TargetCore and TargetCore.Native then
+        TargetCore.Native.lastChaseMode = 1
+      end
+      if TargetBot then
+        TargetBot.usingNativeChase = true
+      end
+    end
+  end
+  
   -- Attack the creature
   if g_game and g_game.attack then
     g_game.attack(creature)

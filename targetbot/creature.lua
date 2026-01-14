@@ -16,7 +16,10 @@ local CACHE_LRU_SIZE = 20    -- Keep only 20 most recent entries when pruning
 local cacheAccessOrder = {}  -- Array of {name, accessTime}
 
 TargetBot.Creature.resetConfigs = function()
-  TargetBot.targetList:destroyChildren()
+  -- Safety check: targetList may not be initialized yet
+  if TargetBot.targetList then
+    TargetBot.targetList:destroyChildren()
+  end
   TargetBot.Creature.resetConfigsCache()
 end
 
@@ -126,6 +129,12 @@ TargetBot.Creature.addConfig = function(config, focus)
     end
   end
 
+  -- Safety check: targetList must be initialized
+  if not TargetBot.targetList then
+    warn("[TargetBot] Cannot add config - UI not initialized yet")
+    return nil
+  end
+
   local widget = UI.createWidget("TargetBotEntry", TargetBot.targetList)
   widget:setText(config.name)
   widget.value = config
@@ -144,7 +153,9 @@ TargetBot.Creature.addConfig = function(config, focus)
 
   if focus then
     widget:focus()
-    TargetBot.targetList:ensureChildVisible(widget)
+    if TargetBot.targetList then
+      TargetBot.targetList:ensureChildVisible(widget)
+    end
   end
   return widget
 end
@@ -152,6 +163,9 @@ end
 -- Optimized config lookup with TTL-based cache invalidation and LRU eviction
 TargetBot.Creature.getConfigs = function(creature)
   if not creature then return {} end
+  
+  -- Safety check: targetList may not be initialized yet during startup
+  if not TargetBot.targetList then return {} end
   
   -- Check cache TTL
   if now - TargetBot.Creature.lastCacheClear > CACHE_TTL then

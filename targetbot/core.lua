@@ -884,9 +884,23 @@ end
 -- Follow creature with validation
 -- @param creature: creature to follow
 -- @return boolean: true if follow was initiated
+-- 
+-- WARNING: g_game.follow() CANCELS the current attack!
+-- For monsters, use setChaseMode(1) + g_game.attack() instead.
+-- This function is only safe for following players (party members, etc.)
 function TargetCore.Native.followCreature(creature)
   if not creature or creature:isDead() then
     return false
+  end
+  
+  -- IMPORTANT: Don't use g_game.follow() for monsters - it cancels attack!
+  -- Check if creature is a monster
+  local isMonster = creature.isMonster and creature:isMonster()
+  if isMonster then
+    -- For monsters, just ensure chase mode is set - attack handles the rest
+    TargetCore.Native.setChaseMode(TargetCore.Native.CHASE_MODE.CHASE)
+    TargetCore.Native.lastFollowCreature = creature:getId()
+    return true  -- Return true but don't call g_game.follow()
   end
   
   -- Check if already following this creature
@@ -895,8 +909,7 @@ function TargetCore.Native.followCreature(creature)
     return true  -- Already following
   end
   
-  -- Set chase mode to chase opponent for better pathfinding
-  TargetCore.Native.setChaseMode(TargetCore.Native.CHASE_MODE.CHASE)
+  -- For non-monsters (players), we can safely use g_game.follow()
   
   -- Use g_game.follow if available, otherwise fall back to bot's follow()
   if g_game.follow then

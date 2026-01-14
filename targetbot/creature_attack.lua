@@ -1171,6 +1171,9 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local creature = params.creature
   local creaturePos = creature:getPosition()
   local playerPos = player:getPosition()
+  
+  -- DEBUG: Verify chase config is being passed correctly
+  -- Uncomment to debug: print(\"[Chase] config.chase=\" .. tostring(config.chase) .. \" keepDistance=\" .. tostring(config.keepDistance))
 
   -- Update ActiveMovementConfig for EventBus-driven movement intents
   if TargetBot.ActiveMovementConfig then
@@ -1182,22 +1185,42 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     TargetBot.ActiveMovementConfig.anchorRange = config.anchorRange or 5
   end
 
-  -- Set OTClient native chase mode based on config using centralized enforcer
-  -- This ensures consistent chase mode handling through EventBus coordination
-  if TargetBot.enforceChaseModeNow then
-    pcall(TargetBot.enforceChaseModeNow)
-  else
-    -- Fallback: direct API call if enforcer not available
-    if config.chase and not config.keepDistance then
-      if g_game.setChaseMode then
-        g_game.setChaseMode(1) -- ChaseOpponent
-      end
-    elseif config.keepDistance or not config.chase then
-      if g_game.setChaseMode then
-        g_game.setChaseMode(0) -- Stand
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NATIVE CHASE MODE SETUP (MUST happen BEFORE g_game.attack())
+  -- 
+  -- OTClient Chase Mode (g_game.setChaseMode):
+  --   0 = DontChase (Stand) - Player won't auto-walk to target
+  --   1 = ChaseOpponent - Client automatically walks toward attacked creature
+  --
+  -- CRITICAL: When chase mode is enabled, we should NOT use custom walking
+  -- (autoWalk, walkTo, etc.) as it interferes with the native chase behavior.
+  -- The client handles pathfinding and walking automatically.
+  --
+  -- NOTE: avoidAttacks doesn't prevent chase - it only temporarily overrides
+  -- when an attack needs to be avoided. Chase is the default movement mode.
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- Chase should be enabled unless keepDistance is ON (mutually exclusive)
+  -- avoidAttacks is handled separately in the walk function (temporary override)
+  local useNativeChase = config.chase and not config.keepDistance
+  
+  -- DEBUG: Log chase mode decision (can be commented out in production)
+  -- print(\"[Chase Debug] config.chase=\" .. tostring(config.chase) .. \" keepDistance=\" .. tostring(config.keepDistance) .. \" useNativeChase=\" .. tostring(useNativeChase))
+  
+  -- Always set chase mode BEFORE attacking - this is how OTClient works
+  if g_game.setChaseMode then
+    local desiredMode = useNativeChase and 1 or 0
+    local currentMode = g_game.getChaseMode and g_game.getChaseMode() or -1
+    if currentMode ~= desiredMode then
+      g_game.setChaseMode(desiredMode)
+      -- Cache the mode for other modules
+      if TargetCore and TargetCore.Native then
+        TargetCore.Native.lastChaseMode = desiredMode
       end
     end
   end
+  
+  -- Store whether we're using native chase for the walk function
+  TargetBot.usingNativeChase = useNativeChase
   
   -- ═══════════════════════════════════════════════════════════════════════════
   -- REACHABILITY VALIDATION (v2.1): Verify target before attack
@@ -1228,20 +1251,13 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   -- Cache attacking creature check
   local currentTarget = g_game.getAttackingCreature()
   if currentTarget ~= creature then
-    -- Ensure chase mode is set BEFORE attacking so server knows to chase
-    if config.chase and not config.keepDistance then
-      if g_game.setChaseMode and g_game.getChaseMode then
-        if g_game.getChaseMode() ~= 1 then
-          pcall(function() g_game.setChaseMode(1) end) -- ChaseOpponent
-        end
-      end
-    end
-    
+    -- Chase mode was already set above BEFORE this check (correct order for OTClient)
+    -- Just attack - the native chase mode will handle walking automatically
     local ok, err = pcall(function() g_game.attack(creature) end)
     if not ok then warn("[TargetBot] g_game.attack pcall failed: " .. tostring(err)) end
     
-    -- NOTE: Do NOT call g_game.follow() here - it cancels the attack!
-    -- Server-side chase mode (setChaseMode(1)) handles chasing while attacking
+    -- IMPORTANT: Do NOT call g_game.follow() - it cancels the attack!
+    -- When chase mode is set to 1 (ChaseOpponent), OTClient handles walking automatically
     
     -- Notify EventTargeting of target acquisition
     if EventTargeting and EventTargeting.CombatCoordinator then
@@ -1264,9 +1280,17 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   end
 
   if not isLooting then
-    -- Server-side chase mode should be handling movement when chase is enabled
-    -- Only use custom walking when not in chase mode or for precise positioning
-    TargetBot.Creature.walk(creature, config, targets)
+    -- When using native chase mode, skip custom walking - OTClient handles it
+    -- Only use custom walking for keepDistance, avoidAttacks, rePosition, or when chase is disabled
+    if not useNativeChase then
+      TargetBot.Creature.walk(creature, config, targets)
+    elseif config.avoidAttacks or config.rePosition then
+      -- Still allow wave avoidance and repositioning even with chase enabled
+      -- These are safety features that should override chase temporarily
+      TargetBot.Creature.walk(creature, config, targets)
+    end
+    -- When useNativeChase is true and no safety features needed,
+    -- OTClient's chase mode handles the walking automatically
   end
 
   -- Cache mana check
@@ -1461,25 +1485,51 @@ TargetBot.Creature.walk = function(creature, config, targets)
   end
 
   -- ─────────────────────────────────────────────────────────────────────────
-  -- AUTO-FOLLOW MANAGEMENT: Cancel native follow when precision control needed
+  -- AUTO-FOLLOW MANAGEMENT: Handle native chase vs precision control
   -- 
-  -- Native follow is efficient but incompatible with:
-  -- - Wave avoidance (needs instant direction changes)
+  -- OTClient chase mode (setChaseMode(1)) works WITH attacking - we don't
+  -- need to cancel it. Only g_game.follow() (which we're not using for 
+  -- monsters) needs to be managed.
+  --
+  -- Native chase is compatible with:
+  -- - Chase (that's what it's for!)
+  -- - Basic attacking (no movement override)
+  -- - rePosition (can coexist - rePosition is opportunistic)
+  --
+  -- But we need to TEMPORARILY disable chase mode for:
+  -- - Wave avoidance (needs instant custom direction changes)
   -- - Keep distance (needs precise range maintenance)
-  -- - Repositioning (custom tile scoring)
-  -- We cancel follow here if any of these modes are active
   -- ─────────────────────────────────────────────────────────────────────────
-  local needsPrecisionControl = config.avoidAttacks or config.keepDistance or config.rePosition
+  -- Only avoidAttacks and keepDistance require disabling native chase
+  -- rePosition is opportunistic and works alongside native chase
+  local needsPrecisionControl = config.avoidAttacks or config.keepDistance
+  
+  -- When precision control is needed, temporarily set chase mode to Stand
+  -- This allows our custom walking to work without interference
   if needsPrecisionControl then
-    if TargetCore and TargetCore.Native and TargetCore.Native.cancelFollow then
-      local currentFollow = TargetCore.Native.getFollowingCreature()
-      if currentFollow then
-        TargetCore.Native.cancelFollow()
+    -- Set chase mode to Stand temporarily for precision control
+    if g_game.setChaseMode and g_game.getChaseMode then
+      local currentMode = g_game.getChaseMode()
+      if currentMode == 1 then
+        g_game.setChaseMode(0)  -- DontChase/Stand
+        TargetBot.usingNativeChase = false
       end
-    elseif g_game.cancelFollow and g_game.getFollowingCreature then
+    end
+    
+    -- Also cancel g_game.follow() if active (shouldn't be for monsters, but safety check)
+    if g_game.cancelFollow and g_game.getFollowingCreature then
       local currentFollow = g_game.getFollowingCreature()
       if currentFollow then
         g_game.cancelFollow()
+      end
+    end
+  elseif config.chase then
+    -- Chase mode without precision control - ensure native chase is active
+    if g_game.setChaseMode and g_game.getChaseMode then
+      local currentMode = g_game.getChaseMode()
+      if currentMode ~= 1 then
+        g_game.setChaseMode(1)  -- ChaseOpponent
+        TargetBot.usingNativeChase = true
       end
     end
   end
@@ -1700,16 +1750,33 @@ TargetBot.Creature.walk = function(creature, config, targets)
   
   -- ─────────────────────────────────────────────────────────────────────────
   -- INTENT 6: CHASE (Close gap to target)
-  -- Server-side chase mode (setChaseMode(1)) should handle basic chasing.
-  -- We use custom pathfinding as a FALLBACK or for servers that don't 
-  -- support chase mode properly. Also used for anchor constraints.
+  -- 
+  -- OTClient native chase mode (setChaseMode(1)) handles basic chasing when
+  -- the player is attacking. When native chase is active, we should NOT
+  -- call autoWalk or custom pathfinding as it interferes.
+  --
+  -- This fallback is ONLY used when:
+  -- 1. Native chase mode is not active (usingNativeChase = false)
+  -- 2. OR there's an anchor constraint that native chase can't respect
+  -- 3. OR the server doesn't support native chase
+  --
   -- NOTE: Do NOT use g_game.follow() - it cancels the attack!
   -- ─────────────────────────────────────────────────────────────────────────
   local chaseExecuted = false
   if config.chase and not config.keepDistance and pathLen > 1 then
-    -- Check anchor constraint first
+    -- First check: Is native chase already handling this?
+    local nativeChaseMayWork = false
+    if g_game.getChaseMode and g_game.isAttacking then
+      local isAttacking = g_game.isAttacking()
+      local chaseMode = g_game.getChaseMode()
+      nativeChaseMayWork = isAttacking and chaseMode == 1
+    end
+    
+    -- Check anchor constraint
     local anchorValid = true
+    local hasAnchorConstraint = false
     if config.anchor and anchorPosition then
+      hasAnchorConstraint = true
       local anchorDist = math.max(
         math.abs(cpos.x - anchorPosition.x),
         math.abs(cpos.y - anchorPosition.y)
@@ -1717,29 +1784,22 @@ TargetBot.Creature.walk = function(creature, config, targets)
       anchorValid = anchorDist <= (config.anchorRange or 5)
     end
     
-    -- Use custom pathfinding to chase the target
-    -- This works alongside server-side chase mode and provides fallback
-    if anchorValid then
-      -- Confidence values increased to pass CHASE threshold (0.50) + hysteresis
-      local confidence = 0.60  -- Base now passes threshold with hysteresis margin
-      if pathLen <= 3 then
-        confidence = 0.70  -- Very close - high priority chase
-      elseif pathLen >= 5 then
-        confidence = 0.75  -- Far away - even higher priority
+    -- Only use custom chase if:
+    -- 1. Native chase isn't active/working, OR
+    -- 2. There's an anchor constraint (native chase doesn't know about anchors)
+    local needsCustomChase = not nativeChaseMayWork or hasAnchorConstraint
+    
+    if needsCustomChase and anchorValid then
+      -- Use player:autoWalk() for direct client-side movement
+      if player and player.autoWalk and not player:isWalking() then
+        pcall(function() player:autoWalk(cpos) end)
+        chaseExecuted = true
+        return true
       end
-      
-      if useCoordinator then
-        MovementCoordinator.chase(cpos, confidence)
-      else
-        local walkParams = {ignoreNonPathable = true, precision = 1}
-        if config.anchor and anchorPosition then
-          walkParams.maxDistanceFrom = {anchorPosition, config.anchorRange or 5}
-        end
-        if movementAllowed() then
-          chaseExecuted = true
-          return TargetBot.walkTo(cpos, 10, walkParams)
-        end
-      end
+    elseif nativeChaseMayWork and anchorValid then
+      -- Native chase is working, just return success
+      chaseExecuted = true
+      return true
     end
   end
 
@@ -1808,12 +1868,23 @@ TargetBot.Creature.walk = function(creature, config, targets)
       return true
     end
     
-    -- DIRECT CHASE FALLBACK: If MovementCoordinator didn't execute movement
-    -- but chase is enabled and we're not adjacent to target, force walk directly.
-    -- This ensures chasing works even when MovementCoordinator blocks due to
-    -- thresholds, oscillation detection, or other conditions.
+    -- CHASE FALLBACK: If MovementCoordinator didn't execute but chase is enabled
+    -- Check if native chase is already working before using custom pathfinding
     if config.chase and not config.keepDistance and pathLen > 1 then
-      -- Don't interfere if player is already walking
+      -- First check if native chase is active and should be working
+      local nativeChaseMayWork = false
+      if g_game.getChaseMode and g_game.isAttacking then
+        local isAttacking = g_game.isAttacking()
+        local chaseMode = g_game.getChaseMode()
+        nativeChaseMayWork = isAttacking and chaseMode == 1
+      end
+      
+      -- If native chase is active, trust it and don't interfere
+      if nativeChaseMayWork then
+        return true  -- Native chase is handling movement
+      end
+      
+      -- Only use custom fallback if native chase isn't working
       if not player:isWalking() then
         local anchorValid = true
         if config.anchor and anchorPosition then
@@ -1825,15 +1896,11 @@ TargetBot.Creature.walk = function(creature, config, targets)
         end
         
         if anchorValid then
-          -- Use direct walk - bypassing MovementCoordinator for chase
-          local walkParams = {ignoreNonPathable = true, precision = 1}
-          if config.anchor and anchorPosition then
-            walkParams.maxDistanceFrom = {anchorPosition, config.anchorRange or 5}
+          -- Use direct autoWalk for immediate chase
+          if player and player.autoWalk then
+            pcall(function() player:autoWalk(cpos) end)
+            return true
           end
-          
-          -- Direct call to TargetBot.walkTo for immediate chase
-          TargetBot.walkTo(cpos, 10, walkParams)
-          return true
         end
       end
     end

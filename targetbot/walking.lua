@@ -97,6 +97,26 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
   maxDist = _maxDist
   params = _params or {}
   
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- NATIVE CHASE MODE CHECK
+  -- When OTClient native chase mode is active (setChaseMode(1) + attacking),
+  -- skip custom pathfinding - let the client handle walking automatically.
+  -- This prevents interference with the native chase behavior.
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if TargetBot.usingNativeChase then
+    -- Check if we're actually attacking (native chase only works when attacking)
+    local isAttacking = g_game.isAttacking and g_game.isAttacking()
+    if isAttacking then
+      -- Verify chase mode is still set correctly
+      local chaseMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+      if chaseMode == 1 then
+        -- Native chase is active and working, skip custom walking
+        dest = nil
+        return true  -- Return true to indicate chase is handling movement
+      end
+    end
+  end
+  
   -- Check if following a player (for "Follow While Attacking" feature)
   -- We don't skip pathfinding for monsters anymore since we use custom pathfinding for chase
   if g_game.getFollowingCreature then
