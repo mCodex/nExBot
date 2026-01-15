@@ -234,6 +234,17 @@ if EventBus then
     local creaturePos = creature:getPosition()
     if not playerPos or not creaturePos then return end
     
+    -- CRITICAL: Only chase if Chase is enabled in TargetBot UI
+    local config = TargetBot and TargetBot.ActiveMovementConfig
+    if not config or not config.chase then
+      return  -- Chase disabled in UI, do not move towards monster
+    end
+    
+    -- Skip if keepDistance is enabled (use keepDistance logic instead)
+    if config.keepDistance then
+      return
+    end
+    
     local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
     
     -- Only register chase if target is moving away and out of melee range
@@ -1112,13 +1123,20 @@ function MovementCoordinator.Execute.move(decision)
     -- with custom walking unless the native chase fails or is unavailable.
     -- ═══════════════════════════════════════════════════════════════════════════
     
-    -- Set native chase mode (this is the primary mechanism)
-    if g_game.setChaseMode then
+    -- CRITICAL: Only set native chase mode if Chase is enabled in TargetBot config
+    local chaseEnabled = TargetBot and TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
+    if chaseEnabled and g_game.setChaseMode then
       g_game.setChaseMode(1) -- ChaseOpponent
       if TargetCore and TargetCore.Native then
         TargetCore.Native.lastChaseMode = 1
       end
       TargetBot.usingNativeChase = true
+    elseif not chaseEnabled and g_game.setChaseMode then
+      -- Chase disabled - ensure Stand mode
+      g_game.setChaseMode(0) -- DontChase
+      TargetBot.usingNativeChase = false
+      -- Skip movement when chase is disabled
+      return false, "chase_disabled"
     end
     
     -- Check if we're attacking - native chase only works when attacking

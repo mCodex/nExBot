@@ -54,20 +54,29 @@ local function createWindowIfMissing()
 
 
   -- Rebind buttons and visibility handlers (same logic as below)
-  local refreshBtn = SafeCall.globalWithFallback("getWidgetById", nil) -- noop placeholder
-  -- Setup actual buttons if present
+  -- Setup actual buttons if present - use direct property access (OTClient pattern)
   local function bindButtons()
-    local refreshBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.refresh
-    local exportBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.export
-    local clearBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.clear
-    local closeBtn = MonsterInspectorWindow.buttons and MonsterInspectorWindow.buttons.close
+    local buttonsPanel = win.buttons
+    if not buttonsPanel then
+      pcall(function() buttonsPanel = win:getChildById("buttons") end)
+    end
+    
+    if not buttonsPanel then
+      if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Buttons panel not found during window creation") end
+      return
+    end
+    
+    local refreshBtn = buttonsPanel.refresh
+    local exportBtn = buttonsPanel.export  -- Note: export button may not exist in current OTUI
+    local clearBtn = buttonsPanel.clear
+    local closeBtn = buttonsPanel.close
 
     if refreshBtn then refreshBtn.onClick = function() refreshPatterns() end end
     if exportBtn then exportBtn.onClick = function() exportPatterns() end end
     if clearBtn then clearBtn.onClick = function() clearPatterns() end end
-    if closeBtn then closeBtn.onClick = function() MonsterInspectorWindow:hide() end end
+    if closeBtn then closeBtn.onClick = function() win:hide() end end
 
-    MonsterInspectorWindow.onVisibilityChange = function(widget, visible)
+    win.onVisibilityChange = function(widget, visible)
       if visible then
         updateWidgetRefs()
         refreshPatterns()
@@ -208,6 +217,30 @@ local function buildSummary()
     ))
   end
   
+  -- Metrics Aggregator Summary (NEW in v2.2)
+  if MonsterAI and MonsterAI.Metrics and MonsterAI.Metrics.getSummary then
+    local summary = MonsterAI.Metrics.getSummary()
+    
+    -- Combat metrics
+    if summary.combat then
+      local c = summary.combat
+      table.insert(lines, string.format("Combat: DPS Received=%.1f  KDR=%.1f",
+        c.dpsReceived or 0,
+        c.kdr or 0
+      ))
+    end
+    
+    -- Performance metrics
+    if summary.performance and summary.performance.cyclesSaved > 0 then
+      local p = summary.performance
+      table.insert(lines, string.format("Performance: Cycles=%d  Saved=%d  Mode=%s",
+        p.updateCycles or 0,
+        p.cyclesSaved or 0,
+        (p.volume or "normal"):upper()
+      ))
+    end
+  end
+  
   -- Real-time prediction stats
   if MonsterAI and MonsterAI.getPredictionStats then
     local predStats = MonsterAI.getPredictionStats()
@@ -282,6 +315,61 @@ local function buildSummary()
     end
   end
   
+  -- Spell Tracker Stats (NEW in v2.2 - Monster spell analysis)
+  if MonsterAI and MonsterAI.SpellTracker then
+    local st = MonsterAI.SpellTracker
+    local stats = st.getStats and st.getStats() or {}
+    local reactivity = st.analyzeReactivity and st.analyzeReactivity() or {}
+    
+    table.insert(lines, string.format("SpellTracker: Total=%d  /min=%.1f  Types=%d",
+      stats.totalSpellsCast or 0,
+      stats.spellsPerMinute or 0,
+      stats.uniqueMissileTypes or 0
+    ))
+    
+    -- Reactivity analysis
+    local reactivityStatus = "Normal"
+    if reactivity.spellBurstDetected then
+      reactivityStatus = "BURST!"
+    elseif reactivity.highVolumeThreshold then
+      reactivityStatus = "High Volume"
+    elseif reactivity.lowVolumeThreshold then
+      reactivityStatus = "Low Volume"
+    end
+    
+    table.insert(lines, string.format("  Reactivity: %s  Active=%d  AvgInterval=%dms",
+      reactivityStatus,
+      reactivity.activeMonsterCount or 0,
+      math.floor(reactivity.avgTimeBetweenSpells or 0)
+    ))
+    
+    -- Show top spell casters
+    local topCasters = {}
+    if st.monsterSpells then
+      for id, data in pairs(st.monsterSpells) do
+        if data.totalSpellsCast and data.totalSpellsCast > 0 then
+          table.insert(topCasters, {
+            name = data.name or "Unknown",
+            spells = data.totalSpellsCast,
+            cooldown = data.ewmaSpellCooldown,
+            frequency = data.castFrequency or 0
+          })
+        end
+      end
+      table.sort(topCasters, function(a, b) return a.spells > b.spells end)
+    end
+    
+    if #topCasters > 0 then
+      table.insert(lines, "  Top Casters:")
+      for i = 1, math.min(3, #topCasters) do
+        local c = topCasters[i]
+        local cdStr = c.cooldown and string.format("%dms", math.floor(c.cooldown)) or "-"
+        table.insert(lines, string.format("    %s: %d spells  cd=%s  freq=%d/min",
+          c.name:sub(1, 15), c.spells, cdStr, c.frequency))
+      end
+    end
+  end
+  
   -- Scenario Manager Stats (NEW in v2.1 - Anti-Zigzag)
   if MonsterAI and MonsterAI.Scenario then
     local scn = MonsterAI.Scenario
@@ -319,6 +407,33 @@ local function buildSummary()
         cfg.targetStickiness or 0,
         cfg.maxSwitchesPerMinute and tostring(cfg.maxSwitchesPerMinute) or "∞"))
     end
+  end
+  
+  -- Volume Adaptation Stats (NEW in v2.2 - Dynamic reactivity)
+  if MonsterAI and MonsterAI.VolumeAdaptation then
+    local va = MonsterAI.VolumeAdaptation
+    local vaStats = va.getStats and va.getStats() or {}
+    local params = vaStats.params or {}
+    local metrics = vaStats.metrics or {}
+    
+    local volumeDisplay = (vaStats.currentVolume or "normal"):upper()
+    local desc = params.description or ""
+    
+    table.insert(lines, string.format("VolumeAdaptation: %s", volumeDisplay))
+    if desc ~= "" then
+      table.insert(lines, string.format("  Mode: %s", desc))
+    end
+    table.insert(lines, string.format("  Telemetry=%dms  CacheTTL=%dms  EWMA=%.2f",
+      params.telemetryInterval or 200,
+      params.threatCacheTTL or 100,
+      params.ewmaAlpha or 0.25
+    ))
+    table.insert(lines, string.format("  Avg Monsters=%.1f  Peak=%d  Adaptations=%d  Saved=%d",
+      metrics.avgMonsterCount or 0,
+      metrics.peakMonsterCount or 0,
+      metrics.volumeChanges or 0,
+      metrics.adaptationsSaved or 0
+    ))
   end
   
   -- Reachability Stats (NEW in v2.1 - Prevents "Creature not reachable")
@@ -581,38 +696,65 @@ local function clearPatterns()
   print("[MonsterInspector] Cleared stored monster patterns")
 end
 
--- Buttons - use proper widget lookup via getChildById
+-- Buttons - use direct property access (standard OTClient pattern)
 local function bindInspectorButtons()
   if not MonsterInspectorWindow then return end
   
-  -- Find buttons panel first
-  local buttonsPanel = nil
-  pcall(function() buttonsPanel = MonsterInspectorWindow:getChildById("buttons") end)
+  -- Access buttons panel directly as property (standard OTClient widget hierarchy)
+  local buttonsPanel = MonsterInspectorWindow.buttons
+  
   if not buttonsPanel then
-    pcall(function() buttonsPanel = MonsterInspectorWindow.buttons end)
+    -- Fallback: try getChildById if direct access fails
+    pcall(function() buttonsPanel = MonsterInspectorWindow:getChildById("buttons") end)
   end
   
   if not buttonsPanel then
-    warn("[MonsterInspector] Could not find buttons panel")
+    warn("[MonsterInspector] Could not find buttons panel - window may not be fully loaded")
     return
   end
   
-  -- Find individual buttons
-  local refreshBtn, clearBtn, closeBtn = nil, nil, nil
-  pcall(function() refreshBtn = buttonsPanel:getChildById("refresh") end)
-  pcall(function() clearBtn = buttonsPanel:getChildById("clear") end)
-  pcall(function() closeBtn = buttonsPanel:getChildById("close") end)
+  -- Access buttons directly as properties (OTClient creates child widgets as properties)
+  local refreshBtn = buttonsPanel.refresh
+  local clearBtn = buttonsPanel.clear
+  local closeBtn = buttonsPanel.close
   
-  if refreshBtn then
-    refreshBtn.onClick = function() refreshPatterns() end
+  -- Fallback to getChildById if direct access returns nil
+  if not refreshBtn then
+    pcall(function() refreshBtn = buttonsPanel:getChildById("refresh") end)
   end
+  if not clearBtn then
+    pcall(function() clearBtn = buttonsPanel:getChildById("clear") end)
+  end
+  if not closeBtn then
+    pcall(function() closeBtn = buttonsPanel:getChildById("close") end)
+  end
+  
+  -- Bind click handlers
+  if refreshBtn then
+    refreshBtn.onClick = function() 
+      if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Refresh button clicked") end
+      refreshPatterns() 
+    end
+    if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Bound refresh button") end
+  else
+    warn("[MonsterInspector] Could not find refresh button")
+  end
+  
   if clearBtn then
     clearBtn.onClick = function()
+      if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Clear button clicked") end
       clearPatterns()
     end
+    if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Bound clear button") end
+  else
+    warn("[MonsterInspector] Could not find clear button")
   end
+  
   if closeBtn then
     closeBtn.onClick = function() MonsterInspectorWindow:hide() end
+    if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Bound close button") end
+  else
+    warn("[MonsterInspector] Could not find close button")
   end
 
   -- Auto-refresh while visible (guarded to avoid duplicate schedule chains)
@@ -620,6 +762,10 @@ local function bindInspectorButtons()
     if visible then
       -- re-resolve widgets in case UI was reloaded or nested
       updateWidgetRefs()
+      -- Rebind buttons when window becomes visible (in case they weren't bound initially)
+      if not buttonsPanel or not buttonsPanel.refresh then
+        bindInspectorButtons()
+      end
       refreshPatterns()
     end
   end

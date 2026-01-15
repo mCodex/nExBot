@@ -366,13 +366,14 @@ if onPlayerHealthChange then
         storedEnabled = storage.targetbotEnabled
       end
       
-      -- Only start recovery if user EXPLICITLY enabled it (storedEnabled == true), not nil
-      if storedEnabled == false then
-        -- User explicitly turned it off, don't do anything
+      -- Only start recovery if user EXPLICITLY enabled it (storedEnabled == true)
+      -- If storedEnabled is nil or false, don't auto-enable
+      if storedEnabled ~= true then
+        -- User didn't explicitly enable it, don't auto-enable
         return
       end
       
-      if TargetBot and TargetBot.isOn and storedEnabled == true then
+      if TargetBot and TargetBot.isOn then
         reloginRecovery.active = true
         reloginRecovery.endTime = now + reloginRecovery.duration
         reloginRecovery.lastAttempt = 0
@@ -1722,13 +1723,20 @@ targetbotMacro = macro(200, function()
       -- EventTargeting is handling combat - ensure we're attacking AND chase mode is set
       local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
       
-      -- CRITICAL: Always enforce chase mode when in EventTargeting fast path
-      -- This ensures native chase works even when EventTargeting handles targeting
-      if g_game.setChaseMode then
+      -- CRITICAL: Only set chase mode if Chase is enabled in ActiveMovementConfig
+      local chaseEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
+      if chaseEnabled and g_game.setChaseMode then
         local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
         if currentMode ~= 1 then
           g_game.setChaseMode(1)  -- ChaseOpponent
           if TargetBot then TargetBot.usingNativeChase = true end
+        end
+      elseif not chaseEnabled and g_game.setChaseMode then
+        -- Chase disabled - ensure Stand mode
+        local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+        if currentMode ~= 0 then
+          g_game.setChaseMode(0)  -- DontChase / Stand
+          if TargetBot then TargetBot.usingNativeChase = false end
         end
       end
       

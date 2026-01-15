@@ -771,7 +771,9 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
   -- When chase mode is set BEFORE attacking, OTClient handles pathfinding
   -- and walking automatically. This is the native chase behavior.
   -- ═══════════════════════════════════════════════════════════════════════════
-  if g_game.setChaseMode then
+  -- CRITICAL: Only set chase mode if Chase is enabled in TargetBot config
+  local chaseEnabled = TargetBot and TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
+  if chaseEnabled and g_game.setChaseMode then
     local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
     if currentMode ~= 1 then
       g_game.setChaseMode(1)  -- ChaseOpponent
@@ -781,6 +783,15 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
       end
       if TargetBot then
         TargetBot.usingNativeChase = true
+      end
+    end
+  elseif not chaseEnabled and g_game.setChaseMode then
+    -- Chase is disabled - ensure we're in Stand mode
+    local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+    if currentMode ~= 0 then
+      g_game.setChaseMode(0)  -- DontChase / Stand
+      if TargetBot then
+        TargetBot.usingNativeChase = false
       end
     end
   end
@@ -805,8 +816,9 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
     EventBus.emit("targeting/acquired", creature, dist, path)
   end
   
-  -- Register chase intent if not adjacent
+  -- Register chase intent if not adjacent (registerChaseIntent checks config.chase internally)
   if dist > 1 and path and #path > 0 then
+    -- Note: registerChaseIntent will check config.chase and skip if disabled
     EventTargeting.CombatCoordinator.registerChaseIntent(creature, creaturePos, dist)
   end
   
@@ -951,6 +963,17 @@ end
 -- Register chase intent with MovementCoordinator
 function EventTargeting.CombatCoordinator.registerChaseIntent(creature, targetPos, dist)
   if not MovementCoordinator or not MovementCoordinator.Intent then
+    return
+  end
+  
+  -- CRITICAL: Only chase if Chase is enabled in TargetBot UI
+  local config = TargetBot and TargetBot.ActiveMovementConfig
+  if not config or not config.chase then
+    return  -- Chase disabled in UI, do not move towards monster
+  end
+  
+  -- Also skip if keepDistance is enabled (use keepDistance logic instead)
+  if config.keepDistance then
     return
   end
   

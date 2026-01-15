@@ -1,5 +1,5 @@
 --[[
-  Monster AI Analysis Module v2.1
+  Monster AI Analysis Module v2.2
   
   Deep learning-inspired analysis system for predicting monster behavior
   and optimizing player positioning for maximum damage output.
@@ -15,6 +15,9 @@
   - Monster type classification
   - Scenario-aware targeting (anti-zigzag)
   - Multi-monster handling optimization
+  - Spell/missile tracking and analysis (NEW in v2.2)
+  - Volume-based reactivity adaptation (NEW in v2.2)
+  - Centralized metrics aggregation (NEW in v2.2)
   
   Architecture:
   - MonsterAI.Patterns: Known monster attack patterns
@@ -26,6 +29,9 @@
   - MonsterAI.Classifier: Monster behavior classification
   - MonsterAI.Scenario: Combat scenario detection and target locking
   - MonsterAI.CombatFeedback: Adaptive learning from combat outcomes
+  - MonsterAI.SpellTracker: Monster spell/missile analysis (NEW in v2.2)
+  - MonsterAI.VolumeAdaptation: Dynamic reactivity tuning (NEW in v2.2)
+  - MonsterAI.Metrics: Centralized metrics aggregator (NEW in v2.2)
 ]]
 
 -- ============================================================================
@@ -33,7 +39,7 @@
 -- ============================================================================
 
 MonsterAI = MonsterAI or {}
-MonsterAI.VERSION = "2.1"
+MonsterAI.VERSION = "2.2"
 
 -- Time helper (milliseconds). Prefer existing global 'now' if available, else use g_clock.millis or os.time()*1000
 local function nowMs()
@@ -47,6 +53,191 @@ MonsterAI.COLLECT_EXTENDED = (MonsterAI.COLLECT_EXTENDED == nil) and true or Mon
 MonsterAI.DPS_WINDOW = MonsterAI.DPS_WINDOW or 5000 -- ms window for DPS calculation
 MonsterAI.AUTO_TUNE_ENABLED = (MonsterAI.AUTO_TUNE_ENABLED == nil) and true or MonsterAI.AUTO_TUNE_ENABLED
 MonsterAI.TELEMETRY_INTERVAL = MonsterAI.TELEMETRY_INTERVAL or 200 -- ms between telemetry samples
+
+-- ============================================================================
+-- VOLUME ADAPTATION MODULE (NEW in v2.2)
+-- Automatically adjusts processing parameters based on monster count
+-- Optimizes CPU usage while maintaining responsiveness
+-- ============================================================================
+
+MonsterAI.VolumeAdaptation = MonsterAI.VolumeAdaptation or {
+  -- Current adaptation state
+  currentVolume = "normal",  -- "low", "normal", "high", "extreme"
+  lastVolumeChange = 0,
+  
+  -- Volume thresholds
+  THRESHOLDS = {
+    LOW = 2,       -- 1-2 monsters = low volume
+    NORMAL = 5,    -- 3-5 monsters = normal
+    HIGH = 10,     -- 6-10 monsters = high
+    EXTREME = 15   -- 11+ monsters = extreme
+  },
+  
+  -- Adaptation parameters per volume level
+  PARAMS = {
+    low = {
+      description = "Few monsters - high precision mode",
+      telemetryInterval = 100,      -- ms (more frequent sampling)
+      threatCacheTTL = 50,          -- ms (fresher cache)
+      updatePriority = "precision", -- Focus on accuracy
+      ewmaAlpha = 0.35,             -- More responsive EWMA
+      minSamplesForPrediction = 3,
+      maxTrackedPerCycle = 10
+    },
+    normal = {
+      description = "Normal load - balanced mode",
+      telemetryInterval = 200,
+      threatCacheTTL = 100,
+      updatePriority = "balanced",
+      ewmaAlpha = 0.25,
+      minSamplesForPrediction = 5,
+      maxTrackedPerCycle = 8
+    },
+    high = {
+      description = "Many monsters - efficiency mode",
+      telemetryInterval = 350,
+      threatCacheTTL = 150,
+      updatePriority = "efficiency",
+      ewmaAlpha = 0.20,
+      minSamplesForPrediction = 7,
+      maxTrackedPerCycle = 6
+    },
+    extreme = {
+      description = "Overload - survival mode",
+      telemetryInterval = 500,
+      threatCacheTTL = 200,
+      updatePriority = "survival",
+      ewmaAlpha = 0.15,             -- Smoother, less CPU
+      minSamplesForPrediction = 10,
+      maxTrackedPerCycle = 4        -- Process fewer per cycle
+    }
+  },
+  
+  -- Performance metrics
+  metrics = {
+    volumeChanges = 0,
+    avgMonsterCount = 0,
+    peakMonsterCount = 0,
+    adaptationsSaved = 0   -- Estimated CPU cycles saved
+  }
+}
+
+-- Determine volume level from monster count
+function MonsterAI.VolumeAdaptation.getVolumeLevel(monsterCount)
+  local th = MonsterAI.VolumeAdaptation.THRESHOLDS
+  if monsterCount <= th.LOW then
+    return "low"
+  elseif monsterCount <= th.NORMAL then
+    return "normal"
+  elseif monsterCount <= th.HIGH then
+    return "high"
+  else
+    return "extreme"
+  end
+end
+
+-- Get current adaptation parameters
+function MonsterAI.VolumeAdaptation.getParams()
+  local volume = MonsterAI.VolumeAdaptation.currentVolume
+  return MonsterAI.VolumeAdaptation.PARAMS[volume] or MonsterAI.VolumeAdaptation.PARAMS.normal
+end
+
+-- Update volume state based on current monster count
+function MonsterAI.VolumeAdaptation.update()
+  local va = MonsterAI.VolumeAdaptation
+  local nowt = nowMs()
+  
+  -- Count currently tracked monsters
+  local monsterCount = 0
+  if MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+    for _ in pairs(MonsterAI.Tracker.monsters) do
+      monsterCount = monsterCount + 1
+    end
+  end
+  
+  -- Update metrics
+  va.metrics.avgMonsterCount = (va.metrics.avgMonsterCount or 0) * 0.95 + monsterCount * 0.05
+  if monsterCount > (va.metrics.peakMonsterCount or 0) then
+    va.metrics.peakMonsterCount = monsterCount
+  end
+  
+  -- Determine new volume level
+  local newVolume = va.getVolumeLevel(monsterCount)
+  
+  -- Apply hysteresis to prevent rapid switching
+  -- Only change if we've been in current state for at least 500ms
+  if newVolume ~= va.currentVolume then
+    if (nowt - (va.lastVolumeChange or 0)) > 500 then
+      local oldVolume = va.currentVolume
+      va.currentVolume = newVolume
+      va.lastVolumeChange = nowt
+      va.metrics.volumeChanges = (va.metrics.volumeChanges or 0) + 1
+      
+      -- Apply new parameters
+      local params = va.PARAMS[newVolume]
+      if params then
+        -- Update global settings
+        MonsterAI.TELEMETRY_INTERVAL = params.telemetryInterval
+        
+        -- Update EWMA alpha in constants
+        if MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.EWMA then
+          MonsterAI.CONSTANTS.EWMA.ALPHA_DEFAULT = params.ewmaAlpha
+        end
+        
+        -- Update threat cache TTL
+        if MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.EVENT_DRIVEN then
+          MonsterAI.CONSTANTS.EVENT_DRIVEN.THREAT_CACHE_TTL = params.threatCacheTTL
+        end
+      end
+      
+      -- Emit volume change event
+      if EventBus and EventBus.emit then
+        EventBus.emit("monsterai:volume_changed", {
+          oldVolume = oldVolume,
+          newVolume = newVolume,
+          monsterCount = monsterCount,
+          params = params
+        })
+      end
+      
+      if MonsterAI.DEBUG then
+        print(string.format("[MonsterAI] Volume adapted: %s -> %s (%d monsters) - %s",
+          oldVolume, newVolume, monsterCount, params and params.description or ""))
+      end
+    end
+  end
+  
+  return va.currentVolume, va.getParams()
+end
+
+-- Check if we should process this monster in current cycle (load balancing)
+function MonsterAI.VolumeAdaptation.shouldProcessMonster(monsterId)
+  local va = MonsterAI.VolumeAdaptation
+  local params = va.getParams()
+  
+  -- In low/normal volume, always process
+  if va.currentVolume == "low" or va.currentVolume == "normal" then
+    return true
+  end
+  
+  -- In high/extreme, use round-robin based on monster ID
+  -- This distributes processing across multiple cycles
+  local cycleNumber = math.floor(nowMs() / 100) -- 100ms cycles
+  local hash = monsterId % (params.maxTrackedPerCycle * 2)
+  local slot = cycleNumber % (params.maxTrackedPerCycle * 2)
+  
+  return hash <= slot and hash > (slot - params.maxTrackedPerCycle)
+end
+
+-- Get volume adaptation stats for UI
+function MonsterAI.VolumeAdaptation.getStats()
+  local va = MonsterAI.VolumeAdaptation
+  return {
+    currentVolume = va.currentVolume,
+    params = va.getParams(),
+    metrics = va.metrics
+  }
+end
 
 -- ============================================================================
 -- REAL-TIME EVENT-DRIVEN STATE (O(1) lookups)
@@ -150,8 +341,50 @@ function MonsterAI.Telemetry.collectSnapshot(creature)
     
     -- Step history for trajectory prediction
     lastStepFrom = creature.getLastStepFromPosition and creature:getLastStepFromPosition() or nil,
-    lastStepTo = creature.getLastStepToPosition and creature:getLastStepToPosition() or nil
+    lastStepTo = creature.getLastStepToPosition and creature:getLastStepToPosition() or nil,
+    
+    -- ═══════════════════════════════════════════════════════════════════════
+    -- ENHANCED METRICS (NEW in v2.2)
+    -- ═══════════════════════════════════════════════════════════════════════
+    
+    -- Animation state (useful for attack detection)
+    isAnimating = creature.isAnimating and creature:isAnimating() or false,
+    animationPhase = creature.getAnimationPhase and creature:getAnimationPhase() or 0,
+    
+    -- Light emission (some monsters glow when attacking)
+    light = creature.getLight and creature:getLight() or nil,
+    
+    -- Name color (can indicate status effects)
+    nameColor = creature.getNameColor and creature:getNameColor() or nil,
+    
+    -- Marks/emblems
+    emblem = creature.getEmblem and creature:getEmblem() or 0,
+    
+    -- Static square (attack indicator in game)
+    hasStaticSquare = creature.hasStaticSquare and creature:hasStaticSquare() or false,
+    
+    -- Distance from player (computed metric)
+    distanceFromPlayer = 0
   }
+  
+  -- Calculate distance from player
+  local playerPos = player and player:getPosition()
+  if playerPos and snapshot.position then
+    snapshot.distanceFromPlayer = math.max(
+      math.abs(snapshot.position.x - playerPos.x),
+      math.abs(snapshot.position.y - playerPos.y)
+    )
+    
+    -- Calculate direction to player (useful for dodge prediction)
+    local dx = playerPos.x - snapshot.position.x
+    local dy = playerPos.y - snapshot.position.y
+    if dx ~= 0 or dy ~= 0 then
+      snapshot.directionToPlayer = {x = dx, y = dy}
+      -- Check if facing player
+      snapshot.isFacingPlayer = MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition
+        and MonsterAI.Predictor.isFacingPosition(snapshot.position, snapshot.direction, playerPos) or false
+    end
+  end
   
   -- Calculate derived metrics
   if snapshot.baseSpeed > 0 and snapshot.speed > 0 then
@@ -160,11 +393,200 @@ function MonsterAI.Telemetry.collectSnapshot(creature)
     snapshot.isSlowed = snapshot.speedMultiplier < 0.85
   end
   
+  -- Detect if monster might be casting (stopped walking but recently moved, or animating)
+  snapshot.mightBeCasting = (not snapshot.isWalking and snapshot.isAnimating) or
+                            (not snapshot.isWalking and snapshot.isFacingPlayer and snapshot.distanceFromPlayer <= 6)
+  
   -- Store snapshot
   MonsterAI.Telemetry.snapshots[id] = snapshot
   MonsterAI.RealTime.metrics.telemetrySamples = (MonsterAI.RealTime.metrics.telemetrySamples or 0) + 1
   
   return snapshot
+end
+
+-- ============================================================================
+-- METRICS AGGREGATOR (NEW in v2.2)
+-- Centralized metrics collection for analysis and debugging
+-- ============================================================================
+
+MonsterAI.Metrics = MonsterAI.Metrics or {
+  -- Aggregate metrics across all subsystems
+  aggregate = {
+    -- Combat metrics
+    totalDamageReceived = 0,
+    totalDamageDealt = 0,
+    totalKills = 0,
+    totalDeaths = 0,
+    
+    -- Prediction metrics
+    predictionsTotal = 0,
+    predictionsCorrect = 0,
+    predictionsMissed = 0,
+    predictionAccuracy = 0,
+    
+    -- Performance metrics
+    updateCyclesTotal = 0,
+    avgUpdateTimeMs = 0,
+    peakUpdateTimeMs = 0,
+    
+    -- Session info
+    sessionStartTime = nowMs(),
+    lastUpdateTime = 0
+  },
+  
+  -- Historical metrics for trend analysis
+  history = {
+    dpsReceived = {},      -- {time, value}
+    monsterCounts = {},    -- {time, count}
+    threatLevels = {}      -- {time, level}
+  },
+  
+  MAX_HISTORY = 100
+}
+
+-- Collect all metrics from various subsystems
+function MonsterAI.Metrics.collect()
+  local nowt = nowMs()
+  local m = MonsterAI.Metrics.aggregate
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- COLLECT FROM TRACKER
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if MonsterAI.Tracker and MonsterAI.Tracker.stats then
+    m.totalDamageReceived = MonsterAI.Tracker.stats.totalDamageReceived or 0
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- COLLECT FROM TELEMETRY SESSION
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if MonsterAI.Telemetry and MonsterAI.Telemetry.session then
+    local session = MonsterAI.Telemetry.session
+    m.totalKills = session.killCount or 0
+    m.totalDeaths = session.deathCount or 0
+    m.totalDamageDealt = session.totalDamageDealt or 0
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- COLLECT FROM REALTIME METRICS
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if MonsterAI.RealTime and MonsterAI.RealTime.metrics then
+    local rt = MonsterAI.RealTime.metrics
+    m.predictionsCorrect = rt.predictionsCorrect or 0
+    m.predictionsMissed = rt.predictionsMissed or 0
+    m.predictionsTotal = m.predictionsCorrect + m.predictionsMissed
+    
+    if m.predictionsTotal > 0 then
+      m.predictionAccuracy = m.predictionsCorrect / m.predictionsTotal
+    end
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- COLLECT FROM COMBAT FEEDBACK
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if MonsterAI.CombatFeedback and MonsterAI.CombatFeedback.getAccuracy then
+    local acc = MonsterAI.CombatFeedback.getAccuracy()
+    if acc then
+      m.combatFeedbackAccuracy = acc.overall or 0
+    end
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- COLLECT FROM SPELL TRACKER
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if MonsterAI.SpellTracker and MonsterAI.SpellTracker.getStats then
+    local st = MonsterAI.SpellTracker.getStats()
+    m.totalSpellsObserved = st.totalSpellsCast or 0
+    m.spellsPerMinute = st.spellsPerMinute or 0
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- COLLECT FROM VOLUME ADAPTATION
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if MonsterAI.VolumeAdaptation and MonsterAI.VolumeAdaptation.getStats then
+    local va = MonsterAI.VolumeAdaptation.getStats()
+    m.currentVolume = va.currentVolume
+    m.avgMonsterCount = va.metrics and va.metrics.avgMonsterCount or 0
+    m.cpuCyclesSaved = va.metrics and va.metrics.adaptationsSaved or 0
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- UPDATE HISTORY
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local history = MonsterAI.Metrics.history
+  
+  -- Track monster count over time
+  local monsterCount = 0
+  if MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+    for _ in pairs(MonsterAI.Tracker.monsters) do
+      monsterCount = monsterCount + 1
+    end
+  end
+  table.insert(history.monsterCounts, {time = nowt, value = monsterCount})
+  while #history.monsterCounts > MonsterAI.Metrics.MAX_HISTORY do
+    table.remove(history.monsterCounts, 1)
+  end
+  
+  -- Track threat level over time
+  local threatLevel = 0
+  if MonsterAI.RealTime and MonsterAI.RealTime.threatCache then
+    threatLevel = MonsterAI.RealTime.threatCache.totalThreat or 0
+  end
+  table.insert(history.threatLevels, {time = nowt, value = threatLevel})
+  while #history.threatLevels > MonsterAI.Metrics.MAX_HISTORY do
+    table.remove(history.threatLevels, 1)
+  end
+  
+  m.lastUpdateTime = nowt
+  m.updateCyclesTotal = (m.updateCyclesTotal or 0) + 1
+  
+  return m
+end
+
+-- Get comprehensive metrics summary
+function MonsterAI.Metrics.getSummary()
+  MonsterAI.Metrics.collect()
+  
+  local m = MonsterAI.Metrics.aggregate
+  local sessionDurationSec = math.max(1, (nowMs() - m.sessionStartTime) / 1000)
+  
+  return {
+    -- Combat summary
+    combat = {
+      dpsReceived = m.totalDamageReceived / sessionDurationSec,
+      damageReceived = m.totalDamageReceived,
+      kills = m.totalKills,
+      deaths = m.totalDeaths,
+      kdr = m.totalDeaths > 0 and (m.totalKills / m.totalDeaths) or m.totalKills
+    },
+    
+    -- Prediction summary
+    prediction = {
+      accuracy = m.predictionAccuracy,
+      total = m.predictionsTotal,
+      correct = m.predictionsCorrect,
+      missed = m.predictionsMissed
+    },
+    
+    -- Spell summary
+    spells = {
+      total = m.totalSpellsObserved or 0,
+      perMinute = m.spellsPerMinute or 0
+    },
+    
+    -- Volume/performance summary
+    performance = {
+      volume = m.currentVolume or "normal",
+      avgMonsters = m.avgMonsterCount or 0,
+      cyclesSaved = m.cpuCyclesSaved or 0,
+      updateCycles = m.updateCyclesTotal or 0
+    },
+    
+    -- Session info
+    session = {
+      durationSeconds = sessionDurationSec,
+      startTime = m.sessionStartTime
+    }
+  }
 end
 
 -- Aggregate type statistics from tracked monsters
@@ -2099,6 +2521,406 @@ function MonsterAI.CombatFeedback.reset()
 end
 
 -- ============================================================================
+-- SPELL TRACKER MODULE (NEW in v2.2)
+-- Comprehensive spell/missile tracking for monster attack analysis
+-- Tracks: projectile types, cast frequency, target patterns, cooldowns
+-- ============================================================================
+
+MonsterAI.SpellTracker = MonsterAI.SpellTracker or {
+  -- Global spell statistics
+  stats = {
+    totalSpellsCast = 0,
+    totalMissiles = 0,
+    uniqueMissileTypes = 0,
+    spellsPerMinute = 0,
+    lastMinuteSpells = 0,
+    sessionStartTime = nowMs()
+  },
+  
+  -- Per-monster spell data: monsterId -> spellData
+  monsterSpells = {},
+  
+  -- Spell type catalog: missileTypeId -> spellInfo
+  spellCatalog = {},
+  
+  -- Recent spells for reactivity analysis (bounded FIFO)
+  recentSpells = {},
+  MAX_RECENT_SPELLS = 100,
+  
+  -- Per-monster-type aggregated spell stats: monsterName -> aggregatedStats
+  typeSpellStats = {}
+}
+
+-- Initialize spell tracking for a monster
+function MonsterAI.SpellTracker.initMonster(creature)
+  if not creature then return nil end
+  local id = creature:getId()
+  if not id then return nil end
+  
+  if MonsterAI.SpellTracker.monsterSpells[id] then
+    return MonsterAI.SpellTracker.monsterSpells[id]
+  end
+  
+  local data = {
+    id = id,
+    name = creature:getName() or "Unknown",
+    
+    -- Spell counts and timing
+    totalSpellsCast = 0,
+    missilesByType = {},       -- missileTypeId -> count
+    spellHistory = {},          -- { time, missileType, targetPos, sourcePos }
+    
+    -- EWMA-based spell cooldown tracking
+    ewmaSpellCooldown = nil,
+    ewmaSpellVariance = 0,
+    lastSpellTime = 0,
+    spellCooldownSamples = {},
+    
+    -- Spell pattern detection
+    spellSequence = {},         -- Recent spell types in order
+    detectedPatterns = {},      -- Recognized spell patterns/rotations
+    
+    -- Target analysis
+    spellsAtPlayer = 0,
+    spellsAtOthers = 0,
+    avgSpellRange = 0,
+    
+    -- Spell frequency (casts per minute)
+    castFrequency = 0,
+    frequencyWindow = {},       -- { time } for rolling window
+    
+    -- First and last observed spell
+    firstSpellTime = nil,
+    lastObservedMissileType = nil
+  }
+  
+  MonsterAI.SpellTracker.monsterSpells[id] = data
+  return data
+end
+
+-- Record a spell cast by a monster
+function MonsterAI.SpellTracker.recordSpell(creatureId, missileType, sourcePos, targetPos)
+  local nowt = nowMs()
+  local data = MonsterAI.SpellTracker.monsterSpells[creatureId]
+  
+  if not data then
+    -- Try to find creature and init
+    local trackerData = MonsterAI.Tracker.monsters[creatureId]
+    if trackerData and trackerData.creature then
+      data = MonsterAI.SpellTracker.initMonster(trackerData.creature)
+    end
+  end
+  
+  if not data then return end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- UPDATE SPELL COUNTS
+  -- ═══════════════════════════════════════════════════════════════════════════
+  data.totalSpellsCast = (data.totalSpellsCast or 0) + 1
+  data.missilesByType[missileType] = (data.missilesByType[missileType] or 0) + 1
+  
+  -- Track first spell time
+  if not data.firstSpellTime then
+    data.firstSpellTime = nowt
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- SPELL COOLDOWN TRACKING (EWMA)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if data.lastSpellTime > 0 then
+    local interval = nowt - data.lastSpellTime
+    
+    -- Ignore very short intervals (likely multi-projectile spells)
+    if interval > 200 then
+      -- Record sample
+      table.insert(data.spellCooldownSamples, interval)
+      while #data.spellCooldownSamples > 30 do
+        table.remove(data.spellCooldownSamples, 1)
+      end
+      
+      -- Update EWMA
+      local alpha = CONST.EWMA.ALPHA_DEFAULT
+      if data.ewmaSpellCooldown then
+        local diff = interval - data.ewmaSpellCooldown
+        data.ewmaSpellCooldown = data.ewmaSpellCooldown * (1 - alpha) + interval * alpha
+        data.ewmaSpellVariance = data.ewmaSpellVariance * (1 - alpha) + (diff * diff) * alpha
+      else
+        data.ewmaSpellCooldown = interval
+        data.ewmaSpellVariance = 0
+      end
+    end
+  end
+  data.lastSpellTime = nowt
+  data.lastObservedMissileType = missileType
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- SPELL HISTORY & SEQUENCE TRACKING
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local spellRecord = {
+    time = nowt,
+    missileType = missileType,
+    sourcePos = sourcePos,
+    targetPos = targetPos
+  }
+  table.insert(data.spellHistory, spellRecord)
+  while #data.spellHistory > 50 do
+    table.remove(data.spellHistory, 1)
+  end
+  
+  -- Track spell sequence for pattern detection
+  table.insert(data.spellSequence, missileType)
+  while #data.spellSequence > 10 do
+    table.remove(data.spellSequence, 1)
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- TARGET ANALYSIS
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local playerPos = player and player:getPosition()
+  if playerPos and targetPos then
+    local distToPlayer = math.max(
+      math.abs(targetPos.x - playerPos.x),
+      math.abs(targetPos.y - playerPos.y)
+    )
+    
+    if distToPlayer <= 1 then
+      data.spellsAtPlayer = (data.spellsAtPlayer or 0) + 1
+    else
+      data.spellsAtOthers = (data.spellsAtOthers or 0) + 1
+    end
+    
+    -- Update average spell range
+    if sourcePos then
+      local range = math.max(
+        math.abs(targetPos.x - sourcePos.x),
+        math.abs(targetPos.y - sourcePos.y)
+      )
+      data.avgSpellRange = (data.avgSpellRange or 0) * 0.8 + range * 0.2
+    end
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- FREQUENCY TRACKING (rolling 60-second window)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  data.frequencyWindow = data.frequencyWindow or {}
+  table.insert(data.frequencyWindow, nowt)
+  
+  -- Prune entries older than 60 seconds
+  while #data.frequencyWindow > 0 and (nowt - data.frequencyWindow[1]) > 60000 do
+    table.remove(data.frequencyWindow, 1)
+  end
+  data.castFrequency = #data.frequencyWindow
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- GLOBAL STATS UPDATE
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local stats = MonsterAI.SpellTracker.stats
+  stats.totalSpellsCast = (stats.totalSpellsCast or 0) + 1
+  stats.totalMissiles = (stats.totalMissiles or 0) + 1
+  
+  -- Add to recent spells
+  table.insert(MonsterAI.SpellTracker.recentSpells, {
+    time = nowt,
+    monsterId = creatureId,
+    monsterName = data.name,
+    missileType = missileType,
+    targetedPlayer = playerPos and targetPos and 
+      math.max(math.abs(targetPos.x - playerPos.x), math.abs(targetPos.y - playerPos.y)) <= 1
+  })
+  while #MonsterAI.SpellTracker.recentSpells > MonsterAI.SpellTracker.MAX_RECENT_SPELLS do
+    table.remove(MonsterAI.SpellTracker.recentSpells, 1)
+  end
+  
+  -- Update spell catalog
+  if not MonsterAI.SpellTracker.spellCatalog[missileType] then
+    MonsterAI.SpellTracker.spellCatalog[missileType] = {
+      typeId = missileType,
+      firstSeen = nowt,
+      totalCasts = 0,
+      monstersSeen = {}
+    }
+    stats.uniqueMissileTypes = (stats.uniqueMissileTypes or 0) + 1
+  end
+  local catalogEntry = MonsterAI.SpellTracker.spellCatalog[missileType]
+  catalogEntry.totalCasts = catalogEntry.totalCasts + 1
+  catalogEntry.lastSeen = nowt
+  catalogEntry.monstersSeen[data.name:lower()] = true
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- UPDATE TYPE AGGREGATED STATS
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local nameLower = data.name:lower()
+  local typeStats = MonsterAI.SpellTracker.typeSpellStats[nameLower]
+  if not typeStats then
+    typeStats = {
+      name = data.name,
+      totalSpells = 0,
+      avgCooldown = nil,
+      missileTypes = {},
+      spellsPerEncounter = 0,
+      encounterCount = 0
+    }
+    MonsterAI.SpellTracker.typeSpellStats[nameLower] = typeStats
+  end
+  typeStats.totalSpells = typeStats.totalSpells + 1
+  typeStats.missileTypes[missileType] = (typeStats.missileTypes[missileType] or 0) + 1
+  
+  -- Update avg cooldown
+  if data.ewmaSpellCooldown then
+    if typeStats.avgCooldown then
+      typeStats.avgCooldown = typeStats.avgCooldown * 0.9 + data.ewmaSpellCooldown * 0.1
+    else
+      typeStats.avgCooldown = data.ewmaSpellCooldown
+    end
+  end
+  
+  -- Emit spell cast event
+  if EventBus and EventBus.emit then
+    EventBus.emit("monsterai:spell_cast", {
+      creatureId = creatureId,
+      monsterName = data.name,
+      missileType = missileType,
+      totalSpells = data.totalSpellsCast,
+      cooldown = data.ewmaSpellCooldown,
+      frequency = data.castFrequency,
+      targetedPlayer = playerPos and targetPos and 
+        math.max(math.abs(targetPos.x - playerPos.x), math.abs(targetPos.y - playerPos.y)) <= 1
+    })
+  end
+end
+
+-- Get spell statistics for a specific monster
+function MonsterAI.SpellTracker.getMonsterSpells(creatureId)
+  return MonsterAI.SpellTracker.monsterSpells[creatureId]
+end
+
+-- Get aggregated spell stats for a monster type
+function MonsterAI.SpellTracker.getTypeSpellStats(monsterName)
+  if not monsterName then return nil end
+  return MonsterAI.SpellTracker.typeSpellStats[monsterName:lower()]
+end
+
+-- Get global spell statistics
+function MonsterAI.SpellTracker.getStats()
+  local stats = MonsterAI.SpellTracker.stats
+  local nowt = nowMs()
+  
+  -- Calculate spells per minute
+  local sessionDurationMin = math.max(1, (nowt - stats.sessionStartTime) / 60000)
+  stats.spellsPerMinute = stats.totalSpellsCast / sessionDurationMin
+  
+  -- Count spells in last minute
+  local recentCount = 0
+  for i = #MonsterAI.SpellTracker.recentSpells, 1, -1 do
+    if (nowt - MonsterAI.SpellTracker.recentSpells[i].time) <= 60000 then
+      recentCount = recentCount + 1
+    else
+      break
+    end
+  end
+  stats.lastMinuteSpells = recentCount
+  
+  return stats
+end
+
+-- Analyze spell reactivity (how fast monsters cast in response to player)
+function MonsterAI.SpellTracker.analyzeReactivity()
+  local result = {
+    avgTimeBetweenSpells = 0,
+    spellBurstDetected = false,
+    highVolumeThreshold = false,
+    lowVolumeThreshold = false,
+    activeMonsterCount = 0,
+    totalRecentSpells = #MonsterAI.SpellTracker.recentSpells
+  }
+  
+  local nowt = nowMs()
+  local recentWindow = 10000 -- 10 seconds
+  local recentSpells = {}
+  
+  for i = #MonsterAI.SpellTracker.recentSpells, 1, -1 do
+    local spell = MonsterAI.SpellTracker.recentSpells[i]
+    if (nowt - spell.time) <= recentWindow then
+      table.insert(recentSpells, spell)
+    else
+      break
+    end
+  end
+  
+  result.totalRecentSpells = #recentSpells
+  
+  -- Count unique monsters casting
+  local uniqueMonsters = {}
+  for _, spell in ipairs(recentSpells) do
+    uniqueMonsters[spell.monsterId] = true
+  end
+  for _ in pairs(uniqueMonsters) do
+    result.activeMonsterCount = result.activeMonsterCount + 1
+  end
+  
+  -- Calculate average time between spells
+  if #recentSpells >= 2 then
+    local totalInterval = 0
+    for i = 2, #recentSpells do
+      totalInterval = totalInterval + (recentSpells[i-1].time - recentSpells[i].time)
+    end
+    result.avgTimeBetweenSpells = totalInterval / (#recentSpells - 1)
+  end
+  
+  -- Detect spell burst (many spells in short time)
+  if #recentSpells >= 5 and result.avgTimeBetweenSpells < 500 then
+    result.spellBurstDetected = true
+  end
+  
+  -- Volume thresholds
+  result.highVolumeThreshold = result.activeMonsterCount >= 4 or #recentSpells >= 15
+  result.lowVolumeThreshold = result.activeMonsterCount <= 1 and #recentSpells <= 3
+  
+  return result
+end
+
+-- Clean up spell data for removed monsters
+function MonsterAI.SpellTracker.cleanup(creatureId)
+  if creatureId then
+    local data = MonsterAI.SpellTracker.monsterSpells[creatureId]
+    if data then
+      -- Update type stats before removing
+      local nameLower = data.name:lower()
+      local typeStats = MonsterAI.SpellTracker.typeSpellStats[nameLower]
+      if typeStats then
+        typeStats.encounterCount = (typeStats.encounterCount or 0) + 1
+        if data.totalSpellsCast > 0 then
+          local prevAvg = typeStats.spellsPerEncounter or 0
+          typeStats.spellsPerEncounter = prevAvg * 0.8 + data.totalSpellsCast * 0.2
+        end
+      end
+    end
+    MonsterAI.SpellTracker.monsterSpells[creatureId] = nil
+  end
+end
+
+-- Get summary for UI display
+function MonsterAI.SpellTracker.getSummary()
+  local stats = MonsterAI.SpellTracker.getStats()
+  local reactivity = MonsterAI.SpellTracker.analyzeReactivity()
+  
+  return {
+    stats = stats,
+    reactivity = reactivity,
+    catalogSize = 0, -- Will be calculated below
+    trackedMonsters = 0
+  }, function(summary)
+    for _ in pairs(MonsterAI.SpellTracker.spellCatalog) do
+      summary.catalogSize = summary.catalogSize + 1
+    end
+    for _ in pairs(MonsterAI.SpellTracker.monsterSpells) do
+      summary.trackedMonsters = summary.trackedMonsters + 1
+    end
+    return summary
+  end
+end
+
+-- ============================================================================
 -- EVENTBUS INTEGRATION (Enhanced for Real-Time Threat Detection)
 -- ============================================================================
 
@@ -2279,12 +3101,34 @@ if EventBus then
   end, 30)
 
   -- Projectile/missile events: observe attacks originating from monsters
+  -- Enhanced with SpellTracker integration (v2.2)
   if onMissle then
     onMissle(function(missle)
-      local src = missle and missle:getSource()
-      -- Guard method calls in case src does not implement expected API
-      if not src or type(src.isCreature) ~= 'function' or not src:isCreature() then return end
-      if type(src.isMonster) ~= 'function' or not src:isMonster() then return end
+      if not missle then return end
+      
+      local srcPos = missle:getSource()
+      local destPos = missle:getDestination()
+      
+      if not srcPos or not destPos then return end
+      
+      -- Get the source tile and find creatures on it
+      local srcTile = g_map and g_map.getTile and g_map.getTile(srcPos)
+      if not srcTile then return end
+      
+      local creatures = srcTile:getCreatures()
+      if not creatures or #creatures == 0 then return end
+      
+      -- Find a monster on the source tile (the caster)
+      local src = nil
+      for i = 1, #creatures do
+        local c = creatures[i]
+        if c and c:isMonster() and not c:isDead() then
+          src = c
+          break
+        end
+      end
+      
+      if not src then return end
 
       local id = src:getId()
       if not id then return end
@@ -2294,7 +3138,17 @@ if EventBus then
       if not data then return end
 
       local nowt = nowMs()
-      -- Record the attack timestamp
+      
+      -- ═══════════════════════════════════════════════════════════════════════
+      -- SPELL TRACKER INTEGRATION (NEW in v2.2)
+      -- Record spell with missile type for detailed analytics
+      -- ═══════════════════════════════════════════════════════════════════════
+      local missileType = missle.getId and missle:getId() or 0
+      if MonsterAI.SpellTracker and MonsterAI.SpellTracker.recordSpell then
+        MonsterAI.SpellTracker.recordSpell(id, missileType, srcPos, destPos)
+      end
+      
+      -- Record the attack timestamp for wave prediction
       if data.lastWaveTime and data.lastWaveTime > 0 then
         local observed = nowt - data.lastWaveTime
         if observed > 100 then -- ignore micro-events
@@ -2319,7 +3173,49 @@ if EventBus then
       -- Bound the sample history to avoid unbounded growth
       if #data.observedWaveAttacks > 100 then table.remove(data.observedWaveAttacks, 1) end
       data.missileCount = (data.missileCount or 0) + 1
+      
+      -- Emit wave observed event for other modules
+      if EventBus and EventBus.emit then
+        EventBus.emit("monsterai:wave_observed", src, {
+          missileType = missileType,
+          sourcePos = srcPos,
+          destPos = destPos,
+          totalMissiles = data.missileCount
+        })
+      end
     end)
+  end
+  
+  -- Also listen for effect:missile EventBus event for additional coverage
+  if EventBus then
+    EventBus.on("effect:missile", function(missile)
+      if not missile then return end
+      
+      local srcPos = missile.getSource and missile:getSource()
+      local destPos = missile.getDestination and missile:getDestination()
+      
+      if not srcPos then return end
+      
+      -- Get source tile
+      local srcTile = g_map and g_map.getTile and g_map.getTile(srcPos)
+      if not srcTile then return end
+      
+      local creatures = srcTile.getCreatures and srcTile:getCreatures()
+      if not creatures then return end
+      
+      -- Find monster caster
+      for i = 1, #creatures do
+        local c = creatures[i]
+        if c and c:isMonster() and not c:isDead() then
+          local id = c:getId()
+          if id and MonsterAI.SpellTracker then
+            local missileType = missile.getId and missile:getId() or 0
+            MonsterAI.SpellTracker.recordSpell(id, missileType, srcPos, destPos)
+          end
+          break
+        end
+      end
+    end, 25)
   end
   
   -- ═══════════════════════════════════════════════════════════════════════════
@@ -2606,6 +3502,14 @@ function MonsterAI.updateAll()
     return
   end
 
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- VOLUME ADAPTATION UPDATE (NEW in v2.2)
+  -- Adjust processing parameters based on monster count
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if MonsterAI.VolumeAdaptation and MonsterAI.VolumeAdaptation.update then
+    pcall(function() MonsterAI.VolumeAdaptation.update() end)
+  end
+
   -- OPTIMIZED: Prefer MonsterCache for O(1) cached creature lookup
   -- This avoids expensive g_map.getSpectatorsInRange calls
   local creatures = nil
@@ -2628,15 +3532,42 @@ function MonsterAI.updateAll()
   end
 
   local processed = 0
+  local skipped = 0
+  local vaParams = MonsterAI.VolumeAdaptation and MonsterAI.VolumeAdaptation.getParams() or {}
+  local maxPerCycle = vaParams.maxTrackedPerCycle or 10
+  
   for i = 1, #creatures do
     local creature = creatures[i]
     if creature and creature:isMonster() and not creature:isDead() then
-      local ok, err = pcall(function() MonsterAI.Tracker.update(creature) end)
-      if not ok then
-        -- Tracker.update failed (silent)
+      local id = creature:getId()
+      
+      -- Volume-based load balancing: in high load, skip some monsters per cycle
+      local shouldProcess = true
+      if MonsterAI.VolumeAdaptation and MonsterAI.VolumeAdaptation.shouldProcessMonster and id then
+        shouldProcess = MonsterAI.VolumeAdaptation.shouldProcessMonster(id)
       end
-      processed = processed + 1
+      
+      -- Also respect max per cycle limit
+      if processed >= maxPerCycle then
+        shouldProcess = false
+      end
+      
+      if shouldProcess then
+        local ok, err = pcall(function() MonsterAI.Tracker.update(creature) end)
+        if not ok then
+          -- Tracker.update failed (silent)
+        end
+        processed = processed + 1
+      else
+        skipped = skipped + 1
+      end
     end
+  end
+  
+  -- Track adaptation metrics
+  if MonsterAI.VolumeAdaptation and skipped > 0 then
+    MonsterAI.VolumeAdaptation.metrics.adaptationsSaved = 
+      (MonsterAI.VolumeAdaptation.metrics.adaptationsSaved or 0) + skipped
   end
 
   -- Update RealTime threat cache and cleanup stale entries
