@@ -20,7 +20,7 @@ modules.game_interface.gameRootPanel.onMouseRelease = function(widget, mousePos,
                 if TargetBot.isOn() then 
                     TargetBot.setOff() 
                 else 
-                    TargetBot.setOn() 
+                    TargetBot.setOn(true, true)  -- force=true for user-initiated toggle
                 end 
             end, TargetBot.isOn() and "ON " or "OFF ")
             menu:display(mousePos)

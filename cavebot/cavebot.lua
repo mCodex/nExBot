@@ -1051,9 +1051,22 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
     return    
   end
 
-  -- Save character's profile preference when profile changes (multi-client support)
-  if enabled and name and name ~= "" and setCharacterProfile then
-    setCharacterProfile("cavebotProfile", name)
+  -- ALWAYS save character's profile preference when config changes (regardless of enabled state)
+  -- This ensures the selected config is persisted even when just switching configs
+  if name and name ~= "" then
+    if setCharacterProfile then
+      setCharacterProfile("cavebotProfile", name)
+    end
+    -- Persist to UnifiedStorage for character isolation
+    if UnifiedStorage and UnifiedStorage.set then
+      UnifiedStorage.set("cavebot.selectedConfig", name)
+      -- Also save the enabled state
+      UnifiedStorage.set("cavebot.enabled", enabled)
+    end
+    -- Emit event for any listeners
+    if EventBus and EventBus.emit then
+      pcall(function() EventBus.emit("cavebot:configChanged", name) end)
+    end
   end
 
   local currentActionIndex = ui.list:getChildIndex(ui.list:getFocusedChild())
@@ -1169,6 +1182,10 @@ CaveBot.setOn = function(val)
   if val == false then  
     return CaveBot.setOff(true)
   end
+  -- Save enabled state to UnifiedStorage
+  if UnifiedStorage and UnifiedStorage.set then
+    UnifiedStorage.set("cavebot.enabled", true)
+  end
   config.setOn()  -- This triggers callback which handles storage
 end
 
@@ -1176,10 +1193,21 @@ CaveBot.setOff = function(val)
   if val == false then  
     return CaveBot.setOn(true)
   end
+  -- Save enabled state to UnifiedStorage
+  if UnifiedStorage and UnifiedStorage.set then
+    UnifiedStorage.set("cavebot.enabled", false)
+  end
   config.setOff()  -- This triggers callback which handles storage
 end
 
 CaveBot.getCurrentProfile = function()
+  -- Check UnifiedStorage first for per-character persistence
+  if UnifiedStorage and UnifiedStorage.get then
+    local stored = UnifiedStorage.get("cavebot.selectedConfig")
+    if stored and stored ~= "" then
+      return stored
+    end
+  end
   return storage._configs.cavebot_configs.selected
 end
 
@@ -1880,9 +1908,17 @@ CaveBot.setCurrentProfile = function(name)
   end
   CaveBot.setOff()
   storage._configs.cavebot_configs.selected = name
+  -- Persist to UnifiedStorage for character isolation
+  if UnifiedStorage and UnifiedStorage.set then
+    UnifiedStorage.set("cavebot.selectedConfig", name)
+  end
   -- Save character's profile preference for multi-client support
   if setCharacterProfile then
     setCharacterProfile("cavebotProfile", name)
+  end
+  -- Emit event for any listeners
+  if EventBus and EventBus.emit then
+    pcall(function() EventBus.emit("cavebot:configChanged", name) end)
   end
   CaveBot.setOn()
 end

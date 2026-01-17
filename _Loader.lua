@@ -257,18 +257,19 @@ loadCategory("features", {
 
 -- 4. Tools and Utilities (Non-critical, can be deferred)
 loadCategory("tools", {
-  "ingame_editor",  -- In-game script editor
-  "Dropper",        -- Item dropper
-  "Containers",     -- Container manager
-  "quiver_manager", -- Quiver management
-  "quiver_label",   -- Quiver labels
-  "tools",          -- Miscellaneous tools
-  "antiRs",         -- Anti-RS protection
-  "depot_withdraw", -- Depot withdrawal
-  "eat_food",       -- Auto eat food
-  "equip",          -- Equipment utilities
-  "exeta",          -- Exeta res handler
-  "outfit_cloner",  -- Outfit cloning via right-click menu
+  "ingame_editor",     -- In-game script editor
+  "Dropper",           -- Item dropper
+  "Containers",        -- Container manager
+  "container_opener",  -- Advanced container opening (BFS graph traversal)
+  "quiver_manager",    -- Quiver management
+  "quiver_label",      -- Quiver labels
+  "tools",             -- Miscellaneous tools
+  "antiRs",            -- Anti-RS protection
+  "depot_withdraw",    -- Depot withdrawal
+  "eat_food",          -- Auto eat food
+  "equip",             -- Equipment utilities
+  "exeta",             -- Exeta res handler
+  "outfit_cloner",     -- Outfit cloning via right-click menu
 })
 
 -- 5. Analytics and UI (Can be loaded last)

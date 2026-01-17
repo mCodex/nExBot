@@ -234,6 +234,17 @@ if EventBus then
     local creaturePos = creature:getPosition()
     if not playerPos or not creaturePos then return end
     
+    -- CRITICAL: Only chase if Chase is enabled in TargetBot UI
+    local config = TargetBot and TargetBot.ActiveMovementConfig
+    if not config or not config.chase then
+      return  -- Chase disabled in UI, do not move towards monster
+    end
+    
+    -- Skip if keepDistance is enabled (use keepDistance logic instead)
+    if config.keepDistance then
+      return
+    end
+    
     local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
     
     -- Only register chase if target is moving away and out of melee range
@@ -1100,14 +1111,70 @@ function MovementCoordinator.Execute.move(decision)
       })
     end
   elseif intent.type == INTENT.CHASE or intent.type == INTENT.FINISH_KILL then
-    -- CHASE/FINISH_KILL: Native chase mode handles this automatically
-    -- When g_game.setChaseMode(1) is set and we're attacking, client chases automatically
-    -- Just ensure chase mode is set and return success
-    if g_game.setChaseMode then
+    -- ═══════════════════════════════════════════════════════════════════════════
+    -- CHASE/FINISH_KILL: Leverage OTClient Native Chase Mode
+    --
+    -- OTClient ChaseModes (from const.h):
+    --   DontChase = 0 (Stand mode - player won't auto-walk)
+    --   ChaseOpponent = 1 (Chase mode - client auto-walks to attacked creature)
+    --
+    -- When chase mode is set to 1 and we're attacking, the client AUTOMATICALLY
+    -- handles pathfinding and walking to the target. We should NOT interfere
+    -- with custom walking unless the native chase fails or is unavailable.
+    -- ═══════════════════════════════════════════════════════════════════════════
+    
+    -- Check if Chase is enabled in TargetBot config
+    local chaseEnabled = TargetBot and TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
+    local keepDistanceEnabled = TargetBot and TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.keepDistance
+    
+    -- Chase is only active if enabled AND keepDistance is disabled
+    local useNativeChase = chaseEnabled and not keepDistanceEnabled
+    
+    if useNativeChase and g_game.setChaseMode then
       g_game.setChaseMode(1) -- ChaseOpponent
+      if TargetCore and TargetCore.Native then
+        TargetCore.Native.lastChaseMode = 1
+      end
+      TargetBot.usingNativeChase = true
+    elseif not useNativeChase then
+      -- Chase disabled or keepDistance enabled - don't set chase mode
+      -- But don't block execution - let other movement systems handle it
+      if g_game.setChaseMode then
+        g_game.setChaseMode(0) -- DontChase
+      end
+      TargetBot.usingNativeChase = false
+      -- For FINISH_KILL, still allow movement via walkTo (low HP chase)
+      if intent.type == INTENT.FINISH_KILL then
+        if TargetBot and TargetBot.walkTo then
+          success = TargetBot.walkTo(targetPos, 10, {
+            ignoreNonPathable = true,
+            precision = 1,
+            allowOnlyVisibleTiles = true
+          })
+        end
+      else
+        -- Regular CHASE intent with chase disabled - skip movement, let attack logic work
+        return true, "chase_disabled_stand"
+      end
     end
-    -- Native chase mode is now active - client handles chasing the attack target
-    success = true
+    
+    -- Check if we're attacking - native chase only works when attacking
+    local isAttacking = g_game.isAttacking and g_game.isAttacking()
+    
+    if isAttacking then
+      -- Native chase mode is active and we're attacking
+      -- The client will handle walking automatically - consider this success
+      success = true
+    else
+      -- Not attacking yet, use custom pathfinding as fallback
+      if TargetBot and TargetBot.walkTo then
+        success = TargetBot.walkTo(targetPos, 10, {
+          ignoreNonPathable = true,
+          precision = 1,
+          allowOnlyVisibleTiles = true
+        })
+      end
+    end
   else
     -- OTCLIENT API: Standard movement with walkability validation
     if TargetBot and TargetBot.walkTo then

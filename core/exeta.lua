@@ -18,8 +18,8 @@ if voc == 1 or voc == 11 then
       EventBus.on("creature:health", function(creature, healthPercent)
         if not exetaLowHpMacro:isOn() then return end
         if healthPercent > 15 then return end 
-        if not CaveBot or CaveBot.isOff() then return end
-        if not TargetBot or TargetBot.isOff() then return end
+        if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
+        if not TargetBot or not TargetBot.isOff or TargetBot.isOff() then return end
         if modules.game_cooldown.isGroupCooldownIconActive(3) then return end
         local cpos = creature and creature.getPosition and creature:getPosition()
         if not cpos then return end
@@ -35,8 +35,8 @@ if voc == 1 or voc == 11 then
       onCreatureHealthPercentChange(function(creature, healthPercent)
         if not exetaLowHpMacro:isOn() then return end
         if healthPercent > 15 then return end 
-        if not CaveBot or CaveBot.isOff() then return end
-        if not TargetBot or TargetBot.isOff() then return end
+        if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
+        if not TargetBot or not TargetBot.isOff or TargetBot.isOff() then return end
         if modules.game_cooldown.isGroupCooldownIconActive(3) then return end
         if creature:getPosition() and getDistanceBetween(pos(),creature:getPosition()) > 1 then return end
         if canCast("exeta res") and now - lastCast > 6000 then
@@ -91,7 +91,7 @@ if voc == 1 or voc == 11 then
 
     local function checkAndCastExeta()
       if not exetaIfPlayerMacro:isOn() then return end
-      if not CaveBot or CaveBot.isOff() then return end
+      if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
       if (now - lastExetaPlayer) < 6000 then return end
       if modules.game_cooldown.isGroupCooldownIconActive(3) then return end
       if not canCast("exeta res") then return end
@@ -219,11 +219,11 @@ if voc == 1 or voc == 11 then
       local function tryExetaAmp(reason)
         if not exetaAmpMacro:isOn() then return false end
         if (now - lastExetaAmp) < 6000 then return false end
-        if not CaveBot or CaveBot.isOff() then return false end
+        if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return false end
         if modules.game_cooldown.isGroupCooldownIconActive(3) then return false end
-        if not canCast("exeta res") then return false end
+        if not canCast("exeta amp res") then return false end
         
-        say("exeta res")
+        say("exeta amp res")
         lastExetaAmp = now
         exetaStats.ampCasts = (exetaStats.ampCasts or 0) + 1
         
@@ -361,9 +361,9 @@ if voc == 1 or voc == 11 then
       macro(500, "ExetaAmpFallback", function()
         if not exetaAmpMacro:isOn() then return end
         if (now - lastExetaAmp) < 6000 then return end
-        if not CaveBot or CaveBot.isOff() then return end
+        if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
         if modules.game_cooldown.isGroupCooldownIconActive(3) then return end
-        if not canCast("exeta res") then return end
+        if not canCast("exeta amp res") then return end
 
         -- Find distant monsters not facing/attacking local player
         local playerPos = player and player:getPosition()
@@ -391,7 +391,7 @@ if voc == 1 or voc == 11 then
         end
 
         if distantNotAttackingMe >= 1 then
-          say("exeta res")
+          say("exeta amp res")
           lastExetaAmp = now
           exetaStats.ampCasts = (exetaStats.ampCasts or 0) + 1
         end

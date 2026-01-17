@@ -245,63 +245,310 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   return true
 end
 
+--[[
+  ═══════════════════════════════════════════════════════════════════════════
+  LOOT CONTAINER FINDER v7.0
+  
+  Improved algorithm using BFS (Breadth-First Search) graph traversal.
+  Properly handles nested and sibling backpacks by using a queue-based approach.
+  
+  Graph Traversal Logic:
+  1. Scan all open containers (roots of the graph)
+  2. For each container, check if it has space
+  3. If full, add all nested containers to the queue
+  4. Process queue: open containers one at a time
+  5. Continue until we find a container with space or queue is empty
+  
+  Integration with ContainerOpener module for advanced opening logic.
+  ═══════════════════════════════════════════════════════════════════════════
+]]
+
+-- BFS Queue for container opening
+local containerOpenQueue = {}
+local containerOpenIndex = 1
+local openedThisCycle = {} -- Track containers opened this cycle by itemId
+local lastQueueProcess = 0
+local QUEUE_COOLDOWN = 200 -- ms between queue processes
+
+-- Helper: Check if container has free space
+local function hasContainerSpace(container)
+  if not container then return false end
+  local ok1, capacity = pcall(function() return container:getCapacity() end)
+  local ok2, count = pcall(function() return container:getItemsCount() end)
+  local ok3, hasPages = pcall(function() return container:hasPages() end)
+  
+  if hasPages then return true end -- Paged containers are always "available"
+  if ok1 and ok2 then
+    return count < capacity
+  end
+  return false
+end
+
+-- Helper: Get container item ID safely
+local function getContainerId(container)
+  if not container then return nil end
+  local ok, containerItem = pcall(function() return container:getContainerItem() end)
+  if not ok or not containerItem then return nil end
+  local okId, id = pcall(function() return containerItem:getId() end)
+  if okId then return id end
+  return nil
+end
+
+-- Helper: Get all container items from a container
+local function getNestedContainerItems(container, filterIds)
+  local items = {}
+  if not container then return items end
+  
+  local ok, containerItems = pcall(function() return container:getItems() end)
+  if not ok or not containerItems then return items end
+  
+  for slot, item in ipairs(containerItems) do
+    local okC, isContainer = pcall(function() return item:isContainer() end)
+    if okC and isContainer then
+      local okId, itemId = pcall(function() return item:getId() end)
+      if okId and itemId then
+        -- Filter by allowed container IDs if provided
+        if not filterIds or filterIds[itemId] then
+          table.insert(items, { item = item, id = itemId, slot = slot })
+        end
+      end
+    end
+  end
+  
+  return items
+end
+
+-- Enqueue container items for opening (BFS enqueue)
+local function enqueueNestedContainers(container, filterIds, depth)
+  local nestedItems = getNestedContainerItems(container, filterIds)
+  for _, entry in ipairs(nestedItems) do
+    -- Create unique key to prevent duplicates
+    local key = string.format("%d_%d", entry.id, depth or 0)
+    if not openedThisCycle[key] then
+      table.insert(containerOpenQueue, {
+        item = entry.item,
+        parent = container,
+        itemId = entry.id,
+        depth = (depth or 0) + 1,
+        key = key,
+      })
+    end
+  end
+end
+
+-- Process the container open queue (BFS step)
+local function processContainerQueue()
+  if #containerOpenQueue == 0 then
+    return false
+  end
+  
+  -- Rate limit queue processing
+  if now - lastQueueProcess < QUEUE_COOLDOWN then
+    return true -- Queue not empty, but cooling down
+  end
+  
+  -- Dequeue first item (BFS order)
+  local entry = table.remove(containerOpenQueue, 1)
+  if not entry or not entry.item then
+    return #containerOpenQueue > 0
+  end
+  
+  -- Check if already opened this cycle
+  if openedThisCycle[entry.key] then
+    return #containerOpenQueue > 0
+  end
+  
+  -- Validate item still exists
+  local ok, itemId = pcall(function() return entry.item:getId() end)
+  if not ok or not itemId then
+    return #containerOpenQueue > 0
+  end
+  
+  -- Open the container
+  lastQueueProcess = now
+  openedThisCycle[entry.key] = true
+  
+  -- ALWAYS OPEN IN NEW WINDOW for better container management
+  -- g_game.open(item) without second parameter opens in new window
+  g_game.open(entry.item)
+  
+  waitTill = now + 300
+  waitingForContainer = itemId
+  
+  return true
+end
+
+-- Reset queue state (call at start of new loot cycle)
+local function resetContainerQueue()
+  containerOpenQueue = {}
+  containerOpenIndex = 1
+  openedThisCycle = {}
+end
+
 TargetBot.Looting.getLootContainers = function(containers)
   local lootContainers = {}
   local openedContainersById = {}
-  local toOpen = nil
+  local fullContainers = {} -- Containers that are full and need nested opening
+  
+  -- ═══════════════════════════════════════════════════════════════════════
+  -- PHASE 1: Scan all open containers for ones with space
+  -- ═══════════════════════════════════════════════════════════════════════
   for index, container in pairs(containers) do
-    openedContainersById[container:getContainerItem():getId()] = 1
-    if containersById[container:getContainerItem():getId()] and not container.lootContainer then
-      if container:getItemsCount() < container:getCapacity() or container:hasPages() then
-        table.insert(lootContainers, container)
-      else -- it's full, open next container if possible
-        for slot, item in ipairs(container:getItems()) do
-          if item:isContainer() and containersById[item:getId()] then
-            toOpen = {item, container}
-            break
+    local containerId = getContainerId(container)
+    if containerId then
+      openedContainersById[containerId] = true
+      
+      -- Check if this is a loot container
+      if containersById[containerId] and not container.lootContainer then
+        if hasContainerSpace(container) then
+          table.insert(lootContainers, container)
+        else
+          -- Container is full, track for nested opening
+          table.insert(fullContainers, container)
+        end
+      end
+    end
+  end
+  
+  -- If we found containers with space, return them
+  if #lootContainers > 0 then
+    resetContainerQueue() -- Clear queue since we have space
+    return lootContainers
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════
+  -- PHASE 2: No space found - BFS traverse nested containers
+  -- ═══════════════════════════════════════════════════════════════════════
+  
+  -- First, check if queue is still processing
+  if #containerOpenQueue > 0 then
+    processContainerQueue()
+    return lootContainers
+  end
+  
+  -- Queue is empty, build new queue from full containers
+  resetContainerQueue()
+  
+  -- Add all nested containers from full loot containers to queue
+  for _, container in ipairs(fullContainers) do
+    enqueueNestedContainers(container, containersById, 0)
+  end
+  
+  -- If we found nested containers to open, start processing
+  if #containerOpenQueue > 0 then
+    processContainerQueue()
+    return lootContainers
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════
+  -- PHASE 3: Check ALL open containers for nested loot containers (aggressive scan)
+  -- Also check intermediate containers that may contain loot containers
+  -- ═══════════════════════════════════════════════════════════════════════
+  for index, container in pairs(containers) do
+    local containerId = getContainerId(container)
+    if containerId and not container.lootContainer then
+      -- First, look for loot containers inside
+      enqueueNestedContainers(container, containersById, 0)
+      
+      -- Also check if any container inside might have loot containers (go deeper)
+      local nestedItems = getNestedContainerItems(container, nil) -- nil = no filter, get ALL containers
+      for _, entry in ipairs(nestedItems) do
+        -- If this nested container is NOT a loot container, it might contain one
+        if not containersById[entry.id] then
+          local key = string.format("any_%d_%d", entry.id, 0)
+          if not openedThisCycle[key] then
+            table.insert(containerOpenQueue, {
+              item = entry.item,
+              parent = container,
+              itemId = entry.id,
+              depth = 1,
+              key = key,
+            })
           end
         end
       end
     end
   end
-  if not lootContainers[1] then
-    if toOpen then
-      g_game.open(toOpen[1], toOpen[2])
-      waitTill = now + 500 -- wait 0.5s
+  
+  if #containerOpenQueue > 0 then
+    processContainerQueue()
+    return lootContainers
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════
+  -- PHASE 4: Check ALL inventory slots for closed loot containers
+  -- Includes: back, left hand, right hand (quiver!), ammo slot
+  -- ═══════════════════════════════════════════════════════════════════════
+  local inventorySlots = {
+    InventorySlotBack,   -- Backpack
+    InventorySlotLeft,   -- Left hand
+    InventorySlotRight,  -- Right hand (QUIVER is usually here!)
+    InventorySlotAmmo,   -- Ammo slot
+  }
+  
+  -- First try specific slots, then fallback to all slots
+  for _, slot in ipairs(inventorySlots) do
+    local item = getInventoryItem(slot)
+    if item then
+      local okC, isContainer = pcall(function() return item:isContainer() end)
+      if okC and isContainer then
+        local okId, itemId = pcall(function() return item:getId() end)
+        if okId and itemId and containersById[itemId] and not openedContainersById[itemId] then
+          -- Found a closed loot container in inventory
+          g_game.open(item)
+          waitTill = now + 400
+          waitingForContainer = itemId
+          openedContainersById[itemId] = true
+          return lootContainers
+        end
+      end
+    end
+  end
+  
+  -- Fallback: scan ALL slots
+  for slot = InventorySlotFirst, InventorySlotLast do
+    local item = getInventoryItem(slot)
+    if item then
+      local okC, isContainer = pcall(function() return item:isContainer() end)
+      if okC and isContainer then
+        local okId, itemId = pcall(function() return item:getId() end)
+        if okId and itemId and containersById[itemId] and not openedContainersById[itemId] then
+          -- Found a closed loot container in inventory
+          g_game.open(item)
+          waitTill = now + 400
+          waitingForContainer = itemId
+          openedContainersById[itemId] = true
+          return lootContainers
+        end
+      end
+    end
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════
+  -- PHASE 5: Use ContainerOpener module if available (advanced opening)
+  -- ═══════════════════════════════════════════════════════════════════════
+  if ContainerOpener and ContainerOpener.ensureLootContainerSpace then
+    local containerIdList = {}
+    for id, _ in pairs(containersById) do
+      table.insert(containerIdList, id)
+    end
+    
+    if ContainerOpener.ensureLootContainerSpace(containerIdList) then
+      waitTill = now + 300
       return lootContainers
     end
-    -- check containers one more time, maybe there's any loot container
-    for index, container in pairs(containers) do
-      if not containersById[container:getContainerItem():getId()] and not container.lootContainer then
-        for slot, item in ipairs(container:getItems()) do
-          if item:isContainer() and containersById[item:getId()] then
-            g_game.open(item)
-            waitTill = now + 500 -- wait 0.5s
-            return lootContainers
-          end
-        end
-      end
-    end
-    -- can't find any lootContainer, let's check slots, maybe there's one
-    for slot = InventorySlotFirst, InventorySlotLast do
-      local item = getInventoryItem(slot)
-      if item and item:isContainer() and not openedContainersById[item:getId()] then
-        -- container which is not opened yet, let's open it
-        g_game.open(item)
-        waitTill = now + 500 -- wait 0.5s
-        return lootContainers
-      end
-    end
   end
+  
   return lootContainers
 end
 
 TargetBot.Looting.lootContainer = function(lootContainers, container)
   -- loot items
-  local nextContainer = nil
+  local nestedContainers = {} -- Track all nested containers for BFS
   for i, item in ipairs(container:getItems()) do
     if item:isContainer() and not itemsById[item:getId()] then
-      nextContainer = item
+      -- Add to nested containers list instead of just tracking one
+      table.insert(nestedContainers, item)
     elseif itemsById[item:getId()] or ((ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn() and not item:isContainer()) then
       item.lootTries = (item.lootTries or 0) + 1
       if item.lootTries < 5 then -- if can't be looted within 0.5s then skip it
@@ -329,21 +576,36 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
     end
   end
 
-  -- no more items to loot, open next container
-  if nextContainer then
+  -- no more items to loot, open next nested container (BFS: first in queue)
+  if #nestedContainers > 0 then
+    local nextContainer = nestedContainers[1]
     nextContainer.lootTries = (nextContainer.lootTries or 0) + 1
-    if nextContainer.lootTries < 2 then -- max 0.6s to open it
+    if nextContainer.lootTries < 3 then -- Increased from 2 for more reliability
       g_game.open(nextContainer, container)
-      waitTill = now + 300 -- give it 0.3s to open
+      waitTill = now + 250 -- Reduced from 300ms for faster opening
       waitingForContainer = nextContainer:getId()
       return
+    end
+    
+    -- First container failed, try next ones
+    for i = 2, #nestedContainers do
+      local altContainer = nestedContainers[i]
+      altContainer.lootTries = (altContainer.lootTries or 0) + 1
+      if altContainer.lootTries < 3 then
+        g_game.open(altContainer, container)
+        waitTill = now + 250
+        waitingForContainer = altContainer:getId()
+        return
+      end
     end
   end
   
   -- looting finished, remove container from list
   container.lootContainer = false
   g_game.close(container)
-  table.remove(TargetBot.Looting.list, storage.extras.lootLast and #TargetBot.Looting.list or 1) 
+  -- Get extras from UnifiedStorage or fallback to storage.extras
+  local extras = (UnifiedStorage and UnifiedStorage.get("extras")) or storage.extras or {}
+  table.remove(TargetBot.Looting.list, extras.lootLast and #TargetBot.Looting.list or 1) 
 end
 
 onTextMessage(function(mode, text)

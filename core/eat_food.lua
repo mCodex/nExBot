@@ -106,9 +106,42 @@ local State = {
   lastEatFood = 0,
   lastCorpseCheck = 0,
   recentKills = {},        -- { pos, timestamp } of recently killed monsters
+  openedCorpses = {},      -- { ["x,y,z"] = timestamp } of already opened corpses
   corpseContainerOpen = false,
   waitingForCorpse = nil,
+  lastEat = 0,             -- Last time we ate food
 }
+
+-- Helper to create position key for tracking
+local function posKey(pos)
+  if not pos then return nil end
+  return string.format("%d,%d,%d", pos.x or 0, pos.y or 0, pos.z or 0)
+end
+
+-- Check if corpse at position was already opened
+local function wasCorpseOpened(pos)
+  local key = posKey(pos)
+  if not key then return true end  -- If no valid pos, consider it opened
+  return State.openedCorpses[key] ~= nil
+end
+
+-- Mark corpse as opened
+local function markCorpseOpened(pos)
+  local key = posKey(pos)
+  if not key then return end
+  State.openedCorpses[key] = now or 0
+end
+
+-- Cleanup old opened corpse entries (older than 30 seconds)
+local function cleanupOpenedCorpses()
+  local nowMs = now or 0
+  local OPENED_CORPSE_EXPIRY = 30000  -- 30 seconds
+  for key, timestamp in pairs(State.openedCorpses) do
+    if (nowMs - timestamp) > OPENED_CORPSE_EXPIRY then
+      State.openedCorpses[key] = nil
+    end
+  end
+end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- HELPER FUNCTIONS (DRY: Reusable utilities)
@@ -118,6 +151,11 @@ local State = {
 local function getRegenTime()
   if player and player.getRegenerationTime then
     local ok, regen = pcall(function() return player:getRegenerationTime() end)
+    if ok then return regen end
+  end
+  -- Fallback to player:regeneration()
+  if player and player.regeneration then
+    local ok, regen = pcall(function() return player:regeneration() end)
     if ok then return regen end
   end
   -- Fallback to global function if available
@@ -279,10 +317,7 @@ local function setupRegenEventListener()
     -- Only trigger eating when regen drops below threshold
     if newRegen < CONFIG.EAT_FOOD_THRESHOLD and oldRegen >= CONFIG.EAT_FOOD_THRESHOLD then
       schedule(50, function()
-        local food = findFoodInContainers()
-        if food then
-          g_game.use(food)
-        end
+        tryEat()
       end)
     end
   end, 50)
@@ -325,6 +360,11 @@ end
 
 -- Simple single eat (for macro polling)
 local function tryEat()
+  -- Cooldown to prevent spam eating
+  if now - State.lastEat < 10000 then  -- 10 seconds cooldown
+    return false
+  end
+  
   local regenTime = getRegenTime()
   if regenTime >= CONFIG.EAT_FOOD_THRESHOLD then
     return false
@@ -333,12 +373,14 @@ local function tryEat()
   local food = findFoodInContainers()
   if food then
     g_game.use(food)
+    State.lastEat = now
     return true
   end
   
   local foodId = findFoodById()
   if foodId and use then
     use(foodId)
+    State.lastEat = now
     return true
   end
   
@@ -355,23 +397,24 @@ local eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function()
   end
   
   -- Eat food
-  eatUntilFull()
+  tryEat()
 end)
 
 -- Add tooltip
 if eatFoodMacro and eatFoodMacro.button then
   eatFoodMacro.button:setTooltip(
-    "Automatically eats food until full (60+ sec regen).\n" ..
-    "Runs every 500ms and eats multiple pieces.\n" ..
+    "Automatically eats food when regeneration < 40 seconds.\n" ..
+    "Runs every 500ms and eats one piece at a time.\n" ..
     "Searches all open containers for supported food items.\n" ..
-    "Uses EventBus for optimized performance."
+    "Uses EventBus for optimized performance.\n" ..
+    "10 second cooldown between eats to prevent spam."
   )
 end
 
 -- Register with BotDB for persistence, eat immediately on enable
 if BotDB and BotDB.registerMacro then
   BotDB.registerMacro(eatFoodMacro, "eatFood", function()
-    schedule(100, eatUntilFull)
+    schedule(100, tryEat)
   end)
 end
 
@@ -383,86 +426,109 @@ UI.Separator()
 -- ═══════════════════════════════════════════════════════════════════════════
 -- EAT FROM CORPSES FEATURE
 -- Opens recently killed monster corpses and eats food from them
+-- Uses monster:killed event which fires when monster health reaches 0%
+-- This is more reliable than monster:disappear as it captures the exact death position
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Track monster deaths using EventBus
+-- Track monster deaths using EventBus monster:killed event
 local function setupCorpseTracking()
-  if not EventBus then return end
+  if not EventBus then 
+    warn("[EatFood] EventBus not available, corpse tracking disabled")
+    return 
+  end
   
-  -- Listen for monster deaths
-  EventBus.on("monster:disappear", function(creature)
-    if not creature then return end
-    
-    local creaturePos = nil
-    local ok, p = pcall(function() return creature:getPosition() end)
-    if ok and p then
-      creaturePos = p
-    end
-    
+  -- PRIMARY: Listen for monster:killed event (health dropped to 0%)
+  -- This is the most reliable way to track kills - fires at exact moment of death
+  EventBus.on("monster:killed", function(creature, creaturePos, creatureName)
     if not creaturePos then return end
+    
+    local killPos = { x = creaturePos.x, y = creaturePos.y, z = creaturePos.z }
+    
+    -- Skip if this position was already opened
+    if wasCorpseOpened(killPos) then
+      return
+    end
     
     -- Record the kill position
     table.insert(State.recentKills, {
-      pos = creaturePos,
+      pos = killPos,
       timestamp = now or 0,
-      name = creature:getName() or "Unknown"
+      name = creatureName or "Unknown"
     })
     
     -- Limit queue size
     while #State.recentKills > 20 do
       table.remove(State.recentKills, 1)
     end
-  end, 30)
+  end, 20)  -- Priority 20
   
-  -- Also listen for creature disappear events via native callback
-  if onCreatureDisappear then
-    onCreatureDisappear(function(creature)
-      if not creature or not creature:isMonster() then return end
-      
-      local creaturePos = nil
-      local ok, p = pcall(function() return creature:getPosition() end)
-      if ok and p then
-        creaturePos = p
-      end
-      
-      if not creaturePos then return end
-      
-      -- Record the kill position
-      table.insert(State.recentKills, {
-        pos = creaturePos,
-        timestamp = now or 0,
-        name = creature:getName() or "Unknown"
-      })
-      
-      -- Limit queue size
-      while #State.recentKills > 20 do
-        table.remove(State.recentKills, 1)
-      end
-    end)
-  end
+  -- FALLBACK: Also check EventBus.getKilledMonsters() for direct access
+  -- This provides redundancy if event subscription fails
 end
 
--- Find corpse on tile
+-- Find corpse on tile - improved detection
 local function findCorpseOnTile(tilePos)
-  if not g_map or not g_map.getTile then return nil end
+  if not g_map then return nil end
   
-  local tile = g_map.getTile(tilePos)
+  local tile = nil
+  if g_map.getTile then
+    tile = g_map.getTile(tilePos)
+  end
   if not tile then return nil end
   
-  -- Get top thing and check if it's a container (corpse)
-  local thing = tile.getTopUseThing and tile:getTopUseThing() or tile:getTopThing()
+  -- Method 1: Get top usable thing (most reliable for corpses)
+  local thing = nil
+  if tile.getTopUseThing then
+    local ok, t = pcall(function() return tile:getTopUseThing() end)
+    if ok then thing = t end
+  end
+  
+  -- Method 2: Fallback to top thing
+  if not thing and tile.getTopThing then
+    local ok, t = pcall(function() return tile:getTopThing() end)
+    if ok then thing = t end
+  end
+  
   if not thing then return nil end
   
-  local id = thing.getId and thing:getId() or 0
+  local id = 0
+  if thing.getId then
+    local ok, i = pcall(function() return thing:getId() end)
+    if ok then id = i end
+  end
   
-  -- Check if it's a corpse/container
-  if thing.isContainer and thing:isContainer() then
-    return thing
+  -- Check if it's a container (corpses are containers)
+  if thing.isContainer then
+    local ok, isContainer = pcall(function() return thing:isContainer() end)
+    if ok and isContainer then
+      return thing
+    end
   end
   
   -- Check against known corpse IDs
   if CORPSE_LOOKUP[id] then
     return thing
+  end
+  
+  -- Method 3: Check all items on the tile for containers/corpses
+  if tile.getItems then
+    local ok, items = pcall(function() return tile:getItems() end)
+    if ok and items then
+      for _, item in pairs(items) do
+        if item and item.isContainer then
+          local okC, isC = pcall(function() return item:isContainer() end)
+          if okC and isC then
+            return item
+          end
+        end
+        if item and item.getId then
+          local okId, itemId = pcall(function() return item:getId() end)
+          if okId and CORPSE_LOOKUP[itemId] then
+            return item
+          end
+        end
+      end
+    end
   end
   
   return nil
@@ -513,8 +579,41 @@ local function tryEatFromCorpse()
     return false  -- Don't need food
   end
   
-  -- Cleanup old kills
+  -- Cleanup old kills and opened corpses
   cleanupRecentKills()
+  cleanupOpenedCorpses()
+  
+  -- Also merge in kills from EventBus.getKilledMonsters() as fallback
+  if EventBus and EventBus.getKilledMonsters then
+    local ebKills = EventBus.getKilledMonsters()
+    if ebKills then
+      for id, data in pairs(ebKills) do
+        -- Skip if this corpse was already opened
+        if data.pos and wasCorpseOpened(data.pos) then
+          -- Already handled this corpse, skip
+        else
+          -- Check if this kill is already in our list (by position)
+          local found = false
+          for _, k in ipairs(State.recentKills) do
+            if k.pos and data.pos and 
+               k.pos.x == data.pos.x and 
+               k.pos.y == data.pos.y and 
+               k.pos.z == data.pos.z then
+              found = true
+              break
+            end
+          end
+          if not found and data.pos then
+            table.insert(State.recentKills, {
+              pos = data.pos,
+              timestamp = data.timestamp,
+              name = data.name
+            })
+          end
+        end
+      end
+    end
+  end
   
   if #State.recentKills == 0 then
     return false  -- No recent kills
@@ -526,7 +625,15 @@ local function tryEatFromCorpse()
     local ok, p = pcall(function() return player:getPosition() end)
     if ok then playerPos = p end
   elseif pos then
-    playerPos = pos()
+    local ok, p = pcall(pos)
+    if ok then playerPos = p end
+  end
+  if not playerPos and g_game and g_game.getLocalPlayer then
+    local ok, lp = pcall(g_game.getLocalPlayer)
+    if ok and lp then
+      local okP, p = pcall(function() return lp:getPosition() end)
+      if okP then playerPos = p end
+    end
   end
   
   if not playerPos then return false end
@@ -535,8 +642,10 @@ local function tryEatFromCorpse()
   for i = #State.recentKills, 1, -1 do
     local kill = State.recentKills[i]
     if kill and kill.pos then
-      -- Check if on same floor
-      if kill.pos.z == playerPos.z then
+      -- Skip if this corpse was already opened
+      if wasCorpseOpened(kill.pos) then
+        table.remove(State.recentKills, i)
+      elseif kill.pos.z == playerPos.z then
         -- Check distance
         local dist = math.max(
           math.abs(kill.pos.x - playerPos.x),
@@ -544,21 +653,32 @@ local function tryEatFromCorpse()
         )
         
         if dist <= CONFIG.CORPSE_SCAN_RANGE then
+          -- Create position object for tile lookup
+          local tilePos = { x = kill.pos.x, y = kill.pos.y, z = kill.pos.z }
+          
           -- Try to find corpse on this tile
-          local corpse = findCorpseOnTile(kill.pos)
+          local corpse = findCorpseOnTile(tilePos)
           if corpse then
+            -- Mark this corpse as opened BEFORE opening it
+            markCorpseOpened(tilePos)
+            
             -- Open the corpse
             State.corpseContainerOpen = true
-            State.waitingForCorpse = kill.pos
+            State.waitingForCorpse = tilePos
             
-            pcall(function() g_game.open(corpse) end)
+            local openOk = pcall(function() g_game.open(corpse) end)
+            if not openOk then
+              -- Try alternative method
+              pcall(function() g_game.use(corpse) end)
+            end
             
             -- Remove from queue
             table.remove(State.recentKills, i)
             
             return true
           else
-            -- Corpse gone, remove from queue
+            -- Corpse gone or not found, mark as opened anyway and remove
+            markCorpseOpened(kill.pos)
             table.remove(State.recentKills, i)
           end
         end

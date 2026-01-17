@@ -108,6 +108,50 @@ local PATH_PARAMS = {
 }
 
 -- ============================================================================
+-- STATE MANAGEMENT
+-- ============================================================================
+
+-- Clear all EventTargeting state (called when TargetBot is disabled)
+function EventTargeting.clearState()
+  -- Clear target state
+  targetState.currentTarget = nil
+  targetState.currentTargetId = nil
+  targetState.lastAcquisition = 0
+  targetState.pendingTargets = {}
+  targetState.combatActive = false
+  targetState.lastCombatCheck = 0
+  
+  -- Clear creature cache
+  creatureCache.entries = {}
+  creatureCache.count = 0
+  creatureCache.accessOrder = {}
+  creatureCache.lastCleanup = 0
+  
+  -- Clear live monster state
+  liveMonsterState.count = 0
+  liveMonsterState.creatures = {}
+  liveMonsterState.lastUpdate = 0
+  
+  if EventTargeting.DEBUG then
+    print("[EventTargeting] State cleared")
+  end
+end
+
+-- Check if targeting is allowed (respects explicit disable state)
+local function canAttack()
+  -- Use TargetBot.canAttack() if available (preferred)
+  if TargetBot and TargetBot.canAttack then
+    return TargetBot.canAttack()
+  end
+  -- Fallback: check isOn and explicitlyDisabled separately
+  if TargetBot then
+    if TargetBot.explicitlyDisabled then return false end
+    if TargetBot.isOn and not TargetBot.isOn() then return false end
+  end
+  return true
+end
+
+-- ============================================================================
 -- LIVE MONSTER COUNTING (Direct API - Most Accurate)
 -- Uses g_map.getSpectators/getSpectatorsInRange directly for accurate counting
 -- This bypasses the cache which may have stale data
@@ -571,6 +615,11 @@ end
 
 -- Process a newly appeared creature (improved with safe API calls)
 function EventTargeting.TargetAcquisition.processCreature(creature)
+  -- CRITICAL: Do not process any creature if TargetBot is disabled
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+    return
+  end
+  
   if not creature then return end
   if not EventTargeting.TargetAcquisition.isValidTarget(creature) then return end
   
@@ -650,7 +699,7 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
   
   -- If no current target, acquire immediately
   if not currentTarget or currentTarget:isDead() then
-    EventTargeting.TargetAcquisition.acquireTarget(creature, path)
+    EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority)
     return
   end
   
@@ -693,7 +742,7 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
         print("[EventTargeting] Priority switch: " .. name .. " (priority=" .. newConfigPriority .. 
               ") > " .. currentName .. " (priority=" .. currentConfigPriority .. ")")
       end
-      EventTargeting.TargetAcquisition.acquireTarget(creature, path)
+      EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority)
       return
     end
   end
@@ -715,12 +764,12 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
   -- Use lower threshold since config priority is already checked above
   local priorityThreshold = 50  -- Within same config priority tier
   if priority > currentPriority + priorityThreshold then
-    EventTargeting.TargetAcquisition.acquireTarget(creature, path)
+    EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority)
   end
 end
 
 -- Acquire a new target
-function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
+function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priorityHint)
   -- CRITICAL: Do not attack if TargetBot is disabled
   if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
     return
@@ -756,23 +805,125 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
     end
   end
   
-  -- Attack the creature
-  if g_game and g_game.attack then
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- SET CHASE MODE BEFORE ATTACKING (Critical for OTClient)
+  -- 
+  -- OTClient ChaseModes (from const.h):
+  --   DontChase = 0 (Stand mode)
+  --   ChaseOpponent = 1 (Client auto-walks to attacked creature)
+  --
+  -- When chase mode is set BEFORE attacking, OTClient handles pathfinding
+  -- and walking automatically. This is the native chase behavior.
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- Get chase setting from the CREATURE's specific config (not global ActiveMovementConfig)
+  local chaseEnabled = false
+  local keepDistanceEnabled = false
+  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+    local configs = TargetBot.Creature.getConfigs(creature)
+    if configs and #configs > 0 then
+      -- Use first matching config (highest priority)
+      local cfg = configs[1]
+      chaseEnabled = cfg.chase == true
+      keepDistanceEnabled = cfg.keepDistance == true
+      
+      -- Update global ActiveMovementConfig for other modules
+      if TargetBot.ActiveMovementConfig then
+        TargetBot.ActiveMovementConfig.chase = chaseEnabled
+        TargetBot.ActiveMovementConfig.keepDistance = keepDistanceEnabled
+        TargetBot.ActiveMovementConfig.keepDistanceRange = cfg.keepDistanceRange or 4
+      end
+    end
+  end
+  
+  -- Chase is only active if enabled AND keepDistance is disabled (they're mutually exclusive)
+  local useNativeChase = chaseEnabled and not keepDistanceEnabled
+  
+  if useNativeChase and g_game.setChaseMode then
+    local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+    if currentMode ~= 1 then
+      g_game.setChaseMode(1)  -- ChaseOpponent
+      -- Update cache for other modules
+      if TargetCore and TargetCore.Native then
+        TargetCore.Native.lastChaseMode = 1
+      end
+      if TargetBot then
+        TargetBot.usingNativeChase = true
+      end
+    end
+  elseif not useNativeChase and g_game.setChaseMode then
+    -- Chase is disabled OR keepDistance is enabled - use Stand mode
+    local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+    if currentMode ~= 0 then
+      g_game.setChaseMode(0)  -- DontChase / Stand
+      if TargetBot then
+        TargetBot.usingNativeChase = false
+      end
+    end
+  end
+  
+  -- Scenario gate: avoid illegal switches (anti-zigzag)
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
+    local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if currentTarget and not currentTarget:isDead() then
+      local okNewId, newId = pcall(function() return creature:getId() end)
+      local okCurId, curId = pcall(function() return currentTarget:getId() end)
+      if okNewId and okCurId and newId ~= curId then
+        local newPriority = priorityHint
+        if newPriority == nil then
+          newPriority = EventTargeting.TargetAcquisition.calculatePriority(creature, path)
+        end
+        local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+        local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, newPriority or 0, okHp and hp or nil)
+        if not allowed then
+          return
+        end
+      end
+    end
+  end
+
+  -- Attack the creature (rate-limited to prevent spam)
+  -- CRITICAL: Final check that TargetBot is enabled and not explicitly disabled
+  if not canAttack() then
+    if EventTargeting.DEBUG then
+      print("[EventTargeting] Attack blocked - TargetBot disabled")
+    end
+    return
+  end
+
+  local sent = false
+  if TargetBot and TargetBot.requestAttack then
+    sent = TargetBot.requestAttack(creature, "event_acquire")
+  elseif g_game and g_game.attack then
     g_game.attack(creature)
+    sent = true
+  end
+
+  -- If attack was throttled and we are not already attacking this creature, bail
+  local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+  local okCurId, curId = pcall(function() return currentAttack and currentAttack:getId() end)
+  if not sent and not (currentAttack and okCurId and curId == id) then
+    return
   end
   
   targetState.currentTarget = creature
   targetState.currentTargetId = id
   targetState.lastAcquisition = now
   targetState.combatActive = true
+
+  -- Update MonsterAI target lock for anti-zigzag stability
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
+    local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+    MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
+  end
   
   -- Emit combat start event
   if EventBus then
     EventBus.emit("targeting/acquired", creature, dist, path)
   end
   
-  -- Register chase intent if not adjacent
+  -- Register chase intent if not adjacent (registerChaseIntent checks config.chase internally)
   if dist > 1 and path and #path > 0 then
+    -- Note: registerChaseIntent will check config.chase and skip if disabled
     EventTargeting.CombatCoordinator.registerChaseIntent(creature, creaturePos, dist)
   end
   
@@ -786,6 +937,12 @@ end
 
 -- Process pending targets (called from macro)
 function EventTargeting.TargetAcquisition.processPending()
+  -- CRITICAL: Do not process if TargetBot is disabled or explicitly turned off
+  if not canAttack() then
+    targetState.pendingTargets = {}  -- Clear queue when disabled
+    return
+  end
+  
   if #targetState.pendingTargets == 0 then return end
   
   -- Find best pending target
@@ -914,6 +1071,17 @@ function EventTargeting.CombatCoordinator.registerChaseIntent(creature, targetPo
     return
   end
   
+  -- CRITICAL: Only chase if Chase is enabled in TargetBot UI
+  local config = TargetBot and TargetBot.ActiveMovementConfig
+  if not config or not config.chase then
+    return  -- Chase disabled in UI, do not move towards monster
+  end
+  
+  -- Also skip if keepDistance is enabled (use keepDistance logic instead)
+  if config.keepDistance then
+    return
+  end
+  
   -- Calculate confidence based on distance and HP
   local confidence = 0.55  -- Base passes CHASE threshold
   if dist <= 2 then confidence = 0.68 end
@@ -978,6 +1146,12 @@ local lastProcessTime = 0
 local pendingCreatures = {}
 
 local function debouncedProcess()
+  -- CRITICAL: Do not process if TargetBot is disabled
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+    pendingCreatures = {}  -- Clear queue when disabled
+    return
+  end
+  
   if now - lastProcessTime < CONST.DEBOUNCE_INTERVAL then
     return
   end
@@ -1000,6 +1174,11 @@ if EventBus then
   -- IMPROVED: Instant high-priority monster detection and target switching
   EventBus.on("monster:appear", function(creature)
     if not creature then return end
+    
+    -- CRITICAL: Do not process if TargetBot is disabled
+    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+      return
+    end
     
     -- Quick distance check before queuing
     updatePlayerRef()
@@ -1110,6 +1289,11 @@ if EventBus then
   
   -- Monster health changed - update priority
   EventBus.on("monster:health", function(creature, percent, oldPercent)
+    -- Skip processing if TargetBot is disabled
+    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+      return
+    end
+    
     if not creature then return end
     local id = creature:getId()
     local entry = creatureCache.entries[id]
@@ -1435,9 +1619,10 @@ if onCreatureAppear then
     if not creature:isMonster() then return end
     if creature:isDead() then return end
     
-    -- Skip if TargetBot is off
-    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
-      return
+    -- CRITICAL: Skip if TargetBot is off OR explicitly disabled by user
+    if TargetBot then
+      if TargetBot.explicitlyDisabled then return end
+      if TargetBot.isOn and not TargetBot.isOn() then return end
     end
     
     -- Quick validation
@@ -1482,15 +1667,48 @@ if onCreatureAppear then
           
           -- INSTANT SWITCH for higher priority monster!
           if newConfigPriority > currentConfigPriority then
+            -- CRITICAL: Double-check TargetBot is enabled and not explicitly disabled
+            if not canAttack() then
+              return
+            end
+            
             if EventTargeting.DEBUG then
               local name = creature:getName() or "Unknown"
               print("[EventTargeting] NATIVE: High priority monster appeared: " .. name .. 
                     " (priority=" .. newConfigPriority .. ")")
             end
             
-            -- Immediate attack!
-            if g_game and g_game.attack then
+            -- Scenario gate: avoid illegal switches (anti-zigzag)
+            if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
+              local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+              if currentTarget and not currentTarget:isDead() then
+                local okNewId, newId = pcall(function() return creature:getId() end)
+                local okCurId, curId = pcall(function() return currentTarget:getId() end)
+                if okNewId and okCurId and newId ~= curId then
+                  local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+                  local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, (newConfigPriority or 0) * 100, okHp and hp or nil)
+                  if not allowed then
+                    return
+                  end
+                end
+              end
+            end
+
+            -- Immediate attack (rate-limited to prevent spam)
+            local sent = false
+            if TargetBot and TargetBot.requestAttack then
+              sent = TargetBot.requestAttack(creature, "event_high_priority")
+            elseif g_game and g_game.attack then
               g_game.attack(creature)
+              sent = true
+            end
+          
+            -- If attack was throttled and we are not already attacking this creature, bail
+            local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+            local okCurId2, curId2 = pcall(function() return currentAttack and currentAttack:getId() end)
+            local okNewId2, newId2 = pcall(function() return creature:getId() end)
+            if not sent and not (currentAttack and okCurId2 and okNewId2 and curId2 == newId2) then
+              return
             end
             
             -- Also update our state
@@ -1500,6 +1718,12 @@ if onCreatureAppear then
               targetState.currentTargetId = id
               targetState.lastAcquisition = now or (os.time() * 1000)
               targetState.combatActive = true
+            end
+
+            -- Update MonsterAI target lock for anti-zigzag stability
+            if okId and id and MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
+              local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+              MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
             end
             
             -- Emit event for other systems
