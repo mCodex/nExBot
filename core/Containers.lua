@@ -970,10 +970,13 @@ local ContainerOpener = {
     settleDelayMs = 12000,
     rescanDelays = { 200, 500, 900, 1400 },
     rescanTimers = {},
+    stableEmptyCount = 0,
+    stableRequired = 3,
+    pageState = {},
   
   -- Retry tracking
   currentAttempt = 0,
-  maxAttempts = 3,
+    maxAttempts = 5,
   
   -- Depth tracking
   maxDepth = 15,
@@ -1001,8 +1004,63 @@ function ContainerOpener.reset()
     ContainerOpener.lastFullScanTime = 0
     ContainerOpener.autoOpenActiveUntil = 0
     ContainerOpener.rescanTimers = {}
+    ContainerOpener.stableEmptyCount = 0
+    ContainerOpener.pageState = {}
   ContainerOpener.currentAttempt = 0
   ContainerOpener.onComplete = nil
+end
+
+-- Handle paged containers to discover items on other pages
+function ContainerOpener.ensurePagedContainers(container)
+    if not container or not container.hasPages or not container:hasPages() then return end
+    if not container.getSize or not container.getCapacity or not container.getFirstIndex then return end
+
+    local size = container:getSize()
+    local capacity = container:getCapacity()
+    if capacity <= 0 or size <= capacity then return end
+
+    local containerId = container:getId()
+    local firstIndex = container:getFirstIndex()
+    local pageIndex = math.floor(firstIndex / capacity)
+    local totalPages = math.ceil(size / capacity)
+
+    local state = ContainerOpener.pageState[containerId]
+    if not state then
+        state = { visited = {}, pending = false }
+        ContainerOpener.pageState[containerId] = state
+    end
+
+    state.visited[pageIndex] = true
+
+    if state.pending then return end
+
+    -- Find next unvisited page
+    local nextPage = nil
+    for i = 0, totalPages - 1 do
+        if not state.visited[i] then
+            nextPage = i
+            break
+        end
+    end
+
+    if nextPage == nil then return end
+
+    state.pending = true
+    local nextFirstIndex = nextPage * capacity
+    schedule(200, function()
+        g_game.seekInContainer(containerId, nextFirstIndex)
+        schedule(200, function()
+            state.pending = false
+            local c = g_game.getContainer(containerId)
+            if c then
+                ContainerOpener.scanContainer(c)
+                ContainerOpener.markDirty(c)
+            end
+            if ContainerOpener.isProcessing then
+                schedule(50, ContainerOpener.processNext)
+            end
+        end)
+    end)
 end
 
 -- Schedule delayed rescans for a container to catch late-loaded items
@@ -1091,7 +1149,7 @@ function ContainerOpener.queueItem(item, parentContainerId, slotIndex, slotId, f
     if slotIndex == nil then
         slotIndex = slotId + 1
     end
-    local parentKey = parentContainerId or parentSig or "unknown"
+    local parentKey = parentSig or parentContainerId or "unknown"
     local slotKey = makeSlotKey(parentKey, slotId)
     local itemSig = getItemSignature(item)
     local lastOpened = ContainerOpener.openedItemSigs[itemSig]
@@ -1164,6 +1222,11 @@ function ContainerOpener.scanContainer(container)
             end
     end
   end
+
+    -- If container has pages, ensure all pages are visited to find nested containers
+    if ContainerOpener.isProcessing or getNow() < ContainerOpener.autoOpenActiveUntil then
+        ContainerOpener.ensurePagedContainers(container)
+    end
   
   return foundCount
 end
@@ -1204,13 +1267,20 @@ function ContainerOpener.processNext()
   
     -- Check if queue is empty
     if #ContainerOpener.queue == 0 then
-        if getNow() < ContainerOpener.autoOpenActiveUntil then
-            schedule(200, ContainerOpener.processNext)
+        -- Force a full scan to catch late container items
+        ContainerOpener.scanAllContainers()
+        if #ContainerOpener.queue == 0 then
+            ContainerOpener.stableEmptyCount = ContainerOpener.stableEmptyCount + 1
+            if getNow() < ContainerOpener.autoOpenActiveUntil or ContainerOpener.stableEmptyCount < ContainerOpener.stableRequired then
+                schedule(200, ContainerOpener.processNext)
+                return
+            end
+            -- All done
+            ContainerOpener.finish()
             return
         end
-        -- All done
-        ContainerOpener.finish()
-        return
+        -- New items found after scan; reset stability
+        ContainerOpener.stableEmptyCount = 0
     end
   
   -- Get next entry
@@ -1404,7 +1474,9 @@ function ContainerOpener.onContainerOpened(container)
   ContainerOpener.scanContainer(container)
     ContainerOpener.markDirty(container)
     ContainerOpener.scheduleRescan(container:getId())
+    ContainerOpener.ensurePagedContainers(container)
     ContainerOpener.autoOpenActiveUntil = math.max(ContainerOpener.autoOpenActiveUntil, getNow() + 2000)
+    ContainerOpener.stableEmptyCount = 0
   
   -- Trigger processing immediately
   schedule(50, ContainerOpener.processNext)
@@ -1919,6 +1991,9 @@ onContainerClose(function(container)
             end
             if ContainerOpener.containerIdBySig and ContainerOpener.containerIdBySig[sig] == container:getId() then
                 ContainerOpener.containerIdBySig[sig] = nil
+            end
+            if ContainerOpener.pageState then
+                ContainerOpener.pageState[container:getId()] = nil
             end
         end
     end
