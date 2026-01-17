@@ -699,7 +699,7 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
   
   -- If no current target, acquire immediately
   if not currentTarget or currentTarget:isDead() then
-    EventTargeting.TargetAcquisition.acquireTarget(creature, path)
+    EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority)
     return
   end
   
@@ -742,7 +742,7 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
         print("[EventTargeting] Priority switch: " .. name .. " (priority=" .. newConfigPriority .. 
               ") > " .. currentName .. " (priority=" .. currentConfigPriority .. ")")
       end
-      EventTargeting.TargetAcquisition.acquireTarget(creature, path)
+      EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority)
       return
     end
   end
@@ -764,12 +764,12 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
   -- Use lower threshold since config priority is already checked above
   local priorityThreshold = 50  -- Within same config priority tier
   if priority > currentPriority + priorityThreshold then
-    EventTargeting.TargetAcquisition.acquireTarget(creature, path)
+    EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority)
   end
 end
 
 -- Acquire a new target
-function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
+function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priorityHint)
   -- CRITICAL: Do not attack if TargetBot is disabled
   if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
     return
@@ -861,7 +861,27 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
     end
   end
   
-  -- Attack the creature
+  -- Scenario gate: avoid illegal switches (anti-zigzag)
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
+    local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if currentTarget and not currentTarget:isDead() then
+      local okNewId, newId = pcall(function() return creature:getId() end)
+      local okCurId, curId = pcall(function() return currentTarget:getId() end)
+      if okNewId and okCurId and newId ~= curId then
+        local newPriority = priorityHint
+        if newPriority == nil then
+          newPriority = EventTargeting.TargetAcquisition.calculatePriority(creature, path)
+        end
+        local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+        local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, newPriority or 0, okHp and hp or nil)
+        if not allowed then
+          return
+        end
+      end
+    end
+  end
+
+  -- Attack the creature (rate-limited to prevent spam)
   -- CRITICAL: Final check that TargetBot is enabled and not explicitly disabled
   if not canAttack() then
     if EventTargeting.DEBUG then
@@ -869,15 +889,32 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
     end
     return
   end
-  
-  if g_game and g_game.attack then
+
+  local sent = false
+  if TargetBot and TargetBot.requestAttack then
+    sent = TargetBot.requestAttack(creature, "event_acquire")
+  elseif g_game and g_game.attack then
     g_game.attack(creature)
+    sent = true
+  end
+
+  -- If attack was throttled and we are not already attacking this creature, bail
+  local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+  local okCurId, curId = pcall(function() return currentAttack and currentAttack:getId() end)
+  if not sent and not (currentAttack and okCurId and curId == id) then
+    return
   end
   
   targetState.currentTarget = creature
   targetState.currentTargetId = id
   targetState.lastAcquisition = now
   targetState.combatActive = true
+
+  -- Update MonsterAI target lock for anti-zigzag stability
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
+    local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+    MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
+  end
   
   -- Emit combat start event
   if EventBus then
@@ -1641,9 +1678,37 @@ if onCreatureAppear then
                     " (priority=" .. newConfigPriority .. ")")
             end
             
-            -- Immediate attack!
-            if g_game and g_game.attack then
+            -- Scenario gate: avoid illegal switches (anti-zigzag)
+            if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
+              local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+              if currentTarget and not currentTarget:isDead() then
+                local okNewId, newId = pcall(function() return creature:getId() end)
+                local okCurId, curId = pcall(function() return currentTarget:getId() end)
+                if okNewId and okCurId and newId ~= curId then
+                  local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+                  local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, (newConfigPriority or 0) * 100, okHp and hp or nil)
+                  if not allowed then
+                    return
+                  end
+                end
+              end
+            end
+
+            -- Immediate attack (rate-limited to prevent spam)
+            local sent = false
+            if TargetBot and TargetBot.requestAttack then
+              sent = TargetBot.requestAttack(creature, "event_high_priority")
+            elseif g_game and g_game.attack then
               g_game.attack(creature)
+              sent = true
+            end
+          
+            -- If attack was throttled and we are not already attacking this creature, bail
+            local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+            local okCurId2, curId2 = pcall(function() return currentAttack and currentAttack:getId() end)
+            local okNewId2, newId2 = pcall(function() return creature:getId() end)
+            if not sent and not (currentAttack and okCurId2 and okNewId2 and curId2 == newId2) then
+              return
             end
             
             -- Also update our state
@@ -1653,6 +1718,12 @@ if onCreatureAppear then
               targetState.currentTargetId = id
               targetState.lastAcquisition = now or (os.time() * 1000)
               targetState.combatActive = true
+            end
+
+            -- Update MonsterAI target lock for anti-zigzag stability
+            if okId and id and MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
+              local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+              MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
             end
             
             -- Emit event for other systems

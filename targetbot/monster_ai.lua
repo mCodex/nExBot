@@ -3950,6 +3950,7 @@ Scenario.state = {
   lastSwitchTime = 0,           -- When we last switched targets
   consecutiveSwitches = 0,      -- Count of rapid switches (zigzag indicator)
   movementHistory = {},         -- Recent movement directions for zigzag detection
+  lastMoveRecord = 0,            -- Last movement record timestamp
   scenarioStartTime = 0,        -- When current scenario started
   avgDangerLevel = 0,           -- Average threat level of nearby monsters
   clusterInfo = nil             -- Monster clustering analysis
@@ -4288,6 +4289,15 @@ function Scenario.recordMovement()
   
   local nowt = nowMs()
   local history = Scenario.state.movementHistory
+  local lastRecord = Scenario.state.lastMoveRecord or 0
+  if (nowt - lastRecord) < 120 then
+    return
+  end
+  -- Avoid recording duplicate positions
+  local lastEntry = history[#history]
+  if lastEntry and lastEntry.x == playerPos.x and lastEntry.y == playerPos.y then
+    return
+  end
   
   -- Add current position
   table.insert(history, {
@@ -4295,6 +4305,7 @@ function Scenario.recordMovement()
     y = playerPos.y,
     time = nowt
   })
+  Scenario.state.lastMoveRecord = nowt
   
   -- Keep only last 10 positions
   while #history > 10 do
@@ -4324,6 +4335,13 @@ function Scenario.isZigzagging()
   
   -- If more than 50% of movements are reversals, we're zigzagging
   return reversals >= (#history - 1) * 0.5
+end
+
+-- Record movement history on player movement (improves zigzag detection accuracy)
+if EventBus then
+  EventBus.on("player:move", function()
+    Scenario.recordMovement()
+  end, 60)
 end
 
 -- ============================================================================

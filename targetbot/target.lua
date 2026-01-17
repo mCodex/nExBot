@@ -70,6 +70,51 @@ local reloginRecovery = {
 TargetBot = TargetBot or {}
 TargetBot.smartPullActive = false  -- When true, CaveBot pauses waypoint walking
 
+-- Centralized attack controller (anti-spam + anti-zigzag switching)
+local AttackController = {
+  lastCommandTime = 0,
+  lastTargetId = nil,
+  lastReason = nil,
+  minInterval = 200,        -- Minimum time between any attack commands
+  sameTargetInterval = 250, -- Minimum time between same-target commands
+  minSwitchInterval = 500   -- Minimum time between target switches
+}
+
+TargetBot.AttackController = AttackController
+
+-- Request a single attack command (rate-limited, anti-spam)
+TargetBot.requestAttack = function(creature, reason, force)
+  if not creature or creature:isDead() then return false end
+  if not g_game or not g_game.attack then return false end
+
+  local nowt = now or (os.time() * 1000)
+  local okId, id = pcall(function() return creature:getId() end)
+  if not okId or not id then return false end
+
+  -- If already attacking this target, avoid spamming
+  local current = g_game.getAttackingCreature and g_game.getAttackingCreature()
+  if current and current == creature and not force then
+    if (nowt - AttackController.lastCommandTime) < AttackController.sameTargetInterval then
+      return false
+    end
+  end
+
+  -- Prevent rapid switching between targets
+  if AttackController.lastTargetId and AttackController.lastTargetId ~= id and not force then
+    if (nowt - AttackController.lastCommandTime) < AttackController.minSwitchInterval then
+      return false
+    end
+  elseif not force and (nowt - AttackController.lastCommandTime) < AttackController.minInterval then
+    return false
+  end
+
+  g_game.attack(creature)
+  AttackController.lastCommandTime = nowt
+  AttackController.lastTargetId = id
+  AttackController.lastReason = reason
+  return true
+end
+
 -- Use TargetBotCore if available (DRY principle)
 local Core = TargetCore or {}
 -- Spectator cache to reduce expensive g_map.getSpectatorsInRange calls
@@ -423,7 +468,9 @@ if onPlayerHealthChange then
                     setStatusRight("Recovering ("..tostring(count)..")")
                   end
                 end
-                if best2 and best2.creature then pcall(function() g_game.attack(best2.creature) end) end
+                if best2 and best2.creature then
+                  pcall(function() TargetBot.requestAttack(best2.creature, "relogin_recovery") end)
+                end
               end
             end
           end
@@ -1890,6 +1937,21 @@ local function recalculateBestTarget()
       end
     end
   end
+
+  -- MonsterAI Scenario integration: prevent illegal switches (anti-zigzag)
+  if currentTargetStillValid and currentTargetParams and bestTarget and bestTarget ~= currentTargetParams then
+    if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
+      local okNewId, newId = pcall(function() return bestTarget.creature and bestTarget.creature:getId() end)
+      local okNewHp, newHp = pcall(function() return bestTarget.creature and bestTarget.creature:getHealthPercent() end)
+      if okNewId and newId then
+        local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, bestTarget.priority or 0, okNewHp and newHp or nil)
+        if not allowed then
+          bestTarget = currentTargetParams
+          bestPriority = currentTargetParams.priority
+        end
+      end
+    end
+  end
   
   CreatureCache.lastFullUpdate = now
   
@@ -2034,7 +2096,7 @@ targetbotMacro = macro(200, function()
       
       if not currentAttack or currentAttack:getId() ~= eventTarget:getId() then
         -- Sync our attack target with EventTargeting's choice
-        pcall(function() g_game.attack(eventTarget) end)
+        pcall(function() TargetBot.requestAttack(eventTarget, "event_sync") end)
       end
       
       -- CRITICAL FIX: Still run creature_attack logic for movement features
@@ -2050,6 +2112,14 @@ targetbotMacro = macro(200, function()
           danger = config.danger or 0,
           priority = config.priority or 1
         }
+        -- Update MonsterAI target lock for anti-zigzag stability
+        if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
+          local okId, id = pcall(function() return eventTarget:getId() end)
+          local okHp, hp = pcall(function() return eventTarget:getHealthPercent() end)
+          if okId and id then
+            MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
+          end
+        end
         -- Run the full attack/walk logic with proper config
         pcall(function() TargetBot.Creature.attack(params, targetCount, false) end)
       end
@@ -2177,6 +2247,15 @@ targetbotMacro = macro(200, function()
     -- IMPROVED: Use live count for accurate status
     local displayCount = liveMonsterCount > 0 and liveMonsterCount or targetCount
     setStatusRight("Killing (" .. tostring(displayCount) .. ")")
+
+    -- Update MonsterAI target lock for anti-zigzag stability
+    if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
+      local okId, id = pcall(function() return bestTarget.creature:getId() end)
+      local okHp, hp = pcall(function() return bestTarget.creature:getHealthPercent() end)
+      if okId and id then
+        MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
+      end
+    end
 
     -- Delegate to unified attack/walk logic from creature_attack
     -- This ensures chase, positioning, avoidance and AttackBot integration run correctly
