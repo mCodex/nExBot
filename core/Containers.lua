@@ -636,7 +636,8 @@ local function refreshContainerList()
                         for slot, item in ipairs(container:getItems()) do
                             if item:isContainer() and item:getId() == entry.itemId then
                                 if ContainerOpener and ContainerOpener.queueItem then
-                                    ContainerOpener.queueItem(item, container:getId(), slot, item.getStackPos and item:getStackPos() or (slot - 1), true, parentSig)
+                                    local resolvedIndex, slotId, absoluteSlotId = getSlotInfo(container, item, slot, nil)
+                                    ContainerOpener.queueItem(item, container:getId(), resolvedIndex, slotId, absoluteSlotId, true, parentSig)
                                 else
                                     g_game.open(item)
                                 end
@@ -1088,6 +1089,17 @@ local function makeSlotKey(containerId, slot)
     return tostring(containerId) .. "_" .. tostring(slot)
 end
 
+local function getSlotInfo(container, item, slotIndex, slotId)
+    local resolvedSlotId = slotId
+    if resolvedSlotId == nil then
+        resolvedSlotId = item and item.getStackPos and item:getStackPos() or (slotIndex and (slotIndex - 1)) or 0
+    end
+    local resolvedSlotIndex = slotIndex or (resolvedSlotId + 1)
+    local firstIndex = (container and container.getFirstIndex and container:getFirstIndex()) or 0
+    local absoluteSlotId = firstIndex + resolvedSlotId
+    return resolvedSlotIndex, resolvedSlotId, absoluteSlotId
+end
+
 local function getNow()
     return now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
 end
@@ -1140,7 +1152,7 @@ function ContainerOpener.scanDirtyContainers()
 end
 
 -- Queue a container item safely (front = true inserts at front)
-function ContainerOpener.queueItem(item, parentContainerId, slotIndex, slotId, front, parentSig)
+function ContainerOpener.queueItem(item, parentContainerId, slotIndex, slotId, absoluteSlotId, front, parentSig)
     if not item or not item:isContainer() then return false end
     local nowMs = getNow()
     if slotId == nil then
@@ -1149,8 +1161,11 @@ function ContainerOpener.queueItem(item, parentContainerId, slotIndex, slotId, f
     if slotIndex == nil then
         slotIndex = slotId + 1
     end
+    if absoluteSlotId == nil then
+        absoluteSlotId = slotId
+    end
     local parentKey = parentSig or parentContainerId or "unknown"
-    local slotKey = makeSlotKey(parentKey, slotId)
+    local slotKey = makeSlotKey(parentKey, absoluteSlotId)
     local itemSig = getItemSignature(item)
     local lastOpened = ContainerOpener.openedItemSigs[itemSig]
     local inFlight = ContainerOpener.inFlightSigs[itemSig]
@@ -1165,6 +1180,7 @@ function ContainerOpener.queueItem(item, parentContainerId, slotIndex, slotId, f
         parentSig = parentSig,
         slotIndex = slotIndex,
         slotId = slotId,
+        absoluteSlotId = absoluteSlotId,
         slotKey = slotKey
     }
     if front then
@@ -1198,8 +1214,8 @@ function ContainerOpener.scanContainer(container)
   
     for slotIndex, item in ipairs(items) do
     if item and item:isContainer() then
-            local slotId = item.getStackPos and item:getStackPos() or (slotIndex - 1)
-            local slotKey = makeSlotKey(containerId, slotId)
+            local resolvedIndex, slotId, absoluteSlotId = getSlotInfo(container, item, slotIndex, nil)
+            local slotKey = makeSlotKey(containerId, absoluteSlotId)
             local itemSig = getItemSignature(item)
       
             -- Update graph
@@ -1207,8 +1223,9 @@ function ContainerOpener.scanContainer(container)
                 itemId = item:getId(),
                 parentContainerId = containerId,
                 parentSig = parentSig,
-                slotIndex = slotIndex,
+                slotIndex = resolvedIndex,
                 slotId = slotId,
+                absoluteSlotId = absoluteSlotId,
                 lastSeen = nowMs
             }
             if parentSig then
@@ -1217,7 +1234,7 @@ function ContainerOpener.scanContainer(container)
             end
 
             -- Skip if already open/in-flight; only queue if slot is new or item changed
-            if ContainerOpener.queueItem(item, containerId, slotIndex, slotId, false, parentSig) then
+            if ContainerOpener.queueItem(item, containerId, resolvedIndex, slotId, absoluteSlotId, false, parentSig) then
                 foundCount = foundCount + 1
             end
     end
@@ -1326,11 +1343,12 @@ function ContainerOpener.processNext()
     for idx, candidate in ipairs(items) do
       if candidate and candidate:isContainer() then
                 local sig = getItemSignature(candidate)
-                local candidateSlotId = candidate.getStackPos and candidate:getStackPos() or (idx - 1)
-                if (entrySig and sig == entrySig) or (entry.slotId ~= nil and candidateSlotId == entry.slotId) then
-                    entry.slotIndex = idx
+                local resolvedIndex, candidateSlotId, absoluteSlotId = getSlotInfo(parentContainer, candidate, idx, nil)
+                if (entrySig and sig == entrySig) or (entry.absoluteSlotId ~= nil and absoluteSlotId == entry.absoluteSlotId) then
+                    entry.slotIndex = resolvedIndex
                     entry.slotId = candidateSlotId
-                    entry.slotKey = makeSlotKey(entry.parentContainerId or entry.parentSig or "unknown", candidateSlotId)
+                    entry.absoluteSlotId = absoluteSlotId
+                    entry.slotKey = makeSlotKey(entry.parentContainerId or entry.parentSig or "unknown", absoluteSlotId)
                     ContainerOpener.queuedSlots[entry.slotKey] = sig
                     item = candidate
                     break
@@ -1343,14 +1361,15 @@ function ContainerOpener.processNext()
     if not item then
         for idx, candidate in ipairs(items) do
             if candidate and candidate:isContainer() then
-                local candidateSlotId = candidate.getStackPos and candidate:getStackPos() or (idx - 1)
-                local candidateKey = makeSlotKey(entry.parentContainerId or entry.parentSig or "unknown", candidateSlotId)
+                local resolvedIndex, candidateSlotId, absoluteSlotId = getSlotInfo(parentContainer, candidate, idx, nil)
+                local candidateKey = makeSlotKey(entry.parentContainerId or entry.parentSig or "unknown", absoluteSlotId)
                 local sig = getItemSignature(candidate)
                 if ContainerOpener.queuedSlots[candidateKey] ~= sig then
                     ContainerOpener.queuedSlots[candidateKey] = sig
                     entry.itemSig = sig
-                    entry.slotIndex = idx
+                    entry.slotIndex = resolvedIndex
                     entry.slotId = candidateSlotId
+                    entry.absoluteSlotId = absoluteSlotId
                     entry.slotKey = candidateKey
                     item = candidate
                     break
@@ -1534,7 +1553,8 @@ onContainerOpen(function(container, previousContainer)
         for slot, item in ipairs(container:getItems()) do
             if item:isContainer() and item:getId() == itemId then
                 if ContainerOpener and ContainerOpener.queueItem then
-                    ContainerOpener.queueItem(item, container:getId(), slot, item.getStackPos and item:getStackPos() or (slot - 1), true, parentSig)
+                    local resolvedIndex, slotId, absoluteSlotId = getSlotInfo(container, item, slot, nil)
+                    ContainerOpener.queueItem(item, container:getId(), resolvedIndex, slotId, absoluteSlotId, true, parentSig)
                 end
             end
         end
@@ -1545,8 +1565,8 @@ end)
 -- ============================================================================
 -- PUBLIC API (using ContainerOpener)
 -- ============================================================================
-local function startContainerBFS()
-    ContainerOpener.start()
+local function startContainerBFS(onComplete)
+    ContainerOpener.start(onComplete)
 end
 
 -- Open main backpack first, then start BFS
@@ -1596,7 +1616,7 @@ local function openAllContainers()
 end
 
 -- Reopen all backpacks from back slot
-function reopenBackpacks()
+function reopenBackpacks(onComplete)
     -- Emit event so other modules know we're closing all containers
     if EventBus and EventBus.emit then
         EventBus.emit("containers:close_all")
@@ -1614,6 +1634,7 @@ function reopenBackpacks()
             g_game.open(bpItem)
         else
             warn("[Container Panel] No backpack in back slot!")
+            if onComplete then onComplete() end
             return
         end
         
@@ -1638,12 +1659,12 @@ function reopenBackpacks()
             for _ in pairs(g_game.getContainers()) do containerCount = containerCount + 1 end
             
             if containerCount > 0 then
-                startContainerBFS()
+                startContainerBFS(onComplete)
             elseif attempts < 12 then
                 schedule(150, waitForMainReopen)
             else
                 -- Fallback
-                startContainerBFS()
+                startContainerBFS(onComplete)
             end
         end
         schedule(150, waitForMainReopen)
@@ -1743,6 +1764,27 @@ end
 
 local lastKnownHealth = 0
 local hasTriggeredThisSession = false
+local autoOpenState = {
+    inProgress = false,
+    lastStart = 0,
+    minInterval = 6000
+}
+
+local function clearAutoOpenState()
+    autoOpenState.inProgress = false
+end
+
+local function triggerAutoOpen()
+    if not config.autoOpenOnLogin then return end
+    if autoOpenState.inProgress then return end
+    local nowMs = getNow()
+    if (nowMs - autoOpenState.lastStart) < autoOpenState.minInterval then return end
+    autoOpenState.inProgress = true
+    autoOpenState.lastStart = nowMs
+    schedule(1500, function()
+        reopenBackpacks(clearAutoOpenState)
+    end)
+end
 
 -- Detect login by watching for health to appear
 onPlayerHealthChange(function(healthPercent)
@@ -1753,11 +1795,7 @@ onPlayerHealthChange(function(healthPercent)
     if lastKnownHealth == 0 and healthPercent > 0 and not hasTriggeredThisSession then
         hasTriggeredThisSession = true
         
-        -- Delay to let game fully load, then close all and reopen
-        schedule(1500, function()
-            -- Use reopenBackpacks which closes all first, then opens from back slot
-            reopenBackpacks()
-        end)
+        triggerAutoOpen()
     end
     
     lastKnownHealth = healthPercent
@@ -1782,10 +1820,7 @@ schedule(1000, function()
     -- Only auto-open if no containers are currently open (avoids surprising behavior during normal play)
     if #g_game.getContainers() == 0 then
         hasTriggeredThisSession = true
-        schedule(1500, function()
-            -- Use reopenBackpacks for clean state
-            reopenBackpacks()
-        end)
+        triggerAutoOpen()
     end
 end)
 
@@ -1944,7 +1979,8 @@ onAddItem(function(container, slot, item, oldItem)
                 local parentSig = parentItem and getItemSignature(parentItem) or nil
                 local slotIndex = (slot or 0) + 1
                 local slotId = slot
-                if ContainerOpener.queueItem(item, parentId, slotIndex, slotId, true, parentSig) then
+                local resolvedIndex, resolvedSlotId, absoluteSlotId = getSlotInfo(container, item, slotIndex, slotId)
+                if ContainerOpener.queueItem(item, parentId, resolvedIndex, resolvedSlotId, absoluteSlotId, true, parentSig) then
                     -- If opener is active, process immediately for realtime behavior
                     if not ContainerOpener.isProcessing then
                         ContainerOpener.isProcessing = true
