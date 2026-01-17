@@ -33,19 +33,22 @@
 ]]
 
 -- Use TargetCore constants if available, otherwise define locally
+-- v2.3: FURTHER INCREASED target stickiness to prevent erratic switching
 local PRIO = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.PRIORITY) or {
-  CRITICAL_HEALTH = 80,
-  VERY_LOW_HEALTH = 55,
-  LOW_HEALTH = 35,
-  WOUNDED = 18,
-  CURRENT_TARGET = 15,
-  CURRENT_WOUNDED = 25,
+  CRITICAL_HEALTH = 100,       -- INCREASED from 80 - always finish critical targets
+  VERY_LOW_HEALTH = 70,        -- INCREASED from 55
+  LOW_HEALTH = 45,             -- INCREASED from 35
+  WOUNDED = 25,                -- INCREASED from 18
+  CURRENT_TARGET = 70,         -- INCREASED from 50 - major stickiness boost
+  CURRENT_WOUNDED = 55,        -- INCREASED from 40 - finish what you started
+  CURRENT_LOW_HP = 80,         -- INCREASED from 60 - Extra bonus when current target is low HP
   ADJACENT = 14,
   CLOSE = 10,
   NEAR = 6,
   MEDIUM = 3,
   CHASE_BONUS = 12,
   AOE_BONUS = 8,
+  SWITCH_PENALTY = 35,         -- NEW: Penalty for switching away from wounded target
 }
 
 local DIST_W = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.DISTANCE_WEIGHTS) or {
@@ -96,10 +99,11 @@ local MONSTER_AI_COOLDOWN_SOON_BONUS = 5    -- NEW: Bonus when cooldown almost d
 local MONSTER_AI_LOW_VARIANCE_BONUS = 4     -- NEW: Bonus for predictable monsters
 local MONSTER_AI_HIGH_VARIANCE_CAUTION = 6  -- NEW: Bonus for unpredictable (stay cautious)
 
--- Scenario-based targeting (NEW in v2.1)
-local SCENARIO_TARGET_LOCK_BONUS = 40       -- NEW: Bonus for currently locked target
-local SCENARIO_FINISH_KILL_BONUS = 60       -- NEW: Bonus for low-health locked target
-local SCENARIO_SWARM_LOW_HEALTH_MULT = 0.5  -- NEW: Multiplier for low-health bonus in swarm
+-- Scenario-based targeting (NEW in v2.1, ENHANCED in v2.3)
+local SCENARIO_TARGET_LOCK_BONUS = 60       -- INCREASED from 40: Bonus for currently locked target
+local SCENARIO_FINISH_KILL_BONUS = 100      -- INCREASED from 60: Bonus for low-health locked target
+local SCENARIO_SWARM_LOW_HEALTH_MULT = 0.6  -- INCREASED from 0.5: Multiplier for low-health bonus in swarm
+local SCENARIO_ZIGZAG_PENALTY = 200         -- NEW: Massive penalty when zigzag detected
 
 -- Diamond arrow pattern for paladin optimization
 local DIAMOND_ARROW_AREA = {
@@ -222,22 +226,69 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   end
   
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- CURRENT TARGET BONUS (Target stickiness)
-  -- Prevents constant target switching, ensures kills complete
+  -- CURRENT TARGET BONUS (Target stickiness) v2.2
+  -- CRITICAL: Prevents constant target switching, ensures kills complete
+  -- Uses exponential scaling to strongly favor finishing current target
   -- ═══════════════════════════════════════════════════════════════════════════
   
   if isCurrentTarget then
+    -- Base stickiness bonus (always applied to current target)
     priority = priority + PRIO.CURRENT_TARGET
     
-    -- Progressive bonus for wounded targets
+    -- EXPONENTIAL scaling for wounded targets - the lower HP, the stronger the lock
+    -- This ensures we ALWAYS finish a wounded target before switching
+    if hp < 70 then
+      priority = priority + 10  -- Slightly damaged
+    end
     if hp < 50 then
-      priority = priority + PRIO.CURRENT_WOUNDED
+      priority = priority + PRIO.CURRENT_WOUNDED  -- Wounded
+    end
+    if hp < 35 then
+      priority = priority + 35  -- Significantly wounded - strong lock
     end
     if hp < 25 then
-      priority = priority + 20  -- Don't switch when target almost dead!
+      priority = priority + 45  -- Almost dead - very strong lock
+    end
+    if hp < 15 then
+      priority = priority + 55  -- Critical HP - nearly unbreakable lock
     end
     if hp < 10 then
-      priority = priority + 15  -- FINISH THIS KILL
+      priority = priority + (PRIO.CURRENT_LOW_HP or 60)  -- FINISH THIS KILL - maximum lock
+    end
+    
+    -- Additional bonus based on how long we've been attacking this target
+    -- (tracked via MonsterAI if available)
+    if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+      local creatureId = creature:getId()
+      local trackerData = MonsterAI.Tracker.monsters[creatureId]
+      if trackerData and trackerData.attackStartTime then
+        local attackDuration = (now or os.time() * 1000) - trackerData.attackStartTime
+        -- The longer we attack, the more committed we are (caps at +30)
+        local durationBonus = math.min(30, math.floor(attackDuration / 1000) * 5)
+        priority = priority + durationBonus
+      end
+    end
+  else
+    -- NOT current target - apply penalty for switching
+    -- This makes switching harder, especially when we have a wounded target
+    local currentTarget = g_game.getAttackingCreature()
+    if currentTarget and not currentTarget:isDead() then
+      local currentHP = currentTarget:getHealthPercent()
+      if currentHP < 70 then
+        -- We're attacking a wounded target - significant penalty for considering others
+        -- v2.3: Enhanced penalty scaling to prevent leaving monsters behind
+        local switchPenalty = PRIO.SWITCH_PENALTY or 35
+        if currentHP < 50 then
+          switchPenalty = switchPenalty + 25  -- Total ~60 penalty
+        end
+        if currentHP < 30 then
+          switchPenalty = switchPenalty + 40  -- Total ~100 penalty
+        end
+        if currentHP < 15 then
+          switchPenalty = switchPenalty + 60  -- Total ~160 penalty - almost impossible to switch
+        end
+        priority = priority - switchPenalty
+      end
     end
   end
   
@@ -673,13 +724,84 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   end
   
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- SCENARIO-AWARE TARGETING (NEW in v2.1)
+  -- SCENARIO-AWARE TARGETING v2.2
   -- Prevents erratic target switching and zigzag movement
+  -- Now includes LOCAL FALLBACK when MonsterAI.Scenario is not available
   -- ═══════════════════════════════════════════════════════════════════════════
+  
+  -- v2.2: Local target lock state (fallback when MonsterAI.Scenario is unavailable)
+  if not TargetBot.LocalTargetLock then
+    TargetBot.LocalTargetLock = {
+      targetId = nil,
+      targetHealth = nil,
+      lockTime = 0,
+      switchCount = 0,
+      lastSwitchTime = 0,
+      recentTargets = {}  -- Track last N targets for zigzag detection
+    }
+  end
+  local LocalLock = TargetBot.LocalTargetLock
+  local creatureId = creature:getId()
+  
+  -- Update local lock based on current attack state
+  local currentAttackTarget = g_game.getAttackingCreature()
+  if currentAttackTarget then
+    local attackId = currentAttackTarget:getId()
+    if attackId ~= LocalLock.targetId then
+      -- Target changed
+      LocalLock.switchCount = LocalLock.switchCount + 1
+      LocalLock.lastSwitchTime = now or os.time() * 1000
+      
+      -- Track for zigzag detection (keep last 5 targets)
+      table.insert(LocalLock.recentTargets, 1, LocalLock.targetId)
+      while #LocalLock.recentTargets > 5 do
+        table.remove(LocalLock.recentTargets)
+      end
+      
+      LocalLock.targetId = attackId
+      LocalLock.targetHealth = currentAttackTarget:getHealthPercent()
+      LocalLock.lockTime = now or os.time() * 1000
+    else
+      -- Same target - update health for progress tracking
+      LocalLock.targetHealth = currentAttackTarget:getHealthPercent()
+      -- Decay switch count over time (10 seconds to forget)
+      local timeSinceSwitch = (now or os.time() * 1000) - LocalLock.lastSwitchTime
+      if timeSinceSwitch > 10000 then
+        LocalLock.switchCount = math.max(0, LocalLock.switchCount - 1)
+      end
+    end
+  end
+  
+  -- Detect zigzag pattern (switching back and forth between same targets)
+  -- v2.3: Enhanced zigzag detection with longer memory
+  local isZigzagging = false
+  local zigzagSeverity = 0
+  if #LocalLock.recentTargets >= 3 then
+    -- Check if we're bouncing between 2 targets
+    local t1, t2, t3 = LocalLock.recentTargets[1], LocalLock.recentTargets[2], LocalLock.recentTargets[3]
+    if t1 and t2 and t3 and t1 == t3 and t1 ~= t2 then
+      isZigzagging = true
+      zigzagSeverity = 1
+    end
+    
+    -- Check for more severe zigzag (A-B-A-B pattern)
+    if #LocalLock.recentTargets >= 4 then
+      local t4 = LocalLock.recentTargets[4]
+      if t1 and t2 and t3 and t4 and t1 == t3 and t2 == t4 and t1 ~= t2 then
+        zigzagSeverity = 2  -- Severe zigzag
+      end
+    end
+    
+    -- Check for rapid switching (3+ switches in short time)
+    local timeSinceFirstSwitch = (now or os.time() * 1000) - LocalLock.lastSwitchTime
+    if LocalLock.switchCount >= 4 and timeSinceFirstSwitch < 5000 then
+      isZigzagging = true
+      zigzagSeverity = math.max(zigzagSeverity, 2)
+    end
+  end
   
   if MonsterAI and MonsterAI.Scenario then
     local Scenario = MonsterAI.Scenario
-    local creatureId = creature:getId()
     
     -- Detect current combat scenario
     local scenarioType = Scenario.detectScenario and Scenario.detectScenario() or "moderate"
@@ -809,6 +931,66 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
       if switches >= 3 and Scenario.state.targetLockId ~= creatureId then
         local switchPenalty = switches * 10  -- 30+ penalty after 3 switches
         priority = priority - switchPenalty
+      end
+    end
+  else
+    -- ═══════════════════════════════════════════════════════════════════════
+    -- SECTION 17: LOCAL FALLBACK TARGET LOCK (v2.2)
+    -- When MonsterAI.Scenario is not available, use local state
+    -- This ensures target stickiness always works
+    -- ═══════════════════════════════════════════════════════════════════════
+    
+    -- If this is the current locked target
+    if LocalLock.targetId == creatureId then
+      priority = priority + SCENARIO_TARGET_LOCK_BONUS
+      
+      -- Bonus for progress (health dropping)
+      if LocalLock.targetHealth and hp < LocalLock.targetHealth then
+        local healthDrop = LocalLock.targetHealth - hp
+        local progressBonus = math.min(40, healthDrop * 0.8)  -- v2.3: Increased from 30, 0.6
+        priority = priority + progressBonus
+      end
+      
+      -- FINISH KILL bonus - v2.3: Enhanced scaling
+      if hp < 15 then
+        priority = priority + SCENARIO_FINISH_KILL_BONUS + 40  -- Extra for critical
+      elseif hp < 25 then
+        priority = priority + SCENARIO_FINISH_KILL_BONUS
+      elseif hp < 40 then
+        priority = priority + SCENARIO_FINISH_KILL_BONUS * 0.7
+      elseif hp < 55 then
+        priority = priority + SCENARIO_FINISH_KILL_BONUS * 0.4
+      end
+      
+      -- v2.3: Zigzag prevention bonus for current target
+      if isZigzagging then
+        local stabilityBonus = 100 + (zigzagSeverity * 50)  -- 100-200 bonus
+        priority = priority + stabilityBonus
+      end
+    else
+      -- Not current target - apply penalties based on situation
+      
+      -- Switch penalty based on recent switch frequency
+      -- v2.3: Enhanced penalty scaling
+      if LocalLock.switchCount >= 2 then
+        local switchPenalty = LocalLock.switchCount * 15
+        priority = priority - switchPenalty
+      end
+      
+      -- Zigzag prevention - v2.3: Use severity for scaling
+      if isZigzagging then
+        local basePenalty = SCENARIO_ZIGZAG_PENALTY or 200
+        local zigzagPenalty = basePenalty * (1 + zigzagSeverity * 0.5)  -- Up to 300 penalty
+        priority = priority - zigzagPenalty
+      end
+      
+      -- Extra penalty if we recently switched away from current target (prevent going back)
+      for i, recentId in ipairs(LocalLock.recentTargets) do
+        if recentId == creatureId and i <= 2 then
+          -- This creature was a recent target we switched away from
+          -- Don't go back unless it's very high priority
+          priority = priority - (50 / i)  -- -50 if most recent, -25 if second most recent
+        end
       end
     end
   end

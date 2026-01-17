@@ -221,9 +221,9 @@ if voc == 1 or voc == 11 then
         if (now - lastExetaAmp) < 6000 then return false end
         if not CaveBot or CaveBot.isOff() then return false end
         if modules.game_cooldown.isGroupCooldownIconActive(3) then return false end
-        if not canCast("exeta res") then return false end
+        if not canCast("exeta amp res") then return false end
         
-        say("exeta res")
+        say("exeta amp res")
         lastExetaAmp = now
         exetaStats.ampCasts = (exetaStats.ampCasts or 0) + 1
         
@@ -363,7 +363,7 @@ if voc == 1 or voc == 11 then
         if (now - lastExetaAmp) < 6000 then return end
         if not CaveBot or CaveBot.isOff() then return end
         if modules.game_cooldown.isGroupCooldownIconActive(3) then return end
-        if not canCast("exeta res") then return end
+        if not canCast("exeta amp res") then return end
 
         -- Find distant monsters not facing/attacking local player
         local playerPos = player and player:getPosition()
@@ -391,7 +391,7 @@ if voc == 1 or voc == 11 then
         end
 
         if distantNotAttackingMe >= 1 then
-          say("exeta res")
+          say("exeta amp res")
           lastExetaAmp = now
           exetaStats.ampCasts = (exetaStats.ampCasts or 0) + 1
         end

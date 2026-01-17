@@ -69,20 +69,23 @@ TargetCore.CONSTANTS = {
     {x = -1, y = -1}  -- NW
   },
   
-  -- Priority weights (tunable)
+  -- Priority weights (tunable) v2.3
+  -- IMPROVED: Stronger target stickiness to prevent erratic switching and leaving monsters behind
   PRIORITY = {
-    CRITICAL_HEALTH = 80,    -- HP <= 10%
-    VERY_LOW_HEALTH = 55,    -- HP <= 20%
-    LOW_HEALTH = 35,         -- HP <= 30%
-    WOUNDED = 18,            -- HP <= 50%
-    CURRENT_TARGET = 15,     -- Already attacking
-    CURRENT_WOUNDED = 25,    -- Attacking + wounded
+    CRITICAL_HEALTH = 100,   -- HP <= 10% (INCREASED from 80)
+    VERY_LOW_HEALTH = 70,    -- HP <= 20% (INCREASED from 55)
+    LOW_HEALTH = 45,         -- HP <= 30% (INCREASED from 35)
+    WOUNDED = 25,            -- HP <= 50% (INCREASED from 18)
+    CURRENT_TARGET = 70,     -- Already attacking (INCREASED from 50)
+    CURRENT_WOUNDED = 55,    -- Attacking + wounded (INCREASED from 40)
+    CURRENT_LOW_HP = 80,     -- Attacking + critical HP (INCREASED from 60)
     ADJACENT = 14,           -- Distance 1
     CLOSE = 10,              -- Distance 2
     NEAR = 6,                -- Distance 3
     MEDIUM = 3,              -- Distance 4-5
     CHASE_BONUS = 12,        -- Chase mode active
     AOE_BONUS = 8,           -- Per monster in AOE range
+    SWITCH_PENALTY = 35,     -- Penalty for switching from wounded target (INCREASED from 20)
   },
   
   -- Distance weight lookup (O(1))

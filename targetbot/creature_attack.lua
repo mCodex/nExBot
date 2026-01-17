@@ -1163,9 +1163,15 @@ local function rePosition(minTiles, config)
 end
 
 TargetBot.Creature.attack = function(params, targets, isLooting)
-  -- CRITICAL: Do not attack if TargetBot is disabled
-  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
-    return
+  -- CRITICAL: Do not attack if TargetBot is disabled or explicitly turned off
+  if TargetBot then
+    if TargetBot.canAttack and not TargetBot.canAttack() then
+      return
+    elseif TargetBot.explicitlyDisabled then
+      return
+    elseif TargetBot.isOn and not TargetBot.isOn() then
+      return
+    end
   end
   
   if player:isWalking() then
@@ -1455,6 +1461,20 @@ TargetBot.Creature.walk = function(creature, config, targets)
     if config.closeLure and config.closeLureAmount then
       if SafeCall.getMonsters(1) >= config.closeLureAmount then
         return TargetBot.allowCaveBot(150)
+      end
+    end
+    
+    -- ═══════════════════════════════════════════════════════════════════════
+    -- KILL BEFORE WALK: When dynamicLure is DISABLED, do NOT allow CaveBot
+    -- to proceed until all monsters on screen are killed.
+    -- This ensures the screen is cleared before moving to the next waypoint.
+    -- ═══════════════════════════════════════════════════════════════════════
+    if not config.dynamicLure then
+      -- Check if there are still monsters on screen that need to be killed
+      local screenMonsters = SafeCall.getMonsters(7)  -- Full visible range
+      if screenMonsters > 0 then
+        -- Do NOT call allowCaveBot - keep CaveBot paused until screen is clear
+        -- Continue with normal attack/positioning below
       end
     end
   else
@@ -1765,10 +1785,19 @@ TargetBot.Creature.walk = function(creature, config, targets)
   -- 2. OR there's an anchor constraint that native chase can't respect
   -- 3. OR the server doesn't support native chase
   --
+  -- IMPROVED: Only chase when monster is FAR from player (distance > 2)
+  -- This prevents unnecessary movement when already in melee/close range.
+  --
   -- NOTE: Do NOT use g_game.follow() - it cancels the attack!
   -- ─────────────────────────────────────────────────────────────────────────
+  
+  -- Calculate direct distance (Chebyshev) to creature for chase decision
+  local chaseDistanceThreshold = config.chaseDistanceThreshold or 2  -- Only chase if farther than this
+  local directDist = math.max(math.abs(pos.x - cpos.x), math.abs(pos.y - cpos.y))
+  
   local chaseExecuted = false
-  if config.chase and not config.keepDistance and pathLen > 1 then
+  -- Only trigger chase when monster is FAR (distance > threshold) - prevents chasing when already close
+  if config.chase and not config.keepDistance and pathLen > 1 and directDist > chaseDistanceThreshold then
     -- First check: Is native chase already handling this?
     local nativeChaseMayWork = false
     if g_game.getChaseMode and g_game.isAttacking then
@@ -1875,7 +1904,11 @@ TargetBot.Creature.walk = function(creature, config, targets)
     
     -- CHASE FALLBACK: If MovementCoordinator didn't execute but chase is enabled
     -- Check if native chase is already working before using custom pathfinding
-    if config.chase and not config.keepDistance and pathLen > 1 then
+    -- IMPROVED: Only chase when monster is FAR from player (distance > threshold)
+    local fallbackDirectDist = math.max(math.abs(pos.x - cpos.x), math.abs(pos.y - cpos.y))
+    local fallbackChaseThreshold = config.chaseDistanceThreshold or 2
+    
+    if config.chase and not config.keepDistance and pathLen > 1 and fallbackDirectDist > fallbackChaseThreshold then
       -- First check if native chase is active and should be working
       local nativeChaseMayWork = false
       if g_game.getChaseMode and g_game.isAttacking then

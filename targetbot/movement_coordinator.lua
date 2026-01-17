@@ -1123,20 +1123,39 @@ function MovementCoordinator.Execute.move(decision)
     -- with custom walking unless the native chase fails or is unavailable.
     -- ═══════════════════════════════════════════════════════════════════════════
     
-    -- CRITICAL: Only set native chase mode if Chase is enabled in TargetBot config
+    -- Check if Chase is enabled in TargetBot config
     local chaseEnabled = TargetBot and TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
-    if chaseEnabled and g_game.setChaseMode then
+    local keepDistanceEnabled = TargetBot and TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.keepDistance
+    
+    -- Chase is only active if enabled AND keepDistance is disabled
+    local useNativeChase = chaseEnabled and not keepDistanceEnabled
+    
+    if useNativeChase and g_game.setChaseMode then
       g_game.setChaseMode(1) -- ChaseOpponent
       if TargetCore and TargetCore.Native then
         TargetCore.Native.lastChaseMode = 1
       end
       TargetBot.usingNativeChase = true
-    elseif not chaseEnabled and g_game.setChaseMode then
-      -- Chase disabled - ensure Stand mode
-      g_game.setChaseMode(0) -- DontChase
+    elseif not useNativeChase then
+      -- Chase disabled or keepDistance enabled - don't set chase mode
+      -- But don't block execution - let other movement systems handle it
+      if g_game.setChaseMode then
+        g_game.setChaseMode(0) -- DontChase
+      end
       TargetBot.usingNativeChase = false
-      -- Skip movement when chase is disabled
-      return false, "chase_disabled"
+      -- For FINISH_KILL, still allow movement via walkTo (low HP chase)
+      if intent.type == INTENT.FINISH_KILL then
+        if TargetBot and TargetBot.walkTo then
+          success = TargetBot.walkTo(targetPos, 10, {
+            ignoreNonPathable = true,
+            precision = 1,
+            allowOnlyVisibleTiles = true
+          })
+        end
+      else
+        -- Regular CHASE intent with chase disabled - skip movement, let attack logic work
+        return true, "chase_disabled_stand"
+      end
     end
     
     -- Check if we're attacking - native chase only works when attacking

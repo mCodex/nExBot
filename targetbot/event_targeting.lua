@@ -108,6 +108,50 @@ local PATH_PARAMS = {
 }
 
 -- ============================================================================
+-- STATE MANAGEMENT
+-- ============================================================================
+
+-- Clear all EventTargeting state (called when TargetBot is disabled)
+function EventTargeting.clearState()
+  -- Clear target state
+  targetState.currentTarget = nil
+  targetState.currentTargetId = nil
+  targetState.lastAcquisition = 0
+  targetState.pendingTargets = {}
+  targetState.combatActive = false
+  targetState.lastCombatCheck = 0
+  
+  -- Clear creature cache
+  creatureCache.entries = {}
+  creatureCache.count = 0
+  creatureCache.accessOrder = {}
+  creatureCache.lastCleanup = 0
+  
+  -- Clear live monster state
+  liveMonsterState.count = 0
+  liveMonsterState.creatures = {}
+  liveMonsterState.lastUpdate = 0
+  
+  if EventTargeting.DEBUG then
+    print("[EventTargeting] State cleared")
+  end
+end
+
+-- Check if targeting is allowed (respects explicit disable state)
+local function canAttack()
+  -- Use TargetBot.canAttack() if available (preferred)
+  if TargetBot and TargetBot.canAttack then
+    return TargetBot.canAttack()
+  end
+  -- Fallback: check isOn and explicitlyDisabled separately
+  if TargetBot then
+    if TargetBot.explicitlyDisabled then return false end
+    if TargetBot.isOn and not TargetBot.isOn() then return false end
+  end
+  return true
+end
+
+-- ============================================================================
 -- LIVE MONSTER COUNTING (Direct API - Most Accurate)
 -- Uses g_map.getSpectators/getSpectatorsInRange directly for accurate counting
 -- This bypasses the cache which may have stale data
@@ -771,9 +815,30 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
   -- When chase mode is set BEFORE attacking, OTClient handles pathfinding
   -- and walking automatically. This is the native chase behavior.
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- CRITICAL: Only set chase mode if Chase is enabled in TargetBot config
-  local chaseEnabled = TargetBot and TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
-  if chaseEnabled and g_game.setChaseMode then
+  -- Get chase setting from the CREATURE's specific config (not global ActiveMovementConfig)
+  local chaseEnabled = false
+  local keepDistanceEnabled = false
+  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+    local configs = TargetBot.Creature.getConfigs(creature)
+    if configs and #configs > 0 then
+      -- Use first matching config (highest priority)
+      local cfg = configs[1]
+      chaseEnabled = cfg.chase == true
+      keepDistanceEnabled = cfg.keepDistance == true
+      
+      -- Update global ActiveMovementConfig for other modules
+      if TargetBot.ActiveMovementConfig then
+        TargetBot.ActiveMovementConfig.chase = chaseEnabled
+        TargetBot.ActiveMovementConfig.keepDistance = keepDistanceEnabled
+        TargetBot.ActiveMovementConfig.keepDistanceRange = cfg.keepDistanceRange or 4
+      end
+    end
+  end
+  
+  -- Chase is only active if enabled AND keepDistance is disabled (they're mutually exclusive)
+  local useNativeChase = chaseEnabled and not keepDistanceEnabled
+  
+  if useNativeChase and g_game.setChaseMode then
     local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
     if currentMode ~= 1 then
       g_game.setChaseMode(1)  -- ChaseOpponent
@@ -785,8 +850,8 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
         TargetBot.usingNativeChase = true
       end
     end
-  elseif not chaseEnabled and g_game.setChaseMode then
-    -- Chase is disabled - ensure we're in Stand mode
+  elseif not useNativeChase and g_game.setChaseMode then
+    -- Chase is disabled OR keepDistance is enabled - use Stand mode
     local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
     if currentMode ~= 0 then
       g_game.setChaseMode(0)  -- DontChase / Stand
@@ -797,8 +862,11 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path)
   end
   
   -- Attack the creature
-  -- CRITICAL: Final check that TargetBot is enabled before any attack
-  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+  -- CRITICAL: Final check that TargetBot is enabled and not explicitly disabled
+  if not canAttack() then
+    if EventTargeting.DEBUG then
+      print("[EventTargeting] Attack blocked - TargetBot disabled")
+    end
     return
   end
   
@@ -832,8 +900,8 @@ end
 
 -- Process pending targets (called from macro)
 function EventTargeting.TargetAcquisition.processPending()
-  -- CRITICAL: Do not process if TargetBot is disabled
-  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+  -- CRITICAL: Do not process if TargetBot is disabled or explicitly turned off
+  if not canAttack() then
     targetState.pendingTargets = {}  -- Clear queue when disabled
     return
   end
@@ -1514,9 +1582,10 @@ if onCreatureAppear then
     if not creature:isMonster() then return end
     if creature:isDead() then return end
     
-    -- Skip if TargetBot is off
-    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
-      return
+    -- CRITICAL: Skip if TargetBot is off OR explicitly disabled by user
+    if TargetBot then
+      if TargetBot.explicitlyDisabled then return end
+      if TargetBot.isOn and not TargetBot.isOn() then return end
     end
     
     -- Quick validation
@@ -1561,8 +1630,8 @@ if onCreatureAppear then
           
           -- INSTANT SWITCH for higher priority monster!
           if newConfigPriority > currentConfigPriority then
-            -- CRITICAL: Double-check TargetBot is actually enabled before attacking
-            if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+            -- CRITICAL: Double-check TargetBot is enabled and not explicitly disabled
+            if not canAttack() then
               return
             end
             

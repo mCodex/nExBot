@@ -373,6 +373,11 @@ if onPlayerHealthChange then
         return
       end
       
+      -- CRITICAL: Check explicitlyDisabled flag - if user turned it off, don't recover
+      if TargetBot and TargetBot.explicitlyDisabled then
+        return
+      end
+      
       if TargetBot and TargetBot.isOn then
         reloginRecovery.active = true
         reloginRecovery.endTime = now + reloginRecovery.duration
@@ -384,7 +389,8 @@ if onPlayerHealthChange then
         debouncedInvalidateAndRecalc()
 
         -- If TargetBot was previously enabled via storage, ensure it's on now to allow recovery
-        if storedEnabled == true and not TargetBot.isOn() then
+        -- CRITICAL: Never auto-enable if user explicitly disabled it this session
+        if storedEnabled == true and not TargetBot.isOn() and not TargetBot.explicitlyDisabled then
           pcall(function() TargetBot.setOn() end)
         end
 
@@ -394,6 +400,12 @@ if onPlayerHealthChange then
         -- Schedule repeated attempts (aggressive recovery window)
         if targetbotMacro then
           local function attemptRecovery()
+            -- CRITICAL: Never recover if explicitly disabled by user
+            if TargetBot and TargetBot.explicitlyDisabled then
+              reloginRecovery.active = false
+              return
+            end
+            
             -- Only attempt recovery runs if targetbot should be enabled
             local storedEnabled2 = (UnifiedStorage and UnifiedStorage.get("targetbot.enabled"))
             if storedEnabled2 == nil then storedEnabled2 = storage.targetbotEnabled end
@@ -677,6 +689,11 @@ if EventBus then
   
   -- Event-driven keepDistance: when target moves, adjust position
   EventBus.on("creature:move", function(creature, oldPos)
+    -- Skip if TargetBot is disabled
+    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
+      return
+    end
+    
     -- Safe check for monster
     local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
     if not okMonster or not isMonster then return end
@@ -1135,16 +1152,70 @@ TargetBot.isOff = function()
   return config.isOff()
 end
 
-TargetBot.setOn = function(val)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- TARGETBOT ON/OFF HANDLERS v2.5 - Safer state management with persistence
+-- Uses explicitlyDisabled flag to prevent auto-enable from any source
+-- Flag is now persisted to storage to survive reloads
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Central flag: when true, NO automatic enabling is allowed (recovery, events, etc.)
+-- v2.5: Load persisted state from storage to survive reloads
+local function loadExplicitlyDisabledState()
+  -- Check storage for persisted state
+  if UnifiedStorage then
+    local stored = UnifiedStorage.get("targetbot.explicitlyDisabled")
+    if stored == true then return true end
+  end
+  if storage and storage.targetbotExplicitlyDisabled == true then
+    return true
+  end
+  return false
+end
+
+TargetBot.explicitlyDisabled = loadExplicitlyDisabledState()
+
+-- Timestamp of last user action (for debouncing)
+TargetBot._lastUserToggle = 0
+
+-- v2.4: setOn now checks explicitlyDisabled and has optional 'force' parameter
+-- Regular calls from CaveBot/lure scripts will be blocked when explicitlyDisabled is true
+-- Only direct user clicks (force=true) or clearing explicitlyDisabled first will work
+TargetBot.setOn = function(val, force)
   if val == false then  
     return TargetBot.setOff(true)
   end
+  
+  -- CRITICAL: If explicitly disabled and this is NOT a forced (user-initiated) call, block it
+  if TargetBot.explicitlyDisabled and not force then
+    -- Don't enable - user explicitly turned it off
+    return
+  end
+  
+  -- Clear the explicit disable flag - user wants it ON (or force was used)
+  TargetBot.explicitlyDisabled = false
+  TargetBot._lastUserToggle = now or os.time() * 1000
+  
+  -- v2.5: Persist the flag to storage so it survives reloads
+  if UnifiedStorage then
+    UnifiedStorage.set("targetbot.explicitlyDisabled", false)
+  end
+  storage.targetbotExplicitlyDisabled = false
+  
+  -- Stop any pending recovery attempts
+  reloginRecovery.active = false
+  
   -- Save user's choice to storage BEFORE triggering config callback
   if UnifiedStorage then 
     UnifiedStorage.set("targetbot.enabled", true) 
   else 
     storage.targetbotEnabled = true 
   end
+  
+  -- Notify MonsterAI and other modules
+  if EventBus then
+    pcall(function() EventBus.emit("targetbot/enabled") end)
+  end
+  
   config.setOn()  -- This triggers callback which handles UI update
 end
 
@@ -1152,13 +1223,78 @@ TargetBot.setOff = function(val)
   if val == false then  
     return TargetBot.setOn(true)
   end
+  
+  -- SET the explicit disable flag - user wants it OFF, prevent ALL auto-enable
+  TargetBot.explicitlyDisabled = true
+  TargetBot._lastUserToggle = now or os.time() * 1000
+  
+  -- v2.5: Persist the flag to storage so it survives reloads
+  if UnifiedStorage then
+    UnifiedStorage.set("targetbot.explicitlyDisabled", true)
+  end
+  storage.targetbotExplicitlyDisabled = true
+  
+  -- IMMEDIATELY stop all recovery and pending operations
+  reloginRecovery.active = false
+  reloginRecovery.endTime = 0
+  attackWatchdog.attempts = 0
+  attackWatchdog.lastForce = 0
+  
+  -- Clear any pending targets in EventTargeting
+  if EventTargeting and EventTargeting.clearState then
+    pcall(function() EventTargeting.clearState() end)
+  end
+  
+  -- Cancel current attack
+  if g_game and g_game.cancelAttackAndFollow then
+    pcall(function() g_game.cancelAttackAndFollow() end)
+  end
+  
   -- Save user's choice to storage BEFORE triggering config callback
   if UnifiedStorage then 
     UnifiedStorage.set("targetbot.enabled", false) 
   else 
     storage.targetbotEnabled = false 
   end
+  
+  -- Clear local target lock state
+  if TargetBot.LocalTargetLock then
+    TargetBot.LocalTargetLock.targetId = nil
+    TargetBot.LocalTargetLock.targetHealth = nil
+    TargetBot.LocalTargetLock.switchCount = 0
+    TargetBot.LocalTargetLock.recentTargets = {}
+  end
+  
+  -- Clear creature cache to stop targeting
+  CreatureCache.monsters = {}
+  CreatureCache.monsterCount = 0
+  CreatureCache.bestTarget = nil
+  CreatureCache.bestPriority = 0
+  CreatureCache.dirty = false
+  
+  -- Notify MonsterAI and other modules
+  if EventBus then
+    pcall(function() EventBus.emit("targetbot/disabled") end)
+  end
+  
+  -- Update status
+  setStatusRight("Off")
+  
   config.setOff()  -- This triggers callback which handles UI update
+end
+
+-- Helper function to check if TargetBot should be active
+-- This respects the explicitlyDisabled flag
+TargetBot.canAttack = function()
+  -- If explicitly disabled by user, NEVER allow attacks
+  if TargetBot.explicitlyDisabled then
+    return false
+  end
+  -- Check the normal isOn state
+  if not TargetBot.isOn or not TargetBot.isOn() then
+    return false
+  end
+  return true
 end
 
 TargetBot.getCurrentProfile = function()
@@ -1188,7 +1324,8 @@ TargetBot.setCurrentProfile = function(name)
   if setCharacterProfile then
     setCharacterProfile("targetbotProfile", name)
   end
-  if wasOn then
+  -- Only restore enabled state if not explicitly disabled by user
+  if wasOn and not TargetBot.explicitlyDisabled then
     TargetBot.setOn()
   end
 end
@@ -1433,57 +1570,113 @@ end
 --------------------------------------------------------------------------------
 
 -- Helper: process a creature into target params (returns params, path) - pure helper to reduce duplication
--- IMPROVED v2.1: Uses MonsterAI.Reachability for accurate blocked path detection
-local function processCandidate(creature, pos)
+-- IMPROVED v2.2: More lenient path validation to prevent "leaving monsters behind"
+local function processCandidate(creature, pos, isCurrentTarget)
   if not creature or creature:isDead() or not isTargetableCreature(creature) then return nil, nil end
   local cpos = creature:getPosition()
   if not cpos then return nil, nil end
   
+  -- v2.2: Calculate distance first - adjacent creatures should ALWAYS be targetable
+  local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
+  
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- REACHABILITY CHECK (v2.1): Use MonsterAI.Reachability for smart detection
-  -- This prevents "Creature not reachable" errors by pre-validating targets
+  -- ADJACENCY CHECK (v2.2): Adjacent creatures are ALWAYS reachable
+  -- This prevents the common issue of skipping monsters that are right next to us
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if dist <= 1 then
+    -- Creature is adjacent - it's definitely reachable
+    local params = TargetBot.Creature.calculateParams(creature, {1})  -- Fake minimal path
+    if params and params.config then
+      return params, {1}  -- Return simple path
+    end
+  end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- REACHABILITY CHECK (v2.2): Improved with fallback strategies
   -- ═══════════════════════════════════════════════════════════════════════════
   
   local path = nil
   local isReachable = true
-  local reachReason = "unknown"
   
-  -- Use MonsterAI.Reachability if available (v2.1 enhancement)
-  if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable then
+  -- Try multiple path strategies for better success rate
+  local pathStrategies = {
+    -- Strategy 1: Standard path params
+    {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = true, precision = 1},
+    -- Strategy 2: Ignore creatures more aggressively (creatures might move)
+    {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = false, precision = 1},
+    -- Strategy 3: For current target, try even harder
+    {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = false, ignoreCreatures = true, allowOnlyVisibleTiles = false, precision = 2}
+  }
+  
+  -- Use MonsterAI.Reachability if available (but don't let it block adjacent/current targets)
+  if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable and not isCurrentTarget then
     local reachResult, reason, cachedPath = MonsterAI.Reachability.isReachable(creature)
-    isReachable = reachResult
-    reachReason = reason or "unknown"
-    path = cachedPath
-    
-    if not isReachable then
-      -- Creature is blocked - don't waste time calculating params
+    if reachResult and cachedPath then
+      path = cachedPath
+    elseif not reachResult and dist > 3 then
+      -- Only skip if truly far and blocked
       return nil, nil
     end
   end
   
-  -- If Reachability didn't give us a path, calculate one
+  -- If we don't have a path yet, try our strategies
   if not path then
-    path = findPath(pos, cpos, 10, PATH_PARAMS)
-    if not path or #path == 0 then 
-      -- No path found - creature is unreachable
-      -- Mark in Reachability cache if available
-      if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.markBlocked then
-        MonsterAI.Reachability.markBlocked(creature:getId(), "no_path")
+    local maxStrategies = isCurrentTarget and 3 or 2
+    for strategyIdx = 1, maxStrategies do
+      local params = pathStrategies[strategyIdx]
+      path = findPath(pos, cpos, 12, params)
+      if path and #path > 0 then
+        break
       end
-      return nil, nil 
     end
   end
   
-  -- ADDITIONAL CHECK: Verify path doesn't cross blocked tiles
-  -- This catches cases where findPath returns a path but it's actually blocked
+  -- If still no path for nearby creatures, create a simple direction-based path
+  if (not path or #path == 0) and dist <= 3 then
+    -- Create a simple path towards the creature
+    local simplePath = {}
+    local dx = cpos.x - pos.x
+    local dy = cpos.y - pos.y
+    
+    -- Determine direction
+    local dir = nil
+    if dx > 0 and dy < 0 then dir = NorthEast or 4
+    elseif dx > 0 and dy > 0 then dir = SouthEast or 5
+    elseif dx < 0 and dy > 0 then dir = SouthWest or 6
+    elseif dx < 0 and dy < 0 then dir = NorthWest or 7
+    elseif dx > 0 then dir = East or 1
+    elseif dx < 0 then dir = West or 3
+    elseif dy > 0 then dir = South or 2
+    elseif dy < 0 then dir = North or 0
+    end
+    
+    if dir then
+      for i = 1, dist do
+        simplePath[i] = dir
+      end
+      path = simplePath
+    end
+  end
+  
+  if not path or #path == 0 then
+    -- v2.2: Only mark as blocked if really far
+    if dist > 5 then
+      if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.markBlocked then
+        MonsterAI.Reachability.markBlocked(creature:getId(), "no_path")
+      end
+    end
+    return nil, nil
+  end
+  
+  -- v2.2: Skip excessive path validation for close targets
+  -- The original validation was too strict and caused targets to be skipped
   local pathLength = #path
-  if pathLength > 15 then
-    -- For long paths, do a quick walkability check on first few tiles
+  if pathLength > 20 and dist > 8 then
+    -- Only do strict validation for far targets with long paths
     local probe = {x = pos.x, y = pos.y, z = pos.z}
-    for i = 1, math.min(5, pathLength) do
+    for i = 1, math.min(3, pathLength) do  -- Reduced from 5 to 3
       local dir = path[i]
       local offset = nil
-      -- Get offset for direction
       if dir == North or dir == 0 then offset = {x = 0, y = -1}
       elseif dir == East or dir == 1 then offset = {x = 1, y = 0}
       elseif dir == South or dir == 2 then offset = {x = 0, y = 1}
@@ -1497,11 +1690,8 @@ local function processCandidate(creature, pos)
       if offset then
         probe = {x = probe.x + offset.x, y = probe.y + offset.y, z = probe.z}
         local tile = g_map.getTile(probe)
-        if tile and not tile:isWalkable() then
-          -- Path crosses a blocked tile - creature is unreachable
-          if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.markBlocked then
-            MonsterAI.Reachability.markBlocked(creature:getId(), "blocked_tile")
-          end
+        if tile and not tile:isWalkable() and not tile:hasCreature() then
+          -- Only fail if truly blocked (not just creature in the way)
           return nil, nil
         end
       end
@@ -1510,8 +1700,13 @@ local function processCandidate(creature, pos)
   
   local params = TargetBot.Creature.calculateParams(creature, path)
   
-  -- ADDITIONAL CHECK: Verify priority is non-zero (creature is actually targetable)
-  if not params or not params.config or params.priority <= 0 then
+  -- v2.2: Be more lenient with priority check for close targets
+  if not params or not params.config then
+    return nil, nil
+  end
+  
+  -- Only require positive priority for far targets
+  if params.priority <= 0 and dist > 3 then
     return nil, nil
   end
   
@@ -1529,8 +1724,13 @@ local function recalculateBestTarget()
   local bestPriority = 0
   local totalDanger = 0
   local targetCount = 0
-  local reachableCount = 0  -- NEW: Track only reachable creatures
-  local unreachableCount = 0  -- NEW: Track blocked path creatures
+  local reachableCount = 0  -- Track only reachable creatures
+  local unreachableCount = 0  -- Track blocked path creatures
+  
+  -- v2.2: Track current target for stickiness - DO NOT lose it during recalculation
+  local currentAttackTarget = g_game.getAttackingCreature and g_game.getAttackingCreature()
+  local currentTargetId = currentAttackTarget and currentAttackTarget:getId() or nil
+  local currentTargetStillValid = false  -- Will be set to true if current target is found
 
   -- IMPROVED: Get creatures from live detection first
   local creatures = nil
@@ -1569,6 +1769,12 @@ local function recalculateBestTarget()
   CreatureCache.monsterCount = 0
   
   local playerZ = pos.z
+  
+  -- v2.2: First pass - find current target to ensure it's not skipped
+  -- This prevents the "leaving monsters behind" issue
+  local currentTargetParams = nil
+  local currentTargetPath = nil
+  
   for i = 1, #creatures do
     local creature = creatures[i]
     if creature and isTargetableCreature(creature) then
@@ -1577,11 +1783,30 @@ local function recalculateBestTarget()
         local okId, id = pcall(function() return creature:getId() end)
         id = id or i
         
-        -- Calculate path and params
-        local params, path = processCandidate(creature, pos)
+        -- v2.2: Special handling for current target - be more lenient with path validation
+        local isCurrentTarget = (currentTargetId and id == currentTargetId)
         
-        -- FIXED: Only add to cache if creature has a valid reachable path
-        -- Creatures with blocked paths should not be counted as targetable
+        -- Calculate path and params (pass isCurrentTarget for enhanced path finding)
+        local params, path = processCandidate(creature, pos, isCurrentTarget)
+        
+        -- For current target, try harder to find a path if initial attempt failed
+        if isCurrentTarget and (not path or not params or not params.config) then
+          -- Try with relaxed path params
+          local relaxedPath = findPath(pos, cpos, 12, {
+            ignoreLastCreature = true,
+            ignoreNonPathable = true,
+            ignoreCost = true,
+            ignoreCreatures = true,
+            allowOnlyVisibleTiles = false  -- More relaxed
+          })
+          if relaxedPath and #relaxedPath > 0 then
+            path = relaxedPath
+            params = TargetBot.Creature.calculateParams(creature, path)
+          end
+        end
+        
+        -- IMPROVED: Track all creatures, not just those with perfect paths
+        -- Creatures with blocked paths can still be targeted if they're close
         if path and params and params.config then
           -- Creature is reachable - add to cache
           CreatureCache.monsters[id] = {
@@ -1589,21 +1814,78 @@ local function recalculateBestTarget()
             path = path,
             pathTime = now,
             lastUpdate = now,
-            reachable = true  -- Mark as reachable
+            reachable = true
           }
           CreatureCache.monsterCount = CreatureCache.monsterCount + 1
           reachableCount = reachableCount + 1
           targetCount = targetCount + 1
           totalDanger = totalDanger + (params.danger or 0)
           
+          -- v2.2: Track if current target is still valid
+          if isCurrentTarget then
+            currentTargetStillValid = true
+            currentTargetParams = params
+            currentTargetPath = path
+          end
+          
           if params.priority > bestPriority then
             bestPriority = params.priority
             bestTarget = params
           end
+        elseif isCurrentTarget and not creature:isDead() then
+          -- v2.2: Current target has no path but is not dead
+          -- Still add it to cache to prevent "losing" the target
+          local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
+          if dist <= 2 then
+            -- Very close - might just be blocked by other creatures, keep targeting
+            local fallbackParams = TargetBot.Creature.calculateParams(creature, {1})  -- Fake short path
+            if fallbackParams and fallbackParams.config then
+              CreatureCache.monsters[id] = {
+                creature = creature,
+                path = nil,
+                pathTime = now,
+                lastUpdate = now,
+                reachable = false,
+                closeButBlocked = true
+              }
+              CreatureCache.monsterCount = CreatureCache.monsterCount + 1
+              currentTargetStillValid = true
+              currentTargetParams = fallbackParams
+              
+              -- Give it a slightly reduced priority but don't abandon it
+              if fallbackParams.priority * 0.8 > bestPriority then
+                bestPriority = fallbackParams.priority * 0.8
+                bestTarget = fallbackParams
+              end
+            end
+          else
+            unreachableCount = unreachableCount + 1
+          end
         else
           -- Creature has blocked path - don't add to active targeting
-          -- Track for display purposes only
           unreachableCount = unreachableCount + 1
+        end
+      end
+    end
+  end
+  
+  -- v2.2: If current target is still valid, ensure it's not replaced by a marginally better target
+  -- This implements "target stickiness" at the recalculation level
+  if currentTargetStillValid and currentTargetParams and bestTarget then
+    local currentHP = currentAttackTarget:getHealthPercent()
+    -- If current target is wounded, require MUCH higher priority to switch
+    if currentHP < 70 then
+      local switchThreshold = 30  -- Need 30+ priority advantage to switch
+      if currentHP < 50 then switchThreshold = 50 end  -- Need 50+ to switch from half-health
+      if currentHP < 30 then switchThreshold = 80 end  -- Need 80+ to switch from low HP
+      if currentHP < 15 then switchThreshold = 150 end -- Nearly impossible to switch from critical
+      
+      if bestTarget ~= currentTargetParams then
+        local priorityAdvantage = bestTarget.priority - currentTargetParams.priority
+        if priorityAdvantage < switchThreshold then
+          -- Not enough priority advantage - keep current target
+          bestTarget = currentTargetParams
+          bestPriority = currentTargetParams.priority
         end
       end
     end
@@ -1616,7 +1898,7 @@ local function recalculateBestTarget()
   CreatureCache.bestPriority = bestPriority
   CreatureCache.totalDanger = totalDanger
   CreatureCache.dirty = false
-  CreatureCache.unreachableCount = unreachableCount  -- Track blocked creatures
+  CreatureCache.unreachableCount = unreachableCount
 
   return bestTarget, reachableCount, totalDanger
 end
@@ -1698,6 +1980,11 @@ targetbotMacro = macro(200, function()
   if not config or not config.isOn or not config.isOn() then
     return
   end
+  
+  -- CRITICAL: Respect explicit disable flag - user turned it off manually
+  if TargetBot and TargetBot.explicitlyDisabled then
+    return
+  end
 
   -- Prevent execution before login is complete to avoid freezing
   if not g_game.isOnline() then return end
@@ -1717,22 +2004,27 @@ targetbotMacro = macro(200, function()
   
   -- FAST PATH: If EventTargeting already has a valid target, use it
   -- This skips the expensive recalculation when event-driven targeting is handling things
+  -- BUT we still need to run the walk/positioning logic for features like:
+  -- avoidAttacks, keepDistance, dynamicLure, smartPull, etc.
   if EventTargeting and EventTargeting.isInCombat and EventTargeting.isInCombat() then
     local eventTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
     if eventTarget and not eventTarget:isDead() then
       -- EventTargeting is handling combat - ensure we're attacking AND chase mode is set
       local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
       
-      -- CRITICAL: Only set chase mode if Chase is enabled in ActiveMovementConfig
+      -- CRITICAL: Chase is only active if enabled AND keepDistance is disabled
       local chaseEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
-      if chaseEnabled and g_game.setChaseMode then
+      local keepDistanceEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.keepDistance
+      local useNativeChase = chaseEnabled and not keepDistanceEnabled
+      
+      if useNativeChase and g_game.setChaseMode then
         local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
         if currentMode ~= 1 then
           g_game.setChaseMode(1)  -- ChaseOpponent
           if TargetBot then TargetBot.usingNativeChase = true end
         end
-      elseif not chaseEnabled and g_game.setChaseMode then
-        -- Chase disabled - ensure Stand mode
+      elseif not useNativeChase and g_game.setChaseMode then
+        -- Chase disabled OR keepDistance enabled - ensure Stand mode
         local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
         if currentMode ~= 0 then
           g_game.setChaseMode(0)  -- DontChase / Stand
@@ -1744,7 +2036,24 @@ targetbotMacro = macro(200, function()
         -- Sync our attack target with EventTargeting's choice
         pcall(function() g_game.attack(eventTarget) end)
       end
-      -- Let EventTargeting handle movement coordination
+      
+      -- CRITICAL FIX: Still run creature_attack logic for movement features
+      -- (avoidAttacks, keepDistance, dynamicLure, smartPull, rePosition, etc.)
+      -- Get configs for this creature and build params
+      local configs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(eventTarget)
+      if configs and #configs > 0 then
+        local config = configs[1]  -- Use first matching config
+        local targetCount = CreatureCache.monsterCount or 1
+        local params = {
+          config = config,
+          creature = eventTarget,
+          danger = config.danger or 0,
+          priority = config.priority or 1
+        }
+        -- Run the full attack/walk logic with proper config
+        pcall(function() TargetBot.Creature.attack(params, targetCount, false) end)
+      end
+      
       setStatusRight("Targeting (Event)")
       lastAction = now
       return
@@ -1904,6 +2213,10 @@ pcall(function() performPendingEnableOnce() end)
 
 -- Config setup (moved here so macro/recalc are defined before callback runs)
 config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
+  -- Track if this callback was triggered by user clicking the switch
+  -- The 'enabled' parameter comes from the UI switch state
+  local isUserToggle = (TargetBot._initialized == true)  -- After init, changes are user-driven
+  
   -- Save character's profile preference when profile changes (multi-client support)
   if enabled and name and name ~= "" then
     if setCharacterProfile then
@@ -1946,6 +2259,43 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
     TargetBot._initialized = true
   end
 
+  -- v2.4: Handle user-initiated toggle via the UI switch
+  -- If user clicked the switch AFTER init, update explicitlyDisabled accordingly
+  if isUserToggle then
+    if enabled == false then
+      -- User clicked to disable - set explicitlyDisabled
+      TargetBot.explicitlyDisabled = true
+      TargetBot._lastUserToggle = now or os.time() * 1000
+      finalEnabled = false
+      -- v2.5: Persist explicitlyDisabled flag to storage
+      if UnifiedStorage then 
+        UnifiedStorage.set("targetbot.enabled", false)
+        UnifiedStorage.set("targetbot.explicitlyDisabled", true)
+      else 
+        storage.targetbotEnabled = false 
+      end
+      storage.targetbotExplicitlyDisabled = true
+    elseif enabled == true then
+      -- User clicked to enable - clear explicitlyDisabled
+      TargetBot.explicitlyDisabled = false
+      TargetBot._lastUserToggle = now or os.time() * 1000
+      finalEnabled = true
+      -- v2.5: Persist explicitlyDisabled flag to storage
+      if UnifiedStorage then 
+        UnifiedStorage.set("targetbot.enabled", true)
+        UnifiedStorage.set("targetbot.explicitlyDisabled", false)
+      else 
+        storage.targetbotEnabled = true 
+      end
+      storage.targetbotExplicitlyDisabled = false
+    end
+  else
+    -- Not user-initiated - respect explicitlyDisabled flag
+    if TargetBot.explicitlyDisabled then
+      finalEnabled = false
+    end
+  end
+  
   -- Update UI to reflect final state
   if finalEnabled then
     setStatusRight("On")

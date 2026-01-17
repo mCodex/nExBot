@@ -159,10 +159,10 @@ local function lateRestoreFromUnifiedStorage()
           if TargetBot and TargetBot.setCurrentProfile then
             pcall(function() 
               TargetBot.setCurrentProfile(targetbotConfig)
-              -- Restore saved enabled state
+              -- Restore saved enabled state (ONLY if not explicitly disabled by user)
               if targetbotEnabled == false and TargetBot.setOff then
                 TargetBot.setOff()
-              elseif targetbotEnabled == true and TargetBot.setOn then
+              elseif targetbotEnabled == true and TargetBot.setOn and not TargetBot.explicitlyDisabled then
                 TargetBot.setOn()
               end
             end)
@@ -172,7 +172,8 @@ local function lateRestoreFromUnifiedStorage()
         -- Same config, just restore enabled state
         schedule(200, function()
           if TargetBot then
-            if targetbotEnabled == true and TargetBot.setOn then
+            -- CRITICAL: Respect explicitlyDisabled flag - user turned it off manually
+            if targetbotEnabled == true and TargetBot.setOn and not TargetBot.explicitlyDisabled then
               pcall(function() TargetBot.setOn() end)
             elseif targetbotEnabled == false and TargetBot.setOff then
               pcall(function() TargetBot.setOff() end)

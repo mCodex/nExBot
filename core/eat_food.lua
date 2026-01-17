@@ -109,6 +109,7 @@ local State = {
   openedCorpses = {},      -- { ["x,y,z"] = timestamp } of already opened corpses
   corpseContainerOpen = false,
   waitingForCorpse = nil,
+  lastEat = 0,             -- Last time we ate food
 }
 
 -- Helper to create position key for tracking
@@ -150,6 +151,11 @@ end
 local function getRegenTime()
   if player and player.getRegenerationTime then
     local ok, regen = pcall(function() return player:getRegenerationTime() end)
+    if ok then return regen end
+  end
+  -- Fallback to player:regeneration()
+  if player and player.regeneration then
+    local ok, regen = pcall(function() return player:regeneration() end)
     if ok then return regen end
   end
   -- Fallback to global function if available
@@ -311,10 +317,7 @@ local function setupRegenEventListener()
     -- Only trigger eating when regen drops below threshold
     if newRegen < CONFIG.EAT_FOOD_THRESHOLD and oldRegen >= CONFIG.EAT_FOOD_THRESHOLD then
       schedule(50, function()
-        local food = findFoodInContainers()
-        if food then
-          g_game.use(food)
-        end
+        tryEat()
       end)
     end
   end, 50)
@@ -357,6 +360,11 @@ end
 
 -- Simple single eat (for macro polling)
 local function tryEat()
+  -- Cooldown to prevent spam eating
+  if now - State.lastEat < 10000 then  -- 10 seconds cooldown
+    return false
+  end
+  
   local regenTime = getRegenTime()
   if regenTime >= CONFIG.EAT_FOOD_THRESHOLD then
     return false
@@ -365,12 +373,14 @@ local function tryEat()
   local food = findFoodInContainers()
   if food then
     g_game.use(food)
+    State.lastEat = now
     return true
   end
   
   local foodId = findFoodById()
   if foodId and use then
     use(foodId)
+    State.lastEat = now
     return true
   end
   
@@ -387,23 +397,24 @@ local eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function()
   end
   
   -- Eat food
-  eatUntilFull()
+  tryEat()
 end)
 
 -- Add tooltip
 if eatFoodMacro and eatFoodMacro.button then
   eatFoodMacro.button:setTooltip(
-    "Automatically eats food until full (60+ sec regen).\n" ..
-    "Runs every 500ms and eats multiple pieces.\n" ..
+    "Automatically eats food when regeneration < 40 seconds.\n" ..
+    "Runs every 500ms and eats one piece at a time.\n" ..
     "Searches all open containers for supported food items.\n" ..
-    "Uses EventBus for optimized performance."
+    "Uses EventBus for optimized performance.\n" ..
+    "10 second cooldown between eats to prevent spam."
   )
 end
 
 -- Register with BotDB for persistence, eat immediately on enable
 if BotDB and BotDB.registerMacro then
   BotDB.registerMacro(eatFoodMacro, "eatFood", function()
-    schedule(100, eatUntilFull)
+    schedule(100, tryEat)
   end)
 end
 
