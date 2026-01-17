@@ -23,7 +23,19 @@ local Geometry = Core.Geometry or {}
 local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
 
 -- Helper: check MovementCoordinator for movement allowance
+local zigzagState = { blockUntil = 0, cooldown = 250 }
+
 local function movementAllowed()
+  local nowt = now or (os.time() * 1000)
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.isZigzagging then
+    if MonsterAI.Scenario.isZigzagging() then
+      if nowt < zigzagState.blockUntil then
+        return false
+      end
+      zigzagState.blockUntil = nowt + zigzagState.cooldown
+      return false
+    end
+  end
   if nExBot and nExBot.MovementCoordinator and nExBot.MovementCoordinator.canMove then
     return nExBot.MovementCoordinator.canMove()
   end

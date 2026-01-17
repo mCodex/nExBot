@@ -108,10 +108,33 @@ TargetBot.requestAttack = function(creature, reason, force)
     return false
   end
 
+  -- MonsterAI target switch gate (anti-zigzag / consistency)
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch and not force then
+    local current = g_game.getAttackingCreature and g_game.getAttackingCreature()
+    if current and current:getId() ~= id then
+      local newPriority = 100
+      if TargetBot.Creature and TargetBot.Creature.getConfigs then
+        local cfgs = TargetBot.Creature.getConfigs(creature)
+        if cfgs and cfgs[1] then
+          newPriority = cfgs[1].priority or newPriority
+        end
+      end
+      local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+      local allow = MonsterAI.Scenario.shouldAllowTargetSwitch(id, newPriority, okHp and hp or 100)
+      if not allow then
+        return false
+      end
+    end
+  end
+
   g_game.attack(creature)
   AttackController.lastCommandTime = nowt
   AttackController.lastTargetId = id
   AttackController.lastReason = reason
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
+    local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+    MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
+  end
   return true
 end
 
@@ -2174,6 +2197,29 @@ targetbotMacro = macro(200, function()
       lastRecalcTime = now
       bestTarget, targetCount, totalDanger = recalculateBestTarget()
     end
+
+  -- MonsterAI scenario integration: prefer scenario optimal target when allowed
+  local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature() or nil
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.getOptimalTarget then
+    local optimal = MonsterAI.Scenario.getOptimalTarget()
+    if optimal and optimal.creature and not optimal.creature:isDead() then
+      local okPos, cpos = pcall(function() return optimal.creature:getPosition() end)
+      if okPos and cpos and cpos.z == pos.z then
+        local isCurrent = currentAttack and currentAttack:getId() == optimal.id
+        local params, path = processCandidate(optimal.creature, pos, isCurrent)
+        if params and params.config then
+          local okSwitch = true
+          if MonsterAI.Scenario.shouldAllowTargetSwitch and currentAttack and not isCurrent then
+            local okHp, hp = pcall(function() return optimal.creature:getHealthPercent() end)
+            okSwitch = MonsterAI.Scenario.shouldAllowTargetSwitch(optimal.id, params.priority or 100, okHp and hp or 100)
+          end
+          if okSwitch then
+            bestTarget = params
+          end
+        end
+      end
+    end
+  end
   
   -- IMPROVED: Get live monster count from EventTargeting (most accurate)
   local liveMonsterCount = 0
@@ -2181,6 +2227,28 @@ targetbotMacro = macro(200, function()
     liveMonsterCount = EventTargeting.getLiveMonsterCount()
   else
     liveMonsterCount = CreatureCache.monsterCount or 0
+  end
+
+  -- HARD STICKY: If we already attack a valid monster on screen, keep it
+  local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+  if currentAttack and not currentAttack:isDead() then
+    local okPos, cpos = pcall(function() return currentAttack:getPosition() end)
+    if okPos and cpos and cpos.z == pos.z then
+      local dist = getDistanceBetween(pos, cpos)
+      if dist and dist <= 10 then
+        local cfgs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(currentAttack)
+        if cfgs and cfgs[1] then
+          bestTarget = {
+            config = cfgs[1],
+            creature = currentAttack,
+            danger = cfgs[1].danger or 0,
+            priority = cfgs[1].priority or 1
+          }
+          -- prevent walking away while target is still alive
+          cavebotAllowance = now + 600
+        end
+      end
+    end
   end
   
   if not bestTarget then
