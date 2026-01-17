@@ -950,6 +950,7 @@ local ContainerOpener = {
     openedByContainerId = {},
     containerIdBySig = {},
     inFlightSigs = {},
+    inFlightEntries = {},
     openAttempts = {},
   
     -- Graph tracking (for diagnostics / stability)
@@ -966,6 +967,7 @@ local ContainerOpener = {
     fullScanInterval = 900, -- Full rescan interval (ms)
     reopenGraceMs = 5000,  -- Prevent rapid reopen/close loops
     inFlightTimeoutMs = 1800,
+    inFlightRetryMs = 2200,
     attemptWindowMs = 2500,
     autoOpenActiveUntil = 0,
     settleDelayMs = 12000,
@@ -997,6 +999,7 @@ function ContainerOpener.reset()
     ContainerOpener.openedByContainerId = {}
     ContainerOpener.containerIdBySig = {}
     ContainerOpener.inFlightSigs = {}
+    ContainerOpener.inFlightEntries = {}
     ContainerOpener.openAttempts = {}
     ContainerOpener.graphNodes = {}
     ContainerOpener.graphEdges = {}
@@ -1082,6 +1085,30 @@ function ContainerOpener.scheduleRescan(containerId)
             ContainerOpener.rescanTimers[containerId] = nil
         end)
     end
+end
+
+-- Retry opens that did not result in a container window
+function ContainerOpener.scheduleInFlightCheck(itemSig)
+    if not itemSig then return end
+    schedule(ContainerOpener.inFlightRetryMs, function()
+        if not ContainerOpener.inFlightSigs[itemSig] then return end
+        local entry = ContainerOpener.inFlightEntries[itemSig]
+        if not entry then return end
+
+        local attempts = ContainerOpener.openAttempts[itemSig] or { count = 0, lastAttempt = 0 }
+        if attempts.count >= ContainerOpener.maxAttempts then
+            ContainerOpener.inFlightSigs[itemSig] = nil
+            ContainerOpener.inFlightEntries[itemSig] = nil
+            return
+        end
+
+        ContainerOpener.inFlightSigs[itemSig] = nil
+        ContainerOpener.queueItem(entry.item, entry.parentContainerId, entry.slotIndex, entry.slotId, entry.absoluteSlotId, true, entry.parentSig)
+        if not ContainerOpener.isProcessing then
+            ContainerOpener.isProcessing = true
+        end
+        schedule(50, ContainerOpener.processNext)
+    end)
 end
 
 -- Generate a unique key for a slot
@@ -1394,6 +1421,16 @@ function ContainerOpener.processNext()
   -- Record timing
   ContainerOpener.lastOpenTime = currentTime
     ContainerOpener.inFlightSigs[finalSig] = currentTime
+        ContainerOpener.inFlightEntries[finalSig] = {
+                item = item,
+                itemSig = finalSig,
+                parentContainerId = entry.parentContainerId,
+                parentSig = entry.parentSig,
+                slotIndex = entry.slotIndex,
+                slotId = entry.slotId,
+                absoluteSlotId = entry.absoluteSlotId
+        }
+        ContainerOpener.scheduleInFlightCheck(finalSig)
     local attempt = ContainerOpener.openAttempts[finalSig] or { count = 0, lastAttempt = 0 }
     if (currentTime - attempt.lastAttempt) < ContainerOpener.attemptWindowMs then
         attempt.count = attempt.count + 1
@@ -1405,6 +1442,7 @@ function ContainerOpener.processNext()
     if attempt.count >= ContainerOpener.maxAttempts then
         ContainerOpener.openedItemSigs[finalSig] = currentTime
         ContainerOpener.inFlightSigs[finalSig] = nil
+                ContainerOpener.inFlightEntries[finalSig] = nil
         schedule(60, ContainerOpener.processNext)
         return
     end
@@ -1487,6 +1525,7 @@ function ContainerOpener.onContainerOpened(container)
         ContainerOpener.openedByContainerId[container:getId()] = sig
         ContainerOpener.containerIdBySig[sig] = container:getId()
         ContainerOpener.inFlightSigs[sig] = nil
+        ContainerOpener.inFlightEntries[sig] = nil
     end
   
   -- Scan the newly opened container for nested containers
