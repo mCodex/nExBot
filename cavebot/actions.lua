@@ -32,7 +32,7 @@ end
 local lastMoved = now - 200
 onTextMessage(function(mode, text)
   if text ~= 'There is not enough room.' then return end
-  if CaveBot.isOff() then return end
+  if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
 
   local playerPos = pos()
   local tiles = getNearTiles(playerPos)
