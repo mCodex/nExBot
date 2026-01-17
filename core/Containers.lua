@@ -901,15 +901,45 @@ local function renameContainer(container)
     end
 end
 
--- Helper: Open equipped quiver from right hand slot (for paladins)
+-- Helper: Check if a quiver container is already open
+local function isQuiverOpen()
+    for _, container in pairs(g_game.getContainers()) do
+        local name = container and container:getName() or ""
+        if name:lower():find("quiver") then
+            return true
+        end
+    end
+    return false
+end
+
+-- Helper: Open equipped quiver from right hand/ammo slot (for paladins)
 -- (defined early so it can be called from openAllContainers)
 local function openQuiver()
+    if isQuiverOpen() then return true end
+
     local rightItem = getRight()
     if rightItem and rightItem:isContainer() then
         g_game.open(rightItem)
         return true
     end
+
+    local ammoItem = getAmmo and getAmmo() or nil
+    if ammoItem and ammoItem:isContainer() then
+        g_game.open(ammoItem)
+        return true
+    end
+
     return false
+end
+
+-- Helper: Retry opening quiver a few times (handles delayed equips)
+local function openQuiverWithRetry(attempts)
+    attempts = attempts or 3
+    if openQuiver() then return end
+    if attempts <= 1 then return end
+    schedule(250, function()
+        openQuiverWithRetry(attempts - 1)
+    end)
 end
 
 -- ============================================================================
@@ -1632,14 +1662,14 @@ local function openAllContainers()
                 attempts = attempts + 1
                 if #g_game.getContainers() > 0 then
                     startContainerBFS()
-                    schedule(200, openQuiver)
+                    schedule(200, function() openQuiverWithRetry(3) end)
                 elseif attempts < 12 then
                     -- retry a few times (~1.8s total)
                     schedule(150, waitForMain)
                 else
                     -- Fallback: start anyway after retries
                     startContainerBFS()
-                    schedule(200, openQuiver)
+                    schedule(200, function() openQuiverWithRetry(3) end)
                 end
             end
             schedule(150, waitForMain)
@@ -1650,7 +1680,7 @@ local function openAllContainers()
         -- Main backpack already open, start BFS directly
         startContainerBFS()
         -- Also try to open quiver
-        schedule(200, openQuiver)
+        schedule(200, function() openQuiverWithRetry(3) end)
     end
 end
 
@@ -1688,7 +1718,7 @@ function reopenBackpacks(onComplete)
         end
         
         -- Always open quiver (default behavior)
-        schedule(350, openQuiver)
+        schedule(350, function() openQuiverWithRetry(3) end)
         
         -- Start BFS after main backpack opens; poll until a container appears
         local attempts = 0
