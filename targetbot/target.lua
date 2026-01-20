@@ -14,6 +14,13 @@ local monsterAIWaitUntil = 0
 
 local dangerValue = 0
 local looterStatus = ""
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ATTACK STATE MACHINE INTEGRATION (Default Attack System)
+-- The AttackStateMachine is now the PRIMARY attack handler for TargetBot.
+-- It provides linear, consistent targeting with automatic recovery.
+-- ═══════════════════════════════════════════════════════════════════════════
+
 -- initialization state
 local pendingEnable = false
 local pendingEnableDesired = nil
@@ -71,71 +78,52 @@ TargetBot = TargetBot or {}
 TargetBot.smartPullActive = false  -- When true, CaveBot pauses waypoint walking
 
 -- Centralized attack controller (anti-spam + anti-zigzag switching)
+-- IMPROVED: Faster intervals for more responsive attacking
 local AttackController = {
   lastCommandTime = 0,
   lastTargetId = nil,
   lastReason = nil,
-  minInterval = 200,        -- Minimum time between any attack commands
-  sameTargetInterval = 250, -- Minimum time between same-target commands
-  minSwitchInterval = 500   -- Minimum time between target switches
+  minInterval = 100,        -- Reduced: Minimum time between any attack commands
+  sameTargetInterval = 150, -- Reduced: Minimum time between same-target commands
+  minSwitchInterval = 400,  -- Reduced: Minimum time between target switches
+  lastConfirmedTime = 0,    -- When attack was last confirmed by server
+  attackState = "idle"      -- idle, pending, confirmed
 }
 
 TargetBot.AttackController = AttackController
 
--- Request a single attack command (rate-limited, anti-spam)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- REQUEST ATTACK (Unified Attack Interface)
+-- This is the SINGLE entry point for all attack requests in TargetBot.
+-- Uses AttackStateMachine for state-based attack management.
+-- ═══════════════════════════════════════════════════════════════════════════
 TargetBot.requestAttack = function(creature, reason, force)
-  if not creature or creature:isDead() then return false end
+  if not creature then return false end
+  
+  -- Safe dead check
+  local okDead, isDead = pcall(function() return creature:isDead() end)
+  if okDead and isDead then return false end
+  
   if not g_game or not g_game.attack then return false end
 
-  local nowt = now or (os.time() * 1000)
   local okId, id = pcall(function() return creature:getId() end)
   if not okId or not id then return false end
 
-  -- If already attacking this target, avoid spamming
-  local current = g_game.getAttackingCreature and g_game.getAttackingCreature()
-  if current and current == creature and not force then
-    if (nowt - AttackController.lastCommandTime) < AttackController.sameTargetInterval then
-      return false
+  -- Calculate priority for this creature
+  local priority = 100
+  if TargetBot.Creature and TargetBot.Creature.getConfigs then
+    local cfgs = TargetBot.Creature.getConfigs(creature)
+    if cfgs and cfgs[1] then
+      priority = (cfgs[1].priority or 1) * 100
     end
   end
 
-  -- Prevent rapid switching between targets
-  if AttackController.lastTargetId and AttackController.lastTargetId ~= id and not force then
-    if (nowt - AttackController.lastCommandTime) < AttackController.minSwitchInterval then
-      return false
-    end
-  elseif not force and (nowt - AttackController.lastCommandTime) < AttackController.minInterval then
-    return false
+  -- Use AttackStateMachine directly (always loaded as default)
+  if force then
+    return AttackStateMachine.forceSwitch(creature)
+  else
+    return AttackStateMachine.requestSwitch(creature, priority)
   end
-
-  -- MonsterAI target switch gate (anti-zigzag / consistency)
-  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch and not force then
-    local current = g_game.getAttackingCreature and g_game.getAttackingCreature()
-    if current and current:getId() ~= id then
-      local newPriority = 100
-      if TargetBot.Creature and TargetBot.Creature.getConfigs then
-        local cfgs = TargetBot.Creature.getConfigs(creature)
-        if cfgs and cfgs[1] then
-          newPriority = cfgs[1].priority or newPriority
-        end
-      end
-      local okHp, hp = pcall(function() return creature:getHealthPercent() end)
-      local allow = MonsterAI.Scenario.shouldAllowTargetSwitch(id, newPriority, okHp and hp or 100)
-      if not allow then
-        return false
-      end
-    end
-  end
-
-  g_game.attack(creature)
-  AttackController.lastCommandTime = nowt
-  AttackController.lastTargetId = id
-  AttackController.lastReason = reason
-  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
-    local okHp, hp = pcall(function() return creature:getHealthPercent() end)
-    MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
-  end
-  return true
 end
 
 -- Use TargetBotCore if available (DRY principle)
@@ -1789,6 +1777,24 @@ end
 local function recalculateBestTarget()
   local pos = player:getPosition()
   if not pos then return end
+
+  local function getAdjustedPriority(creature, params, dist)
+    if not creature or not params then return (params and params.priority) or 0 end
+    local base = params.priority or 0
+    local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+    hp = okHp and hp or 100
+    if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.modifyPriority then
+      local okId, id = pcall(function() return creature:getId() end)
+      if okId and id then
+        base = MonsterAI.Scenario.modifyPriority(id, base, hp)
+      end
+    end
+    if dist then
+      base = base + math.max(0, (8 - dist)) * 2
+    end
+    base = base + ((100 - hp) * 0.15)
+    return base
+  end
   
   local bestTarget = nil
   local bestPriority = 0
@@ -1857,6 +1863,7 @@ local function recalculateBestTarget()
         local isCurrentTarget = (currentTargetId and id == currentTargetId)
         
         -- Calculate path and params (pass isCurrentTarget for enhanced path finding)
+        local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
         local params, path = processCandidate(creature, pos, isCurrentTarget)
         
         -- For current target, try harder to find a path if initial attempt failed
@@ -1878,6 +1885,7 @@ local function recalculateBestTarget()
         -- IMPROVED: Track all creatures, not just those with perfect paths
         -- Creatures with blocked paths can still be targeted if they're close
         if path and params and params.config then
+          params.priority = getAdjustedPriority(creature, params, dist)
           -- Creature is reachable - add to cache
           CreatureCache.monsters[id] = {
             creature = creature,
@@ -1910,6 +1918,7 @@ local function recalculateBestTarget()
             -- Very close - might just be blocked by other creatures, keep targeting
             local fallbackParams = TargetBot.Creature.calculateParams(creature, {1})  -- Fake short path
             if fallbackParams and fallbackParams.config then
+              fallbackParams.priority = getAdjustedPriority(creature, fallbackParams, dist)
               CreatureCache.monsters[id] = {
                 creature = creature,
                 path = nil,
@@ -2062,6 +2071,12 @@ local lastRecalcTime = 0
 local RECALC_COOLDOWN_MS = 100  -- IMPROVED: Faster recalc cooldown
 targetbotMacro = macro(200, function()
   local _msStart = os.clock()
+  
+  -- Update AttackStateMachine (runs silently - no separate button)
+  if AttackStateMachine and AttackStateMachine.update then
+    pcall(AttackStateMachine.update)
+  end
+  
   if not config or not config.isOn or not config.isOn() then
     return
   end
@@ -2322,6 +2337,37 @@ targetbotMacro = macro(200, function()
       local okHp, hp = pcall(function() return bestTarget.creature:getHealthPercent() end)
       if okId and id then
         MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
+      end
+    end
+
+    -- ═══════════════════════════════════════════════════════════════════════════
+    -- LINEAR ATTACK SYSTEM: AttackStateMachine handles all attack persistence
+    -- Ensures continuous attacking of same target until death - no fallbacks
+    -- ═══════════════════════════════════════════════════════════════════════════
+    local nowt = now or (os.time() * 1000)
+    local okId, id = pcall(function() return bestTarget.creature:getId() end)
+    
+    if okId and id then
+      -- Use AttackStateMachine for all attack management
+      local smState = AttackStateMachine.getState()
+      local smTargetId = AttackStateMachine.getTargetId()
+      
+      -- If state machine is targeting something different, sync it
+      if smTargetId ~= id then
+        pcall(function() AttackStateMachine.forceSwitch(bestTarget.creature) end)
+      end
+      
+      -- Update AttackController based on state machine status
+      if smState == "ATTACKING" or smState == "RECOVERING" or smState == "CONFIRMING" then
+        -- State machine is handling it - trust it completely
+        AttackController.attackState = "confirmed"
+        AttackController.lastConfirmedTime = nowt
+        AttackController.lastTargetId = id
+      elseif smState == "ACQUIRING" then
+        -- State machine is acquiring target
+        AttackController.attackState = "pending"
+        AttackController.lastCommandTime = nowt
+        AttackController.lastTargetId = id
       end
     end
 
