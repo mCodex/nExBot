@@ -2,7 +2,7 @@ CaveBot.Extensions.ClearTile = {}
 
 -- ClientService helper for cross-client compatibility
 local function getClient()
-    return ClientService or _G.ClientService
+    return ClientService
 end
 
 CaveBot.Extensions.ClearTile.setup = function()
@@ -103,16 +103,16 @@ CaveBot.Extensions.ClearTile.setup = function()
           end
 
           if #candidates == 0 then
-            print(\"CaveBot[ClearTile]: can't find tile to push, cannot clear way, skipping\")
+            print("CaveBot[ClearTile]: can't find tile to push, cannot clear way, skipping")
             return false
           else
-            print(\"CaveBot[ClearTile]: pushing player... \" .. c:getName() .. \" out of the way\")
+            print("CaveBot[ClearTile]: pushing player... " .. c:getName() .. " out of the way")
             local pos = candidates[math.random(1,#candidates)]
             local tileToPush = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
-            tileToPush:setText(\"here\")
-            schedule(500, function() tileToPush:setText(\"\") end)
+            tileToPush:setText("here")
+            schedule(500, function() tileToPush:setText("") end)
             if Client and Client.move then Client.move(c, pos, 1) elseif g_game then g_game.move(c, pos, 1) end
-            return \"retry\"
+            return "retry"
           end
         end
       end

@@ -73,7 +73,7 @@ local DIR_VECTORS = Geometry.DIR_VECTORS or {
 -- CLIENTSERVICE HELPERS (cross-client compatibility)
 --------------------------------------------------------------------------------
 local function getClient()
-  return ClientService or _G.ClientService
+  return ClientService
 end
 
 local function getClientVersion()

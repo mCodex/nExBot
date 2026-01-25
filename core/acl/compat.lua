@@ -17,7 +17,7 @@
 ]]
 
 -- Get ClientService reference (should be loaded before this)
-local Client = ClientService or _G.ClientService
+local Client = ClientService
 
 if not Client then
   warn("[ACL Compat] ClientService not found, compatibility layer disabled")

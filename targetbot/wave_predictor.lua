@@ -8,7 +8,7 @@ WavePredictor.VERSION = "0.3"  -- Updated for OTClient API integration
 
 -- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
 local function getClient()
-  return ClientService or _G.ClientService
+  return ClientService
 end
 
 local function getClientVersion()

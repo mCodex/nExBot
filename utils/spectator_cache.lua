@@ -5,7 +5,7 @@ local DEFAULT_TTL = 200 -- milliseconds
 
 -- ClientService helper for cross-client compatibility
 local function getClient()
-    return ClientService or _G.ClientService
+    return ClientService
 end
 
 local function makeKey(rx, ry)

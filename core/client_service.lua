@@ -1314,7 +1314,12 @@ function ClientService.onRemoveItem(callback)
   end
 end
 
--- Make it globally accessible
-_G.ClientService = ClientService
+-- Make it globally accessible (use rawset to avoid errors if _G doesn't exist)
+if rawset then
+  pcall(function() rawset(_G, 'ClientService', ClientService) end)
+end
+
+-- Also export as global in bot environment
+ClientService = ClientService
 
 return ClientService

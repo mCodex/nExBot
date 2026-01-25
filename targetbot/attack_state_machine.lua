@@ -55,7 +55,7 @@ AttackStateMachine.STATE = STATE
 -- CLIENTSERVICE HELPERS (cross-client compatibility)
 --------------------------------------------------------------------------------
 local function getClient()
-  return ClientService or _G.ClientService
+  return ClientService
 end
 
 local function getClientVersion()

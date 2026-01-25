@@ -2,7 +2,7 @@ local version = "1.0.0"
 
 -- Get ClientService reference for cross-client compatibility
 local function getClient()
-  return ClientService or _G.ClientService
+  return ClientService
 end
 
 UI.Label("nExBot v" .. version)

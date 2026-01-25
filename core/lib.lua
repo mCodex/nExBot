@@ -7,7 +7,7 @@ nExBot = nExBot or {} -- global namespace for bot variables
 
 -- Get ClientService reference (may not be loaded yet, lazy load in functions)
 local function getClient()
-  return ClientService or _G.ClientService
+  return ClientService
 end
 nExBot.standTime = now
 nExBot.isUsingPotion = false

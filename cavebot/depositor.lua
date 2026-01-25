@@ -2,7 +2,7 @@ CaveBot.Extensions.Depositor = {}
 
 -- ClientService helper for cross-client compatibility
 local function getClient()
-    return ClientService or _G.ClientService
+    return ClientService
 end
 
 local function getClientVersion()

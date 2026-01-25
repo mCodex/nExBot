@@ -12,7 +12,7 @@
 
 -- ClientService helper for cross-client compatibility
 local function getClient()
-  return ClientService or _G.ClientService
+  return ClientService
 end
 
 if voc() == 2 or voc() == 12 then

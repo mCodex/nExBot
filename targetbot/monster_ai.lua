@@ -45,7 +45,7 @@ MonsterAI.VERSION = "2.2"
 -- CLIENTSERVICE HELPERS (cross-client compatibility)
 --------------------------------------------------------------------------------
 local function getClient()
-  return ClientService or _G.ClientService
+  return ClientService
 end
 
 local function getClientVersion()

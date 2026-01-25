@@ -5,7 +5,7 @@ CaveBot.Extensions.Imbuing = {}
 
 -- ClientService helper for cross-client compatibility
 local function getClient()
-    return ClientService or _G.ClientService
+    return ClientService
 end
 
 local SHRINES = {25060, 25061, 25182, 25183}

@@ -5,7 +5,7 @@ local SafeCall = SafeCall or require("core.safe_call")
 -- CLIENTSERVICE HELPERS (cross-client compatibility)
 --------------------------------------------------------------------------------
 local function getClient()
-  return ClientService or _G.ClientService
+  return ClientService
 end
 
 local function getClientVersion()
