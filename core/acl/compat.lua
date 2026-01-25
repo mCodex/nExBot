@@ -498,27 +498,21 @@ local Compat = {
   createMapProxy = createMapProxy,
   
   -- Helper to enable full proxy mode (replaces g_game/g_map)
+  -- NOTE: Proxy mode is disabled in bot environment (no _G access)
   enableProxyMode = function()
-    _G.g_game_original = g_game
-    _G.g_map_original = g_map
-    _G.g_game = createGameProxy()
-    _G.g_map = createMapProxy()
-    return true
+    -- Bot environment doesn't have _G, so proxy mode is not supported
+    -- The proxies can still be used directly via Compat.createGameProxy()
+    return false
   end,
   
   -- Helper to disable proxy mode
   disableProxyMode = function()
-    if _G.g_game_original then
-      _G.g_game = _G.g_game_original
-    end
-    if _G.g_map_original then
-      _G.g_map = _G.g_map_original
-    end
-    return true
+    -- Bot environment doesn't have _G, so nothing to restore
+    return false
   end
 }
 
--- Export globally
-_G.ACLCompat = Compat
+-- Export globally (safe - avoids _G in bot environment)
+ACLCompat = Compat
 
 return Compat
