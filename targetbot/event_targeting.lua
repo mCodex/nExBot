@@ -70,11 +70,11 @@ EventTargeting.CONSTANTS = {
   
   -- Combat coordination
   COMBAT_PAUSE_DURATION = 300,    -- How long to pause CaveBot when engaging
-  LURE_CHECK_INTERVAL = 150,      -- Faster lure checks (was 250)
+  LURE_CHECK_INTERVAL = 200,      -- Lure checks interval
   
   -- Performance thresholds
-  MAX_PROCESS_PER_TICK = 10,      -- Increased for faster processing
-  DEBOUNCE_INTERVAL = 25,         -- Reduced from 50ms for faster response
+  MAX_PROCESS_PER_TICK = 5,       -- PERFORMANCE: Reduced to 5 for less CPU
+  DEBOUNCE_INTERVAL = 50,         -- PERFORMANCE: Increased from 25ms
   
   -- LIVE COUNTING - uses direct API for accuracy
   LIVE_COUNT_INTERVAL = 100,      -- How often to refresh live count
@@ -993,21 +993,31 @@ function EventTargeting.TargetAcquisition.processPending()
   
   if #targetState.pendingTargets == 0 then return end
   
+  -- PERFORMANCE: Only re-validate paths occasionally, not every tick
+  local currentTime = now or (os.time() * 1000)
+  local shouldValidatePaths = (currentTime - (targetState.lastPathValidation or 0)) > 300
+  if shouldValidatePaths then
+    targetState.lastPathValidation = currentTime
+  end
+  
   -- Find best pending target
   local best = nil
   local bestPriority = 0
   local validTargets = {}
   
+  -- PERFORMANCE: Get player reference once outside the loop
+  updatePlayerRef()
+  local playerPos = player and player:getPosition()
+  
   for i = 1, #targetState.pendingTargets do
     local pending = targetState.pendingTargets[i]
     if pending.creature and not pending.creature:isDead() then
-      -- Re-validate path for pending targets (they may have become unreachable)
       local stillReachable = true
-      updatePlayerRef()
-      if player then
-        local playerPos = player:getPosition()
+      
+      -- PERFORMANCE: Only validate paths every 300ms, not every tick
+      if shouldValidatePaths and playerPos then
         local creaturePos = pending.creature:getPosition()
-        if playerPos and creaturePos and chebyshev(playerPos, creaturePos) > 1 then
+        if creaturePos and chebyshev(playerPos, creaturePos) > 1 then
           local _, _, reachable = EventTargeting.PathValidator.validate(playerPos, creaturePos)
           stillReachable = reachable
         end
@@ -1017,8 +1027,8 @@ function EventTargeting.TargetAcquisition.processPending()
         bestPriority = pending.priority
         best = pending
       end
-      -- Keep recent valid targets that are still reachable
-      if now - pending.time < 500 and stillReachable then
+      -- Keep recent valid targets
+      if currentTime - pending.time < 500 then
         table.insert(validTargets, pending)
       end
     end
@@ -1449,7 +1459,7 @@ end
 
 -- Scan interval for full screen scan (catch any monsters EventBus missed)
 local lastFullScan = 0
-local FULL_SCAN_INTERVAL = 150  -- IMPROVED: Scan every 150ms for faster detection
+local FULL_SCAN_INTERVAL = 500  -- PERFORMANCE: Scan every 500ms (EventBus handles real-time)
 
 -- Full screen scan - catches monsters that EventBus may have missed
 -- IMPROVED: Uses the live count system for accurate detection
@@ -1532,8 +1542,8 @@ local function scanVisibleMonsters()
 end
 
 -- Fast macro for processing queued creatures and combat checks
--- IMPROVED: Runs at 50ms for faster response
-macro(50, function()
+-- PERFORMANCE: Runs at 100ms (EventBus handles real-time creature detection)
+macro(100, function()
   -- Skip if TargetBot is off
   if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
     return

@@ -185,7 +185,17 @@ local toggle = function()
 end
 
 local drawGraph = function(graph, value)
-    graph:addValue(value)
+    if not graph then return end
+    -- Ensure graph is created before adding values
+    if graph.getGraphsCount and graph:getGraphsCount() == 0 then
+        graph:createGraph()
+        graph:setLineWidth(1, 1)
+        graph:setLineColor(1, "#00FF00")  -- Default green color
+    end
+    -- Use index 1 for the graph
+    if graph.addValue then
+        graph:addValue(1, value)
+    end
 end
 
 local toggleAnalyzer = function(window)

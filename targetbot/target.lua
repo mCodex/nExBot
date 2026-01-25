@@ -1728,12 +1728,54 @@ end
 -- Only recalculates when cache is dirty (events occurred)
 --------------------------------------------------------------------------------
 
+-- PERFORMANCE: Path cache to avoid recalculating paths every tick
+local pathCache = {
+  entries = {},   -- {id -> {path, time, pos}}
+  TTL = 400       -- Path valid for 400ms
+}
+
+local function getCachedPath(creatureId, playerPos, creaturePos)
+  local entry = pathCache.entries[creatureId]
+  local currentTime = now or (os.time() * 1000)
+  if entry and (currentTime - entry.time) < pathCache.TTL then
+    -- Check if positions are still valid
+    if entry.playerZ == playerPos.z and entry.creatureZ == creaturePos.z then
+      return entry.path
+    end
+  end
+  return nil
+end
+
+local function setCachedPath(creatureId, path, playerPos, creaturePos)
+  pathCache.entries[creatureId] = {
+    path = path,
+    time = now or (os.time() * 1000),
+    playerZ = playerPos.z,
+    creatureZ = creaturePos.z
+  }
+end
+
+local function cleanupPathCache()
+  local currentTime = now or (os.time() * 1000)
+  local cutoff = currentTime - pathCache.TTL * 2
+  for id, entry in pairs(pathCache.entries) do
+    if entry.time < cutoff then
+      pathCache.entries[id] = nil
+    end
+  end
+end
+
 -- Helper: process a creature into target params (returns params, path) - pure helper to reduce duplication
 -- IMPROVED v2.2: More lenient path validation to prevent "leaving monsters behind"
+-- PERFORMANCE: Uses path cache to avoid expensive recalculations
 local function processCandidate(creature, pos, isCurrentTarget)
   if not creature or creature:isDead() or not isTargetableCreature(creature) then return nil, nil end
   local cpos = creature:getPosition()
   if not cpos then return nil, nil end
+  
+  -- Get creature ID for path caching
+  local okId, creatureId = pcall(function() return creature:getId() end)
+  creatureId = okId and creatureId or nil
   
   -- v2.2: Calculate distance first - adjacent creatures should ALWAYS be targetable
   local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
@@ -1752,41 +1794,53 @@ local function processCandidate(creature, pos, isCurrentTarget)
   
   -- ═══════════════════════════════════════════════════════════════════════════
   -- REACHABILITY CHECK (v2.2): Improved with fallback strategies
+  -- PERFORMANCE: Check path cache first to avoid expensive pathfinding
   -- ═══════════════════════════════════════════════════════════════════════════
   
   local path = nil
   local isReachable = true
   
-  -- Try multiple path strategies for better success rate
-  local pathStrategies = {
-    -- Strategy 1: Standard path params
-    {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = true, precision = 1},
-    -- Strategy 2: Ignore creatures more aggressively (creatures might move)
-    {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = false, precision = 1},
-    -- Strategy 3: For current target, try even harder
-    {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = false, ignoreCreatures = true, allowOnlyVisibleTiles = false, precision = 2}
-  }
-  
-  -- Use MonsterAI.Reachability if available (but don't let it block adjacent/current targets)
-  if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable and not isCurrentTarget then
-    local reachResult, reason, cachedPath = MonsterAI.Reachability.isReachable(creature)
-    if reachResult and cachedPath then
-      path = cachedPath
-    elseif not reachResult and dist > 3 then
-      -- Only skip if truly far and blocked
-      return nil, nil
-    end
+  -- PERFORMANCE: Try cached path first
+  if creatureId then
+    path = getCachedPath(creatureId, pos, cpos)
   end
   
-  -- If we don't have a path yet, try our strategies
+  -- If no cached path, calculate new one
   if not path then
-    local maxStrategies = isCurrentTarget and 3 or 2
-    for strategyIdx = 1, maxStrategies do
-      local params = pathStrategies[strategyIdx]
-      path = findPath(pos, cpos, 12, params)
-      if path and #path > 0 then
-        break
+    -- Use MonsterAI.Reachability if available (but don't let it block adjacent/current targets)
+    if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable and not isCurrentTarget then
+      local reachResult, reason, cachedPath = MonsterAI.Reachability.isReachable(creature)
+      if reachResult and cachedPath then
+        path = cachedPath
+      elseif not reachResult and dist > 3 then
+        -- Only skip if truly far and blocked
+        return nil, nil
       end
+    end
+    
+    -- If we don't have a path yet, try pathfinding
+    if not path then
+      -- PERFORMANCE: Use only one strategy for non-current targets
+      local maxStrategies = isCurrentTarget and 2 or 1
+      local pathStrategies = {
+        -- Strategy 1: Standard path params
+        {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = true, precision = 1},
+        -- Strategy 2: More relaxed (only for current target)
+        {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = false, precision = 1}
+      }
+      
+      for strategyIdx = 1, maxStrategies do
+        local params = pathStrategies[strategyIdx]
+        path = findPath(pos, cpos, 12, params)
+        if path and #path > 0 then
+          break
+        end
+      end
+    end
+    
+    -- Cache the path result
+    if creatureId and path then
+      setCachedPath(creatureId, path, pos, cpos)
     end
   end
   
@@ -2170,10 +2224,11 @@ local function primeCreatureCache()
 end
 
 -- Main TargetBot loop - optimized with EventBus caching
--- IMPROVED: Faster macro interval (200ms) for better responsiveness
+-- PERFORMANCE: 250ms macro interval balances responsiveness and CPU usage
 local lastRecalcTime = 0
-local RECALC_COOLDOWN_MS = 100  -- IMPROVED: Faster recalc cooldown
-targetbotMacro = macro(200, function()
+local RECALC_COOLDOWN_MS = 150  -- PERFORMANCE: Increased from 100ms
+local lastPathCacheCleanup = 0
+targetbotMacro = macro(250, function()
   local _msStart = os.clock()
   
   -- Update AttackStateMachine (runs silently - no separate button)
