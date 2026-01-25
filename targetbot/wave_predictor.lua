@@ -6,6 +6,16 @@
 WavePredictor = WavePredictor or {}
 WavePredictor.VERSION = "0.3"  -- Updated for OTClient API integration
 
+-- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+local function getClientVersion()
+  local Client = getClient()
+  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+end
+
 -- Per-creature state
 local patterns = {} -- id -> { lastAttack = ts, cooldownEMA, directionBias, observedWidth, ... }
 
@@ -168,7 +178,8 @@ local function isTileSafeForWaveAvoidance(tilePos)
   if not tilePos then return false end
   
   -- Use OTClient tile API for fast validation
-  local tile = g_map.getTile(tilePos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(tilePos) or (g_map and g_map.getTile and g_map.getTile(tilePos))
   if not tile then return false end
   
   -- Must be walkable (ignore creatures for emergency evasion)

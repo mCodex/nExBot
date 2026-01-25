@@ -20,6 +20,16 @@
 
 TargetCore = TargetCore or {}
 
+-- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+local function getClientVersion()
+  local Client = getClient()
+  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+end
+
 -- ============================================================================
 -- CONSTANTS (Centralized, immutable)
 -- ============================================================================
@@ -202,9 +212,10 @@ TargetCore.PathSafety.FLOOR_CHANGE_ITEMS = {
 -- Check if tile position is a floor-change tile (no caching here)
 function TargetCore.PathSafety.isFloorChangeTile(pos)
   if not pos then return false end
-  local color = g_map.getMinimapColor(pos)
+  local Client = getClient()
+  local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor and g_map.getMinimapColor(pos)) or 0
   if color and TargetCore.PathSafety.FLOOR_CHANGE_COLORS[color] then return true end
-  local tile = g_map.getTile(pos)
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile and g_map.getTile(pos))
   if not tile then return false end
   local ground = tile:getGround()
   if ground and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[ground:getId()] then return true end
@@ -226,7 +237,8 @@ function TargetCore.PathSafety.isPositionSafeForMovement(targetPos, currentPos)
   if TargetCore.PathSafety.isFloorChangeTile(targetPos) then return false end
   
   -- Must be a walkable tile
-  local tile = g_map.getTile(targetPos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(targetPos) or (g_map and g_map.getTile and g_map.getTile(targetPos))
   if not tile or not tile:isWalkable() then return false end
   
   -- Should not have creatures (unless it's the target we're chasing)
@@ -234,8 +246,9 @@ function TargetCore.PathSafety.isPositionSafeForMovement(targetPos, currentPos)
     -- Allow if it's the creature we're targeting
     local creatures = tile:getCreatures()
     if creatures then
+      local attackingCreature = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
       for _, creature in ipairs(creatures) do
-        if creature and creature:getId() ~= (g_game.getAttackingCreature() and g_game.getAttackingCreature():getId()) then
+        if creature and creature:getId() ~= (attackingCreature and attackingCreature:getId()) then
           return false
         end
       end
@@ -248,7 +261,8 @@ end
 -- Simple tile safe check
 function TargetCore.PathSafety.isTileSafe(pos, allowFloorChange)
   if not pos then return false end
-  local tile = g_map.getTile(pos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile and g_map.getTile(pos))
   if not tile then return false end
   if not tile:isWalkable() then return false end
   if tile:hasCreature() then return false end
@@ -508,7 +522,10 @@ end
 -- @param getTileFunc: function(pos) -> tile (dependency injection for testing)
 -- @return {pos, danger, score} or nil
 function TargetCore.findSafestTile(playerPos, monsters, currentTarget, getTileFunc)
-  getTileFunc = getTileFunc or function(p) return g_map.getTile(p) end
+  getTileFunc = getTileFunc or function(p) 
+    local Client = getClient()
+    return (Client and Client.getTile) and Client.getTile(p) or (g_map and g_map.getTile and g_map.getTile(p))
+  end
   
   local currentDanger = TargetCore.calculatePositionDanger(playerPos, monsters)
   

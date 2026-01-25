@@ -29,6 +29,16 @@ EventTargeting = EventTargeting or {}
 EventTargeting.VERSION = "2.0"
 EventTargeting.DEBUG = false
 
+-- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+local function getClientVersion()
+  local Client = getClient()
+  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+end
+
 -- ============================================================================
 -- DEPENDENCIES
 -- ============================================================================
@@ -97,7 +107,8 @@ local targetState = {
 }
 
 -- Cached player reference
-local player = g_game and g_game.getLocalPlayer() or nil
+local Client = getClient()
+local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or nil
 
 -- Path validation parameters (reuse to avoid allocations)
 local PATH_PARAMS = {
@@ -161,7 +172,7 @@ local liveMonsterState = {
   count = 0,              -- Live count from direct API call
   lastUpdate = 0,         -- When we last updated
   creatures = {},         -- Array of live monster references
-  oldTibia = g_game and g_game.getClientVersion and g_game.getClientVersion() < 960 or false
+  oldTibia = getClientVersion() < 960
 }
 
 -- Check if a creature is a targetable monster (not summon)
@@ -199,7 +210,8 @@ function EventTargeting.getLiveMonsterCount()
   
   -- Update cached player reference
   if not player or not player:getPosition() then
-    player = g_game and g_game.getLocalPlayer() or player
+    local Client = getClient()
+    player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or player
   end
   if not player then return 0, {} end
   
@@ -212,11 +224,16 @@ function EventTargeting.getLiveMonsterCount()
   end
   
   -- Get creatures using the most reliable API available
+  local Client = getClient()
   local creatures = nil
   local range = CONST.LIVE_COUNT_RANGE
   
   -- Try getSpectatorsInRange first (most common)
-  if g_map and g_map.getSpectatorsInRange then
+  if Client and Client.getSpectatorsInRange then
+    creatures = Client.getSpectatorsInRange(playerPos, false, range, range)
+  elseif Client and Client.getSpectators then
+    creatures = Client.getSpectators(playerPos, false)
+  elseif g_map and g_map.getSpectatorsInRange then
     creatures = g_map.getSpectatorsInRange(playerPos, false, range, range)
   elseif g_map and g_map.getSpectators then
     creatures = g_map.getSpectators(playerPos, false)
@@ -285,7 +302,8 @@ end
 
 -- Update player reference (on relogin)
 local function updatePlayerRef()
-  player = g_game and g_game.getLocalPlayer() or player
+  local Client = getClient()
+  player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or player
 end
 
 -- ============================================================================
@@ -310,9 +328,10 @@ local function isFloorChangeTile(pos)
     return TargetCore.PathSafety.isFloorChangeTile(pos)
   end
   if not pos then return false end
-  local color = g_map.getMinimapColor(pos)
+  local Client = getClient()
+  local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor and g_map.getMinimapColor(pos)) or 0
   if FLOOR_CHANGE_COLORS[color] then return true end
-  local tile = g_map.getTile(pos)
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile and g_map.getTile(pos))
   if not tile then return false end
   local ground = tile:getGround()
   if ground and FLOOR_CHANGE_ITEMS[ground:getId()] then return true end
@@ -597,7 +616,8 @@ function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
   end
   
   -- Current attack target bonus (safe)
-  local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+  local Client = getClient()
+  local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   if currentTarget then
     local okCid, cid = pcall(function() return creature:getId() end)
     local okTid, tid = pcall(function() return currentTarget:getId() end)
@@ -695,7 +715,8 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
     return
   end
   
-  local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+  local Client = getClient()
+  local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   
   -- If no current target, acquire immediately
   if not currentTarget or currentTarget:isDead() then
@@ -837,11 +858,16 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   
   -- Chase is only active if enabled AND keepDistance is disabled (they're mutually exclusive)
   local useNativeChase = chaseEnabled and not keepDistanceEnabled
+  local Client = getClient()
   
-  if useNativeChase and g_game.setChaseMode then
-    local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+  if useNativeChase then
+    local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
     if currentMode ~= 1 then
-      g_game.setChaseMode(1)  -- ChaseOpponent
+      if Client and Client.setChaseMode then
+        Client.setChaseMode(1)
+      elseif g_game and g_game.setChaseMode then
+        g_game.setChaseMode(1)
+      end
       -- Update cache for other modules
       if TargetCore and TargetCore.Native then
         TargetCore.Native.lastChaseMode = 1
@@ -850,11 +876,15 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
         TargetBot.usingNativeChase = true
       end
     end
-  elseif not useNativeChase and g_game.setChaseMode then
+  elseif not useNativeChase then
     -- Chase is disabled OR keepDistance is enabled - use Stand mode
-    local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+    local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
     if currentMode ~= 0 then
-      g_game.setChaseMode(0)  -- DontChase / Stand
+      if Client and Client.setChaseMode then
+        Client.setChaseMode(0)
+      elseif g_game and g_game.setChaseMode then
+        g_game.setChaseMode(0)
+      end
       if TargetBot then
         TargetBot.usingNativeChase = false
       end
@@ -863,7 +893,7 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   
   -- Scenario gate: avoid illegal switches (anti-zigzag)
   if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
-    local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if currentTarget and not currentTarget:isDead() then
       local okNewId, newId = pcall(function() return creature:getId() end)
       local okCurId, curId = pcall(function() return currentTarget:getId() end)
@@ -905,14 +935,19 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   
   -- Only fallback to direct attack if state machine failed (should not happen)
   if not sent then
-    if g_game and g_game.attack then
+    local Client = getClient()
+    if Client and Client.attack then
+      Client.attack(creature)
+      sent = true
+    elseif g_game and g_game.attack then
       g_game.attack(creature)
       sent = true
     end
   end
 
   -- If attack was throttled and we are not already attacking this creature, bail
-  local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+  local Client = getClient()
+  local currentAttack = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   local okCurId, curId = pcall(function() return currentAttack and currentAttack:getId() end)
   if not sent and not (currentAttack and okCurId and curId == id) then
     return
@@ -1127,7 +1162,8 @@ function EventTargeting.CombatCoordinator.checkCombatStatus()
   end
   targetState.lastCombatCheck = now
   
-  local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+  local Client = getClient()
+  local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   
   if not currentTarget or currentTarget:isDead() then
     -- Combat ended
@@ -1457,8 +1493,11 @@ local function scanVisibleMonsters()
   -- Fallback: Use direct API if live count didn't work
   local creatures = nil
   local range = CONST.DETECTION_RANGE
+  local Client = getClient()
   
-  if g_map and g_map.getSpectatorsInRange then
+  if Client and Client.getSpectatorsInRange then
+    creatures = Client.getSpectatorsInRange(playerPos, false, range, range)
+  elseif g_map and g_map.getSpectatorsInRange then
     creatures = g_map.getSpectatorsInRange(playerPos, false, range, range)
   end
   
@@ -1663,7 +1702,8 @@ if onCreatureAppear then
         end
         
         -- Check current target's priority
-        local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+        local Client = getClient()
+        local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
         if newConfigPriority > 0 then
           local currentConfigPriority = 0
           if currentTarget and not currentTarget:isDead() then
@@ -1693,7 +1733,8 @@ if onCreatureAppear then
             
             -- Scenario gate: avoid illegal switches (anti-zigzag)
             if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
-              local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+              local Client2 = getClient()
+              local currentTarget = (Client2 and Client2.getAttackingCreature) and Client2.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
               if currentTarget and not currentTarget:isDead() then
                 local okNewId, newId = pcall(function() return creature:getId() end)
                 local okCurId, curId = pcall(function() return currentTarget:getId() end)
@@ -1709,15 +1750,20 @@ if onCreatureAppear then
 
             -- Immediate attack (rate-limited to prevent spam)
             local sent = false
+            local Client3 = getClient()
+            local sent = false
             if TargetBot and TargetBot.requestAttack then
               sent = TargetBot.requestAttack(creature, "event_high_priority")
+            elseif (Client3 and Client3.attack) then
+              Client3.attack(creature)
+              sent = true
             elseif g_game and g_game.attack then
               g_game.attack(creature)
               sent = true
             end
           
             -- If attack was throttled and we are not already attacking this creature, bail
-            local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+            local currentAttack = (Client3 and Client3.getAttackingCreature) and Client3.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
             local okCurId2, curId2 = pcall(function() return currentAttack and currentAttack:getId() end)
             local okNewId2, newId2 = pcall(function() return creature:getId() end)
             if not sent and not (currentAttack and okCurId2 and okNewId2 and curId2 == newId2) then

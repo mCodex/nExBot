@@ -3,7 +3,7 @@
   UNIFIED STORAGE - Per-Character State Management with EventBus Persistence
   ═══════════════════════════════════════════════════════════════════════════
   
-  Version: 1.0.0
+  Version: 1.0.1 (ClientService refactor for cross-client compatibility)
   
   Purpose:
   - Provides COMPLETE per-CHARACTER storage isolation for multi-client setups
@@ -53,6 +53,15 @@ local CONFIG = {
   SCHEMA_VERSION = 1,
   MAX_BACKUPS = 5,              -- Keep last 5 backups
 }
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- CLIENT SERVICE HELPERS (Cross-client compatibility: OTCv8 / OpenTibiaBR)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ClientService helper for cross-client compatibility
+local function getClient()
+  return ClientService or _G.ClientService
+end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- SCHEMA DEFINITION (Single Source of Truth for All Defaults)
@@ -341,8 +350,9 @@ local function getCharName()
     end
   end
   
-  -- Fallback to g_game.getLocalPlayer()
-  local localPlayer = g_game.getLocalPlayer()
+  -- Fallback to g_game.getLocalPlayer() with ClientService
+  local Client = getClient()
+  local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if localPlayer and localPlayer:getName() then
     _state.charName = sanitizeCharName(localPlayer:getName())
     return _state.charName
@@ -483,7 +493,8 @@ local function load()
     pcall(function() rawName = player:getName() end)
   end
   if not rawName then
-    local lp = g_game.getLocalPlayer()
+    local Client = getClient()
+    local lp = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
     if lp then rawName = lp:getName() end
   end
   _state.cache.characterName = rawName or _state.charName
@@ -842,8 +853,15 @@ end
 -- INITIALIZATION
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- Helper to check if local player is available (cross-client compatible)
+local function hasLocalPlayer()
+  local Client = getClient()
+  local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
+  return localPlayer ~= nil
+end
+
 -- Try to initialize immediately if player is available
-if g_game.getLocalPlayer() then
+if hasLocalPlayer() then
   load()
   migrateFromLegacy()
 end
@@ -853,7 +871,7 @@ schedule(100, function()
   setupEventBusListeners()
   
   -- If not initialized yet, try again
-  if not _state.initialized and g_game.getLocalPlayer() then
+  if not _state.initialized and hasLocalPlayer() then
     load()
     migrateFromLegacy()
   end

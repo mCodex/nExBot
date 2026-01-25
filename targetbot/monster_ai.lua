@@ -41,6 +41,18 @@
 MonsterAI = MonsterAI or {}
 MonsterAI.VERSION = "2.2"
 
+--------------------------------------------------------------------------------
+-- CLIENTSERVICE HELPERS (cross-client compatibility)
+--------------------------------------------------------------------------------
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+local function getClientVersion()
+  local Client = getClient()
+  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+end
+
 -- Time helper (milliseconds). Prefer existing global 'now' if available, else use g_clock.millis or os.time()*1000
 local function nowMs()
   if now then return now end
@@ -1536,7 +1548,14 @@ function MonsterAI.RealTime.findSafeTileFromArc(playerPos, monsterPos, monsterDi
       if not MonsterAI.Predictor.isPositionInWavePath(tile, monsterPos, monsterDir, range, width) then
         -- Check walkability
         local walkable = true
-        if g_map and g_map.isTileWalkable then
+        local Client = getClient()
+        if Client and Client.isTileWalkable then
+          local ok, result = pcall(Client.isTileWalkable, tile)
+          walkable = ok and result
+        elseif Client and Client.getTile then
+          local ok, mapTile = pcall(Client.getTile, tile)
+          walkable = ok and mapTile and mapTile:isWalkable()
+        elseif g_map and g_map.isTileWalkable then
           local ok, result = pcall(g_map.isTileWalkable, tile)
           walkable = ok and result
         elseif g_map and g_map.getTile then
@@ -1560,7 +1579,11 @@ function MonsterAI.RealTime.findSafeTileFromArc(playerPos, monsterPos, monsterDi
         local tile = { x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z }
         if not MonsterAI.Predictor.isPositionInWavePath(tile, monsterPos, monsterDir, range, width) then
           local walkable = true
-          if g_map and g_map.getTile then
+          local Client2 = getClient()
+          if Client2 and Client2.getTile then
+            local ok, mapTile = pcall(Client2.getTile, tile)
+            walkable = ok and mapTile and mapTile:isWalkable()
+          elseif g_map and g_map.getTile then
             local ok, mapTile = pcall(g_map.getTile, tile)
             walkable = ok and mapTile and mapTile:isWalkable()
           end
@@ -3204,9 +3227,10 @@ if EventBus then
       return score, data
     end
 
+    local Client = getClient()
     local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
       and MovementCoordinator.MonsterCache.getNearby(CONST.DAMAGE.CORRELATION_RADIUS)
-      or g_map.getSpectatorsInRange(playerPos, false, CONST.DAMAGE.CORRELATION_RADIUS, CONST.DAMAGE.CORRELATION_RADIUS)
+      or ((Client and Client.getSpectatorsInRange) and Client.getSpectatorsInRange(playerPos, false, CONST.DAMAGE.CORRELATION_RADIUS, CONST.DAMAGE.CORRELATION_RADIUS) or (g_map and g_map.getSpectatorsInRange and g_map.getSpectatorsInRange(playerPos, false, CONST.DAMAGE.CORRELATION_RADIUS, CONST.DAMAGE.CORRELATION_RADIUS)))
 
     local bestScore, bestData, bestMonster = 0, nil, nil
     for i = 1, #creatures do
@@ -3268,7 +3292,8 @@ if EventBus then
       if not srcPos or not destPos then return end
       
       -- Get the source tile and find creatures on it
-      local srcTile = g_map and g_map.getTile and g_map.getTile(srcPos)
+      local Client = getClient()
+      local srcTile = (Client and Client.getTile) and Client.getTile(srcPos) or (g_map and g_map.getTile and g_map.getTile(srcPos))
       if not srcTile then return end
       
       local creatures = srcTile:getCreatures()
@@ -3353,7 +3378,8 @@ if EventBus then
       if not srcPos then return end
       
       -- Get source tile
-      local srcTile = g_map and g_map.getTile and g_map.getTile(srcPos)
+      local Client2 = getClient()
+      local srcTile = (Client2 and Client2.getTile) and Client2.getTile(srcPos) or (g_map and g_map.getTile and g_map.getTile(srcPos))
       if not srcTile then return end
       
       local creatures = srcTile.getCreatures and srcTile:getCreatures()
@@ -3690,7 +3716,15 @@ function MonsterAI.updateAll()
     if SpectatorCache and SpectatorCache.getNearby then
       creatures = SpectatorCache.getNearby(8, 8) or {}
     else
-      local ok, result = pcall(function() return g_map.getSpectatorsInRange(playerPos, false, 8, 8) end)
+      local Client = getClient()
+      local ok, result = pcall(function()
+        if Client and Client.getSpectatorsInRange then
+          return Client.getSpectatorsInRange(playerPos, false, 8, 8)
+        elseif g_map and g_map.getSpectatorsInRange then
+          return g_map.getSpectatorsInRange(playerPos, false, 8, 8)
+        end
+        return {}
+      end)
       creatures = ok and result or {}
     end
   end
@@ -4225,7 +4259,8 @@ function Scenario.detectScenario()
   local totalDanger = 0
   local monsterCount = 0
   
-  local creatures = g_map.getSpectators(playerPos, false) or {}
+  local Client = getClient()
+  local creatures = (Client and Client.getSpectators) and Client.getSpectators(playerPos, false) or (g_map and g_map.getSpectators and g_map.getSpectators(playerPos, false)) or {}
   
   for _, creature in ipairs(creatures) do
     if creature and isValidAliveMonster(creature) then
@@ -4831,7 +4866,8 @@ function Scenario.getOptimalTarget()
     candidates = MonsterAI.TargetBot.getSortedTargets({maxRange = 12})
   else
     -- Fallback to basic targeting
-    local creatures = g_map.getSpectators(playerPos, false) or {}
+    local Client2 = getClient()
+    local creatures = (Client2 and Client2.getSpectators) and Client2.getSpectators(playerPos, false) or (g_map and g_map.getSpectators and g_map.getSpectators(playerPos, false)) or {}
     for _, creature in ipairs(creatures) do
       if creature and isValidAliveMonster(creature) then
         local pos = safeCreatureCall(creature, "getPosition", nil)
@@ -5102,7 +5138,8 @@ function Reachability.isReachable(creature, forceRecheck)
     if offset then
       probe = {x = probe.x + offset.x, y = probe.y + offset.y, z = probe.z}
       
-      local tile = g_map.getTile(probe)
+      local Client3 = getClient()
+      local tile = (Client3 and Client3.getTile) and Client3.getTile(probe) or (g_map and g_map.getTile and g_map.getTile(probe))
       if tile then
         -- Check if tile is walkable
         local walkable = tile.isWalkable and tile:isWalkable()
@@ -5139,7 +5176,10 @@ function Reachability.isReachable(creature, forceRecheck)
     -- For close creatures, check if there's a clear line
     local ok2, los = pcall(function()
       -- Use Bresenham line check if available
-      if g_map.isSightClear then
+      local Client4 = getClient()
+      if Client4 and Client4.isSightClear then
+        return Client4.isSightClear(playerPos, creaturePos)
+      elseif g_map and g_map.isSightClear then
         return g_map.isSightClear(playerPos, creaturePos)
       end
       return true  -- Assume LOS if API not available
@@ -5763,7 +5803,8 @@ function TBI.getSortedTargets(options)
   local maxRange = options.maxRange or 10
   
   -- Get all creatures on screen
-  local creatures = g_map.getSpectators(playerPos, false) or {}
+  local Client = getClient()
+  local creatures = (Client and Client.getSpectators) and Client.getSpectators(playerPos, false) or (g_map and g_map.getSpectators and g_map.getSpectators(playerPos, false)) or {}
   
   for _, creature in ipairs(creatures) do
     if creature and isValidAliveMonster(creature) then

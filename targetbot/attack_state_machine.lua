@@ -51,6 +51,18 @@ AttackStateMachine.STATE = STATE
 -- IMPROVED v3.0: Stricter values for linear targeting (anti-zigzag)
 -- ============================================================================
 
+--------------------------------------------------------------------------------
+-- CLIENTSERVICE HELPERS (cross-client compatibility)
+--------------------------------------------------------------------------------
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+local function getClientVersion()
+  local Client = getClient()
+  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+end
+
 local CONFIG = {
   -- Attack timing
   ATTACK_REISSUE_INTERVAL = 300,    -- Re-issue attack every 300ms if not confirmed
@@ -143,7 +155,8 @@ end
 
 local function updatePlayerRef()
   if not player or not pcall(function() return player:getPosition() end) then
-    player = g_game and g_game.getLocalPlayer() or nil
+    local Client = getClient()
+    player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or nil
   end
   return player
 end
@@ -203,9 +216,15 @@ end
 
 -- Get current attacking creature from game
 local function getGameAttackTarget()
-  if not g_game or not g_game.getAttackingCreature then return nil end
-  local ok, creature = pcall(g_game.getAttackingCreature)
-  return ok and creature or nil
+  local Client = getClient()
+  if (Client and Client.getAttackingCreature) then
+    local ok, creature = pcall(Client.getAttackingCreature)
+    return ok and creature or nil
+  elseif g_game and g_game.getAttackingCreature then
+    local ok, creature = pcall(g_game.getAttackingCreature)
+    return ok and creature or nil
+  end
+  return nil
 end
 
 -- Issue attack command (centralized, rate-limited)
@@ -222,8 +241,9 @@ local function issueAttack(creature, reason)
   
   -- Issue the attack
   local success = false
-  if g_game and g_game.attack then
-    local ok, err = pcall(function() g_game.attack(creature) end)
+  local Client = getClient()
+  if (Client and Client.attack) then
+    local ok, err = pcall(function() Client.attack(creature) end)
     success = ok
     if ok then
       state.lastAttackCommand = currentTime
@@ -241,6 +261,24 @@ local function issueAttack(creature, reason)
       end
     else
       log("Attack failed: " .. tostring(err))
+    end
+  elseif g_game and g_game.attack then
+    local ok, err = pcall(function() g_game.attack(creature) end)
+    success = ok
+    if ok then
+      state.lastAttackCommand = currentTime
+      state.attackConfirmed = false
+      state.stats.attacksIssued = state.stats.attacksIssued + 1
+      log("Attack issued (g_game fallback): " .. getCreatureName(creature) .. " (" .. (reason or "unknown") .. ")")
+      
+      if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.startEngagement then
+        local creatureId = getCreatureId(creature)
+        local health = nil
+        pcall(function() health = creature:getHealthPercent() end)
+        MonsterAI.Scenario.startEngagement(creatureId, health)
+      end
+    else
+      log("Attack failed (g_game fallback): " .. tostring(err))
     end
   end
   
@@ -662,7 +700,10 @@ function AttackStateMachine.stop()
   transition(STATE.IDLE, "manual_stop")
   
   -- Cancel game attack
-  if g_game and g_game.cancelAttackAndFollow then
+  local Client = getClient()
+  if Client and Client.cancelAttackAndFollow then
+    pcall(Client.cancelAttackAndFollow)
+  elseif g_game and g_game.cancelAttackAndFollow then
     pcall(g_game.cancelAttackAndFollow)
   end
 end
@@ -722,7 +763,10 @@ function AttackStateMachine.findBestTarget()
   
   -- Fallback to spectators
   if not creatures or #creatures == 0 then
-    if g_map and g_map.getSpectatorsInRange then
+    local Client = getClient()
+    if Client and Client.getSpectatorsInRange then
+      creatures = Client.getSpectatorsInRange(playerPos, false, 8, 8)
+    elseif g_map and g_map.getSpectatorsInRange then
       creatures = g_map.getSpectatorsInRange(playerPos, false, 8, 8)
     end
   end

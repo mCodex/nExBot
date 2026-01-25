@@ -3,6 +3,11 @@ local SpectatorCache = {}
 local cache = {} -- key -> {ts = now, data = {...}}
 local DEFAULT_TTL = 200 -- milliseconds
 
+-- ClientService helper for cross-client compatibility
+local function getClient()
+    return ClientService or _G.ClientService
+end
+
 local function makeKey(rx, ry)
   return tostring(rx) .. "x" .. tostring(ry)
 end
@@ -15,10 +20,11 @@ SpectatorCache.getNearby = function(rx, ry, ttl)
     return entry.data
   end
   local ok, res = pcall(function()
-    local player = g_game and g_game.getLocalPlayer() or nil
+    local Client = getClient()
+    local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer()) or nil
     if not player then return {} end
     local pos = player:getPosition()
-    return g_map.getSpectatorsInRange(pos, false, rx, ry)
+    return (Client and Client.getSpectatorsInRange) and Client.getSpectatorsInRange(pos, false, rx, ry) or (g_map and g_map.getSpectatorsInRange(pos, false, rx, ry)) or {}
   end)
   local data = ok and res or {}
   cache[key] = { ts = now, data = data }

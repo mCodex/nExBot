@@ -70,6 +70,18 @@ local DIR_VECTORS = Geometry.DIR_VECTORS or {
 }
 
 --------------------------------------------------------------------------------
+-- CLIENTSERVICE HELPERS (cross-client compatibility)
+--------------------------------------------------------------------------------
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+local function getClientVersion()
+  local Client = getClient()
+  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+end
+
+--------------------------------------------------------------------------------
 -- IMPROVED WAVE AVOIDANCE SYSTEM
 -- 
 -- Uses TargetBotCore pure functions and improved scoring algorithm.
@@ -476,7 +488,8 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
     local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
       and TargetCore.PathSafety.isTileSafe(checkPos)
       or (function()
-        local tile = g_map.getTile(checkPos)
+        local Client = getClient()
+        local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
         return tile and tile:isWalkable() and not tile:hasCreature()
       end)()
     if tileSafe then
@@ -559,7 +572,8 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
           local escapeSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
             and TargetCore.PathSafety.isTileSafe(escapePos)
             or (function()
-              local et = g_map.getTile(escapePos)
+              local Client = getClient()
+              local et = (Client and Client.getTile) and Client.getTile(escapePos) or (g_map and g_map.getTile and g_map.getTile(escapePos))
               return et and et:isWalkable()
             end)()
           if escapeSafe then
@@ -624,7 +638,8 @@ local function avoidWaveAttacks()
   
   -- Get monsters in range FIRST (needed for scaling)
   local playerPos = player:getPosition()
-  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(7) or (SpectatorCache and SpectatorCache.getNearby(7, 7) or g_map.getSpectatorsInRange(playerPos, false, 7, 7))
+  local Client = getClient()
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(7) or (SpectatorCache and SpectatorCache.getNearby(7, 7) or ((Client and Client.getSpectatorsInRange) and Client.getSpectatorsInRange(playerPos, false, 7, 7) or (g_map and g_map.getSpectatorsInRange and g_map.getSpectatorsInRange(playerPos, false, 7, 7))))
   local monsters = {}
   
   for i = 1, #creatures do
@@ -789,7 +804,8 @@ if EventBus then
           end
           
           if #monsters > 0 then
-            local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+            local Client = getClient()
+            local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
             local safePos, score = findSafeAdjacentTile(playerPos, monsters, currentTarget)
             
             if safePos and MovementCoordinator and MovementCoordinator.Intent then
@@ -826,7 +842,8 @@ if EventBus then
       local safe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
         and TargetCore.PathSafety.isTileSafe(checkPos)
         or (function()
-          local tile = g_map.getTile(checkPos)
+          local Client = getClient()
+          local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
           return tile and tile:isWalkable()
         end)()
       if safe then
@@ -872,11 +889,12 @@ if EventBus then
         
         -- Quick search for better tile
         local bestPos, bestScore = nil, walkable * 12
+        local Client = getClient()
         for dx = -1, 1 do
           for dy = -1, 1 do
             if dx ~= 0 or dy ~= 0 then
               local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
-              local tile = g_map.getTile(checkPos)
+              local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
               if tile and tile:isWalkable() and not tile:hasCreature() then
                 local newWalkable = countWalkableTiles(checkPos)
                 local score = newWalkable * 12
@@ -999,7 +1017,8 @@ local function rePosition(minTiles, config)
   if currentWalkable >= minTiles and not immediateThreat then return end
   
   -- Get nearby monsters for scoring
-  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(5) or (SpectatorCache and SpectatorCache.getNearby(5, 5) or g_map.getSpectatorsInRange(playerPos, false, 5, 5))
+  local Client = getClient()
+  local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby) and MovementCoordinator.MonsterCache.getNearby(5) or (SpectatorCache and SpectatorCache.getNearby(5, 5) or ((Client and Client.getSpectatorsInRange) and Client.getSpectatorsInRange(playerPos, false, 5, 5) or (g_map and g_map.getSpectatorsInRange and g_map.getSpectatorsInRange(playerPos, false, 5, 5))))
   local monsters = {}
   for i = 1, #creatures do
     local c = creatures[i]
@@ -1076,7 +1095,8 @@ local function rePosition(minTiles, config)
           local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
             and TargetCore.PathSafety.isTileSafe(checkPos)
             or (function()
-              local t = g_map.getTile(checkPos)
+              local Client = getClient()
+              local t = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
               return t and t:isWalkable() and not t:hasCreature()
             end)()
           if tileSafe then
@@ -1232,11 +1252,16 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   -- print(\"[Chase Debug] config.chase=\" .. tostring(config.chase) .. \" keepDistance=\" .. tostring(config.keepDistance) .. \" useNativeChase=\" .. tostring(useNativeChase))
   
   -- Always set chase mode BEFORE attacking - this is how OTClient works
-  if g_game.setChaseMode then
+  local Client = getClient()
+  if (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode) then
     local desiredMode = useNativeChase and 1 or 0
-    local currentMode = g_game.getChaseMode and g_game.getChaseMode() or -1
+    local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or -1
     if currentMode ~= desiredMode then
-      g_game.setChaseMode(desiredMode)
+      if Client and Client.setChaseMode then
+        Client.setChaseMode(desiredMode)
+      elseif g_game and g_game.setChaseMode then
+        g_game.setChaseMode(desiredMode)
+      end
       -- Cache the mode for other modules
       if TargetCore and TargetCore.Native then
         TargetCore.Native.lastChaseMode = desiredMode
@@ -1258,9 +1283,16 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
       -- Target is not reachable - skip attack and allow CaveBot to proceed
       if reason == "no_path" or reason == "blocked_tile" then
         -- Clear attack target to prevent OTClient errors
-        local currentTarget = g_game.getAttackingCreature and g_game.getAttackingCreature()
+        local Client2 = getClient()
+        local currentTarget = (Client2 and Client2.getAttackingCreature) and Client2.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
         if currentTarget and currentTarget:getId() == creature:getId() then
-          pcall(function() g_game.cancelAttackAndFollow() end)
+          pcall(function()
+            if Client2 and Client2.cancelAttackAndFollow then
+              Client2.cancelAttackAndFollow()
+            elseif g_game and g_game.cancelAttackAndFollow then
+              g_game.cancelAttackAndFollow()
+            end
+          end)
         end
         
         -- Allow CaveBot to walk away from blocked creature
@@ -1274,12 +1306,18 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   end
   
   -- Cache attacking creature check
-  local currentTarget = g_game.getAttackingCreature()
+  local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   if currentTarget ~= creature then
     -- Chase mode was already set above BEFORE this check (correct order for OTClient)
     -- Just attack - the native chase mode will handle walking automatically
-    local ok, err = pcall(function() g_game.attack(creature) end)
-    if not ok then warn("[TargetBot] g_game.attack pcall failed: " .. tostring(err)) end
+    local ok, err = pcall(function()
+      if Client and Client.attack then
+        Client.attack(creature)
+      elseif g_game and g_game.attack then
+        g_game.attack(creature)
+      end
+    end)
+    if not ok then warn("[TargetBot] attack pcall failed: " .. tostring(err)) end
     
     -- IMPORTANT: Do NOT call g_game.follow() - it cancels the attack!
     -- When chase mode is set to 1 (ChaseOpponent), OTClient handles walking automatically
@@ -1573,29 +1611,48 @@ TargetBot.Creature.walk = function(creature, config, targets)
   
   -- When precision control is needed, temporarily set chase mode to Stand
   -- This allows our custom walking to work without interference
+  local Client = getClient()
   if needsPrecisionControl then
     -- Set chase mode to Stand temporarily for precision control
-    if g_game.setChaseMode and g_game.getChaseMode then
-      local currentMode = g_game.getChaseMode()
+    local hasSetChaseMode = (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode)
+    local hasGetChaseMode = (Client and Client.getChaseMode) or (g_game and g_game.getChaseMode)
+    if hasSetChaseMode and hasGetChaseMode then
+      local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode())
       if currentMode == 1 then
-        g_game.setChaseMode(0)  -- DontChase/Stand
+        if Client and Client.setChaseMode then
+          Client.setChaseMode(0)  -- DontChase/Stand
+        elseif g_game and g_game.setChaseMode then
+          g_game.setChaseMode(0)  -- DontChase/Stand
+        end
         TargetBot.usingNativeChase = false
       end
     end
     
-    -- Also cancel g_game.follow() if active (shouldn't be for monsters, but safety check)
-    if g_game.cancelFollow and g_game.getFollowingCreature then
-      local currentFollow = g_game.getFollowingCreature()
+    -- Also cancel follow if active (shouldn't be for monsters, but safety check)
+    local hasCancelFollow = (Client and Client.cancelFollow) or (g_game and g_game.cancelFollow)
+    local hasGetFollowingCreature = (Client and Client.getFollowingCreature) or (g_game and g_game.getFollowingCreature)
+    if hasCancelFollow and hasGetFollowingCreature then
+      local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
       if currentFollow then
-        g_game.cancelFollow()
+        if Client and Client.cancelFollow then
+          Client.cancelFollow()
+        elseif g_game and g_game.cancelFollow then
+          g_game.cancelFollow()
+        end
       end
     end
   elseif config.chase then
     -- Chase mode without precision control - ensure native chase is active
-    if g_game.setChaseMode and g_game.getChaseMode then
-      local currentMode = g_game.getChaseMode()
+    local hasSetChaseMode = (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode)
+    local hasGetChaseMode = (Client and Client.getChaseMode) or (g_game and g_game.getChaseMode)
+    if hasSetChaseMode and hasGetChaseMode then
+      local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode())
       if currentMode ~= 1 then
-        g_game.setChaseMode(1)  -- ChaseOpponent
+        if Client and Client.setChaseMode then
+          Client.setChaseMode(1)  -- ChaseOpponent
+        elseif g_game and g_game.setChaseMode then
+          g_game.setChaseMode(1)  -- ChaseOpponent
+        end
         TargetBot.usingNativeChase = true
       end
     end
@@ -1768,7 +1825,8 @@ TargetBot.Creature.walk = function(creature, config, targets)
             local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
               and TargetCore.PathSafety.isTileSafe(checkPos)
               or (function()
-                local t = g_map.getTile(checkPos)
+                local Client = getClient()
+                local t = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
                 return t and t:isWalkable() and not t:hasCreature()
               end)()
             
@@ -1842,9 +1900,12 @@ TargetBot.Creature.walk = function(creature, config, targets)
   if config.chase and not config.keepDistance and pathLen > 1 and directDist > chaseDistanceThreshold then
     -- First check: Is native chase already handling this?
     local nativeChaseMayWork = false
-    if g_game.getChaseMode and g_game.isAttacking then
-      local isAttacking = g_game.isAttacking()
-      local chaseMode = g_game.getChaseMode()
+    local Client2 = getClient()
+    local hasGetChaseMode = (Client2 and Client2.getChaseMode) or (g_game and g_game.getChaseMode)
+    local hasIsAttacking = (Client2 and Client2.isAttacking) or (g_game and g_game.isAttacking)
+    if hasGetChaseMode and hasIsAttacking then
+      local isAttacking = (Client2 and Client2.isAttacking) and Client2.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
+      local chaseMode = (Client2 and Client2.getChaseMode) and Client2.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode())
       nativeChaseMayWork = isAttacking and chaseMode == 1
     end
     
@@ -1898,7 +1959,8 @@ TargetBot.Creature.walk = function(creature, config, targets)
         local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
           and TargetCore.PathSafety.isTileSafe(candidates[i])
           or (function()
-            local t = g_map.getTile(candidates[i])
+            local Client3 = getClient()
+            local t = (Client3 and Client3.getTile) and Client3.getTile(candidates[i]) or (g_map and g_map.getTile and g_map.getTile(candidates[i]))
             return t and t:isWalkable() and not t:hasCreature()
           end)()
         if tileSafe then
@@ -1953,9 +2015,12 @@ TargetBot.Creature.walk = function(creature, config, targets)
     if config.chase and not config.keepDistance and pathLen > 1 and fallbackDirectDist > fallbackChaseThreshold then
       -- First check if native chase is active and should be working
       local nativeChaseMayWork = false
-      if g_game.getChaseMode and g_game.isAttacking then
-        local isAttacking = g_game.isAttacking()
-        local chaseMode = g_game.getChaseMode()
+      local Client4 = getClient()
+      local hasGetChaseMode = (Client4 and Client4.getChaseMode) or (g_game and g_game.getChaseMode)
+      local hasIsAttacking = (Client4 and Client4.isAttacking) or (g_game and g_game.isAttacking)
+      if hasGetChaseMode and hasIsAttacking then
+        local isAttacking = (Client4 and Client4.isAttacking) and Client4.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
+        local chaseMode = (Client4 and Client4.getChaseMode) and Client4.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode())
         nativeChaseMayWork = isAttacking and chaseMode == 1
       end
       

@@ -5,6 +5,16 @@
   Integrates with TargetBot's creature cache for efficient walking.
 ]]
 
+-- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+local function getClientVersion()
+  local Client = getClient()
+  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+end
+
 local dest = nil
 local maxDist = nil
 local params = nil
@@ -45,9 +55,10 @@ local function isFloorChangeTile(pos)
     return TargetCore.PathSafety.isFloorChangeTile(pos)
   end
   if not pos then return false end
-  local color = g_map.getMinimapColor(pos)
+  local Client = getClient()
+  local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor and g_map.getMinimapColor(pos)) or 0
   if FLOOR_CHANGE_COLORS[color] then return true end
-  local tile = g_map.getTile(pos)
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile and g_map.getTile(pos))
   if not tile then return false end
   local ground = tile:getGround()
   if ground and FLOOR_CHANGE_ITEMS[ground:getId()] then return true end
@@ -105,10 +116,11 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
   -- ═══════════════════════════════════════════════════════════════════════════
   if TargetBot.usingNativeChase then
     -- Check if we're actually attacking (native chase only works when attacking)
-    local isAttacking = g_game.isAttacking and g_game.isAttacking()
+    local Client = getClient()
+    local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
     if isAttacking then
       -- Verify chase mode is still set correctly
-      local chaseMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+      local chaseMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
       if chaseMode == 1 then
         -- Native chase is active and working, skip custom walking
         dest = nil
@@ -119,9 +131,10 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
   
   -- Check if following a player (for "Follow While Attacking" feature)
   -- We don't skip pathfinding for monsters anymore since we use custom pathfinding for chase
-  if g_game.getFollowingCreature then
-    local currentFollow = g_game.getFollowingCreature()
-    if currentFollow and currentFollow:isPlayer() and not currentFollow:isLocalPlayer() then
+  local Client = getClient()
+  local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
+  if currentFollow then
+    if currentFollow:isPlayer() and not currentFollow:isLocalPlayer() then
       -- Check if following a player with "Follow While Attacking" enabled
       local shouldKeepFollow = false
       if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
@@ -141,7 +154,11 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
         return
       else
         -- Not a configured follow target, cancel and use custom pathfinding
-        g_game.cancelFollow()
+        if Client and Client.cancelFollow then
+          Client.cancelFollow()
+        elseif g_game and g_game.cancelFollow then
+          g_game.cancelFollow()
+        end
       end
     end
   end

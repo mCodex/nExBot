@@ -4,6 +4,16 @@ lastAction = 0
 local cavebotAllowance = 0
 local lureEnabled = true
 
+-- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+local function getClientVersion()
+  local Client = getClient()
+  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+end
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- MONSTER DETECTION RANGE (v3.0)
 -- IMPROVED: Increased range for better monster detection
@@ -36,7 +46,8 @@ local moduleInitialized = false
 local _lastTargetbotSlowWarn = 0
 
 -- Local cached reference to local player (updated on relogin)
-local player = g_game and g_game.getLocalPlayer() or nil
+local Client = getClient()
+local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or nil
 
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
@@ -112,7 +123,8 @@ TargetBot.requestAttack = function(creature, reason, force)
   local okDead, isDead = pcall(function() return creature:isDead() end)
   if okDead and isDead then return false end
   
-  if not g_game or not g_game.attack then return false end
+  local Client = getClient()
+  if not (Client and Client.attack) and not (g_game and g_game.attack) then return false end
 
   local okId, id = pcall(function() return creature:getId() end)
   if not okId or not id then return false end
@@ -449,7 +461,8 @@ if onPlayerHealthChange then
 
         -- Force immediate cache refresh and attempt recovery hits
         -- Update local player reference (in case object changed on relogin)
-        player = g_game and g_game.getLocalPlayer() or player
+        local Client = getClient()
+        player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or player
         debouncedInvalidateAndRecalc()
 
         -- If TargetBot was previously enabled via storage, ensure it's on now to allow recovery
@@ -765,7 +778,8 @@ if EventBus then
     if not okMonster or not isMonster then return end
     
     -- Check if this is our current target
-    local target = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    local Client = getClient()
+    local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if not target then return end
     
     -- Safe ID comparison
@@ -864,7 +878,8 @@ if EventBus then
     if not creature then return end
     
     -- Check if this is our target (safe)
-    local target = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    local Client = getClient()
+    local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if not target then return end
     
     -- Safe ID comparison
@@ -964,7 +979,8 @@ local function enforceChaseModeNow()
   end
   
   -- Only enforce if we're actively attacking
-  local isAttacking = g_game.isAttacking and g_game.isAttacking()
+  local Client = getClient()
+  local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
   if not isAttacking then
     ChaseModeEnforcer.enabled = false
     return
@@ -973,14 +989,24 @@ local function enforceChaseModeNow()
   ChaseModeEnforcer.enabled = true
   
   -- Check current mode and enforce if different
-  local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+  local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
   if currentMode ~= desiredMode then
-    if g_game.setChaseMode then
-      g_game.setChaseMode(desiredMode)
+    if Client and Client.setChaseMode then
+      Client.setChaseMode(desiredMode)
       ChaseModeEnforcer.lastEnforcedMode = desiredMode
       ChaseModeEnforcer.lastEnforceTime = currentTime
       
       -- Emit event for other modules
+      if EventBus then
+        pcall(function()
+          EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand")
+        end)
+      end
+    elseif g_game and g_game.setChaseMode then
+      g_game.setChaseMode(desiredMode)
+      ChaseModeEnforcer.lastEnforcedMode = desiredMode
+      ChaseModeEnforcer.lastEnforceTime = currentTime
+      
       if EventBus then
         pcall(function()
           EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand")
@@ -1027,7 +1053,8 @@ if EventBus then
     if not ChaseModeEnforcer.enabled then return end
     
     -- Safe check if this is our target
-    local target = g_game.getAttackingCreature and g_game.getAttackingCreature()
+    local Client = getClient()
+    local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if not target then return end
     
     local okCid, cid = pcall(function() return creature:getId() end)
@@ -1141,7 +1168,7 @@ setWidgetTextSafe(ui.danger.right, "0")
 
 if ui and ui.editor and ui.editor.debug then ui.editor.debug:destroy() end
 
-local oldTibia = g_game.getClientVersion() < 960
+local oldTibia = getClientVersion() < 960
 
 -- config, its callback is called immediately, data can be nil
 -- Config setup moved down to after macro (to ensure macro and recalc exist before callback runs)
@@ -1202,8 +1229,10 @@ TargetBot.hasTargetableMonstersOnScreen = function()
   if not p then return false end
   
   -- Get all creatures in detection range
+  local Client = getClient()
   local creatures = (SpectatorCache and SpectatorCache.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)) 
-    or g_map.getSpectatorsInRange(p, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
+    or ((Client and Client.getSpectatorsInRange) and Client.getSpectatorsInRange(p, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE))
+    or (g_map and g_map.getSpectatorsInRange and g_map.getSpectatorsInRange(p, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE))
   
   if not creatures or #creatures == 0 then return false end
   
@@ -1373,7 +1402,10 @@ TargetBot.setOff = function(val)
   end
   
   -- Cancel current attack
-  if g_game and g_game.cancelAttackAndFollow then
+  local Client = getClient()
+  if Client and Client.cancelAttackAndFollow then
+    pcall(function() Client.cancelAttackAndFollow() end)
+  elseif g_game and g_game.cancelAttackAndFollow then
     pcall(function() g_game.cancelAttackAndFollow() end)
   end
   
@@ -1816,7 +1848,8 @@ local function processCandidate(creature, pos, isCurrentTarget)
       
       if offset then
         probe = {x = probe.x + offset.x, y = probe.y + offset.y, z = probe.z}
-        local tile = g_map.getTile(probe)
+        local Client = getClient()
+        local tile = (Client and Client.getTile) and Client.getTile(probe) or (g_map and g_map.getTile and g_map.getTile(probe))
         if tile and not tile:isWalkable() and not tile:hasCreature() then
           -- Only fail if truly blocked (not just creature in the way)
           return nil, nil
@@ -1873,7 +1906,8 @@ local function recalculateBestTarget()
   local unreachableCount = 0  -- Track blocked path creatures
   
   -- v2.2: Track current target for stickiness - DO NOT lose it during recalculation
-  local currentAttackTarget = g_game.getAttackingCreature and g_game.getAttackingCreature()
+  local Client = getClient()
+  local currentAttackTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   local currentTargetId = currentAttackTarget and currentAttackTarget:getId() or nil
   local currentTargetStillValid = false  -- Will be set to true if current target is found
 
@@ -2156,7 +2190,9 @@ targetbotMacro = macro(200, function()
   end
 
   -- Prevent execution before login is complete to avoid freezing
-  if not g_game.isOnline() then return end
+  local Client = getClient()
+  local isOnline = (Client and Client.isOnline) and Client.isOnline() or (g_game and g_game.isOnline and g_game.isOnline())
+  if not isOnline then return end
 
   -- MonsterAI imminent-attack pause DISABLED (was blocking chase mode)
   -- If re-enabling, reduce the wait time significantly (max 100ms, not 900ms)
@@ -2179,24 +2215,33 @@ targetbotMacro = macro(200, function()
     local eventTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
     if eventTarget and not eventTarget:isDead() then
       -- EventTargeting is handling combat - ensure we're attacking AND chase mode is set
-      local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+      local Client = getClient()
+      local currentAttack = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
       
       -- CRITICAL: Chase is only active if enabled AND keepDistance is disabled
       local chaseEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
       local keepDistanceEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.keepDistance
       local useNativeChase = chaseEnabled and not keepDistanceEnabled
       
-      if useNativeChase and g_game.setChaseMode then
-        local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+      if useNativeChase then
+        local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
         if currentMode ~= 1 then
-          g_game.setChaseMode(1)  -- ChaseOpponent
+          if Client and Client.setChaseMode then
+            Client.setChaseMode(1)
+          elseif g_game and g_game.setChaseMode then
+            g_game.setChaseMode(1)
+          end
           if TargetBot then TargetBot.usingNativeChase = true end
         end
-      elseif not useNativeChase and g_game.setChaseMode then
+      elseif not useNativeChase then
         -- Chase disabled OR keepDistance enabled - ensure Stand mode
-        local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+        local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
         if currentMode ~= 0 then
-          g_game.setChaseMode(0)  -- DontChase / Stand
+          if Client and Client.setChaseMode then
+            Client.setChaseMode(0)
+          elseif g_game and g_game.setChaseMode then
+            g_game.setChaseMode(0)
+          end
           if TargetBot then TargetBot.usingNativeChase = false end
         end
       end
@@ -2283,7 +2328,8 @@ targetbotMacro = macro(200, function()
     end
 
   -- MonsterAI scenario integration: prefer scenario optimal target when allowed
-  local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature() or nil
+  local Client = getClient()
+  local currentAttack = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.getOptimalTarget then
     local optimal = MonsterAI.Scenario.getOptimalTarget()
     if optimal and optimal.creature and not optimal.creature:isDead() then

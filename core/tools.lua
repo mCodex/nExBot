@@ -2,6 +2,21 @@
 setDefaultTab("Tools")
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- CLIENT SERVICE HELPERS (Cross-client compatibility: OTCv8 / OpenTibiaBR)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ClientService helper for cross-client compatibility
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+-- Version check helper
+local function getClientVersion()
+  local Client = getClient()
+  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- PROFILE STORAGE INTEGRATION
 -- All settings are stored per-profile using ProfileStorage from configs.lua
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -43,7 +58,8 @@ end
 
 -- Pure function: Find first exchangeable item in all containers
 local function findExchangeableItem()
-  local containers = g_game.getContainers()
+  local Client = getClient()
+  local containers = (Client and Client.getContainers) and Client.getContainers() or (g_game and g_game.getContainers and g_game.getContainers()) or {}
   if not containers then return nil end
   
   for _, container in pairs(containers) do
@@ -65,7 +81,12 @@ end
 -- Side effect: Exchange a single item
 local function exchangeItem(item)
   if not item then return false end
-  g_game.use(item)
+  local Client = getClient()
+  if Client and Client.use then
+    Client.use(item)
+  elseif g_game and g_game.use then
+    g_game.use(item)
+  end
   return true
 end
 
@@ -165,7 +186,8 @@ local function checkLevitateDirection(px, py, pz, dirIdx)
   -- CHECK UP: Is there ground at Z-1 (one level above the adjacent tile)?
   -- This works regardless of whether the current-level tile is walkable or not
   if pz > 0 then
-    local aboveTile = g_map.getTile({x = fx, y = fy, z = pz - 1})
+    local Client = getClient()
+    local aboveTile = (Client and Client.getTile) and Client.getTile({x = fx, y = fy, z = pz - 1}) or (g_map and g_map.getTile and g_map.getTile({x = fx, y = fy, z = pz - 1}))
     if aboveTile and aboveTile:getGround() then
       -- Ground exists above! This is ALWAYS a levitate-up opportunity
       return "up"
@@ -175,7 +197,7 @@ local function checkLevitateDirection(px, py, pz, dirIdx)
     for depth = 2, levDepth do
       local zcheck = pz - depth
       if zcheck < 0 then break end
-      local aboveD = g_map.getTile({x = fx, y = fy, z = zcheck})
+      local aboveD = (Client and Client.getTile) and Client.getTile({x = fx, y = fy, z = zcheck}) or (g_map and g_map.getTile and g_map.getTile({x = fx, y = fy, z = zcheck}))
       if aboveD and aboveD:getGround() then
         return "up"
       end
@@ -183,11 +205,12 @@ local function checkLevitateDirection(px, py, pz, dirIdx)
   end
   
   -- CHECK DOWN: No ground at current level + ground below
-  local currentTile = g_map.getTile({x = fx, y = fy, z = pz})
+  local Client = getClient()
+  local currentTile = (Client and Client.getTile) and Client.getTile({x = fx, y = fy, z = pz}) or (g_map and g_map.getTile and g_map.getTile({x = fx, y = fy, z = pz}))
   local hasCurrentGround = currentTile and currentTile:getGround()
   
   if not hasCurrentGround and pz < 15 then
-    local belowTile = g_map.getTile({x = fx, y = fy, z = pz + 1})
+    local belowTile = (Client and Client.getTile) and Client.getTile({x = fx, y = fy, z = pz + 1}) or (g_map and g_map.getTile and g_map.getTile({x = fx, y = fy, z = pz + 1}))
     if belowTile and belowTile:getGround() then
       return "down"
     end
@@ -206,7 +229,8 @@ local function checkCurrentTileLevitate(px, py, pz, dirIdx)
   
   -- Check if there's ground above the adjacent tile
   if pz > 0 then
-    local aboveTile = g_map.getTile({x = fx, y = fy, z = pz - 1})
+    local Client = getClient()
+    local aboveTile = (Client and Client.getTile) and Client.getTile({x = fx, y = fy, z = pz - 1}) or (g_map and g_map.getTile and g_map.getTile({x = fx, y = fy, z = pz - 1}))
     if aboveTile and aboveTile:getGround() then
       return "up"
     end
@@ -491,7 +515,11 @@ local autoMountMacro = macro(500, "Auto Mount", function()
   if not outfit then return end
   
   -- Only try to mount if we're reasonably sure it won't open outfit dialog
-  if g_game.mount then
+  local Client = getClient()
+  if Client and Client.mount then
+    Client.mount()
+    lastMountAttempt = now
+  elseif g_game and g_game.mount then
     g_game.mount(true)
     lastMountAttempt = now
   end
@@ -508,7 +536,8 @@ BotDB.registerMacro(autoMountMacro, "autoMount")
 local autoRandomOutfitEnabled = false
 
 local function randomizeOutfitColors()
-  local player = g_game.getLocalPlayer()
+  local Client = getClient()
+  local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if not player then return end
   
   local currentOutfit = player:getOutfit()
@@ -645,11 +674,12 @@ end
 
 -- Find water tile position for dropping
 local function findWaterTilePos(playerPos)
+  local Client = getClient()
   for dx = -FISHING_RANGE, FISHING_RANGE do
     for dy = -FISHING_RANGE, FISHING_RANGE do
       if dx ~= 0 or dy ~= 0 then
         local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
-        local tile = g_map.getTile(checkPos)
+        local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
         if tile then
           local ground = tile:getGround()
           if ground then
@@ -683,7 +713,12 @@ local fishingMacro = macro(1000, function()
     if itemToDrop then
       local waterPos = findWaterTilePos(ppos)
       if waterPos then
-        g_game.move(itemToDrop, waterPos, itemToDrop:getCount())
+        local Client = getClient()
+        if Client and Client.move then
+          Client.move(itemToDrop, waterPos, itemToDrop:getCount())
+        elseif g_game and g_game.move then
+          g_game.move(itemToDrop, waterPos, itemToDrop:getCount())
+        end
         lastDropTime = now
         return -- One action per tick
       end
@@ -695,12 +730,13 @@ local fishingMacro = macro(1000, function()
   
   -- Find all water tiles nearby
   local waterTiles = {}
+  local Client = getClient()
   
   for dx = -FISHING_RANGE, FISHING_RANGE do
     for dy = -FISHING_RANGE, FISHING_RANGE do
       if dx ~= 0 or dy ~= 0 then
         local checkPos = {x = ppos.x + dx, y = ppos.y + dy, z = ppos.z}
-        local tile = g_map.getTile(checkPos)
+        local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
         
         if tile then
           local ground = tile:getGround()
@@ -728,11 +764,22 @@ local fishingMacro = macro(1000, function()
   local rod = findItem(FISHING_ROD_ID)
   
   if rod then
-    g_game.useWith(rod, target)
+    local Client = getClient()
+    if Client and Client.useWith then
+      Client.useWith(rod, target)
+    elseif g_game and g_game.useWith then
+      g_game.useWith(rod, target)
+    end
     lastFishTime = now
-  elseif g_game.getClientVersion() >= 780 and g_game.useInventoryItemWith then
-    g_game.useInventoryItemWith(FISHING_ROD_ID, target, 0)
-    lastFishTime = now
+  elseif getClientVersion() >= 780 then
+    local Client = getClient()
+    if Client and Client.useInventoryItemWith then
+      Client.useInventoryItemWith(FISHING_ROD_ID, target, 0)
+      lastFishTime = now
+    elseif g_game and g_game.useInventoryItemWith then
+      g_game.useInventoryItemWith(FISHING_ROD_ID, target, 0)
+      lastFishTime = now
+    end
   end
 end)
 
@@ -945,9 +992,12 @@ local function followStartCreature(creature)
   followState.targetPlayerCreature = creature
   followState.targetPlayerPosition = safeGetPosition(creature)
   
-  -- Use native follow API
+  -- Use native follow API with ClientService fallback
   local ok = pcall(function()
-    if g_game and g_game.follow then
+    local Client = getClient()
+    if Client and Client.follow then
+      Client.follow(creature)
+    elseif g_game and g_game.follow then
       g_game.follow(creature)
     else
       SafeCall.global("follow", creature)
@@ -959,7 +1009,12 @@ end
 
 -- Follow manager: stop following
 local function followStop()
-  if g_game and g_game.cancelFollow then pcall(g_game.cancelFollow) end
+  local Client = getClient()
+  if Client and Client.cancelFollow then
+    pcall(Client.cancelFollow)
+  elseif g_game and g_game.cancelFollow then
+    pcall(g_game.cancelFollow)
+  end
   followState.targetPlayerId = nil
   followState.targetPlayerCreature = nil
   followState.targetPlayerPosition = nil
@@ -970,13 +1025,15 @@ end
 -- Check if we're currently following our target player
 local function isFollowingTarget()
   if not followState.targetPlayerId then return false end
-  local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+  local Client = getClient()
+  local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
   return currentFollow and safeGetId(currentFollow) == followState.targetPlayerId
 end
 
 -- Get path to leader using map API
 local function getPathToLeader(leaderPos)
-  local player = g_game.getLocalPlayer()
+  local Client = getClient()
+  local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if not player or not leaderPos then return nil, 999 end
   
   local playerPos = safeGetPosition(player)
@@ -1008,7 +1065,8 @@ local function smartWalkToLeader(leaderPos)
   end
   followState.lastPathFollow = currentTime
   
-  local player = g_game.getLocalPlayer()
+  local Client = getClient()
+  local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if not player then return false end
   
   local playerPos = safeGetPosition(player)
@@ -1040,8 +1098,13 @@ local function smartWalkToLeader(leaderPos)
     else
       -- Fallback: Direct walk
       local nextDir = path[1]
-      if nextDir and g_game.walk then
-        pcall(function() g_game.walk(nextDir) end)
+      if nextDir then
+        local Client = getClient()
+        if Client and Client.walk then
+          pcall(function() Client.walk(nextDir) end)
+        elseif g_game and g_game.walk then
+          pcall(function() g_game.walk(nextDir) end)
+        end
         return true
       end
     end
@@ -1055,7 +1118,8 @@ local function shouldForceFollow()
   if not followPlayerConfig.enabled then return false end
   if not followState.targetPlayerPosition then return false end
   
-  local player = g_game.getLocalPlayer()
+  local Client = getClient()
+  local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if not player then return false end
   
   local playerPos = safeGetPosition(player)
@@ -1096,14 +1160,15 @@ local function ensureFollowing()
   local name = followPlayerConfig.playerName and followPlayerConfig.playerName:trim() or ""
   if name == "" then return end
   
-  local localPlayer = g_game.getLocalPlayer()
+  local Client = getClient()
+  local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if not localPlayer then return end
   
   local playerPos = safeGetPosition(localPlayer)
   if not playerPos then return end
   
   -- Check if we're attacking and handle combat window
-  local isAttacking = g_game.isAttacking and g_game.isAttacking()
+  local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
   
   if isAttacking then
     if followState.combatStartTime == 0 then
@@ -1115,7 +1180,10 @@ local function ensureFollowing()
       followState.forceFollowMode = true
       
       -- Cancel attack to follow leader (party survival priority)
-      if g_game.cancelAttack then
+      local Client = getClient()
+      if Client and Client.cancelAttack then
+        pcall(Client.cancelAttack)
+      elseif g_game and g_game.cancelAttack then
         pcall(g_game.cancelAttack)
       end
       
@@ -1149,7 +1217,8 @@ local function ensureFollowing()
     followState.lastLeaderDistance = distance
     
     -- Check if we're already following them
-    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+    local Client = getClient()
+    local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
     local isFollowing = currentFollow and safeGetId(currentFollow) == followState.targetPlayerId
     
     if not isFollowing then
@@ -1176,7 +1245,8 @@ local function ensureFollowing()
     end
     
     -- Check if native follow is still tracking them
-    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+    local Client = getClient()
+    local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
     if currentFollow and followState.targetPlayerId and safeGetId(currentFollow) == followState.targetPlayerId then
       -- Native follow is still tracking, update position
       followState.targetPlayerPosition = safeGetPosition(currentFollow)
@@ -1218,7 +1288,8 @@ if EventBus then
     followState.targetPlayerCreature = creature
     
     -- Check distance
-    local player = g_game.getLocalPlayer()
+    local Client = getClient()
+    local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
     if player then
       local playerPos = safeGetPosition(player)
       if playerPos and newPos then
@@ -1233,7 +1304,7 @@ if EventBus then
     end
     
     -- Ensure we're still following them
-    local currentFollow = g_game.getFollowingCreature and g_game.getFollowingCreature()
+    local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
     if not currentFollow or safeGetId(currentFollow) ~= followState.targetPlayerId then
       -- Re-initiate follow
       schedule(50, function()
@@ -1375,8 +1446,9 @@ followStatusLabel:setTooltip("Shows current follow target, distance, and status"
 
 -- Helper to update status label
 local function updateFollowStatusLabel()
-  local current = (g_game.getFollowingCreature and g_game.getFollowingCreature()) or nil
-  local isAttacking = g_game.isAttacking and g_game.isAttacking()
+  local Client = getClient()
+  local current = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
+  local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
   local distance = followState.lastLeaderDistance or 0
   
   if current and followState.targetPlayerId and safeGetId(current) == followState.targetPlayerId then

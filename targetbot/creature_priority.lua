@@ -32,6 +32,18 @@
   - Enhanced DPS and damage correlation
 ]]
 
+--------------------------------------------------------------------------------
+-- CLIENTSERVICE HELPERS (cross-client compatibility)
+--------------------------------------------------------------------------------
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+local function getClientVersion()
+  local Client = getClient()
+  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+end
+
 -- Use TargetCore constants if available, otherwise define locally
 -- v2.3: FURTHER INCREASED target stickiness to prevent erratic switching
 local PRIO = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.PRIORITY) or {
@@ -159,7 +171,8 @@ local function getMonstersInArea(pos, offsets, maxDist)
       z = pos.z
     }
 
-    local tile = g_map.getTile(checkPos)
+    local Client = getClient()
+    local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
     if tile then
       local creatures = tile:getCreatures()
       if creatures then
@@ -193,16 +206,22 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
     
     -- RP Safe: Cancel attack on out-of-range target
     if config.rpSafe then
-      local currentTarget = g_game.getAttackingCreature()
+      local Client = getClient()
+      local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
       if currentTarget == creature then
-        g_game.cancelAttackAndFollow()
+        if Client and Client.cancelAttackAndFollow then
+          Client.cancelAttackAndFollow()
+        elseif g_game and g_game.cancelAttackAndFollow then
+          g_game.cancelAttackAndFollow()
+        end
       end
     end
     return 0
   end
   
   local priority = config.priority or 1
-  local currentTarget = g_game.getAttackingCreature()
+  local Client = getClient()
+  local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   local isCurrentTarget = (currentTarget == creature)
   
   -- ═══════════════════════════════════════════════════════════════════════════
@@ -271,7 +290,8 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   else
     -- NOT current target - apply penalty for switching
     -- This makes switching harder, especially when we have a wounded target
-    local currentTarget = g_game.getAttackingCreature()
+    local Client2 = getClient()
+    local currentTarget = (Client2 and Client2.getAttackingCreature) and Client2.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if currentTarget and not currentTarget:isDead() then
       local currentHP = currentTarget:getHealthPercent()
       if currentHP < 70 then
@@ -325,7 +345,12 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
         
         -- If currently attacking this and would pull, cancel
         if isCurrentTarget and largeAreaMonsters >= 2 then
-          g_game.cancelAttackAndFollow()
+          local Client3 = getClient()
+          if Client3 and Client3.cancelAttackAndFollow then
+            Client3.cancelAttackAndFollow()
+          elseif g_game and g_game.cancelAttackAndFollow then
+            g_game.cancelAttackAndFollow()
+          end
           return 0
         end
       end
@@ -744,7 +769,8 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   local creatureId = creature:getId()
   
   -- Update local lock based on current attack state
-  local currentAttackTarget = g_game.getAttackingCreature()
+  local Client = getClient()
+  local currentAttackTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   if currentAttackTarget then
     local attackId = currentAttackTarget:getId()
     if attackId ~= LocalLock.targetId then
