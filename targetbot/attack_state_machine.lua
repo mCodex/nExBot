@@ -65,10 +65,11 @@ end
 
 local CONFIG = {
   -- Attack timing
-  ATTACK_REISSUE_INTERVAL = 300,    -- Re-issue attack every 300ms if not confirmed
-  ATTACK_CONFIRM_TIMEOUT = 500,     -- Max time to wait for server confirmation
+  -- IMPROVED v4.0: Increased intervals for less spam, more consistent attacking
+  ATTACK_REISSUE_INTERVAL = 1000,   -- Re-issue attack every 1000ms (server only needs periodic keepalive)
+  ATTACK_CONFIRM_TIMEOUT = 800,     -- Max time to wait for server confirmation
   ATTACK_RECOVER_ATTEMPTS = 5,      -- Max recovery attempts before giving up
-  ATTACK_COOLDOWN = 150,            -- Minimum time between attack commands
+  ATTACK_COOLDOWN = 200,            -- Minimum time between attack commands (prevents spam)
   
   -- Target switching thresholds (STRICTER v3.0)
   SWITCH_PRIORITY_THRESHOLD = 500,  -- INCREASED: Need 500+ priority advantage to force switch (was 100)

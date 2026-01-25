@@ -59,6 +59,7 @@ if SafeCall then
   
   -- Enhanced getCreatureByName using client spectator system
   function SafeCall.getCreatureByName(name, caseSensitive)
+    local Client = getClient()
     if Client and Client.getCreatureByName then
       local status, result = pcall(Client.getCreatureByName, name, caseSensitive)
       if status then return result end
@@ -71,17 +72,22 @@ if SafeCall then
   
   -- Add new SafeCall functions that use ClientService
   function SafeCall.global(funcName, ...)
+    local Client = getClient()
     -- Handle common global functions through ClientService
-    if funcName == "getSpectators" then
+    if funcName == "getSpectators" and Client then
       return Client.getSpectators(...)
-    elseif funcName == "getTile" then
+    elseif funcName == "getTile" and Client then
       return Client.getTile(...)
-    elseif funcName == "getLocalPlayer" then
+    elseif funcName == "getLocalPlayer" and Client then
       return Client.getLocalPlayer()
     end
     
-    -- Fallback to actual global
-    local fn = _G[funcName]
+    -- Fallback to actual global (be careful with _G access)
+    local fn = nil
+    if funcName == "getSpectators" then fn = getSpectators
+    elseif funcName == "getTile" then fn = getTile
+    elseif funcName == "getLocalPlayer" then fn = getLocalPlayer
+    end
     if fn and type(fn) == "function" then
       return fn(...)
     end

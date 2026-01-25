@@ -1850,7 +1850,8 @@ local function processCandidate(creature, pos, isCurrentTarget)
         probe = {x = probe.x + offset.x, y = probe.y + offset.y, z = probe.z}
         local Client = getClient()
         local tile = (Client and Client.getTile) and Client.getTile(probe) or (g_map and g_map.getTile and g_map.getTile(probe))
-        if tile and not tile:isWalkable() and not tile:hasCreature() then
+        local hasCreature = tile and tile.hasCreature and tile:hasCreature()
+        if tile and not tile:isWalkable() and not hasCreature then
           -- Only fail if truly blocked (not just creature in the way)
           return nil, nil
         end

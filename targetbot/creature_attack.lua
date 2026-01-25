@@ -490,7 +490,8 @@ local function findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
       or (function()
         local Client = getClient()
         local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
-        return tile and tile:isWalkable() and not tile:hasCreature()
+        local hasCreature = tile and tile.hasCreature and tile:hasCreature()
+        return tile and tile:isWalkable() and not hasCreature
       end)()
     if tileSafe then
       local analysis = analyzePositionDanger(checkPos, monsters, true)
@@ -895,7 +896,8 @@ if EventBus then
             if dx ~= 0 or dy ~= 0 then
               local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
               local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
-              if tile and tile:isWalkable() and not tile:hasCreature() then
+              local hasCreature = tile and tile.hasCreature and tile:hasCreature()
+              if tile and tile:isWalkable() and not hasCreature then
                 local newWalkable = countWalkableTiles(checkPos)
                 local score = newWalkable * 12
                 if score > bestScore + 15 then
@@ -1097,7 +1099,8 @@ local function rePosition(minTiles, config)
             or (function()
               local Client = getClient()
               local t = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
-              return t and t:isWalkable() and not t:hasCreature()
+              local hasCreature = t and t.hasCreature and t:hasCreature()
+              return t and t:isWalkable() and not hasCreature
             end)()
           if tileSafe then
             -- Score this position using improved danger analysis
@@ -1305,19 +1308,43 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     end
   end
   
-  -- Cache attacking creature check
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- UNIFIED ATTACK MANAGEMENT (v4.0)
+  -- Use ID comparison (not reference) to detect target changes
+  -- Defer to AttackStateMachine for rate-limited, consistent attacks
+  -- ═══════════════════════════════════════════════════════════════════════════
   local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
-  if currentTarget ~= creature then
-    -- Chase mode was already set above BEFORE this check (correct order for OTClient)
-    -- Just attack - the native chase mode will handle walking automatically
-    local ok, err = pcall(function()
-      if Client and Client.attack then
-        Client.attack(creature)
-      elseif g_game and g_game.attack then
-        g_game.attack(creature)
-      end
-    end)
-    if not ok then warn("[TargetBot] attack pcall failed: " .. tostring(err)) end
+  
+  -- Get IDs for proper comparison (reference comparison can give false positives)
+  local currentTargetId = nil
+  local wantedTargetId = nil
+  pcall(function() currentTargetId = currentTarget and currentTarget:getId() end)
+  pcall(function() wantedTargetId = creature and creature:getId() end)
+  
+  -- Only issue attack if we're not already attacking the correct target
+  local needsAttack = (currentTargetId ~= wantedTargetId) or (not currentTarget)
+  
+  if needsAttack and wantedTargetId then
+    -- Delegate to AttackStateMachine for rate-limited attack management
+    -- This prevents attack spam while ensuring continuous attacking
+    local attackIssued = false
+    if AttackStateMachine and AttackStateMachine.requestSwitch then
+      -- Use requestSwitch for rate-limited attack
+      local priority = params.priority or (params.config and params.config.priority) or 100
+      attackIssued = AttackStateMachine.requestSwitch(creature, priority * 100)
+    end
+    
+    -- Fallback only if AttackStateMachine not available
+    if not attackIssued then
+      local ok, err = pcall(function()
+        if Client and Client.attack then
+          Client.attack(creature)
+        elseif g_game and g_game.attack then
+          g_game.attack(creature)
+        end
+      end)
+      if not ok then warn("[TargetBot] attack pcall failed: " .. tostring(err)) end
+    end
     
     -- IMPORTANT: Do NOT call g_game.follow() - it cancels the attack!
     -- When chase mode is set to 1 (ChaseOpponent), OTClient handles walking automatically
@@ -1827,7 +1854,8 @@ TargetBot.Creature.walk = function(creature, config, targets)
               or (function()
                 local Client = getClient()
                 local t = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
-                return t and t:isWalkable() and not t:hasCreature()
+                local hasCreature = t and t.hasCreature and t:hasCreature()
+                return t and t:isWalkable() and not hasCreature
               end)()
             
             if tileSafe then
@@ -1961,7 +1989,8 @@ TargetBot.Creature.walk = function(creature, config, targets)
           or (function()
             local Client3 = getClient()
             local t = (Client3 and Client3.getTile) and Client3.getTile(candidates[i]) or (g_map and g_map.getTile and g_map.getTile(candidates[i]))
-            return t and t:isWalkable() and not t:hasCreature()
+            local hasCreature = t and t.hasCreature and t:hasCreature()
+            return t and t:isWalkable() and not hasCreature
           end)()
         if tileSafe then
           -- Check anchor

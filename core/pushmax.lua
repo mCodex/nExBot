@@ -218,7 +218,8 @@ macro(200, function()
   end
   
   -- Check if target tile is walkable and not blocked
-  if isNotOk(fieldTable, targetTile) or targetTile:hasCreature() then
+  local hasCreature = targetTile and targetTile.hasCreature and targetTile:hasCreature()
+  if isNotOk(fieldTable, targetTile) or hasCreature then
     return -- Wait for tile to be clear
   end
   

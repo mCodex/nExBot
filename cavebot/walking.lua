@@ -490,7 +490,8 @@ local function isTileSafe(tilePos, allowFloorChange)
   local tile = (Client and Client.getTile) and Client.getTile(tilePos) or (g_map and g_map.getTile(tilePos))
   if not tile then return false end
   if not tile:isWalkable() then return false end
-  if tile:hasCreature() then return false end
+  local hasCreature = tile.hasCreature and tile:hasCreature()
+  if hasCreature then return false end
   
   if not allowFloorChange and isFloorChangeTile(tilePos) then
     return false

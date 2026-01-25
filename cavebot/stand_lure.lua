@@ -110,7 +110,8 @@ CaveBot.Extensions.StandLure.setup = function()
                 local Client = getClient()
                 local tile = (Client and Client.getTile) and Client.getTile(nextPos) or (g_map and g_map.getTile(nextPos))
                 if tile then
-                    if tile:hasCreature() then
+                    local hasCreature = tile.hasCreature and tile:hasCreature()
+                    if hasCreature then
                         local creature = tile:getCreatures()[1]
                         local hppc = creature:getHealthPercent()
                         if creature:isMonster() and (hppc and hppc > 0) and (oldTibia or creature:getType() < 3) then

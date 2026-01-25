@@ -8,10 +8,6 @@ end
 UI.Label("nExBot v" .. version)
 UI.Separator()
 
--- Display client type
-local clientLabel = "Client: " .. (nExBot and nExBot.clientName or "Detecting...")
-UI.Label(clientLabel)
-
 -- Create a panel with blinking label
 local blinkUI = setupUI([[
 Panel

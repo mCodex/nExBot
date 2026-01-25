@@ -242,7 +242,8 @@ function TargetCore.PathSafety.isPositionSafeForMovement(targetPos, currentPos)
   if not tile or not tile:isWalkable() then return false end
   
   -- Should not have creatures (unless it's the target we're chasing)
-  if tile:hasCreature() then
+  local hasCreature = tile.hasCreature and tile:hasCreature()
+  if hasCreature then
     -- Allow if it's the creature we're targeting
     local creatures = tile:getCreatures()
     if creatures then
@@ -265,7 +266,8 @@ function TargetCore.PathSafety.isTileSafe(pos, allowFloorChange)
   local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile and g_map.getTile(pos))
   if not tile then return false end
   if not tile:isWalkable() then return false end
-  if tile:hasCreature() then return false end
+  local hasCreature = tile.hasCreature and tile:hasCreature()
+  if hasCreature then return false end
   if not allowFloorChange and TargetCore.PathSafety.isFloorChangeTile(pos) then return false end
   return true
 end
@@ -547,7 +549,8 @@ function TargetCore.findSafestTile(playerPos, monsters, currentTarget, getTileFu
     }
     
     local tile = getTileFunc(checkPos)
-    if tile and tile:isWalkable() and not tile:hasCreature() then
+    local hasCreature = tile and tile.hasCreature and tile:hasCreature()
+    if tile and tile:isWalkable() and not hasCreature then
       local danger = TargetCore.calculatePositionDanger(checkPos, monsters)
       
       -- Calculate composite score (lower = better)
@@ -795,7 +798,8 @@ function TargetCore.findBestPosition(centerPos, radius, context, getTileFunc)
         }
         
         local tile = getTileFunc(checkPos)
-        if tile and tile:isWalkable() and not tile:hasCreature() then
+        local hasCreature = tile and tile.hasCreature and tile:hasCreature()
+        if tile and tile:isWalkable() and not hasCreature then
           local score = TargetCore.scorePosition(checkPos, context, getTileFunc)
           
           if score > bestScore then
