@@ -1,4 +1,18 @@
-local quiverSlot = modules.game_inventory.inventoryWindow:recursiveGetChildById('slot5')
+-- Safe access to inventory window
+local game_inventory = modules and modules.game_inventory
+local inventoryWindow = game_inventory and game_inventory.inventoryWindow
+
+if not inventoryWindow then
+  print("[QuiverLabel] Inventory window not available, skipping quiver label")
+  return
+end
+
+local quiverSlot = inventoryWindow:recursiveGetChildById('slot5')
+if not quiverSlot then
+  print("[QuiverLabel] Quiver slot not found")
+  return
+end
+
 local label = quiverSlot.count
 
 label = label or g_ui.loadUIFromString([[

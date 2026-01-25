@@ -1,4 +1,11 @@
-local minimap = modules.game_minimap.minimapWidget
+-- Safe access to minimap widget
+local minimap = modules and modules.game_minimap and modules.game_minimap.minimapWidget
+
+-- Early exit if minimap not available
+if not minimap then
+  print("[Minimap] Minimap widget not available, skipping minimap integration")
+  return
+end
 
 -- Safe helper to add waypoints to CaveBot
 local function safeAddCaveBotWaypoint(x, y, z)

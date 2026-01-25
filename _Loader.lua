@@ -233,7 +233,11 @@ loadStyles()
 -- 0. ACL (Anti-Corruption Layer) - MUST load first for client abstraction
 loadCategory("acl", {
   "acl/init",         -- ACL initialization and client detection
-  "client_service",   -- Unified client service
+  "client_service",   -- Unified client service (must load before compat)
+})
+
+-- Load compat layer after client_service is available
+loadCategory("acl_compat", {
   "acl/compat",       -- Compatibility layer for existing modules
 })
 

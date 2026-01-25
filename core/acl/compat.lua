@@ -16,12 +16,17 @@
   - Open/Closed: Existing code works, new code can use ClientService directly
 ]]
 
+-- Helper function to get ClientService (lazy load)
+local function getClient()
+  return ClientService
+end
+
 -- Get ClientService reference (should be loaded before this)
-local Client = ClientService
+local Client = getClient()
 
 if not Client then
-  warn("[ACL Compat] ClientService not found, compatibility layer disabled")
-  return
+  -- ClientService not available yet, but don't return - set up lazy loading
+  print("[ACL Compat] ClientService not available at load time, using lazy loading")
 end
 
 --------------------------------------------------------------------------------
@@ -37,6 +42,7 @@ if SafeCall then
   -- Enhanced useWith that uses client-specific optimizations
   function SafeCall.useWith(item, target, subType)
     -- Try ClientService first (handles client differences)
+    local Client = getClient()
     if Client and Client.useWith then
       local status, result = pcall(Client.useWith, item, target)
       if status then return result end

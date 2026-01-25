@@ -55,7 +55,8 @@ onTextMessage(function(mode, text)
 
   for i, tile in ipairs(tiles) do
     local itemCount = #tile:getItems()
-    if not tile:hasCreature() and tile:isWalkable() and itemCount > 9 then
+    local hasCreature = tile.hasCreature and tile:hasCreature()
+    if not hasCreature and tile:isWalkable() and itemCount > 9 then
       local topThing = tile:getTopThing()
       if not inPz then
         return useWith(3197, topThing) -- disintegrate
@@ -380,7 +381,8 @@ local function getBlockingMonster(playerPos, destPos, maxDist)
   
   local Client = getClient()
   local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
-  if not tile or not tile:hasCreature() then return nil end
+  if not tile then return nil end
+  if not tile.hasCreature or not tile:hasCreature() then return nil end
   
   local creatures = tile:getCreatures()
   for _, creature in ipairs(creatures) do
