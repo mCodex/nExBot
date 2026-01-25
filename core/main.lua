@@ -1,7 +1,16 @@
 local version = "1.0.0"
 
+-- Get ClientService reference for cross-client compatibility
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
 UI.Label("nExBot v" .. version)
 UI.Separator()
+
+-- Display client type
+local clientLabel = "Client: " .. (nExBot and nExBot.clientName or "Detecting...")
+UI.Label(clientLabel)
 
 -- Create a panel with blinking label
 local blinkUI = setupUI([[
@@ -26,7 +35,12 @@ macro(300, function() -- change every 300ms
 end)
 
 local docBtn = UI.Button("Website", function()
-  g_platform.openUrl("https://tibiarpgbrasil.com")
+  local Client = getClient()
+  if Client and Client.openUrl then
+    Client.openUrl("https://tibiarpgbrasil.com")
+  elseif g_platform and g_platform.openUrl then
+    g_platform.openUrl("https://tibiarpgbrasil.com")
+  end
 end)
 if docBtn then
   docBtn:setTooltip("Opens RPG's website. More than 20 years online!")

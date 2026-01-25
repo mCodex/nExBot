@@ -3,6 +3,20 @@ local HealContext = dofile("/core/heal_context.lua")
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
 
+-- Get ClientService reference for cross-client compatibility
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+-- Get client version (cached for performance)
+local function getClientVersion()
+  local Client = getClient()
+  if Client and Client.getClientVersion then
+    return Client.getClientVersion()
+  end
+  return g_game and g_game.getClientVersion and g_game.getClientVersion() or 1200
+end
+
 setDefaultTab("Main")
 -- locales
 local panelName = "AttackBot"
@@ -1239,7 +1253,7 @@ function getMonstersInArea(category, posOrCreature, pattern, minHp, maxHp, safeP
           end
         end
         local isMonster = spec:isMonster() and withinRadius and specHp >= minHp and specHp <= maxHp and (#t == 0 or table.find(t, name, true)) and
-                   (g_game.getClientVersion() < 960 or spec:getType() < 3)
+                   (getClientVersion() < 960 or spec:getType() < 3)
         if isMonster then
           monsters = monsters + 1
           counted = counted + 1
@@ -1256,7 +1270,7 @@ function getMonstersInArea(category, posOrCreature, pattern, minHp, maxHp, safeP
         local specHp = spec:getHealthPercent()
         local name = spec:getName():lower()
         monsters = spec:isMonster() and specHp >= minHp and specHp <= maxHp and (#t == 0 or table.find(t, name)) and
-                   (g_game.getClientVersion() < 960 or spec:getType() < 3) and monsters + 1 or monsters
+                   (getClientVersion() < 960 or spec:getType() < 3) and monsters + 1 or monsters
       end
   end
 
@@ -1266,7 +1280,8 @@ end
 -- for area runes only
 -- should return valid targets number (int) and position
 function getBestTileByPattern(pattern, minHp, maxHp, safePattern, monsterNamesTable)
-  local tiles = g_map.getTiles(posz())
+  local Client = getClient()
+  local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
   local targetTile = {amount=0,pos=false}
 
   for i, tile in pairs(tiles) do
@@ -1287,7 +1302,7 @@ end
 -- Uses BotCore.Items for consolidated item usage
 local function useRuneOnTarget(runeId, targetCreatureOrTile)
   lastAttackTime = now -- Update attack time for non-blocking cooldown
-
+  local Client = getClient()
   
   -- Simplified like vBot for better OTCv8 compatibility
   if useWith and targetCreatureOrTile then
@@ -1301,15 +1316,24 @@ local function useRuneOnTarget(runeId, targetCreatureOrTile)
     if ok and res then return true end
   end
   
-  if g_game.useInventoryItemWith then
+  -- Use ClientService if available
+  if Client and Client.useInventoryItemWith then
+    local ok, res = pcall(Client.useInventoryItemWith, runeId, targetCreatureOrTile)
+    if ok then return true end
+  elseif g_game and g_game.useInventoryItemWith then
     local ok, res = pcall(g_game.useInventoryItemWith, runeId, targetCreatureOrTile)
     if ok then return true end
   end
   
   local rune = SafeCall.findItem(runeId)
   if rune then
-    local ok, res = pcall(g_game.useWith, rune, targetCreatureOrTile)
-    if ok then return true end
+    if Client and Client.useWith then
+      local ok, res = pcall(Client.useWith, rune, targetCreatureOrTile)
+      if ok then return true end
+    elseif g_game and g_game.useWith then
+      local ok, res = pcall(g_game.useWith, rune, targetCreatureOrTile)
+      if ok then return true end
+    end
   end
   
   return false
@@ -1342,7 +1366,7 @@ local directionCounts = {0, 0, 0, 0}  -- N, E, S, W
 local DIR_NORTH, DIR_EAST, DIR_SOUTH, DIR_WEST = 0, 1, 2, 3
 
 -- Cache client version check (doesn't change at runtime)
-local isOldClient = g_game.getClientVersion() < 960
+local isOldClient = getClientVersion() < 960
 
 -- Cache for attack table children (invalidated when entries change)
 local cachedAttackEntries = nil
@@ -1615,8 +1639,12 @@ local function executeAttack(entry, context)
       data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
     end
     if data and data.pos then
-      local okArea = useRuneOnTarget(entry.itemId, g_map.getTile(data.pos):getTopUseThing())
-      if okArea and context and context._attackCache then context._attackCache.rotationAttempts = 0 end
+      local Client = getClient()
+      local tile = (Client and Client.getTile) and Client.getTile(data.pos) or (g_map and g_map.getTile(data.pos))
+      if tile then
+        local okArea = useRuneOnTarget(entry.itemId, tile:getTopUseThing())
+        if okArea and context and context._attackCache then context._attackCache.rotationAttempts = 0 end
+      end
     end
   end
 end

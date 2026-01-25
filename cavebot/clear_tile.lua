@@ -1,5 +1,10 @@
 CaveBot.Extensions.ClearTile = {}
 
+-- ClientService helper for cross-client compatibility
+local function getClient()
+    return ClientService or _G.ClientService
+end
+
 CaveBot.Extensions.ClearTile.setup = function()
   CaveBot.registerAction("ClearTile", "#00FFFF", function(value, retries)
     local data = string.split(value, ",")
@@ -33,7 +38,8 @@ CaveBot.Extensions.ClearTile.setup = function()
       print("CaveBot[ClearTile]: tile reached, proceeding")
       return true
     end
-    local tile = g_map.getTile(pos)
+    local Client = getClient()
+    local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
     if not tile then
       print("CaveBot[ClearTile]: can't find tile or tile is unreachable, skipping")
       return false
@@ -75,7 +81,7 @@ CaveBot.Extensions.ClearTile.setup = function()
     if item:isItem() then
       if item and not item:isNotMoveable() then
         print("CaveBot[ClearTile]: moving item... " .. item:getId().. " from tile")
-        g_game.move(item, pPos, item:getCount())
+        if Client and Client.move then Client.move(item, pPos, item:getCount()) elseif g_game then g_game.move(item, pPos, item:getCount()) end
         return "retry"
       end   
     end
@@ -88,7 +94,8 @@ CaveBot.Extensions.ClearTile.setup = function()
         if c and c:isPlayer() then
 
           local candidates = {}
-          for _, tile in ipairs(g_map.getTiles(posz())) do
+          local tilesOnFloor = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
+          for _, tile in ipairs(tilesOnFloor) do
             local tPos = tile:getPosition()
             if getDistanceBetween(c:getPosition(), tPos) == 1 and tPos ~= pPos and tile:isWalkable() then
               table.insert(candidates, tPos)
@@ -96,16 +103,16 @@ CaveBot.Extensions.ClearTile.setup = function()
           end
 
           if #candidates == 0 then
-            print("CaveBot[ClearTile]: can't find tile to push, cannot clear way, skipping")
+            print(\"CaveBot[ClearTile]: can't find tile to push, cannot clear way, skipping\")
             return false
           else
-            print("CaveBot[ClearTile]: pushing player... " .. c:getName() .. " out of the way")
+            print(\"CaveBot[ClearTile]: pushing player... \" .. c:getName() .. \" out of the way\")
             local pos = candidates[math.random(1,#candidates)]
-            local tile = g_map.getTile(pos)
-            tile:setText("here")
-            schedule(500, function() tile:setText("") end)
-            g_game.move(c, pos, 1)
-            return "retry"
+            local tileToPush = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
+            tileToPush:setText(\"here\")
+            schedule(500, function() tileToPush:setText(\"\") end)
+            if Client and Client.move then Client.move(c, pos, 1) elseif g_game then g_game.move(c, pos, 1) end
+            return \"retry\"
           end
         end
       end

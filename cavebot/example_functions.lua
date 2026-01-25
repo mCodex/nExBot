@@ -102,7 +102,8 @@ return true
 ]])
 
 addExampleFunction("Logout", [[
-g_game.safeLogout()
+local Client = ClientService or _G.ClientService
+if Client and Client.safeLogout then Client.safeLogout() elseif g_game then g_game.safeLogout() end
 delay(1000)
 return "retry"
 ]])

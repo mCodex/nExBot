@@ -41,7 +41,13 @@ minimap.onMouseRelease = function(widget,pos,button)
   local mapPos = minimap:getTilePosition(pos)
   if not mapPos then return end
   
-  local localPlayer = g_game.getLocalPlayer()
+  -- ClientService helper for cross-client compatibility
+  local function getClient()
+    return ClientService or _G.ClientService
+  end
+  
+  local Client = getClient()
+  local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer())
   if not localPlayer then return end
 
   if button == 1 then

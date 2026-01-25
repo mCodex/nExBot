@@ -1,5 +1,10 @@
 CaveBot.Extensions.OpenDoors = {}
 
+-- ClientService helper for cross-client compatibility
+local function getClient()
+    return ClientService or _G.ClientService
+end
+
 CaveBot.Extensions.OpenDoors.setup = function()
   CaveBot.registerAction("OpenDoors", "#00FFFF", function(value, retries)
     local pos = string.split(value, ",")
@@ -21,7 +26,9 @@ CaveBot.Extensions.OpenDoors.setup = function()
 
     local doorTile
     if not doorTile then
-      for i, tile in ipairs(g_map.getTiles(posz())) do
+      local Client = getClient()
+      local tilesOnFloor = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
+      for i, tile in ipairs(tilesOnFloor) do
         if tile:getPosition().x == pos.x and tile:getPosition().y == pos.y and tile:getPosition().z == pos.z then
           doorTile = tile
         end

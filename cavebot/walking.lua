@@ -16,9 +16,9 @@
   - Uses tile:isWalkable(ignoreCreatures) for fast tile checks
   - Uses tile:isPathable() for path validation
   - Uses tile:getGroundSpeed() for accurate timing
-  - Uses g_map.getMinimapColor() for fast floor-change detection
+  - Uses ClientService for cross-client compatibility (OTCv8/OpenTibiaBR)
   - Uses autoWalk(path) for smooth multi-step walking
-  - Uses g_game.walk(dir, prewalk) for single step optimization
+  - Uses ClientService.walk(dir) for single step optimization
   
   PATHFINDING FLAGS (Otc::PathFindFlags):
   - PathFindAllowNotSeenTiles = 1  (allow unseen tiles)
@@ -34,6 +34,11 @@
   - Batch tile validation
   - Memory pooling for frequent operations
 ]]
+
+-- Get ClientService reference for cross-client compatibility
+local function getClient()
+  return ClientService or _G.ClientService
+end
 
 -- ============================================================================
 -- MODULE STATE (minimal, well-defined)
@@ -85,7 +90,8 @@ end
 
 -- Optimized tile walkability check (uses native API efficiently)
 local function isTileWalkableFast(pos, ignoreCreatures)
-  local tile = g_map.getTile(pos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
   if not tile then return false end
   
   -- Use native isWalkable with creature ignore flag
@@ -94,14 +100,16 @@ end
 
 -- Optimized path validation using native tile:isPathable()
 local function isTilePathable(pos)
-  local tile = g_map.getTile(pos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
   if not tile then return false end
   return tile:isPathable()
 end
 
 -- Get tile ground speed for timing calculations
 local function getTileSpeed(pos)
-  local tile = g_map.getTile(pos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
   if not tile then return 150 end  -- Default speed
   return (tile.getGroundSpeed and tile:getGroundSpeed()) or 150
 end
@@ -295,7 +303,8 @@ local FIELD_ITEM_IDS = {
 local function isFieldTile(tilePos)
   if not tilePos then return false end
   
-  local tile = g_map.getTile(tilePos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(tilePos) or (g_map and g_map.getTile(tilePos))
   if not tile then return false end
   
   -- Check ground for field
@@ -351,7 +360,8 @@ local FLOOR_CHANGE_COLORS = {
 -- Fast minimap-only check (for distant tiles - performance optimization)
 local function isFloorChangeTileFast(tilePos)
   if not tilePos then return false end
-  local color = g_map.getMinimapColor(tilePos)
+  local Client = getClient()
+  local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(tilePos) or (g_map and g_map.getMinimapColor(tilePos)) or 0
   return FLOOR_CHANGE_COLORS[color] or false
 end
 
@@ -450,7 +460,8 @@ local function isFloorChangeTile(tilePos)
   end
   
   -- Fast path: minimap color (no tile lookup needed)
-  local color = g_map.getMinimapColor(tilePos)
+  local Client = getClient()
+  local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(tilePos) or (g_map and g_map.getMinimapColor(tilePos)) or 0
   if FLOOR_CHANGE_COLORS[color] then
     FloorChangeCache.tiles[cacheKey] = {value = true, time = now}
     return true
@@ -458,7 +469,7 @@ local function isFloorChangeTile(tilePos)
   
   -- Slow path: tile inspection (only if minimap didn't detect)
   local result = false
-  local tile = g_map.getTile(tilePos)
+  local tile = (Client and Client.getTile) and Client.getTile(tilePos) or (g_map and g_map.getTile(tilePos))
   if tile then
     result = hasFloorChangeGround(tile) or hasFloorChangeItem(tile)
   end
@@ -475,7 +486,8 @@ end
 local function isTileSafe(tilePos, allowFloorChange)
   if not tilePos then return false end
   
-  local tile = g_map.getTile(tilePos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(tilePos) or (g_map and g_map.getTile(tilePos))
   if not tile then return false end
   if not tile:isWalkable() then return false end
   if tile:hasCreature() then return false end
@@ -657,7 +669,8 @@ local function smoothPath(path, startPos)
               local diagOffset = getDirectionOffset(diagonalDir)
               if diagOffset then
                 local diagPos = applyOffset(pos, diagOffset)
-                local tile = g_map.getTile(diagPos)
+                local Client = getClient()
+                local tile = (Client and Client.getTile) and Client.getTile(diagPos) or (g_map and g_map.getTile(diagPos))
                 if tile and tile:isWalkable() and not isFloorChangeTile(diagPos) then
                   -- Can take diagonal - continue with simplified path
                   -- (Still add original dirs for safety, but mark for potential optimization)
@@ -1163,8 +1176,11 @@ CaveBot.walkTo = function(dest, maxDist, params)
   if offset then
     -- OPTIMIZED: Check if we can walk in this direction
     if canWalkDirection(firstDir) then
-      -- Use g_game.walk with prewalk for smoother single steps
-      if g_game and g_game.walk then
+      -- Use ClientService.walk for cross-client compatibility
+      local Client = getClient()
+      if Client and Client.walk then
+        Client.walk(firstDir)
+      elseif g_game and g_game.walk then
         g_game.walk(firstDir, true)  -- prewalk=true for smoother animation
       else
         walk(firstDir)

@@ -1,9 +1,18 @@
 --[[
-  nExBot - Tibia Bot for OTClientV8
+  nExBot - Tibia Bot for OTClientV8 and OpenTibiaBR
   Main Loader Script (Optimized)
   
   This file loads all UI styles and scripts in the correct order.
   Core libraries must be loaded before dependent modules.
+  
+  Supported Clients:
+  1. OTCv8 (Original target client)
+  2. OpenTibiaBR / OTClient Redemption (New support via ACL)
+  
+  Architecture:
+  - ACL (Anti-Corruption Layer) provides client abstraction
+  - ClientService provides unified API for all modules
+  - Automatic client detection at startup
   
   Optimization Best Practices Applied:
   1. Lazy loading for non-critical modules
@@ -12,6 +21,7 @@
   4. Error isolation per module
   5. Startup timing metrics
   6. Storage sanitization (sparse array prevention)
+  7. Client abstraction via ACL pattern
 ]]--
 
 local startTime = os.clock()
@@ -219,6 +229,42 @@ loadStyles()
 -- ============================================================================
 -- SCRIPT CATEGORIES (Ordered by dependency)
 -- ============================================================================
+
+-- 0. ACL (Anti-Corruption Layer) - MUST load first for client abstraction
+loadCategory("acl", {
+  "acl/init",         -- ACL initialization and client detection
+  "client_service",   -- Unified client service
+  "acl/compat",       -- Compatibility layer for existing modules
+})
+
+-- Display detected client type
+if nExBot.showDebug then
+  local aclStatus, acl = pcall(function()
+    return dofile("/core/acl/init.lua")
+  end)
+  if aclStatus and acl then
+    info("[nExBot] Detected client: " .. acl.getClientName())
+  end
+end
+
+-- Store client info for runtime checks
+do
+  local aclStatus, acl = pcall(function()
+    return dofile("/core/acl/init.lua")
+  end)
+  if aclStatus and acl then
+    nExBot.clientType = acl.getClientType()
+    nExBot.clientName = acl.getClientName()
+    nExBot.isOTCv8 = acl.isOTCv8()
+    nExBot.isOpenTibiaBR = acl.isOpenTibiaBR()
+  else
+    -- Fallback defaults
+    nExBot.clientType = 1
+    nExBot.clientName = "OTCv8"
+    nExBot.isOTCv8 = true
+    nExBot.isOpenTibiaBR = false
+  end
+end
 
 -- 1. Core Libraries (MUST load first, order matters)
 loadCategory("core", {

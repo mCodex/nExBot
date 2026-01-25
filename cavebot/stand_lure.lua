@@ -1,6 +1,11 @@
 CaveBot.Extensions.StandLure = {}
 local enable = nil
 
+-- ClientService helper for cross-client compatibility
+local function getClient()
+    return ClientService or _G.ClientService
+end
+
 local function modPos(dir)
     local y = 0
     local x = 0
@@ -102,7 +107,8 @@ CaveBot.Extensions.StandLure.setup = function()
                 nextPos.y = nextPos.y + dirs[2]
 
             
-                local tile = g_map.getTile(nextPos)
+                local Client = getClient()
+                local tile = (Client and Client.getTile) and Client.getTile(nextPos) or (g_map and g_map.getTile(nextPos))
                 if tile then
                     if tile:hasCreature() then
                         local creature = tile:getCreatures()[1]
@@ -112,10 +118,11 @@ CaveBot.Extensions.StandLure.setup = function()
                             local path = findPath(playerPos, creature:getPosition(), 7, { ignoreNonPathable = true, precision = 1 }) 
                             if path then
                                 creature:setMarked('#00FF00')
-                                if g_game.getAttackingCreature() ~= creature then
+                                local attackingCreature = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature())
+                                if attackingCreature ~= creature then
                                   attack(creature)
                                 end
-                                g_game.setChaseMode(1)
+                                if Client and Client.setChaseMode then Client.setChaseMode(1) elseif g_game then g_game.setChaseMode(1) end
                                 resetRetries = true -- reset retries, we are trying to unclog the cavebot
                                 delay(100)
                                 return "retry"
@@ -125,7 +132,9 @@ CaveBot.Extensions.StandLure.setup = function()
                 end
               end
           
-              if not g_game.getAttackingCreature() then
+              local Client = getClient()
+              local attackingCreature = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature())
+              if not attackingCreature then
                 reset()
                 warn("[Rush Lure] No path, no blocking monster, skipping.")
                 return false -- no other way

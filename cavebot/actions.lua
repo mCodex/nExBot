@@ -1,6 +1,21 @@
 CaveBot.Actions = {}
 nExBot.lastLabel = ""
-local oldTibia = g_game.getClientVersion() < 960
+
+-- Get ClientService reference for cross-client compatibility
+local function getClient()
+  return ClientService or _G.ClientService
+end
+
+-- Get client version (cached for performance)
+local function getClientVersion()
+  local Client = getClient()
+  if Client and Client.getClientVersion then
+    return Client.getClientVersion()
+  end
+  return g_game and g_game.getClientVersion and g_game.getClientVersion() or 1200
+end
+
+local oldTibia = getClientVersion() < 960
 local nextTile = nil
 
 local noPath = 0
@@ -22,7 +37,7 @@ local nextPos = nil -- creature
 local nextPosF = nil -- furniture
 local function modPos(dir)
     local mod = DIR_MOD_LOOKUP[dir]
-    if mod then
+    if mod then 
         return { mod.x, mod.y }
     end
     return { 0, 0 }
@@ -52,7 +67,12 @@ onTextMessage(function(mode, text)
           if playerPos.x ~= tpos.x or playerPos.y ~= tpos.y or playerPos.z ~= tpos.z then
             if nearTile:isWalkable() then
               lastMoved = now
-              return g_game.move(topThing, tpos) -- move item
+              local Client = getClient()
+              if Client and Client.move then
+                return Client.move(topThing, tpos)
+              else
+                return g_game.move(topThing, tpos) -- move item
+              end
             end
           end
         end
@@ -69,7 +89,8 @@ local function breakFurniture(destPos)
   local candidate = { thing = nil, dist = 100 }
   local playerPos = player:getPosition()
   local playerZ = playerPos.z
-  local tiles = g_map.getTiles(playerZ)
+  local Client = getClient()
+  local tiles = (Client and Client.getTiles) and Client.getTiles(playerZ) or (g_map and g_map.getTiles(playerZ)) or {}
   
   for i, tile in ipairs(tiles) do
     local topThing = tile:getTopThing()
@@ -109,14 +130,19 @@ end
 local function pushPlayer(creature)
   local cpos = creature:getPosition()
   local tiles = getNearTiles(cpos)
+  local Client = getClient()
 
   for i, tile in ipairs(tiles) do
     local pos = tile:getPosition()
-    local minimapColor = g_map.getMinimapColor(pos)
+    local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor(pos)) or 0
     local stairs = (minimapColor >= 210 and minimapColor <= 213)
 
     if not stairs and tile:isWalkable() then
-      g_game.move(creature, pos)
+      if Client and Client.move then
+        Client.move(creature, pos)
+      else
+        g_game.move(creature, pos)
+      end
     end
   end
 
@@ -263,7 +289,12 @@ CaveBot.registerAction("follow", "#FF8400", function(value, retries, prev)
   local cpos = c:getPosition()
   local pos = pos()
   if getDistanceBetween(cpos, pos) < 2 then
-    g_game.cancelFollow()
+    local Client = getClient()
+    if Client and Client.cancelFollow then
+      Client.cancelFollow()
+    else
+      g_game.cancelFollow()
+    end
     return true
   else
     follow(c)
@@ -347,7 +378,8 @@ local function getBlockingMonster(playerPos, destPos, maxDist)
     z = playerPos.z
   }
   
-  local tile = g_map.getTile(checkPos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
   if not tile or not tile:hasCreature() then return nil end
   
   local creatures = tile:getCreatures()
@@ -451,7 +483,8 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
 
   -- Check if destination is floor-change tile (stairs, ladder, rope spot, hole)
   -- When user explicitly adds such a waypoint, they INTEND to use it
-  local minimapColor = g_map.getMinimapColor(destPos)
+  local Client = getClient()
+  local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(destPos) or (g_map and g_map.getMinimapColor(destPos)) or 0
   local isFloorChange = (minimapColor >= 210 and minimapColor <= 213)
   
   -- Also check tile items for floor-change detection (minimap might miss some)
@@ -543,11 +576,16 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   if retries > 2 then
     local blocker = getBlockingMonster(playerPos, destPos, maxDist)
     if blocker then
-      local currentTarget = g_game.getAttackingCreature()
+      local Client = getClient()
+      local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
       if currentTarget ~= blocker then
         attack(blocker)
       end
-      g_game.setChaseMode(1)
+      if Client and Client.setChaseMode then
+        Client.setChaseMode(1)
+      else
+        g_game.setChaseMode(1)
+      end
       CaveBot.delay(100)  -- Reduced delay for faster recovery
       return "retry"
     end
@@ -616,7 +654,8 @@ CaveBot.registerAction("use", "#FFB272", function(value, retries, prev)
     return false -- too far way
   end
 
-  local tile = g_map.getTile(pos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
   if not tile then
     return false
   end
@@ -653,7 +692,8 @@ CaveBot.registerAction("usewith", "#EEB292", function(value, retries, prev)
     return false -- too far way
   end
 
-  local tile = g_map.getTile(pos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
   if not tile then
     return false
   end

@@ -1,5 +1,10 @@
 CaveBot.Extensions.Withdraw = {}
 
+-- ClientService helper for cross-client compatibility
+local function getClient()
+    return ClientService or _G.ClientService
+end
+
 CaveBot.Extensions.Withdraw.setup = function()
 	CaveBot.registerAction("withdraw", "#002FFF", function(value, retries)
 		-- validation
@@ -23,9 +28,10 @@ CaveBot.Extensions.Withdraw.setup = function()
 		-- check for retries
 		if retries > 100 then
 			print("CaveBot[Withdraw]: actions limit reached, proceeding")
+			local Client = getClient()
 			for i, container in ipairs(getContainers()) do
 				if container:getName():lower():find("depot") or container:getName():lower():find("locker") then
-					g_game.close(container)
+					if Client and Client.closeContainer then Client.closeContainer(container) elseif g_game then g_game.close(container) end
 				end
 			end
 			return true
@@ -34,9 +40,10 @@ CaveBot.Extensions.Withdraw.setup = function()
 		-- check for items
 		if itemAmount(id) >= amount then
 			print("CaveBot[Withdraw]: enough items, proceeding")
+			local Client = getClient()
 			for i, container in ipairs(getContainers()) do
 				if container:getName():lower():find("depot") or container:getName():lower():find("locker") then
-					g_game.close(container)
+					if Client and Client.closeContainer then Client.closeContainer(container) elseif g_game then g_game.close(container) end
 				end
 			end
 			return true

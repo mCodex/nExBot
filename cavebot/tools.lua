@@ -4,6 +4,11 @@ local Tools = CaveBot.Tools
 local USE_COOLDOWN = 600
 local lastUseTime = 0
 
+-- ClientService helper for cross-client compatibility
+local function getClient()
+    return ClientService or _G.ClientService
+end
+
 local function hasDoorItems()
   return DoorItems and DoorItems.isClosedDoor
 end
@@ -149,6 +154,7 @@ end
 local function gatherTiles(playerPos, dest)
   local tiles = {}
   local visited = {}
+  local Client = getClient()
 
   local function addTile(pos)
     local key = string.format("%d,%d,%d", pos.x, pos.y, pos.z)
@@ -156,7 +162,7 @@ local function gatherTiles(playerPos, dest)
       return
     end
     visited[key] = true
-    local tile = g_map.getTile(pos)
+    local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
     if tile then
       tiles[#tiles + 1] = tile
     end

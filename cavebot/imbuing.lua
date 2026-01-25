@@ -3,6 +3,11 @@
 
 CaveBot.Extensions.Imbuing = {}
 
+-- ClientService helper for cross-client compatibility
+local function getClient()
+    return ClientService or _G.ClientService
+end
+
 local SHRINES = {25060, 25061, 25182, 25183}
 local currentIndex = 1
 local shrine = nil
@@ -57,7 +62,9 @@ CaveBot.Extensions.Imbuing.setup = function()
       return true
     end
 
-    for _, tile in ipairs(g_map.getTiles(posz())) do
+    local Client = getClient()
+    local tilesOnFloor = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
+    for _, tile in ipairs(tilesOnFloor) do
       for _, item in ipairs(tile:getItems()) do
           local id = item:getId()
           if table.find(SHRINES, id) then
@@ -89,7 +96,7 @@ CaveBot.Extensions.Imbuing.setup = function()
         return "retry"
       end
       triedToTakeOff = true
-      g_game.equipItemId(currentId)
+      if Client and Client.equipItemId then Client.equipItemId(currentId) elseif g_game then g_game.equipItemId(currentId) end
       delay(1000)
       return "retry"
     end
