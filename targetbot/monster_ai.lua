@@ -4108,6 +4108,7 @@ Scenario.TYPES = {
 }
 
 -- Current scenario state
+-- IMPROVED v3.0: Added engagement lock for linear targeting
 Scenario.state = {
   type = Scenario.TYPES.IDLE,
   monsterCount = 0,
@@ -4119,13 +4120,20 @@ Scenario.state = {
   lastSwitchTime = 0,           -- When we last switched targets
   consecutiveSwitches = 0,      -- Count of rapid switches (zigzag indicator)
   movementHistory = {},         -- Recent movement directions for zigzag detection
-  lastMoveRecord = 0,            -- Last movement record timestamp
+  lastMoveRecord = 0,           -- Last movement record timestamp
   scenarioStartTime = 0,        -- When current scenario started
   avgDangerLevel = 0,           -- Average threat level of nearby monsters
-  clusterInfo = nil             -- Monster clustering analysis
+  clusterInfo = nil,            -- Monster clustering analysis
+  -- NEW: Engagement lock system (prevents ANY switching once attack started)
+  engagementLockId = nil,       -- ID of monster we are engaged with (attack started)
+  engagementLockTime = 0,       -- When engagement started
+  engagementLockHealth = 100,   -- Health when engagement started
+  isEngaged = false,            -- TRUE = currently in combat with engagementLockId
+  lastAttackCommandTime = 0     -- When we last sent attack command (for engagement detection)
 }
 
 -- Configuration for each scenario type
+-- IMPROVED v3.0: Much stricter anti-zigzag with engagement locking
 Scenario.configs = {
   [Scenario.TYPES.IDLE] = {
     switchCooldownMs = 0,
@@ -4136,51 +4144,56 @@ Scenario.configs = {
   },
   
   [Scenario.TYPES.SINGLE] = {
-    switchCooldownMs = 500,       -- Can switch quickly if needed
-    targetStickiness = 10,        -- Low stickiness
+    switchCooldownMs = 1000,      -- INCREASED: 1 second minimum
+    targetStickiness = 80,        -- INCREASED: High stickiness even for single
     prioritizeFinishingKills = true,
-    allowZigzag = true,           -- Single target, movement doesn't matter
-    description = "Single target - aggressive"
+    allowZigzag = false,          -- CHANGED: No zigzag even on single target
+    requireEngagementLock = true, -- NEW: Must finish current target
+    description = "Single target - focused"
   },
   
   [Scenario.TYPES.FEW] = {
-    switchCooldownMs = 2000,      -- 2 second minimum before switching (ANTI-ZIGZAG)
-    targetStickiness = 50,        -- HIGH stickiness to prevent zigzag
+    switchCooldownMs = 5000,      -- INCREASED: 5 second minimum (was 2s)
+    targetStickiness = 150,       -- INCREASED: Very high stickiness (was 50)
     prioritizeFinishingKills = true,
     allowZigzag = false,          -- STRICT: No zigzag allowed
-    maxSwitchesPerMinute = 6,     -- Max 6 switches per minute (every 10s avg)
-    healthThresholdForSwitch = 40, -- Only switch if target above 40% health AND better target exists
-    description = "Few targets - stable targeting, anti-zigzag"
+    maxSwitchesPerMinute = 3,     -- REDUCED: Max 3 switches per minute (was 6)
+    healthThresholdForSwitch = 15, -- REDUCED: Only switch if target above 15% (was 40%)
+    requireEngagementLock = true, -- NEW: Must finish current target
+    description = "Few targets - LINEAR targeting, anti-zigzag"
   },
   
   [Scenario.TYPES.MODERATE] = {
-    switchCooldownMs = 1500,      -- 1.5 second cooldown
-    targetStickiness = 35,        -- Medium stickiness
+    switchCooldownMs = 4000,      -- INCREASED: 4 second cooldown (was 1.5s)
+    targetStickiness = 100,       -- INCREASED: High stickiness (was 35)
     prioritizeFinishingKills = true,
     allowZigzag = false,          -- Still prevent zigzag
-    maxSwitchesPerMinute = 10,
-    healthThresholdForSwitch = 30,
-    description = "Moderate - balanced targeting"
+    maxSwitchesPerMinute = 5,     -- REDUCED (was 10)
+    healthThresholdForSwitch = 20, -- REDUCED (was 30%)
+    requireEngagementLock = true, -- NEW: Must finish current target
+    description = "Moderate - stable targeting"
   },
   
   [Scenario.TYPES.SWARM] = {
-    switchCooldownMs = 1000,      -- Faster switching for survival
-    targetStickiness = 20,        -- Lower stickiness, need to react
-    prioritizeFinishingKills = false, -- Survival over kills
-    allowZigzag = false,          -- But still prevent erratic movement
-    maxSwitchesPerMinute = 15,
-    healthThresholdForSwitch = 20,
+    switchCooldownMs = 2500,      -- INCREASED (was 1s)
+    targetStickiness = 60,        -- INCREASED (was 20)
+    prioritizeFinishingKills = true, -- CHANGED: Focus on finishing kills
+    allowZigzag = false,          -- Prevent erratic movement
+    maxSwitchesPerMinute = 8,     -- REDUCED (was 15)
+    healthThresholdForSwitch = 15,
     focusLowestHealth = true,     -- Prioritize finishing any monster
-    description = "Swarm - survival mode"
+    requireEngagementLock = false, -- Allow some switching in swarm
+    description = "Swarm - focused survival"
   },
   
   [Scenario.TYPES.OVERWHELMING] = {
-    switchCooldownMs = 500,       -- Fast reaction needed
-    targetStickiness = 10,        -- Very low stickiness
-    prioritizeFinishingKills = false,
-    allowZigzag = true,           -- Survival trumps movement quality
+    switchCooldownMs = 1500,      -- INCREASED (was 500ms)
+    targetStickiness = 40,        -- INCREASED (was 10)
+    prioritizeFinishingKills = true, -- CHANGED: Still try to finish
+    allowZigzag = false,          -- CHANGED: Prevent zigzag even here
     focusLowestHealth = true,
     emergencyMode = true,         -- Special handling
+    requireEngagementLock = false, -- Allow reactivity in emergency
     description = "Overwhelming - emergency survival"
   }
 }
@@ -4207,6 +4220,7 @@ function Scenario.detectScenario()
   Scenario.state.lastUpdate = nowt
   
   -- Count nearby monsters and gather info
+  -- IMPROVED v3.0: Increased range from 10 to 14 for better detection
   local monsters = {}
   local totalDanger = 0
   local monsterCount = 0
@@ -4221,7 +4235,7 @@ function Scenario.detectScenario()
         local dy = math.abs(creaturePos.y - playerPos.y)
         local dist = math.max(dx, dy)
         
-        if dist <= 10 then  -- Within targeting range
+        if dist <= 14 then  -- INCREASED from 10 to 14 for full screen coverage
           monsterCount = monsterCount + 1
           
           local danger = 1
@@ -4337,10 +4351,34 @@ end
 -- ============================================================================
 
 -- Check if we should allow a target switch
--- IMPROVED: Much stricter by default - prioritizes finishing current target
+-- IMPROVED v3.0: MUCH stricter with engagement lock - LINEAR targeting
 function Scenario.shouldAllowTargetSwitch(newTargetId, newTargetPriority, newTargetHealth)
   local nowt = nowMs()
   local cfg = Scenario.configs[Scenario.state.type] or Scenario.configs[Scenario.TYPES.FEW]
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- ENGAGEMENT LOCK CHECK (HIGHEST PRIORITY)
+  -- If engaged, NEVER switch unless target is dead/gone/unreachable
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if cfg.requireEngagementLock and Scenario.state.isEngaged and Scenario.state.engagementLockId then
+    -- Check if engaged target is still valid
+    local engagedCreature = nil
+    if MonsterAI.Tracker and MonsterAI.Tracker.monsters[Scenario.state.engagementLockId] then
+      engagedCreature = MonsterAI.Tracker.monsters[Scenario.state.engagementLockId].creature
+    end
+    
+    if engagedCreature and not safeIsDead(engagedCreature) and not safeIsRemoved(engagedCreature) then
+      -- Engaged target is still alive - ONLY allow if trying to switch TO the engaged target
+      if newTargetId == Scenario.state.engagementLockId then
+        return true, "engaged_target"
+      end
+      -- BLOCK any other switch while engaged
+      return false, "engagement_locked"
+    else
+      -- Engaged target is dead/gone - end engagement and allow switch
+      Scenario.endEngagement("target_dead")
+    end
+  end
   
   -- No lock exists - allow switch
   if not Scenario.state.targetLockId then
@@ -4373,52 +4411,55 @@ function Scenario.shouldAllowTargetSwitch(newTargetId, newTargetPriority, newTar
   end
   
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- STRICT LINEAR TARGETING: Finish current target before switching
-  -- Only switch if current target is truly unreachable or new target is CRITICAL
+  -- STRICT LINEAR TARGETING v3.0: Finish current target before switching
+  -- MUCH stricter thresholds - effectively prevents ALL switching once attacking
   -- ═══════════════════════════════════════════════════════════════════════════
   
   -- Get current target health
   local okHp, lockedHealth = pcall(function() return lockedCreature:getHealthPercent() end)
   lockedHealth = okHp and lockedHealth or 100
   
-  -- CRITICAL HP: NEVER switch when target is about to die
-  if lockedHealth <= 20 then
-    return false, "finishing_kill_20"
+  -- CRITICAL HP (≤30%): NEVER switch when target is low health
+  -- INCREASED from 20% to 30% for more consistent targeting
+  if lockedHealth <= 30 then
+    return false, "finishing_kill_30"
   end
   
-  -- LOW HP: Only switch for MUCH higher priority
-  if lockedHealth <= 40 then
-    local requiredAdvantage = 200  -- Need 200+ priority advantage
+  -- LOW HP (≤50%): Only switch for EXTREMELY high priority (emergency only)
+  -- INCREASED from 40% to 50%
+  if lockedHealth <= 50 then
+    local requiredAdvantage = 500  -- INCREASED: Need 500+ priority advantage (nearly impossible)
     if (newTargetPriority or 0) < (Scenario.state.targetLockHealth or 0) + requiredAdvantage then
-      return false, "finishing_kill_40"
+      return false, "finishing_kill_50"
     end
   end
   
-  -- WOUNDED: Require significant priority advantage
-  if lockedHealth <= 70 then
-    local requiredAdvantage = 100  -- Need 100+ priority advantage
+  -- WOUNDED (≤80%): Require very significant priority advantage
+  -- INCREASED from 70% to 80%
+  if lockedHealth <= 80 then
+    local requiredAdvantage = 300  -- INCREASED: Need 300+ priority advantage
     local healthDrop = (Scenario.state.targetLockHealth or 100) - lockedHealth
     -- If making progress (health dropped), require even more advantage
-    if healthDrop > 15 then
-      requiredAdvantage = 150
+    if healthDrop > 10 then
+      requiredAdvantage = 400  -- INCREASED
     end
     if (newTargetPriority or 0) < requiredAdvantage then
       return false, "making_progress"
     end
   end
   
-  -- Check switch cooldown (increased for more stability)
+  -- Check switch cooldown (SIGNIFICANTLY increased for stability)
   local timeSinceSwitch = nowt - Scenario.state.lastSwitchTime
-  local switchCooldown = cfg.switchCooldownMs or 800
+  local switchCooldown = cfg.switchCooldownMs or 5000  -- INCREASED default to 5 seconds
   if timeSinceSwitch < switchCooldown then
     return false, "cooldown"
   end
   
-  -- Check switches per minute limit (reduced for more stability)
+  -- Check switches per minute limit (MUCH stricter)
   if cfg.maxSwitchesPerMinute then
-    local maxSwitches = math.max(4, cfg.maxSwitchesPerMinute - 2)  -- Reduce by 2
+    local maxSwitches = math.max(2, cfg.maxSwitchesPerMinute - 1)  -- REDUCED: subtract 1 instead of 2
     local switchInterval = 60000 / maxSwitches
-    if timeSinceSwitch < switchInterval and Scenario.state.consecutiveSwitches > 1 then
+    if timeSinceSwitch < switchInterval and Scenario.state.consecutiveSwitches > 0 then  -- STRICTER: > 0 instead of > 1
       return false, "rate_limit"
     end
   end
@@ -4426,20 +4467,21 @@ function Scenario.shouldAllowTargetSwitch(newTargetId, newTargetPriority, newTar
   -- Calculate locked target's current state
   local lockedHealthDrop = (Scenario.state.targetLockHealth or 100) - lockedHealth
   
-  -- If we're making progress on current target (health dropping), stay focused
-  if lockedHealthDrop > 10 and lockedHealth > 5 then
-    -- Good progress - require even higher priority to switch
-    local progressBonus = math.min(50, lockedHealthDrop)
-    local requiredAdvantage = 150 + progressBonus
+  -- If we're making ANY progress on current target, stay focused
+  -- REDUCED threshold from 10% to 5%
+  if lockedHealthDrop > 5 and lockedHealth > 5 then
+    -- Making progress - require MUCH higher priority to switch
+    local progressBonus = math.min(100, lockedHealthDrop * 2)  -- INCREASED multiplier
+    local requiredAdvantage = 300 + progressBonus  -- INCREASED base from 150 to 300
     if (newTargetPriority or 0) < requiredAdvantage then
       return false, "making_progress"
     end
   end
   
-  -- Zigzag detection - check if we've been switching too rapidly
-  if not cfg.allowZigzag and Scenario.state.consecutiveSwitches >= 3 then
+  -- Zigzag detection - MUCH stricter (fewer switches trigger prevention)
+  if not cfg.allowZigzag and Scenario.state.consecutiveSwitches >= 2 then  -- REDUCED from 3 to 2
     local avgSwitchTime = (nowt - Scenario.state.scenarioStartTime) / math.max(1, Scenario.state.consecutiveSwitches)
-    if avgSwitchTime < 3000 then  -- Less than 3 seconds per switch on average
+    if avgSwitchTime < 5000 then  -- INCREASED from 3s to 5s per switch on average
       -- Force lock on current target
       return false, "zigzag_prevention"
     end
@@ -4496,6 +4538,115 @@ function Scenario.clearTargetLock()
   Scenario.state.targetLockId = nil
   Scenario.state.targetLockTime = 0
   Scenario.state.targetLockHealth = 100
+end
+
+-- ============================================================================
+-- ENGAGEMENT LOCK SYSTEM (v3.0) - LINEAR TARGETING
+-- Once we start attacking a monster, we STAY on it until it dies or becomes unreachable
+-- This prevents the zig-zag behavior completely
+-- ============================================================================
+
+-- Start engagement with a monster (called when attack command is sent)
+function Scenario.startEngagement(creatureId, health)
+  if not creatureId then return end
+  
+  local nowt = nowMs()
+  local cfg = Scenario.configs[Scenario.state.type] or Scenario.configs[Scenario.TYPES.FEW]
+  
+  -- Check if engagement lock is required for current scenario
+  if not cfg.requireEngagementLock then
+    -- Still use regular target lock
+    Scenario.lockTarget(creatureId, health)
+    return
+  end
+  
+  -- If already engaged with same target, just update health
+  if Scenario.state.engagementLockId == creatureId then
+    Scenario.state.lastAttackCommandTime = nowt
+    return
+  end
+  
+  -- Only allow new engagement if not already engaged OR current engagement is invalid
+  if Scenario.state.isEngaged and Scenario.state.engagementLockId then
+    -- Check if currently engaged target is still valid
+    local engagedCreature = nil
+    if MonsterAI.Tracker and MonsterAI.Tracker.monsters[Scenario.state.engagementLockId] then
+      engagedCreature = MonsterAI.Tracker.monsters[Scenario.state.engagementLockId].creature
+    end
+    
+    if engagedCreature and not safeIsDead(engagedCreature) and not safeIsRemoved(engagedCreature) then
+      -- Current engagement is still valid - DO NOT allow new engagement
+      return
+    end
+  end
+  
+  -- Start new engagement
+  Scenario.state.engagementLockId = creatureId
+  Scenario.state.engagementLockTime = nowt
+  Scenario.state.engagementLockHealth = health or 100
+  Scenario.state.isEngaged = true
+  Scenario.state.lastAttackCommandTime = nowt
+  
+  -- Also set regular target lock
+  Scenario.lockTarget(creatureId, health)
+  
+  -- Emit engagement event
+  if EventBus and EventBus.emit then
+    pcall(function()
+      EventBus.emit("monsterai:engagement_started", creatureId, health)
+    end)
+  end
+end
+
+-- Check if currently engaged
+function Scenario.isEngaged()
+  if not Scenario.state.isEngaged or not Scenario.state.engagementLockId then
+    return false, nil
+  end
+  
+  -- Validate engaged target is still alive
+  local engagedCreature = nil
+  if MonsterAI.Tracker and MonsterAI.Tracker.monsters[Scenario.state.engagementLockId] then
+    engagedCreature = MonsterAI.Tracker.monsters[Scenario.state.engagementLockId].creature
+  end
+  
+  if not engagedCreature or safeIsDead(engagedCreature) or safeIsRemoved(engagedCreature) then
+    Scenario.endEngagement("target_gone")
+    return false, nil
+  end
+  
+  return true, Scenario.state.engagementLockId
+end
+
+-- End engagement (called when target dies, becomes unreachable, or explicitly cleared)
+function Scenario.endEngagement(reason)
+  local prevEngagement = Scenario.state.engagementLockId
+  
+  Scenario.state.engagementLockId = nil
+  Scenario.state.engagementLockTime = 0
+  Scenario.state.engagementLockHealth = 100
+  Scenario.state.isEngaged = false
+  
+  -- Also clear target lock
+  Scenario.clearTargetLock()
+  
+  -- Emit event
+  if EventBus and EventBus.emit and prevEngagement then
+    pcall(function()
+      EventBus.emit("monsterai:engagement_ended", prevEngagement, reason or "unknown")
+    end)
+  end
+end
+
+-- Get the engaged target (or nil if not engaged)
+function Scenario.getEngagedTarget()
+  local isEngaged, engagedId = Scenario.isEngaged()
+  if not isEngaged then return nil end
+  
+  if MonsterAI.Tracker and MonsterAI.Tracker.monsters[engagedId] then
+    return MonsterAI.Tracker.monsters[engagedId].creature
+  end
+  return nil
 end
 
 -- ============================================================================
@@ -4564,7 +4715,8 @@ if EventBus then
 end
 
 -- ============================================================================
--- SCENARIO-AWARE PRIORITY MODIFIER
+-- SCENARIO-AWARE PRIORITY MODIFIER (v3.0)
+-- IMPROVED: Much higher stickiness bonuses for linear targeting
 -- ============================================================================
 
 -- Apply scenario-based priority modifications
@@ -4572,25 +4724,48 @@ function Scenario.modifyPriority(creatureId, basePriority, creatureHealth)
   local cfg = Scenario.configs[Scenario.state.type] or Scenario.configs[Scenario.TYPES.FEW]
   local modifiedPriority = basePriority
   
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- ENGAGEMENT LOCK BONUS (HIGHEST PRIORITY)
+  -- If engaged with this target, give MASSIVE bonus
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if creatureId == Scenario.state.engagementLockId and Scenario.state.isEngaged then
+    modifiedPriority = modifiedPriority + 1000  -- MASSIVE bonus - effectively unbeatable
+    
+    -- Additional bonus based on health progress
+    local healthDrop = (Scenario.state.engagementLockHealth or 100) - (creatureHealth or 100)
+    if healthDrop > 0 then
+      modifiedPriority = modifiedPriority + healthDrop * 5  -- 5 points per % health lost
+    end
+  end
+  
   -- Target stickiness: Current target gets bonus
   if creatureId == Scenario.state.targetLockId then
     modifiedPriority = modifiedPriority + cfg.targetStickiness
     
-    -- Extra bonus for low health targets (finish the kill!)
+    -- IMPROVED: Higher bonuses for low health targets (finish the kill!)
     if cfg.prioritizeFinishingKills and creatureHealth then
       if creatureHealth < 20 then
-        modifiedPriority = modifiedPriority + 50  -- Huge bonus to finish
+        modifiedPriority = modifiedPriority + 200  -- INCREASED from 50 to 200
       elseif creatureHealth < 35 then
-        modifiedPriority = modifiedPriority + 30
+        modifiedPriority = modifiedPriority + 120  -- INCREASED from 30 to 120
       elseif creatureHealth < 50 then
-        modifiedPriority = modifiedPriority + 15
+        modifiedPriority = modifiedPriority + 80   -- INCREASED from 15 to 80
+      elseif creatureHealth < 70 then
+        modifiedPriority = modifiedPriority + 40   -- NEW: bonus for wounded targets
       end
+    end
+    
+    -- IMPROVED: Time-based stickiness (longer we've been attacking, harder to switch)
+    local timeLocked = (nowMs() - (Scenario.state.targetLockTime or 0))
+    if timeLocked > 2000 then
+      local timeBonus = math.min(100, timeLocked / 100)  -- Up to 100 bonus after 10 seconds
+      modifiedPriority = modifiedPriority + timeBonus
     end
   end
   
   -- Swarm mode: Focus lowest health to reduce mob count
   if cfg.focusLowestHealth and creatureHealth then
-    local healthBonus = (100 - creatureHealth) * 0.3
+    local healthBonus = (100 - creatureHealth) * 0.5  -- INCREASED from 0.3 to 0.5
     modifiedPriority = modifiedPriority + healthBonus
   end
   
@@ -4599,7 +4774,7 @@ function Scenario.modifyPriority(creatureId, basePriority, creatureHealth)
     -- Additional handling in emergency situations
     local trackerData = MonsterAI.Tracker and MonsterAI.Tracker.monsters[creatureId]
     if trackerData and trackerData.ewmaDps and trackerData.ewmaDps > 50 then
-      modifiedPriority = modifiedPriority + 20
+      modifiedPriority = modifiedPriority + 40  -- INCREASED from 20 to 40
     end
   end
   
@@ -4651,8 +4826,9 @@ function Scenario.getOptimalTarget()
   end
   
   -- Get all valid targets with priorities
+  -- IMPROVED v3.0: Increased range from 10 to 12 for better targeting
   if MonsterAI.TargetBot and MonsterAI.TargetBot.getSortedTargets then
-    candidates = MonsterAI.TargetBot.getSortedTargets({maxRange = 10})
+    candidates = MonsterAI.TargetBot.getSortedTargets({maxRange = 12})
   else
     -- Fallback to basic targeting
     local creatures = g_map.getSpectators(playerPos, false) or {}
@@ -4661,7 +4837,7 @@ function Scenario.getOptimalTarget()
         local pos = safeCreatureCall(creature, "getPosition", nil)
         if pos and pos.z == playerPos.z then
           local dist = math.max(math.abs(pos.x - playerPos.x), math.abs(pos.y - playerPos.y))
-          if dist <= 10 then
+          if dist <= 12 then  -- INCREASED from 10 to 12
             table.insert(candidates, {
               creature = creature,
               id = safeGetId(creature),

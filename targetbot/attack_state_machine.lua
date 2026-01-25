@@ -48,6 +48,7 @@ AttackStateMachine.STATE = STATE
 
 -- ============================================================================
 -- CONFIGURATION (Tunable)
+-- IMPROVED v3.0: Stricter values for linear targeting (anti-zigzag)
 -- ============================================================================
 
 local CONFIG = {
@@ -57,15 +58,15 @@ local CONFIG = {
   ATTACK_RECOVER_ATTEMPTS = 5,      -- Max recovery attempts before giving up
   ATTACK_COOLDOWN = 150,            -- Minimum time between attack commands
   
-  -- Target switching thresholds
-  SWITCH_PRIORITY_THRESHOLD = 100,  -- Need 100+ priority advantage to force switch
-  SWITCH_HP_THRESHOLD = 50,         -- Current target must be above this HP% to allow switch
-  SWITCH_COOLDOWN = 800,            -- Minimum time between target switches
+  -- Target switching thresholds (STRICTER v3.0)
+  SWITCH_PRIORITY_THRESHOLD = 500,  -- INCREASED: Need 500+ priority advantage to force switch (was 100)
+  SWITCH_HP_THRESHOLD = 80,         -- INCREASED: Current target must be above 80% HP to allow switch (was 50%)
+  SWITCH_COOLDOWN = 5000,           -- INCREASED: Minimum 5 seconds between target switches (was 800ms)
   
-  -- Health thresholds for stickiness
-  CRITICAL_HP = 15,                 -- Below this, NEVER switch
-  LOW_HP = 30,                      -- Below this, require huge priority advantage
-  WOUNDED_HP = 50,                  -- Below this, require significant advantage
+  -- Health thresholds for stickiness (STRICTER v3.0)
+  CRITICAL_HP = 30,                 -- INCREASED: Below 30%, NEVER switch (was 15%)
+  LOW_HP = 50,                      -- INCREASED: Below 50%, require huge priority advantage (was 30%)
+  WOUNDED_HP = 75,                  -- INCREASED: Below 75%, require significant advantage (was 50%)
   
   -- Performance
   UPDATE_INTERVAL = 50,             -- State machine tick interval (50ms = 20 FPS)
@@ -208,6 +209,7 @@ local function getGameAttackTarget()
 end
 
 -- Issue attack command (centralized, rate-limited)
+-- IMPROVED v3.0: Now triggers engagement lock for linear targeting
 local function issueAttack(creature, reason)
   if not creature or isCreatureDead(creature) then return false end
   
@@ -228,6 +230,15 @@ local function issueAttack(creature, reason)
       state.attackConfirmed = false
       state.stats.attacksIssued = state.stats.attacksIssued + 1
       log("Attack issued: " .. getCreatureName(creature) .. " (" .. (reason or "unknown") .. ")")
+      
+      -- ENGAGEMENT LOCK: Start engagement with this target
+      -- This prevents target switching once we start attacking
+      if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.startEngagement then
+        local creatureId = getCreatureId(creature)
+        local health = nil
+        pcall(function() health = creature:getHealthPercent() end)
+        MonsterAI.Scenario.startEngagement(creatureId, health)
+      end
     else
       log("Attack failed: " .. tostring(err))
     end
@@ -294,14 +305,30 @@ local function calculatePriority(creature, dist)
 end
 
 -- Check if a switch to new target should be allowed
+-- IMPROVED v3.0: Integrated with MonsterAI engagement lock
 local function shouldAllowSwitch(newCreature, newPriority)
   if not state.targetCreature or isCreatureDead(state.targetCreature) then
+    -- Target is dead - end engagement and allow switch
+    if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.endEngagement then
+      MonsterAI.Scenario.endEngagement("target_dead")
+    end
     return true, "current_dead"
   end
   
   local currentTime = nowMs()
   
-  -- Switch cooldown
+  -- Check MonsterAI engagement lock FIRST (highest priority)
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
+    local newCreatureId = getCreatureId(newCreature)
+    local newHealth = getCreatureHealth(newCreature)
+    local allowed, reason = MonsterAI.Scenario.shouldAllowTargetSwitch(newCreatureId, newPriority, newHealth)
+    if not allowed then
+      state.stats.switchesBlocked = state.stats.switchesBlocked + 1
+      return false, "monsterai_" .. (reason or "blocked")
+    end
+  end
+  
+  -- Switch cooldown (increased from original)
   if (currentTime - state.lastSwitchTime) < CONFIG.SWITCH_COOLDOWN then
     state.stats.switchesBlocked = state.stats.switchesBlocked + 1
     return false, "cooldown"
@@ -310,7 +337,7 @@ local function shouldAllowSwitch(newCreature, newPriority)
   -- Current target health check
   local currentHp = getCreatureHealth(state.targetCreature)
   
-  -- CRITICAL HP: Never switch
+  -- CRITICAL HP: Never switch (increased threshold)
   if currentHp < CONFIG.CRITICAL_HP then
     state.stats.switchesBlocked = state.stats.switchesBlocked + 1
     return false, "critical_hp"

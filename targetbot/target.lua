@@ -4,6 +4,14 @@ lastAction = 0
 local cavebotAllowance = 0
 local lureEnabled = true
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- MONSTER DETECTION RANGE (v3.0)
+-- IMPROVED: Increased range for better monster detection
+-- This prevents the bot from leaving monsters behind when moving to waypoints
+-- ═══════════════════════════════════════════════════════════════════════════
+local MONSTER_DETECTION_RANGE = 14  -- INCREASED from 10 to 14 (covers full visible screen)
+local MONSTER_TARGETING_RANGE = 12  -- INCREASED from 10 to 12 (targeting range)
+
 -- MonsterAI automatic integration (hidden internals, not exposed to UI/storage)
 -- DISABLED: MonsterAI was blocking chase mode by pausing movement for up to 900ms
 -- This caused players to stand still while attacking instead of chasing
@@ -1182,6 +1190,67 @@ TargetBot.isCaveBotActionAllowed = function()
   return cavebotAllowance > now
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- MONSTER DETECTION FOR CAVEBOT (v3.0)
+-- Check if there are targetable monsters on screen that should block cavebot
+-- This prevents the bot from leaving monsters behind
+-- ═══════════════════════════════════════════════════════════════════════════
+TargetBot.hasTargetableMonstersOnScreen = function()
+  if not TargetBot.isOn() then return false end
+  
+  local p = player and player:getPosition()
+  if not p then return false end
+  
+  -- Get all creatures in detection range
+  local creatures = (SpectatorCache and SpectatorCache.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)) 
+    or g_map.getSpectatorsInRange(p, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
+  
+  if not creatures or #creatures == 0 then return false end
+  
+  local monsterCount = 0
+  local playerZ = p.z
+  
+  for i = 1, #creatures do
+    local creature = creatures[i]
+    if creature then
+      local okMonster, isMonster = pcall(function() return creature:isMonster() end)
+      if okMonster and isMonster then
+        local okDead, isDead = pcall(function() return creature:isDead() end)
+        if not isDead then
+          local okPos, cpos = pcall(function() return creature:getPosition() end)
+          if okPos and cpos and cpos.z == playerZ then
+            -- Check if this creature has a matching TargetBot config (it's targetable)
+            local cfgs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(creature)
+            if cfgs and cfgs[1] then
+              monsterCount = monsterCount + 1
+            end
+          end
+        end
+      end
+    end
+  end
+  
+  return monsterCount > 0, monsterCount
+end
+
+-- Check if bot should wait for monsters (stricter version)
+TargetBot.shouldWaitForMonsters = function()
+  -- If actively attacking, definitely wait
+  if TargetBot.isActive() then return true end
+  
+  -- Check for targetable monsters on screen
+  local hasMonsters, count = TargetBot.hasTargetableMonstersOnScreen()
+  if hasMonsters then return true end
+  
+  -- Check MonsterAI engagement lock
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.isEngaged then
+    local isEngaged = MonsterAI.Scenario.isEngaged()
+    if isEngaged then return true end
+  end
+  
+  return false
+end
+
 TargetBot.setStatus = function(text)
   setStatusRight(text)
 end
@@ -1833,9 +1902,9 @@ local function recalculateBestTarget()
   -- If still no creatures, do a fresh scan
   if not creatures or #creatures == 0 then
     creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
-      and MovementCoordinator.MonsterCache.getNearby(10)
-      or (SpectatorCache and SpectatorCache.getNearby(10, 10)
-      or g_map.getSpectatorsInRange(pos, false, 10, 10))
+      and MovementCoordinator.MonsterCache.getNearby(MONSTER_DETECTION_RANGE)
+      or (SpectatorCache and SpectatorCache.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
+      or g_map.getSpectatorsInRange(pos, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE))
   end
   
   if not creatures then return nil, 0, 0 end
@@ -2038,7 +2107,7 @@ schedule(1600, function() if not performPendingEnableOnce() then warn('[TargetBo
 local function primeCreatureCache()
   local p = player and player:getPosition()
   if not p then return end
-  local creatures = (SpectatorCache and SpectatorCache.getNearby(10, 10)) or g_map.getSpectatorsInRange(p, false, 10, 10)
+  local creatures = (SpectatorCache and SpectatorCache.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)) or g_map.getSpectatorsInRange(p, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
   if not creatures or #creatures == 0 then
     return
   end
