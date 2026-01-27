@@ -963,9 +963,18 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       return
     end
     
-    -- SIMPLIFIED MONSTER DETECTION: Only pause if TargetBot is actively fighting
-    -- Don't block indefinitely just because monsters exist on screen
-    -- The targetBotIsCaveBotAllowed check already handles this properly
+    -- ═══════════════════════════════════════════════════════════════════════════
+    -- IMPROVED MONSTER DETECTION (v3.0)
+    -- Check for targetable monsters on screen BEFORE proceeding to next waypoint
+    -- This prevents the bot from leaving monsters behind
+    -- ═══════════════════════════════════════════════════════════════════════════
+    if TargetBot.shouldWaitForMonsters and TargetBot.shouldWaitForMonsters() then
+      -- There are monsters that need to be killed - pause cavebot
+      CaveBot.resetWalking()
+      return
+    end
+    
+    -- BACKUP CHECK: If EventTargeting reports combat active, also pause
     if EventTargeting and EventTargeting.isCombatActive and EventTargeting.isCombatActive() then
       -- Only pause if we're NOT allowed by TargetBot
       if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then

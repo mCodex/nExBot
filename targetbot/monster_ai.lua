@@ -48,6 +48,110 @@ local function nowMs()
   return os.time() * 1000
 end
 
+-- ============================================================================
+-- SAFE CREATURE VALIDATION (Prevents C++ crashes)
+-- The OTClient C++ layer can crash even when methods exist if the creature
+-- object is in an invalid internal state. These helpers prevent that.
+-- ============================================================================
+
+-- Cache for recently validated creatures to reduce overhead
+local validatedCreatures = {}
+local validatedCreaturesTTL = 100 -- ms
+
+-- Check if a creature is valid and safe to call methods on
+-- Returns true only if the creature can be safely accessed
+local function isCreatureValid(creature)
+  if not creature then return false end
+  if type(creature) ~= "userdata" and type(creature) ~= "table" then return false end
+  
+  -- Try the most basic operation possible - if this fails, creature is invalid
+  local ok, id = pcall(function() return creature:getId() end)
+  if not ok or not id then return false end
+  
+  -- Check validation cache
+  local nowt = nowMs()
+  local cached = validatedCreatures[id]
+  if cached and (nowt - cached.time) < validatedCreaturesTTL then
+    return cached.valid
+  end
+  
+  -- Perform full validation - try to access position (critical method)
+  local okPos, pos = pcall(function() return creature:getPosition() end)
+  local valid = okPos and pos ~= nil
+  
+  -- Cache result
+  validatedCreatures[id] = { valid = valid, time = nowt }
+  
+  -- Cleanup old cache entries periodically
+  if math.random(1, 50) == 1 then
+    for cid, data in pairs(validatedCreatures) do
+      if (nowt - data.time) > validatedCreaturesTTL * 10 then
+        validatedCreatures[cid] = nil
+      end
+    end
+  end
+  
+  return valid
+end
+
+-- Safely call a method on a creature, returning default if it fails
+-- This wraps the entire call including method lookup in pcall
+local function safeCreatureCall(creature, methodName, default)
+  if not creature then return default end
+  
+  local ok, result = pcall(function()
+    local method = creature[methodName]
+    if not method then return nil end
+    return method(creature)
+  end)
+  
+  if ok then
+    return result ~= nil and result or default
+  else
+    return default
+  end
+end
+
+-- Safely get creature ID (most common operation)
+local function safeGetId(creature)
+  if not creature then return nil end
+  local ok, id = pcall(function() return creature:getId() end)
+  return ok and id or nil
+end
+
+-- Safely check if creature is dead
+local function safeIsDead(creature)
+  if not creature then return true end
+  local ok, dead = pcall(function() return creature:isDead() end)
+  return ok and dead or true
+end
+
+-- Safely check if creature is a monster
+local function safeIsMonster(creature)
+  if not creature then return false end
+  local ok, monster = pcall(function() return creature:isMonster() end)
+  return ok and monster or false
+end
+
+-- Safely check if creature is removed
+local function safeIsRemoved(creature)
+  if not creature then return true end
+  local ok, removed = pcall(function() return creature:isRemoved() end)
+  if not ok then return true end
+  return removed or false
+end
+
+-- Combined safe check: is the creature a valid, alive monster?
+local function isValidAliveMonster(creature)
+  if not creature then return false end
+  
+  local ok, result = pcall(function()
+    return creature:isMonster() and not creature:isDead() and not creature:isRemoved()
+  end)
+  
+  return ok and result or false
+end
+
 -- Extended telemetry defaults
 MonsterAI.COLLECT_EXTENDED = (MonsterAI.COLLECT_EXTENDED == nil) and true or MonsterAI.COLLECT_EXTENDED
 MonsterAI.DPS_WINDOW = MonsterAI.DPS_WINDOW or 5000 -- ms window for DPS calculation
@@ -294,81 +398,95 @@ MonsterAI.Telemetry = MonsterAI.Telemetry or {
 }
 
 -- Collect extended telemetry from creature using OTClient API
+-- Use the module-level safeCreatureCall helper for all method calls
 function MonsterAI.Telemetry.collectSnapshot(creature)
-  if not creature or not creature:getId() then return nil end
+  if not creature then return nil end
   
-  local id = creature:getId()
+  -- Validate creature before any operations
+  if not isCreatureValid(creature) then return nil end
+  
+  local id = safeGetId(creature)
+  if not id then return nil end
+  
   local nowt = nowMs()
   local snapshot = {
     timestamp = nowt,
     
     -- Basic creature info
     id = id,
-    name = creature:getName() or "Unknown",
-    healthPercent = creature:getHealthPercent() or 100,
+    name = safeCreatureCall(creature, "getName", "Unknown"),
+    healthPercent = safeCreatureCall(creature, "getHealthPercent", 100),
     
     -- Position and movement (OTClient API)
-    position = creature:getPosition(),
-    direction = creature:getDirection(),
-    isWalking = creature.isWalking and creature:isWalking() or false,
+    position = safeCreatureCall(creature, "getPosition", nil),
+    direction = safeCreatureCall(creature, "getDirection", 0),
+    isWalking = safeCreatureCall(creature, "isWalking", false),
     
     -- Speed telemetry (OTClient API)
-    speed = creature.getSpeed and creature:getSpeed() or 0,
-    baseSpeed = creature.getBaseSpeed and creature:getBaseSpeed() or 0,
+    speed = safeCreatureCall(creature, "getSpeed", 0),
+    baseSpeed = safeCreatureCall(creature, "getBaseSpeed", 0),
     
-    -- Walk timing (OTClient API)
-    stepDuration = creature.getStepDuration and creature:getStepDuration() or 0,
-    stepProgress = creature.getStepProgress and creature:getStepProgress() or 0,
-    stepTicksLeft = creature.getStepTicksLeft and creature:getStepTicksLeft() or 0,
-    walkTicksElapsed = creature.getWalkTicksElapsed and creature:getWalkTicksElapsed() or 0,
+    -- Walk timing (OTClient API) - These can fail on some creatures
+    stepDuration = safeCreatureCall(creature, "getStepDuration", 0),
+    stepProgress = safeCreatureCall(creature, "getStepProgress", 0),
+    stepTicksLeft = safeCreatureCall(creature, "getStepTicksLeft", 0),
+    walkTicksElapsed = safeCreatureCall(creature, "getWalkTicksElapsed", 0),
     
     -- Walk direction (can differ from facing direction)
-    walkDirection = creature.getWalkDirection and creature:getWalkDirection() or creature:getDirection(),
+    walkDirection = safeCreatureCall(creature, "getWalkDirection", nil) or safeCreatureCall(creature, "getDirection", 0),
     
     -- State flags
-    isDead = creature:isDead() or false,
-    isRemoved = creature.isRemoved and creature:isRemoved() or false,
-    isInvisible = creature.isInvisible and creature:isInvisible() or false,
+    isDead = safeCreatureCall(creature, "isDead", false),
+    isRemoved = safeCreatureCall(creature, "isRemoved", false),
+    isInvisible = safeCreatureCall(creature, "isInvisible", false),
     
     -- Creature type classification (OTClient API)
-    creatureType = creature.getType and creature:getType() or 0,
-    skull = creature.getSkull and creature:getSkull() or 0,
-    shield = creature.getShield and creature:getShield() or 0,
-    icon = creature.getIcon and creature:getIcon() or 0,
+    creatureType = safeCreatureCall(creature, "getType", 0),
+    skull = safeCreatureCall(creature, "getSkull", 0),
+    shield = safeCreatureCall(creature, "getShield", 0),
+    icon = safeCreatureCall(creature, "getIcon", 0),
     
     -- Outfit info (can indicate monster variant)
-    outfit = creature.getOutfit and creature:getOutfit() or nil,
+    outfit = safeCreatureCall(creature, "getOutfit", nil),
     
     -- Step history for trajectory prediction
-    lastStepFrom = creature.getLastStepFromPosition and creature:getLastStepFromPosition() or nil,
-    lastStepTo = creature.getLastStepToPosition and creature:getLastStepToPosition() or nil,
+    lastStepFrom = safeCreatureCall(creature, "getLastStepFromPosition", nil),
+    lastStepTo = safeCreatureCall(creature, "getLastStepToPosition", nil),
     
     -- ═══════════════════════════════════════════════════════════════════════
     -- ENHANCED METRICS (NEW in v2.2)
     -- ═══════════════════════════════════════════════════════════════════════
     
     -- Animation state (useful for attack detection)
-    isAnimating = creature.isAnimating and creature:isAnimating() or false,
-    animationPhase = creature.getAnimationPhase and creature:getAnimationPhase() or 0,
+    isAnimating = safeCreatureCall(creature, "isAnimating", false),
+    animationPhase = safeCreatureCall(creature, "getAnimationPhase", 0),
     
     -- Light emission (some monsters glow when attacking)
-    light = creature.getLight and creature:getLight() or nil,
+    light = safeCreatureCall(creature, "getLight", nil),
     
     -- Name color (can indicate status effects)
-    nameColor = creature.getNameColor and creature:getNameColor() or nil,
+    nameColor = safeCreatureCall(creature, "getNameColor", nil),
     
     -- Marks/emblems
-    emblem = creature.getEmblem and creature:getEmblem() or 0,
+    emblem = safeCreatureCall(creature, "getEmblem", 0),
     
     -- Static square (attack indicator in game)
-    hasStaticSquare = creature.hasStaticSquare and creature:hasStaticSquare() or false,
+    hasStaticSquare = safeCreatureCall(creature, "hasStaticSquare", false),
     
     -- Distance from player (computed metric)
     distanceFromPlayer = 0
   }
   
-  -- Calculate distance from player
-  local playerPos = player and player:getPosition()
+  -- Early exit if we couldn't get position
+  if not snapshot.position then return nil end
+  
+  -- Calculate distance from player (safely)
+  local playerPos = nil
+  if player then
+    local okPlayer, pPos = pcall(function() return player:getPosition() end)
+    if okPlayer then playerPos = pPos end
+  end
+  
   if playerPos and snapshot.position then
     snapshot.distanceFromPlayer = math.max(
       math.abs(snapshot.position.x - playerPos.x),
@@ -1243,7 +1361,8 @@ MonsterAI.Tracker = {
 -- Fast direction change detection (called on creature:move)
 function MonsterAI.RealTime.onDirectionChange(creature, oldDir, newDir)
   if not creature then return end
-  local id = creature:getId()
+  if not isCreatureValid(creature) then return end
+  local id = safeGetId(creature)
   if not id then return end
   
   local nowt = nowMs()
@@ -1268,8 +1387,12 @@ function MonsterAI.RealTime.onDirectionChange(creature, oldDir, newDir)
   rt.lastChangeTime = nowt
   
   -- Check if now facing player (immediate threat signal)
-  local playerPos = player and player:getPosition()
-  local monsterPos = creature:getPosition()
+  local playerPos = nil
+  if player then
+    local okP, pPos = pcall(function() return player:getPosition() end)
+    if okP then playerPos = pPos end
+  end
+  local monsterPos = safeCreatureCall(creature, "getPosition", nil)
   if playerPos and monsterPos then
     local isFacing = MonsterAI.Predictor.isFacingPosition(monsterPos, newDir, playerPos)
     
@@ -1295,16 +1418,17 @@ end
 -- Register an immediate threat from a monster
 function MonsterAI.RealTime.registerImmediateThreat(creature, reason, confidence)
   if not creature then return end
-  local id = creature:getId()
+  if not isCreatureValid(creature) then return end
+  local id = safeGetId(creature)
   if not id then return end
   
   local nowt = nowMs()
-  local pos = creature:getPosition()
-  local dir = creature:getDirection()
+  local pos = safeCreatureCall(creature, "getPosition", nil)
+  local dir = safeCreatureCall(creature, "getDirection", 0)
   
   -- Get learned cooldown for prediction
   local data = MonsterAI.Tracker.monsters[id]
-  local pattern = MonsterAI.Patterns.get(creature:getName())
+  local pattern = MonsterAI.Patterns.get(safeCreatureCall(creature, "getName", "Unknown"))
   local cooldown = (data and data.ewmaCooldown) or (pattern and pattern.waveCooldown) or 2000
   
   -- Calculate time to attack based on cooldown and last attack
@@ -1475,8 +1599,8 @@ function MonsterAI.RealTime.updateThreatCache()
   -- Check all tracked directions for monsters facing player
   for id, rt in pairs(MonsterAI.RealTime.directions) do
     local data = MonsterAI.Tracker.monsters[id]
-    if data and data.creature and not data.creature:isDead() then
-      local monsterPos = data.creature:getPosition()
+    if data and data.creature and not safeIsDead(data.creature) then
+      local monsterPos = safeCreatureCall(data.creature, "getPosition", nil)
       if monsterPos and monsterPos.z == playerPos.z then
         local dist = math.max(math.abs(monsterPos.x - playerPos.x), math.abs(monsterPos.y - playerPos.y))
         
@@ -1617,26 +1741,29 @@ MonsterAI.RealTime.getImmediateThreat = MonsterAI.getImmediateThreat
 
 -- Initialize tracking for a monster
 function MonsterAI.Tracker.track(creature)
-  if not creature or creature:isDead() then return end
+  -- Use safe validation instead of direct calls
+  if not creature then return end
+  if not isCreatureValid(creature) then return end
+  if safeIsDead(creature) then return end
   
-  local id = creature:getId()
+  local id = safeGetId(creature)
   if not id then return end  -- Creature ID unavailable (invalid creature or getId() failed)
   if MonsterAI.Tracker.monsters[id] then return end  -- Already tracking
   
-  local pos = creature:getPosition()
+  local pos = safeCreatureCall(creature, "getPosition", nil)
   if not pos then return end  -- Creature position unavailable (teleporting/disappearing)
   
   local nowt = nowMs()
   
-  -- Collect initial telemetry snapshot
+  -- Collect initial telemetry snapshot (already uses safe calls internally)
   local initialSnapshot = MonsterAI.Telemetry.collectSnapshot(creature)
   
   MonsterAI.Tracker.monsters[id] = {
     creature = creature,
     id = id,
-    name = creature:getName(),
+    name = safeCreatureCall(creature, "getName", "Unknown"),
     samples = {},           -- {time, pos, dir, health, isAttacking}
-    lastDirection = creature:getDirection(),
+    lastDirection = safeCreatureCall(creature, "getDirection", 0),
     lastPosition = {x = pos.x, y = pos.y, z = pos.z},
     lastSampleTime = nowt,
     lastAttackTime = 0,
@@ -1665,7 +1792,7 @@ function MonsterAI.Tracker.track(creature)
     
     -- Health tracking for damage rate calculation
     healthSamples = {},     -- {time, percent}
-    lastHealthPercent = creature:getHealthPercent() or 100,
+    lastHealthPercent = safeCreatureCall(creature, "getHealthPercent", 100),
     healthChangeRate = 0,   -- Health % change per second
     
     -- Direction pattern tracking
@@ -1698,7 +1825,7 @@ function MonsterAI.Tracker.track(creature)
   
   -- Emit tracking started event
   if EventBus and EventBus.emit then
-    EventBus.emit("monsterai:tracking_started", creature, id)
+    pcall(function() EventBus.emit("monsterai:tracking_started", creature, id) end)
   end
 end
 
@@ -1721,7 +1848,7 @@ function MonsterAI.Tracker.untrack(creatureId)
     end
     
     -- Check if this was a kill (monster dead)
-    if data.creature and data.creature:isDead() then
+    if data.creature and safeIsDead(data.creature) then
       MonsterAI.Telemetry.session.killCount = (MonsterAI.Telemetry.session.killCount or 0) + 1
       
       -- Track kill time if we were engaged
@@ -1748,9 +1875,12 @@ end
 
 -- Update tracking data for a monster
 function MonsterAI.Tracker.update(creature)
-  if not creature or creature:isDead() then return end
+  -- Use safe validation
+  if not creature then return end
+  if not isCreatureValid(creature) then return end
+  if safeIsDead(creature) then return end
   
-  local id = creature:getId()
+  local id = safeGetId(creature)
   if not id then return end  -- Invalid creature
   
   local data = MonsterAI.Tracker.monsters[id]
@@ -1761,11 +1891,11 @@ function MonsterAI.Tracker.update(creature)
   
   local currentTime = now
   local nowt = nowMs()
-  local pos = creature:getPosition()
+  local pos = safeCreatureCall(creature, "getPosition", nil)
   if not pos then return end  -- Creature position unavailable
   
-  local dir = creature:getDirection()
-  local hp = creature:getHealthPercent()
+  local dir = safeCreatureCall(creature, "getDirection", 0)
+  local hp = safeCreatureCall(creature, "getHealthPercent", 100)
   
   -- ═══════════════════════════════════════════════════════════════════════════
   -- CORE SAMPLE COLLECTION
@@ -2028,13 +2158,14 @@ MonsterAI.Predictor = {}
 -- Predict if monster is about to use a wave attack
 -- Returns: isPredicted, confidence, timeToAttack
 function MonsterAI.Predictor.predictWaveAttack(creature)
-  if not creature or creature:isDead() then
-    return false, 0, 999999
-  end
+  if not creature then return false, 0, 999999 end
+  if not isCreatureValid(creature) then return false, 0, 999999 end
+  if safeIsDead(creature) then return false, 0, 999999 end
   
-  local id = creature:getId()
+  local id = safeGetId(creature)
+  if not id then return false, 0, 999999 end
   local data = MonsterAI.Tracker.monsters[id]
-  local pattern = MonsterAI.Patterns.get(creature:getName())
+  local pattern = MonsterAI.Patterns.get(safeCreatureCall(creature, "getName", "Unknown"))
 
 -- Utility: compute DPS for a tracked creature
 function MonsterAI.Tracker.getDPS(creatureId, windowMs)
@@ -2063,9 +2194,16 @@ end
   end
   
   -- Check if monster is facing player (primary indicator)
-  local monsterPos = creature:getPosition()
-  local monsterDir = creature:getDirection()
-  local playerPos = player:getPosition()
+  local monsterPos = safeCreatureCall(creature, "getPosition", nil)
+  local monsterDir = safeCreatureCall(creature, "getDirection", 0)
+  if not monsterPos then return false, 0, 999999 end
+  
+  local playerPos = nil
+  if player then
+    local okP, pPos = pcall(function() return player:getPosition() end)
+    if okP then playerPos = pPos end
+  end
+  if not playerPos then return false, 0, 999999 end
   
   local isFacingPlayer = MonsterAI.Predictor.isFacingPosition(
     monsterPos, monsterDir, playerPos
@@ -2163,31 +2301,33 @@ function MonsterAI.Predictor.predictPositionDanger(position, monsters)
   
   for i = 1, #monsters do
     local monster = monsters[i]
-    if monster and not monster:isDead() then
+    if monster and not safeIsDead(monster) then
       local isPredicted, confidence, timeToAttack = 
         MonsterAI.Predictor.predictWaveAttack(monster)
       
       -- Emit wave prediction event for other modules (Exeta Amp, etc.)
       if isPredicted and confidence >= 0.5 and EventBus then
-        EventBus.emit("monsterai:wave_predicted", monster, confidence, timeToAttack)
+        pcall(function() EventBus.emit("monsterai:wave_predicted", monster, confidence, timeToAttack) end)
       end
       
       if isPredicted and timeToAttack < 1000 then
         -- Check if position is in attack path
-        local mpos = monster:getPosition()
-        local mdir = monster:getDirection()
-        local pattern = MonsterAI.Patterns.get(monster:getName())
+        local mpos = safeCreatureCall(monster, "getPosition", nil)
+        local mdir = safeCreatureCall(monster, "getDirection", 0)
+        local pattern = MonsterAI.Patterns.get(safeCreatureCall(monster, "getName", "Unknown"))
         
-        local inDanger = MonsterAI.Predictor.isPositionInWavePath(
-          position, mpos, mdir, pattern.waveRange, pattern.waveWidth
-        )
+        if mpos then
+          local inDanger = MonsterAI.Predictor.isPositionInWavePath(
+            position, mpos, mdir, pattern.waveRange, pattern.waveWidth
+          )
         
-        if inDanger then
-          -- Closer time to attack = more danger
-          local urgency = 1 - (timeToAttack / 1000)
-          totalDanger = totalDanger + (pattern.dangerLevel * urgency)
-          totalConfidence = totalConfidence + confidence
-          count = count + 1
+          if inDanger then
+            -- Closer time to attack = more danger
+            local urgency = 1 - (timeToAttack / 1000)
+            totalDanger = totalDanger + (pattern.dangerLevel * urgency)
+            totalConfidence = totalConfidence + confidence
+            count = count + 1
+          end
         end
       end
     end
@@ -2554,7 +2694,8 @@ MonsterAI.SpellTracker = MonsterAI.SpellTracker or {
 -- Initialize spell tracking for a monster
 function MonsterAI.SpellTracker.initMonster(creature)
   if not creature then return nil end
-  local id = creature:getId()
+  if not isCreatureValid(creature) then return nil end
+  local id = safeGetId(creature)
   if not id then return nil end
   
   if MonsterAI.SpellTracker.monsterSpells[id] then
@@ -2563,7 +2704,7 @@ function MonsterAI.SpellTracker.initMonster(creature)
   
   local data = {
     id = id,
-    name = creature:getName() or "Unknown",
+    name = safeCreatureCall(creature, "getName", "Unknown"),
     
     -- Spell counts and timing
     totalSpellsCast = 0,
@@ -2930,9 +3071,9 @@ if EventBus then
     MonsterAI.Tracker.track(creature)
     
     -- Initialize direction tracking immediately
-    if creature and creature:getId() then
-      local id = creature:getId()
-      local dir = creature:getDirection()
+    local id = safeGetId(creature)
+    if id then
+      local dir = safeCreatureCall(creature, "getDirection", 0)
       MonsterAI.RealTime.directions[id] = {
         dir = dir,
         lastChangeTime = nowMs(),
@@ -2941,8 +3082,12 @@ if EventBus then
       }
       
       -- Check if already facing player (instant threat check)
-      local playerPos = player and player:getPosition()
-      local monsterPos = creature:getPosition()
+      local playerPos = nil
+      if player then
+        local okP, pPos = pcall(function() return player:getPosition() end)
+        if okP then playerPos = pPos end
+      end
+      local monsterPos = safeCreatureCall(creature, "getPosition", nil)
       if playerPos and monsterPos then
         local dist = math.max(math.abs(monsterPos.x - playerPos.x), math.abs(monsterPos.y - playerPos.y))
         if dist <= 5 then
@@ -2959,7 +3104,7 @@ if EventBus then
   -- Untrack monsters when they disappear
   EventBus.on("monster:disappear", function(creature)
     if creature then
-      local id = creature:getId()
+      local id = safeGetId(creature)
       if id then
         MonsterAI.Tracker.untrack(id)
         MonsterAI.RealTime.directions[id] = nil
@@ -2977,12 +3122,13 @@ if EventBus then
   
   -- CRITICAL: Direction change detection (primary wave anticipation)
   EventBus.on("creature:move", function(creature, oldPos)
-    if not creature or not creature:isMonster() then return end
+    if not creature then return end
+    if not safeIsMonster(creature) then return end
     
-    local id = creature:getId()
+    local id = safeGetId(creature)
     if not id then return end
     
-    local newDir = creature:getDirection()
+    local newDir = safeCreatureCall(creature, "getDirection", 0)
     local rt = MonsterAI.RealTime.directions[id]
     local oldDir = rt and rt.dir or newDir
     
@@ -2993,9 +3139,12 @@ if EventBus then
       -- Position changed but direction same - update position tracking
       if rt then
         rt.positions = rt.positions or {}
-        table.insert(rt.positions, { pos = creature:getPosition(), time = nowMs() })
-        -- Keep last 10 positions
-        while #rt.positions > 10 do table.remove(rt.positions, 1) end
+        local pos = safeCreatureCall(creature, "getPosition", nil)
+        if pos then
+          table.insert(rt.positions, { pos = pos, time = nowMs() })
+          -- Keep last 10 positions
+          while #rt.positions > 10 do table.remove(rt.positions, 1) end
+        end
       end
     end
     
@@ -3009,7 +3158,7 @@ if EventBus then
       MonsterAI.Tracker.update(creature)
       
       -- Health change often indicates monster is active/attacking
-      local id = creature:getId()
+      local id = safeGetId(creature)
       if id then
         local data = MonsterAI.Tracker.monsters[id]
         if data then
@@ -3026,15 +3175,21 @@ if EventBus then
 
     -- Try to correlate this damage to a nearby monster (handles non-projectile attacks)
     local nowt = nowMs()
-    local playerPos = player and player:getPosition()
+    local playerPos = nil
+    if player then
+      local okP, pPos = pcall(function() return player:getPosition() end)
+      if okP then playerPos = pPos end
+    end
     if not playerPos then return end
 
     local function scoreMonsterForDamage(m, playerPos, nowt)
-      if not m or not m:getPosition() or m:isDead() or not m:isMonster() then return 0, nil end
-      local mpos = m:getPosition()
+      if not m then return 0, nil end
+      local mpos = safeCreatureCall(m, "getPosition", nil)
+      if not mpos then return 0, nil end
+      if safeIsDead(m) or not safeIsMonster(m) then return 0, nil end
       local dist = math.max(math.abs(playerPos.x - mpos.x), math.abs(playerPos.y - mpos.y))
       local score = 1 / (1 + dist)
-      local id = m:getId()
+      local id = safeGetId(m)
       local data = id and MonsterAI.Tracker.monsters[id]
 
       -- Prefer recently active/visible attackers
@@ -3042,7 +3197,8 @@ if EventBus then
       if data and data.lastAttackTime and math.abs(nowt - data.lastAttackTime) < 1500 then score = score + 0.8 end
       -- Prefer ones facing the player
       if data and MonsterAI.Predictor.isFacingPosition then
-        local facing = MonsterAI.Predictor.isFacingPosition(mpos, m:getDirection(), playerPos)
+        local mdir = safeCreatureCall(m, "getDirection", 0)
+        local facing = MonsterAI.Predictor.isFacingPosition(mpos, mdir, playerPos)
         if facing then score = score + 0.6 end
       end
       return score, data
@@ -3089,9 +3245,9 @@ if EventBus then
       -- Record damage for accuracy tracking and weight adjustment
       -- ═══════════════════════════════════════════════════════════════════════
       if MonsterAI.CombatFeedback and MonsterAI.CombatFeedback.recordDamage then
-        local attributedId = bestMonster and bestMonster:getId()
+        local attributedId = safeGetId(bestMonster)
         local attributedName = bestData.name
-        MonsterAI.CombatFeedback.recordDamage(damage, attributedId, attributedName)
+        pcall(function() MonsterAI.CombatFeedback.recordDamage(damage, attributedId, attributedName) end)
       end
 
       -- Persist small bump
@@ -3122,7 +3278,7 @@ if EventBus then
       local src = nil
       for i = 1, #creatures do
         local c = creatures[i]
-        if c and c:isMonster() and not c:isDead() then
+        if c and safeIsMonster(c) and not safeIsDead(c) then
           src = c
           break
         end
@@ -3130,7 +3286,7 @@ if EventBus then
       
       if not src then return end
 
-      local id = src:getId()
+      local id = safeGetId(src)
       if not id then return end
 
       if not MonsterAI.Tracker.monsters[id] then MonsterAI.Tracker.track(src) end
@@ -3206,11 +3362,11 @@ if EventBus then
       -- Find monster caster
       for i = 1, #creatures do
         local c = creatures[i]
-        if c and c:isMonster() and not c:isDead() then
-          local id = c:getId()
+        if c and safeIsMonster(c) and not safeIsDead(c) then
+          local id = safeGetId(c)
           if id and MonsterAI.SpellTracker then
             local missileType = missile.getId and missile:getId() or 0
-            MonsterAI.SpellTracker.recordSpell(id, missileType, srcPos, destPos)
+            pcall(function() MonsterAI.SpellTracker.recordSpell(id, missileType, srcPos, destPos) end)
           end
           break
         end
@@ -3226,10 +3382,10 @@ if EventBus then
   if onCreatureTurn then
     onCreatureTurn(function(creature, direction)
       if not creature then return end
-      if not creature:isMonster() then return end
-      if creature:isDead() then return end
+      if not safeIsMonster(creature) then return end
+      if safeIsDead(creature) then return end
       
-      local id = creature:getId()
+      local id = safeGetId(creature)
       if not id then return end
       
       local nowt = nowMs()
@@ -3264,12 +3420,16 @@ if EventBus then
       
       -- Emit creature:turn event for other modules (Exeta Amp, etc.)
       if EventBus then
-        EventBus.emit("creature:turn", creature, direction, oldDir)
+        pcall(function() EventBus.emit("creature:turn", creature, direction, oldDir) end)
       end
       
       -- Check if now facing player
-      local playerPos = player and player:getPosition()
-      local monsterPos = creature:getPosition()
+      local playerPos = nil
+      if player then
+        local okP, pPos = pcall(function() return player:getPosition() end)
+        if okP then playerPos = pPos end
+      end
+      local monsterPos = safeCreatureCall(creature, "getPosition", nil)
       if playerPos and monsterPos then
         local dist = math.max(math.abs(monsterPos.x - playerPos.x), math.abs(monsterPos.y - playerPos.y))
         if dist <= 6 then
@@ -3285,7 +3445,7 @@ if EventBus then
                 math.min(0.4 + rt.turnRate * 0.2, 0.9))
               
               if EventTargeting and EventTargeting.DEBUG then
-                local name = creature:getName() or "Unknown"
+                local name = safeCreatureCall(creature, "getName", "Unknown")
                 print("[MonsterAI] Turn threat: " .. name .. 
                       " turnRate=" .. string.format("%.2f", rt.turnRate) ..
                       " changes=" .. rt.consecutiveChanges)
@@ -3311,9 +3471,10 @@ if EventBus then
   -- PLAYER ATTACK EVENT - Track engagement with monsters
   -- ═══════════════════════════════════════════════════════════════════════════
   EventBus.on("player:attack", function(target)
-    if not target or not target:isMonster() then return end
+    if not target then return end
+    if not safeIsMonster(target) then return end
     
-    local id = target:getId()
+    local id = safeGetId(target)
     if not id then return end
     
     local data = MonsterAI.Tracker.monsters[id]
@@ -3327,10 +3488,12 @@ if EventBus then
       
       -- Emit engagement event
       if EventBus and EventBus.emit then
-        EventBus.emit("monsterai:engagement_started", target, id, {
-          name = data.name,
-          healthPercent = target:getHealthPercent()
-        })
+        pcall(function()
+          EventBus.emit("monsterai:engagement_started", target, id, {
+            name = data.name,
+            healthPercent = safeCreatureCall(target, "getHealthPercent", 100)
+          })
+        end)
       end
     end
   end, 25)
@@ -3339,9 +3502,10 @@ if EventBus then
   -- CREATURE DEATH EVENT - Finalize tracking and collect kill stats
   -- ═══════════════════════════════════════════════════════════════════════════
   EventBus.on("creature:death", function(creature)
-    if not creature or not creature:isMonster() then return end
+    if not creature then return end
+    if not safeIsMonster(creature) then return end
     
-    local id = creature:getId()
+    local id = safeGetId(creature)
     if not id then return end
     
     local data = MonsterAI.Tracker.monsters[id]
@@ -3398,9 +3562,13 @@ if EventBus then
     -- Emit death analysis event with nearby monster data
     local nearbyThreats = {}
     for id, data in pairs(MonsterAI.Tracker.monsters) do
-      if data.creature and not data.creature:isDead() then
-        local pos = data.creature:getPosition()
-        local playerPos = player and player:getPosition()
+      if data.creature and not safeIsDead(data.creature) then
+        local pos = safeCreatureCall(data.creature, "getPosition", nil)
+        local playerPos = nil
+        if player then
+          local okP, pPos = pcall(function() return player:getPosition() end)
+          if okP then playerPos = pPos end
+        end
         if pos and playerPos then
           local dist = math.max(math.abs(pos.x - playerPos.x), math.abs(pos.y - playerPos.y))
           if dist <= 5 then
@@ -3538,8 +3706,9 @@ function MonsterAI.updateAll()
   
   for i = 1, #creatures do
     local creature = creatures[i]
-    if creature and creature:isMonster() and not creature:isDead() then
-      local id = creature:getId()
+    -- Use safe checks instead of direct creature method calls
+    if creature and isValidAliveMonster(creature) then
+      local id = safeGetId(creature)
       
       -- Volume-based load balancing: in high load, skip some monsters per cycle
       local shouldProcess = true
@@ -3939,6 +4108,7 @@ Scenario.TYPES = {
 }
 
 -- Current scenario state
+-- IMPROVED v3.0: Added engagement lock for linear targeting
 Scenario.state = {
   type = Scenario.TYPES.IDLE,
   monsterCount = 0,
@@ -3950,13 +4120,20 @@ Scenario.state = {
   lastSwitchTime = 0,           -- When we last switched targets
   consecutiveSwitches = 0,      -- Count of rapid switches (zigzag indicator)
   movementHistory = {},         -- Recent movement directions for zigzag detection
-  lastMoveRecord = 0,            -- Last movement record timestamp
+  lastMoveRecord = 0,           -- Last movement record timestamp
   scenarioStartTime = 0,        -- When current scenario started
   avgDangerLevel = 0,           -- Average threat level of nearby monsters
-  clusterInfo = nil             -- Monster clustering analysis
+  clusterInfo = nil,            -- Monster clustering analysis
+  -- NEW: Engagement lock system (prevents ANY switching once attack started)
+  engagementLockId = nil,       -- ID of monster we are engaged with (attack started)
+  engagementLockTime = 0,       -- When engagement started
+  engagementLockHealth = 100,   -- Health when engagement started
+  isEngaged = false,            -- TRUE = currently in combat with engagementLockId
+  lastAttackCommandTime = 0     -- When we last sent attack command (for engagement detection)
 }
 
 -- Configuration for each scenario type
+-- IMPROVED v3.0: Much stricter anti-zigzag with engagement locking
 Scenario.configs = {
   [Scenario.TYPES.IDLE] = {
     switchCooldownMs = 0,
@@ -3967,51 +4144,56 @@ Scenario.configs = {
   },
   
   [Scenario.TYPES.SINGLE] = {
-    switchCooldownMs = 500,       -- Can switch quickly if needed
-    targetStickiness = 10,        -- Low stickiness
+    switchCooldownMs = 1000,      -- INCREASED: 1 second minimum
+    targetStickiness = 80,        -- INCREASED: High stickiness even for single
     prioritizeFinishingKills = true,
-    allowZigzag = true,           -- Single target, movement doesn't matter
-    description = "Single target - aggressive"
+    allowZigzag = false,          -- CHANGED: No zigzag even on single target
+    requireEngagementLock = true, -- NEW: Must finish current target
+    description = "Single target - focused"
   },
   
   [Scenario.TYPES.FEW] = {
-    switchCooldownMs = 2000,      -- 2 second minimum before switching (ANTI-ZIGZAG)
-    targetStickiness = 50,        -- HIGH stickiness to prevent zigzag
+    switchCooldownMs = 5000,      -- INCREASED: 5 second minimum (was 2s)
+    targetStickiness = 150,       -- INCREASED: Very high stickiness (was 50)
     prioritizeFinishingKills = true,
     allowZigzag = false,          -- STRICT: No zigzag allowed
-    maxSwitchesPerMinute = 6,     -- Max 6 switches per minute (every 10s avg)
-    healthThresholdForSwitch = 40, -- Only switch if target above 40% health AND better target exists
-    description = "Few targets - stable targeting, anti-zigzag"
+    maxSwitchesPerMinute = 3,     -- REDUCED: Max 3 switches per minute (was 6)
+    healthThresholdForSwitch = 15, -- REDUCED: Only switch if target above 15% (was 40%)
+    requireEngagementLock = true, -- NEW: Must finish current target
+    description = "Few targets - LINEAR targeting, anti-zigzag"
   },
   
   [Scenario.TYPES.MODERATE] = {
-    switchCooldownMs = 1500,      -- 1.5 second cooldown
-    targetStickiness = 35,        -- Medium stickiness
+    switchCooldownMs = 4000,      -- INCREASED: 4 second cooldown (was 1.5s)
+    targetStickiness = 100,       -- INCREASED: High stickiness (was 35)
     prioritizeFinishingKills = true,
     allowZigzag = false,          -- Still prevent zigzag
-    maxSwitchesPerMinute = 10,
-    healthThresholdForSwitch = 30,
-    description = "Moderate - balanced targeting"
+    maxSwitchesPerMinute = 5,     -- REDUCED (was 10)
+    healthThresholdForSwitch = 20, -- REDUCED (was 30%)
+    requireEngagementLock = true, -- NEW: Must finish current target
+    description = "Moderate - stable targeting"
   },
   
   [Scenario.TYPES.SWARM] = {
-    switchCooldownMs = 1000,      -- Faster switching for survival
-    targetStickiness = 20,        -- Lower stickiness, need to react
-    prioritizeFinishingKills = false, -- Survival over kills
-    allowZigzag = false,          -- But still prevent erratic movement
-    maxSwitchesPerMinute = 15,
-    healthThresholdForSwitch = 20,
+    switchCooldownMs = 2500,      -- INCREASED (was 1s)
+    targetStickiness = 60,        -- INCREASED (was 20)
+    prioritizeFinishingKills = true, -- CHANGED: Focus on finishing kills
+    allowZigzag = false,          -- Prevent erratic movement
+    maxSwitchesPerMinute = 8,     -- REDUCED (was 15)
+    healthThresholdForSwitch = 15,
     focusLowestHealth = true,     -- Prioritize finishing any monster
-    description = "Swarm - survival mode"
+    requireEngagementLock = false, -- Allow some switching in swarm
+    description = "Swarm - focused survival"
   },
   
   [Scenario.TYPES.OVERWHELMING] = {
-    switchCooldownMs = 500,       -- Fast reaction needed
-    targetStickiness = 10,        -- Very low stickiness
-    prioritizeFinishingKills = false,
-    allowZigzag = true,           -- Survival trumps movement quality
+    switchCooldownMs = 1500,      -- INCREASED (was 500ms)
+    targetStickiness = 40,        -- INCREASED (was 10)
+    prioritizeFinishingKills = true, -- CHANGED: Still try to finish
+    allowZigzag = false,          -- CHANGED: Prevent zigzag even here
     focusLowestHealth = true,
     emergencyMode = true,         -- Special handling
+    requireEngagementLock = false, -- Allow reactivity in emergency
     description = "Overwhelming - emergency survival"
   }
 }
@@ -4038,6 +4220,7 @@ function Scenario.detectScenario()
   Scenario.state.lastUpdate = nowt
   
   -- Count nearby monsters and gather info
+  -- IMPROVED v3.0: Increased range from 10 to 14 for better detection
   local monsters = {}
   local totalDanger = 0
   local monsterCount = 0
@@ -4045,19 +4228,19 @@ function Scenario.detectScenario()
   local creatures = g_map.getSpectators(playerPos, false) or {}
   
   for _, creature in ipairs(creatures) do
-    if creature and creature:isMonster() and not creature:isDead() and not creature:isRemoved() then
-      local creaturePos = creature:getPosition()
+    if creature and isValidAliveMonster(creature) then
+      local creaturePos = safeCreatureCall(creature, "getPosition", nil)
       if creaturePos and creaturePos.z == playerPos.z then
         local dx = math.abs(creaturePos.x - playerPos.x)
         local dy = math.abs(creaturePos.y - playerPos.y)
         local dist = math.max(dx, dy)
         
-        if dist <= 10 then  -- Within targeting range
+        if dist <= 14 then  -- INCREASED from 10 to 14 for full screen coverage
           monsterCount = monsterCount + 1
           
           local danger = 1
-          local id = creature:getId()
-          local trackerData = MonsterAI.Tracker and MonsterAI.Tracker.monsters[id]
+          local id = safeGetId(creature)
+          local trackerData = MonsterAI.Tracker and id and MonsterAI.Tracker.monsters[id]
           if trackerData then
             danger = (trackerData.ewmaDps or 1) / 10 + 1
           end
@@ -4067,7 +4250,7 @@ function Scenario.detectScenario()
             creature = creature,
             id = id,
             distance = dist,
-            health = creature:getHealthPercent() or 100,
+            health = safeCreatureCall(creature, "getHealthPercent", 100),
             danger = danger,
             pos = creaturePos
           })
@@ -4163,13 +4346,39 @@ function Scenario.analyzeCluster(monsters)
 end
 
 -- ============================================================================
--- TARGET LOCK SYSTEM (Anti-Zigzag)
+-- TARGET LOCK SYSTEM (Anti-Zigzag) - IMPROVED v2.0
+-- Now enforces LINEAR targeting: one target until death
 -- ============================================================================
 
 -- Check if we should allow a target switch
+-- IMPROVED v3.0: MUCH stricter with engagement lock - LINEAR targeting
 function Scenario.shouldAllowTargetSwitch(newTargetId, newTargetPriority, newTargetHealth)
   local nowt = nowMs()
   local cfg = Scenario.configs[Scenario.state.type] or Scenario.configs[Scenario.TYPES.FEW]
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- ENGAGEMENT LOCK CHECK (HIGHEST PRIORITY)
+  -- If engaged, NEVER switch unless target is dead/gone/unreachable
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if cfg.requireEngagementLock and Scenario.state.isEngaged and Scenario.state.engagementLockId then
+    -- Check if engaged target is still valid
+    local engagedCreature = nil
+    if MonsterAI.Tracker and MonsterAI.Tracker.monsters[Scenario.state.engagementLockId] then
+      engagedCreature = MonsterAI.Tracker.monsters[Scenario.state.engagementLockId].creature
+    end
+    
+    if engagedCreature and not safeIsDead(engagedCreature) and not safeIsRemoved(engagedCreature) then
+      -- Engaged target is still alive - ONLY allow if trying to switch TO the engaged target
+      if newTargetId == Scenario.state.engagementLockId then
+        return true, "engaged_target"
+      end
+      -- BLOCK any other switch while engaged
+      return false, "engagement_locked"
+    else
+      -- Engaged target is dead/gone - end engagement and allow switch
+      Scenario.endEngagement("target_dead")
+    end
+  end
   
   -- No lock exists - allow switch
   if not Scenario.state.targetLockId then
@@ -4183,7 +4392,15 @@ function Scenario.shouldAllowTargetSwitch(newTargetId, newTargetPriority, newTar
     lockedCreature = data.creature
   end
   
-  if not lockedCreature or lockedCreature:isDead() or lockedCreature:isRemoved() then
+  if not lockedCreature then
+    Scenario.clearTargetLock()
+    return true, "target_gone"
+  end
+  
+  -- Safe dead check
+  local okDead, isDead = pcall(function() return lockedCreature:isDead() end)
+  local okRemoved, isRemoved = pcall(function() return lockedCreature:isRemoved() end)
+  if (okDead and isDead) or (okRemoved and isRemoved) then
     Scenario.clearTargetLock()
     return true, "target_dead"
   end
@@ -4193,58 +4410,78 @@ function Scenario.shouldAllowTargetSwitch(newTargetId, newTargetPriority, newTar
     return true, "same_target"
   end
   
-  -- Check switch cooldown
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- STRICT LINEAR TARGETING v3.0: Finish current target before switching
+  -- MUCH stricter thresholds - effectively prevents ALL switching once attacking
+  -- ═══════════════════════════════════════════════════════════════════════════
+  
+  -- Get current target health
+  local okHp, lockedHealth = pcall(function() return lockedCreature:getHealthPercent() end)
+  lockedHealth = okHp and lockedHealth or 100
+  
+  -- CRITICAL HP (≤30%): NEVER switch when target is low health
+  -- INCREASED from 20% to 30% for more consistent targeting
+  if lockedHealth <= 30 then
+    return false, "finishing_kill_30"
+  end
+  
+  -- LOW HP (≤50%): Only switch for EXTREMELY high priority (emergency only)
+  -- INCREASED from 40% to 50%
+  if lockedHealth <= 50 then
+    local requiredAdvantage = 500  -- INCREASED: Need 500+ priority advantage (nearly impossible)
+    if (newTargetPriority or 0) < (Scenario.state.targetLockHealth or 0) + requiredAdvantage then
+      return false, "finishing_kill_50"
+    end
+  end
+  
+  -- WOUNDED (≤80%): Require very significant priority advantage
+  -- INCREASED from 70% to 80%
+  if lockedHealth <= 80 then
+    local requiredAdvantage = 300  -- INCREASED: Need 300+ priority advantage
+    local healthDrop = (Scenario.state.targetLockHealth or 100) - lockedHealth
+    -- If making progress (health dropped), require even more advantage
+    if healthDrop > 10 then
+      requiredAdvantage = 400  -- INCREASED
+    end
+    if (newTargetPriority or 0) < requiredAdvantage then
+      return false, "making_progress"
+    end
+  end
+  
+  -- Check switch cooldown (SIGNIFICANTLY increased for stability)
   local timeSinceSwitch = nowt - Scenario.state.lastSwitchTime
-  if timeSinceSwitch < cfg.switchCooldownMs then
+  local switchCooldown = cfg.switchCooldownMs or 5000  -- INCREASED default to 5 seconds
+  if timeSinceSwitch < switchCooldown then
     return false, "cooldown"
   end
   
-  -- Check switches per minute limit
+  -- Check switches per minute limit (MUCH stricter)
   if cfg.maxSwitchesPerMinute then
-    local switchInterval = 60000 / cfg.maxSwitchesPerMinute
-    if timeSinceSwitch < switchInterval and Scenario.state.consecutiveSwitches > 2 then
+    local maxSwitches = math.max(2, cfg.maxSwitchesPerMinute - 1)  -- REDUCED: subtract 1 instead of 2
+    local switchInterval = 60000 / maxSwitches
+    if timeSinceSwitch < switchInterval and Scenario.state.consecutiveSwitches > 0 then  -- STRICTER: > 0 instead of > 1
       return false, "rate_limit"
     end
   end
   
   -- Calculate locked target's current state
-  local lockedHealth = lockedCreature:getHealthPercent() or 100
-  local lockedHealthDrop = Scenario.state.targetLockHealth - lockedHealth
+  local lockedHealthDrop = (Scenario.state.targetLockHealth or 100) - lockedHealth
   
-  -- If we're making progress on current target (health dropping), stay focused
-  if lockedHealthDrop > 10 and lockedHealth > 5 then
-    -- Good progress - add stickiness bonus
-    local progressBonus = math.min(30, lockedHealthDrop)
-    
-    -- Check if new target is significantly better
-    local lockData = MonsterAI.Tracker.monsters[Scenario.state.targetLockId]
-    local lockedPriority = 100  -- Base priority for calculation
-    if lockData then
-      lockedPriority = lockedPriority + (100 - lockedHealth) * 0.5  -- Health-based
-    end
-    
-    -- Add stickiness and progress bonus
-    lockedPriority = lockedPriority + cfg.targetStickiness + progressBonus
-    
-    -- New target must be SIGNIFICANTLY better to justify switch
-    local switchThreshold = 1.3  -- 30% better required
-    if newTargetPriority < lockedPriority * switchThreshold then
+  -- If we're making ANY progress on current target, stay focused
+  -- REDUCED threshold from 10% to 5%
+  if lockedHealthDrop > 5 and lockedHealth > 5 then
+    -- Making progress - require MUCH higher priority to switch
+    local progressBonus = math.min(100, lockedHealthDrop * 2)  -- INCREASED multiplier
+    local requiredAdvantage = 300 + progressBonus  -- INCREASED base from 150 to 300
+    if (newTargetPriority or 0) < requiredAdvantage then
       return false, "making_progress"
     end
   end
   
-  -- Health threshold check (don't switch if current target is low health)
-  if cfg.healthThresholdForSwitch and lockedHealth < cfg.healthThresholdForSwitch then
-    -- Current target is low health - finish it!
-    if lockedHealth < 20 then
-      return false, "finishing_kill"
-    end
-  end
-  
-  -- Zigzag detection - check if we've been switching too rapidly
-  if not cfg.allowZigzag and Scenario.state.consecutiveSwitches >= 3 then
+  -- Zigzag detection - MUCH stricter (fewer switches trigger prevention)
+  if not cfg.allowZigzag and Scenario.state.consecutiveSwitches >= 2 then  -- REDUCED from 3 to 2
     local avgSwitchTime = (nowt - Scenario.state.scenarioStartTime) / math.max(1, Scenario.state.consecutiveSwitches)
-    if avgSwitchTime < 3000 then  -- Less than 3 seconds per switch on average
+    if avgSwitchTime < 5000 then  -- INCREASED from 3s to 5s per switch on average
       -- Force lock on current target
       return false, "zigzag_prevention"
     end
@@ -4254,21 +4491,45 @@ function Scenario.shouldAllowTargetSwitch(newTargetId, newTargetPriority, newTar
 end
 
 -- Lock onto a target
+-- IMPROVED: More comprehensive state tracking for linear targeting
 function Scenario.lockTarget(creatureId, health)
   local nowt = nowMs()
   local prevLock = Scenario.state.targetLockId
   
+  -- Update lock state
   Scenario.state.targetLockId = creatureId
   Scenario.state.targetLockTime = nowt
   Scenario.state.targetLockHealth = health or 100
   
-  -- Track switches
+  -- Track switches (for rate limiting and zigzag detection)
   if prevLock and prevLock ~= creatureId then
     Scenario.state.lastSwitchTime = nowt
     Scenario.state.consecutiveSwitches = Scenario.state.consecutiveSwitches + 1
     
     -- Record movement for zigzag detection
     Scenario.recordMovement()
+    
+    -- Emit target switch event for other modules
+    if EventBus and EventBus.emit then
+      pcall(function()
+        EventBus.emit("monsterai:target_switched", creatureId, prevLock)
+      end)
+    end
+  elseif not prevLock then
+    -- New lock (not a switch)
+    Scenario.state.consecutiveSwitches = 0
+    
+    -- Emit target acquired event
+    if EventBus and EventBus.emit then
+      pcall(function()
+        EventBus.emit("monsterai:target_locked", creatureId, health)
+      end)
+    end
+  end
+  
+  -- Reset switch counter periodically (every 10 seconds of stable targeting)
+  if (nowt - Scenario.state.lastSwitchTime) > 10000 then
+    Scenario.state.consecutiveSwitches = 0
   end
 end
 
@@ -4277,6 +4538,115 @@ function Scenario.clearTargetLock()
   Scenario.state.targetLockId = nil
   Scenario.state.targetLockTime = 0
   Scenario.state.targetLockHealth = 100
+end
+
+-- ============================================================================
+-- ENGAGEMENT LOCK SYSTEM (v3.0) - LINEAR TARGETING
+-- Once we start attacking a monster, we STAY on it until it dies or becomes unreachable
+-- This prevents the zig-zag behavior completely
+-- ============================================================================
+
+-- Start engagement with a monster (called when attack command is sent)
+function Scenario.startEngagement(creatureId, health)
+  if not creatureId then return end
+  
+  local nowt = nowMs()
+  local cfg = Scenario.configs[Scenario.state.type] or Scenario.configs[Scenario.TYPES.FEW]
+  
+  -- Check if engagement lock is required for current scenario
+  if not cfg.requireEngagementLock then
+    -- Still use regular target lock
+    Scenario.lockTarget(creatureId, health)
+    return
+  end
+  
+  -- If already engaged with same target, just update health
+  if Scenario.state.engagementLockId == creatureId then
+    Scenario.state.lastAttackCommandTime = nowt
+    return
+  end
+  
+  -- Only allow new engagement if not already engaged OR current engagement is invalid
+  if Scenario.state.isEngaged and Scenario.state.engagementLockId then
+    -- Check if currently engaged target is still valid
+    local engagedCreature = nil
+    if MonsterAI.Tracker and MonsterAI.Tracker.monsters[Scenario.state.engagementLockId] then
+      engagedCreature = MonsterAI.Tracker.monsters[Scenario.state.engagementLockId].creature
+    end
+    
+    if engagedCreature and not safeIsDead(engagedCreature) and not safeIsRemoved(engagedCreature) then
+      -- Current engagement is still valid - DO NOT allow new engagement
+      return
+    end
+  end
+  
+  -- Start new engagement
+  Scenario.state.engagementLockId = creatureId
+  Scenario.state.engagementLockTime = nowt
+  Scenario.state.engagementLockHealth = health or 100
+  Scenario.state.isEngaged = true
+  Scenario.state.lastAttackCommandTime = nowt
+  
+  -- Also set regular target lock
+  Scenario.lockTarget(creatureId, health)
+  
+  -- Emit engagement event
+  if EventBus and EventBus.emit then
+    pcall(function()
+      EventBus.emit("monsterai:engagement_started", creatureId, health)
+    end)
+  end
+end
+
+-- Check if currently engaged
+function Scenario.isEngaged()
+  if not Scenario.state.isEngaged or not Scenario.state.engagementLockId then
+    return false, nil
+  end
+  
+  -- Validate engaged target is still alive
+  local engagedCreature = nil
+  if MonsterAI.Tracker and MonsterAI.Tracker.monsters[Scenario.state.engagementLockId] then
+    engagedCreature = MonsterAI.Tracker.monsters[Scenario.state.engagementLockId].creature
+  end
+  
+  if not engagedCreature or safeIsDead(engagedCreature) or safeIsRemoved(engagedCreature) then
+    Scenario.endEngagement("target_gone")
+    return false, nil
+  end
+  
+  return true, Scenario.state.engagementLockId
+end
+
+-- End engagement (called when target dies, becomes unreachable, or explicitly cleared)
+function Scenario.endEngagement(reason)
+  local prevEngagement = Scenario.state.engagementLockId
+  
+  Scenario.state.engagementLockId = nil
+  Scenario.state.engagementLockTime = 0
+  Scenario.state.engagementLockHealth = 100
+  Scenario.state.isEngaged = false
+  
+  -- Also clear target lock
+  Scenario.clearTargetLock()
+  
+  -- Emit event
+  if EventBus and EventBus.emit and prevEngagement then
+    pcall(function()
+      EventBus.emit("monsterai:engagement_ended", prevEngagement, reason or "unknown")
+    end)
+  end
+end
+
+-- Get the engaged target (or nil if not engaged)
+function Scenario.getEngagedTarget()
+  local isEngaged, engagedId = Scenario.isEngaged()
+  if not isEngaged then return nil end
+  
+  if MonsterAI.Tracker and MonsterAI.Tracker.monsters[engagedId] then
+    return MonsterAI.Tracker.monsters[engagedId].creature
+  end
+  return nil
 end
 
 -- ============================================================================
@@ -4345,7 +4715,8 @@ if EventBus then
 end
 
 -- ============================================================================
--- SCENARIO-AWARE PRIORITY MODIFIER
+-- SCENARIO-AWARE PRIORITY MODIFIER (v3.0)
+-- IMPROVED: Much higher stickiness bonuses for linear targeting
 -- ============================================================================
 
 -- Apply scenario-based priority modifications
@@ -4353,25 +4724,48 @@ function Scenario.modifyPriority(creatureId, basePriority, creatureHealth)
   local cfg = Scenario.configs[Scenario.state.type] or Scenario.configs[Scenario.TYPES.FEW]
   local modifiedPriority = basePriority
   
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- ENGAGEMENT LOCK BONUS (HIGHEST PRIORITY)
+  -- If engaged with this target, give MASSIVE bonus
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if creatureId == Scenario.state.engagementLockId and Scenario.state.isEngaged then
+    modifiedPriority = modifiedPriority + 1000  -- MASSIVE bonus - effectively unbeatable
+    
+    -- Additional bonus based on health progress
+    local healthDrop = (Scenario.state.engagementLockHealth or 100) - (creatureHealth or 100)
+    if healthDrop > 0 then
+      modifiedPriority = modifiedPriority + healthDrop * 5  -- 5 points per % health lost
+    end
+  end
+  
   -- Target stickiness: Current target gets bonus
   if creatureId == Scenario.state.targetLockId then
     modifiedPriority = modifiedPriority + cfg.targetStickiness
     
-    -- Extra bonus for low health targets (finish the kill!)
+    -- IMPROVED: Higher bonuses for low health targets (finish the kill!)
     if cfg.prioritizeFinishingKills and creatureHealth then
       if creatureHealth < 20 then
-        modifiedPriority = modifiedPriority + 50  -- Huge bonus to finish
+        modifiedPriority = modifiedPriority + 200  -- INCREASED from 50 to 200
       elseif creatureHealth < 35 then
-        modifiedPriority = modifiedPriority + 30
+        modifiedPriority = modifiedPriority + 120  -- INCREASED from 30 to 120
       elseif creatureHealth < 50 then
-        modifiedPriority = modifiedPriority + 15
+        modifiedPriority = modifiedPriority + 80   -- INCREASED from 15 to 80
+      elseif creatureHealth < 70 then
+        modifiedPriority = modifiedPriority + 40   -- NEW: bonus for wounded targets
       end
+    end
+    
+    -- IMPROVED: Time-based stickiness (longer we've been attacking, harder to switch)
+    local timeLocked = (nowMs() - (Scenario.state.targetLockTime or 0))
+    if timeLocked > 2000 then
+      local timeBonus = math.min(100, timeLocked / 100)  -- Up to 100 bonus after 10 seconds
+      modifiedPriority = modifiedPriority + timeBonus
     end
   end
   
   -- Swarm mode: Focus lowest health to reduce mob count
   if cfg.focusLowestHealth and creatureHealth then
-    local healthBonus = (100 - creatureHealth) * 0.3
+    local healthBonus = (100 - creatureHealth) * 0.5  -- INCREASED from 0.3 to 0.5
     modifiedPriority = modifiedPriority + healthBonus
   end
   
@@ -4380,7 +4774,7 @@ function Scenario.modifyPriority(creatureId, basePriority, creatureHealth)
     -- Additional handling in emergency situations
     local trackerData = MonsterAI.Tracker and MonsterAI.Tracker.monsters[creatureId]
     if trackerData and trackerData.ewmaDps and trackerData.ewmaDps > 50 then
-      modifiedPriority = modifiedPriority + 20
+      modifiedPriority = modifiedPriority + 40  -- INCREASED from 20 to 40
     end
   end
   
@@ -4405,8 +4799,8 @@ function Scenario.getOptimalTarget()
   -- Check if current locked target is still valid
   if Scenario.state.targetLockId then
     local lockData = MonsterAI.Tracker and MonsterAI.Tracker.monsters[Scenario.state.targetLockId]
-    if lockData and lockData.creature and not lockData.creature:isDead() then
-      local lockedHealth = lockData.creature:getHealthPercent() or 100
+    if lockData and lockData.creature and not safeIsDead(lockData.creature) then
+      local lockedHealth = safeCreatureCall(lockData.creature, "getHealthPercent", 100)
       
       -- In FEW scenario with anti-zigzag, strongly prefer current target
       if Scenario.state.type == Scenario.TYPES.FEW then
@@ -4432,23 +4826,24 @@ function Scenario.getOptimalTarget()
   end
   
   -- Get all valid targets with priorities
+  -- IMPROVED v3.0: Increased range from 10 to 12 for better targeting
   if MonsterAI.TargetBot and MonsterAI.TargetBot.getSortedTargets then
-    candidates = MonsterAI.TargetBot.getSortedTargets({maxRange = 10})
+    candidates = MonsterAI.TargetBot.getSortedTargets({maxRange = 12})
   else
     -- Fallback to basic targeting
     local creatures = g_map.getSpectators(playerPos, false) or {}
     for _, creature in ipairs(creatures) do
-      if creature and creature:isMonster() and not creature:isDead() then
-        local pos = creature:getPosition()
+      if creature and isValidAliveMonster(creature) then
+        local pos = safeCreatureCall(creature, "getPosition", nil)
         if pos and pos.z == playerPos.z then
           local dist = math.max(math.abs(pos.x - playerPos.x), math.abs(pos.y - playerPos.y))
-          if dist <= 10 then
+          if dist <= 12 then  -- INCREASED from 10 to 12
             table.insert(candidates, {
               creature = creature,
-              id = creature:getId(),
-              priority = 100 - dist + (100 - (creature:getHealthPercent() or 100)) * 0.5,
+              id = safeGetId(creature),
+              priority = 100 - dist + (100 - safeCreatureCall(creature, "getHealthPercent", 100)) * 0.5,
               distance = dist,
-              name = creature:getName() or "unknown"
+              name = safeCreatureCall(creature, "getName", "unknown")
             })
           end
         end
@@ -4464,7 +4859,7 @@ function Scenario.getOptimalTarget()
   
   -- Apply scenario-based priority modifications
   for _, candidate in ipairs(candidates) do
-    local health = candidate.creature:getHealthPercent() or 100
+    local health = safeCreatureCall(candidate.creature, "getHealthPercent", 100)
     candidate.priority = Scenario.modifyPriority(candidate.id, candidate.priority, health)
   end
   
@@ -4472,7 +4867,7 @@ function Scenario.getOptimalTarget()
   table.sort(candidates, function(a, b) return a.priority > b.priority end)
   
   local bestTarget = candidates[1]
-  local bestHealth = bestTarget.creature:getHealthPercent() or 100
+  local bestHealth = safeCreatureCall(bestTarget.creature, "getHealthPercent", 100)
   
   -- Check if we should switch to this target
   local canSwitch, reason = Scenario.shouldAllowTargetSwitch(
@@ -4488,7 +4883,7 @@ function Scenario.getOptimalTarget()
   else
     -- Return current locked target instead
     local lockData = MonsterAI.Tracker and MonsterAI.Tracker.monsters[Scenario.state.targetLockId]
-    if lockData and lockData.creature and not lockData.creature:isDead() then
+    if lockData and lockData.creature and not safeIsDead(lockData.creature) then
       return {
         creature = lockData.creature,
         id = Scenario.state.targetLockId,
@@ -4602,11 +4997,13 @@ local DIR_OFFSETS = {
 -- Check if a creature is reachable from player position
 -- Returns: isReachable, reason, path
 function Reachability.isReachable(creature, forceRecheck)
-  if not creature or creature:isDead() or creature:isRemoved() then
+  if not creature then return false, "invalid", nil end
+  if safeIsDead(creature) or safeIsRemoved(creature) then
     return false, "invalid", nil
   end
   
-  local id = creature:getId()
+  local id = safeGetId(creature)
+  if not id then return false, "invalid", nil end
   local nowt = nowMs()
   
   -- Check cache first (unless forcing recheck)
@@ -4635,8 +5032,12 @@ function Reachability.isReachable(creature, forceRecheck)
   
   Reachability.stats.checksPerformed = Reachability.stats.checksPerformed + 1
   
-  local playerPos = player and player:getPosition()
-  local creaturePos = creature:getPosition()
+  local playerPos = nil
+  if player then
+    local okP, pPos = pcall(function() return player:getPosition() end)
+    if okP then playerPos = pPos end
+  end
+  local creaturePos = safeCreatureCall(creature, "getPosition", nil)
   
   if not playerPos or not creaturePos then
     return Reachability.cacheResult(id, false, "no_position", nil)
@@ -4928,9 +5329,9 @@ if EventBus and EventBus.on then
   
   -- Clear blocked status when creature moves
   EventBus.on("creature:move", function(creature, oldPos, newPos)
-    if creature and creature:isMonster() then
-      local id = creature:getId()
-      if Reachability.blockedCreatures[id] then
+    if creature and safeIsMonster(creature) then
+      local id = safeGetId(creature)
+      if id and Reachability.blockedCreatures[id] then
         -- Creature moved, might be reachable now
         Reachability.clearBlocked(id)
         Reachability.cache[id] = nil
@@ -4980,7 +5381,8 @@ TBI.config = {
 
 -- Calculate comprehensive priority score for a monster
 function TBI.calculatePriority(creature, options)
-  if not creature or creature:isDead() or creature:isRemoved() then
+  if not creature then return 0, {} end
+  if safeIsDead(creature) or safeIsRemoved(creature) then
     return 0, {}
   end
   
@@ -4988,10 +5390,14 @@ function TBI.calculatePriority(creature, options)
   local cfg = TBI.config
   local breakdown = {} -- For debugging
   
-  local creatureId = creature:getId()
-  local creatureName = creature:getName() or "unknown"
-  local creaturePos = creature:getPosition()
-  local playerPos = player and player:getPosition()
+  local creatureId = safeGetId(creature)
+  local creatureName = safeCreatureCall(creature, "getName", "unknown")
+  local creaturePos = safeCreatureCall(creature, "getPosition", nil)
+  local playerPos = nil
+  if player then
+    local okP, pPos = pcall(function() return player:getPosition() end)
+    if okP then playerPos = pPos end
+  end
   
   if not playerPos or not creaturePos then
     return 0, breakdown
@@ -5025,7 +5431,7 @@ function TBI.calculatePriority(creature, options)
   -- ============================================================================
   -- 2. HEALTH SCORING (lower health = slightly higher priority)
   -- ============================================================================
-  local healthPct = creature:getHealthPercent() or 100
+  local healthPct = safeCreatureCall(creature, "getHealthPercent", 100)
   local healthScore = 0
   
   if healthPct <= cfg.criticalHealthThreshold then
@@ -5188,8 +5594,9 @@ function TBI.calculatePriority(creature, options)
   -- ============================================================================
   local movementScore = 0
   
-  if creature.isWalking and creature:isWalking() then
-    local walkDir = creature.getWalkDirection and creature:getWalkDirection()
+  local isWalking = safeCreatureCall(creature, "isWalking", false)
+  if isWalking then
+    local walkDir = safeCreatureCall(creature, "getWalkDirection", nil)
     if walkDir then
       -- Check if approaching player
       local predictedPos = TBI.predictPosition(creaturePos, walkDir, 1)
@@ -5211,7 +5618,7 @@ function TBI.calculatePriority(creature, options)
     end
     
     -- Fast monsters are more dangerous
-    local speed = creature.getSpeed and creature:getSpeed() or 100
+    local speed = safeCreatureCall(creature, "getSpeed", 100)
     if speed >= cfg.fastMonsterThreshold then
       movementScore = movementScore + 10
       breakdown.fast = true
@@ -5359,8 +5766,8 @@ function TBI.getSortedTargets(options)
   local creatures = g_map.getSpectators(playerPos, false) or {}
   
   for _, creature in ipairs(creatures) do
-    if creature and creature:isMonster() and not creature:isDead() and not creature:isRemoved() then
-      local creaturePos = creature:getPosition()
+    if creature and isValidAliveMonster(creature) then
+      local creaturePos = safeCreatureCall(creature, "getPosition", nil)
       if creaturePos and creaturePos.z == playerPos.z then
         local dx = math.abs(creaturePos.x - playerPos.x)
         local dy = math.abs(creaturePos.y - playerPos.y)
@@ -5374,8 +5781,8 @@ function TBI.getSortedTargets(options)
             priority = priority,
             distance = dist,
             breakdown = breakdown,
-            id = creature:getId(),
-            name = creature:getName()
+            id = safeGetId(creature),
+            name = safeCreatureCall(creature, "getName", "unknown")
           })
         end
       end

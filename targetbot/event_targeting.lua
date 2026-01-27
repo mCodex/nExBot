@@ -890,12 +890,25 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
     return
   end
 
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- PRIORITY: Use AttackStateMachine for consistent, linear targeting
+  -- This is the SINGLE source of attack commands (prevents competing sources)
+  -- ═══════════════════════════════════════════════════════════════════════════
   local sent = false
-  if TargetBot and TargetBot.requestAttack then
-    sent = TargetBot.requestAttack(creature, "event_acquire")
-  elseif g_game and g_game.attack then
-    g_game.attack(creature)
-    sent = true
+  
+  -- Use AttackStateMachine directly (always available - loaded as default)
+  local smPriority = priorityHint or EventTargeting.TargetAcquisition.calculatePriority(creature, path)
+  sent = AttackStateMachine.requestSwitch(creature, smPriority)
+  if sent and EventTargeting.DEBUG then
+    print("[EventTargeting] Delegated to AttackStateMachine: " .. creature:getName())
+  end
+  
+  -- Only fallback to direct attack if state machine failed (should not happen)
+  if not sent then
+    if g_game and g_game.attack then
+      g_game.attack(creature)
+      sent = true
+    end
   end
 
   -- If attack was throttled and we are not already attacking this creature, bail

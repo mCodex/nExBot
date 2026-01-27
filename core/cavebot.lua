@@ -75,6 +75,9 @@ dofile("/targetbot/core.lua")
 dofile("/targetbot/monster_ai.lua")           -- Monster behavior analysis
 dofile("/targetbot/movement_coordinator.lua") -- Coordinated movement system
 
+-- Load AttackStateMachine for linear, consistent targeting (before creature.lua)
+dofile("/targetbot/attack_state_machine.lua") -- State machine for attack persistence
+
 -- Load TargetBot modules
 dofile("/targetbot/creature.lua")
 
