@@ -359,17 +359,6 @@ local function shouldAllowSwitch(newCreature, newPriority)
     return true, "priority_advantage"
   end
   
-  -- MonsterAI gate (if available)
-  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
-    local newId = getCreatureId(newCreature)
-    local newHp = getCreatureHealth(newCreature)
-    local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, newPriority, newHp)
-    if not allowed then
-      state.stats.switchesBlocked = state.stats.switchesBlocked + 1
-      return false, "monsterai_blocked"
-    end
-  end
-  
   state.stats.switchesBlocked = state.stats.switchesBlocked + 1
   return false, "insufficient_priority"
 end
