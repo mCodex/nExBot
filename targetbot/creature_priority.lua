@@ -129,7 +129,30 @@ local LARGE_RUNE_AREA = {
   {0, 2}, {2, 0}, {0, -2}, {-2, 0}
 }
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OPENTIBIABR TARGETING ENHANCEMENTS (v3.1)
+-- Use optimized pattern-based spectators when available
+-- ═══════════════════════════════════════════════════════════════════════════
+local OpenTibiaBRTargeting = nil
+local function loadOpenTibiaBRTargeting()
+  if OpenTibiaBRTargeting then return OpenTibiaBRTargeting end
+  local ok, result = pcall(function()
+    return dofile("nExBot/targetbot/opentibiabr_targeting.lua")
+  end)
+  if ok and result then
+    OpenTibiaBRTargeting = result
+  end
+  return OpenTibiaBRTargeting
+end
+
+-- Check if OpenTibiaBR pattern spectators is available
+local function hasPatternSpectators()
+  local otbr = loadOpenTibiaBRTargeting()
+  return otbr and otbr.features and otbr.features.getSpectatorsByPattern
+end
+
 -- Pure function: Get monsters in area around position
+-- v3.1: Enhanced with OpenTibiaBR pattern-based detection
 local function getMonstersInArea(pos, offsets, maxDist)
   -- Guard against nil position
   if not pos or not pos.x or not pos.y then
@@ -137,6 +160,30 @@ local function getMonstersInArea(pos, offsets, maxDist)
   end
   
   local count = 0
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- OPENTIBIABR ENHANCEMENT: Use pattern-based spectators for better performance
+  -- This is much faster than iterating through tiles when available
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr and hasPatternSpectators() then
+    -- Determine which pattern to use based on offset count
+    local patternCount = #offsets
+    local aoeCount = 0
+    
+    if patternCount <= 8 then
+      -- Diamond arrow pattern (3x3)
+      aoeCount = otbr.countDiamondArrowHits(pos)
+    else
+      -- Large area pattern (5x5 for GFB/Avalanche)
+      aoeCount = otbr.countLargeAreaHits(pos)
+    end
+    
+    if aoeCount > 0 then
+      return aoeCount
+    end
+    -- Fall through if function returned 0 (might be an issue)
+  end
 
   -- Prefer MonsterCache for performance and accuracy
   if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
@@ -1033,4 +1080,93 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   end
 
   return priority
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OPENTIBIABR AoE OPTIMIZATION HELPERS (v3.1)
+-- Find best positions for area attacks using pattern-based detection
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Find the best position to cast an AoE spell for maximum hits
+-- Returns: bestPos, monsterCount
+TargetBot.Creature.findBestAoEPosition = function(range, patternType)
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr and otbr.findBestAoEPosition then
+    local playerPos = player:getPosition()
+    if not playerPos then return nil, 0 end
+    
+    -- Map pattern types to OpenTibiaBR patterns
+    local pattern, width, height
+    if patternType == "diamond" or patternType == "small" then
+      -- Diamond arrow / small rune pattern
+      pattern = nil  -- Use default diamond
+      width, height = 3, 3
+    elseif patternType == "large" or patternType == "gfb" or patternType == "avalanche" then
+      -- GFB/Avalanche pattern
+      pattern = nil  -- Use default large
+      width, height = 5, 5
+    else
+      -- Default to large
+      pattern = nil
+      width, height = 5, 5
+    end
+    
+    return otbr.findBestAoEPosition(playerPos, range, pattern, width, height)
+  end
+  
+  -- Fallback: Manual calculation using getMonstersInArea
+  local playerPos = player:getPosition()
+  if not playerPos then return nil, 0 end
+  
+  range = range or 3
+  local bestPos = nil
+  local bestCount = 0
+  local pattern = (patternType == "diamond" or patternType == "small") and DIAMOND_ARROW_AREA or LARGE_RUNE_AREA
+  
+  -- Check tiles in range
+  for dx = -range, range do
+    for dy = -range, range do
+      if math.abs(dx) + math.abs(dy) <= range then
+        local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
+        local count = getMonstersInArea(checkPos, pattern, range)
+        if count > bestCount then
+          bestCount = count
+          bestPos = checkPos
+        end
+      end
+    end
+  end
+  
+  return bestPos, bestCount
+end
+
+-- Count monsters that would be hit by AoE at specified position
+TargetBot.Creature.countAoEHits = function(pos, patternType)
+  if not pos then return 0 end
+  
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr then
+    if patternType == "diamond" or patternType == "small" then
+      local count = otbr.countDiamondArrowHits(pos)
+      if count > 0 then return count end
+    else
+      local count = otbr.countLargeAreaHits(pos)
+      if count > 0 then return count end
+    end
+  end
+  
+  -- Fallback
+  local pattern = (patternType == "diamond" or patternType == "small") and DIAMOND_ARROW_AREA or LARGE_RUNE_AREA
+  return getMonstersInArea(pos, pattern, 3)
+end
+
+-- Get creatures in line (for beam spells) using direction
+TargetBot.Creature.getCreaturesInBeam = function(direction, range)
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr and otbr.getCreaturesInFront then
+    local playerPos = player:getPosition()
+    if not playerPos then return {} end
+    return otbr.getCreaturesInFront(playerPos, direction, range or 5)
+  end
+  return {}
 end

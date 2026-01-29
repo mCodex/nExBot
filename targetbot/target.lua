@@ -14,6 +14,44 @@ local function getClientVersion()
   return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OPENTIBIABR TARGETING ENHANCEMENTS (v3.1)
+-- Load enhanced targeting module for OpenTibiaBR-specific optimizations
+-- Provides: batch pathfinding, line-of-sight detection, pattern-based AoE
+-- ═══════════════════════════════════════════════════════════════════════════
+local OpenTibiaBRTargeting = nil
+local function loadOpenTibiaBRTargeting()
+  if OpenTibiaBRTargeting then return OpenTibiaBRTargeting end
+  local ok, result = pcall(function()
+    return dofile("nExBot/targetbot/opentibiabr_targeting.lua")
+  end)
+  if ok and result then
+    OpenTibiaBRTargeting = result
+    print("[TargetBot] OpenTibiaBR targeting enhancements loaded")
+  end
+  return OpenTibiaBRTargeting
+end
+
+-- Lazy-load on first use
+local function getOpenTibiaBRTargeting()
+  if OpenTibiaBRTargeting == nil then
+    loadOpenTibiaBRTargeting()
+  end
+  return OpenTibiaBRTargeting
+end
+
+-- Check if OpenTibiaBR batch pathfinding is available
+local function hasBatchPathfinding()
+  local otbr = getOpenTibiaBRTargeting()
+  return otbr and otbr.features and otbr.features.findEveryPath
+end
+
+-- Check if OpenTibiaBR sight spectators is available
+local function hasSightSpectators()
+  local otbr = getOpenTibiaBRTargeting()
+  return otbr and otbr.features and otbr.features.getSightSpectators
+end
+
 -- Load PathUtils if available (shared module for creature validation)
 local PathUtils = nil
 local function ensurePathUtils()
@@ -1837,7 +1875,7 @@ end
 -- Helper: process a creature into target params (returns params, path) - pure helper to reduce duplication
 -- IMPROVED v2.2: More lenient path validation to prevent "leaving monsters behind"
 -- PERFORMANCE: Uses path cache to avoid expensive recalculations
-local function processCandidate(creature, pos, isCurrentTarget)
+local function processCandidate(creature, pos, isCurrentTarget, batchPaths)
   if not creature or creature:isDead() or not isTargetableCreature(creature) then return nil, nil end
   local cpos = creature:getPosition()
   if not cpos then return nil, nil end
@@ -1862,15 +1900,24 @@ local function processCandidate(creature, pos, isCurrentTarget)
   end
   
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- REACHABILITY CHECK (v2.2): Improved with fallback strategies
-  -- PERFORMANCE: Check path cache first to avoid expensive pathfinding
+  -- REACHABILITY CHECK (v3.1): Enhanced with OpenTibiaBR batch pathfinding
+  -- PERFORMANCE: Check batch paths first, then cache, then calculate new
   -- ═══════════════════════════════════════════════════════════════════════════
   
   local path = nil
   local isReachable = true
   
-  -- PERFORMANCE: Try cached path first
-  if creatureId then
+  -- OPENTIBIABR ENHANCEMENT: Check batch paths first (fastest)
+  if creatureId and batchPaths and batchPaths[creatureId] then
+    path = batchPaths[creatureId].path
+    if path and #path > 0 then
+      -- Cache this path for future use
+      setCachedPath(creatureId, path, pos, cpos)
+    end
+  end
+  
+  -- PERFORMANCE: Try cached path if no batch path
+  if not path and creatureId then
     path = getCachedPath(creatureId, pos, cpos)
   end
   
@@ -2057,7 +2104,23 @@ local function recalculateBestTarget()
     creatures = cacheCreatures
   end
   
-  -- If still no creatures, do a fresh scan
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- OPENTIBIABR ENHANCEMENT: Use getSightSpectators for line-of-sight detection
+  -- This gives us only creatures we can actually see (no obstacles between)
+  -- Falls back to standard detection on non-OpenTibiaBR clients
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if not creatures or #creatures == 0 then
+    local otbr = getOpenTibiaBRTargeting()
+    if otbr and hasSightSpectators() then
+      -- Use OpenTibiaBR's optimized sight spectators
+      local sightCreatures = otbr.getVisibleCreatures(pos, false)
+      if sightCreatures and #sightCreatures > 0 then
+        creatures = sightCreatures
+      end
+    end
+  end
+  
+  -- If still no creatures, do a fresh scan with standard methods
   if not creatures or #creatures == 0 then
     creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
       and MovementCoordinator.MonsterCache.getNearby(MONSTER_DETECTION_RANGE)
@@ -2066,6 +2129,32 @@ local function recalculateBestTarget()
   end
   
   if not creatures then return nil, 0, 0 end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- OPENTIBIABR ENHANCEMENT: Pre-calculate batch paths to all monsters
+  -- Instead of calculating paths one by one, batch them for ~30-50% speedup
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local batchPaths = nil
+  if hasBatchPathfinding() then
+    local otbr = getOpenTibiaBRTargeting()
+    if otbr then
+      -- Filter to only targetable monsters first
+      local targetableMonsters = {}
+      for i = 1, #creatures do
+        local creature = creatures[i]
+        if creature and isTargetableCreature(creature) then
+          local okPos, cpos = pcall(function() return creature:getPosition() end)
+          if okPos and cpos and cpos.z == pos.z then
+            targetableMonsters[#targetableMonsters + 1] = creature
+          end
+        end
+      end
+      -- Calculate all paths at once
+      if #targetableMonsters > 0 then
+        batchPaths = otbr.calculateBatchPaths(pos, targetableMonsters, 50, 0)
+      end
+    end
+  end
   
   -- Rebuild cache from live creatures
   CreatureCache.monsters = {}
@@ -2090,8 +2179,9 @@ local function recalculateBestTarget()
         local isCurrentTarget = (currentTargetId and id == currentTargetId)
         
         -- Calculate path and params (pass isCurrentTarget for enhanced path finding)
+        -- v3.1: Pass batchPaths for OpenTibiaBR optimization
         local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
-        local params, path = processCandidate(creature, pos, isCurrentTarget)
+        local params, path = processCandidate(creature, pos, isCurrentTarget, batchPaths)
         
         -- For current target, try harder to find a path if initial attempt failed
         if isCurrentTarget and (not path or not params or not params.config) then

@@ -162,11 +162,52 @@ local function updatePlayerRef()
   return player
 end
 
+-- ============================================================================
+-- OPENTIBIABR TARGETING ENHANCEMENT (v3.1)
+-- Use fast creature lookup when available
+-- ============================================================================
+local OpenTibiaBRTargeting = nil
+local function loadOpenTibiaBRTargeting()
+  if OpenTibiaBRTargeting then return OpenTibiaBRTargeting end
+  local ok, result = pcall(function()
+    return dofile("nExBot/targetbot/opentibiabr_targeting.lua")
+  end)
+  if ok and result then
+    OpenTibiaBRTargeting = result
+  end
+  return OpenTibiaBRTargeting
+end
+
+-- ============================================================================
+-- SAFE CREATURE ACCESS HELPERS (v3.1 Enhanced with OpenTibiaBR)
+-- ============================================================================
+
 -- Safe creature property access
 local function getCreatureId(creature)
   if not creature then return nil end
   local ok, id = pcall(function() return creature:getId() end)
   return ok and id or nil
+end
+
+-- Fast creature lookup by ID (uses OpenTibiaBR when available)
+local function getCreatureById(creatureId)
+  if not creatureId then return nil end
+  
+  -- Try OpenTibiaBR fast lookup first
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr and otbr.getCreatureById then
+    local creature = otbr.getCreatureById(creatureId)
+    if creature then return creature end
+  end
+  
+  -- Fallback: check current attack target
+  local Client = getClient()
+  local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+  if target and getCreatureId(target) == creatureId then
+    return target
+  end
+  
+  return nil
 end
 
 local function getCreatureHealth(creature)
@@ -180,6 +221,21 @@ local function isCreatureDead(creature)
   local ok, dead = pcall(function() return creature:isDead() end)
   if ok and dead then return true end
   return getCreatureHealth(creature) <= 0
+end
+
+-- Fast creature validation by ID (v3.1)
+local function isCreatureValidById(creatureId)
+  if not creatureId then return false end
+  
+  -- Try OpenTibiaBR fast validation first
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr and otbr.isCreatureValid then
+    return otbr.isCreatureValid(creatureId)
+  end
+  
+  -- Fallback: get creature and check
+  local creature = getCreatureById(creatureId)
+  return creature and not isCreatureDead(creature)
 end
 
 local function getCreaturePosition(creature)
