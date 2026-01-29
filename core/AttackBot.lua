@@ -66,8 +66,8 @@ local function recordAttackAction(cat, idOrFormula)
   end
   
   local log = attackAnalytics.log
-  if #log >= 50 then table.remove(log, 1) end
-  table.insert(log, { t = now, cat = cat, action = tostring(idOrFormula) })
+  log[#log + 1] = { t = now, cat = cat, action = tostring(idOrFormula) }
+  TrimArray(log, 50)
 end
 
 -- Public API for SmartHunt (redirects to BotCore.Analytics if available)
@@ -1159,12 +1159,12 @@ end
     end
 
 -- ============================================================================
--- COOLDOWN MANAGEMENT
+-- COOLDOWN MANAGEMENT (use ClientHelper for DRY)
 -- ============================================================================
 
 local cooldowns = {}
 
-local function nowMs()
+local nowMs = ClientHelper and ClientHelper.nowMs or function()
   if now then return now end
   if g_clock and g_clock.millis then return g_clock.millis() end
   return os.time() * 1000
@@ -1399,9 +1399,20 @@ local function getMonsterCountCached(category, posOrCreature, pattern, minHp, ma
   return count
 end
 
-local attackMacro = macro(100, function()
-  attackBotMain()
-end)
+-- Use UnifiedTick if available for reduced macro overhead
+local attackMacro
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register("attackbot_main", {
+    interval = 100,
+    priority = UnifiedTick.Priority and UnifiedTick.Priority.HIGH or 75,
+    handler = function() attackBotMain() end,
+    group = "attackbot"
+  })
+else
+  attackMacro = macro(100, function()
+    attackBotMain()
+  end)
+end
 
 -- ============================================================================
 -- SIMPLIFIED ATTACKBOT - HIGH PERFORMANCE & ACCURACY

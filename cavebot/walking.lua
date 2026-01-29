@@ -259,8 +259,9 @@ end
 -- DIRECTION UTILITIES (Use PathUtils where possible)
 -- ============================================================================
 
--- Use PathUtils DIR_TO_OFFSET if available
-local DIR_TO_OFFSET = (PathUtils and PathUtils.DIR_TO_OFFSET) or {
+-- Use Directions constant module if available (DRY)
+local Dirs = Directions
+local DIR_TO_OFFSET = (Dirs and Dirs.DIR_TO_OFFSET) or (PathUtils and PathUtils.DIR_TO_OFFSET) or {
   [North] = {x = 0, y = -1},
   [East] = {x = 1, y = 0},
   [South] = {x = 0, y = 1},
@@ -271,7 +272,7 @@ local DIR_TO_OFFSET = (PathUtils and PathUtils.DIR_TO_OFFSET) or {
   [NorthWest] = {x = -1, y = -1}
 }
 
-local ADJACENT_OFFSETS = {
+local ADJACENT_OFFSETS = (Dirs and Dirs.ADJACENT_OFFSETS) or {
   {x = 0, y = -1},  {x = 1, y = 0},  {x = 0, y = 1},  {x = -1, y = 0},
   {x = 1, y = -1}, {x = 1, y = 1}, {x = -1, y = 1}, {x = -1, y = -1},
 }

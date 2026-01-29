@@ -24,11 +24,11 @@ OpenTibiaBRTargeting.VERSION = "1.0"
 OpenTibiaBRTargeting.DEBUG = false
 
 -- ============================================================================
--- CLIENT SERVICE HELPER
+-- CLIENT SERVICE HELPER (using global ClientHelper)
 -- ============================================================================
 
 local function getClient()
-  return ClientService
+  return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function isOpenTibiaBR()

@@ -28,18 +28,20 @@
 -- ============================================================================
 
 EventTargeting = EventTargeting or {}
-EventTargeting.VERSION = "2.1"
+EventTargeting.VERSION = "2.2"
 EventTargeting.DEBUG = false
 
--- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
+-- Use global ClientHelper (loaded by _Loader.lua) for cross-client compatibility
 local function getClient()
-  return ClientService
+  return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function getClientVersion()
-  local Client = getClient()
-  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
 end
+
+-- SafeCreature module for safe creature access (DRY)
+local SC = SafeCreature
 
 -- ============================================================================
 -- DEPENDENCIES
@@ -232,7 +234,27 @@ local function isTargetableMonster(creature)
     return true
   end
   
-  -- Fallback: individual pcall checks
+  -- Fallback: Use SafeCreature module for DRY
+  if SC then
+    if SC.isDead(creature) then return false end
+    if not SC.isMonster(creature) then return false end
+    if SC.getHealthPercent(creature) <= 0 then return false end
+    
+    -- For old Tibia, all monsters are targetable
+    if liveMonsterState.oldTibia then return true end
+    
+    -- For new Tibia, check creature type to exclude other player's summons
+    local creatureType = nil
+    local okType, cType = pcall(function() return creature:getType() end)
+    if okType then creatureType = cType end
+    if creatureType and creatureType >= 3 then
+      return false  -- Summon
+    end
+    
+    return true
+  end
+  
+  -- Last resort fallback: individual pcall checks
   local ok, isDead = pcall(function() return creature:isDead() end)
   if ok and isDead then return false end
   
@@ -363,18 +385,14 @@ end
 -- FLOOR CHANGE DETECTION (Prevents chasing across stairs/ropes)
 -- ============================================================================
 
--- Floor-change items (subset for performance)
-local FLOOR_CHANGE_ITEMS = {
-  [414]=true,[415]=true,[416]=true,[417]=true,[428]=true,[429]=true,[430]=true,[431]=true,
-  [432]=true,[433]=true,[434]=true,[435]=true,[1949]=true,[1950]=true,[1951]=true,[1952]=true,
-  [1219]=true,[1386]=true,[3678]=true,[5543]=true,[384]=true,[386]=true,[418]=true,
-  [294]=true,[369]=true,[370]=true,[383]=true,[392]=true,[408]=true,[409]=true,[410]=true,
-}
+-- Use centralized floor-change items from constants (DRY principle)
+if not FloorItems then
+  dofile("constants/floor_items.lua")
+end
+local FLOOR_CHANGE_ITEMS = FloorItems.FLOOR_CHANGE
 
 -- Use PathUtils for floor-change colors if available
-local FLOOR_CHANGE_COLORS = (PathUtils and PathUtils.FLOOR_CHANGE_COLORS) or {
-  [210] = true, [211] = true, [212] = true, [213] = true,
-}
+local FLOOR_CHANGE_COLORS = (PathUtils and PathUtils.FLOOR_CHANGE_COLORS) or FloorItems.FLOOR_CHANGE_COLORS
 
 -- Check if position is a floor-change tile (Use PathUtils for DRY)
 local function isFloorChangeTile(pos)
@@ -417,7 +435,12 @@ end
 local function evictOldEntries()
   local order = creatureCache.accessOrder
   while #order > CONST.CREATURE_CACHE_SIZE do
-    local oldestId = table.remove(order, 1)
+    local oldestId = order[1]
+    -- Shift array left
+    for i = 1, #order - 1 do
+      order[i] = order[i + 1]
+    end
+    order[#order] = nil
     if creatureCache.entries[oldestId] then
       creatureCache.entries[oldestId] = nil
       creatureCache.count = creatureCache.count - 1
@@ -546,13 +569,17 @@ function EventTargeting.PathValidator.validate(playerPos, targetPos)
 end
 
 -- Get cached or fresh path
--- Get cached or fresh path (improved with safe API calls)
+-- Get cached or fresh path (improved with SafeCreature module)
 function EventTargeting.PathValidator.getPath(creature)
   if not creature then return nil, 999, false end
   
-  -- Safe ID access
-  local okId, id = pcall(function() return creature:getId() end)
-  if not okId or not id then return nil, 999, false end
+  -- Safe ID access using SafeCreature
+  local id = SC and SC.getId(creature) or nil
+  if not id then
+    local okId, cid = pcall(function() return creature:getId() end)
+    if not okId or not cid then return nil, 999, false end
+    id = cid
+  end
   
   local entry = creatureCache.entries[id]
   
@@ -626,9 +653,12 @@ function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
   -- ═══════════════════════════════════════════════════════════════════════════
   local priority = 0  -- Start at 0, build up from config priority
   
-  -- Safe HP access
-  local okHp, hp = pcall(function() return creature:getHealthPercent() end)
-  hp = (okHp and hp) or 100
+  -- Safe HP access using SafeCreature
+  local hp = SC and SC.getHealthPercent(creature) or nil
+  if not hp then
+    local okHp, cHp = pcall(function() return creature:getHealthPercent() end)
+    hp = (okHp and cHp) or 100
+  end
   
   local pathLen = path and #path or 10
   

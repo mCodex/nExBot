@@ -3,9 +3,9 @@
 
 CaveBot.Extensions.Imbuing = {}
 
--- ClientService helper for cross-client compatibility
+-- Use global ClientHelper (loaded by _Loader.lua)
 local function getClient()
-    return ClientService
+    return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local SHRINES = {25060, 25061, 25182, 25183}

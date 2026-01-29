@@ -120,16 +120,25 @@ function PathUtils.paramsToFlags(params)
 end
 
 -- ============================================================================
--- FLOOR-CHANGE DETECTION (Centralized, no duplication)
+-- FLOOR-CHANGE DETECTION (Using constants/floor_items.lua as single source)
 -- ============================================================================
 
--- Minimap colors for floor-change (stairs/ramps/holes)
-PathUtils.FLOOR_CHANGE_COLORS = {
+-- Load FloorItems constants if available
+local FloorItems = (function()
+  local ok, fi = pcall(dofile, "/constants/floor_items.lua")
+  if ok and fi then return fi end
+  ok, fi = pcall(dofile, "/core/constants/floor_items.lua")
+  if ok and fi then return fi end
+  return nil
+end)()
+
+-- Minimap colors for floor-change (using constants or fallback)
+PathUtils.FLOOR_CHANGE_COLORS = (FloorItems and FloorItems.FLOOR_CHANGE_COLORS) or {
   [210] = true, [211] = true, [212] = true, [213] = true
 }
 
--- Comprehensive floor-change item IDs
-PathUtils.FLOOR_CHANGE_ITEMS = {
+-- Comprehensive floor-change item IDs (using constants or fallback)
+PathUtils.FLOOR_CHANGE_ITEMS = (FloorItems and FloorItems.FLOOR_CHANGE) or {
   -- Stairs (stone)
   [414] = true, [415] = true, [416] = true, [417] = true,
   [428] = true, [429] = true, [430] = true, [431] = true,
@@ -166,8 +175,8 @@ PathUtils.FLOOR_CHANGE_ITEMS = {
   [2129] = true, [2130] = true, [8709] = true,
 }
 
--- Field item IDs (fire, energy, poison, magic walls)
-PathUtils.FIELD_ITEMS = {
+-- Field item IDs (using constants or fallback)
+PathUtils.FIELD_ITEMS = (FloorItems and FloorItems.FIELDS) or {
   -- Fire Fields
   [1487] = true, [1488] = true, [1489] = true, [1490] = true, [1491] = true,
   [1492] = true, [1493] = true, [1494] = true, [1495] = true, [1496] = true,

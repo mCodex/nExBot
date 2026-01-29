@@ -20,14 +20,13 @@
 
 TargetCore = TargetCore or {}
 
--- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
+-- Use global ClientHelper for consistency (loaded by _Loader.lua)
 local function getClient()
-  return ClientService
+  return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function getClientVersion()
-  local Client = getClient()
-  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
 end
 
 -- ============================================================================
@@ -147,15 +146,24 @@ TargetCore.Geometry.isAdjacent = TargetCore.isAdjacent
 
 TargetCore.PathSafety = TargetCore.PathSafety or {}
 
+-- Load FloorItems constants if available (single source of truth)
+local FloorItems = (function()
+  local ok, fi = pcall(dofile, "/constants/floor_items.lua")
+  if ok and fi then return fi end
+  ok, fi = pcall(dofile, "/core/constants/floor_items.lua")
+  if ok and fi then return fi end
+  return nil
+end)()
+
 -- Minimal minimap colors that typically indicate stairs/ramps/holes
-TargetCore.PathSafety.FLOOR_CHANGE_COLORS = {
+TargetCore.PathSafety.FLOOR_CHANGE_COLORS = (FloorItems and FloorItems.FLOOR_CHANGE_COLORS) or {
   [210] = true, [211] = true, [212] = true, [213] = true,
   -- Additional colors that may indicate floor changes
   [214] = true, [215] = true, [216] = true, [217] = true,
 }
 
--- Comprehensive floor-change item ids (expanded list for better detection)
-TargetCore.PathSafety.FLOOR_CHANGE_ITEMS = {
+-- Comprehensive floor-change item ids (using constants or fallback)
+TargetCore.PathSafety.FLOOR_CHANGE_ITEMS = (FloorItems and FloorItems.FLOOR_CHANGE) or {
   -- === STAIRS DOWN ===
   [414] = true, [415] = true, [416] = true, [417] = true,
   [428] = true, [429] = true, [430] = true, [431] = true,

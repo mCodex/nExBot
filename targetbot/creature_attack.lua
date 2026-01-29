@@ -1,12 +1,16 @@
 --------------------------------------------------------------------------------
--- TARGETBOT CREATURE ATTACK v1.1
+-- TARGETBOT CREATURE ATTACK v1.2
 -- Uses TargetBotCore for shared pure functions (DRY, SRP)
 -- Dynamic scaling based on monster count for better reactivity
 -- v1.1: Integrated PathUtils for shared floor-change detection and tile utilities
+-- v1.2: Integrated SafeCreature for safe creature access (DRY)
 --------------------------------------------------------------------------------
 
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
+
+-- SafeCreature module for safe creature access (prevents pcall boilerplate)
+local SC = SafeCreature
 
 -- Load PathUtils if available (shared module for DRY)
 local PathUtils = nil
@@ -77,9 +81,12 @@ local function movementAllowed()
   return true
 end
 
--- Pre-computed direction offsets (fallback if Core not available)
--- Adjacent offsets array (use Geometry.ADJACENT_OFFSETS if provided)
-local DIRECTIONS = Geometry.ADJACENT_OFFSETS or Geometry.DIRECTIONS or {
+-- Use Directions constant module if available (DRY - Phase 3)
+local Dirs = Directions
+
+-- Pre-computed direction offsets (use Directions module, fallback to Geometry)
+-- Adjacent offsets array (use Directions.ADJACENT_OFFSETS if provided)
+local DIRECTIONS = (Dirs and Dirs.ADJACENT_OFFSETS) or Geometry.ADJACENT_OFFSETS or Geometry.DIRECTIONS or {
   {x = 0, y = -1},   -- North
   {x = 1, y = 0},    -- East  
   {x = 0, y = 1},    -- South
@@ -91,7 +98,7 @@ local DIRECTIONS = Geometry.ADJACENT_OFFSETS or Geometry.DIRECTIONS or {
 }
 
 -- Direction index to vector (monster facing)
-local DIR_VECTORS = Geometry.DIR_VECTORS or {
+local DIR_VECTORS = (Dirs and Dirs.DIR_TO_OFFSET) or Geometry.DIR_VECTORS or {
   [0] = {x = 0, y = -1},  -- North
   [1] = {x = 1, y = 0},   -- East
   [2] = {x = 0, y = 1},   -- South
@@ -103,15 +110,14 @@ local DIR_VECTORS = Geometry.DIR_VECTORS or {
 }
 
 --------------------------------------------------------------------------------
--- CLIENTSERVICE HELPERS (cross-client compatibility)
+-- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
 --------------------------------------------------------------------------------
 local function getClient()
-  return ClientService
+  return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function getClientVersion()
-  local Client = getClient()
-  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
 end
 
 --------------------------------------------------------------------------------
@@ -792,17 +798,15 @@ if EventBus then
   local monsterDirections = {}  -- id -> lastDirection
   
   EventBus.on("creature:move", function(creature, oldPos)
-    -- Safe creature checks
-    local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
-    if not okMonster or not isMonster then return end
-    
-    local okDead, isDead = pcall(function() return creature:isDead() end)
-    if okDead and isDead then return end
+    -- Safe creature checks using SafeCreature module
+    if not SC then return end
+    if not SC.isMonster(creature) then return end
+    if SC.isDead(creature) then return end
     
     -- Safe property access
-    local okId, id = pcall(function() return creature:getId() end)
-    local okDir, newDir = pcall(function() return creature:getDirection() end)
-    if not okId or not id or not okDir then return end
+    local id = SC.getId(creature)
+    local newDir = SC.getDirection(creature)
+    if not id or not newDir then return end
     
     local oldDir = monsterDirections[id]
     
@@ -812,8 +816,8 @@ if EventBus then
     -- If direction changed, monster might be turning to attack
     if oldDir and oldDir ~= newDir then
       local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
-      local okMpos, monsterPos = pcall(function() return creature:getPosition() end)
-      if not okPpos or not playerPos or not okMpos or not monsterPos then return end
+      local monsterPos = SC.getPosition(creature)
+      if not okPpos or not playerPos or not monsterPos then return end
       
       local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
       
@@ -829,10 +833,8 @@ if EventBus then
             and MovementCoordinator.MonsterCache.getNearby(7) 
             or {}
           for _, c in ipairs(creatures) do
-            -- Safe monster check
-            local okCm, isCm = pcall(function() return c and c:isMonster() end)
-            local okCd, isCd = pcall(function() return c and c:isDead() end)
-            if okCm and isCm and (not okCd or not isCd) then
+            -- Safe monster check using SafeCreature
+            if SC.isMonster(c) and not SC.isDead(c) then
               monsters[#monsters + 1] = c
             end
           end
@@ -844,13 +846,13 @@ if EventBus then
             
             if safePos and MovementCoordinator and MovementCoordinator.Intent then
               local confidence = 0.75 + (5 - dist) * 0.03  -- Higher confidence for closer monsters
-              local okName, mName = pcall(function() return creature:getName() end)
+              local mName = SC.getName(creature) or "unknown"
               MovementCoordinator.Intent.register(
                 MovementCoordinator.CONSTANTS.INTENT.WAVE_AVOIDANCE, 
                 safePos, 
                 confidence, 
                 "wave_direction_change",
-                {triggered = "direction_change", monster = okName and mName or "unknown"}
+                {triggered = "direction_change", monster = mName}
               )
             end
           end
@@ -901,14 +903,13 @@ if EventBus then
   
   -- When monster appears close, immediately check if repositioning is needed
   EventBus.on("monster:appear", function(creature)
-    -- Safe creature checks
-    local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
-    if not okMonster or not isMonster then return end
+    -- Safe creature checks using SafeCreature module
+    if not SC or not SC.isMonster(creature) then return end
     
     -- Safe position access
     local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
-    local okMpos, monsterPos = pcall(function() return creature:getPosition() end)
-    if not okPpos or not playerPos or not okMpos or not monsterPos then return end
+    local monsterPos = SC.getPosition(creature)
+    if not okPpos or not playerPos or not monsterPos then return end
     
     local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
     
@@ -924,10 +925,8 @@ if EventBus then
           and MovementCoordinator.MonsterCache.getNearby(5) 
           or {}
         for _, c in ipairs(creatures) do
-          -- Safe monster check
-          local okCm, isCm = pcall(function() return c and c:isMonster() end)
-          local okCd, isCd = pcall(function() return c and c:isDead() end)
-          if okCm and isCm and (not okCd or not isCd) then
+          -- Safe monster check using SafeCreature
+          if SC.isMonster(c) and not SC.isDead(c) then
             monsters[#monsters + 1] = c
           end
         end

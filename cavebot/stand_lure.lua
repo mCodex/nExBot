@@ -1,9 +1,9 @@
 CaveBot.Extensions.StandLure = {}
 local enable = nil
 
--- ClientService helper for cross-client compatibility
+-- Use global ClientHelper for cross-client compatibility
 local function getClient()
-    return ClientService
+    return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function modPos(dir)

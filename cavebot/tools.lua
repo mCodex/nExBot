@@ -4,9 +4,9 @@ local Tools = CaveBot.Tools
 local USE_COOLDOWN = 600
 local lastUseTime = 0
 
--- ClientService helper for cross-client compatibility
+-- Use global ClientHelper for cross-client compatibility
 local function getClient()
-    return ClientService
+    return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function hasDoorItems()

@@ -124,12 +124,10 @@ end
 -- Record a floor change
 local function recordFloorChange(fromZ, toZ, waypointIdx)
   local change = {time = now, fromZ = fromZ, toZ = toZ, waypointIdx = waypointIdx}
-  table.insert(floorChangeHistory.changes, change)
+  floorChangeHistory.changes[#floorChangeHistory.changes + 1] = change
   
-  -- Trim to max size
-  while #floorChangeHistory.changes > floorChangeHistory.maxSize do
-    table.remove(floorChangeHistory.changes, 1)
-  end
+  -- Trim to max size (using TrimArray for O(1) amortized)
+  TrimArray(floorChangeHistory.changes, floorChangeHistory.maxSize)
   
   floorChangeHistory.lastChangeTime = now
   floorChangeHistory.lastFloorFrom = fromZ

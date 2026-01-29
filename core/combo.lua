@@ -201,8 +201,9 @@ end
 local shouldCloseWindow = false
 local firstInvitee = true
 local isInComboTeam = false
--- Lower frequency (100ms) to reduce CPU when UI isn't changing rapidly
-macro(100, function()
+
+-- Party window close handler (100ms)
+local function partyWindowHandler()
   if shouldCloseWindow and config.serverEnabled and config.enabled then
     local channelsWindow = modules.game_console.channelsWindow
     if channelsWindow then
@@ -214,7 +215,20 @@ macro(100, function()
       end
     end
   end
-end)
+end
+
+-- Use UnifiedTick if available (reduces macro overhead)
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register("combo_party_window", {
+    interval = 100,
+    priority = UnifiedTick.Priority and UnifiedTick.Priority.LOW or 25,
+    handler = partyWindowHandler,
+    group = "combo"
+  })
+else
+  -- Fallback to traditional macro
+  macro(100, partyWindowHandler)
+end
 
 comboWindow.server.partyButton.onClick = function(widget)
   if config.serverEnabled and config.enabled then 
@@ -338,8 +352,8 @@ onMissle(function(missle)
   end
 end)
 
--- Lower frequency (100ms) to reduce CPU usage
-macro(100, function()
+-- Leader target attack handler (100ms)
+local function leaderTargetHandler()
   if not config.enabled or not config.attackLeaderTargetEnabled then return end
   if leaderTarget and config.attack == "LEADER TARGET" then
     local target = SafeCall.getTarget()
@@ -353,7 +367,7 @@ macro(100, function()
       g_game.attack(serverTarget)
     end
   end
-end)
+end
 
 
 local toFollow
@@ -361,7 +375,8 @@ local toFollowPos = {}
 local lastFollowWalk = 0
 local FOLLOW_WALK_COOLDOWN = 100
 
-macro(100, function()
+-- Follow leader handler (100ms)
+local function followLeaderHandler()
   toFollow = nil
   if not config.enabled or not config.followLeaderEnabled then return end
   if leaderTarget and config.follow == "LEADER TARGET" and leaderTarget:isPlayer() then
@@ -395,7 +410,7 @@ macro(100, function()
   if CaveBot.walkTo(p, 20, {ignoreNonPathable=true, precision=1, ignoreStairs=false}) then
     lastFollowWalk = now
   end
-end)
+end
 
 onCreaturePositionChange(function(creature, oldPos, newPos)
   if creature:getName() == toFollow and newPos then
@@ -404,8 +419,9 @@ onCreaturePositionChange(function(creature, oldPos, newPos)
 end)
 
 local timeout = now
--- Lower frequency (100ms) to reduce CPU usage
-macro(100, function()
+
+-- Combo trigger handler (100ms)
+local function comboTriggerHandler()
   if config.enabled and startCombo then
     if config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item) then
       local target = SafeCall.getTarget()
@@ -424,7 +440,36 @@ macro(100, function()
       timeout = now
     end
   end
-end)
+end
+
+-- Use UnifiedTick if available (reduces macro overhead)
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register("combo_leader_target", {
+    interval = 100,
+    priority = UnifiedTick.Priority and UnifiedTick.Priority.NORMAL or 50,
+    handler = leaderTargetHandler,
+    group = "combo"
+  })
+  
+  UnifiedTick.register("combo_follow_leader", {
+    interval = 100,
+    priority = UnifiedTick.Priority and UnifiedTick.Priority.NORMAL or 50,
+    handler = followLeaderHandler,
+    group = "combo"
+  })
+  
+  UnifiedTick.register("combo_trigger", {
+    interval = 100,
+    priority = UnifiedTick.Priority and UnifiedTick.Priority.HIGH or 75,
+    handler = comboTriggerHandler,
+    group = "combo"
+  })
+else
+  -- Fallback to traditional macros
+  macro(100, leaderTargetHandler)
+  macro(100, followLeaderHandler)
+  macro(100, comboTriggerHandler)
+end
 
 onUseWith(function(pos, itemId, target, subType)
   if BotServer._websocket and itemId == 3155 then

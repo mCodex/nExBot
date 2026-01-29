@@ -813,10 +813,8 @@ local function appendLog(entry)
     return
   end
   local log = analytics.log
-  if #log >= 50 then
-    table.remove(log, 1)
-  end
-  table.insert(log, entry)
+  log[#log + 1] = entry
+  TrimArray(log, 50)
 end
 
 local function recordSpell(entry, hpPercent, mpPercent)

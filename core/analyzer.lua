@@ -626,11 +626,11 @@ local top3 = UI.DualLabel("-", "0", {maxWidth = 200}, impactWindow.contentsPanel
 local top4 = UI.DualLabel("-", "0", {maxWidth = 200}, impactWindow.contentsPanel)
 local top5 = UI.DualLabel("-", "0", {maxWidth = 200}, impactWindow.contentsPanel)
 
-top1.left:setWidth(135)
-top2.left:setWidth(135)
-top3.left:setWidth(135)
-top4.left:setWidth(135)
-top5.left:setWidth(135)
+if top1 and top1.left then top1.left:setWidth(135) end
+if top2 and top2.left then top2.left:setWidth(135) end
+if top3 and top3.left then top3.left:setWidth(135) end
+if top4 and top4.left then top4.left:setWidth(135) end
+if top5 and top5.left then top5.left:setWidth(135) end
 
 
 --- healing
@@ -989,7 +989,9 @@ onTextMessage(function(mode, text)
             add(messageT, data, color, i==#re)
 
             --drop tracker
-            for i, child in ipairs(dropTrackerWindow.contentsPanel:getChildren()) do
+            local dropPanel = dropTrackerWindow and dropTrackerWindow.contentsPanel
+            local dropChildren = dropPanel and dropPanel:getChildren() or {}
+            for i, child in ipairs(dropChildren) do
               local childName = child.name
               childName = childName and childName:getText()
 
@@ -1752,16 +1754,16 @@ macro(500, function()
     maxDpsLabel:setText(format_thousand(bestDPS))
     bestHitLabel:setText(storage.bestHit)
 
-    top1.left:setText(first.l)
-    top1.right:setText(first.r)
-    top2.left:setText(second.l)
-    top2.right:setText(second.r)
-    top3.left:setText(third.l)
-    top3.right:setText(third.r)
-    top4.left:setText(fourth.l)
-    top4.right:setText(fourth.r)
-    top5.left:setText(five.l)
-    top5.right:setText(five.r)
+    if top1 and top1.left then top1.left:setText(first.l) end
+    if top1 and top1.right then top1.right:setText(first.r) end
+    if top2 and top2.left then top2.left:setText(second.l) end
+    if top2 and top2.right then top2.right:setText(second.r) end
+    if top3 and top3.left then top3.left:setText(third.l) end
+    if top3 and top3.right then top3.right:setText(third.r) end
+    if top4 and top4.left then top4.left:setText(fourth.l) end
+    if top4 and top4.right then top4.right:setText(fourth.r) end
+    if top5 and top5.left then top5.left:setText(five.l) end
+    if top5 and top5.right then top5.right:setText(five.r) end
 
     totalHealingLabel:setText(format_thousand(totalHeal))
     maxHpsLabel:setText(format_thousand(bestHPS))
@@ -1771,7 +1773,13 @@ macro(500, function()
     xpGrainInXpLabel:setText(format_thousand(expGained()))
     xpHourInXpLabel:setText(expPerHour())
     nextLevelLabel:setText(timeToLevel())
-    progressBar:setPercent(modules.game_skills.skillsWindow.contentsPanel.level.percent:getPercent())
+    if progressBar and progressBar.setPercent then
+      local skillsWindow = modules.game_skills and modules.game_skills.skillsWindow
+      local levelWidget = skillsWindow and skillsWindow.contentsPanel and skillsWindow.contentsPanel.level
+      local percentWidget = levelWidget and levelWidget.percent
+      local percent = percentWidget and percentWidget.getPercent and percentWidget:getPercent() or 0
+      progressBar:setPercent(percent)
+    end
 
 
     --stats

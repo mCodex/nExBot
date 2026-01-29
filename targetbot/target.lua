@@ -4,14 +4,13 @@ lastAction = 0
 local cavebotAllowance = 0
 local lureEnabled = true
 
--- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
+-- Use global ClientHelper (loaded by _Loader.lua) for cross-client compatibility
 local function getClient()
-  return ClientService
+  return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function getClientVersion()
-  local Client = getClient()
-  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -125,14 +124,6 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 local MONSTER_DETECTION_RANGE = 14  -- INCREASED from 10 to 14 (covers full visible screen)
 local MONSTER_TARGETING_RANGE = 12  -- INCREASED from 10 to 12 (targeting range)
-
--- MonsterAI automatic integration (hidden internals, not exposed to UI/storage)
--- DISABLED: MonsterAI was blocking chase mode by pausing movement for up to 900ms
--- This caused players to stand still while attacking instead of chasing
-local MONSTERAI_INTEGRATION = false  -- DISABLED to fix chase mode
-local MONSTERAI_IMMINENT_ACTION = "avoid"  -- "avoid" = attempt escape, "wait" = pause attacking
-local MONSTERAI_MIN_CONF = 0.6
-local monsterAIWaitUntil = 0
 
 local dangerValue = 0
 local looterStatus = ""
@@ -395,60 +386,6 @@ if EventBus then
     debouncedInvalidateAndRecalc()
   end, 20)
 
-  -- MonsterAI: React to imminent attacks and threat notifications
-  EventBus.on("monsterai/imminent_attack", function(creature, data)
-    -- data: { confidence = 0..1, timeToAttack = ms, reason = "wave"|"melee", ... }
-    if not MONSTERAI_INTEGRATION then return end
-    if not creature or not data then return end
-    local conf = data.confidence or 0
-    if conf < MONSTERAI_MIN_CONF then return end
-
-    -- Compute simple escape tile away from monster
-    local okP, ppos = pcall(function() return player and player:getPosition() end)
-    local okC, cpos = pcall(function() return creature and creature:getPosition() end)
-    if not okP or not okC or not ppos or not cpos then return end
-
-    local dx = (ppos.x - cpos.x)
-    local dy = (ppos.y - cpos.y)
-    local moveX = (dx ~= 0) and (dx > 0 and 1 or -1) or 0
-    local moveY = (dy ~= 0) and (dy > 0 and 1 or -1) or 0
-    local escapePos = { x = ppos.x + moveX, y = ppos.y + moveY, z = ppos.z }
-
-    local action = MONSTERAI_IMMINENT_ACTION
-    if action == "avoid" then
-      if MovementCoordinator and MovementCoordinator.Intent and MovementCoordinator.CONSTANTS then
-        MovementCoordinator.Intent.register(
-          MovementCoordinator.CONSTANTS.INTENT.EMERGENCY_ESCAPE,
-          escapePos,
-          math.min(0.95, conf),
-          "monsterai_imminent",
-          { src = creature, tta = data.timeToAttack }
-        )
-      end
-      -- Pause attacking briefly to let movement coordinator act
-      monsterAIWaitUntil = now + math.max(900, data.timeToAttack or 900)
-    elseif action == "wait" then
-      -- Pause attacking but don't register a move intent
-      monsterAIWaitUntil = now + math.max(800, data.timeToAttack or 800)
-    end
-
-    -- Force cache/invalidation so we re-evaluate target priorities asap
-    invalidateCache()
-  end, 50)
-
-  EventBus.on("monsterai/threat_detected", function(creature, data)
-    if not MONSTERAI_INTEGRATION then return end
-    -- Record AI threat and force a recalc so priorities react quickly
-    if creature then
-      local okId, id = pcall(function() return creature and creature:getId() end)
-      if okId and id and CreatureCache.monsters[id] then
-        -- store last known threat for display or debug
-        CreatureCache.monsters[id].lastAIThreat = data
-      end
-    end
-    invalidateCache()
-  end, 40)
-
   --------------------------------------------------------------------------------
   -- FOLLOW PLAYER INTEGRATION (Party Hunt Support)
   -- When Force Follow mode is active, TargetBot should reduce aggression
@@ -645,7 +582,12 @@ end
 local function evictOldestCreatures()
   local order = CreatureCache.accessOrder
   while #order > CreatureCache.maxSize do
-    local oldestId = table.remove(order, 1)
+    local oldestId = order[1]
+    -- Shift array left by 1
+    for i = 1, #order - 1 do
+      order[i] = order[i + 1]
+    end
+    order[#order] = nil
     if CreatureCache.monsters[oldestId] then
       CreatureCache.monsters[oldestId] = nil
       CreatureCache.monsterCount = CreatureCache.monsterCount - 1
@@ -2512,8 +2454,10 @@ targetbotMacro = macro(250, function()
   cleanupCache()
   cleanupPathCache()
   
-  -- Handle walking if destination is set
-  TargetBot.walk()
+  -- Handle walking if destination is set (safety check for load order)
+  if TargetBot.walk then
+    TargetBot.walk()
+  end
   
   -- Check for looting first (event-driven: only process when dirty or when actively looting)
   local shouldProcessLoot = TargetBot.Looting.isDirty and TargetBot.Looting.isDirty() or (#TargetBot.Looting.list > 0)

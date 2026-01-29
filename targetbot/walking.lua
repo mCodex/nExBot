@@ -7,14 +7,13 @@
   v5.0.0: Integrated PathUtils for DRY, added anti-zigzag, native API optimization
 ]]
 
--- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
+-- Use global ClientHelper (loaded by _Loader.lua) for cross-client compatibility
 local function getClient()
-  return ClientService
+  return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function getClientVersion()
-  local Client = getClient()
-  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
 end
 
 -- Load PathUtils if available (shared module for DRY)
@@ -166,10 +165,8 @@ local function validateDirectionChange(newDir)
     end
     
     -- Record direction
-    table.insert(AntiZigzag.directionHistory, newDir)
-    if #AntiZigzag.directionHistory > AntiZigzag.historySize then
-      table.remove(AntiZigzag.directionHistory, 1)
-    end
+    AntiZigzag.directionHistory[#AntiZigzag.directionHistory + 1] = newDir
+    TrimArray(AntiZigzag.directionHistory, AntiZigzag.historySize)
     AntiZigzag.lastDirection = newDir
     AntiZigzag.lastDirectionTime = currentTime
     return true

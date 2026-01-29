@@ -1,4 +1,7 @@
-CaveBot.Editor.ExampleFunctions = {}
+-- Ensure CaveBot.Editor exists before adding ExampleFunctions
+CaveBot = CaveBot or {}
+CaveBot.Editor = CaveBot.Editor or {}
+CaveBot.Editor.ExampleFunctions = CaveBot.Editor.ExampleFunctions or {}
 
 local function addExampleFunction(title, text)
   return table.insert(CaveBot.Editor.ExampleFunctions, {title, text:trim()})

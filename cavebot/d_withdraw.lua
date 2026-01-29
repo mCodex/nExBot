@@ -1,8 +1,8 @@
 CaveBot.Extensions.DWithdraw = {}
 
--- ClientService helper for cross-client compatibility
+-- Use global ClientHelper (loaded by _Loader.lua)
 local function getClient()
-    return ClientService
+    return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 CaveBot.Extensions.DWithdraw.setup = function()

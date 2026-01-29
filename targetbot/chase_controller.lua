@@ -20,16 +20,15 @@
 local ChaseController = {}
 
 -- ============================================================================
--- CLIENT SERVICE ABSTRACTION
+-- CLIENT SERVICE ABSTRACTION (using global ClientHelper)
 -- ============================================================================
 
 local function getClient()
-  return ClientService
+  return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function getGame()
-  local Client = getClient()
-  return (Client and Client.g_game) or g_game
+  return ClientHelper and ClientHelper.getGame() or ((getClient() and getClient().g_game) or g_game)
 end
 
 -- ============================================================================

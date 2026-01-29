@@ -35,8 +35,11 @@ local FriendHealerEnhanced = BotCore.FriendHealerEnhanced
 -- Also expose as BotCore.FriendHealer for backward compatibility with new_healer.lua
 BotCore.FriendHealer = BotCore.FriendHealerEnhanced
 
+-- SafeCreature module for safe creature access (DRY)
+local SC = SafeCreature
+
 -- Module version for debugging
-FriendHealerEnhanced.VERSION = "3.0.0"
+FriendHealerEnhanced.VERSION = "3.0.1"
 
 -- ============================================================================
 -- CONSTANTS
@@ -309,21 +312,20 @@ local function shouldHealFriend(selfHpPercent, friendHpPercent)
   return true, "normal"
 end
 
--- Check if creature matches friend conditions (improved with safe API calls)
+-- Check if creature matches friend conditions (improved with SafeCreature module)
 local function isFriend(creature, config)
   if not creature then return false end
   
-  -- Safely check if player
-  local okPlayer, isPlayer = pcall(function() return creature:isPlayer() end)
-  if not okPlayer or not isPlayer then return false end
+  -- Use SafeCreature for safe player checks
+  if not SC.isPlayer(creature) then return false end
   
-  -- Safely check if local player
+  -- Check if local player (skip self)
   local okLocal, isLocal = pcall(function() return creature:isLocalPlayer() end)
   if okLocal and isLocal then return false end
   
-  -- Safe way to get creature name
-  local okName, name = pcall(function() return creature:getName() end)
-  if not okName or not name then return false end
+  -- Get creature name safely
+  local name = SC.getName(creature)
+  if not name then return false end
   
   -- Check custom player list first (with custom HP threshold)
   if config.customPlayers and config.customPlayers[name] then

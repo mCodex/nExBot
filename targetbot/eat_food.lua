@@ -10,7 +10,7 @@
   - Uses looting system's monster death tracking
   - Opens corpses automatically
   - Eats food from any opened container (corpses)
-  - Uses comprehensive food item list
+  - Uses comprehensive food item list from constants/food_items.lua
   - Cooldown to prevent spam eating
   - Toggle switch in TargetBot Looting panel
 ]]
@@ -18,71 +18,26 @@
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
 
+-- Use centralized food items constants
+if not FoodItems then
+  dofile("constants/food_items.lua")
+end
+
 --------------------------------------------------------------------------------
--- CLIENTSERVICE HELPERS (cross-client compatibility)
+-- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
 --------------------------------------------------------------------------------
 local function getClient()
-  return ClientService
+  return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function getClientVersion()
-  local Client = getClient()
-  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
 end
 
 TargetBot.EatFood = {}
 
--- Food item IDs
-local FOOD_IDS = {
-  -- Meats
-  [3577] = true,  -- meat
-  [3582] = true,  -- ham
-  [3583] = true,  -- dragon ham
-  
-  -- Fish
-  [3578] = true,  -- fish
-  [6984] = true,  -- fish (variant)
-  [7885] = true,  -- fish (variant)
-  [10245] = true, -- fish (variant)
-  
-  -- Fruits
-  [3584] = true,  -- pear
-  [3585] = true,  -- red apple
-  [3586] = true,  -- orange
-  [3587] = true,  -- banana
-  [3588] = true,  -- blueberry
-  [3589] = true,  -- coconut
-  [3590] = true,  -- cherry
-  [3591] = true,  -- strawberry
-  [3593] = true,  -- melon
-  [5096] = true,  -- mango
-  [8011] = true,  -- plum
-  [8012] = true,  -- raspberry
-  [8013] = true,  -- lemon
-  
-  -- Vegetables
-  [3594] = true,  -- pumpkin
-  [3595] = true,  -- carrot
-  [8015] = true,  -- onion
-  [15634] = true, -- carrot (variant)
-  [15636] = true, -- carrot (variant)
-  
-  -- Baked goods
-  [3598] = true,  -- cookie
-  [3600] = true,  -- bread
-  [3602] = true,  -- brown bread
-  
-  -- Other
-  [3606] = true,  -- egg
-  [3607] = true,  -- cheese
-  [3723] = true,  -- white mushroom
-  [3725] = true,  -- brown mushroom
-  [15700] = true, -- mushroom
-  [6277] = true,  -- cake
-  [6278] = true,  -- cake (variant)
-  [12147] = true, -- cake (variant)
-  [3592] = true,  -- grape
-}
+-- Use centralized food IDs from FoodItems constants
+local FOOD_IDS = FoodItems.FOOD_IDS
 
 -- State variables
 local eatFromCorpsesEnabled = false

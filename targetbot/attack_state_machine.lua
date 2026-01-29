@@ -52,15 +52,14 @@ AttackStateMachine.STATE = STATE
 -- ============================================================================
 
 --------------------------------------------------------------------------------
--- CLIENTSERVICE HELPERS (cross-client compatibility)
+-- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
 --------------------------------------------------------------------------------
 local function getClient()
-  return ClientService
+  return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function getClientVersion()
-  local Client = getClient()
-  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
 end
 
 local CONFIG = {
@@ -135,10 +134,10 @@ local state = {
 local player = nil
 
 -- ============================================================================
--- UTILITY FUNCTIONS
+-- UTILITY FUNCTIONS (use ClientHelper for DRY)
 -- ============================================================================
 
-local function nowMs()
+local nowMs = ClientHelper and ClientHelper.nowMs or function()
   return now or (os.time() * 1000)
 end
 
@@ -179,14 +178,15 @@ local function loadOpenTibiaBRTargeting()
 end
 
 -- ============================================================================
--- SAFE CREATURE ACCESS HELPERS (v3.1 Enhanced with OpenTibiaBR)
+-- SAFE CREATURE ACCESS HELPERS (v4.0 - Using SafeCreature module for DRY)
 -- ============================================================================
 
--- Safe creature property access
+-- Use global SafeCreature module
+local SC = SafeCreature
+
+-- Safe creature property access (delegates to SafeCreature)
 local function getCreatureId(creature)
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
+  return SC and SC.getId(creature) or nil
 end
 
 -- Fast creature lookup by ID (uses OpenTibiaBR when available)
@@ -211,12 +211,11 @@ local function getCreatureById(creatureId)
 end
 
 local function getCreatureHealth(creature)
-  if not creature then return 0 end
-  local ok, hp = pcall(function() return creature:getHealthPercent() end)
-  return ok and hp or 0
+  return SC and SC.getHealthPercent(creature) or 0
 end
 
 local function isCreatureDead(creature)
+  if SC then return SC.isDead(creature) end
   if not creature then return true end
   local ok, dead = pcall(function() return creature:isDead() end)
   if ok and dead then return true end
@@ -239,15 +238,11 @@ local function isCreatureValidById(creatureId)
 end
 
 local function getCreaturePosition(creature)
-  if not creature then return nil end
-  local ok, pos = pcall(function() return creature:getPosition() end)
-  return ok and pos or nil
+  return SC and SC.getPosition(creature) or nil
 end
 
 local function getCreatureName(creature)
-  if not creature then return "Unknown" end
-  local ok, name = pcall(function() return creature:getName() end)
-  return ok and name or "Unknown"
+  return SC and SC.getName(creature) or "Unknown"
 end
 
 -- ============================================================================

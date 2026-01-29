@@ -1,8 +1,8 @@
 CaveBot.Extensions.Withdraw = {}
 
--- ClientService helper for cross-client compatibility
+-- Use global ClientHelper for cross-client compatibility
 local function getClient()
-    return ClientService
+    return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 CaveBot.Extensions.Withdraw.setup = function()

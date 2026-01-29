@@ -2,15 +2,14 @@
 local SafeCall = SafeCall or require("core.safe_call")
 
 --------------------------------------------------------------------------------
--- CLIENTSERVICE HELPERS (cross-client compatibility)
+-- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
 --------------------------------------------------------------------------------
 local function getClient()
-  return ClientService
+  return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function getClientVersion()
-  local Client = getClient()
-  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
 end
 
 TargetBot.Looting = {}

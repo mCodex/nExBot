@@ -1,7 +1,14 @@
 -- Lightweight cached wrapper around g_map.getSpectatorsInRange to reduce expensive map queries
 -- Performance optimized with EventBus integration for auto-invalidation
+-- v1.1: Integrated WeakCache for automatic memory cleanup
+
 local SpectatorCache = {}
-local cache = {} -- key -> {ts = now, data = {...}}
+
+-- Use WeakCache if available for memory-efficient storage
+local WC = WeakCache
+local cache = (WC and WC.createTTL) and WC.createTTL(200) or {}
+local useTTLCache = (WC and WC.createTTL) ~= nil
+
 local DEFAULT_TTL = 200 -- milliseconds
 
 -- Performance counters
@@ -11,9 +18,9 @@ local stats = {
   invalidations = 0
 }
 
--- ClientService helper for cross-client compatibility
+-- Use global ClientHelper (loaded by _Loader.lua)
 local function getClient()
-    return ClientService
+    return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
 local function makeKey(rx, ry)
@@ -23,6 +30,29 @@ end
 SpectatorCache.getNearby = function(rx, ry, ttl)
   ttl = ttl or DEFAULT_TTL
   local key = makeKey(rx or 10, ry or 10)
+  
+  -- Use TTL cache API if available
+  if useTTLCache then
+    local cached = cache:get(key)
+    if cached then
+      stats.hits = stats.hits + 1
+      return cached
+    end
+    stats.misses = stats.misses + 1
+    
+    local ok, res = pcall(function()
+      local Client = getClient()
+      local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer()) or nil
+      if not player then return {} end
+      local pos = player:getPosition()
+      return (Client and Client.getSpectatorsInRange) and Client.getSpectatorsInRange(pos, false, rx, ry) or (g_map and g_map.getSpectatorsInRange(pos, false, rx, ry)) or {}
+    end)
+    local data = ok and res or {}
+    cache:set(key, data, ttl)
+    return data
+  end
+  
+  -- Fallback: simple cache
   local entry = cache[key]
   if entry and entry.ts and (now - entry.ts) < ttl then
     stats.hits = stats.hits + 1
@@ -43,7 +73,11 @@ end
 
 -- Utility to clear cache (for tests or forced refresh)
 SpectatorCache.clear = function()
-  cache = {}
+  if useTTLCache then
+    cache:clear()
+  else
+    cache = {}
+  end
   stats.invalidations = stats.invalidations + 1
 end
 

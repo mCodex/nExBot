@@ -185,8 +185,8 @@ onTalk(function(name, level, mode, text, channelId, pos)
   end
 end)
 
--- health & mana
-macro(100, function() 
+-- health & mana alarm handler
+local function healthManaAlarmHandler()
   if not config.enabled then return end
   if config.lowHealth.enabled then
     if hppercent() < config.lowHealth.value then
@@ -230,4 +230,17 @@ macro(100, function()
       end
     end
   end
-end)
+end
+
+-- Use UnifiedTick if available (reduces macro overhead)
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register("alarms_health_mana", {
+    interval = 100,
+    priority = UnifiedTick.Priority and UnifiedTick.Priority.HIGH or 75,
+    handler = healthManaAlarmHandler,
+    group = "alarms"
+  })
+else
+  -- Fallback to traditional macro
+  macro(100, healthManaAlarmHandler)
+end
