@@ -826,17 +826,17 @@ end
 UI.Separator()
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- FOLLOW PLAYER v3.0 - OpenTibiaBR Optimized Party Hunt
--- Enhanced for party hunting with TargetBot integration
+-- FOLLOW PLAYER v4.0 - OpenTibiaBR Parallel Attack+Follow System
+-- Enhanced for party hunting with TRUE parallel attack and follow
 -- Features:
--- - Aggressive re-follow for OpenTibiaBR (prevents "freeze" issues)
+-- - PARALLEL ATTACK+FOLLOW: Walk toward leader while maintaining attack
+-- - Manual path-based movement (doesn't cancel attack like native follow)
+-- - Attack re-issue between walk steps to maintain target lock
 -- - Smart distance tracking with path-based following
 -- - TargetBot & MovementCoordinator integration
--- - Priority-based movement (follow leader > kill monsters)
 -- - EventBus for instant reaction to leader movements
--- - Map API for accurate path calculations
--- - Combat window system (finish current monster, then follow)
--- - Native autoWalk with fallback to manual walking
+-- - OpenTibiaBR forceWalk for reliable movement
+-- - Combat window system with parallel execution
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- Load follow player settings from CharacterDB (per-character)
@@ -888,32 +888,38 @@ local followPlayerConfig = loadFollowPlayerConfig()
 -- Forward decl for UI switch so helper can sync it
 local followPlayerToggle = nil
 
--- State tracking (v3.0: Enhanced for OpenTibiaBR)
+-- State tracking (v4.0: Enhanced for parallel attack+follow)
 local followState = {
   targetPlayerId = nil,
   targetPlayerCreature = nil,
   targetPlayerPosition = nil,
   lastFollowAttempt = 0,
   lastPathFollow = 0,
-  lastNativeFollow = 0,        -- NEW: Track native follow attempts
-  lastWalkStep = 0,            -- NEW: Track manual walk steps
+  lastNativeFollow = 0,        -- Track native follow attempts
+  lastWalkStep = 0,            -- Track manual walk steps
+  lastAttackReissue = 0,       -- NEW v4.0: Track attack re-issues
   combatStartTime = 0,
   pathToLeader = nil,
   pathTime = 0,
   lastLeaderDistance = 0,
   lostLeaderTime = 0,
   forceFollowMode = false,     -- When true, prioritize following over combat
-  consecutiveFollowFails = 0,  -- NEW: Track native follow failures
-  lastSuccessfulFollow = 0,    -- NEW: When native follow last worked
-  walkingToLeader = false,     -- NEW: Currently path-walking to leader
+  consecutiveFollowFails = 0,  -- Track native follow failures
+  lastSuccessfulFollow = 0,    -- When native follow last worked
+  walkingToLeader = false,     -- Currently path-walking to leader
+  parallelMode = false,        -- NEW v4.0: Using parallel attack+follow
+  currentAttackTarget = nil,   -- NEW v4.0: Current attack target creature
+  currentAttackTargetId = nil, -- NEW v4.0: Current attack target ID
+  pathIndex = 1,               -- NEW v4.0: Current position in path
 }
 
--- v3.0: Faster checks for OpenTibiaBR responsiveness
-local FOLLOW_ATTEMPT_COOLDOWN = 50    -- Very fast checks (was 100)
-local PATH_RECALC_INTERVAL = 150      -- Faster path recalc (was 300)
+-- v4.0: Tuned timings for parallel attack+follow
+local FOLLOW_ATTEMPT_COOLDOWN = 50    -- Very fast checks
+local PATH_RECALC_INTERVAL = 200      -- Path recalc interval
 local NATIVE_FOLLOW_COOLDOWN = 200    -- Cooldown between native follow attempts
-local WALK_STEP_COOLDOWN = 100        -- Cooldown between manual walk steps
-local FORCE_FOLLOW_DISTANCE = 5       -- Distance at which we force follow over combat (was 7)
+local WALK_STEP_COOLDOWN = 150        -- Cooldown between manual walk steps (slightly slower for stability)
+local ATTACK_REISSUE_INTERVAL = 800   -- NEW v4.0: Re-issue attack every 800ms to maintain lock
+local FORCE_FOLLOW_DISTANCE = 5       -- Distance at which we force follow over combat
 local MAX_FOLLOW_FAILS = 3            -- After this many fails, switch to path-walking
 local PATH_PARAMS = { ignoreCreatures = true, ignoreCost = true, allowNotSeenTiles = true }
 
@@ -1225,6 +1231,167 @@ local function smartWalkToLeader(leaderPos)
   return false
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PARALLEL ATTACK+FOLLOW SYSTEM v4.0
+-- Walk toward leader while maintaining attack on current target
+-- Key insight: Native follow() cancels attack, but walk() does not!
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Re-issue attack command to maintain target lock
+local function reissueAttack()
+  if not followState.currentAttackTarget then return false end
+  
+  local currentTime = now or (os.time() * 1000)
+  if (currentTime - followState.lastAttackReissue) < ATTACK_REISSUE_INTERVAL then
+    return true -- Still within interval, attack should be active
+  end
+  
+  -- Verify target is still valid
+  local target = followState.currentAttackTarget
+  if safeIsDead(target) then
+    followState.currentAttackTarget = nil
+    followState.currentAttackTargetId = nil
+    followState.parallelMode = false
+    return false
+  end
+  
+  -- Re-issue attack command
+  local Client = getClient()
+  local attackOk = false
+  
+  if Client and Client.attack then
+    attackOk = pcall(function() Client.attack(target) end)
+  elseif g_game and g_game.attack then
+    attackOk = pcall(function() g_game.attack(target) end)
+  elseif attack then
+    attackOk = pcall(function() attack(target) end)
+  end
+  
+  if attackOk then
+    followState.lastAttackReissue = currentTime
+  end
+  
+  return attackOk
+end
+
+-- Get current attack target from game state
+local function getCurrentAttackTarget()
+  local Client = getClient()
+  local target = nil
+  
+  if Client and Client.getAttackingCreature then
+    target = Client.getAttackingCreature()
+  elseif g_game and g_game.getAttackingCreature then
+    target = g_game.getAttackingCreature()
+  end
+  
+  return target
+end
+
+-- Walk one step toward leader using forceWalk (OpenTibiaBR) or regular walk
+-- This does NOT cancel the attack!
+local function parallelWalkStep(leaderPos)
+  if not leaderPos then return false end
+  
+  local currentTime = now or (os.time() * 1000)
+  if (currentTime - followState.lastWalkStep) < WALK_STEP_COOLDOWN then
+    return false
+  end
+  
+  local Client = getClient()
+  local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
+  if not localPlayer then return false end
+  
+  -- Check if we're currently walking
+  local isWalking = localPlayer.isWalking and localPlayer:isWalking()
+  if isWalking then return false end
+  
+  local playerPos = safeGetPosition(localPlayer)
+  if not playerPos then return false end
+  
+  -- Calculate path to leader
+  local path, pathLen = getPathToLeader(leaderPos)
+  
+  if not path or pathLen == 0 then
+    -- Already adjacent or can't path
+    return false
+  end
+  
+  -- Get next direction to walk
+  local nextDir = path[1]
+  if not nextDir then return false end
+  
+  followState.lastWalkStep = currentTime
+  followState.pathToLeader = path
+  followState.pathIndex = 1
+  
+  -- Use OpenTibiaBR forceWalk if available (most reliable)
+  local walkOk = false
+  if g_game and g_game.forceWalk then
+    walkOk = pcall(function() g_game.forceWalk(nextDir) end)
+  end
+  
+  -- Fallback to regular walk
+  if not walkOk then
+    if localPlayer.walk then
+      walkOk = pcall(function() localPlayer:walk(nextDir) end)
+    end
+    if not walkOk and g_game and g_game.walk then
+      walkOk = pcall(function() g_game.walk(nextDir) end)
+    end
+    if not walkOk and walk then
+      walkOk = pcall(function() walk(nextDir) end)
+    end
+  end
+  
+  return walkOk
+end
+
+-- Main parallel attack+follow execution
+-- This runs when we're attacking AND need to follow the leader
+local function executeParallelAttackFollow(leaderPos)
+  if not leaderPos then return false end
+  
+  local Client = getClient()
+  local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
+  if not localPlayer then return false end
+  
+  local playerPos = safeGetPosition(localPlayer)
+  if not playerPos then return false end
+  
+  local distance = calcDistance(playerPos, leaderPos)
+  
+  -- If we're close enough, no need to walk
+  if distance <= 1 then
+    followState.parallelMode = false
+    return true
+  end
+  
+  -- Track current attack target for re-issuing
+  local currentTarget = getCurrentAttackTarget()
+  if currentTarget then
+    followState.currentAttackTarget = currentTarget
+    followState.currentAttackTargetId = safeGetId(currentTarget)
+  end
+  
+  -- Step 1: Re-issue attack to maintain target lock
+  reissueAttack()
+  
+  -- Step 2: Take a walk step toward leader
+  local walked = parallelWalkStep(leaderPos)
+  
+  -- Step 3: If we walked, re-issue attack again after a short delay
+  -- This ensures we don't lose the attack when walking
+  if walked and followState.currentAttackTarget then
+    -- Schedule attack re-issue after walk step completes
+    schedule(100, function()
+      reissueAttack()
+    end)
+  end
+  
+  return walked
+end
+
 -- Check combat window - should we stop fighting to follow?
 local function shouldForceFollow()
   if not followPlayerConfig.enabled then return false end
@@ -1261,7 +1428,7 @@ local function shouldForceFollow()
   return false
 end
 
--- v3.0: Main follow logic - aggressive for OpenTibiaBR
+-- v4.0: Main follow logic - PARALLEL attack+follow for OpenTibiaBR
 local function ensureFollowing()
   if not followPlayerConfig.enabled then return end
   
@@ -1279,42 +1446,7 @@ local function ensureFollowing()
   local playerPos = safeGetPosition(localPlayer)
   if not playerPos then return end
   
-  -- Check if we're attacking and handle combat window
-  local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
-  
-  if isAttacking then
-    if followState.combatStartTime == 0 then
-      followState.combatStartTime = currentTime
-    end
-    
-    -- Check if we should force follow (leader too far or combat too long)
-    if shouldForceFollow() then
-      followState.forceFollowMode = true
-      
-      -- Cancel attack to follow leader (party survival priority)
-      local Client = getClient()
-      if Client and Client.cancelAttack then
-        pcall(Client.cancelAttack)
-      elseif g_game and g_game.cancelAttack then
-        pcall(g_game.cancelAttack)
-      end
-      
-      -- Emit event for TargetBot to know we're prioritizing follow
-      if EventBus then
-        pcall(function()
-          EventBus.emit("followplayer/force_follow", followState.targetPlayerPosition, followState.lastLeaderDistance)
-        end)
-      end
-    elseif not followPlayerConfig.followWhileAttacking then
-      return -- Don't follow while attacking if option is disabled
-    end
-  else
-    -- Reset combat tracking when not attacking
-    followState.combatStartTime = 0
-    followState.forceFollowMode = false
-  end
-  
-  -- Try to find the target player
+  -- Try to find the target player first
   local target = findPlayerByName(name)
   
   if target then
@@ -1328,27 +1460,90 @@ local function ensureFollowing()
     local distance = calcDistance(playerPos, leaderPos)
     followState.lastLeaderDistance = distance
     
-    -- Check if we're already following them
-    local Client = getClient()
-    local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
-    local isFollowing = currentFollow and safeGetId(currentFollow) == followState.targetPlayerId
+    -- Check if we're attacking
+    local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
     
-    if not isFollowing then
-      -- Not following our target
-      local isWalking = localPlayer:isWalking()
-      
-      if followState.forceFollowMode or not isWalking or not isAttacking then
-        -- Try native follow first
-        local followOk = followStartCreature(target)
-        
-        -- If native follow failed or we're far, use smart pathfinding
-        if (not followOk or distance > 3) and followPlayerConfig.smartFollow then
-          smartWalkToLeader(leaderPos)
-        end
+    if isAttacking then
+      if followState.combatStartTime == 0 then
+        followState.combatStartTime = currentTime
       end
-    elseif distance > 5 and followPlayerConfig.smartFollow then
-      -- We're "following" but still far - use smart walk to catch up
-      smartWalkToLeader(leaderPos)
+      
+      -- ═══════════════════════════════════════════════════════════════════════
+      -- v4.0 PARALLEL MODE: Walk toward leader while maintaining attack
+      -- This is the key change - we DON'T cancel attack, we walk AND attack!
+      -- ═══════════════════════════════════════════════════════════════════════
+      
+      -- Check if followWhileAttacking is enabled
+      if followPlayerConfig.followWhileAttacking and distance > 1 then
+        followState.parallelMode = true
+        
+        -- Use parallel attack+follow system
+        executeParallelAttackFollow(leaderPos)
+        
+        -- Emit event for other modules to know we're in parallel mode
+        if EventBus then
+          pcall(function()
+            EventBus.emit("followplayer/parallel_mode", leaderPos, distance, followState.currentAttackTargetId)
+          end)
+        end
+        
+        return -- Don't use native follow, we're walking manually
+      end
+      
+      -- Check if we should force follow (only when followWhileAttacking is OFF)
+      if not followPlayerConfig.followWhileAttacking and shouldForceFollow() then
+        followState.forceFollowMode = true
+        followState.parallelMode = false
+        
+        -- Cancel attack to follow leader (party survival priority)
+        if Client and Client.cancelAttack then
+          pcall(Client.cancelAttack)
+        elseif g_game and g_game.cancelAttack then
+          pcall(g_game.cancelAttack)
+        end
+        
+        -- Emit event for TargetBot to know we're prioritizing follow
+        if EventBus then
+          pcall(function()
+            EventBus.emit("followplayer/force_follow", leaderPos, distance)
+          end)
+        end
+      elseif not followPlayerConfig.followWhileAttacking then
+        return -- Don't follow while attacking if option is disabled
+      end
+    else
+      -- Reset combat tracking when not attacking
+      followState.combatStartTime = 0
+      followState.forceFollowMode = false
+      followState.parallelMode = false
+      followState.currentAttackTarget = nil
+      followState.currentAttackTargetId = nil
+    end
+    
+    -- ═══════════════════════════════════════════════════════════════════════
+    -- NOT ATTACKING: Use native follow or smart walk
+    -- ═══════════════════════════════════════════════════════════════════════
+    if not isAttacking then
+      -- Check if we're already following them
+      local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
+      local isFollowing = currentFollow and safeGetId(currentFollow) == followState.targetPlayerId
+      
+      if not isFollowing then
+        -- Not following our target - try native follow first
+        local isWalking = localPlayer:isWalking()
+        
+        if not isWalking then
+          local followOk = followStartCreature(target)
+          
+          -- If native follow failed or we're far, use smart pathfinding
+          if (not followOk or distance > 3) and followPlayerConfig.smartFollow then
+            smartWalkToLeader(leaderPos)
+          end
+        end
+      elseif distance > 5 and followPlayerConfig.smartFollow then
+        -- We're "following" but still far - use smart walk to catch up
+        smartWalkToLeader(leaderPos)
+      end
     end
   else
     -- Player not visible
@@ -1357,7 +1552,6 @@ local function ensureFollowing()
     end
     
     -- Check if native follow is still tracking them
-    local Client = getClient()
     local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
     if currentFollow and followState.targetPlayerId and safeGetId(currentFollow) == followState.targetPlayerId then
       -- Native follow is still tracking, update position
@@ -1369,7 +1563,13 @@ local function ensureFollowing()
     if followState.targetPlayerPosition and followPlayerConfig.smartFollow then
       local timeLost = currentTime - followState.lostLeaderTime
       if timeLost < 5000 then  -- Try for 5 seconds
-        smartWalkToLeader(followState.targetPlayerPosition)
+        -- If attacking, use parallel mode
+        local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
+        if isAttacking and followPlayerConfig.followWhileAttacking then
+          executeParallelAttackFollow(followState.targetPlayerPosition)
+        else
+          smartWalkToLeader(followState.targetPlayerPosition)
+        end
       end
     end
   end
