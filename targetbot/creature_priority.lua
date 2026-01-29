@@ -190,6 +190,9 @@ local function getMonstersInArea(pos, offsets, maxDist)
 end
 
 -- Main priority calculation function
+-- IMPROVED v2.4: Config priority (user-set) is now the dominant factor
+-- User-configured priority 1-10 is scaled to 1000-10000 base priority
+-- This ensures higher config priority ALWAYS wins over lower config priority
 TargetBot.Creature.calculatePriority = function(creature, config, path)
   local pathLength = path and #path or 99
   local hp = creature:getHealthPercent()
@@ -201,7 +204,7 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   if pathLength > maxDist then
     -- Exception: nearly dead monsters still targetable (don't let them escape!)
     if hp <= 15 and pathLength <= maxDist + 2 then
-      return config.priority * 0.4
+      return (config.priority or 1) * 400  -- Scaled config priority
     end
     
     -- RP Safe: Cancel attack on out-of-range target
@@ -219,7 +222,15 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
     return 0
   end
   
-  local priority = config.priority or 1
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- CONFIG PRIORITY SCALING (v2.4)
+  -- User-set priority (1-10) is scaled by 1000x to make it the dominant factor
+  -- This ensures priority 10 monster ALWAYS beats priority 5 monster, regardless
+  -- of distance, health, or other modifiers (which only add ~50-300 max)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local CONFIG_PRIORITY_SCALE = 1000
+  local priority = (config.priority or 1) * CONFIG_PRIORITY_SCALE
+  
   local Client = getClient()
   local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   local isCurrentTarget = (currentTarget == creature)

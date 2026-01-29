@@ -1,11 +1,44 @@
 --------------------------------------------------------------------------------
--- TARGETBOT CREATURE ATTACK v1.0
+-- TARGETBOT CREATURE ATTACK v1.1
 -- Uses TargetBotCore for shared pure functions (DRY, SRP)
 -- Dynamic scaling based on monster count for better reactivity
+-- v1.1: Integrated PathUtils for shared floor-change detection and tile utilities
 --------------------------------------------------------------------------------
 
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
+
+-- Load PathUtils if available (shared module for DRY)
+local PathUtils = nil
+local function ensurePathUtils()
+  if PathUtils then return PathUtils end
+  -- OTClient compatible - just try dofile
+  local success = pcall(function()
+    dofile("nExBot/utils/path_utils.lua")
+  end)
+  -- After dofile, PathUtils should be global
+  if success then
+    PathUtils = PathUtils  -- Re-check global
+  end
+  return PathUtils
+end
+ensurePathUtils()
+
+-- Load ChaseController if available (OTClient compatible)
+local ChaseController = ChaseController  -- Try existing global
+local function ensureChaseController()
+  if ChaseController then return ChaseController end
+  -- Try to load ChaseController from targetbot folder
+  local success = pcall(function()
+    dofile("nExBot/targetbot/chase_controller.lua")
+  end)
+  -- After dofile, ChaseController should be global
+  if success then
+    ChaseController = ChaseController  -- Re-check global
+  end
+  return ChaseController
+end
+ensureChaseController()
 
 local targetBotLure = false
 local targetCount = 0 
@@ -827,10 +860,21 @@ if EventBus then
   end, 8)  -- High priority for quick response
   
   -- Pure function: Count walkable tiles around a position
-  -- Uses TargetBotCore.Geometry if available
+  -- Uses TargetBotCore.Geometry if available, or PathUtils.findEveryPath for optimization
   -- @param position: center position
   -- @return number
   local function countWalkableTiles(position)
+    -- OPTIMIZED: Use PathUtils.findEveryPath if available (native API is faster)
+    if PathUtils and PathUtils.findEveryPath then
+      local reachable = PathUtils.findEveryPath(position, 1, {
+        ignoreCreatures = false,  -- Don't count tiles blocked by creatures
+      })
+      if reachable then
+        return #reachable
+      end
+    end
+    
+    -- Fallback: manual check of adjacent tiles
     local count = 0
     
     for i = 1, 8 do
@@ -840,8 +884,8 @@ if EventBus then
         y = position.y + dir.y,
         z = position.z
       }
-      local safe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
-        and TargetCore.PathSafety.isTileSafe(checkPos)
+      local safe = (PathUtils and PathUtils.isTileSafe and PathUtils.isTileSafe(checkPos))
+        or (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe and TargetCore.PathSafety.isTileSafe(checkPos))
         or (function()
           local Client = getClient()
           local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
@@ -1254,9 +1298,13 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   -- DEBUG: Log chase mode decision (can be commented out in production)
   -- print(\"[Chase Debug] config.chase=\" .. tostring(config.chase) .. \" keepDistance=\" .. tostring(config.keepDistance) .. \" useNativeChase=\" .. tostring(useNativeChase))
   
-  -- Always set chase mode BEFORE attacking - this is how OTClient works
+  -- Use ChaseController if available (unified chase management)
   local Client = getClient()
-  if (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode) then
+  if ChaseController then
+    ChaseController.setDesiredChase(useNativeChase)
+    ChaseController.syncMode()
+  elseif (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode) then
+    -- Fallback: direct chase mode control
     local desiredMode = useNativeChase and 1 or 0
     local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or -1
     if currentMode ~= desiredMode then

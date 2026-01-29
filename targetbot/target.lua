@@ -14,6 +14,72 @@ local function getClientVersion()
   return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
 end
 
+-- Load PathUtils if available (shared module for creature validation)
+local PathUtils = nil
+local function ensurePathUtils()
+  if PathUtils then return PathUtils end
+  -- OTClient compatible - just try dofile
+  local success = pcall(function()
+    dofile("nExBot/utils/path_utils.lua")
+  end)
+  -- After dofile, PathUtils should be global
+  if success then
+    PathUtils = PathUtils  -- Re-check global
+  end
+  return PathUtils
+end
+ensurePathUtils()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OPTIMIZED CREATURE VALIDATION (Reduce pcall overhead)
+-- Single pcall wrapper that validates multiple creature properties at once
+-- ═══════════════════════════════════════════════════════════════════════════
+local function validateCreature(creature)
+  if not creature then
+    return { valid = false }
+  end
+  
+  -- Use PathUtils.validateCreature if available (optimized single pcall)
+  if PathUtils and PathUtils.validateCreature then
+    return PathUtils.validateCreature(creature)
+  end
+  
+  -- Fallback: single pcall to get all properties at once
+  local ok, result = pcall(function()
+    return {
+      valid = true,
+      isDead = creature:isDead(),
+      isMonster = creature:isMonster(),
+      isPlayer = creature:isPlayer(),
+      isNpc = creature:isNpc(),
+      id = creature:getId(),
+      position = creature:getPosition(),
+      name = creature:getName(),
+      healthPercent = (type(creature.getHealthPercent) == "function" and creature:getHealthPercent()) or 100,
+    }
+  end)
+  
+  if not ok then
+    return { valid = false }
+  end
+  
+  return result
+end
+
+-- Quick dead check (single pcall, cached result)
+local function isCreatureDead(creature)
+  if not creature then return true end
+  local ok, isDead = pcall(function() return creature:isDead() end)
+  return ok and isDead
+end
+
+-- Quick ID check (single pcall)
+local function getCreatureId(creature)
+  if not creature then return nil end
+  local ok, id = pcall(function() return creature:getId() end)
+  return ok and id or nil
+end
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- MONSTER DETECTION RANGE (v3.0)
 -- IMPROVED: Increased range for better monster detection
@@ -115,26 +181,28 @@ TargetBot.AttackController = AttackController
 -- REQUEST ATTACK (Unified Attack Interface)
 -- This is the SINGLE entry point for all attack requests in TargetBot.
 -- Uses AttackStateMachine for state-based attack management.
+-- OPTIMIZED: Uses consolidated validateCreature for reduced pcall overhead
 -- ═══════════════════════════════════════════════════════════════════════════
 TargetBot.requestAttack = function(creature, reason, force)
   if not creature then return false end
   
-  -- Safe dead check
-  local okDead, isDead = pcall(function() return creature:isDead() end)
-  if okDead and isDead then return false end
+  -- OPTIMIZED: Use isCreatureDead helper (single pcall)
+  if isCreatureDead(creature) then return false end
   
   local Client = getClient()
   if not (Client and Client.attack) and not (g_game and g_game.attack) then return false end
 
-  local okId, id = pcall(function() return creature:getId() end)
-  if not okId or not id then return false end
+  -- OPTIMIZED: Use getCreatureId helper (single pcall)
+  local id = getCreatureId(creature)
+  if not id then return false end
 
   -- Calculate priority for this creature
-  local priority = 100
+  -- v2.4: Config priority scaled by 1000x for consistency with creature_priority.lua
+  local priority = 1000  -- Base priority (config priority 1)
   if TargetBot.Creature and TargetBot.Creature.getConfigs then
     local cfgs = TargetBot.Creature.getConfigs(creature)
     if cfgs and cfgs[1] then
-      priority = (cfgs[1].priority or 1) * 100
+      priority = (cfgs[1].priority or 1) * 1000
     end
   end
 
@@ -577,13 +645,15 @@ local function cleanupCache()
 end
 
 -- Update a single creature in cache (called on events)
--- Improved with LRU tracking, distance-based filtering, and safe API calls
+-- OPTIMIZED: Uses consolidated validateCreature for reduced pcall overhead
 local function updateCreatureInCache(creature)
-  -- Safe check for dead creature
-  local okDead, isDead = pcall(function() return creature and creature:isDead() end)
-  if not creature or (okDead and isDead) then
-    local okId, id = pcall(function() return creature and creature:getId() end)
-    if okId and id and CreatureCache.monsters[id] then
+  -- Use optimized validation (single pcall for all properties)
+  local cv = validateCreature(creature)
+  
+  -- Handle dead or invalid creature
+  if not cv.valid or cv.isDead then
+    local id = cv.id or getCreatureId(creature)
+    if id and CreatureCache.monsters[id] then
       CreatureCache.monsters[id] = nil
       CreatureCache.monsterCount = CreatureCache.monsterCount - 1
       -- Remove from access order
@@ -598,17 +668,16 @@ local function updateCreatureInCache(creature)
     return
   end
   
-  -- Safe check for monster
-  local okMonster, isMonster = pcall(function() return creature:isMonster() end)
-  if not okMonster or not isMonster then return end
+  -- Skip non-monsters
+  if not cv.isMonster then return end
   
-  -- Safe get ID and positions
-  local okId, id = pcall(function() return creature:getId() end)
-  if not okId or not id then return end
+  local id = cv.id
+  if not id then return end
   
+  -- Get player position (separate call as player is a different object)
   local okPos, pos = pcall(function() return player:getPosition() end)
-  local okCpos, cpos = pcall(function() return creature:getPosition() end)
-  if not okPos or not pos or not okCpos or not cpos then return end
+  local cpos = cv.position
+  if not okPos or not pos or not cpos then return end
   
   -- Use TargetBotCore distance if available, otherwise calculate
   local dist

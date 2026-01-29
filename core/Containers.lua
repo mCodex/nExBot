@@ -943,631 +943,593 @@ local function openQuiverWithRetry(attempts)
 end
 
 -- ============================================================================
--- BFS CONTAINER OPENING STATE (Event-Driven v6 - Complete Rewrite)
+-- BFS CONTAINER OPENER (OTClient Optimized v12.1)
+-- FIXED: Infinite loop prevention for OpenTibiaBR
 -- ============================================================================
 --[[
-  This rewrite uses the OTCv8 API properly:
-  - Container:getItems() returns a deque of ItemPtr
-  - Item:isContainer() checks if item is a container
-  - Item:getId() returns the item type ID
-  - g_game.open(item, previousContainer) opens a container
-  - onContainerOpen fires when a container is opened
+  OTClientBR API Reference (used here):
+  - g_game.getContainers() -> map<int, Container>
+  - g_game.getContainer(id) -> Container
+  - g_game.open(item, previousContainer) -> containerId
+  - g_game.seekInContainer(containerId, index) -> void (pagination)
+  - container:getItems() -> deque<Item>
+  - container:getCapacity() -> int
+  - container:getSize() -> int (total items across all pages)
+  - container:getFirstIndex() -> int (current page start index)
+  - container:hasPages() -> bool
+  - container:getId() -> int
+  - container:getContainerItem() -> Item
+  - item:isContainer() -> bool
+  - item:getId() -> int
   
-  The algorithm:
-  1. When triggered, scan all open containers for nested containers
-  2. Queue each nested container by storing a reference to the actual item object
-  3. Process queue: open one container, wait for onContainerOpen event
-  4. When container opens, scan it for more nested containers, continue
+  Architecture (SRP/SOLID):
+  - ContainerQueue: Manages the queue of containers to open
+  - ContainerTracker: Tracks opened containers to prevent duplicates
+  - ContainerScanner: Scans containers for nested containers
+  - ContainerOpener: Orchestrates the opening process
+  - ForceOpenTracker: Prevents infinite open/close loops (NEW in v12.1)
 ]]
 
-local ContainerOpener = {
-  -- State
-  isProcessing = false,
-  isPaused = false,
-  
-  -- Queue of container items to open
-  -- Each entry: { item = ItemPtr, parentContainerId = number, slot = number }
-  queue = {},
-  
-    -- Tracking which containers we've queued (by "parentId_slot" key -> item signature)
-    queuedSlots = {},
-  
-    -- Dirty container tracking (event-driven scans)
-    dirtyContainerIds = {},
-  
-    -- Tracking opened container items (by item signature -> timestamp)
-    openedItemSigs = {},
-    openedByContainerId = {},
-    containerIdBySig = {},
-    inFlightSigs = {},
-    inFlightEntries = {},
-    openAttempts = {},
-  
-    -- Graph tracking (for diagnostics / stability)
-    graphNodes = {},
-    graphEdges = {},
-  
-  -- Tracking which game container IDs we've already scanned
-  scannedContainerIds = {},
-  
-  -- Timing
-  openDelay = 200,       -- Delay between open attempts (ms)
-  lastOpenTime = 0,
-    lastFullScanTime = 0,
-    fullScanInterval = 900, -- Full rescan interval (ms)
-    reopenGraceMs = 5000,  -- Prevent rapid reopen/close loops
-    inFlightTimeoutMs = 1800,
-    inFlightRetryMs = 2200,
-    attemptWindowMs = 2500,
-    autoOpenActiveUntil = 0,
-    settleDelayMs = 12000,
-    rescanDelays = { 200, 500, 900, 1400 },
-    rescanTimers = {},
-    stableEmptyCount = 0,
-    stableRequired = 3,
-    pageState = {},
-  
-  -- Retry tracking
-  currentAttempt = 0,
-    maxAttempts = 5,
-  
-  -- Depth tracking
-  maxDepth = 15,
-  
-  -- Callbacks
-  onComplete = nil,
+-- ============================================================================
+-- UTILITY FUNCTIONS (DRY - Single Definition)
+-- ============================================================================
+
+-- Get current timestamp in milliseconds (defined early for ForceOpenTracker)
+local function getNow()
+    if now then return now end
+    if g_clock and g_clock.millis then return g_clock.millis() end
+    return os.time() * 1000
+end
+
+-- ============================================================================
+-- FORCE OPEN TRACKER (Prevents infinite open/close loops)
+-- ============================================================================
+local ForceOpenTracker = {
+    lastAttempt = {},       -- itemId -> timestamp
+    cooldownMs = 2000,      -- Wait 2 seconds between attempts for same container
+    openedThisCycle = {},   -- itemId -> true (containers opened this macro cycle)
+    cycleStart = 0,         -- When the current cycle started
+    cycleMaxDuration = 500, -- Max duration of a single macro cycle
 }
 
--- Reset all state
-function ContainerOpener.reset()
-  ContainerOpener.isProcessing = false
-  ContainerOpener.isPaused = false
-  ContainerOpener.queue = {}
-  ContainerOpener.queuedSlots = {}
-    ContainerOpener.dirtyContainerIds = {}
-    ContainerOpener.openedItemSigs = {}
-    ContainerOpener.openedByContainerId = {}
-    ContainerOpener.containerIdBySig = {}
-    ContainerOpener.inFlightSigs = {}
-    ContainerOpener.inFlightEntries = {}
-    ContainerOpener.openAttempts = {}
-    ContainerOpener.graphNodes = {}
-    ContainerOpener.graphEdges = {}
-  ContainerOpener.scannedContainerIds = {}
-  ContainerOpener.lastOpenTime = 0
-    ContainerOpener.lastFullScanTime = 0
-    ContainerOpener.autoOpenActiveUntil = 0
-    ContainerOpener.rescanTimers = {}
-    ContainerOpener.stableEmptyCount = 0
-    ContainerOpener.pageState = {}
-  ContainerOpener.currentAttempt = 0
-  ContainerOpener.onComplete = nil
+function ForceOpenTracker.reset()
+    ForceOpenTracker.lastAttempt = {}
+    ForceOpenTracker.openedThisCycle = {}
+    ForceOpenTracker.cycleStart = 0
 end
 
--- Handle paged containers to discover items on other pages
-function ContainerOpener.ensurePagedContainers(container)
-    if not container or not container.hasPages or not container:hasPages() then return end
-    if not container.getSize or not container.getCapacity or not container.getFirstIndex then return end
-
-    local size = container:getSize()
-    local capacity = container:getCapacity()
-    if capacity <= 0 or size <= capacity then return end
-
-    local containerId = container:getId()
-    local firstIndex = container:getFirstIndex()
-    local pageIndex = math.floor(firstIndex / capacity)
-    local totalPages = math.ceil(size / capacity)
-
-    local state = ContainerOpener.pageState[containerId]
-    if not state then
-        state = { visited = {}, pending = false }
-        ContainerOpener.pageState[containerId] = state
-    end
-
-    state.visited[pageIndex] = true
-
-    if state.pending then return end
-
-    -- Find next unvisited page
-    local nextPage = nil
-    for i = 0, totalPages - 1 do
-        if not state.visited[i] then
-            nextPage = i
-            break
-        end
-    end
-
-    if nextPage == nil then return end
-
-    state.pending = true
-    local nextFirstIndex = nextPage * capacity
-    schedule(200, function()
-        g_game.seekInContainer(containerId, nextFirstIndex)
-        schedule(200, function()
-            state.pending = false
-            local c = g_game.getContainer(containerId)
-            if c then
-                ContainerOpener.scanContainer(c)
-                ContainerOpener.markDirty(c)
-            end
-            if ContainerOpener.isProcessing then
-                schedule(50, ContainerOpener.processNext)
-            end
-        end)
-    end)
-end
-
--- Schedule delayed rescans for a container to catch late-loaded items
-function ContainerOpener.scheduleRescan(containerId)
-    if not containerId then return end
-    if not ContainerOpener.rescanTimers[containerId] then
-        ContainerOpener.rescanTimers[containerId] = true
-        for _, delay in ipairs(ContainerOpener.rescanDelays) do
-            schedule(delay, function()
-                local container = g_game.getContainer(containerId)
-                if container then
-                    ContainerOpener.scanContainer(container)
-                    ContainerOpener.markDirty(container)
-                end
-            end)
-        end
-        schedule(ContainerOpener.rescanDelays[#ContainerOpener.rescanDelays] + 50, function()
-            ContainerOpener.rescanTimers[containerId] = nil
-        end)
-    end
-end
-
--- Retry opens that did not result in a container window
-function ContainerOpener.scheduleInFlightCheck(itemSig)
-    if not itemSig then return end
-    schedule(ContainerOpener.inFlightRetryMs, function()
-        if not ContainerOpener.inFlightSigs[itemSig] then return end
-        local entry = ContainerOpener.inFlightEntries[itemSig]
-        if not entry then return end
-
-        local attempts = ContainerOpener.openAttempts[itemSig] or { count = 0, lastAttempt = 0 }
-        if attempts.count >= ContainerOpener.maxAttempts then
-            ContainerOpener.inFlightSigs[itemSig] = nil
-            ContainerOpener.inFlightEntries[itemSig] = nil
-            return
-        end
-
-        ContainerOpener.inFlightSigs[itemSig] = nil
-        ContainerOpener.queueItem(entry.item, entry.parentContainerId, entry.slotIndex, entry.slotId, entry.absoluteSlotId, true, entry.parentSig)
-        if not ContainerOpener.isProcessing then
-            ContainerOpener.isProcessing = true
-        end
-        schedule(50, ContainerOpener.processNext)
-    end)
-end
-
--- Generate a unique key for a slot
-local function makeSlotKey(containerId, slot)
-    return tostring(containerId) .. "_" .. tostring(slot)
-end
-
-local function getSlotInfo(container, item, slotIndex, slotId)
-    local resolvedSlotId = slotId
-    if resolvedSlotId == nil then
-        resolvedSlotId = item and item.getStackPos and item:getStackPos() or (slotIndex and (slotIndex - 1)) or 0
-    end
-    local resolvedSlotIndex = slotIndex or (resolvedSlotId + 1)
-    local firstIndex = (container and container.getFirstIndex and container:getFirstIndex()) or 0
-    local absoluteSlotId = firstIndex + resolvedSlotId
-    return resolvedSlotIndex, resolvedSlotId, absoluteSlotId
-end
-
-local function getNow()
-    return now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
-end
-
--- Generate a best-effort signature for a container item
-local function getItemPathKey(item, depth)
-    if not item then return "nil" end
-    depth = (depth or 0) + 1
-    if depth > 12 then return "depth" end
-
-    local id = item.getId and item:getId() or 0
-    local parent = item.getParentContainer and item:getParentContainer() or nil
-    local slot = item.getStackPos and item:getStackPos() or -1
-
-    if not parent then
-        local pos = item.getPosition and item:getPosition() or nil
-        local invSlot = (pos and pos.y) or slot
-        return "inv:" .. tostring(invSlot) .. ":" .. tostring(id)
-    end
-
-    local parentItem = parent.getContainerItem and parent:getContainerItem() or nil
-    local parentKey = getItemPathKey(parentItem, depth)
-    return parentKey .. "/" .. tostring(id) .. ":" .. tostring(slot)
-end
-
-local function getItemSignature(item)
-    if not item then return "nil" end
-    return getItemPathKey(item, 0)
-end
-
--- Mark a container as dirty so it will be scanned soon
-function ContainerOpener.markDirty(container)
-    if not container then return end
-    local containerId = container.getId and container:getId() or nil
-    if not containerId then return end
-    ContainerOpener.dirtyContainerIds[containerId] = true
-end
-
--- Scan only dirty containers for performance
-function ContainerOpener.scanDirtyContainers()
-    local totalFound = 0
-    for containerId, _ in pairs(ContainerOpener.dirtyContainerIds) do
-        local container = g_game.getContainer(containerId)
-        if container then
-            totalFound = totalFound + ContainerOpener.scanContainer(container)
-        end
-        ContainerOpener.dirtyContainerIds[containerId] = nil
-    end
-    return totalFound
-end
-
--- Queue a container item safely (front = true inserts at front)
-function ContainerOpener.queueItem(item, parentContainerId, slotIndex, slotId, absoluteSlotId, front, parentSig)
-    if not item or not item:isContainer() then return false end
-    local nowMs = getNow()
-    if slotId == nil then
-        slotId = item.getStackPos and item:getStackPos() or (slotIndex and (slotIndex - 1)) or 0
-    end
-    if slotIndex == nil then
-        slotIndex = slotId + 1
-    end
-    if absoluteSlotId == nil then
-        absoluteSlotId = slotId
-    end
-    local parentKey = parentSig or parentContainerId or "unknown"
-    local slotKey = makeSlotKey(parentKey, absoluteSlotId)
-    local itemSig = getItemSignature(item)
-    local lastOpened = ContainerOpener.openedItemSigs[itemSig]
-    local inFlight = ContainerOpener.inFlightSigs[itemSig]
-    if lastOpened and (nowMs - lastOpened) < ContainerOpener.reopenGraceMs then return false end
-    if inFlight and (nowMs - inFlight) < ContainerOpener.inFlightTimeoutMs then return false end
-    if ContainerOpener.queuedSlots[slotKey] == itemSig then return false end
-    ContainerOpener.queuedSlots[slotKey] = itemSig
-    local entry = {
-        item = item,
-        itemSig = itemSig,
-        parentContainerId = parentContainerId,
-        parentSig = parentSig,
-        slotIndex = slotIndex,
-        slotId = slotId,
-        absoluteSlotId = absoluteSlotId,
-        slotKey = slotKey
-    }
-    if front then
-        table.insert(ContainerOpener.queue, 1, entry)
-    else
-        table.insert(ContainerOpener.queue, entry)
+function ForceOpenTracker.canAttempt(itemId)
+    local currentTime = getNow()
+    local lastTime = ForceOpenTracker.lastAttempt[itemId]
+    if lastTime and (currentTime - lastTime) < ForceOpenTracker.cooldownMs then
+        return false
     end
     return true
 end
 
--- Scan a single container for nested containers and add them to queue
-function ContainerOpener.scanContainer(container)
-  if not container then return 0 end
-  
-  local containerId = container:getId()
-  local containerName = container:getName() or ""
-  
-  -- Skip excluded containers
-  if isExcludedContainer(containerName) then
-    return 0
-  end
-  
-  -- Mark as scanned
-  ContainerOpener.scannedContainerIds[containerId] = true
-  
-  local items = container:getItems()
-  local foundCount = 0
-    local nowMs = getNow()
-    local parentItem = container.getContainerItem and container:getContainerItem() or nil
-    local parentSig = parentItem and getItemSignature(parentItem) or nil
-  
-    for slotIndex, item in ipairs(items) do
-    if item and item:isContainer() then
-            local resolvedIndex, slotId, absoluteSlotId = getSlotInfo(container, item, slotIndex, nil)
-            local slotKey = makeSlotKey(containerId, absoluteSlotId)
-            local itemSig = getItemSignature(item)
-      
-            -- Update graph
-            ContainerOpener.graphNodes[itemSig] = {
-                itemId = item:getId(),
-                parentContainerId = containerId,
-                parentSig = parentSig,
-                slotIndex = resolvedIndex,
-                slotId = slotId,
-                absoluteSlotId = absoluteSlotId,
-                lastSeen = nowMs
-            }
-            if parentSig then
-                ContainerOpener.graphEdges[parentSig] = ContainerOpener.graphEdges[parentSig] or {}
-                ContainerOpener.graphEdges[parentSig][itemSig] = true
-            end
+function ForceOpenTracker.markAttempt(itemId)
+    ForceOpenTracker.lastAttempt[itemId] = getNow()
+    ForceOpenTracker.openedThisCycle[itemId] = true
+end
 
-            -- Skip if already open/in-flight; only queue if slot is new or item changed
-            if ContainerOpener.queueItem(item, containerId, resolvedIndex, slotId, absoluteSlotId, false, parentSig) then
+function ForceOpenTracker.startCycle()
+    local currentTime = getNow()
+    -- Reset cycle tracking if enough time has passed
+    if (currentTime - ForceOpenTracker.cycleStart) > ForceOpenTracker.cycleMaxDuration then
+        ForceOpenTracker.openedThisCycle = {}
+        ForceOpenTracker.cycleStart = currentTime
+    end
+end
+
+function ForceOpenTracker.wasOpenedThisCycle(itemId)
+    return ForceOpenTracker.openedThisCycle[itemId] == true
+end
+
+-- Generate unique key for container slot
+local function makeSlotKey(containerId, slotIndex)
+    return string.format("%d:%d", containerId or 0, slotIndex or 0)
+end
+
+-- Get slot information with pagination support
+local function getSlotInfo(container, slotIndex)
+    if not container then return slotIndex, slotIndex end
+    local firstIndex = 0
+    if container.getFirstIndex then
+        firstIndex = container:getFirstIndex() or 0
+    end
+    local absoluteSlot = firstIndex + (slotIndex - 1)  -- Convert 1-based to 0-based
+    return slotIndex, absoluteSlot
+end
+
+-- ============================================================================
+-- CONTAINER TRACKER (SRP - Tracks opened containers)
+-- ============================================================================
+local ContainerTracker = {
+    openedSlots = {},      -- slotKey -> timestamp (when opened)
+    pendingSlots = {},     -- slotKey -> timestamp (waiting for open)
+    graceMs = 4000,        -- Grace period to prevent re-opening
+    pendingTimeoutMs = 2500, -- Timeout for pending opens
+}
+
+function ContainerTracker.reset()
+    ContainerTracker.openedSlots = {}
+    ContainerTracker.pendingSlots = {}
+end
+
+function ContainerTracker.markOpened(slotKey)
+    ContainerTracker.openedSlots[slotKey] = getNow()
+    ContainerTracker.pendingSlots[slotKey] = nil
+end
+
+function ContainerTracker.markPending(slotKey)
+    ContainerTracker.pendingSlots[slotKey] = getNow()
+end
+
+function ContainerTracker.isRecentlyOpened(slotKey)
+    local timestamp = ContainerTracker.openedSlots[slotKey]
+    if not timestamp then return false end
+    return (getNow() - timestamp) < ContainerTracker.graceMs
+end
+
+function ContainerTracker.isPending(slotKey)
+    local timestamp = ContainerTracker.pendingSlots[slotKey]
+    if not timestamp then return false end
+    local elapsed = getNow() - timestamp
+    if elapsed > ContainerTracker.pendingTimeoutMs then
+        ContainerTracker.pendingSlots[slotKey] = nil
+        return false
+    end
+    return true
+end
+
+function ContainerTracker.canOpen(slotKey)
+    return not ContainerTracker.isRecentlyOpened(slotKey) 
+       and not ContainerTracker.isPending(slotKey)
+end
+
+-- ============================================================================
+-- CONTAINER QUEUE (SRP - Manages the BFS queue)
+-- ============================================================================
+local ContainerQueue = {
+    items = {},          -- Array of { item, containerId, slotIndex, slotKey }
+    inQueue = {},        -- slotKey -> true (for O(1) lookup)
+}
+
+function ContainerQueue.reset()
+    ContainerQueue.items = {}
+    ContainerQueue.inQueue = {}
+end
+
+function ContainerQueue.add(item, containerId, slotIndex, front)
+    local _, absoluteSlot = getSlotInfo(g_game.getContainer(containerId), slotIndex)
+    local slotKey = makeSlotKey(containerId, absoluteSlot)
+    
+    -- Skip if already in queue or recently opened
+    if ContainerQueue.inQueue[slotKey] then return false end
+    if not ContainerTracker.canOpen(slotKey) then return false end
+    
+    ContainerQueue.inQueue[slotKey] = true
+    local entry = {
+        item = item,
+        containerId = containerId,
+        slotIndex = slotIndex,
+        slotKey = slotKey,
+    }
+    
+    if front then
+        table.insert(ContainerQueue.items, 1, entry)
+    else
+        table.insert(ContainerQueue.items, entry)
+    end
+    return true
+end
+
+function ContainerQueue.pop()
+    if #ContainerQueue.items == 0 then return nil end
+    local entry = table.remove(ContainerQueue.items, 1)
+    if entry then
+        ContainerQueue.inQueue[entry.slotKey] = nil
+    end
+    return entry
+end
+
+function ContainerQueue.isEmpty()
+    return #ContainerQueue.items == 0
+end
+
+function ContainerQueue.size()
+    return #ContainerQueue.items
+end
+
+-- ============================================================================
+-- CONTAINER SCANNER (SRP - Scans containers for nested items)
+-- ============================================================================
+local ContainerScanner = {
+    scannedPages = {},    -- containerId -> { pageIndex -> true }
+}
+
+function ContainerScanner.reset()
+    ContainerScanner.scannedPages = {}
+end
+
+-- Scan a container for nested containers and add them to queue
+function ContainerScanner.scan(container, prioritizeItemId)
+    if not container then return 0 end
+    
+    local containerName = container:getName() or ""
+    if isExcludedContainer(containerName) then return 0 end
+    
+    local containerId = container:getId()
+    local items = container:getItems()
+    local foundCount = 0
+    
+    for slotIndex, item in ipairs(items) do
+        if item and item:isContainer() then
+            local itemId = item:getId()
+            -- Prioritize same-type containers (for nested backpack opening)
+            local shouldPrioritize = prioritizeItemId and itemId == prioritizeItemId
+            if ContainerQueue.add(item, containerId, slotIndex, shouldPrioritize) then
                 foundCount = foundCount + 1
             end
+        end
     end
-  end
-
-    -- If container has pages, ensure all pages are visited to find nested containers
-    if ContainerOpener.isProcessing or getNow() < ContainerOpener.autoOpenActiveUntil then
-        ContainerOpener.ensurePagedContainers(container)
-    end
-  
-  return foundCount
+    
+    return foundCount
 end
 
--- Scan all open containers
-function ContainerOpener.scanAllContainers()
-  local totalFound = 0
-  
-  for containerId, container in pairs(g_game.getContainers()) do
-    -- Scan even if previously scanned (items may have been added)
-    totalFound = totalFound + ContainerOpener.scanContainer(container)
-  end
-  
-  return totalFound
+-- Scan all currently open containers
+function ContainerScanner.scanAll(prioritizeItemId)
+    local containers = g_game.getContainers()
+    local totalFound = 0
+    
+    for _, container in pairs(containers) do
+        totalFound = totalFound + ContainerScanner.scan(container, prioritizeItemId)
+    end
+    
+    return totalFound
 end
 
--- Process the next item in the queue
+-- Handle paged containers (OTClient pagination API)
+function ContainerScanner.handlePages(container, onPageLoaded)
+    if not container or not container.hasPages or not container:hasPages() then return end
+    
+    local containerId = container:getId()
+    local capacity = container:getCapacity()
+    local totalSize = container:getSize()
+    local firstIndex = container:getFirstIndex()
+    
+    if capacity <= 0 or totalSize <= capacity then return end
+    
+    local currentPage = math.floor(firstIndex / capacity)
+    local totalPages = math.ceil(totalSize / capacity)
+    
+    -- Initialize page tracking
+    ContainerScanner.scannedPages[containerId] = ContainerScanner.scannedPages[containerId] or {}
+    ContainerScanner.scannedPages[containerId][currentPage] = true
+    
+    -- Find next unvisited page
+    for pageIdx = 0, totalPages - 1 do
+        if not ContainerScanner.scannedPages[containerId][pageIdx] then
+            local targetIndex = pageIdx * capacity
+            schedule(150, function()
+                g_game.seekInContainer(containerId, targetIndex)
+                schedule(200, function()
+                    local c = g_game.getContainer(containerId)
+                    if c and onPageLoaded then
+                        onPageLoaded(c)
+                    end
+                end)
+            end)
+            return true  -- Processing a page
+        end
+    end
+    
+    return false  -- All pages scanned
+end
+
+-- ============================================================================
+-- CONTAINER OPENER (Orchestrator - Main Controller)
+-- ============================================================================
+local ContainerOpener = {
+    -- State
+    isProcessing = false,
+    isPaused = false,
+    
+    -- Timing configuration
+    openDelayMs = 180,      -- Delay between opens
+    lastOpenTime = 0,
+    settleDelayMs = 8000,   -- Time to keep scanning after last activity
+    activeUntil = 0,        -- Timestamp until which we keep scanning
+    
+    -- Stability tracking
+    emptyQueueCount = 0,
+    requiredEmptyCount = 3, -- How many empty scans before finishing
+    
+    -- Retry configuration  
+    maxRetries = 4,
+    retryCount = {},        -- slotKey -> count
+    
+    -- Callbacks
+    onComplete = nil,
+}
+
+-- Reset all state
+function ContainerOpener.reset()
+    ContainerOpener.isProcessing = false
+    ContainerOpener.isPaused = false
+    ContainerOpener.lastOpenTime = 0
+    ContainerOpener.activeUntil = 0
+    ContainerOpener.emptyQueueCount = 0
+    ContainerOpener.retryCount = {}
+    ContainerOpener.onComplete = nil
+    
+    -- Reset sub-modules
+    ContainerQueue.reset()
+    ContainerTracker.reset()
+    ContainerScanner.reset()
+end
+
+-- Extend active period (called when new activity detected)
+function ContainerOpener.extendActiveTime()
+    ContainerOpener.activeUntil = getNow() + ContainerOpener.settleDelayMs
+    ContainerOpener.emptyQueueCount = 0
+end
+
+-- Check if still in active scanning period
+function ContainerOpener.isActive()
+    return ContainerOpener.isProcessing or getNow() < ContainerOpener.activeUntil
+end
+
+-- Queue a container item for opening (public interface)
+function ContainerOpener.queueItem(item, containerId, slotIndex, prioritize)
+    if not item or not item:isContainer() then return false end
+    return ContainerQueue.add(item, containerId, slotIndex, prioritize)
+end
+
+-- Mark a container as dirty for rescanning
+function ContainerOpener.markDirty(container)
+    if not container then return end
+    -- Immediate rescan for active processing
+    if ContainerOpener.isActive() then
+        ContainerScanner.scan(container)
+    end
+end
+
+-- Schedule delayed rescans to catch late-loaded items
+local rescanTimers = {}
+function ContainerOpener.scheduleRescan(containerId)
+    if not containerId or rescanTimers[containerId] then return end
+    rescanTimers[containerId] = true
+    
+    local delays = { 200, 500, 1000 }
+    for _, delay in ipairs(delays) do
+        schedule(delay, function()
+            local container = g_game.getContainer(containerId)
+            if container and ContainerOpener.isActive() then
+                ContainerScanner.scan(container)
+                ContainerScanner.handlePages(container, function(c)
+                    ContainerScanner.scan(c)
+                    if ContainerOpener.isProcessing then
+                        schedule(50, ContainerOpener.processNext)
+                    end
+                end)
+            end
+        end)
+    end
+    
+    schedule(1100, function()
+        rescanTimers[containerId] = nil
+    end)
+end
+
+-- ============================================================================
+-- PROCESS NEXT (Clean OTClient implementation)
+-- ============================================================================
 function ContainerOpener.processNext()
-  if not ContainerOpener.isProcessing then return end
-  if ContainerOpener.isPaused then return end
-  
-  -- Respect timing
+    if not ContainerOpener.isProcessing then return end
+    if ContainerOpener.isPaused then return end
+    
     local currentTime = getNow()
-  local elapsed = currentTime - ContainerOpener.lastOpenTime
-  if elapsed < ContainerOpener.openDelay then
-    schedule(ContainerOpener.openDelay - elapsed + 20, ContainerOpener.processNext)
-    return
-  end
-  
-    -- Event-driven scan of dirty containers for performance
-    ContainerOpener.scanDirtyContainers()
-  
-    -- Periodic full scan for accuracy
-    if (currentTime - ContainerOpener.lastFullScanTime) > ContainerOpener.fullScanInterval then
-        ContainerOpener.lastFullScanTime = currentTime
-        ContainerOpener.scanAllContainers()
+    
+    -- Respect timing delay between opens
+    local elapsed = currentTime - ContainerOpener.lastOpenTime
+    if elapsed < ContainerOpener.openDelayMs then
+        schedule(ContainerOpener.openDelayMs - elapsed + 20, ContainerOpener.processNext)
+        return
     end
-  
+    
     -- Check if queue is empty
-    if #ContainerOpener.queue == 0 then
-        -- Force a full scan to catch late container items
-        ContainerOpener.scanAllContainers()
-        if #ContainerOpener.queue == 0 then
-            ContainerOpener.stableEmptyCount = ContainerOpener.stableEmptyCount + 1
-            if getNow() < ContainerOpener.autoOpenActiveUntil or ContainerOpener.stableEmptyCount < ContainerOpener.stableRequired then
+    if ContainerQueue.isEmpty() then
+        -- Rescan all containers to find any new nested containers
+        local found = ContainerScanner.scanAll()
+        
+        if ContainerQueue.isEmpty() then
+            ContainerOpener.emptyQueueCount = ContainerOpener.emptyQueueCount + 1
+            
+            -- Keep scanning during settle period or until stable
+            if currentTime < ContainerOpener.activeUntil or 
+               ContainerOpener.emptyQueueCount < ContainerOpener.requiredEmptyCount then
                 schedule(200, ContainerOpener.processNext)
                 return
             end
-            -- All done
+            
+            -- All done - finish up
             ContainerOpener.finish()
             return
         end
-        -- New items found after scan; reset stability
-        ContainerOpener.stableEmptyCount = 0
+        
+        -- Found new items, reset stability counter
+        ContainerOpener.emptyQueueCount = 0
     end
-  
-  -- Get next entry
-  local entry = table.remove(ContainerOpener.queue, 1)
-  if not entry then
-    schedule(50, ContainerOpener.processNext)
-    return
-  end
-  
-    -- Skip if already open recently
-    if entry.itemSig and ContainerOpener.openedItemSigs[entry.itemSig] and (currentTime - ContainerOpener.openedItemSigs[entry.itemSig]) < ContainerOpener.reopenGraceMs then
-        schedule(20, ContainerOpener.processNext)
+    
+    -- Get next entry from queue
+    local entry = ContainerQueue.pop()
+    if not entry then
+        schedule(50, ContainerOpener.processNext)
         return
     end
-  
-  -- Verify the parent container still exists
-    local parentContainerId = entry.parentContainerId
-    if entry.parentSig and ContainerOpener.containerIdBySig[entry.parentSig] then
-        parentContainerId = ContainerOpener.containerIdBySig[entry.parentSig]
+    
+    -- Verify parent container still exists
+    local parentContainer = g_game.getContainer(entry.containerId)
+    if not parentContainer then
+        -- Parent closed, skip this entry
+        schedule(50, ContainerOpener.processNext)
+        return
     end
-    local parentContainer = parentContainerId and g_game.getContainer(parentContainerId) or nil
-  if not parentContainer then
-    -- Parent closed, skip this entry
-    schedule(50, ContainerOpener.processNext)
-    return
-  end
-  
-  -- Get fresh item reference from the slot
-  local items = parentContainer:getItems()
-  local item = nil
-    local entrySig = entry.itemSig
-  
-    -- First try the original slot index (1-based)
-    if entry.slotIndex and items[entry.slotIndex] then
-        local candidate = items[entry.slotIndex]
-        if candidate and candidate:isContainer() and (not entrySig or getItemSignature(candidate) == entrySig) then
-            item = candidate
-        end
-    end
-  
-    -- If not found at slot, search for the same item by signature or slotId
-  if not item then
-    for idx, candidate in ipairs(items) do
-      if candidate and candidate:isContainer() then
-                local sig = getItemSignature(candidate)
-                local resolvedIndex, candidateSlotId, absoluteSlotId = getSlotInfo(parentContainer, candidate, idx, nil)
-                if (entrySig and sig == entrySig) or (entry.absoluteSlotId ~= nil and absoluteSlotId == entry.absoluteSlotId) then
-                    entry.slotIndex = resolvedIndex
-                    entry.slotId = candidateSlotId
-                    entry.absoluteSlotId = absoluteSlotId
-                    entry.slotKey = makeSlotKey(entry.parentContainerId or entry.parentSig or "unknown", absoluteSlotId)
-                    ContainerOpener.queuedSlots[entry.slotKey] = sig
-                    item = candidate
-                    break
-        end
-      end
-    end
-  end
-
-    -- If still not found, fall back to any container not already queued
-    if not item then
+    
+    -- Get fresh item reference from the slot
+    local items = parentContainer:getItems()
+    local item = items[entry.slotIndex]
+    
+    -- Validate item is still a container at that slot
+    if not item or not item:isContainer() then
+        -- Item moved or changed, try to find it
         for idx, candidate in ipairs(items) do
             if candidate and candidate:isContainer() then
-                local resolvedIndex, candidateSlotId, absoluteSlotId = getSlotInfo(parentContainer, candidate, idx, nil)
-                local candidateKey = makeSlotKey(entry.parentContainerId or entry.parentSig or "unknown", absoluteSlotId)
-                local sig = getItemSignature(candidate)
-                if ContainerOpener.queuedSlots[candidateKey] ~= sig then
-                    ContainerOpener.queuedSlots[candidateKey] = sig
-                    entry.itemSig = sig
-                    entry.slotIndex = resolvedIndex
-                    entry.slotId = candidateSlotId
-                    entry.absoluteSlotId = absoluteSlotId
-                    entry.slotKey = candidateKey
+                local _, absSlot = getSlotInfo(parentContainer, idx)
+                local candidateKey = makeSlotKey(entry.containerId, absSlot)
+                if ContainerTracker.canOpen(candidateKey) then
                     item = candidate
+                    entry.slotIndex = idx
+                    entry.slotKey = candidateKey
                     break
                 end
             end
         end
     end
-  
-  if not item then
-    -- No valid container found, move on
-    schedule(50, ContainerOpener.processNext)
-    return
-  end
-  
-    -- Skip if already open (late check)
-    local finalSig = getItemSignature(item)
-    if ContainerOpener.openedItemSigs[finalSig] and (currentTime - ContainerOpener.openedItemSigs[finalSig]) < ContainerOpener.reopenGraceMs then
-        schedule(20, ContainerOpener.processNext)
+    
+    if not item then
+        -- No valid container found, move on
+        schedule(50, ContainerOpener.processNext)
         return
     end
-  
-  -- Record timing
-  ContainerOpener.lastOpenTime = currentTime
-    ContainerOpener.inFlightSigs[finalSig] = currentTime
-        ContainerOpener.inFlightEntries[finalSig] = {
-                item = item,
-                itemSig = finalSig,
-                parentContainerId = entry.parentContainerId,
-                parentSig = entry.parentSig,
-                slotIndex = entry.slotIndex,
-                slotId = entry.slotId,
-                absoluteSlotId = entry.absoluteSlotId
-        }
-        ContainerOpener.scheduleInFlightCheck(finalSig)
-    local attempt = ContainerOpener.openAttempts[finalSig] or { count = 0, lastAttempt = 0 }
-    if (currentTime - attempt.lastAttempt) < ContainerOpener.attemptWindowMs then
-        attempt.count = attempt.count + 1
-    else
-        attempt.count = 1
-    end
-    attempt.lastAttempt = currentTime
-    ContainerOpener.openAttempts[finalSig] = attempt
-    if attempt.count >= ContainerOpener.maxAttempts then
-        ContainerOpener.openedItemSigs[finalSig] = currentTime
-        ContainerOpener.inFlightSigs[finalSig] = nil
-                ContainerOpener.inFlightEntries[finalSig] = nil
-        schedule(60, ContainerOpener.processNext)
+    
+    -- Final check if this slot was recently opened
+    if not ContainerTracker.canOpen(entry.slotKey) then
+        schedule(50, ContainerOpener.processNext)
         return
     end
-  
-  -- Open the container
-  -- g_game.open(item, nil) opens in a new window
+    
+    -- Check retry limit
+    local retries = ContainerOpener.retryCount[entry.slotKey] or 0
+    if retries >= ContainerOpener.maxRetries then
+        ContainerTracker.markOpened(entry.slotKey)  -- Give up on this slot
+        schedule(50, ContainerOpener.processNext)
+        return
+    end
+    ContainerOpener.retryCount[entry.slotKey] = retries + 1
+    
+    -- Mark as pending and record timing
+    ContainerTracker.markPending(entry.slotKey)
+    ContainerOpener.lastOpenTime = currentTime
+    
+    -- Open the container using OTClient API
+    -- g_game.open(item, nil) opens in a new window
     g_game.open(item, nil)
-  
-  -- Schedule next processing after a delay
-  -- The onContainerOpen handler will also trigger scan + processNext
-  schedule(ContainerOpener.openDelay + 100, ContainerOpener.processNext)
+    
+    -- Schedule next processing
+    schedule(ContainerOpener.openDelayMs + 80, ContainerOpener.processNext)
 end
 
--- Finish the opening process
+-- ============================================================================
+-- FINISH (Clean implementation)
+-- ============================================================================
 function ContainerOpener.finish()
-  ContainerOpener.isProcessing = false
-  
-  -- Apply final minimize pass
-  if config.autoMinimize then
-    schedule(100, function()
-      for _, container in pairs(g_game.getContainers()) do
-        minimizeContainer(container)
-      end
-    end)
-  end
-  
-  -- Apply renaming
-  if config.renameEnabled then
-    schedule(150, function()
-      for _, container in pairs(g_game.getContainers()) do
-        renameContainer(container)
-      end
-    end)
-  end
-  
-  -- Call completion callback
-  if ContainerOpener.onComplete then
-    local cb = ContainerOpener.onComplete
-    ContainerOpener.onComplete = nil
-    schedule(50, cb)
-  end
-  
-  -- Emit event
-  if EventBus and EventBus.emit then
-    EventBus.emit("containers:open_all_complete")
-  end
+    ContainerOpener.isProcessing = false
+    
+    -- Apply final minimize pass
+    if config.autoMinimize then
+        schedule(100, function()
+            for _, container in pairs(g_game.getContainers()) do
+                minimizeContainer(container)
+            end
+        end)
+    end
+    
+    -- Apply renaming
+    if config.renameEnabled then
+        schedule(150, function()
+            for _, container in pairs(g_game.getContainers()) do
+                renameContainer(container)
+            end
+        end)
+    end
+    
+    -- Call completion callback
+    if ContainerOpener.onComplete then
+        local cb = ContainerOpener.onComplete
+        ContainerOpener.onComplete = nil
+        schedule(50, cb)
+    end
+    
+    -- Emit event for other modules
+    if EventBus and EventBus.emit then
+        EventBus.emit("containers:open_all_complete")
+    end
 end
 
--- Start the container opening process
+-- ============================================================================
+-- START (Clean implementation)
+-- ============================================================================
 function ContainerOpener.start(onComplete)
-  ContainerOpener.reset()
-  ContainerOpener.isProcessing = true
-  ContainerOpener.onComplete = onComplete
-  ContainerOpener.lastOpenTime = 0
-    ContainerOpener.autoOpenActiveUntil = getNow() + ContainerOpener.settleDelayMs
-  
-  -- Initial scan
-  ContainerOpener.scanAllContainers()
-  
-  -- Start processing
-  schedule(50, ContainerOpener.processNext)
+    ContainerOpener.reset()
+    ContainerOpener.isProcessing = true
+    ContainerOpener.onComplete = onComplete
+    ContainerOpener.lastOpenTime = 0
+    ContainerOpener.extendActiveTime()
+    
+    -- Initial scan of all open containers
+    ContainerScanner.scanAll()
+    
+    -- Start processing
+    schedule(50, ContainerOpener.processNext)
 end
 
 -- Stop the opening process
 function ContainerOpener.stop()
-  ContainerOpener.isProcessing = false
-  ContainerOpener.isPaused = false
+    ContainerOpener.isProcessing = false
+    ContainerOpener.isPaused = false
 end
 
 -- Called when a container opens (from event handler)
 function ContainerOpener.onContainerOpened(container)
-  if not ContainerOpener.isProcessing then return end
-  if not container then return end
-  
-    -- Mark as opened to prevent reopen loops
-    local containerItem = container.getContainerItem and container:getContainerItem() or nil
+    if not ContainerOpener.isActive() then return end
+    if not container then return end
+    
+    local containerId = container:getId()
+    
+    -- Mark the slot as successfully opened
+    -- Find which slot this container came from (best effort)
+    local containerItem = container:getContainerItem()
     if containerItem then
-        local sig = getItemSignature(containerItem)
-        ContainerOpener.openedItemSigs[sig] = getNow()
-        ContainerOpener.openedByContainerId[container:getId()] = sig
-        ContainerOpener.containerIdBySig[sig] = container:getId()
-        ContainerOpener.inFlightSigs[sig] = nil
-        ContainerOpener.inFlightEntries[sig] = nil
+        -- Search for matching queued slot and mark it opened
+        for slotKey, _ in pairs(ContainerTracker.pendingSlots) do
+            ContainerTracker.markOpened(slotKey)
+            break
+        end
     end
-  
-  -- Scan the newly opened container for nested containers
-  ContainerOpener.scanContainer(container)
-    ContainerOpener.markDirty(container)
-    ContainerOpener.scheduleRescan(container:getId())
-    ContainerOpener.ensurePagedContainers(container)
-    ContainerOpener.autoOpenActiveUntil = math.max(ContainerOpener.autoOpenActiveUntil, getNow() + 2000)
-    ContainerOpener.stableEmptyCount = 0
-  
-  -- Trigger processing immediately
-  schedule(50, ContainerOpener.processNext)
+    
+    -- Scan the newly opened container for nested containers
+    ContainerScanner.scan(container)
+    
+    -- Handle paged containers
+    ContainerScanner.handlePages(container, function(c)
+        ContainerScanner.scan(c)
+        if ContainerOpener.isProcessing then
+            schedule(50, ContainerOpener.processNext)
+        end
+    end)
+    
+    -- Schedule rescans for late-loaded items
+    ContainerOpener.scheduleRescan(containerId)
+    
+    -- Extend active time since we got a response
+    ContainerOpener.extendActiveTime()
+    
+    -- Trigger processing immediately
+    if ContainerOpener.isProcessing then
+        schedule(50, ContainerOpener.processNext)
+    end
 end
 
 -- ============================================================================
@@ -1617,17 +1579,17 @@ onContainerOpen(function(container, previousContainer)
     end
 
     -- If configured, prioritize opening nested containers of the same type (only during BFS)
-    if ContainerOpener.isProcessing and entry and entry.openNested then
-        local parentSig = containerItem and getItemSignature(containerItem) or nil
-        for slot, item in ipairs(container:getItems()) do
+    if ContainerOpener.isActive() and entry and entry.openNested then
+        local containerId = container:getId()
+        for slotIndex, item in ipairs(container:getItems()) do
             if item:isContainer() and item:getId() == itemId then
-                if ContainerOpener and ContainerOpener.queueItem then
-                    local resolvedIndex, slotId, absoluteSlotId = getSlotInfo(container, item, slot, nil)
-                    ContainerOpener.queueItem(item, container:getId(), resolvedIndex, slotId, absoluteSlotId, true, parentSig)
-                end
+                -- Queue with priority (front of queue)
+                ContainerQueue.add(item, containerId, slotIndex, true)
             end
         end
-        schedule(20, ContainerOpener.processNext)
+        if ContainerOpener.isProcessing then
+            schedule(20, ContainerOpener.processNext)
+        end
     end
 end)
 
@@ -1923,12 +1885,41 @@ local function findDestinationForItem(itemId)
     return nil
 end
 
+-- Helper: Check if a container with the given itemId is already open
+local function isContainerOpen(itemId)
+    if not itemId then return false end
+    for _, container in pairs(g_game.getContainers()) do
+        local containerItem = container:getContainerItem()
+        if containerItem and containerItem:getId() == itemId then
+            return true
+        end
+    end
+    return false
+end
+
 -- Pure function: Open container from configured list
+-- FIXED: Prevents infinite loop by checking if already open and using cooldown
 local function openConfiguredContainer(itemId)
+    -- Skip if already open (prevents toggle behavior)
+    if isContainerOpen(itemId) then
+        return false
+    end
+    
+    -- Skip if we already tried this recently (prevents rapid cycling)
+    if not ForceOpenTracker.canAttempt(itemId) then
+        return false
+    end
+    
+    -- Skip if we already opened this during the current macro cycle
+    if ForceOpenTracker.wasOpenedThisCycle(itemId) then
+        return false
+    end
+    
     -- Check equipment slots first
     local slots = {getBack(), getAmmo(), getFinger(), getNeck(), getLeft(), getRight()}
     for _, slotItem in ipairs(slots) do
         if slotItem and slotItem:getId() == itemId then
+            ForceOpenTracker.markAttempt(itemId)
             g_game.open(slotItem)
             return true
         end
@@ -1938,6 +1929,7 @@ local function openConfiguredContainer(itemId)
     for _, container in pairs(g_game.getContainers()) do
         for _, item in ipairs(container:getItems()) do
             if item:isContainer() and item:getId() == itemId then
+                ForceOpenTracker.markAttempt(itemId)
                 g_game.open(item)
                 return true
             end
@@ -1947,6 +1939,7 @@ local function openConfiguredContainer(itemId)
     -- Try to find anywhere
     local item = findItem(itemId)
     if item then
+        ForceOpenTracker.markAttempt(itemId)
         g_game.open(item)
         return true
     end
@@ -1961,6 +1954,9 @@ sortingMacro = macro(150, function(m)
         m:setOff()
         return
     end
+    
+    -- Start a new cycle for ForceOpenTracker
+    ForceOpenTracker.startCycle()
     
     -- Item sorting logic
     if config.sortEnabled then
@@ -2002,31 +1998,37 @@ sortingMacro = macro(150, function(m)
             end
         end
         
-        -- Force open purse
+        -- Force open purse (already has protection via openConfiguredContainer pattern)
         if config.purse then
             local purseContainer = getContainerByItem(PURSE_ITEM_ID)
-            if not purseContainer then
-                local purseItem = getPurse()
-                if purseItem then
-                    use(purseItem)
-                    return
+            if not purseContainer and not isContainerOpen(PURSE_ITEM_ID) then
+                if ForceOpenTracker.canAttempt(PURSE_ITEM_ID) then
+                    local purseItem = getPurse()
+                    if purseItem then
+                        ForceOpenTracker.markAttempt(PURSE_ITEM_ID)
+                        use(purseItem)
+                        return
+                    end
                 end
             end
         end
         
-        -- Force open loot bag
+        -- Force open loot bag (with protection)
         if config.lootBag then
             local lootBagContainer = getContainerByItem(LOOT_BAG_ITEM_ID)
-            if not lootBagContainer then
-                local lootBag = findItem(LOOT_BAG_ITEM_ID)
-                if lootBag then
-                    local purseContainer = getContainerByItem(PURSE_ITEM_ID)
-                    if purseContainer then
-                        g_game.open(lootBag, purseContainer)
-                    else
-                        use(getPurse())
+            if not lootBagContainer and not isContainerOpen(LOOT_BAG_ITEM_ID) then
+                if ForceOpenTracker.canAttempt(LOOT_BAG_ITEM_ID) then
+                    local lootBag = findItem(LOOT_BAG_ITEM_ID)
+                    if lootBag then
+                        local purseContainer = getContainerByItem(PURSE_ITEM_ID)
+                        if purseContainer then
+                            ForceOpenTracker.markAttempt(LOOT_BAG_ITEM_ID)
+                            g_game.open(lootBag, purseContainer)
+                        else
+                            use(getPurse())
+                        end
+                        return
                     end
-                    return
                 end
             end
         end
@@ -2039,29 +2041,26 @@ end)
 -- Event handlers to trigger sorting
 onAddItem(function(container, slot, item, oldItem)
     -- If a container item is added into an open container, queue it for opening
-    if item and item:isContainer() and ContainerOpener and (ContainerOpener.isProcessing or getNow() < ContainerOpener.autoOpenActiveUntil) then
-        local parentId = container and container.getId and container:getId() or 0
-        local containerName = container and container.getName and container:getName() or ""
+    if item and item:isContainer() and ContainerOpener.isActive() then
+        local containerId = container and container:getId() or 0
+        local containerName = container and container:getName() or ""
+        
         if not isExcludedContainer(containerName) then
-            if ContainerOpener and ContainerOpener.queueItem then
-                local parentItem = container and container.getContainerItem and container:getContainerItem() or nil
-                local parentSig = parentItem and getItemSignature(parentItem) or nil
-                local slotIndex = (slot or 0) + 1
-                local slotId = slot
-                local resolvedIndex, resolvedSlotId, absoluteSlotId = getSlotInfo(container, item, slotIndex, slotId)
-                if ContainerOpener.queueItem(item, parentId, resolvedIndex, resolvedSlotId, absoluteSlotId, true, parentSig) then
-                    -- If opener is active, process immediately for realtime behavior
-                    if not ContainerOpener.isProcessing then
-                        ContainerOpener.isProcessing = true
-                    end
-                    schedule(10, ContainerOpener.processNext)
+            -- Queue the new container for opening (slot is 0-based, convert to 1-based)
+            local slotIndex = (slot or 0) + 1
+            if ContainerQueue.add(item, containerId, slotIndex, true) then
+                -- Trigger processing if not already running
+                if not ContainerOpener.isProcessing then
+                    ContainerOpener.isProcessing = true
+                    ContainerOpener.extendActiveTime()
                 end
+                schedule(10, ContainerOpener.processNext)
             end
         end
     end
 
-    -- Mark container dirty for rescan (items may have changed)
-    if container and ContainerOpener and ContainerOpener.markDirty then
+    -- Mark container for rescan
+    if container then
         ContainerOpener.markDirty(container)
     end
 
@@ -2071,7 +2070,7 @@ onAddItem(function(container, slot, item, oldItem)
 end)
 
 onRemoveItem(function(container, slot, item)
-    if container and ContainerOpener and ContainerOpener.markDirty then
+    if container then
         ContainerOpener.markDirty(container)
     end
     if sortingMacro and (config.sortEnabled or config.forceOpen) then
@@ -2086,22 +2085,14 @@ onPlayerInventoryChange(function(slot, item, oldItem)
 end)
 
 onContainerClose(function(container)
-    if container and ContainerOpener and ContainerOpener.openedItemSigs then
-        local containerItem = container.getContainerItem and container:getContainerItem() or nil
-        if containerItem then
-            local sig = getItemSignature(containerItem)
-            ContainerOpener.openedItemSigs[sig] = getNow()
-            if ContainerOpener.openedByContainerId then
-                ContainerOpener.openedByContainerId[container:getId()] = nil
-            end
-            if ContainerOpener.containerIdBySig and ContainerOpener.containerIdBySig[sig] == container:getId() then
-                ContainerOpener.containerIdBySig[sig] = nil
-            end
-            if ContainerOpener.pageState then
-                ContainerOpener.pageState[container:getId()] = nil
-            end
+    if container then
+        local containerId = container:getId()
+        -- Clean up page tracking for closed container
+        if ContainerScanner and ContainerScanner.scannedPages then
+            ContainerScanner.scannedPages[containerId] = nil
         end
     end
+    
     if container and not container.lootContainer then
         if sortingMacro and (config.sortEnabled or config.forceOpen) then
             sortingMacro:setOn()

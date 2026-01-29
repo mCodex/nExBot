@@ -1,5 +1,5 @@
 --[[
-  Event-Driven Targeting System v2.0
+  Event-Driven Targeting System v2.1
   
   High-performance monster detection and targeting using EventBus.
   IMPROVED: More accurate monster counting using direct g_map API calls.
@@ -12,6 +12,8 @@
   - Smooth chase integration using MovementCoordinator
   - CaveBot pause coordination (respects dynamicLure/smartPull)
   - O(1) lookups with optimized caching
+  
+  v2.1: Integrated PathUtils for DRY, optimized creature validation
   
   Architecture:
   - EventTargeting.LiveMonsterCount: Direct API count (most accurate)
@@ -26,7 +28,7 @@
 -- ============================================================================
 
 EventTargeting = EventTargeting or {}
-EventTargeting.VERSION = "2.0"
+EventTargeting.VERSION = "2.1"
 EventTargeting.DEBUG = false
 
 -- ClientService helper for cross-client compatibility (OTCv8 / OpenTibiaBR)
@@ -44,6 +46,37 @@ end
 -- ============================================================================
 
 local SafeCall = SafeCall or require("core.safe_call")
+
+-- Load PathUtils if available (shared module for DRY)
+-- OTClient compatible - no _G usage
+local PathUtils = PathUtils  -- Try existing global
+local function ensurePathUtils()
+  if PathUtils then return PathUtils end
+  local success = pcall(function()
+    dofile("nExBot/utils/path_utils.lua")
+  end)
+  -- After dofile, PathUtils should be global
+  if success then
+    PathUtils = PathUtils  -- Re-check global after dofile
+  end
+  return PathUtils
+end
+ensurePathUtils()
+
+-- Load ChaseController if available (OTClient compatible)
+local ChaseController = ChaseController  -- Try existing global
+local function ensureChaseController()
+  if ChaseController then return ChaseController end
+  local success = pcall(function()
+    dofile("nExBot/targetbot/chase_controller.lua")
+  end)
+  -- After dofile, ChaseController should be global
+  if success then
+    ChaseController = ChaseController  -- Re-check global after dofile
+  end
+  return ChaseController
+end
+ensureChaseController()
 
 -- ============================================================================
 -- CONSTANTS (Tunable for performance)
@@ -176,10 +209,30 @@ local liveMonsterState = {
 }
 
 -- Check if a creature is a targetable monster (not summon)
+-- OPTIMIZED: Uses PathUtils.validateCreature for reduced pcall overhead
 local function isTargetableMonster(creature)
   if not creature then return false end
   
-  -- Check basic conditions
+  -- Use PathUtils for optimized validation
+  if PathUtils and PathUtils.validateCreature then
+    local cv = PathUtils.validateCreature(creature)
+    if not cv.valid then return false end
+    if cv.isDead then return false end
+    if not cv.isMonster then return false end
+    if cv.healthPercent and cv.healthPercent <= 0 then return false end
+    
+    -- For old Tibia, all monsters are targetable
+    if liveMonsterState.oldTibia then return true end
+    
+    -- Check creature type
+    if cv.creatureType and cv.creatureType >= 3 then
+      return false  -- Summon
+    end
+    
+    return true
+  end
+  
+  -- Fallback: individual pcall checks
   local ok, isDead = pcall(function() return creature:isDead() end)
   if ok and isDead then return false end
   
@@ -318,12 +371,16 @@ local FLOOR_CHANGE_ITEMS = {
   [294]=true,[369]=true,[370]=true,[383]=true,[392]=true,[408]=true,[409]=true,[410]=true,
 }
 
-local FLOOR_CHANGE_COLORS = {
+-- Use PathUtils for floor-change colors if available
+local FLOOR_CHANGE_COLORS = (PathUtils and PathUtils.FLOOR_CHANGE_COLORS) or {
   [210] = true, [211] = true, [212] = true, [213] = true,
 }
 
--- Check if position is a floor-change tile
+-- Check if position is a floor-change tile (Use PathUtils for DRY)
 local function isFloorChangeTile(pos)
+  if PathUtils and PathUtils.isFloorChangeTile then
+    return PathUtils.isFloorChangeTile(pos)
+  end
   if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isFloorChangeTile then
     return TargetCore.PathSafety.isFloorChangeTile(pos)
   end
@@ -434,9 +491,11 @@ function EventTargeting.PathValidator.validate(playerPos, targetPos)
     return nil, dist, false
   end
   
-  -- Find path
+  -- Find path (use PathUtils if available)
   local path = nil
-  if findPath then
+  if PathUtils and PathUtils.findPath then
+    path = PathUtils.findPath(playerPos, targetPos, CONST.MAX_CHASE_RANGE, PATH_PARAMS)
+  elseif findPath then
     path = findPath(playerPos, targetPos, CONST.MAX_CHASE_RANGE, PATH_PARAMS)
   elseif getPath then
     path = getPath(playerPos, targetPos, CONST.MAX_CHASE_RANGE, PATH_PARAMS)
@@ -451,26 +510,33 @@ function EventTargeting.PathValidator.validate(playerPos, targetPos)
     return path, pathLen, false  -- Path exists but too long
   end
   
-  -- Check if path crosses floor-change tiles
+  -- Check if path crosses floor-change tiles (Use PathUtils for DRY)
   if pathLen > 0 then
-    local DIR_OFFSET = {
-      [North or 0] = {x = 0, y = -1},
-      [East or 1] = {x = 1, y = 0},
-      [South or 2] = {x = 0, y = 1},
-      [West or 3] = {x = -1, y = 0},
-      [NorthEast or 4] = {x = 1, y = -1},
-      [SouthEast or 5] = {x = 1, y = 1},
-      [SouthWest or 6] = {x = -1, y = 1},
-      [NorthWest or 7] = {x = -1, y = -1}
-    }
-    local probe = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-    for i = 1, pathLen do
-      local off = DIR_OFFSET[path[i]]
-      if off then
-        probe.x = probe.x + off.x
-        probe.y = probe.y + off.y
-        if isFloorChangeTile(probe) then
-          return nil, pathLen, false  -- Path crosses floor change
+    if PathUtils and PathUtils.pathCrossesFloorChange then
+      if PathUtils.pathCrossesFloorChange(path, playerPos, pathLen) then
+        return nil, pathLen, false  -- Path crosses floor change
+      end
+    else
+      -- Fallback: manual check
+      local DIR_OFFSET = (PathUtils and PathUtils.DIR_TO_OFFSET) or {
+        [North or 0] = {x = 0, y = -1},
+        [East or 1] = {x = 1, y = 0},
+        [South or 2] = {x = 0, y = 1},
+        [West or 3] = {x = -1, y = 0},
+        [NorthEast or 4] = {x = 1, y = -1},
+        [SouthEast or 5] = {x = 1, y = 1},
+        [SouthWest or 6] = {x = -1, y = 1},
+        [NorthWest or 7] = {x = -1, y = -1}
+      }
+      local probe = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+      for i = 1, pathLen do
+        local off = DIR_OFFSET[path[i]]
+        if off then
+          probe.x = probe.x + off.x
+          probe.y = probe.y + off.y
+          if isFloorChangeTile(probe) then
+            return nil, pathLen, false  -- Path crosses floor change
+          end
         end
       end
     end
@@ -569,6 +635,7 @@ function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
   -- ═══════════════════════════════════════════════════════════════════════════
   -- CONFIG PRIORITY: The user-defined priority is THE PRIMARY FACTOR
   -- This is what distinguishes different monster types
+  -- v2.2: Scaled to 1000x to match creature_priority.lua
   -- ═══════════════════════════════════════════════════════════════════════════
   if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
     local configs = TargetBot.Creature.getConfigs(creature)
@@ -583,9 +650,9 @@ function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
           highestDanger = cfg.danger or 0
         end
       end
-      -- Config priority is multiplied by 100 to make it the dominant factor
-      -- A monster with priority 2 will ALWAYS beat priority 1 unless critically wounded
-      priority = priority + (highestConfigPriority * 100)
+      -- Config priority is multiplied by 1000 to make it the DOMINANT factor
+      -- A monster with priority 2 will ALWAYS beat priority 1 (1000 point gap)
+      priority = priority + (highestConfigPriority * 1000)
       priority = priority + (highestDanger * 2)
     else
       -- No config found = not a valid target
@@ -1619,8 +1686,9 @@ function EventTargeting.getReachableTargets()
   return targets
 end
 
--- Debug: Print cache status
+-- Debug: Print cache status (only outputs when DEBUG is true)
 function EventTargeting.debugStatus()
+  if not EventTargeting.DEBUG then return end
   print("[EventTargeting] Cache: " .. creatureCache.count .. " creatures")
   print("[EventTargeting] Combat: " .. tostring(targetState.combatActive))
   if targetState.currentTarget then
@@ -1815,4 +1883,6 @@ if onCreatureAppear then
   end
 end
 
-print("[EventTargeting] Module loaded v" .. EventTargeting.VERSION)
+if EventTargeting.DEBUG then
+  print("[EventTargeting] Module loaded v" .. EventTargeting.VERSION)
+end

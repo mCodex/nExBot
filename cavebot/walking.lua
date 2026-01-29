@@ -1,39 +1,53 @@
 --[[
-  CaveBot Walking Module v4.0.0
+  CaveBot Walking Module v5.0.0
   
   DESIGN PRINCIPLES:
   - SRP: Each function has one responsibility
-  - DRY: No duplicated logic, shared helpers
+  - DRY: Uses shared PathUtils module (no duplicated logic)
   - KISS: Simple, readable functions
   - Pure Functions: Predictable, no side effects where possible
   - SOLID: Open for extension, closed for modification
   
-  OTClient API OPTIMIZATIONS (based on OTCv8-dev):
-  - Uses findPath() with optimal flags for performance
+  OTClientBR Native API OPTIMIZATIONS:
+  - Uses g_map.findPath() with native flags for performance
   - Uses player:getStepDuration() for precise timing
-  - Uses player:isWalking() for state checks
+  - Uses player:isWalking() and player:isAutoWalking() for state checks
+  - Uses player:stopAutoWalk() for proper walk cancellation
   - Uses player:canWalk() for direction validation
   - Uses tile:isWalkable(ignoreCreatures) for fast tile checks
   - Uses tile:isPathable() for path validation
   - Uses tile:getGroundSpeed() for accurate timing
-  - Uses ClientService for cross-client compatibility (OTCv8/OpenTibiaBR)
-  - Uses autoWalk(path) for smooth multi-step walking
-  - Uses ClientService.walk(dir) for single step optimization
+  - Uses PathUtils for shared utilities and anti-zigzag logic
   
   PATHFINDING FLAGS (Otc::PathFindFlags):
-  - PathFindAllowNotSeenTiles = 1  (allow unseen tiles)
-  - PathFindAllowCreatures = 2     (ignore creatures)
-  - PathFindAllowNonPathable = 4   (ignore non-pathable)
-  - PathFindAllowNonWalkable = 8   (ignore non-walkable)
-  - PathFindIgnoreCreatures = 16   (step through creatures)
+  - PathFindAllowNotSeenTiles = 1
+  - PathFindAllowCreatures = 2
+  - PathFindAllowNonPathable = 4
+  - PathFindAllowNonWalkable = 8
+  - PathFindIgnoreCreatures = 16
   
-  PERFORMANCE OPTIMIZATIONS:
-  - O(1) lookups with pre-computed tables
-  - Path caching with smart invalidation
-  - Async pathfinding for long distances
-  - Batch tile validation
-  - Memory pooling for frequent operations
+  ANTI-ZIGZAG SYSTEM:
+  - Direction smoothing via PathUtils.getSmoothedDirection()
+  - Minimum delay between direction changes
+  - Opposite direction dampening
 ]]
+
+-- Load shared PathUtils module (OTClient compatible)
+local PathUtils = PathUtils  -- Try to get existing global first
+if not PathUtils then
+  local ok, mod = pcall(require, "utils.path_utils")
+  if ok and mod then PathUtils = mod end
+end
+
+-- SAFEGUARD: Ensure CaveBot.resetWalking exists even if file partially loads
+-- This will be overwritten by the proper implementation below
+if not CaveBot then CaveBot = {} end
+if not CaveBot.resetWalking then
+  CaveBot.resetWalking = function() end
+end
+if not CaveBot.fullResetWalking then
+  CaveBot.fullResetWalking = function() end
+end
 
 -- Get ClientService reference for cross-client compatibility
 local function getClient()
@@ -56,46 +70,47 @@ local THOROUGH_CHECK_DIST = 40 -- Thorough validation window
 -- OTCLIENT API OPTIMIZATIONS (NEW: High-performance walking)
 -- ============================================================================
 
--- Pre-computed step duration cache (avoids repeated API calls)
-local StepDurationCache = {
-  lastSpeed = 0,
-  durations = {},  -- [diagonal] = duration
-  lastUpdate = 0,
-  TTL = 1000,  -- Refresh every 1 second
-}
-
--- Get cached step duration (PERFORMANCE: reduces API calls by 90%)
+-- Use PathUtils for step duration (DRY: no duplicate caching logic)
 local function getCachedStepDuration(diagonal)
-  local playerSpeed = (player.getSpeed and player:getSpeed()) or 220
-  
-  -- Invalidate cache if speed changed or TTL expired
-  if playerSpeed ~= StepDurationCache.lastSpeed or 
-     now - StepDurationCache.lastUpdate > StepDurationCache.TTL then
-    StepDurationCache.lastSpeed = playerSpeed
-    StepDurationCache.lastUpdate = now
-    StepDurationCache.durations = {}
+  if PathUtils and PathUtils.getStepDuration then
+    return PathUtils.getStepDuration(diagonal)
   end
-  
-  -- Check cache
-  local key = diagonal and "diag" or "card"
-  if StepDurationCache.durations[key] then
-    return StepDurationCache.durations[key]
-  end
-  
-  -- Calculate and cache
-  local duration = (player.getStepDuration and player:getStepDuration(false, diagonal and NorthEast or North)) or 150
-  StepDurationCache.durations[key] = duration
-  return duration
+  -- Fallback
+  return (player.getStepDuration and player:getStepDuration(false, diagonal and NorthEast or North)) or 150
 end
 
--- Optimized tile walkability check (uses native API efficiently)
+-- Use PathUtils for tile walkability (DRY)
 local function isTileWalkableFast(pos, ignoreCreatures)
+  if PathUtils and PathUtils.isTileWalkable then
+    return PathUtils.isTileWalkable(pos, ignoreCreatures)
+  end
+  -- Fallback
   local Client = getClient()
   local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
   if not tile then return false end
-  
-  -- Use native isWalkable with creature ignore flag
   return tile:isWalkable(ignoreCreatures or false)
+end
+
+-- Check if player is auto-walking (native API)
+local function isAutoWalking()
+  if PathUtils and PathUtils.isAutoWalking then
+    return PathUtils.isAutoWalking()
+  end
+  return player and player.isAutoWalking and player:isAutoWalking() or false
+end
+
+-- Stop auto-walk (native API)
+local function stopAutoWalk()
+  if PathUtils and PathUtils.stopAutoWalk then
+    PathUtils.stopAutoWalk()
+    return
+  end
+  if player and player.stopAutoWalk then
+    player:stopAutoWalk()
+  end
+  if g_game and g_game.stop then
+    g_game.stop()
+  end
 end
 
 -- Optimized path validation using native tile:isPathable()
@@ -162,6 +177,18 @@ end
 -- PATH SMOOTHING CONSTANTS (For 40%+ accuracy improvement)
 -- ============================================================================
 
+-- Step duration cache (for resetWalking)
+local StepDurationCache = {
+  durations = {},
+  lastUpdate = 0,
+}
+
+-- Floor change tile cache (for resetWalking)
+local FloorChangeCache = {
+  tiles = {},
+  lastUpdate = 0,
+}
+
 local PATH_SMOOTHING = {
   -- Direction consistency tracking
   lastDirection = nil,
@@ -202,38 +229,38 @@ local function getDirectionTo(fromPos, toPos)
   return nil
 end
 
--- Check if two directions are similar (same or adjacent)
+-- Use PathUtils for direction similarity (DRY)
 local function areSimilarDirections(dir1, dir2)
-  if dir1 == nil or dir2 == nil then return true end  -- Allow first direction
-  if dir1 == dir2 then return true end
-  
-  -- Define adjacent directions
-  local adjacent = {
-    [North] = {NorthEast, NorthWest},
-    [East] = {NorthEast, SouthEast},
-    [South] = {SouthEast, SouthWest},
-    [West] = {NorthWest, SouthWest},
-    [NorthEast] = {North, East},
-    [SouthEast] = {South, East},
-    [SouthWest] = {South, West},
-    [NorthWest] = {North, West},
-  }
-  
-  local adj = adjacent[dir1]
-  if adj then
-    for _, d in ipairs(adj) do
-      if d == dir2 then return true end
-    end
+  if PathUtils and PathUtils.areSimilarDirections then
+    return PathUtils.areSimilarDirections(dir1, dir2)
   end
-  
+  -- Fallback
+  if dir1 == nil or dir2 == nil then return true end
+  return dir1 == dir2
+end
+
+-- Anti-zigzag: Check if directions are opposite
+local function areOppositeDirections(dir1, dir2)
+  if PathUtils and PathUtils.areOppositeDirections then
+    return PathUtils.areOppositeDirections(dir1, dir2)
+  end
   return false
 end
 
+-- Anti-zigzag: Get smoothed direction to prevent oscillation
+local function getSmoothedDirection(dir, forceChange)
+  if PathUtils and PathUtils.getSmoothedDirection then
+    return PathUtils.getSmoothedDirection(dir, forceChange)
+  end
+  return dir
+end
+
 -- ============================================================================
--- DIRECTION UTILITIES (Pure functions)
+-- DIRECTION UTILITIES (Use PathUtils where possible)
 -- ============================================================================
 
-local DIR_TO_OFFSET = {
+-- Use PathUtils DIR_TO_OFFSET if available
+local DIR_TO_OFFSET = (PathUtils and PathUtils.DIR_TO_OFFSET) or {
   [North] = {x = 0, y = -1},
   [East] = {x = 1, y = 0},
   [South] = {x = 0, y = 1},
@@ -249,27 +276,33 @@ local ADJACENT_OFFSETS = {
   {x = 1, y = -1}, {x = 1, y = 1}, {x = -1, y = 1}, {x = -1, y = -1},
 }
 
--- Pure: Get offset for direction
+-- Pure: Get offset for direction (use PathUtils)
 local function getDirectionOffset(dir)
   return DIR_TO_OFFSET[dir]
 end
 
--- Pure: Apply offset to position
+-- Pure: Apply offset to position (use PathUtils if available)
 local function applyOffset(pos, offset)
+  if PathUtils and PathUtils.applyDirection and type(offset) == 'number' then
+    return PathUtils.applyDirection(pos, offset)
+  end
   return {x = pos.x + offset.x, y = pos.y + offset.y, z = pos.z}
 end
 
--- Pure: Check position equality
+-- Pure: Check position equality (use PathUtils)
 local function posEquals(a, b)
+  if PathUtils and PathUtils.posEquals then
+    return PathUtils.posEquals(a, b)
+  end
   return a.x == b.x and a.y == b.y and a.z == b.z
 end
 
 -- ============================================================================
--- FIELD DETECTION (Fire, Energy, Poison Fields)
+-- FIELD DETECTION (Use PathUtils if available)
 -- ============================================================================
 
--- Field item IDs (fire, energy, poison, magic walls)
-local FIELD_ITEM_IDS = {
+-- Use PathUtils for field items if available
+local FIELD_ITEM_IDS = (PathUtils and PathUtils.FIELD_ITEMS) or {
   -- Fire Fields
   [1487] = true, [1488] = true, [1489] = true, [1490] = true, [1491] = true,
   [1492] = true, [1493] = true, [1494] = true, [1495] = true, [1496] = true,
@@ -338,165 +371,67 @@ local function isFieldTile(tilePos)
 end
 
 -- ============================================================================
--- FLOOR-CHANGE DETECTION (SRP: Only detects floor-change tiles)
+-- FLOOR-CHANGE DETECTION (Use PathUtils for DRY)
 -- ============================================================================
 
--- Floor-change tile cache (PERFORMANCE: avoid repeated tile lookups)
-local FloorChangeCache = {
-  tiles = {},
-  lastCleanup = 0,
-  TTL = 2000,  -- Cache valid for 2 seconds
-}
-
-local function getFloorChangeCacheKey(pos)
-  return pos.x .. "," .. pos.y .. "," .. pos.z
-end
-
--- Minimap colors for floor-change
-local FLOOR_CHANGE_COLORS = {
+-- Use PathUtils for floor-change colors and items if available
+local FLOOR_CHANGE_COLORS = (PathUtils and PathUtils.FLOOR_CHANGE_COLORS) or {
   [210] = true, [211] = true, [212] = true, [213] = true,
 }
 
--- Fast minimap-only check (for distant tiles - performance optimization)
-local function isFloorChangeTileFast(tilePos)
+local FLOOR_CHANGE_ITEMS = (PathUtils and PathUtils.FLOOR_CHANGE_ITEMS) or {
+  -- Minimal fallback set
+  [414] = true, [415] = true, [416] = true, [417] = true,
+  [1956] = true, [1957] = true, [1958] = true, [1959] = true,
+  [1219] = true, [384] = true, [386] = true, [418] = true,
+}
+
+-- Use PathUtils for floor-change detection (DRY)
+local function isFloorChangeTile(tilePos)
+  if PathUtils and PathUtils.isFloorChangeTile then
+    return PathUtils.isFloorChangeTile(tilePos)
+  end
+  -- Fallback: minimap color check
   if not tilePos then return false end
   local Client = getClient()
   local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(tilePos) or (g_map and g_map.getMinimapColor(tilePos)) or 0
   return FLOOR_CHANGE_COLORS[color] or false
 end
 
--- Comprehensive floor-change item IDs
-local FLOOR_CHANGE_ITEMS = {
-  -- === STAIRS ===
-  -- Stone stairs down (414-417, 428-431)
-  [414] = true, [415] = true, [416] = true, [417] = true,
-  [428] = true, [429] = true, [430] = true, [431] = true,
-  -- Stone stairs up (432-435)
-  [432] = true, [433] = true, [434] = true, [435] = true,
-  -- Wooden stairs (1949-1955)
-  [1949] = true, [1950] = true, [1951] = true,
-  [1952] = true, [1953] = true, [1954] = true, [1955] = true,
-  
-  -- === RAMPS ===
-  -- Standard ramps (1956-1959) - very common cause of pathfinding issues!
-  [1956] = true, [1957] = true, [1958] = true, [1959] = true,
-  -- Stone/Cave ramps (1385, 1396-1402)
-  [1385] = true, [1396] = true, [1397] = true, [1398] = true,
-  [1399] = true, [1400] = true, [1401] = true, [1402] = true,
-  -- Special terrain ramps (4834-4841)
-  [4834] = true, [4835] = true, [4836] = true, [4837] = true,
-  [4838] = true, [4839] = true, [4840] = true, [4841] = true,
-  -- Ice ramps (6915-6918)
-  [6915] = true, [6916] = true, [6917] = true, [6918] = true,
-  -- Desert/Jungle ramps (7545-7548)
-  [7545] = true, [7546] = true, [7547] = true, [7548] = true,
-  
-  -- === LADDERS & ROPE SPOTS ===
-  -- Ladders (1219, 1386, 3678, 5543)
-  [1219] = true, [1386] = true, [3678] = true, [5543] = true,
-  -- Rope spots (384, 386, 418)
-  [384] = true, [386] = true, [418] = true,
-  
-  -- === HOLES & TRAPDOORS ===
-  -- Holes and pitfalls (294, 369-370, 383, 392, 408-410, 469-470, 482, 484)
-  [294] = true, [369] = true, [370] = true, [383] = true,
-  [392] = true, [408] = true, [409] = true, [410] = true,
-  [469] = true, [470] = true, [482] = true, [484] = true,
-  -- Trapdoors (423-425)
-  [423] = true, [424] = true, [425] = true,
-  -- Sewer grates (426-427)
-  [426] = true, [427] = true,
-  
-  -- === TELEPORTS & PORTALS ===
-  -- Basic teleports (502, 1387)
-  [502] = true, [1387] = true,
-  -- Magic forcefields and portals (2129-2130, 8709)
-  [2129] = true, [2130] = true, [8709] = true,
-}
-
--- Pure: Check if tile has floor-change ground
-local function hasFloorChangeGround(tile)
-  if not tile then return false end
-  local ground = tile:getGround()
-  return ground and FLOOR_CHANGE_ITEMS[ground:getId()]
-end
-
--- Pure: Check if tile has floor-change item on top
-local function hasFloorChangeItem(tile)
-  if not tile then return false end
-  
-  local useThing = tile:getTopUseThing()
-  if useThing and useThing:isItem() and FLOOR_CHANGE_ITEMS[useThing:getId()] then
-    return true
+-- Use PathUtils for field detection (DRY)
+local function isFieldTile(tilePos)
+  if PathUtils and PathUtils.isFieldTile then
+    return PathUtils.isFieldTile(tilePos)
   end
-  
-  local topThing = tile:getTopThing()
-  if topThing and topThing:isItem() and FLOOR_CHANGE_ITEMS[topThing:getId()] then
-    return true
-  end
-  
   return false
 end
 
--- Pure: Check if position is a floor-change tile (with caching)
-local function isFloorChangeTile(tilePos)
-  if not tilePos then return false end
-  
-  -- Periodic cache cleanup (guarded to run at most once per second)
-  FloorChangeCache.lastCleanupCheck = FloorChangeCache.lastCleanupCheck or 0
-  if now - FloorChangeCache.lastCleanupCheck > 1000 then
-    FloorChangeCache.lastCleanupCheck = now
-    if now - FloorChangeCache.lastCleanup > 5000 then
-      FloorChangeCache.tiles = {}
-      FloorChangeCache.lastCleanup = now
-    end
+-- Fast minimap-only check (for distant tiles - performance optimization)
+local function isFloorChangeTileFast(tilePos)
+  if PathUtils and PathUtils.isFloorChangeTileFast then
+    return PathUtils.isFloorChangeTileFast(tilePos)
   end
-  
-  -- Check cache first
-  local cacheKey = getFloorChangeCacheKey(tilePos)
-  local cached = FloorChangeCache.tiles[cacheKey]
-  if cached ~= nil and now - cached.time < FloorChangeCache.TTL then
-    return cached.value
-  end
-  
-  -- Fast path: minimap color (no tile lookup needed)
-  local Client = getClient()
-  local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(tilePos) or (g_map and g_map.getMinimapColor(tilePos)) or 0
-  if FLOOR_CHANGE_COLORS[color] then
-    FloorChangeCache.tiles[cacheKey] = {value = true, time = now}
-    return true
-  end
-  
-  -- Slow path: tile inspection (only if minimap didn't detect)
-  local result = false
-  local tile = (Client and Client.getTile) and Client.getTile(tilePos) or (g_map and g_map.getTile(tilePos))
-  if tile then
-    result = hasFloorChangeGround(tile) or hasFloorChangeItem(tile)
-  end
-   
-  FloorChangeCache.tiles[cacheKey] = {value = result, time = now}
-  return result
+  return isFloorChangeTile(tilePos)
 end
 
 -- ============================================================================
--- TILE SAFETY (SRP: Checks if tiles are safe to walk)
+-- TILE SAFETY (Use PathUtils for DRY)
 -- ============================================================================
 
--- Pure: Check if tile is walkable and safe
+-- Use PathUtils for tile safety checks
 local function isTileSafe(tilePos, allowFloorChange)
+  if PathUtils and PathUtils.isTileSafe then
+    return PathUtils.isTileSafe(tilePos, allowFloorChange)
+  end
+  -- Fallback
   if not tilePos then return false end
-  
   local Client = getClient()
   local tile = (Client and Client.getTile) and Client.getTile(tilePos) or (g_map and g_map.getTile(tilePos))
   if not tile then return false end
   if not tile:isWalkable() then return false end
   local hasCreature = tile.hasCreature and tile:hasCreature()
   if hasCreature then return false end
-  
-  if not allowFloorChange and isFloorChangeTile(tilePos) then
-    return false
-  end
-  
+  if not allowFloorChange and isFloorChangeTile(tilePos) then return false end
   return true
 end
 
@@ -516,29 +451,28 @@ end
 -- PATH VALIDATION (SRP: Validates paths for safety)
 -- ============================================================================
 
--- Check if a position is adjacent to a floor-change tile (buffer zone)
+-- Check if a position is adjacent to a floor-change tile (Use PathUtils for DRY)
 local function isNearFloorChangeTile(tilePos)
+  if PathUtils and PathUtils.isNearFloorChangeTile then
+    return PathUtils.isNearFloorChangeTile(tilePos)
+  end
+  -- Fallback implementation
   if not tilePos then return false end
-  
-  -- Check the tile itself first
   if isFloorChangeTile(tilePos) then return true end
-  
-  -- Check adjacent tiles for floor-change (diagonal too - prevents diagonal step-on)
   for _, offset in ipairs(ADJACENT_OFFSETS) do
     local checkPos = applyOffset(tilePos, offset)
-    if isFloorChangeTile(checkPos) then
-      return true
-    end
+    if isFloorChangeTile(checkPos) then return true end
   end
-  
   return false
 end
 
--- Pure: Check if path crosses floor-change tiles (checks ALL steps for safety)
--- Also checks buffer zone around floor-change tiles to prevent accidental step-on
+-- Check if path crosses floor-change tiles (Use PathUtils for DRY)
 local function pathCrossesFloorChange(path, startPos, maxSteps)
+  if PathUtils and PathUtils.pathCrossesFloorChange then
+    return PathUtils.pathCrossesFloorChange(path, startPos, maxSteps)
+  end
+  -- Fallback implementation
   if not path or #path == 0 then return false end
-  
   local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
   local checkLimit = maxSteps and math.min(#path, maxSteps) or #path
   for i = 1, checkLimit do
@@ -1405,6 +1339,13 @@ onPlayerPositionChange(function(newPos, oldPos)
   
   FloorChangeCache.tiles = {}  -- Clear cache on any floor change
 end)
+
+-- DEBUG: Verify file loaded completely
+if CaveBot.resetWalking then
+  info("[CaveBot Walking] Module loaded successfully - resetWalking is defined")
+else
+  warn("[CaveBot Walking] ERROR: resetWalking is NOT defined after loading!")
+end
 
 -- Safeguard: ensure module closes cleanly
 return true

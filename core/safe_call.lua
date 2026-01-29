@@ -159,9 +159,7 @@ function SafeCall.call(func, ...)
     return false, nil
 end
 
--- Export to global namespace for easy access (only if _G is available)
-if _G then
-    _G.SafeCall = SafeCall
-end
+-- Export to global namespace for easy access (OTClient doesn't have _G)
+SafeCall = SafeCall  -- Makes it globally accessible
 
 return SafeCall

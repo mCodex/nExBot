@@ -344,7 +344,8 @@ local function calculatePriority(creature, dist)
 end
 
 -- Check if a switch to new target should be allowed
--- IMPROVED v3.0: Integrated with MonsterAI engagement lock
+-- IMPROVED v3.1: Config priority (user-set) takes precedence over calculated priority
+-- When a monster with HIGHER user-configured priority appears, switch immediately!
 local function shouldAllowSwitch(newCreature, newPriority)
   if not state.targetCreature or isCreatureDead(state.targetCreature) then
     -- Target is dead - end engagement and allow switch
@@ -356,60 +357,92 @@ local function shouldAllowSwitch(newCreature, newPriority)
   
   local currentTime = nowMs()
   
-  -- Check MonsterAI engagement lock FIRST (highest priority)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- FAST PATH: CONFIG PRIORITY CHECK (User-set priority takes precedence!)
+  -- If new creature has HIGHER user-configured priority, bypass most checks
+  -- This is the KEY feature for multi-monster configurations
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local newConfigPriority = 0
+  local currentConfigPriority = 0
+  
+  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+    -- Get new creature's config priority
+    local newConfigs = TargetBot.Creature.getConfigs(newCreature)
+    if newConfigs and #newConfigs > 0 then
+      for i = 1, #newConfigs do
+        local cfg = newConfigs[i]
+        if cfg.priority and cfg.priority > newConfigPriority then
+          newConfigPriority = cfg.priority
+        end
+      end
+    end
+    
+    -- Get current target's config priority
+    local currentConfigs = TargetBot.Creature.getConfigs(state.targetCreature)
+    if currentConfigs and #currentConfigs > 0 then
+      for i = 1, #currentConfigs do
+        local cfg = currentConfigs[i]
+        if cfg.priority and cfg.priority > currentConfigPriority then
+          currentConfigPriority = cfg.priority
+        end
+      end
+    end
+    
+    -- FAST PATH: Higher config priority = IMMEDIATE SWITCH
+    -- Only a reduced cooldown applies (500ms instead of 5000ms)
+    if newConfigPriority > currentConfigPriority then
+      local configSwitchCooldown = 500  -- Much shorter cooldown for config priority switches
+      if (currentTime - state.lastSwitchTime) >= configSwitchCooldown then
+        state.stats.switchesAllowed = (state.stats.switchesAllowed or 0) + 1
+        log("CONFIG PRIORITY SWITCH: " .. newConfigPriority .. " > " .. currentConfigPriority)
+        return true, "config_priority"
+      end
+    end
+  end
+  
+  -- Check MonsterAI engagement lock (only if not bypassed by config priority)
   if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
     local newCreatureId = getCreatureId(newCreature)
     local newHealth = getCreatureHealth(newCreature)
     local allowed, reason = MonsterAI.Scenario.shouldAllowTargetSwitch(newCreatureId, newPriority, newHealth)
     if not allowed then
-      state.stats.switchesBlocked = state.stats.switchesBlocked + 1
+      state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
       return false, "monsterai_" .. (reason or "blocked")
     end
   end
   
-  -- Switch cooldown (increased from original)
+  -- Standard switch cooldown
   if (currentTime - state.lastSwitchTime) < CONFIG.SWITCH_COOLDOWN then
-    state.stats.switchesBlocked = state.stats.switchesBlocked + 1
+    state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
     return false, "cooldown"
   end
   
   -- Current target health check
   local currentHp = getCreatureHealth(state.targetCreature)
   
-  -- CRITICAL HP: Never switch (increased threshold)
+  -- CRITICAL HP: Never switch (unless config priority is higher - handled above)
   if currentHp < CONFIG.CRITICAL_HP then
-    state.stats.switchesBlocked = state.stats.switchesBlocked + 1
+    state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
     return false, "critical_hp"
   end
   
-  -- Priority comparison
+  -- Priority comparison (calculated priority, not config priority)
   local priorityAdvantage = newPriority - state.targetPriority
   local requiredAdvantage = CONFIG.SWITCH_PRIORITY_THRESHOLD
   
   -- Adjust required advantage based on current target health
   if currentHp < CONFIG.LOW_HP then
-    requiredAdvantage = requiredAdvantage * 3  -- 300 priority needed
+    requiredAdvantage = requiredAdvantage * 3  -- 1500 priority needed
   elseif currentHp < CONFIG.WOUNDED_HP then
-    requiredAdvantage = requiredAdvantage * 2  -- 200 priority needed
+    requiredAdvantage = requiredAdvantage * 2  -- 1000 priority needed
   end
   
   if priorityAdvantage >= requiredAdvantage then
-    state.stats.switchesAllowed = state.stats.switchesAllowed + 1
+    state.stats.switchesAllowed = (state.stats.switchesAllowed or 0) + 1
     return true, "priority_advantage"
   end
   
-  -- MonsterAI gate (if available)
-  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
-    local newId = getCreatureId(newCreature)
-    local newHp = getCreatureHealth(newCreature)
-    local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, newPriority, newHp)
-    if not allowed then
-      state.stats.switchesBlocked = state.stats.switchesBlocked + 1
-      return false, "monsterai_blocked"
-    end
-  end
-  
-  state.stats.switchesBlocked = state.stats.switchesBlocked + 1
+  state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
   return false, "insufficient_priority"
 end
 

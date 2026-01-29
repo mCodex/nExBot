@@ -167,42 +167,69 @@ Slot 4: Quiver (if Paladin)
 ## 🛠️ Developer Notes & Technical Details
 
 > [!NOTE]
-> This section documents internal behavior introduced in **ContainerOpener v6** (event-driven rewrite) and how to integrate with it.
+> This section documents internal behavior introduced in **ContainerOpener v12** (OTClient optimized rewrite) and how to integrate with it.
+
+### Architecture (SOLID/SRP)
+
+The container opener is now split into specialized modules:
+
+- **ContainerQueue**: Manages the BFS queue of containers to open
+- **ContainerTracker**: Tracks opened containers to prevent duplicate opens
+- **ContainerScanner**: Scans containers for nested containers
+- **ContainerOpener**: Orchestrates the opening process
+
+### OTClientBR API Reference
+
+The following OTClient APIs are used:
+
+```lua
+-- Game-level container access
+g_game.getContainers()           -- Returns map<int, Container>
+g_game.getContainer(id)          -- Returns single Container
+g_game.open(item, prevContainer) -- Opens container, returns containerId
+g_game.close(container)          -- Closes container
+g_game.seekInContainer(id, idx)  -- Pagination: seek to index
+
+-- Container methods
+container:getItems()             -- Returns deque<Item>
+container:getCapacity()          -- Max items per page
+container:getSize()              -- Total items across all pages
+container:hasPages()             -- Has multiple pages?
+container:getFirstIndex()        -- Current page start index
+container:getId()                -- Container window ID
+container:getContainerItem()     -- The item representing this container
+
+-- Item methods
+item:isContainer()               -- Is this a container?
+item:getId()                     -- Item type ID
+```
 
 ### Events & Integration
 
-- EventBus emits `container:open` (container, previousContainer) on every container open — this is used internally by the ContainerOpener and available for other modules.
-- After a full open-all run, ContainerOpener emits `containers:open_all_complete`.
-- The `onAddItem(container, slot, item, oldItem)` handler now queues new container items immediately using a `parentId_slot` key to avoid sibling conflicts.
+- EventBus emits `containers:open_all_complete` after a full open-all run.
+- The `onAddItem(container, slot, item, oldItem)` handler queues new container items for opening.
+- The `onContainerOpen(container, previousContainer)` handler triggers scanning of new containers.
 
 **Example: subscribe to container events**
 
 ```lua
--- Log every container open
+-- Log when all containers are opened
 if EventBus and EventBus.on then
-  EventBus.on("container:open", function(container, previous)
-    local item = container:getContainerItem()
-    local name = item and item:getName() or "UNKNOWN"
-    print("[EventBus] Container opened: "..name)
+  EventBus.on("containers:open_all_complete", function()
+    print("[Container Panel] All containers opened!")
   end)
 end
 ```
 
-**Advanced usage: queue a specific nested container manually**
+**Queue a container for opening (new API)**
 
 ```lua
--- Manually queue a nested container to open next (for custom scripts)
-local parent = g_game.getContainer(0) -- example container ID
+-- Use ContainerQueue to add containers
+local parent = g_game.getContainer(0)
 if parent then
-  local items = parent:getItems()
-  for slot, it in ipairs(items) do
-    if it and it:isContainer() then
-      -- Use the same slotKey format : parentId_slot
-      local slotKey = tostring(parent:getId()) .. "_" .. tostring(slot)
-      if not ContainerOpener.queuedSlots[slotKey] then
-        ContainerOpener.queuedSlots[slotKey] = true
-        table.insert(ContainerOpener.queue, { item = it, parentContainerId = parent:getId(), slot = slot, slotKey = slotKey })
-      end
+  for slotIndex, item in ipairs(parent:getItems()) do
+    if item and item:isContainer() then
+      ContainerQueue.add(item, parent:getId(), slotIndex, false) -- false = back of queue
     end
   end
   schedule(20, ContainerOpener.processNext)
@@ -210,18 +237,21 @@ end
 ```
 
 > [!TIP]
-> Prefer EventBus hooks over direct modification when possible; direct queue manipulation should be reserved for advanced integration and managed carefully.
+> Use `ContainerQueue.add()` instead of directly manipulating the queue. The third parameter `true` adds to front (priority).
 
 ### Behavior Guarantees
 
-- The opener uses direct `item` references when queuing; this avoids ambiguous type ID collisions when multiple identical backpacks are present.
-- Containers are scanned across all open containers each pass (rescan) — newly added containers are discovered immediately.
-- The opener respects `config.autoMinimize` and `config.renameEnabled` and will apply minimize/rename in the finalization phase.
+- Queue uses slot-based keys (`containerId:absoluteSlotIndex`) for robust deduplication
+- `ContainerTracker` prevents re-opening the same slot within a grace period (4 seconds)
+- Pagination is handled automatically via `ContainerScanner.handlePages()`
+- The opener respects `config.autoMinimize` and `config.renameEnabled`
 
-### Migration Guidance for Script Authors
+### Performance Improvements (v12)
 
-- Avoid relying on internal queue fields like `itemTypeId` or `itemUniqueId` — newer code stores `item` and `slotKey` for robust identification.
-- Prefer subscribing to EventBus `container:open` instead of internal hooks for compatibility.
+- Reduced state tracking variables from 15+ to 4 core tables
+- Simplified slot key format: `"containerId:absoluteSlot"` instead of complex signatures
+- Removed redundant graph tracking
+- Faster queue lookups with O(1) `inQueue` set
 
 ---
 
