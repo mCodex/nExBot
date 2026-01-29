@@ -1314,6 +1314,939 @@ function ClientService.onRemoveItem(callback)
   end
 end
 
+--------------------------------------------------------------------------------
+-- OPENTIBIABR ENHANCED OPERATIONS
+-- These functions expose OpenTibiaBR-specific features through the ACL
+--------------------------------------------------------------------------------
+
+-- Force walk (more reliable walking)
+function ClientService.forceWalk(direction)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.forceWalk then
+    return acl.game.forceWalk(direction)
+  end
+  if g_game and g_game.forceWalk then
+    return g_game.forceWalk(direction)
+  end
+  -- Fallback to normal walk
+  return ClientService.walk(direction)
+end
+
+-- Schedule last walk
+function ClientService.setScheduleLastWalk(schedule)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.setScheduleLastWalk then
+    return acl.game.setScheduleLastWalk(schedule)
+  end
+  if g_game and g_game.setScheduleLastWalk then
+    return g_game.setScheduleLastWalk(schedule)
+  end
+end
+
+-- Walk speed configuration
+function ClientService.setWalkFirstStepDelay(delay)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.setWalkFirstStepDelay then
+    return acl.game.setWalkFirstStepDelay(delay)
+  end
+  if g_game and g_game.setWalkFirstStepDelay then
+    return g_game.setWalkFirstStepDelay(delay)
+  end
+end
+
+function ClientService.setWalkTurnDelay(delay)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.setWalkTurnDelay then
+    return acl.game.setWalkTurnDelay(delay)
+  end
+  if g_game and g_game.setWalkTurnDelay then
+    return g_game.setWalkTurnDelay(delay)
+  end
+end
+
+function ClientService.setWalkSpeedMultiplier(multiplier)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.setWalkSpeedMultiplier then
+    return acl.game.setWalkSpeedMultiplier(multiplier)
+  end
+  if g_game and g_game.setWalkSpeedMultiplier then
+    return g_game.setWalkSpeedMultiplier(multiplier)
+  end
+end
+
+function ClientService.getWalkSpeedMultiplier()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.getWalkSpeedMultiplier then
+    return acl.game.getWalkSpeedMultiplier()
+  end
+  if g_game and g_game.getWalkSpeedMultiplier then
+    return g_game.getWalkSpeedMultiplier()
+  end
+  return 1.0
+end
+
+function ClientService.getWalkMaxSteps()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.getWalkMaxSteps then
+    return acl.game.getWalkMaxSteps()
+  end
+  if g_game and g_game.getWalkMaxSteps then
+    return g_game.getWalkMaxSteps()
+  end
+  return 10
+end
+
+function ClientService.setWalkMaxSteps(steps)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.setWalkMaxSteps then
+    return acl.game.setWalkMaxSteps(steps)
+  end
+  if g_game and g_game.setWalkMaxSteps then
+    return g_game.setWalkMaxSteps(steps)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- STASH OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.stashWithdraw(itemId, count)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.stashWithdraw then
+    return acl.game.stashWithdraw(itemId, count)
+  end
+  if g_game and g_game.stashWithdraw then
+    return g_game.stashWithdraw(itemId, count)
+  end
+end
+
+function ClientService.stashStowItem(item, count)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.stashStowItem then
+    return acl.game.stashStowItem(item, count)
+  end
+  if g_game and g_game.stashStowItem then
+    return g_game.stashStowItem(item, count)
+  end
+end
+
+function ClientService.stashStowAll(item)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.stashStowAll then
+    return acl.game.stashStowAll(item)
+  end
+  if g_game and g_game.stashStowAll then
+    return g_game.stashStowAll(item)
+  end
+end
+
+function ClientService.openStash()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.openStash then
+    return acl.game.openStash()
+  end
+  if g_game and g_game.openStash then
+    return g_game.openStash()
+  end
+end
+
+function ClientService.requestStashSearch(itemId)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestStashSearch then
+    return acl.game.requestStashSearch(itemId)
+  end
+  if g_game and g_game.requestStashSearch then
+    return g_game.requestStashSearch(itemId)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- QUICK LOOT OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.sendQuickLoot(pos)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.sendQuickLoot then
+    return acl.game.sendQuickLoot(pos)
+  end
+  if g_game and g_game.sendQuickLoot then
+    return g_game.sendQuickLoot(pos)
+  end
+end
+
+function ClientService.quickLootCorpse(tile)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.quickLootCorpse then
+    return acl.game.quickLootCorpse(tile)
+  end
+  if g_game and g_game.quickLootCorpse then
+    return g_game.quickLootCorpse(tile)
+  end
+end
+
+function ClientService.setQuickLootFallback(enabled)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.setQuickLootFallback then
+    return acl.game.setQuickLootFallback(enabled)
+  end
+  if g_game and g_game.setQuickLootFallback then
+    return g_game.setQuickLootFallback(enabled)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- IMBUEMENT OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.imbuementDurations()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.imbuementDurations then
+    return acl.game.imbuementDurations()
+  end
+  if g_game and g_game.imbuementDurations then
+    return g_game.imbuementDurations()
+  end
+  return {}
+end
+
+function ClientService.applyImbuement(slotId, imbuementId, usedProtection)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.applyImbuement then
+    return acl.game.applyImbuement(slotId, imbuementId, usedProtection)
+  end
+  if g_game and g_game.applyImbuement then
+    return g_game.applyImbuement(slotId, imbuementId, usedProtection or false)
+  end
+end
+
+function ClientService.clearImbuement(slotId)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.clearImbuement then
+    return acl.game.clearImbuement(slotId)
+  end
+  if g_game and g_game.clearImbuement then
+    return g_game.clearImbuement(slotId)
+  end
+end
+
+function ClientService.requestImbuingWindow(item)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestImbuingWindow then
+    return acl.game.requestImbuingWindow(item)
+  end
+  if g_game and g_game.requestImbuingWindow then
+    return g_game.requestImbuingWindow(item)
+  end
+end
+
+function ClientService.closeImbuingWindow()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.closeImbuingWindow then
+    return acl.game.closeImbuingWindow()
+  end
+  if g_game and g_game.closeImbuingWindow then
+    return g_game.closeImbuingWindow()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- PREY OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.preyAction(slotId, actionType, bonusType, monsterIndex)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.preyAction then
+    return acl.game.preyAction(slotId, actionType, bonusType, monsterIndex)
+  end
+  if g_game and g_game.preyAction then
+    return g_game.preyAction(slotId, actionType, bonusType or 0, monsterIndex or 0)
+  end
+end
+
+function ClientService.requestPreyData()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestPreyData then
+    return acl.game.requestPreyData()
+  end
+  if g_game and g_game.requestPreyData then
+    return g_game.requestPreyData()
+  end
+end
+
+function ClientService.selectPreyCreature(slotId, creatureIndex)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.selectPreyCreature then
+    return acl.game.selectPreyCreature(slotId, creatureIndex)
+  end
+  if g_game and g_game.selectPreyCreature then
+    return g_game.selectPreyCreature(slotId, creatureIndex)
+  end
+end
+
+function ClientService.refreshPreyMonsters(slotId)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.refreshPreyMonsters then
+    return acl.game.refreshPreyMonsters(slotId)
+  end
+  if g_game and g_game.refreshPreyMonsters then
+    return g_game.refreshPreyMonsters(slotId)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- FORGE OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.forgeRequest(action, ...)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.forgeRequest then
+    return acl.game.forgeRequest(action, ...)
+  end
+  if g_game and g_game.forgeRequest then
+    return g_game.forgeRequest(action, ...)
+  end
+end
+
+function ClientService.forgeFuse(firstItem, secondItem, usedCore)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.forgeFuse then
+    return acl.game.forgeFuse(firstItem, secondItem, usedCore)
+  end
+  if g_game and g_game.forgeFuse then
+    return g_game.forgeFuse(firstItem, secondItem, usedCore or false)
+  end
+end
+
+function ClientService.forgeTransfer(donorItem, receiverItem, usedCore)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.forgeTransfer then
+    return acl.game.forgeTransfer(donorItem, receiverItem, usedCore)
+  end
+  if g_game and g_game.forgeTransfer then
+    return g_game.forgeTransfer(donorItem, receiverItem, usedCore or false)
+  end
+end
+
+function ClientService.openForge()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.openForge then
+    return acl.game.openForge()
+  end
+  if g_game and g_game.openForge then
+    return g_game.openForge()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- MARKET OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.browseMarket(category, vocation)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.browseMarket then
+    return acl.game.browseMarket(category, vocation)
+  end
+  if g_game and g_game.browseMarket then
+    return g_game.browseMarket(category or 0, vocation or 0)
+  end
+end
+
+function ClientService.createMarketOffer(offerType, itemId, amount, price, anonymous)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.createMarketOffer then
+    return acl.game.createMarketOffer(offerType, itemId, amount, price, anonymous)
+  end
+  if g_game and g_game.createMarketOffer then
+    return g_game.createMarketOffer(offerType, itemId, amount, price, anonymous or false)
+  end
+end
+
+function ClientService.cancelMarketOffer(offerId)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.cancelMarketOffer then
+    return acl.game.cancelMarketOffer(offerId)
+  end
+  if g_game and g_game.cancelMarketOffer then
+    return g_game.cancelMarketOffer(offerId)
+  end
+end
+
+function ClientService.acceptMarketOffer(offerId, amount)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.acceptMarketOffer then
+    return acl.game.acceptMarketOffer(offerId, amount)
+  end
+  if g_game and g_game.acceptMarketOffer then
+    return g_game.acceptMarketOffer(offerId, amount)
+  end
+end
+
+function ClientService.requestMarketInfo(itemId)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestMarketInfo then
+    return acl.game.requestMarketInfo(itemId)
+  end
+  if g_game and g_game.requestMarketInfo then
+    return g_game.requestMarketInfo(itemId)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- MODAL DIALOG OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.answerModalDialog(dialogId, buttonId, choiceId)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.answerModalDialog then
+    return acl.game.answerModalDialog(dialogId, buttonId, choiceId)
+  end
+  if g_game and g_game.answerModalDialog then
+    return g_game.answerModalDialog(dialogId, buttonId, choiceId or 0)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- BROWSE/INSPECTION OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.browseField(pos)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.browseField then
+    return acl.game.browseField(pos)
+  end
+  if g_game and g_game.browseField then
+    return g_game.browseField(pos)
+  end
+end
+
+function ClientService.inspectionNormalObject(thing)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.inspectionNormalObject then
+    return acl.game.inspectionNormalObject(thing)
+  end
+  if g_game and g_game.inspectionNormalObject then
+    return g_game.inspectionNormalObject(thing)
+  end
+end
+
+function ClientService.inspectionObject(inspectionType, id, count)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.inspectionObject then
+    return acl.game.inspectionObject(inspectionType, id, count)
+  end
+  if g_game and g_game.inspectionObject then
+    return g_game.inspectionObject(inspectionType, id, count or 1)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- CONTAINER OPERATIONS (Enhanced)
+--------------------------------------------------------------------------------
+
+function ClientService.refreshContainer(container)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.refreshContainer then
+    return acl.game.refreshContainer(container)
+  end
+  if g_game and g_game.refreshContainer then
+    return g_game.refreshContainer(container)
+  end
+end
+
+function ClientService.requestContainerQueue()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestContainerQueue then
+    return acl.game.requestContainerQueue()
+  end
+  if g_game and g_game.requestContainerQueue then
+    return g_game.requestContainerQueue()
+  end
+end
+
+function ClientService.openContainerAt(thing, pos)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.openContainerAt then
+    return acl.game.openContainerAt(thing, pos)
+  end
+  if g_game and g_game.openContainerAt then
+    return g_game.openContainerAt(thing, pos)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- NPC TRADE OPERATIONS (Enhanced)
+--------------------------------------------------------------------------------
+
+function ClientService.buyItem(item, amount, ignoreCapacity, buyWithBackpack)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.buyItem then
+    return acl.game.buyItem(item, amount, ignoreCapacity, buyWithBackpack)
+  end
+  if g_game and g_game.buyItem then
+    return g_game.buyItem(item, amount or 1, ignoreCapacity or false, buyWithBackpack or false)
+  end
+end
+
+function ClientService.sellItem(item, amount, ignoreEquipped)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.sellItem then
+    return acl.game.sellItem(item, amount, ignoreEquipped)
+  end
+  if g_game and g_game.sellItem then
+    return g_game.sellItem(item, amount or 1, ignoreEquipped or false)
+  end
+end
+
+function ClientService.requestNPCTrade(creature)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestNPCTrade then
+    return acl.game.requestNPCTrade(creature)
+  end
+  if g_game and g_game.requestNPCTrade then
+    return g_game.requestNPCTrade(creature)
+  end
+end
+
+function ClientService.closeNPCTrade()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.closeNPCTrade then
+    return acl.game.closeNPCTrade()
+  end
+  if g_game and g_game.closeNPCTrade then
+    return g_game.closeNPCTrade()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- BLESSINGS
+--------------------------------------------------------------------------------
+
+function ClientService.requestBless()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestBless then
+    return acl.game.requestBless()
+  end
+  if g_game and g_game.requestBless then
+    return g_game.requestBless()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OUTFIT OPERATIONS (Enhanced)
+--------------------------------------------------------------------------------
+
+function ClientService.requestOutfitChange()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestOutfitChange then
+    return acl.game.requestOutfitChange()
+  end
+  if g_game and g_game.requestOutfitChange then
+    return g_game.requestOutfitChange()
+  end
+end
+
+function ClientService.mountCreature(mount)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.mountCreature then
+    return acl.game.mountCreature(mount)
+  end
+  if g_game and g_game.mountCreature then
+    return g_game.mountCreature(mount)
+  end
+end
+
+function ClientService.requestMounts()
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestMounts then
+    return acl.game.requestMounts()
+  end
+  if g_game and g_game.requestMounts then
+    return g_game.requestMounts()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- CYCLOPEDIA OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.requestCyclopediaMapData(pos, zoomLevel)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestCyclopediaMapData then
+    return acl.game.requestCyclopediaMapData(pos, zoomLevel)
+  end
+  if g_game and g_game.requestCyclopediaMapData then
+    return g_game.requestCyclopediaMapData(pos, zoomLevel or 0)
+  end
+end
+
+function ClientService.requestCharacterInfo(type)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestCharacterInfo then
+    return acl.game.requestCharacterInfo(type)
+  end
+  if g_game and g_game.requestCharacterInfo then
+    return g_game.requestCharacterInfo(type or 0)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- PARTY OPERATIONS (Enhanced)
+--------------------------------------------------------------------------------
+
+function ClientService.requestPartySharedExperience(enable)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.requestPartySharedExperience then
+    return acl.game.requestPartySharedExperience(enable)
+  end
+  if g_game and g_game.requestPartySharedExperience then
+    return g_game.requestPartySharedExperience(enable)
+  end
+end
+
+function ClientService.passPartyLeadership(creature)
+  local acl = loadACL()
+  if acl and acl.game and acl.game.passPartyLeadership then
+    return acl.game.passPartyLeadership(creature)
+  end
+  if g_game and g_game.passPartyLeadership then
+    return g_game.passPartyLeadership(creature)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- ENHANCED MAP OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.findEveryPath(startPos, destinations, maxSteps, flags)
+  local acl = loadACL()
+  if acl and acl.map and acl.map.findEveryPath then
+    return acl.map.findEveryPath(startPos, destinations, maxSteps, flags)
+  end
+  if g_map and g_map.findEveryPath then
+    return g_map.findEveryPath(startPos, destinations, maxSteps or 50, flags or 0)
+  end
+  return {}
+end
+
+function ClientService.getSpectatorsInRangeEx(pos, multifloor, minRangeX, maxRangeX, minRangeY, maxRangeY)
+  local acl = loadACL()
+  if acl and acl.map and acl.map.getSpectatorsInRangeEx then
+    return acl.map.getSpectatorsInRangeEx(pos, multifloor, minRangeX, maxRangeX, minRangeY, maxRangeY)
+  end
+  if g_map and g_map.getSpectatorsInRangeEx then
+    return g_map.getSpectatorsInRangeEx(pos, multifloor, minRangeX, maxRangeX, minRangeY, maxRangeY) or {}
+  end
+  return ClientService.getSpectators(pos, multifloor)
+end
+
+function ClientService.getSightSpectators(pos, multifloor)
+  local acl = loadACL()
+  if acl and acl.map and acl.map.getSightSpectators then
+    return acl.map.getSightSpectators(pos, multifloor)
+  end
+  if g_map and g_map.getSightSpectators then
+    return g_map.getSightSpectators(pos, multifloor) or {}
+  end
+  return ClientService.getSpectators(pos, multifloor)
+end
+
+function ClientService.getSpectatorsByPattern(pos, pattern, width, height, firstFloor, lastFloor)
+  local acl = loadACL()
+  if acl and acl.map and acl.map.getSpectatorsByPattern then
+    return acl.map.getSpectatorsByPattern(pos, pattern, width, height, firstFloor, lastFloor)
+  end
+  if g_map and g_map.getSpectatorsByPattern then
+    return g_map.getSpectatorsByPattern(pos, pattern, width, height, firstFloor, lastFloor) or {}
+  end
+  return {}
+end
+
+function ClientService.getCreatureById(creatureId)
+  local acl = loadACL()
+  if acl and acl.map and acl.map.getCreatureById then
+    return acl.map.getCreatureById(creatureId)
+  end
+  if g_map and g_map.getCreatureById then
+    return g_map.getCreatureById(creatureId)
+  end
+  return nil
+end
+
+function ClientService.isAwareOfPosition(pos)
+  local acl = loadACL()
+  if acl and acl.map and acl.map.isAwareOfPosition then
+    return acl.map.isAwareOfPosition(pos)
+  end
+  if g_map and g_map.isAwareOfPosition then
+    return g_map.isAwareOfPosition(pos)
+  end
+  return false
+end
+
+function ClientService.findItemsById(itemId, multifloor)
+  local acl = loadACL()
+  if acl and acl.map and acl.map.findItemsById then
+    return acl.map.findItemsById(itemId, multifloor)
+  end
+  if g_map and g_map.findItemsById then
+    return g_map.findItemsById(itemId, multifloor or false) or {}
+  end
+  return {}
+end
+
+function ClientService.getTilesInRange(pos, rangeX, rangeY, multifloor)
+  local acl = loadACL()
+  if acl and acl.map and acl.map.getTilesInRange then
+    return acl.map.getTilesInRange(pos, rangeX, rangeY, multifloor)
+  end
+  if g_map and g_map.getTilesInRange then
+    return g_map.getTilesInRange(pos, rangeX, rangeY, multifloor or false) or {}
+  end
+  -- Fallback implementation
+  local tiles = {}
+  for x = pos.x - rangeX, pos.x + rangeX do
+    for y = pos.y - rangeY, pos.y + rangeY do
+      local tile = ClientService.getTile({x = x, y = y, z = pos.z})
+      if tile then
+        table.insert(tiles, tile)
+      end
+    end
+  end
+  return tiles
+end
+
+function ClientService.cleanTile(pos)
+  local acl = loadACL()
+  if acl and acl.map and acl.map.cleanTile then
+    return acl.map.cleanTile(pos)
+  end
+  if g_map and g_map.cleanTile then
+    return g_map.cleanTile(pos)
+  end
+end
+
+function ClientService.setMinimapColor(pos, color, description)
+  local acl = loadACL()
+  if acl and acl.map and acl.map.setMinimapColor then
+    return acl.map.setMinimapColor(pos, color, description)
+  end
+  if g_map and g_map.setMinimapColor then
+    return g_map.setMinimapColor(pos, color, description)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- BESTIARY OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.requestBestiary()
+  local acl = loadACL()
+  if acl and acl.bestiary and acl.bestiary.request then
+    return acl.bestiary.request()
+  end
+  if g_game and g_game.requestBestiary then
+    return g_game.requestBestiary()
+  end
+end
+
+function ClientService.requestBestiaryOverview(raceName)
+  local acl = loadACL()
+  if acl and acl.bestiary and acl.bestiary.requestOverview then
+    return acl.bestiary.requestOverview(raceName)
+  end
+  if g_game and g_game.requestBestiaryOverview then
+    return g_game.requestBestiaryOverview(raceName)
+  end
+end
+
+function ClientService.requestBestiarySearch(text)
+  local acl = loadACL()
+  if acl and acl.bestiary and acl.bestiary.search then
+    return acl.bestiary.search(text)
+  end
+  if g_game and g_game.requestBestiarySearch then
+    return g_game.requestBestiarySearch(text)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- BOSSTIARY OPERATIONS
+--------------------------------------------------------------------------------
+
+function ClientService.requestBosstiaryInfo()
+  local acl = loadACL()
+  if acl and acl.bosstiary and acl.bosstiary.requestInfo then
+    return acl.bosstiary.requestInfo()
+  end
+  if g_game and g_game.requestBosstiaryInfo then
+    return g_game.requestBosstiaryInfo()
+  end
+end
+
+function ClientService.requestBossSlootInfo()
+  local acl = loadACL()
+  if acl and acl.bosstiary and acl.bosstiary.requestSlotInfo then
+    return acl.bosstiary.requestSlotInfo()
+  end
+  if g_game and g_game.requestBossSlootInfo then
+    return g_game.requestBossSlootInfo()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- ADDITIONAL CALLBACKS FOR OPENTIBIABR
+--------------------------------------------------------------------------------
+
+function ClientService.onImbuementWindow(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onImbuementWindow then
+    return acl.callbacks.onImbuementWindow(callback)
+  end
+  if onImbuementWindow then
+    return onImbuementWindow(callback)
+  end
+end
+
+function ClientService.onForgeResult(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onForgeResult then
+    return acl.callbacks.onForgeResult(callback)
+  end
+  if onForgeResult then
+    return onForgeResult(callback)
+  end
+end
+
+function ClientService.onPreyData(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onPreyData then
+    return acl.callbacks.onPreyData(callback)
+  end
+  if onPreyData then
+    return onPreyData(callback)
+  end
+end
+
+function ClientService.onMarketBrowse(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onMarketBrowse then
+    return acl.callbacks.onMarketBrowse(callback)
+  end
+  if onMarketBrowse then
+    return onMarketBrowse(callback)
+  end
+end
+
+function ClientService.onMarketOffer(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onMarketOffer then
+    return acl.callbacks.onMarketOffer(callback)
+  end
+  if onMarketOffer then
+    return onMarketOffer(callback)
+  end
+end
+
+function ClientService.onStashAction(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onStashAction then
+    return acl.callbacks.onStashAction(callback)
+  end
+  if onStashAction then
+    return onStashAction(callback)
+  end
+end
+
+function ClientService.onBestiaryData(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onBestiaryData then
+    return acl.callbacks.onBestiaryData(callback)
+  end
+  if onBestiaryData then
+    return onBestiaryData(callback)
+  end
+end
+
+function ClientService.onModalDialog(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onModalDialog then
+    return acl.callbacks.onModalDialog(callback)
+  end
+  if onModalDialog then
+    return onModalDialog(callback)
+  end
+end
+
+function ClientService.onAttackingCreatureChange(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onAttackingCreatureChange then
+    return acl.callbacks.onAttackingCreatureChange(callback)
+  end
+  if onAttackingCreatureChange then
+    return onAttackingCreatureChange(callback)
+  end
+end
+
+function ClientService.onInventoryChange(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onInventoryChange then
+    return acl.callbacks.onInventoryChange(callback)
+  end
+  if onInventoryChange then
+    return onInventoryChange(callback)
+  end
+end
+
+function ClientService.onManaChange(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onManaChange then
+    return acl.callbacks.onManaChange(callback)
+  end
+  if onManaChange then
+    return onManaChange(callback)
+  end
+end
+
+function ClientService.onStatesChange(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onStatesChange then
+    return acl.callbacks.onStatesChange(callback)
+  end
+  if onStatesChange then
+    return onStatesChange(callback)
+  end
+end
+
+function ClientService.onWalk(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onWalk then
+    return acl.callbacks.onWalk(callback)
+  end
+  if onWalk then
+    return onWalk(callback)
+  end
+end
+
+function ClientService.onAddThing(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onAddThing then
+    return acl.callbacks.onAddThing(callback)
+  end
+  if onAddThing then
+    return onAddThing(callback)
+  end
+end
+
+function ClientService.onRemoveThing(callback)
+  local acl = loadACL()
+  if acl and acl.callbacks and acl.callbacks.onRemoveThing then
+    return acl.callbacks.onRemoveThing(callback)
+  end
+  if onRemoveThing then
+    return onRemoveThing(callback)
+  end
+end
+
 -- Make it globally accessible (use rawset to avoid errors if _G doesn't exist)
 if rawset then
   pcall(function() rawset(_G, 'ClientService', ClientService) end)
@@ -1321,5 +2254,16 @@ end
 
 -- Also export as global in bot environment
 ClientService = ClientService
+
+-- Global helper function for easy access (DRY pattern)
+-- This replaces the duplicated local getClient() in each file
+function getClient()
+  return ClientService
+end
+
+-- Make getClient globally accessible too
+if rawset then
+  pcall(function() rawset(_G, 'getClient', getClient) end)
+end
 
 return ClientService

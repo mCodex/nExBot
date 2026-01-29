@@ -83,6 +83,18 @@ function OpenTibiaBRAdapter.game.sendQuickLoot(pos)
   end
 end
 
+function OpenTibiaBRAdapter.game.quickLootCorpse(tile)
+  if g_game and g_game.quickLootCorpse then
+    return g_game.quickLootCorpse(tile)
+  end
+end
+
+function OpenTibiaBRAdapter.game.setQuickLootFallback(enabled)
+  if g_game and g_game.setQuickLootFallback then
+    return g_game.setQuickLootFallback(enabled)
+  end
+end
+
 -- OpenTibiaBR stash operations
 function OpenTibiaBRAdapter.game.stashWithdraw(itemId, count)
   if g_game and g_game.stashWithdraw then
@@ -94,6 +106,319 @@ function OpenTibiaBRAdapter.game.stashStowItem(item, count)
   if g_game and g_game.stashStowItem then
     return g_game.stashStowItem(item, count)
   end
+end
+
+function OpenTibiaBRAdapter.game.stashStowAll(item)
+  if g_game and g_game.stashStowAll then
+    return g_game.stashStowAll(item)
+  end
+end
+
+function OpenTibiaBRAdapter.game.openStash()
+  if g_game and g_game.openStash then
+    return g_game.openStash()
+  end
+end
+
+function OpenTibiaBRAdapter.game.requestStashSearch(itemId)
+  if g_game and g_game.requestStashSearch then
+    return g_game.requestStashSearch(itemId)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR IMBUEMENT OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.applyImbuement(slotId, imbuementId, usedProtection)
+  if g_game and g_game.applyImbuement then
+    return g_game.applyImbuement(slotId, imbuementId, usedProtection or false)
+  end
+end
+
+function OpenTibiaBRAdapter.game.clearImbuement(slotId)
+  if g_game and g_game.clearImbuement then
+    return g_game.clearImbuement(slotId)
+  end
+end
+
+function OpenTibiaBRAdapter.game.requestImbuingWindow(item)
+  if g_game and g_game.requestImbuingWindow then
+    return g_game.requestImbuingWindow(item)
+  end
+end
+
+function OpenTibiaBRAdapter.game.closeImbuingWindow()
+  if g_game and g_game.closeImbuingWindow then
+    return g_game.closeImbuingWindow()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR PREY OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.preyAction(slotId, actionType, bonusType, monsterIndex)
+  if g_game and g_game.preyAction then
+    return g_game.preyAction(slotId, actionType, bonusType or 0, monsterIndex or 0)
+  end
+end
+
+function OpenTibiaBRAdapter.game.requestPreyData()
+  if g_game and g_game.requestPreyData then
+    return g_game.requestPreyData()
+  end
+end
+
+function OpenTibiaBRAdapter.game.selectPreyCreature(slotId, creatureIndex)
+  if g_game and g_game.selectPreyCreature then
+    return g_game.selectPreyCreature(slotId, creatureIndex)
+  end
+end
+
+function OpenTibiaBRAdapter.game.refreshPreyMonsters(slotId)
+  if g_game and g_game.refreshPreyMonsters then
+    return g_game.refreshPreyMonsters(slotId)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR FORGE OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.forgeRequest(action, ...)
+  if g_game and g_game.forgeRequest then
+    return g_game.forgeRequest(action, ...)
+  end
+end
+
+function OpenTibiaBRAdapter.game.forgeFuse(firstItem, secondItem, usedCore)
+  if g_game and g_game.forgeFuse then
+    return g_game.forgeFuse(firstItem, secondItem, usedCore or false)
+  end
+end
+
+function OpenTibiaBRAdapter.game.forgeTransfer(donorItem, receiverItem, usedCore)
+  if g_game and g_game.forgeTransfer then
+    return g_game.forgeTransfer(donorItem, receiverItem, usedCore or false)
+  end
+end
+
+function OpenTibiaBRAdapter.game.openForge()
+  if g_game and g_game.openForge then
+    return g_game.openForge()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR MARKET OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.browseMarket(category, vocation)
+  if g_game and g_game.browseMarket then
+    return g_game.browseMarket(category or 0, vocation or 0)
+  end
+end
+
+function OpenTibiaBRAdapter.game.createMarketOffer(offerType, itemId, amount, price, anonymous)
+  if g_game and g_game.createMarketOffer then
+    return g_game.createMarketOffer(offerType, itemId, amount, price, anonymous or false)
+  end
+end
+
+function OpenTibiaBRAdapter.game.cancelMarketOffer(offerId)
+  if g_game and g_game.cancelMarketOffer then
+    return g_game.cancelMarketOffer(offerId)
+  end
+end
+
+function OpenTibiaBRAdapter.game.acceptMarketOffer(offerId, amount)
+  if g_game and g_game.acceptMarketOffer then
+    return g_game.acceptMarketOffer(offerId, amount)
+  end
+end
+
+function OpenTibiaBRAdapter.game.requestMarketInfo(itemId)
+  if g_game and g_game.requestMarketInfo then
+    return g_game.requestMarketInfo(itemId)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR MODAL DIALOG OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.answerModalDialog(dialogId, buttonId, choiceId)
+  if g_game and g_game.answerModalDialog then
+    return g_game.answerModalDialog(dialogId, buttonId, choiceId or 0)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR BROWSE/INSPECTION OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.browseField(pos)
+  if g_game and g_game.browseField then
+    return g_game.browseField(pos)
+  end
+end
+
+function OpenTibiaBRAdapter.game.inspectionNormalObject(thing)
+  if g_game and g_game.inspectionNormalObject then
+    return g_game.inspectionNormalObject(thing)
+  end
+end
+
+function OpenTibiaBRAdapter.game.inspectionObject(inspectionType, id, count)
+  if g_game and g_game.inspectionObject then
+    return g_game.inspectionObject(inspectionType, id, count or 1)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR CONTAINER OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.refreshContainer(container)
+  if g_game and g_game.refreshContainer then
+    return g_game.refreshContainer(container)
+  end
+end
+
+function OpenTibiaBRAdapter.game.requestContainerQueue()
+  if g_game and g_game.requestContainerQueue then
+    return g_game.requestContainerQueue()
+  end
+end
+
+function OpenTibiaBRAdapter.game.openContainerAt(thing, pos)
+  if g_game and g_game.openContainerAt then
+    return g_game.openContainerAt(thing, pos)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR OUTFIT OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.requestOutfitChange()
+  if g_game and g_game.requestOutfitChange then
+    return g_game.requestOutfitChange()
+  end
+end
+
+function OpenTibiaBRAdapter.game.changeOutfit(outfit)
+  if g_game and g_game.changeOutfit then
+    return g_game.changeOutfit(outfit)
+  end
+end
+
+function OpenTibiaBRAdapter.game.mountCreature(mount)
+  if g_game and g_game.mountCreature then
+    return g_game.mountCreature(mount)
+  end
+end
+
+function OpenTibiaBRAdapter.game.requestMounts()
+  if g_game and g_game.requestMounts then
+    return g_game.requestMounts()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR NPC TRADE OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.buyItem(item, amount, ignoreCapacity, buyWithBackpack)
+  if g_game and g_game.buyItem then
+    return g_game.buyItem(item, amount or 1, ignoreCapacity or false, buyWithBackpack or false)
+  end
+end
+
+function OpenTibiaBRAdapter.game.sellItem(item, amount, ignoreEquipped)
+  if g_game and g_game.sellItem then
+    return g_game.sellItem(item, amount or 1, ignoreEquipped or false)
+  end
+end
+
+function OpenTibiaBRAdapter.game.requestNPCTrade(creature)
+  if g_game and g_game.requestNPCTrade then
+    return g_game.requestNPCTrade(creature)
+  end
+end
+
+function OpenTibiaBRAdapter.game.closeNPCTrade()
+  if g_game and g_game.closeNPCTrade then
+    return g_game.closeNPCTrade()
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR CYCLOPEDIA OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.requestCyclopediaMapData(pos, zoomLevel)
+  if g_game and g_game.requestCyclopediaMapData then
+    return g_game.requestCyclopediaMapData(pos, zoomLevel or 0)
+  end
+end
+
+function OpenTibiaBRAdapter.game.requestCharacterInfo(type)
+  if g_game and g_game.requestCharacterInfo then
+    return g_game.requestCharacterInfo(type or 0)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR PARTY OPERATIONS
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.requestPartySharedExperience(enable)
+  if g_game and g_game.requestPartySharedExperience then
+    return g_game.requestPartySharedExperience(enable)
+  end
+end
+
+function OpenTibiaBRAdapter.game.passPartyLeadership(creature)
+  if g_game and g_game.passPartyLeadership then
+    return g_game.passPartyLeadership(creature)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- OPENTIBIABR WALK OPERATIONS (Enhanced)
+--------------------------------------------------------------------------------
+
+function OpenTibiaBRAdapter.game.enableTileThingLuaCallback(enable)
+  if g_game and g_game.enableTileThingLuaCallback then
+    return g_game.enableTileThingLuaCallback(enable)
+  end
+end
+
+function OpenTibiaBRAdapter.game.setWalkFirstStepDelay(delay)
+  if g_game and g_game.setWalkFirstStepDelay then
+    return g_game.setWalkFirstStepDelay(delay)
+  end
+end
+
+function OpenTibiaBRAdapter.game.setWalkTurnDelay(delay)
+  if g_game and g_game.setWalkTurnDelay then
+    return g_game.setWalkTurnDelay(delay)
+  end
+end
+
+function OpenTibiaBRAdapter.game.setWalkSpeedMultiplier(multiplier)
+  if g_game and g_game.setWalkSpeedMultiplier then
+    return g_game.setWalkSpeedMultiplier(multiplier)
+  end
+end
+
+function OpenTibiaBRAdapter.game.getWalkSpeedMultiplier()
+  if g_game and g_game.getWalkSpeedMultiplier then
+    return g_game.getWalkSpeedMultiplier()
+  end
+  return 1.0
 end
 
 -- OpenTibiaBR blessing request
@@ -178,6 +503,102 @@ function OpenTibiaBRAdapter.map.findPath(startPos, goalPos, options)
     return g_map.findPath(startPos, goalPos, options.maxSteps or 50, options.flags or 0)
   end
   return nil
+end
+
+-- OpenTibiaBR findEveryPath for multiple destinations
+function OpenTibiaBRAdapter.map.findEveryPath(startPos, destinations, maxSteps, flags)
+  if g_map and g_map.findEveryPath then
+    return g_map.findEveryPath(startPos, destinations, maxSteps or 50, flags or 0)
+  end
+  return {}
+end
+
+-- OpenTibiaBR getSpectatorsInRangeEx (extended version)
+function OpenTibiaBRAdapter.map.getSpectatorsInRangeEx(pos, multifloor, minRangeX, maxRangeX, minRangeY, maxRangeY)
+  if g_map and g_map.getSpectatorsInRangeEx then
+    return g_map.getSpectatorsInRangeEx(pos, multifloor, minRangeX, maxRangeX, minRangeY, maxRangeY) or {}
+  end
+  return OpenTibiaBRAdapter.map.getSpectators(pos, multifloor)
+end
+
+-- OpenTibiaBR getSightSpectators
+function OpenTibiaBRAdapter.map.getSightSpectators(pos, multifloor)
+  if g_map and g_map.getSightSpectators then
+    return g_map.getSightSpectators(pos, multifloor) or {}
+  end
+  return OpenTibiaBRAdapter.map.getSpectators(pos, multifloor)
+end
+
+-- OpenTibiaBR getSpectatorsByPattern
+function OpenTibiaBRAdapter.map.getSpectatorsByPattern(pos, pattern, width, height, firstFloor, lastFloor)
+  if g_map and g_map.getSpectatorsByPattern then
+    return g_map.getSpectatorsByPattern(pos, pattern, width, height, firstFloor, lastFloor) or {}
+  end
+  return {}
+end
+
+-- OpenTibiaBR getCreatureById
+function OpenTibiaBRAdapter.map.getCreatureById(creatureId)
+  if g_map and g_map.getCreatureById then
+    return g_map.getCreatureById(creatureId)
+  end
+  return nil
+end
+
+-- OpenTibiaBR isAwareOfPosition
+function OpenTibiaBRAdapter.map.isAwareOfPosition(pos)
+  if g_map and g_map.isAwareOfPosition then
+    return g_map.isAwareOfPosition(pos)
+  end
+  return false
+end
+
+-- OpenTibiaBR findItemsById
+function OpenTibiaBRAdapter.map.findItemsById(itemId, multifloor)
+  if g_map and g_map.findItemsById then
+    return g_map.findItemsById(itemId, multifloor or false) or {}
+  end
+  return {}
+end
+
+-- OpenTibiaBR getTiles in range
+function OpenTibiaBRAdapter.map.getTilesInRange(pos, rangeX, rangeY, multifloor)
+  if g_map and g_map.getTilesInRange then
+    return g_map.getTilesInRange(pos, rangeX, rangeY, multifloor or false) or {}
+  end
+  -- Fallback implementation
+  local tiles = {}
+  for x = pos.x - rangeX, pos.x + rangeX do
+    for y = pos.y - rangeY, pos.y + rangeY do
+      local tile = g_map.getTile({x = x, y = y, z = pos.z})
+      if tile then
+        table.insert(tiles, tile)
+      end
+    end
+  end
+  return tiles
+end
+
+-- OpenTibiaBR cleanTile
+function OpenTibiaBRAdapter.map.cleanTile(pos)
+  if g_map and g_map.cleanTile then
+    return g_map.cleanTile(pos)
+  end
+end
+
+-- OpenTibiaBR minimapColor
+function OpenTibiaBRAdapter.map.getMinimapColor(pos)
+  if g_map and g_map.getMinimapColor then
+    return g_map.getMinimapColor(pos)
+  end
+  return 0
+end
+
+-- OpenTibiaBR setMinimapColor
+function OpenTibiaBRAdapter.map.setMinimapColor(pos, color, description)
+  if g_map and g_map.setMinimapColor then
+    return g_map.setMinimapColor(pos, color, description)
+  end
 end
 
 --------------------------------------------------------------------------------
@@ -468,6 +889,48 @@ function OpenTibiaBRAdapter.callbacks.onImbuementWindow(callback)
     return onImbuementWindow(callback)
   end
   return BaseAdapter.callbacks.register("onImbuementWindow", callback)
+end
+
+function OpenTibiaBRAdapter.callbacks.onForgeResult(callback)
+  if onForgeResult then
+    return onForgeResult(callback)
+  end
+  return BaseAdapter.callbacks.register("onForgeResult", callback)
+end
+
+function OpenTibiaBRAdapter.callbacks.onPreyData(callback)
+  if onPreyData then
+    return onPreyData(callback)
+  end
+  return BaseAdapter.callbacks.register("onPreyData", callback)
+end
+
+function OpenTibiaBRAdapter.callbacks.onMarketBrowse(callback)
+  if onMarketBrowse then
+    return onMarketBrowse(callback)
+  end
+  return BaseAdapter.callbacks.register("onMarketBrowse", callback)
+end
+
+function OpenTibiaBRAdapter.callbacks.onMarketOffer(callback)
+  if onMarketOffer then
+    return onMarketOffer(callback)
+  end
+  return BaseAdapter.callbacks.register("onMarketOffer", callback)
+end
+
+function OpenTibiaBRAdapter.callbacks.onStashAction(callback)
+  if onStashAction then
+    return onStashAction(callback)
+  end
+  return BaseAdapter.callbacks.register("onStashAction", callback)
+end
+
+function OpenTibiaBRAdapter.callbacks.onBestiaryData(callback)
+  if onBestiaryData then
+    return onBestiaryData(callback)
+  end
+  return BaseAdapter.callbacks.register("onBestiaryData", callback)
 end
 
 function OpenTibiaBRAdapter.callbacks.onAddThing(callback)
