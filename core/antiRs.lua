@@ -111,7 +111,15 @@ local function executeAntiRsProtection()
 end
 
 -- Create the macro (empty function - logic is in event handler)
-local antiRsMacro = macro(50, "AntiRS & Msg", function() end)
+-- Use UnifiedTick if available for consistency, but this is effectively a no-op
+local antiRsMacro
+if UnifiedTick and UnifiedTick.register then
+  -- No actual handler needed - logic is event-driven via onTextMessage
+  -- Just create dummy macro for UI toggle compatibility
+  antiRsMacro = macro(50, "AntiRS & Msg", function() end)
+else
+  antiRsMacro = macro(50, "AntiRS & Msg", function() end)
+end
 BotDB.registerMacro(antiRsMacro, "antiRs")
 
 -- Listen for murder warning messages

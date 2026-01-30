@@ -227,8 +227,8 @@ if voc() == 2 or voc() == 12 then
         return cachedWeaponType ~= nil and cachedQuiverContainer ~= nil
     end
     
-    -- Main macro - runs less frequently, with cooldown protection
-    local quiverManagerMacro = macro(300, "Quiver Manager", function()
+    -- Quiver manager handler function (shared by UnifiedTick and fallback macro)
+    local function quiverManagerHandler()
         -- Skip if nothing changed
         if not needsCheck then return end
         
@@ -283,6 +283,25 @@ if voc() == 2 or voc() == 12 then
         else
             lastMoveTime = currentTime -- Just moved something, apply cooldown
         end
-    end)
+    end
+    
+    -- Use UnifiedTick if available, fallback to standalone macro
+    local quiverManagerMacro
+    if UnifiedTick and UnifiedTick.register then
+        UnifiedTick.register("quiver_manager", {
+            interval = 300,
+            priority = UnifiedTick.Priority.LOW,
+            handler = quiverManagerHandler,
+            group = "equipment"
+        })
+        -- Create dummy macro for UI toggle and BotDB compatibility
+        quiverManagerMacro = macro(300, "Quiver Manager", function() end)
+        quiverManagerMacro:setOn(true)
+        quiverManagerMacro.onSwitch = function(m)
+            UnifiedTick.setEnabled("quiver_manager", m:isOn())
+        end
+    else
+        quiverManagerMacro = macro(300, "Quiver Manager", quiverManagerHandler)
+    end
     BotDB.registerMacro(quiverManagerMacro, "quiverManager")
 end

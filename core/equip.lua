@@ -38,7 +38,8 @@ for i=1,scripts do
   end)
 end
 
-macro(250, function()
+-- Auto equip handler function (shared by UnifiedTick and fallback macro)
+local function autoEquipHandler()
   -- Non-blocking cooldown check
   if (now - lastEquipTime) < EQUIP_COOLDOWN then return end
   
@@ -59,4 +60,16 @@ macro(250, function()
       end
     end
   end
-end)
+end
+
+-- Use UnifiedTick if available, fallback to standalone macro
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register("auto_equip", {
+    interval = 250,
+    priority = UnifiedTick.Priority.LOW,
+    handler = autoEquipHandler,
+    group = "equipment"
+  })
+else
+  macro(250, autoEquipHandler)
+end

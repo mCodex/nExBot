@@ -366,8 +366,8 @@ local function tryEat()
   return false
 end
 
--- Main eat food macro
-local eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function()
+-- Eat food handler function (shared by UnifiedTick and fallback macro)
+local function eatFoodHandler()
   local regenTime = getRegenTime()
   
   -- Skip if regeneration is sufficient
@@ -377,7 +377,28 @@ local eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function()
   
   -- Eat food
   tryEat()
-end)
+end
+
+-- Main eat food macro - use UnifiedTick if available
+local eatFoodMacro
+if UnifiedTick and UnifiedTick.register then
+  -- Register with UnifiedTick for consolidated tick management
+  UnifiedTick.register("eat_food", {
+    interval = CONFIG.EAT_FOOD_INTERVAL,
+    priority = UnifiedTick.Priority.LOW,
+    handler = eatFoodHandler,
+    group = "tools"
+  })
+  -- Create dummy macro for UI toggle compatibility
+  eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function() end)
+  eatFoodMacro:setOn(true)
+  eatFoodMacro.onSwitch = function(m)
+    UnifiedTick.setEnabled("eat_food", m:isOn())
+  end
+else
+  -- Fallback to standalone macro
+  eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", eatFoodHandler)
+end
 
 -- Add tooltip
 if eatFoodMacro and eatFoodMacro.button then

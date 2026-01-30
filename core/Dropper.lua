@@ -164,8 +164,8 @@ local function hasItems(tbl)
     return false
 end
 
--- Main dropper macro
-macro(250, function()
+-- Dropper handler function (shared by UnifiedTick and fallback macro)
+local function dropperHandler()
     if not config.enabled then return end
     
     -- Cooldown between actions
@@ -218,4 +218,16 @@ macro(250, function()
             end
         end
     end
-end)
+end
+
+-- Main dropper macro - use UnifiedTick if available
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register("dropper", {
+    interval = 250,
+    priority = UnifiedTick.Priority.LOW,
+    handler = dropperHandler,
+    group = "tools"
+  })
+else
+  macro(250, dropperHandler)
+end

@@ -448,22 +448,56 @@ local function checkEquipmentChanges()
   end
 end
 
--- Equipment check macro (runs every 200ms, lightweight)
-macro(200, function()
-  checkEquipmentChanges()
-end)
+-- ============================================================================
+-- UNIFIED TICK INTEGRATION
+-- Migrate polling macros to UnifiedTick for consolidated tick management
+-- ============================================================================
 
--- Periodic flush for queued events (fast tick)
-macro(25, function()
-  EventBus.flush()
-end)
-
--- Slow tick for periodic tasks (backup, cleanup, etc.)
-macro(5000, function()
-  EventBus.emit("tick:slow")
-  -- Cleanup killed monsters periodically
-  cleanupKilledMonsters()
-end)
+if UnifiedTick and UnifiedTick.register then
+  -- Equipment check handler (200ms, LOW priority - UI updates)
+  UnifiedTick.register("eventbus_equipment_check", {
+    interval = 200,
+    priority = UnifiedTick.Priority.LOW,
+    handler = checkEquipmentChanges,
+    group = "eventbus"
+  })
+  
+  -- Event flush handler (50ms, NORMAL priority - event processing)
+  -- Note: Running at 50ms instead of 25ms to match UnifiedTick master interval
+  UnifiedTick.register("eventbus_flush", {
+    interval = 50,
+    priority = UnifiedTick.Priority.NORMAL,
+    handler = function()
+      EventBus.flush()
+    end,
+    group = "eventbus"
+  })
+  
+  -- Slow tick handler (5000ms, IDLE priority - cleanup tasks)
+  UnifiedTick.register("eventbus_slow_tick", {
+    interval = 5000,
+    priority = UnifiedTick.Priority.IDLE,
+    handler = function()
+      EventBus.emit("tick:slow")
+      cleanupKilledMonsters()
+    end,
+    group = "eventbus"
+  })
+else
+  -- Fallback to standalone macros if UnifiedTick not available
+  macro(200, function()
+    checkEquipmentChanges()
+  end)
+  
+  macro(25, function()
+    EventBus.flush()
+  end)
+  
+  macro(5000, function()
+    EventBus.emit("tick:slow")
+    cleanupKilledMonsters()
+  end)
+end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- EXTENDED OTCLIENT API EVENTS

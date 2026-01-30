@@ -148,7 +148,8 @@ if true then
       vocText = "- ED"
   end
 
-  macro(5000, function()
+  -- Window title handler function
+  local function windowTitleHandler()
     if settings.title then
       if hppercent() > 0 then
           g_window.setTitle("Tibia - " .. name() .. " - " .. lvl() .. "lvl " .. vocText)
@@ -158,7 +159,19 @@ if true then
     else
       g_window.setTitle("Tibia - " .. name())
     end
-  end)
+  end
+
+  -- Use UnifiedTick if available, fallback to standalone macro
+  if UnifiedTick and UnifiedTick.register then
+    UnifiedTick.register("window_title", {
+      interval = 5000,
+      priority = UnifiedTick.Priority.IDLE,
+      handler = windowTitleHandler,
+      group = "ui"
+    })
+  else
+    macro(5000, windowTitleHandler)
+  end
 end
 
 addCheckBox("separatePm", "Open PM's in new Window", false, rightPanel, "PM's will be automatically opened in new tab after receiving one.")
@@ -264,12 +277,25 @@ end
 
 addCheckBox("antiKick", "Anti - Kick", true, rightPanel, "Turn every 10 minutes to prevent kick.")
 if true then
-  macro(600*1000, function()
+  -- Anti-kick handler function
+  local function antiKickHandler()
     if not settings.antiKick then return end
     local dir = player:getDirection()
     turn((dir + 1) % 4)
     schedule(50, function() turn(dir) end)
-  end)
+  end
+
+  -- Use UnifiedTick if available, fallback to standalone macro
+  if UnifiedTick and UnifiedTick.register then
+    UnifiedTick.register("anti_kick", {
+      interval = 600000, -- 10 minutes
+      priority = UnifiedTick.Priority.IDLE,
+      handler = antiKickHandler,
+      group = "tools"
+    })
+  else
+    macro(600*1000, antiKickHandler)
+  end
 end
 
 
@@ -527,14 +553,27 @@ end
 
 addCheckBox("suppliesControl", "TargetBot off if low supply", false, leftPanel, "Turn off TargetBot if either one of supply amount is below 50% of minimum.")
 if true then
-  macro(500, function()
+  -- Supplies control handler function
+  local function suppliesControlHandler()
     if not settings.suppliesControl then return end
     if TargetBot.isOff() then return end
     if CaveBot.isOff() then return end
     if type(hasSupplies()) == 'table' then
         TargetBot.setOff()
     end
-  end)
+  end
+
+  -- Use UnifiedTick if available, fallback to standalone macro
+  if UnifiedTick and UnifiedTick.register then
+    UnifiedTick.register("supplies_control", {
+      interval = 500,
+      priority = UnifiedTick.Priority.LOW,
+      handler = suppliesControlHandler,
+      group = "tools"
+    })
+  else
+    macro(500, suppliesControlHandler)
+  end
 end
 
 addCheckBox("holdMwall", "Hold MW/WG", true, rightPanel, "Mark tiles with below hotkeys to automatically use Magic Wall or Wild Growth")
