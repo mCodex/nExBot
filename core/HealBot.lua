@@ -918,7 +918,8 @@ local _lastApplyToggle = 0
 local syncDone = false
 local SYNC_INTERVAL_MS = 500  -- Reduced from 2000ms for faster profile updates
 
-healMacro = macro(150, function()
+-- HealBot handler function (shared by UnifiedTick and fallback macro)
+local function healBotHandler()
   ensureCurrentSettings()
   if not currentSettings or not currentSettings.enabled then return end
   
@@ -952,7 +953,33 @@ healMacro = macro(150, function()
   if action then
     HealEngine.execute(action)
   end
-end)
+end
+
+-- Use UnifiedTick if available, fallback to standalone macro
+-- Healing uses CRITICAL priority for safety-critical response time
+if UnifiedTick and UnifiedTick.register then
+  -- Register with UnifiedTick for consolidated tick management
+  UnifiedTick.register("healbot_main", {
+    interval = 150,
+    priority = UnifiedTick.Priority.CRITICAL,
+    handler = healBotHandler,
+    group = "healing"
+  })
+  -- Create a dummy macro for syncHealMacro compatibility
+  healMacro = macro(150, function() end)
+  healMacro:setOn(true)
+  -- Sync macro toggle with UnifiedTick handler
+  local origSyncHealMacro = syncHealMacro
+  syncHealMacro = function()
+    if origSyncHealMacro then origSyncHealMacro() end
+    if currentSettings then
+      UnifiedTick.setEnabled("healbot_main", currentSettings.enabled)
+    end
+  end
+else
+  -- Fallback to standalone macro if UnifiedTick not available
+  healMacro = macro(150, healBotHandler)
+end
 
 syncHealMacro()
 

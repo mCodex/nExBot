@@ -349,6 +349,47 @@ loadCategory("analytics", {
 local totalTime = math.floor((os.clock() - startTime) * 1000)
 loadTimes["_total"] = totalTime
 
+-- ============================================================================
+-- STARTUP PROFILING SUMMARY
+-- ============================================================================
+
+-- Collect and sort all module load times for analysis
+local function getTopSlowestModules(n)
+  local modules = {}
+  for name, time in pairs(loadTimes) do
+    if not name:match("^_") then
+      modules[#modules + 1] = { name = name, time = time }
+    end
+  end
+  table.sort(modules, function(a, b) return a.time > b.time end)
+  local top = {}
+  for i = 1, math.min(n, #modules) do
+    top[i] = modules[i]
+  end
+  return top
+end
+
+-- Always show top 5 slowest modules when debug is enabled
+if nExBot.showDebug then
+  local top5 = getTopSlowestModules(5)
+  print("[nExBot] Startup profiling - Top 5 slowest modules:")
+  for i, m in ipairs(top5) do
+    print(string.format("  %d. %s: %dms", i, m.name, m.time))
+  end
+  print(string.format("  Total startup time: %dms", totalTime))
+end
+
+-- Export profiling helper for runtime analysis
+nExBot.getTopSlowestModules = getTopSlowestModules
+nExBot.printStartupProfile = function()
+  local top = getTopSlowestModules(10)
+  print("[nExBot] Startup Profile (Top 10):")
+  for i, m in ipairs(top) do
+    print(string.format("  %d. %s: %dms", i, m.name, m.time))
+  end
+  print(string.format("  Total: %dms", loadTimes["_total"] or 0))
+end
+
 if totalTime > 1000 then
   warn("[nExBot] Slow startup: " .. totalTime .. "ms")
   local slowModules = {}
@@ -456,6 +497,20 @@ loadPrivateScripts()
 
 -- Return to Main tab
 setDefaultTab("Main")
+
+-- ============================================================================
+-- ACTIVATE UNIFIED TICK SYSTEM
+-- ============================================================================
+-- Start the consolidated tick system now that all modules are loaded
+-- This reduces ~30+ separate macro timers to a single 50ms master tick
+if UnifiedTick and UnifiedTick.start then
+  schedule(100, function()
+    UnifiedTick.start()
+    if nExBot.showDebug then
+      print("[nExBot] UnifiedTick master loop activated")
+    end
+  end)
+end
 
 -- Export nExBot API summary
 nExBot.API = {

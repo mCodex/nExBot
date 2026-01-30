@@ -311,7 +311,8 @@ if true then
     return pos.x .. "," .. pos.y .. "," .. pos.z
   end
   
-  macro(400, function()
+  -- Skin Monsters handler function (shared by UnifiedTick and fallback macro)
+  local function skinMonstersHandler()
     if not CaveBot or type(CaveBot.isOn) ~= "function" or not CaveBot.isOn() or not settings.stake then return end
     
     local playerPos = player:getPosition()
@@ -384,7 +385,22 @@ if true then
         CaveBot.delay(300)
       end
     end
-  end)
+  end
+  
+  -- Use UnifiedTick if available, fallback to standalone macro
+  if UnifiedTick and UnifiedTick.register then
+    -- Register with UnifiedTick for consolidated tick management
+    -- Lower priority since skinning is not combat-critical
+    UnifiedTick.register("skin_monsters", {
+      interval = 400,
+      priority = UnifiedTick.Priority.LOW,
+      handler = skinMonstersHandler,
+      group = "tools"
+    })
+  else
+    -- Fallback to standalone macro if UnifiedTick not available
+    macro(400, skinMonstersHandler)
+  end
 end
 
 
@@ -531,7 +547,9 @@ if true then
   local wgHot
 
   local candidates = {}
-  local m = macro(100, function()
+  
+  -- Hold MW/WG handler function (shared by UnifiedTick and fallback macro)
+  local function holdMwWgHandler()
     mwHot = settings.holdMwHot
     wgHot = settings.holdWgHot
     
@@ -552,7 +570,32 @@ if true then
           end
         end
       end
-  end)
+  end
+  
+  -- Use UnifiedTick if available, fallback to standalone macro
+  local m
+  local macroEnabled = true  -- Track enabled state for event handlers
+  if UnifiedTick and UnifiedTick.register then
+    -- Register with UnifiedTick for consolidated tick management
+    UnifiedTick.register("hold_mw_wg", {
+      interval = 100,
+      priority = UnifiedTick.Priority.HIGH,
+      handler = holdMwWgHandler,
+      group = "combat"
+    })
+    -- Create isOff/isOn compatibility functions
+    m = {
+      isOff = function() return not macroEnabled end,
+      isOn = function() return macroEnabled end,
+      setOn = function(enabled) 
+        macroEnabled = enabled
+        UnifiedTick.setEnabled("hold_mw_wg", enabled)
+      end
+    }
+  else
+    -- Fallback to standalone macro if UnifiedTick not available
+    m = macro(100, holdMwWgHandler)
+  end
 
   onRemoveThing(function(tile, thing)
     if not settings.holdMwall then return end
