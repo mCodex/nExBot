@@ -540,9 +540,9 @@ TargetBot.Looting.getLootContainers = function(containers)
         local okId, itemId = pcall(function() return item:getId() end)
         if okId and itemId and containersById[itemId] and not openedContainersById[itemId] then
           -- Found a closed loot container in inventory
-          local Client2 = getClient()
-          if Client2 and Client2.open then
-            Client2.open(item)
+          local Client = getClient()
+          if Client and Client.open then
+            Client.open(item)
           elseif g_game and g_game.open then
             g_game.open(item)
           end
