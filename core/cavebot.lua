@@ -10,7 +10,9 @@ CaveBot.Extensions = {}
 
 local function safeDofile(path)
 	local ok, res = pcall(function() return dofile(path) end)
-	if not ok then
+	if ok then
+		return res
+	else
 		warn("[CaveBot] Failed to load " .. path .. ": " .. tostring(res))
 	end
 	return res
@@ -22,11 +24,19 @@ importStyle("/cavebot/config.otui")
 importStyle("/cavebot/editor.otui")
 safeDofile("/cavebot/actions.lua")
 safeDofile("/cavebot/config.lua")
-safeDofile("/cavebot/editor.lua")
 safeDofile("/cavebot/example_functions.lua")
+safeDofile("/cavebot/editor.lua")
 safeDofile("/cavebot/recorder.lua")
 safeDofile("/cavebot/tools.lua")
 safeDofile("/cavebot/walking.lua")
+
+-- DEBUG: Verify walking module loaded correctly
+if CaveBot and CaveBot.resetWalking then
+  info("[CaveBot] walking.lua: resetWalking is properly defined")
+else
+  warn("[CaveBot] walking.lua: ERROR - resetWalking is NOT defined!")
+end
+
 safeDofile("/cavebot/minimap.lua")
 
 -- Defer auxiliary modules to reduce startup cost; cavebot.lua must be last (depends on all above)
@@ -70,6 +80,11 @@ importStyle("/targetbot/monster_inspector.otui")
 
 -- Load TargetBot core module first (shared utilities)
 dofile("/targetbot/core.lua")
+
+-- Load new optimized modules (SRP extractions from monster_ai.lua)
+dofile("/targetbot/monster_tracking.lua")     -- Per-monster data collection with ring buffers
+dofile("/targetbot/monster_prediction.lua")   -- Wave/attack prediction logic
+dofile("/targetbot/auto_tuner.lua")           -- Monster classification and auto-tuning
 
 -- Load AI and optimization modules (before creature_attack)
 dofile("/targetbot/monster_ai.lua")           -- Monster behavior analysis

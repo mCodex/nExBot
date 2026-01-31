@@ -90,10 +90,10 @@ function HealEngine.setPotionDebug(flag)
 end
 
 -- ============================================================================
--- TIME UTILITIES
+-- TIME UTILITIES (use ClientHelper for DRY)
 -- ============================================================================
 
-local function nowMs()
+local nowMs = ClientHelper and ClientHelper.nowMs or function()
   if now then return now end
   if g_clock and g_clock.millis then return g_clock.millis() end
   return os.time() * 1000

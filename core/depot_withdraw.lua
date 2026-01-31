@@ -23,7 +23,8 @@ function reopenLootContainer()
 
 end
 
-local depotWithdrawMacro = macro(50, "Depot Withdraw", function()
+-- Depot withdraw handler function (shared by UnifiedTick and fallback macro)
+local function depotWithdrawHandler()
   
   -- set the containers
   if not potionsContainer or not runesContainer or not ammoContainer then
@@ -73,5 +74,24 @@ if playerContainer and freecap() >= 200 then
     end
 end
 
-end)
+end
+
+-- Use UnifiedTick if available, fallback to standalone macro
+local depotWithdrawMacro
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register("depot_withdraw", {
+    interval = 50,
+    priority = UnifiedTick.Priority.NORMAL,
+    handler = depotWithdrawHandler,
+    group = "tools"
+  })
+  -- Create dummy macro for UI toggle and BotDB compatibility
+  depotWithdrawMacro = macro(50, "Depot Withdraw", function() end)
+  depotWithdrawMacro:setOn(true)
+  depotWithdrawMacro.onSwitch = function(m)
+    UnifiedTick.setEnabled("depot_withdraw", m:isOn())
+  end
+else
+  depotWithdrawMacro = macro(50, "Depot Withdraw", depotWithdrawHandler)
+end
 BotDB.registerMacro(depotWithdrawMacro, "depotWithdraw")

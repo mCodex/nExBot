@@ -51,12 +51,24 @@ AttackStateMachine.STATE = STATE
 -- IMPROVED v3.0: Stricter values for linear targeting (anti-zigzag)
 -- ============================================================================
 
+--------------------------------------------------------------------------------
+-- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
+--------------------------------------------------------------------------------
+local function getClient()
+  return ClientHelper and ClientHelper.getClient() or ClientService
+end
+
+local function getClientVersion()
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
+end
+
 local CONFIG = {
   -- Attack timing
-  ATTACK_REISSUE_INTERVAL = 300,    -- Re-issue attack every 300ms if not confirmed
-  ATTACK_CONFIRM_TIMEOUT = 500,     -- Max time to wait for server confirmation
+  -- IMPROVED v4.0: Increased intervals for less spam, more consistent attacking
+  ATTACK_REISSUE_INTERVAL = 1000,   -- Re-issue attack every 1000ms (server only needs periodic keepalive)
+  ATTACK_CONFIRM_TIMEOUT = 800,     -- Max time to wait for server confirmation
   ATTACK_RECOVER_ATTEMPTS = 5,      -- Max recovery attempts before giving up
-  ATTACK_COOLDOWN = 150,            -- Minimum time between attack commands
+  ATTACK_COOLDOWN = 200,            -- Minimum time between attack commands (prevents spam)
   
   -- Target switching thresholds (STRICTER v3.0)
   SWITCH_PRIORITY_THRESHOLD = 500,  -- INCREASED: Need 500+ priority advantage to force switch (was 100)
@@ -122,10 +134,10 @@ local state = {
 local player = nil
 
 -- ============================================================================
--- UTILITY FUNCTIONS
+-- UTILITY FUNCTIONS (use ClientHelper for DRY)
 -- ============================================================================
 
-local function nowMs()
+local nowMs = ClientHelper and ClientHelper.nowMs or function()
   return now or (os.time() * 1000)
 end
 
@@ -143,41 +155,94 @@ end
 
 local function updatePlayerRef()
   if not player or not pcall(function() return player:getPosition() end) then
-    player = g_game and g_game.getLocalPlayer() or nil
+    local Client = getClient()
+    player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or nil
   end
   return player
 end
 
--- Safe creature property access
+-- ============================================================================
+-- OPENTIBIABR TARGETING ENHANCEMENT (v3.1)
+-- Use fast creature lookup when available
+-- ============================================================================
+local OpenTibiaBRTargeting = nil
+local function loadOpenTibiaBRTargeting()
+  if OpenTibiaBRTargeting then return OpenTibiaBRTargeting end
+  local ok, result = pcall(function()
+    return dofile("nExBot/targetbot/opentibiabr_targeting.lua")
+  end)
+  if ok and result then
+    OpenTibiaBRTargeting = result
+  end
+  return OpenTibiaBRTargeting
+end
+
+-- ============================================================================
+-- SAFE CREATURE ACCESS HELPERS (v4.0 - Using SafeCreature module for DRY)
+-- ============================================================================
+
+-- Use global SafeCreature module
+local SC = SafeCreature
+
+-- Safe creature property access (delegates to SafeCreature)
 local function getCreatureId(creature)
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
+  return SC and SC.getId(creature) or nil
+end
+
+-- Fast creature lookup by ID (uses OpenTibiaBR when available)
+local function getCreatureById(creatureId)
+  if not creatureId then return nil end
+  
+  -- Try OpenTibiaBR fast lookup first
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr and otbr.getCreatureById then
+    local creature = otbr.getCreatureById(creatureId)
+    if creature then return creature end
+  end
+  
+  -- Fallback: check current attack target
+  local Client = getClient()
+  local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+  if target and getCreatureId(target) == creatureId then
+    return target
+  end
+  
+  return nil
 end
 
 local function getCreatureHealth(creature)
-  if not creature then return 0 end
-  local ok, hp = pcall(function() return creature:getHealthPercent() end)
-  return ok and hp or 0
+  return SC and SC.getHealthPercent(creature) or 0
 end
 
 local function isCreatureDead(creature)
+  if SC then return SC.isDead(creature) end
   if not creature then return true end
   local ok, dead = pcall(function() return creature:isDead() end)
   if ok and dead then return true end
   return getCreatureHealth(creature) <= 0
 end
 
+-- Fast creature validation by ID (v3.1)
+local function isCreatureValidById(creatureId)
+  if not creatureId then return false end
+  
+  -- Try OpenTibiaBR fast validation first
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr and otbr.isCreatureValid then
+    return otbr.isCreatureValid(creatureId)
+  end
+  
+  -- Fallback: get creature and check
+  local creature = getCreatureById(creatureId)
+  return creature and not isCreatureDead(creature)
+end
+
 local function getCreaturePosition(creature)
-  if not creature then return nil end
-  local ok, pos = pcall(function() return creature:getPosition() end)
-  return ok and pos or nil
+  return SC and SC.getPosition(creature) or nil
 end
 
 local function getCreatureName(creature)
-  if not creature then return "Unknown" end
-  local ok, name = pcall(function() return creature:getName() end)
-  return ok and name or "Unknown"
+  return SC and SC.getName(creature) or "Unknown"
 end
 
 -- ============================================================================
@@ -203,9 +268,15 @@ end
 
 -- Get current attacking creature from game
 local function getGameAttackTarget()
-  if not g_game or not g_game.getAttackingCreature then return nil end
-  local ok, creature = pcall(g_game.getAttackingCreature)
-  return ok and creature or nil
+  local Client = getClient()
+  if (Client and Client.getAttackingCreature) then
+    local ok, creature = pcall(Client.getAttackingCreature)
+    return ok and creature or nil
+  elseif g_game and g_game.getAttackingCreature then
+    local ok, creature = pcall(g_game.getAttackingCreature)
+    return ok and creature or nil
+  end
+  return nil
 end
 
 -- Issue attack command (centralized, rate-limited)
@@ -222,8 +293,9 @@ local function issueAttack(creature, reason)
   
   -- Issue the attack
   local success = false
-  if g_game and g_game.attack then
-    local ok, err = pcall(function() g_game.attack(creature) end)
+  local Client = getClient()
+  if (Client and Client.attack) then
+    local ok, err = pcall(function() Client.attack(creature) end)
     success = ok
     if ok then
       state.lastAttackCommand = currentTime
@@ -241,6 +313,24 @@ local function issueAttack(creature, reason)
       end
     else
       log("Attack failed: " .. tostring(err))
+    end
+  elseif g_game and g_game.attack then
+    local ok, err = pcall(function() g_game.attack(creature) end)
+    success = ok
+    if ok then
+      state.lastAttackCommand = currentTime
+      state.attackConfirmed = false
+      state.stats.attacksIssued = state.stats.attacksIssued + 1
+      log("Attack issued (g_game fallback): " .. getCreatureName(creature) .. " (" .. (reason or "unknown") .. ")")
+      
+      if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.startEngagement then
+        local creatureId = getCreatureId(creature)
+        local health = nil
+        pcall(function() health = creature:getHealthPercent() end)
+        MonsterAI.Scenario.startEngagement(creatureId, health)
+      end
+    else
+      log("Attack failed (g_game fallback): " .. tostring(err))
     end
   end
   
@@ -305,7 +395,8 @@ local function calculatePriority(creature, dist)
 end
 
 -- Check if a switch to new target should be allowed
--- IMPROVED v3.0: Integrated with MonsterAI engagement lock
+-- IMPROVED v3.1: Config priority (user-set) takes precedence over calculated priority
+-- When a monster with HIGHER user-configured priority appears, switch immediately!
 local function shouldAllowSwitch(newCreature, newPriority)
   if not state.targetCreature or isCreatureDead(state.targetCreature) then
     -- Target is dead - end engagement and allow switch
@@ -317,49 +408,92 @@ local function shouldAllowSwitch(newCreature, newPriority)
   
   local currentTime = nowMs()
   
-  -- Check MonsterAI engagement lock FIRST (highest priority)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- FAST PATH: CONFIG PRIORITY CHECK (User-set priority takes precedence!)
+  -- If new creature has HIGHER user-configured priority, bypass most checks
+  -- This is the KEY feature for multi-monster configurations
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local newConfigPriority = 0
+  local currentConfigPriority = 0
+  
+  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+    -- Get new creature's config priority
+    local newConfigs = TargetBot.Creature.getConfigs(newCreature)
+    if newConfigs and #newConfigs > 0 then
+      for i = 1, #newConfigs do
+        local cfg = newConfigs[i]
+        if cfg.priority and cfg.priority > newConfigPriority then
+          newConfigPriority = cfg.priority
+        end
+      end
+    end
+    
+    -- Get current target's config priority
+    local currentConfigs = TargetBot.Creature.getConfigs(state.targetCreature)
+    if currentConfigs and #currentConfigs > 0 then
+      for i = 1, #currentConfigs do
+        local cfg = currentConfigs[i]
+        if cfg.priority and cfg.priority > currentConfigPriority then
+          currentConfigPriority = cfg.priority
+        end
+      end
+    end
+    
+    -- FAST PATH: Higher config priority = IMMEDIATE SWITCH
+    -- Only a reduced cooldown applies (500ms instead of 5000ms)
+    if newConfigPriority > currentConfigPriority then
+      local configSwitchCooldown = 500  -- Much shorter cooldown for config priority switches
+      if (currentTime - state.lastSwitchTime) >= configSwitchCooldown then
+        state.stats.switchesAllowed = (state.stats.switchesAllowed or 0) + 1
+        log("CONFIG PRIORITY SWITCH: " .. newConfigPriority .. " > " .. currentConfigPriority)
+        return true, "config_priority"
+      end
+    end
+  end
+  
+  -- Check MonsterAI engagement lock (only if not bypassed by config priority)
   if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
     local newCreatureId = getCreatureId(newCreature)
     local newHealth = getCreatureHealth(newCreature)
     local allowed, reason = MonsterAI.Scenario.shouldAllowTargetSwitch(newCreatureId, newPriority, newHealth)
     if not allowed then
-      state.stats.switchesBlocked = state.stats.switchesBlocked + 1
+      state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
       return false, "monsterai_" .. (reason or "blocked")
     end
   end
   
-  -- Switch cooldown (increased from original)
+  -- Standard switch cooldown
   if (currentTime - state.lastSwitchTime) < CONFIG.SWITCH_COOLDOWN then
-    state.stats.switchesBlocked = state.stats.switchesBlocked + 1
+    state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
     return false, "cooldown"
   end
   
   -- Current target health check
   local currentHp = getCreatureHealth(state.targetCreature)
   
-  -- CRITICAL HP: Never switch (increased threshold)
+  -- CRITICAL HP: Never switch (unless config priority is higher - handled above)
   if currentHp < CONFIG.CRITICAL_HP then
-    state.stats.switchesBlocked = state.stats.switchesBlocked + 1
+    state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
     return false, "critical_hp"
   end
   
-  -- Priority comparison
+  -- Priority comparison (calculated priority, not config priority)
   local priorityAdvantage = newPriority - state.targetPriority
   local requiredAdvantage = CONFIG.SWITCH_PRIORITY_THRESHOLD
   
   -- Adjust required advantage based on current target health
   if currentHp < CONFIG.LOW_HP then
-    requiredAdvantage = requiredAdvantage * 3  -- 300 priority needed
+    requiredAdvantage = requiredAdvantage * 3  -- 1500 priority needed
   elseif currentHp < CONFIG.WOUNDED_HP then
-    requiredAdvantage = requiredAdvantage * 2  -- 200 priority needed
+    requiredAdvantage = requiredAdvantage * 2  -- 1000 priority needed
   end
   
   if priorityAdvantage >= requiredAdvantage then
-    state.stats.switchesAllowed = state.stats.switchesAllowed + 1
+    state.stats.switchesAllowed = (state.stats.switchesAllowed or 0) + 1
     return true, "priority_advantage"
   end
   
-  state.stats.switchesBlocked = state.stats.switchesBlocked + 1
+  state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
   return false, "insufficient_priority"
 end
 
@@ -651,7 +785,10 @@ function AttackStateMachine.stop()
   transition(STATE.IDLE, "manual_stop")
   
   -- Cancel game attack
-  if g_game and g_game.cancelAttackAndFollow then
+  local Client = getClient()
+  if Client and Client.cancelAttackAndFollow then
+    pcall(Client.cancelAttackAndFollow)
+  elseif g_game and g_game.cancelAttackAndFollow then
     pcall(g_game.cancelAttackAndFollow)
   end
 end
@@ -711,7 +848,10 @@ function AttackStateMachine.findBestTarget()
   
   -- Fallback to spectators
   if not creatures or #creatures == 0 then
-    if g_map and g_map.getSpectatorsInRange then
+    local Client = getClient()
+    if Client and Client.getSpectatorsInRange then
+      creatures = Client.getSpectatorsInRange(playerPos, false, 8, 8)
+    elseif g_map and g_map.getSpectatorsInRange then
       creatures = g_map.getSpectatorsInRange(playerPos, false, 8, 8)
     end
   end

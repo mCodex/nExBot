@@ -1,5 +1,14 @@
 CaveBot.Extensions.Depositor = {}
 
+-- Use global ClientHelper (loaded by _Loader.lua)
+local function getClient()
+    return ClientHelper and ClientHelper.getClient() or ClientService
+end
+
+local function getClientVersion()
+    return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
+end
+
 --local variables
 local destination = nil
 local lootTable = nil
@@ -10,9 +19,10 @@ local function resetCache()
 	destination = nil
 	lootTable = nil
 
+	local Client = getClient()
 	for i, container in ipairs(getContainers()) do
 		if container:getName():lower():find("depot") or container:getName():lower():find("locker") then
-			g_game.close(container)
+			if Client and Client.closeContainer then Client.closeContainer(container) elseif g_game then g_game.close(container) end
 		end
 	end
 
@@ -28,12 +38,12 @@ local function resetCache()
 	end
 end
 
-local description = g_game.getClientVersion() > 960 and "No - just deposit \n Yes - also reopen loot containers" or "currently not supported, will be added in near future"
+local description = getClientVersion() > 960 and "No - just deposit \n Yes - also reopen loot containers" or "currently not supported, will be added in near future"
 
 CaveBot.Extensions.Depositor.setup = function()
 	CaveBot.registerAction("depositor", "#002FFF", function(value, retries)
 		-- version check, TODO old tibia
-		if g_game.getClientVersion() < 960 then
+		if getClientVersion() < 960 then
 			resetCache()
 			warn("CaveBot[Depositor]: unsupported Tibia version, will be added in near future")
 			return false
@@ -60,12 +70,13 @@ CaveBot.Extensions.Depositor.setup = function()
 			-- open next backpacks if no more loot
 			if not CaveBot.HasLootItems() then
 				local lootContainers = CaveBot.GetLootContainers()
+				local Client = getClient()
 				for _, container in ipairs(getContainers()) do
 					local cId = container:getContainerItem():getId()
 					if table.find(lootContainers, cId) then
 						for i, item in ipairs(container:getItems()) do
 							if item:getId() == cId then
-								g_game.open(item, container)
+								if Client and Client.openContainer then Client.openContainer(item, container) elseif g_game then g_game.open(item, container) end
 								delay(100)
 								return "retry"
 							end

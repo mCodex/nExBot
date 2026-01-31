@@ -20,6 +20,15 @@
 
 TargetCore = TargetCore or {}
 
+-- Use global ClientHelper for consistency (loaded by _Loader.lua)
+local function getClient()
+  return ClientHelper and ClientHelper.getClient() or ClientService
+end
+
+local function getClientVersion()
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
+end
+
 -- ============================================================================
 -- CONSTANTS (Centralized, immutable)
 -- ============================================================================
@@ -137,15 +146,24 @@ TargetCore.Geometry.isAdjacent = TargetCore.isAdjacent
 
 TargetCore.PathSafety = TargetCore.PathSafety or {}
 
+-- Load FloorItems constants if available (single source of truth)
+local FloorItems = (function()
+  local ok, fi = pcall(dofile, "/constants/floor_items.lua")
+  if ok and fi then return fi end
+  ok, fi = pcall(dofile, "/core/constants/floor_items.lua")
+  if ok and fi then return fi end
+  return nil
+end)()
+
 -- Minimal minimap colors that typically indicate stairs/ramps/holes
-TargetCore.PathSafety.FLOOR_CHANGE_COLORS = {
+TargetCore.PathSafety.FLOOR_CHANGE_COLORS = (FloorItems and FloorItems.FLOOR_CHANGE_COLORS) or {
   [210] = true, [211] = true, [212] = true, [213] = true,
   -- Additional colors that may indicate floor changes
   [214] = true, [215] = true, [216] = true, [217] = true,
 }
 
--- Comprehensive floor-change item ids (expanded list for better detection)
-TargetCore.PathSafety.FLOOR_CHANGE_ITEMS = {
+-- Comprehensive floor-change item ids (using constants or fallback)
+TargetCore.PathSafety.FLOOR_CHANGE_ITEMS = (FloorItems and FloorItems.FLOOR_CHANGE) or {
   -- === STAIRS DOWN ===
   [414] = true, [415] = true, [416] = true, [417] = true,
   [428] = true, [429] = true, [430] = true, [431] = true,
@@ -202,9 +220,10 @@ TargetCore.PathSafety.FLOOR_CHANGE_ITEMS = {
 -- Check if tile position is a floor-change tile (no caching here)
 function TargetCore.PathSafety.isFloorChangeTile(pos)
   if not pos then return false end
-  local color = g_map.getMinimapColor(pos)
+  local Client = getClient()
+  local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor and g_map.getMinimapColor(pos)) or 0
   if color and TargetCore.PathSafety.FLOOR_CHANGE_COLORS[color] then return true end
-  local tile = g_map.getTile(pos)
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile and g_map.getTile(pos))
   if not tile then return false end
   local ground = tile:getGround()
   if ground and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[ground:getId()] then return true end
@@ -226,16 +245,19 @@ function TargetCore.PathSafety.isPositionSafeForMovement(targetPos, currentPos)
   if TargetCore.PathSafety.isFloorChangeTile(targetPos) then return false end
   
   -- Must be a walkable tile
-  local tile = g_map.getTile(targetPos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(targetPos) or (g_map and g_map.getTile and g_map.getTile(targetPos))
   if not tile or not tile:isWalkable() then return false end
   
   -- Should not have creatures (unless it's the target we're chasing)
-  if tile:hasCreature() then
+  local hasCreature = tile.hasCreature and tile:hasCreature()
+  if hasCreature then
     -- Allow if it's the creature we're targeting
     local creatures = tile:getCreatures()
     if creatures then
+      local attackingCreature = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
       for _, creature in ipairs(creatures) do
-        if creature and creature:getId() ~= (g_game.getAttackingCreature() and g_game.getAttackingCreature():getId()) then
+        if creature and creature:getId() ~= (attackingCreature and attackingCreature:getId()) then
           return false
         end
       end
@@ -248,10 +270,12 @@ end
 -- Simple tile safe check
 function TargetCore.PathSafety.isTileSafe(pos, allowFloorChange)
   if not pos then return false end
-  local tile = g_map.getTile(pos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile and g_map.getTile(pos))
   if not tile then return false end
   if not tile:isWalkable() then return false end
-  if tile:hasCreature() then return false end
+  local hasCreature = tile.hasCreature and tile:hasCreature()
+  if hasCreature then return false end
   if not allowFloorChange and TargetCore.PathSafety.isFloorChangeTile(pos) then return false end
   return true
 end
@@ -508,7 +532,10 @@ end
 -- @param getTileFunc: function(pos) -> tile (dependency injection for testing)
 -- @return {pos, danger, score} or nil
 function TargetCore.findSafestTile(playerPos, monsters, currentTarget, getTileFunc)
-  getTileFunc = getTileFunc or function(p) return g_map.getTile(p) end
+  getTileFunc = getTileFunc or function(p) 
+    local Client = getClient()
+    return (Client and Client.getTile) and Client.getTile(p) or (g_map and g_map.getTile and g_map.getTile(p))
+  end
   
   local currentDanger = TargetCore.calculatePositionDanger(playerPos, monsters)
   
@@ -530,7 +557,8 @@ function TargetCore.findSafestTile(playerPos, monsters, currentTarget, getTileFu
     }
     
     local tile = getTileFunc(checkPos)
-    if tile and tile:isWalkable() and not tile:hasCreature() then
+    local hasCreature = tile and tile.hasCreature and tile:hasCreature()
+    if tile and tile:isWalkable() and not hasCreature then
       local danger = TargetCore.calculatePositionDanger(checkPos, monsters)
       
       -- Calculate composite score (lower = better)
@@ -778,7 +806,8 @@ function TargetCore.findBestPosition(centerPos, radius, context, getTileFunc)
         }
         
         local tile = getTileFunc(checkPos)
-        if tile and tile:isWalkable() and not tile:hasCreature() then
+        local hasCreature = tile and tile.hasCreature and tile:hasCreature()
+        if tile and tile:isWalkable() and not hasCreature then
           local score = TargetCore.scorePosition(checkPos, context, getTileFunc)
           
           if score > bestScore then

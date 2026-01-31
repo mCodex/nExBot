@@ -136,12 +136,16 @@ CaveBot.Editor.setup = function()
     title="NPC Say",
     description="Enter text to NPC say",
     multiline=false   
-  }) 
+  })
+  
+  -- Ensure ExampleFunctions exists and has at least one entry
+  local defaultExample = (CaveBot.Editor.ExampleFunctions and CaveBot.Editor.ExampleFunctions[1] and CaveBot.Editor.ExampleFunctions[1][2]) or "return true"
+  
   registerAction("function", {
     title="Edit bot function",
     multiline=true,
-    value=CaveBot.Editor.ExampleFunctions[1][2],
-    examples=CaveBot.Editor.ExampleFunctions,
+    value=defaultExample,
+    examples=CaveBot.Editor.ExampleFunctions or {},
     width=650
   })
   

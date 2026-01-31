@@ -1,6 +1,17 @@
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
 
+--------------------------------------------------------------------------------
+-- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
+--------------------------------------------------------------------------------
+local function getClient()
+  return ClientHelper and ClientHelper.getClient() or ClientService
+end
+
+local function getClientVersion()
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
+end
+
 TargetBot.Looting = {}
 TargetBot.Looting.list = {} -- list of containers to loot
 
@@ -192,7 +203,8 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   if waitTill > now then
     return true
   end
-  local containers = g_game.getContainers()
+  local Client = getClient()
+  local containers = (Client and Client.getContainers) and Client.getContainers() or (g_game and g_game.getContainers and g_game.getContainers())
   local lootContainers = TargetBot.Looting.getLootContainers(containers)
 
   -- check if there's container for loot and has empty space for it
@@ -219,7 +231,7 @@ TargetBot.Looting.process = function(targets, dangerLevel)
     return true
   end
 
-  local tile = g_map.getTile(loot.pos)
+  local tile = (Client and Client.getTile) and Client.getTile(loot.pos) or (g_map and g_map.getTile and g_map.getTile(loot.pos))
   if dist >= 3 or not tile then
     loot.tries = loot.tries + 1
     if nExBot and nExBot.MovementCoordinator and nExBot.MovementCoordinator.canMove then
@@ -238,7 +250,11 @@ TargetBot.Looting.process = function(targets, dangerLevel)
     return true
   end
 
-  g_game.open(container)
+  if Client and Client.open then
+    Client.open(container)
+  elseif g_game and g_game.open then
+    g_game.open(container)
+  end
   waitTill = now + (extras.lootDelay or 200)
   waitingForContainer = container:getId()
 
@@ -370,7 +386,12 @@ local function processContainerQueue()
   
   -- ALWAYS OPEN IN NEW WINDOW for better container management
   -- g_game.open(item) without second parameter opens in new window
-  g_game.open(entry.item)
+  local Client = getClient()
+  if Client and Client.open then
+    Client.open(entry.item)
+  elseif g_game and g_game.open then
+    g_game.open(entry.item)
+  end
   
   waitTill = now + 300
   waitingForContainer = itemId
@@ -495,7 +516,12 @@ TargetBot.Looting.getLootContainers = function(containers)
         local okId, itemId = pcall(function() return item:getId() end)
         if okId and itemId and containersById[itemId] and not openedContainersById[itemId] then
           -- Found a closed loot container in inventory
-          g_game.open(item)
+          local Client = getClient()
+          if Client and Client.open then
+            Client.open(item)
+          elseif g_game and g_game.open then
+            g_game.open(item)
+          end
           waitTill = now + 400
           waitingForContainer = itemId
           openedContainersById[itemId] = true
@@ -514,7 +540,12 @@ TargetBot.Looting.getLootContainers = function(containers)
         local okId, itemId = pcall(function() return item:getId() end)
         if okId and itemId and containersById[itemId] and not openedContainersById[itemId] then
           -- Found a closed loot container in inventory
-          g_game.open(item)
+          local Client = getClient()
+          if Client and Client.open then
+            Client.open(item)
+          elseif g_game and g_game.open then
+            g_game.open(item)
+          end
           waitTill = now + 400
           waitingForContainer = itemId
           openedContainersById[itemId] = true
@@ -557,7 +588,12 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
     elseif storage.foodItems and storage.foodItems[1] and lastFoodConsumption + 5000 < now then
       for _, food in ipairs(storage.foodItems) do
         if item:getId() == food.id then
-          g_game.use(item)
+          local Client = getClient()
+          if Client and Client.use then
+            Client.use(item)
+          elseif g_game and g_game.use then
+            g_game.use(item)
+          end
           lastFoodConsumption = now
           return
         end
@@ -569,7 +605,12 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
       local itemId = item:getId()
       local foodIds = TargetBot.EatFood.getFoodIds and TargetBot.EatFood.getFoodIds() or {}
       if foodIds[itemId] and lastFoodConsumption + 3000 < now then
-        g_game.use(item)
+        local Client2 = getClient()
+        if Client2 and Client2.use then
+          Client2.use(item)
+        elseif g_game and g_game.use then
+          g_game.use(item)
+        end
         lastFoodConsumption = now
         return
       end
@@ -581,7 +622,12 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
     local nextContainer = nestedContainers[1]
     nextContainer.lootTries = (nextContainer.lootTries or 0) + 1
     if nextContainer.lootTries < 3 then -- Increased from 2 for more reliability
-      g_game.open(nextContainer, container)
+      local Client3 = getClient()
+      if Client3 and Client3.open then
+        Client3.open(nextContainer, container)
+      elseif g_game and g_game.open then
+        g_game.open(nextContainer, container)
+      end
       waitTill = now + 250 -- Reduced from 300ms for faster opening
       waitingForContainer = nextContainer:getId()
       return
@@ -592,7 +638,12 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
       local altContainer = nestedContainers[i]
       altContainer.lootTries = (altContainer.lootTries or 0) + 1
       if altContainer.lootTries < 3 then
-        g_game.open(altContainer, container)
+        local Client4 = getClient()
+        if Client4 and Client4.open then
+          Client4.open(altContainer, container)
+        elseif g_game and g_game.open then
+          g_game.open(altContainer, container)
+        end
         waitTill = now + 250
         waitingForContainer = altContainer:getId()
         return
@@ -602,7 +653,12 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
   
   -- looting finished, remove container from list
   container.lootContainer = false
-  g_game.close(container)
+  local Client5 = getClient()
+  if Client5 and Client5.close then
+    Client5.close(container)
+  elseif g_game and g_game.close then
+    g_game.close(container)
+  end
   -- Get extras from UnifiedStorage or fallback to storage.extras
   local extras = (UnifiedStorage and UnifiedStorage.get("extras")) or storage.extras or {}
   table.remove(TargetBot.Looting.list, extras.lootLast and #TargetBot.Looting.list or 1) 
@@ -625,6 +681,7 @@ local stackableItemCache = {}
 TargetBot.Looting.lootItem = function(lootContainers, item)
   local itemId = item:getId()
   local isStackable = item:isStackable()
+  local Client = getClient()
   
   if isStackable then
     local count = item:getCount()
@@ -635,7 +692,11 @@ TargetBot.Looting.lootItem = function(lootContainers, item)
       for slot = 1, #containerItems do
         local citem = containerItems[slot]
         if citem:getId() == itemId and citem:getCount() < 100 then
-          g_game.move(item, container:getSlotPosition(slot - 1), count)
+          if Client and Client.move then
+            Client.move(item, container:getSlotPosition(slot - 1), count)
+          elseif g_game and g_game.move then
+            g_game.move(item, container:getSlotPosition(slot - 1), count)
+          end
           waitTill = now + 250 -- Reduced from 300ms
           return
         end
@@ -645,7 +706,11 @@ TargetBot.Looting.lootItem = function(lootContainers, item)
 
   local container = lootContainers[1]
   local moveCount = isStackable and item:getCount() or 1
-  g_game.move(item, container:getSlotPosition(container:getItemsCount()), moveCount)
+  if Client and Client.move then
+    Client.move(item, container:getSlotPosition(container:getItemsCount()), moveCount)
+  elseif g_game and g_game.move then
+    g_game.move(item, container:getSlotPosition(container:getItemsCount()), moveCount)
+  end
   waitTill = now + 250 -- Reduced from 300ms
 end
 
@@ -695,7 +760,8 @@ onCreatureDisappear(function(creature)
     local listCount = #TargetBot.Looting.list
     if listCount >= 20 then return end -- too many items to loot
     
-    local tile = g_map.getTile(mpos)
+    local Client = getClient()
+    local tile = (Client and Client.getTile) and Client.getTile(mpos) or (g_map and g_map.getTile and g_map.getTile(mpos))
     if not tile then return end
     
     local container = tile:getTopUseThing()

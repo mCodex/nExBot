@@ -135,10 +135,12 @@ end
 
 -- Initialize BotCore FriendHealer if available
 local function initBotCoreHealer()
-  if BotCore and BotCore.FriendHealer then
+  if BotCore and BotCore.FriendHealer and BotCore.FriendHealer.init then
     local bcConfig = buildBotCoreConfig()
     BotCore.FriendHealer.init(bcConfig)
-    BotCore.FriendHealer.setEnabled(config.enabled)
+    if BotCore.FriendHealer.setEnabled then
+      BotCore.FriendHealer.setEnabled(config.enabled)
+    end
     return true
   end
   return false
@@ -146,7 +148,7 @@ end
 
 -- Update BotCore when config changes (also syncs HealEngine spells)
 local function updateBotCoreConfig()
-  if BotCore and BotCore.FriendHealer then
+  if BotCore and BotCore.FriendHealer and BotCore.FriendHealer.init then
     local bcConfig = buildBotCoreConfig()
     BotCore.FriendHealer.init(bcConfig)
     -- Sync spells to HealEngine

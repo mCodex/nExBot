@@ -1,8 +1,14 @@
 -- nExBot Core Library
 -- Contains utility functions and code shorteners
+-- Refactored to use ClientService for cross-client compatibility
 
 -- Global namespace initialization
 nExBot = nExBot or {} -- global namespace for bot variables
+
+-- Get ClientService reference (may not be loaded yet, lazy load in functions)
+local function getClient()
+  return ClientService
+end
 nExBot.standTime = now
 nExBot.isUsingPotion = false
 nExBot.isUsing = false
@@ -210,8 +216,14 @@ function dropItem(idOrObject)
     if type(idOrObject) == "number" then
         idOrObject = findItem(idOrObject)
     end
+    if not idOrObject then return end
 
-    g_game.move(idOrObject, pos(), idOrObject:getCount())
+    local Client = getClient()
+    if Client and Client.move then
+        Client.move(idOrObject, pos(), idOrObject:getCount())
+    elseif g_game and g_game.move then
+        g_game.move(idOrObject, pos(), idOrObject:getCount())
+    end
 end
 
 -- not perfect function to return whether character has utito tempo buff
@@ -254,9 +266,12 @@ end
 -- returns how many kills left to get next skull - can be red skull, can be black skull!
 -- reutrns number
 function killsToRs()
-    return math.min(g_game.getUnjustifiedPoints().killsDayRemaining,
-                    g_game.getUnjustifiedPoints().killsWeekRemaining,
-                    g_game.getUnjustifiedPoints().killsMonthRemaining)
+    local Client = getClient()
+    local points = Client and Client.getUnjustifiedPoints and Client.getUnjustifiedPoints() or 
+                   (g_game and g_game.getUnjustifiedPoints and g_game.getUnjustifiedPoints()) or {}
+    return math.min(points.killsDayRemaining or 999,
+                    points.killsWeekRemaining or 999,
+                    points.killsMonthRemaining or 999)
 end
 
 -- calculates exhaust for potions based on "Aaaah..." message
@@ -398,19 +413,33 @@ function getSpellCoolDown(text)
     text = text:lower()
     local data = getSpellData(text)
     if not data then return false end
-    local icon = modules.game_cooldown.isCooldownIconActive(data.id)
+    
+    local Client = getClient()
+    local icon = false
     local group = false
-    for groupId, duration in pairs(data.group) do
-        if modules.game_cooldown.isGroupCooldownIconActive(groupId) then
-            group = true
-            break
+    
+    if Client and Client.isCooldownActive then
+        icon = Client.isCooldownActive(data.id)
+    elseif modules and modules.game_cooldown then
+        icon = modules.game_cooldown.isCooldownIconActive(data.id)
+    end
+    
+    if data.group then
+        for groupId, duration in pairs(data.group) do
+            local groupActive = false
+            if Client and Client.isGroupCooldownActive then
+                groupActive = Client.isGroupCooldownActive(groupId)
+            elseif modules and modules.game_cooldown then
+                groupActive = modules.game_cooldown.isGroupCooldownIconActive(groupId)
+            end
+            if groupActive then
+                group = true
+                break
+            end
         end
     end
-    if icon or group then
-        return true
-    else
-        return false
-    end
+    
+    return icon or group
 end
 
 -- global var to indicate that player is trying to do something
@@ -733,9 +762,11 @@ end
 function getMonstersInRange(pos, range)
     if not pos or not range then return false end
     local monsters = 0
+    local Client = getClient()
+    local clientVersion = getClientVersion()
     for i, spec in pairs(SafeCall.global("getSpectators") or {}) do
         if spec:isMonster() and
-            (g_game.getClientVersion() < 960 or spec:getType() < 3) and
+            (clientVersion < 960 or spec:getType() < 3) and
             getDistanceBetween(pos, spec:getPosition()) < range then
             monsters = monsters + 1
         end
@@ -752,7 +783,14 @@ function distanceFromPlayer(coords)
 end
 
 -- Cache client version check (doesn't change during session)
-local isOldTibia = g_game.getClientVersion() < 960
+local function getClientVersion()
+    local Client = getClient()
+    if Client and Client.getClientVersion then
+        return Client.getClientVersion()
+    end
+    return g_game and g_game.getClientVersion and g_game.getClientVersion() or 1200
+end
+local isOldTibia = getClientVersion() < 960
 
 --------------------------------------------------------------------------------
 -- ADVANCED MONSTER COUNTING SYSTEM
@@ -1067,6 +1105,7 @@ function getNearTiles(pos)
     local tiles = {}
     local tileCount = 0
     local baseX, baseY, baseZ = pos.x, pos.y, pos.z
+    local Client = getClient()
     
     for i = 1, NEAR_TILE_COUNT do
         local dir = NEAR_TILE_DIRS[i]
@@ -1074,7 +1113,7 @@ function getNearTiles(pos)
         nearTilePos.y = baseY - dir[2]
         nearTilePos.z = baseZ
         
-        local tile = g_map.getTile(nearTilePos)
+        local tile = (Client and Client.getTile) and Client.getTile(nearTilePos) or (g_map and g_map.getTile(nearTilePos))
         if tile then
             tileCount = tileCount + 1
             tiles[tileCount] = tile
@@ -1090,7 +1129,9 @@ function useGroundItem(id)
     if not id then return false end
 
     local dest = nil
-    for i, tile in ipairs(g_map.getTiles(posz())) do
+    local Client = getClient()
+    local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
+    for i, tile in ipairs(tiles) do
         for j, item in ipairs(tile:getItems()) do
             if item:getId() == id then
                 dest = item
@@ -1112,9 +1153,12 @@ function reachGroundItem(id)
     if not id then return false end
 
     local dest = nil
-    for i, tile in ipairs(g_map.getTiles(posz())) do
+    local iPos = nil
+    local Client = getClient()
+    local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
+    for i, tile in ipairs(tiles) do
         for j, item in ipairs(tile:getItems()) do
-            local iPos = item:getPosition()
+            iPos = item:getPosition()
             local iId = item:getId()
             if iId == id then
                 if findPath(pos(), iPos, 20,
@@ -1126,7 +1170,7 @@ function reachGroundItem(id)
         end
     end
 
-    if dest then
+    if dest and iPos then
         return autoWalk(iPos, 20, {ignoreNonPathable = true, precision = 1})
     else
         return false
@@ -1136,7 +1180,9 @@ end
 -- self explanatory
 -- returns object
 function findItemOnGround(id)
-    for i, tile in ipairs(g_map.getTiles(posz())) do
+    local Client = getClient()
+    local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
+    for i, tile in ipairs(tiles) do
         for j, item in ipairs(tile:getItems()) do
             if item:getId() == id then return item end
         end
@@ -1151,10 +1197,12 @@ function useOnGroundItem(a, b)
     if not item then return false end
 
     local dest = nil
-    for i, tile in ipairs(g_map.getTiles(posz())) do
-        for j, item in ipairs(tile:getItems()) do
-            if item:getId() == id then
-                dest = item
+    local Client = getClient()
+    local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
+    for i, tile in ipairs(tiles) do
+        for j, tileItem in ipairs(tile:getItems()) do
+            if tileItem:getId() == b then
+                dest = tileItem
                 break
             end
         end
@@ -1169,11 +1217,12 @@ end
 
 -- returns target creature
 function target()
-    if not g_game.isAttacking() then
-        return
-    else
-        return g_game.getAttackingCreature()
+    local Client = getClient()
+    local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
+    if not isAttacking then
+        return nil
     end
+    return (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
 end
 
 -- returns target creature
@@ -1182,30 +1231,59 @@ function getTarget() return target() end
 -- dist is boolean
 -- returns target position/distance from player
 function targetPos(dist)
-    if not g_game.isAttacking() then return end
+    local Client = getClient()
+    local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
+    if not isAttacking then return end
+    local t = target()
+    if not t then return end
     if dist then
-        return distanceFromPlayer(target():getPosition())
+        return distanceFromPlayer(t:getPosition())
     else
-        return target():getPosition()
+        return t:getPosition()
     end
 end
 
 -- for gunzodus/ezodus only
 -- it will reopen loot bag, necessary for depositer
 function reopenPurse()
-    for i, c in pairs(getContainers()) do
+    local Client = getClient()
+    local containers = (Client and Client.getContainers) and Client.getContainers() or getContainers()
+    for i, c in pairs(containers) do
         if c:getName():lower() == "loot bag" or c:getName():lower() ==
-            "store inbox" then g_game.close(c) end
+            "store inbox" then 
+            if Client and Client.close then
+                Client.close(c)
+            elseif g_game and g_game.close then
+                g_game.close(c)
+            end
+        end
     end
     schedule(100, function()
-        g_game.use(g_game.getLocalPlayer():getInventoryItem(InventorySlotPurse))
+        local Client = getClient()
+        local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer())
+        if player then
+            local purseItem = player:getInventoryItem(InventorySlotPurse)
+            if purseItem then
+                if Client and Client.use then
+                    Client.use(purseItem)
+                elseif g_game and g_game.use then
+                    g_game.use(purseItem)
+                end
+            end
+        end
     end)
     schedule(1400, function()
-        for i, c in pairs(getContainers()) do
+        local Client = getClient()
+        local containers = (Client and Client.getContainers) and Client.getContainers() or getContainers()
+        for i, c in pairs(containers) do
             if c:getName():lower() == "store inbox" then
-                for _, i in pairs(c:getItems()) do
-                    if i:getId() == 23721 then
-                        g_game.open(i, c)
+                for _, item in pairs(c:getItems()) do
+                    if item:getId() == 23721 then
+                        if Client and Client.open then
+                            Client.open(item, c)
+                        elseif g_game and g_game.open then
+                            g_game.open(item, c)
+                        end
                     end
                 end
             end
@@ -1224,11 +1302,12 @@ function getCreaturesInArea(param1, param2, param3)
     local specs = 0
     local monsters = 0
     local players = 0
+    local clientVersion = getClientVersion()
     for i, spec in pairs(getSpectators(param1, param2)) do
         if spec ~= player then
             specs = specs + 1
             if spec:isMonster() and
-                (g_game.getClientVersion() < 960 or spec:getType() < 3) then
+                (clientVersion < 960 or spec:getType() < 3) then
                 monsters = monsters + 1
             elseif spec:isPlayer() and not isFriend(spec:getName()) then
                 players = players + 1
@@ -1255,18 +1334,21 @@ function getBestTileByPatern(pattern, specType, maxDist, safe)
 
     local bestTile = nil
     local best = nil
-    for _, tile in pairs(g_map.getTiles(posz())) do
+    local Client = getClient()
+    local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
+    for _, tile in pairs(tiles) do
         if distanceFromPlayer(tile:getPosition()) <= maxDist then
-            local minimapColor = g_map.getMinimapColor(tile:getPosition())
+            local tilePos = tile:getPosition()
+            local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(tilePos) or (g_map and g_map.getMinimapColor(tilePos)) or 0
             local stairs = (minimapColor >= 210 and minimapColor <= 213)
             if tile:canShoot() and tile:isWalkable() then
-                if getCreaturesInArea(tile:getPosition(), pattern, specType) > 0 then
+                if getCreaturesInArea(tilePos, pattern, specType) > 0 then
                     if (not safe or
-                        getCreaturesInArea(tile:getPosition(), pattern, 3) == 0) then
+                        getCreaturesInArea(tilePos, pattern, 3) == 0) then
                         local candidate =
                             {
                                 pos = tile,
-                                count = getCreaturesInArea(tile:getPosition(),
+                                count = getCreaturesInArea(tilePos,
                                                            pattern, specType)
                             }
                         if not best or best.count <= candidate.count then

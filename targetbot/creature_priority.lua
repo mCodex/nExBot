@@ -32,6 +32,17 @@
   - Enhanced DPS and damage correlation
 ]]
 
+--------------------------------------------------------------------------------
+-- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
+--------------------------------------------------------------------------------
+local function getClient()
+  return ClientHelper and ClientHelper.getClient() or ClientService
+end
+
+local function getClientVersion()
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
+end
+
 -- Use TargetCore constants if available, otherwise define locally
 -- v2.3: FURTHER INCREASED target stickiness to prevent erratic switching
 local PRIO = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.PRIORITY) or {
@@ -117,7 +128,30 @@ local LARGE_RUNE_AREA = {
   {0, 2}, {2, 0}, {0, -2}, {-2, 0}
 }
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OPENTIBIABR TARGETING ENHANCEMENTS (v3.1)
+-- Use optimized pattern-based spectators when available
+-- ═══════════════════════════════════════════════════════════════════════════
+local OpenTibiaBRTargeting = nil
+local function loadOpenTibiaBRTargeting()
+  if OpenTibiaBRTargeting then return OpenTibiaBRTargeting end
+  local ok, result = pcall(function()
+    return dofile("nExBot/targetbot/opentibiabr_targeting.lua")
+  end)
+  if ok and result then
+    OpenTibiaBRTargeting = result
+  end
+  return OpenTibiaBRTargeting
+end
+
+-- Check if OpenTibiaBR pattern spectators is available
+local function hasPatternSpectators()
+  local otbr = loadOpenTibiaBRTargeting()
+  return otbr and otbr.features and otbr.features.getSpectatorsByPattern
+end
+
 -- Pure function: Get monsters in area around position
+-- v3.1: Enhanced with OpenTibiaBR pattern-based detection
 local function getMonstersInArea(pos, offsets, maxDist)
   -- Guard against nil position
   if not pos or not pos.x or not pos.y then
@@ -125,6 +159,30 @@ local function getMonstersInArea(pos, offsets, maxDist)
   end
   
   local count = 0
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- OPENTIBIABR ENHANCEMENT: Use pattern-based spectators for better performance
+  -- This is much faster than iterating through tiles when available
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr and hasPatternSpectators() then
+    -- Determine which pattern to use based on offset count
+    local patternCount = #offsets
+    local aoeCount = 0
+    
+    if patternCount <= 8 then
+      -- Diamond arrow pattern (3x3)
+      aoeCount = otbr.countDiamondArrowHits(pos)
+    else
+      -- Large area pattern (5x5 for GFB/Avalanche)
+      aoeCount = otbr.countLargeAreaHits(pos)
+    end
+    
+    if aoeCount > 0 then
+      return aoeCount
+    end
+    -- Fall through if function returned 0 (might be an issue)
+  end
 
   -- Prefer MonsterCache for performance and accuracy
   if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
@@ -159,7 +217,8 @@ local function getMonstersInArea(pos, offsets, maxDist)
       z = pos.z
     }
 
-    local tile = g_map.getTile(checkPos)
+    local Client = getClient()
+    local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
     if tile then
       local creatures = tile:getCreatures()
       if creatures then
@@ -177,6 +236,9 @@ local function getMonstersInArea(pos, offsets, maxDist)
 end
 
 -- Main priority calculation function
+-- IMPROVED v2.4: Config priority (user-set) is now the dominant factor
+-- User-configured priority 1-10 is scaled to 1000-10000 base priority
+-- This ensures higher config priority ALWAYS wins over lower config priority
 TargetBot.Creature.calculatePriority = function(creature, config, path)
   local pathLength = path and #path or 99
   local hp = creature:getHealthPercent()
@@ -188,21 +250,35 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   if pathLength > maxDist then
     -- Exception: nearly dead monsters still targetable (don't let them escape!)
     if hp <= 15 and pathLength <= maxDist + 2 then
-      return config.priority * 0.4
+      return (config.priority or 1) * 400  -- Scaled config priority
     end
     
     -- RP Safe: Cancel attack on out-of-range target
     if config.rpSafe then
-      local currentTarget = g_game.getAttackingCreature()
+      local Client = getClient()
+      local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
       if currentTarget == creature then
-        g_game.cancelAttackAndFollow()
+        if Client and Client.cancelAttackAndFollow then
+          Client.cancelAttackAndFollow()
+        elseif g_game and g_game.cancelAttackAndFollow then
+          g_game.cancelAttackAndFollow()
+        end
       end
     end
     return 0
   end
   
-  local priority = config.priority or 1
-  local currentTarget = g_game.getAttackingCreature()
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- CONFIG PRIORITY SCALING (v2.4)
+  -- User-set priority (1-10) is scaled by 1000x to make it the dominant factor
+  -- This ensures priority 10 monster ALWAYS beats priority 5 monster, regardless
+  -- of distance, health, or other modifiers (which only add ~50-300 max)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local CONFIG_PRIORITY_SCALE = 1000
+  local priority = (config.priority or 1) * CONFIG_PRIORITY_SCALE
+  
+  local Client = getClient()
+  local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   local isCurrentTarget = (currentTarget == creature)
   
   -- ═══════════════════════════════════════════════════════════════════════════
@@ -271,7 +347,8 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   else
     -- NOT current target - apply penalty for switching
     -- This makes switching harder, especially when we have a wounded target
-    local currentTarget = g_game.getAttackingCreature()
+    local Client = getClient()
+    local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if currentTarget and not currentTarget:isDead() then
       local currentHP = currentTarget:getHealthPercent()
       if currentHP < 70 then
@@ -325,7 +402,12 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
         
         -- If currently attacking this and would pull, cancel
         if isCurrentTarget and largeAreaMonsters >= 2 then
-          g_game.cancelAttackAndFollow()
+          local Client3 = getClient()
+          if Client3 and Client3.cancelAttackAndFollow then
+            Client3.cancelAttackAndFollow()
+          elseif g_game and g_game.cancelAttackAndFollow then
+            g_game.cancelAttackAndFollow()
+          end
           return 0
         end
       end
@@ -744,7 +826,8 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   local creatureId = creature:getId()
   
   -- Update local lock based on current attack state
-  local currentAttackTarget = g_game.getAttackingCreature()
+  local Client = getClient()
+  local currentAttackTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   if currentAttackTarget then
     local attackId = currentAttackTarget:getId()
     if attackId ~= LocalLock.targetId then
@@ -996,4 +1079,93 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   end
 
   return priority
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OPENTIBIABR AoE OPTIMIZATION HELPERS (v3.1)
+-- Find best positions for area attacks using pattern-based detection
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Find the best position to cast an AoE spell for maximum hits
+-- Returns: bestPos, monsterCount
+TargetBot.Creature.findBestAoEPosition = function(range, patternType)
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr and otbr.findBestAoEPosition then
+    local playerPos = player:getPosition()
+    if not playerPos then return nil, 0 end
+    
+    -- Map pattern types to OpenTibiaBR patterns
+    local pattern, width, height
+    if patternType == "diamond" or patternType == "small" then
+      -- Diamond arrow / small rune pattern
+      pattern = nil  -- Use default diamond
+      width, height = 3, 3
+    elseif patternType == "large" or patternType == "gfb" or patternType == "avalanche" then
+      -- GFB/Avalanche pattern
+      pattern = nil  -- Use default large
+      width, height = 5, 5
+    else
+      -- Default to large
+      pattern = nil
+      width, height = 5, 5
+    end
+    
+    return otbr.findBestAoEPosition(playerPos, range, pattern, width, height)
+  end
+  
+  -- Fallback: Manual calculation using getMonstersInArea
+  local playerPos = player:getPosition()
+  if not playerPos then return nil, 0 end
+  
+  range = range or 3
+  local bestPos = nil
+  local bestCount = 0
+  local pattern = (patternType == "diamond" or patternType == "small") and DIAMOND_ARROW_AREA or LARGE_RUNE_AREA
+  
+  -- Check tiles in range
+  for dx = -range, range do
+    for dy = -range, range do
+      if math.abs(dx) + math.abs(dy) <= range then
+        local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
+        local count = getMonstersInArea(checkPos, pattern, range)
+        if count > bestCount then
+          bestCount = count
+          bestPos = checkPos
+        end
+      end
+    end
+  end
+  
+  return bestPos, bestCount
+end
+
+-- Count monsters that would be hit by AoE at specified position
+TargetBot.Creature.countAoEHits = function(pos, patternType)
+  if not pos then return 0 end
+  
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr then
+    if patternType == "diamond" or patternType == "small" then
+      local count = otbr.countDiamondArrowHits(pos)
+      if count > 0 then return count end
+    else
+      local count = otbr.countLargeAreaHits(pos)
+      if count > 0 then return count end
+    end
+  end
+  
+  -- Fallback
+  local pattern = (patternType == "diamond" or patternType == "small") and DIAMOND_ARROW_AREA or LARGE_RUNE_AREA
+  return getMonstersInArea(pos, pattern, 3)
+end
+
+-- Get creatures in line (for beam spells) using direction
+TargetBot.Creature.getCreaturesInBeam = function(direction, range)
+  local otbr = loadOpenTibiaBRTargeting()
+  if otbr and otbr.getCreaturesInFront then
+    local playerPos = player:getPosition()
+    if not playerPos then return {} end
+    return otbr.getCreaturesInFront(playerPos, direction, range or 5)
+  end
+  return {}
 end

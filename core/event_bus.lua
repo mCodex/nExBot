@@ -30,21 +30,6 @@ local eventQueue = { head = 1, tail = 0 }
 local processing = false
 local FLUSH_BATCH = 100 -- max events processed per flush to avoid blocking
 
--- Startup safeguard: filter known problematic spawners (configurable via ProfileStorage.get("startupFilterPlayers"))
-local startupFilter = {}
-do
-  local ok, list = pcall(function() return ProfileStorage and ProfileStorage.get("startupFilterPlayers") end)
-  if ok and type(list) == "table" then
-    for _, n in ipairs(list) do startupFilter[tostring(n)] = true end
-  end
-  -- Add a default safe entry for the reported problematic name
-  startupFilter["Elderane"] = true
-end
-
-local startupCounts = {} -- { [name] = {first=ts, count=n, warned=true} }
-local STARTUP_WINDOW_MS = 10000 -- 10s window
-local STARTUP_THRESHOLD = 5 -- ignore after this many appears within window
-
 -- Subscribe to an event
 -- @param event string: Event name (e.g., "creature:appear", "player:move")
 -- @param callback function: Handler function
@@ -187,30 +172,6 @@ end
 -- Creature events
 if onCreatureAppear then
   onCreatureAppear(function(creature)
-    -- Startup filter: protect from bursty spawns of problematic names (e.g., 'Elderane')
-    local ok, name = pcall(function() return creature:getName() end)
-    if ok and name and startupFilter[name] then
-      local now = math.floor(os.clock() * 1000)
-      local rec = startupCounts[name]
-      if not rec or (now - rec.first) > STARTUP_WINDOW_MS then
-        rec = { first = now, count = 0, warned = false }
-        startupCounts[name] = rec
-      end
-      rec.count = rec.count + 1
-      if rec.count > STARTUP_THRESHOLD then
-        if not rec.warned then
-          warn("[EventBus] Ignoring repeated spawn of '" .. tostring(name) .. "' (count=" .. tostring(rec.count) .. "), protecting main loop")
-          pcall(function()
-            if ProfileStorage then
-              ProfileStorage.set("bootFreezeLast", { name = name, count = rec.count, ts = now })
-            end
-          end)
-          rec.warned = true
-        end
-        -- return -- drop this appear event to avoid heavy processing
-      end
-    end
-
     if creature:isMonster() then
       EventBus.emit("monster:appear", creature)
     elseif creature:isPlayer() then
@@ -487,22 +448,56 @@ local function checkEquipmentChanges()
   end
 end
 
--- Equipment check macro (runs every 200ms, lightweight)
-macro(200, function()
-  checkEquipmentChanges()
-end)
+-- ============================================================================
+-- UNIFIED TICK INTEGRATION
+-- Migrate polling macros to UnifiedTick for consolidated tick management
+-- ============================================================================
 
--- Periodic flush for queued events (fast tick)
-macro(25, function()
-  EventBus.flush()
-end)
-
--- Slow tick for periodic tasks (backup, cleanup, etc.)
-macro(5000, function()
-  EventBus.emit("tick:slow")
-  -- Cleanup killed monsters periodically
-  cleanupKilledMonsters()
-end)
+if UnifiedTick and UnifiedTick.register then
+  -- Equipment check handler (200ms, LOW priority - UI updates)
+  UnifiedTick.register("eventbus_equipment_check", {
+    interval = 200,
+    priority = UnifiedTick.Priority.LOW,
+    handler = checkEquipmentChanges,
+    group = "eventbus"
+  })
+  
+  -- Event flush handler (50ms, NORMAL priority - event processing)
+  -- Note: Running at 50ms instead of 25ms to match UnifiedTick master interval
+  UnifiedTick.register("eventbus_flush", {
+    interval = 50,
+    priority = UnifiedTick.Priority.NORMAL,
+    handler = function()
+      EventBus.flush()
+    end,
+    group = "eventbus"
+  })
+  
+  -- Slow tick handler (5000ms, IDLE priority - cleanup tasks)
+  UnifiedTick.register("eventbus_slow_tick", {
+    interval = 5000,
+    priority = UnifiedTick.Priority.IDLE,
+    handler = function()
+      EventBus.emit("tick:slow")
+      cleanupKilledMonsters()
+    end,
+    group = "eventbus"
+  })
+else
+  -- Fallback to standalone macros if UnifiedTick not available
+  macro(200, function()
+    checkEquipmentChanges()
+  end)
+  
+  macro(25, function()
+    EventBus.flush()
+  end)
+  
+  macro(5000, function()
+    EventBus.emit("tick:slow")
+    cleanupKilledMonsters()
+  end)
+end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- EXTENDED OTCLIENT API EVENTS

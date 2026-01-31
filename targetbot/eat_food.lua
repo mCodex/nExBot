@@ -10,7 +10,7 @@
   - Uses looting system's monster death tracking
   - Opens corpses automatically
   - Eats food from any opened container (corpses)
-  - Uses comprehensive food item list
+  - Uses comprehensive food item list from constants/food_items.lua
   - Cooldown to prevent spam eating
   - Toggle switch in TargetBot Looting panel
 ]]
@@ -18,59 +18,26 @@
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
 
+-- Use centralized food items constants
+if not FoodItems then
+  dofile("constants/food_items.lua")
+end
+
+--------------------------------------------------------------------------------
+-- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
+--------------------------------------------------------------------------------
+local function getClient()
+  return ClientHelper and ClientHelper.getClient() or ClientService
+end
+
+local function getClientVersion()
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
+end
+
 TargetBot.EatFood = {}
 
--- Food item IDs
-local FOOD_IDS = {
-  -- Meats
-  [3577] = true,  -- meat
-  [3582] = true,  -- ham
-  [3583] = true,  -- dragon ham
-  
-  -- Fish
-  [3578] = true,  -- fish
-  [6984] = true,  -- fish (variant)
-  [7885] = true,  -- fish (variant)
-  [10245] = true, -- fish (variant)
-  
-  -- Fruits
-  [3584] = true,  -- pear
-  [3585] = true,  -- red apple
-  [3586] = true,  -- orange
-  [3587] = true,  -- banana
-  [3588] = true,  -- blueberry
-  [3589] = true,  -- coconut
-  [3590] = true,  -- cherry
-  [3591] = true,  -- strawberry
-  [3593] = true,  -- melon
-  [5096] = true,  -- mango
-  [8011] = true,  -- plum
-  [8012] = true,  -- raspberry
-  [8013] = true,  -- lemon
-  
-  -- Vegetables
-  [3594] = true,  -- pumpkin
-  [3595] = true,  -- carrot
-  [8015] = true,  -- onion
-  [15634] = true, -- carrot (variant)
-  [15636] = true, -- carrot (variant)
-  
-  -- Baked goods
-  [3598] = true,  -- cookie
-  [3600] = true,  -- bread
-  [3602] = true,  -- brown bread
-  
-  -- Other
-  [3606] = true,  -- egg
-  [3607] = true,  -- cheese
-  [3723] = true,  -- white mushroom
-  [3725] = true,  -- brown mushroom
-  [15700] = true, -- mushroom
-  [6277] = true,  -- cake
-  [6278] = true,  -- cake (variant)
-  [12147] = true, -- cake (variant)
-  [3592] = true,  -- grape
-}
+-- Use centralized food IDs from FoodItems constants
+local FOOD_IDS = FoodItems.FOOD_IDS
 
 -- State variables
 local eatFromCorpsesEnabled = false
@@ -346,7 +313,8 @@ local function walkToCorpse(corpse)
   end
   
   -- Fallback: use g_game.walk
-  if g_game.walk then
+  local Client = getClient()
+  if (Client and Client.walk) or (g_game and g_game.walk) then
     -- Calculate direction to walk
     local dx = corpse.pos.x - playerPos.x
     local dy = corpse.pos.y - playerPos.y
@@ -359,7 +327,11 @@ local function walkToCorpse(corpse)
     end
     
     if dir then
-      g_game.walk(dir)
+      if Client and Client.walk then
+        Client.walk(dir)
+      elseif g_game and g_game.walk then
+        g_game.walk(dir)
+      end
       walkingToCorpse = corpse
       return true
     end
@@ -373,10 +345,15 @@ local function eatFromInventory()
   if (now - lastEatTime) < EAT_COOLDOWN then return false end
   
   -- Try findItem first (searches all open containers including backpacks)
+  local Client = getClient()
   for foodId, _ in pairs(FOOD_IDS) do
     local food = SafeCall.findItem(foodId)
     if food then
-      g_game.use(food)
+      if Client and Client.use then
+        Client.use(food)
+      elseif g_game and g_game.use then
+        g_game.use(food)
+      end
       lastEatTime = now
       return true
     end
@@ -400,7 +377,8 @@ end
 local function eatFromOpenContainers()
   if (now - lastEatTime) < EAT_COOLDOWN then return false end
   
-  local containers = g_game.getContainers()
+  local Client = getClient()
+  local containers = (Client and Client.getContainers) and Client.getContainers() or (g_game and g_game.getContainers and g_game.getContainers())
   for index, container in pairs(containers) do
     -- Only check corpse containers (not backpacks)
     local containerItem = container:getContainerItem()
@@ -410,7 +388,11 @@ local function eatFromOpenContainers()
       -- and rely on the fact that player's loot containers won't have food
       for _, item in ipairs(container:getItems()) do
         if FOOD_IDS[item:getId()] then
-          g_game.use(item)
+          if Client and Client.use then
+            Client.use(item)
+          elseif g_game and g_game.use then
+            g_game.use(item)
+          end
           lastEatTime = now
           -- Mark container for tracking
           if not processedContainers[index] then
@@ -429,7 +411,12 @@ local function eatFromOpenContainers()
                 end
                 -- Close if no more food
                 if not hasFood then
-                  g_game.close(container)
+                  local Client = getClient()
+                  if Client and Client.close then
+                    Client.close(container)
+                  elseif g_game and g_game.close then
+                    g_game.close(container)
+                  end
                   processedContainers[index] = nil
                 end
               end
@@ -454,7 +441,8 @@ local function openNearbyCorpse()
   local corpse, index = findNearestCorpse()
   if not corpse then return false end
   
-  local tile = g_map.getTile(corpse.pos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(corpse.pos) or (g_map and g_map.getTile and g_map.getTile(corpse.pos))
   if not tile then
     foodCorpseQueue[index].tries = foodCorpseQueue[index].tries + 1
     if foodCorpseQueue[index].tries >= 3 then
@@ -483,7 +471,11 @@ local function openNearbyCorpse()
   end
   
   -- Open the corpse
-  g_game.open(topThing)
+  if Client and Client.open then
+    Client.open(topThing)
+  elseif g_game and g_game.open then
+    g_game.open(topThing)
+  end
   foodCorpseQueue[index].state = "opening"
   lastOpenTime = now
   
@@ -574,7 +566,8 @@ onCreatureDisappear(function(creature)
   schedule(100, function()
     if not player then return end
     
-    local tile = g_map.getTile(mpos)
+    local Client = getClient()
+    local tile = (Client and Client.getTile) and Client.getTile(mpos) or (g_map and g_map.getTile and g_map.getTile(mpos))
     if not tile then return end
     
     local topThing = tile:getTopUseThing()

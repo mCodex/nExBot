@@ -2,13 +2,14 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![OTClientV8](https://img.shields.io/badge/OTClientV8-compatible-orange.svg)
+![OpenTibiaBR](https://img.shields.io/badge/OpenTibiaBR-compatible-brightgreen.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1+-purple.svg)
 ![Performance](https://img.shields.io/badge/Performance-Optimized-brightgreen.svg)
 
-**A high-performance, intelligent automation bot for OTClientV8 with advanced AI, real-time analytics, and battle-tested reliability**
+**A high-performance, intelligent automation bot for OTClientV8 and OpenTibiaBR with advanced AI, real-time analytics, and battle-tested reliability**
 
 [🚀 Quick Start](#-quick-start) • [✨ Features](#-features) • [🏗️ How It Works](#-how-it-works) • [📚 Documentation](#-documentation) • [⚙️ Configuration](#-configuration)
 
@@ -443,6 +444,66 @@ HealBot Reports Usage        AttackBot Reports Usage
 
 ## ⚙️ Architecture
 
+### Multi-Client Support via ACL (Anti-Corruption Layer)
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                  CLIENT ABSTRACTION LAYER                      │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │                   ClientService API                      │  │
+│  │  Unified interface for ALL client operations             │  │
+│  │  - getClient() returns ClientService globally            │  │
+│  │  - 100+ abstracted functions                             │  │
+│  └─────────────────────────────────────────────────────────┘  │
+│                            │                                   │
+│                            ▼                                   │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │                     ACL Layer                            │  │
+│  │  Anti-Corruption Layer for client abstraction            │  │
+│  │  - Auto-detects client type at startup                   │  │
+│  │  - Loads appropriate adapter                             │  │
+│  └─────────────────────────────────────────────────────────┘  │
+│                            │                                   │
+│           ┌────────────────┴────────────────┐                 │
+│           ▼                                 ▼                  │
+│  ┌─────────────────┐              ┌─────────────────────────┐ │
+│  │   OTCv8 Adapter │              │  OpenTibiaBR Adapter    │ │
+│  │                 │              │  - forceWalk            │ │
+│  │  Base client    │              │  - stash operations     │ │
+│  │  operations     │              │  - imbuement system     │ │
+│  │                 │              │  - prey system          │ │
+│  │                 │              │  - forge operations     │ │
+│  │                 │              │  - market APIs          │ │
+│  └─────────────────┘              └─────────────────────────┘ │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### ClientService API Examples
+
+```lua
+-- The global getClient() function returns ClientService
+local Client = getClient()
+
+-- Basic operations work on both OTCv8 and OpenTibiaBR
+local player = Client.getLocalPlayer()
+Client.attack(creature)
+Client.walk(direction)
+
+-- OpenTibiaBR-specific operations (gracefully degrade on OTCv8)
+Client.stashWithdraw(itemId, count)
+Client.applyImbuement(slotId, imbuementId, useProtection)
+Client.preyAction(slotId, actionType)
+Client.forgeFuse(item1, item2, useCore)
+
+-- Event callbacks work uniformly
+Client.onCreatureAppear(function(creature) ... end)
+Client.onImbuementWindow(function(data) ... end)
+Client.onForgeResult(function(result) ... end)
+```
+
 ### Module Organization
 
 ```
@@ -450,8 +511,16 @@ nExBot/
 ├── 📄 _Loader.lua                    # Main entry point - loads everything
 │
 ├── 📁 core/                          # Core libraries & systems
-│   ├── lib.lua                       # Utils: Object Pool, Memoization, Shapes
+│   ├── 📁 acl/                       # Anti-Corruption Layer
+│   │   ├── init.lua                  # Client detection & adapter loading
+│   │   ├── compat.lua                # Backward compatibility shim
+│   │   └── 📁 adapters/              # Client-specific implementations
+│   │       ├── base.lua              # Base adapter (OTCv8)
+│   │       └── opentibiabr.lua       # OpenTibiaBR adapter (50+ extra APIs)
+│   │
+│   ├── client_service.lua            # Unified ClientService API
 │   ├── event_bus.lua                 # Centralized event dispatcher
+│   ├── lib.lua                       # Utils: Object Pool, Memoization, Shapes
 │   ├── bot_database.lua              # Unified item/config database
 │   ├── HealBot.lua                   # Healing automation
 │   ├── AttackBot.lua                 # Attack automation
@@ -475,10 +544,11 @@ nExBot/
 │   ├── core.lua                      # Pure utility functions
 │   ├── creature_attack.lua           # Movement & combat logic
 │   ├── creature_priority.lua         # Target scoring algorithm
-│   ├── monster_behavior.lua          # AI pattern recognition
-│   ├── spell_optimizer.lua           # AoE position optimization
+│   ├── monster_ai.lua                # AI pattern recognition
+│   ├── attack_state_machine.lua      # Deterministic target state
+│   ├── event_targeting.lua           # Event-driven target updates
 │   ├── movement_coordinator.lua      # Intent-based movement voting
-│   └── 5+ other modules
+│   └── 10+ other modules
 │
 ├── 📁 cavebot_configs/               # User waypoint scripts (.cfg)
 ├── 📁 targetbot_configs/             # User creature configs (.json)

@@ -10,7 +10,7 @@
   
   Principles Applied:
   - SRP: Each feature is a separate, focused component
-  - DRY: Shared food lookup, reusable helper functions
+  - DRY: Shared food lookup from constants/food_items.lua, reusable helper functions
   - KISS: Simple, readable logic
   - SOLID: Open for extension, closed for modification
   
@@ -25,38 +25,20 @@
 
 setDefaultTab("HP")
 
+-- Use centralized constants (dofile loads FoodItems globally)
+if not FoodItems then
+  dofile("constants/food_items.lua")
+end
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- CONSTANTS (Single Source of Truth)
+-- CONSTANTS (Use centralized FoodItems)
 -- ═══════════════════════════════════════════════════════════════════════════
 
-local FOOD_IDS = {
-  -- Mushrooms (common hunting food)
-  3725,  -- Brown Mushroom
-  3731,  -- Fire Mushroom  
-  3723,  -- White Mushroom
-  3726,  -- Orange Mushroom
-  3728,  -- Dark Mushroom
-  -- Meat & Fish
-  3582,  -- Ham
-  3577,  -- Meat
-  3578,  -- Fish
-  -- Dairy & Bakery
-  3585,  -- Cheese
-  3600,  -- Bread
-  3606,  -- Cake
-  -- Fruits
-  3607,  -- Mango
-  3592,  -- Grape
-  3601,  -- Banana
-  3586,  -- Apple
-  3595,  -- Pear
-  3593,  -- Coconut
-  3587,  -- Blueberry
-  -- Other common food
-  3583,  -- Dragon Ham
-  3584,  -- Roasted Meat
-  8838,  -- Hydra Tongue
-}
+-- Get food IDs array from FoodItems
+local FOOD_IDS = {}
+for id, _ in pairs(FoodItems.FOODS) do
+  FOOD_IDS[#FOOD_IDS + 1] = id
+end
 
 -- Corpse IDs that may contain food (skinnable/lootable bodies)
 local CORPSE_IDS = {
@@ -73,11 +55,8 @@ local CORPSE_IDS = {
   6079, 6080, 6081, 6082, -- Beast corpses
 }
 
--- O(1) lookup tables
-local FOOD_LOOKUP = {}
-for _, id in ipairs(FOOD_IDS) do
-  FOOD_LOOKUP[id] = true
-end
+-- O(1) lookup tables (FOOD_LOOKUP uses FoodItems.FOOD_IDS directly)
+local FOOD_LOOKUP = FoodItems.FOOD_IDS
 
 local CORPSE_LOOKUP = {}
 for _, id in ipairs(CORPSE_IDS) do
@@ -387,8 +366,8 @@ local function tryEat()
   return false
 end
 
--- Main eat food macro
-local eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function()
+-- Eat food handler function (shared by UnifiedTick and fallback macro)
+local function eatFoodHandler()
   local regenTime = getRegenTime()
   
   -- Skip if regeneration is sufficient
@@ -398,7 +377,28 @@ local eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function()
   
   -- Eat food
   tryEat()
-end)
+end
+
+-- Main eat food macro - use UnifiedTick if available
+local eatFoodMacro
+if UnifiedTick and UnifiedTick.register then
+  -- Register with UnifiedTick for consolidated tick management
+  UnifiedTick.register("eat_food", {
+    interval = CONFIG.EAT_FOOD_INTERVAL,
+    priority = UnifiedTick.Priority.LOW,
+    handler = eatFoodHandler,
+    group = "tools"
+  })
+  -- Create dummy macro for UI toggle compatibility
+  eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function() end)
+  eatFoodMacro:setOn(true)
+  eatFoodMacro.onSwitch = function(m)
+    UnifiedTick.setEnabled("eat_food", m:isOn())
+  end
+else
+  -- Fallback to standalone macro
+  eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", eatFoodHandler)
+end
 
 -- Add tooltip
 if eatFoodMacro and eatFoodMacro.button then
@@ -449,17 +449,12 @@ local function setupCorpseTracking()
       return
     end
     
-    -- Record the kill position
-    table.insert(State.recentKills, {
+    -- Record the kill position (using BoundedPush for O(1) amortized)
+    BoundedPush(State.recentKills, {
       pos = killPos,
       timestamp = now or 0,
       name = creatureName or "Unknown"
-    })
-    
-    -- Limit queue size
-    while #State.recentKills > 20 do
-      table.remove(State.recentKills, 1)
-    end
+    }, 20)
   end, 20)  -- Priority 20
   
   -- FALLBACK: Also check EventBus.getKilledMonsters() for direct access

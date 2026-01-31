@@ -1,5 +1,10 @@
 CaveBot.Extensions.DWithdraw = {}
 
+-- Use global ClientHelper (loaded by _Loader.lua)
+local function getClient()
+    return ClientHelper and ClientHelper.getClient() or ClientService
+end
+
 CaveBot.Extensions.DWithdraw.setup = function()
 	CaveBot.registerAction("dpwithdraw", "#002FFF", function(value, retries)
 		local capLimit
@@ -27,9 +32,10 @@ CaveBot.Extensions.DWithdraw.setup = function()
 
 		-- cap check
 		if freecap() < (capLimit or 200) then
+			local Client = getClient()
 			for i, container in ipairs(getContainers()) do
 				if container:getName():lower():find("depot") or container:getName():lower():find("locker") then
-					g_game.close(container)
+					if Client and Client.closeContainer then Client.closeContainer(container) elseif g_game then g_game.close(container) end
 				end
 			end
 			print("CaveBot[DepotWithdraw]: cap limit reached, proceeding") 
@@ -52,9 +58,10 @@ CaveBot.Extensions.DWithdraw.setup = function()
 		end
 
 		if containerIsFull(destContainer) then
+			local Client = getClient()
 			for i, item in pairs(destContainer:getItems()) do
 				if item:getId() == destId then
-					g_game.open(item, destContainer)
+					if Client and Client.openContainer then Client.openContainer(item, destContainer) elseif g_game then g_game.open(item, destContainer) end
 					return "retry"
 				end
 			end
@@ -63,14 +70,16 @@ CaveBot.Extensions.DWithdraw.setup = function()
 		-- stash validation
 		if depotContainer and #depotContainer:getItems() == 0 then
 			print("CaveBot[DepotWithdraw]: all items withdrawn")
-			g_game.close(depotContainer)
+			local Client2 = getClient()
+			if Client2 and Client2.closeContainer then Client2.closeContainer(depotContainer) elseif g_game then g_game.close(depotContainer) end
 			return true
 		end
 
 		if containerIsFull(destContainer) then
+			local Client = getClient()
 			for i, item in pairs(destContainer:getItems()) do
 				if item:getId() == destId then
-					g_game.open(foundNextContainer, destContainer)
+					if Client and Client.openContainer then Client.openContainer(foundNextContainer, destContainer) elseif g_game then g_game.open(foundNextContainer, destContainer) end
 					return "retry"
 				end
 			end
@@ -84,11 +93,13 @@ CaveBot.Extensions.DWithdraw.setup = function()
 
 		CaveBot.PingDelay(2)
 
-		for i, container in pairs(g_game.getContainers()) do
+		local Client = getClient()
+		local containers = (Client and Client.getContainers) and Client.getContainers() or (g_game and g_game.getContainers()) or {}
+		for i, container in pairs(containers) do
 			if string.find(container:getName():lower(), "depot box") then
 				for j, item in ipairs(container:getItems()) do
 					statusMessage("[D_Withdraw] witdhrawing item: "..item:getId())
-					g_game.move(item, destContainer:getSlotPosition(destContainer:getItemsCount()), item:getCount())
+					if Client and Client.move then Client.move(item, destContainer:getSlotPosition(destContainer:getItemsCount()), item:getCount()) elseif g_game then g_game.move(item, destContainer:getSlotPosition(destContainer:getItemsCount()), item:getCount()) end
 					return "retry"
 				end
 			end

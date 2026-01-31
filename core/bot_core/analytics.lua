@@ -86,14 +86,12 @@ storage.botCoreAnalytics = _data
 -- PRIVATE HELPERS
 -- ============================================================================
 
--- Append to log with rotation
+-- Append to log with rotation (using TrimArray for O(1) amortized)
 local function appendLog(entry)
   local log = _data.log
-  if #log >= _data.logMaxSize then
-    table.remove(log, 1)
-  end
   entry.timestamp = now or os.time() * 1000
-  table.insert(log, entry)
+  log[#log + 1] = entry
+  TrimArray(log, _data.logMaxSize)
 end
 
 -- Increment counter in table

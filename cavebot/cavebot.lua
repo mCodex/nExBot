@@ -1,6 +1,13 @@
 local cavebotMacro = nil
 local config = nil
 
+-- Safe wrapper for CaveBot.resetWalking to prevent nil errors
+local function safeResetWalking()
+  if CaveBot and CaveBot.resetWalking then
+    CaveBot.resetWalking()
+  end
+end
+
 -- ui
 local configWidget = UI.Config()  -- Create config widget first
 local ui = UI.createWidget("CaveBotPanel")
@@ -117,12 +124,10 @@ end
 -- Record a floor change
 local function recordFloorChange(fromZ, toZ, waypointIdx)
   local change = {time = now, fromZ = fromZ, toZ = toZ, waypointIdx = waypointIdx}
-  table.insert(floorChangeHistory.changes, change)
+  floorChangeHistory.changes[#floorChangeHistory.changes + 1] = change
   
-  -- Trim to max size
-  while #floorChangeHistory.changes > floorChangeHistory.maxSize do
-    table.remove(floorChangeHistory.changes, 1)
-  end
+  -- Trim to max size (using TrimArray for O(1) amortized)
+  TrimArray(floorChangeHistory.changes, floorChangeHistory.maxSize)
   
   floorChangeHistory.lastChangeTime = now
   floorChangeHistory.lastFloorFrom = fromZ
@@ -910,11 +915,11 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       if wasIntended then
         -- Intended floor change - just reset walking, don't search for waypoints
         -- The cavebot will naturally advance to the next waypoint in the list
-        CaveBot.resetWalking()
+        safeResetWalking()
         -- Do NOT call resetWaypointEngine or findNearestGlobalWaypoint!
       else
         -- Unintended floor change - do the full reset and recovery
-        CaveBot.resetWalking()
+        safeResetWalking()
         resetWaypointEngine()
         if resetStartupCheck then resetStartupCheck() end
         if findNearestGlobalWaypoint then
@@ -953,13 +958,13 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   -- Check TargetBot allows CaveBot action (cached function refs)
   if targetBotIsActive and targetBotIsActive() then
     if targetBotIsCaveBotAllowed and not targetBotIsCaveBotAllowed() then
-      CaveBot.resetWalking()
+      safeResetWalking()
       return
     end
     
     -- PULL SYSTEM PAUSE: If smartPull is active, pause waypoint walking
     if TargetBot.smartPullActive then
-      CaveBot.resetWalking()
+      safeResetWalking()
       return
     end
     
@@ -970,7 +975,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     -- ═══════════════════════════════════════════════════════════════════════════
     if TargetBot.shouldWaitForMonsters and TargetBot.shouldWaitForMonsters() then
       -- There are monsters that need to be killed - pause cavebot
-      CaveBot.resetWalking()
+      safeResetWalking()
       return
     end
     
@@ -978,7 +983,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     if EventTargeting and EventTargeting.isCombatActive and EventTargeting.isCombatActive() then
       -- Only pause if we're NOT allowed by TargetBot
       if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
-        CaveBot.resetWalking()
+        safeResetWalking()
         return
       end
     end
@@ -1005,7 +1010,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   end
   
   -- Execute action (inline for performance)
-  CaveBot.resetWalking()
+  safeResetWalking()
   local result = actionDef.callback(currentAction.value, actionRetries, prevActionResult)
   
   -- Handle result
@@ -1120,7 +1125,7 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
   if CaveBot.fullResetWalking then
     CaveBot.fullResetWalking()
   else
-    CaveBot.resetWalking()
+    safeResetWalking()
   end
   -- Clear all floor change tracking including history
   if CaveBot.clearAllFloorChangeTracking then

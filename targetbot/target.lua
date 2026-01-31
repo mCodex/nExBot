@@ -4,6 +4,119 @@ lastAction = 0
 local cavebotAllowance = 0
 local lureEnabled = true
 
+-- Use global ClientHelper (loaded by _Loader.lua) for cross-client compatibility
+local function getClient()
+  return ClientHelper and ClientHelper.getClient() or ClientService
+end
+
+local function getClientVersion()
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OPENTIBIABR TARGETING ENHANCEMENTS (v3.1)
+-- Load enhanced targeting module for OpenTibiaBR-specific optimizations
+-- Provides: batch pathfinding, line-of-sight detection, pattern-based AoE
+-- ═══════════════════════════════════════════════════════════════════════════
+local OpenTibiaBRTargeting = nil
+local function loadOpenTibiaBRTargeting()
+  if OpenTibiaBRTargeting then return OpenTibiaBRTargeting end
+  local ok, result = pcall(function()
+    return dofile("nExBot/targetbot/opentibiabr_targeting.lua")
+  end)
+  if ok and result then
+    OpenTibiaBRTargeting = result
+    print("[TargetBot] OpenTibiaBR targeting enhancements loaded")
+  end
+  return OpenTibiaBRTargeting
+end
+
+-- Lazy-load on first use
+local function getOpenTibiaBRTargeting()
+  if OpenTibiaBRTargeting == nil then
+    loadOpenTibiaBRTargeting()
+  end
+  return OpenTibiaBRTargeting
+end
+
+-- Check if OpenTibiaBR batch pathfinding is available
+local function hasBatchPathfinding()
+  local otbr = getOpenTibiaBRTargeting()
+  return otbr and otbr.features and otbr.features.findEveryPath
+end
+
+-- Check if OpenTibiaBR sight spectators is available
+local function hasSightSpectators()
+  local otbr = getOpenTibiaBRTargeting()
+  return otbr and otbr.features and otbr.features.getSightSpectators
+end
+
+-- Load PathUtils if available (shared module for creature validation)
+local PathUtils = nil
+local function ensurePathUtils()
+  if PathUtils then return PathUtils end
+  -- OTClient compatible - just try dofile
+  local success = pcall(function()
+    dofile("nExBot/utils/path_utils.lua")
+  end)
+  -- After dofile, PathUtils should be global
+  if success then
+    PathUtils = PathUtils  -- Re-check global
+  end
+  return PathUtils
+end
+ensurePathUtils()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- OPTIMIZED CREATURE VALIDATION (Reduce pcall overhead)
+-- Single pcall wrapper that validates multiple creature properties at once
+-- ═══════════════════════════════════════════════════════════════════════════
+local function validateCreature(creature)
+  if not creature then
+    return { valid = false }
+  end
+  
+  -- Use PathUtils.validateCreature if available (optimized single pcall)
+  if PathUtils and PathUtils.validateCreature then
+    return PathUtils.validateCreature(creature)
+  end
+  
+  -- Fallback: single pcall to get all properties at once
+  local ok, result = pcall(function()
+    return {
+      valid = true,
+      isDead = creature:isDead(),
+      isMonster = creature:isMonster(),
+      isPlayer = creature:isPlayer(),
+      isNpc = creature:isNpc(),
+      id = creature:getId(),
+      position = creature:getPosition(),
+      name = creature:getName(),
+      healthPercent = (type(creature.getHealthPercent) == "function" and creature:getHealthPercent()) or 100,
+    }
+  end)
+  
+  if not ok then
+    return { valid = false }
+  end
+  
+  return result
+end
+
+-- Quick dead check (single pcall, cached result)
+local function isCreatureDead(creature)
+  if not creature then return true end
+  local ok, isDead = pcall(function() return creature:isDead() end)
+  return ok and isDead
+end
+
+-- Quick ID check (single pcall)
+local function getCreatureId(creature)
+  if not creature then return nil end
+  local ok, id = pcall(function() return creature:getId() end)
+  return ok and id or nil
+end
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- MONSTER DETECTION RANGE (v3.0)
 -- IMPROVED: Increased range for better monster detection
@@ -11,14 +124,6 @@ local lureEnabled = true
 -- ═══════════════════════════════════════════════════════════════════════════
 local MONSTER_DETECTION_RANGE = 14  -- INCREASED from 10 to 14 (covers full visible screen)
 local MONSTER_TARGETING_RANGE = 12  -- INCREASED from 10 to 12 (targeting range)
-
--- MonsterAI automatic integration (hidden internals, not exposed to UI/storage)
--- DISABLED: MonsterAI was blocking chase mode by pausing movement for up to 900ms
--- This caused players to stand still while attacking instead of chasing
-local MONSTERAI_INTEGRATION = false  -- DISABLED to fix chase mode
-local MONSTERAI_IMMINENT_ACTION = "avoid"  -- "avoid" = attempt escape, "wait" = pause attacking
-local MONSTERAI_MIN_CONF = 0.6
-local monsterAIWaitUntil = 0
 
 local dangerValue = 0
 local looterStatus = ""
@@ -36,7 +141,8 @@ local moduleInitialized = false
 local _lastTargetbotSlowWarn = 0
 
 -- Local cached reference to local player (updated on relogin)
-local player = g_game and g_game.getLocalPlayer() or nil
+local Client = getClient()
+local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or nil
 
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
@@ -104,25 +210,28 @@ TargetBot.AttackController = AttackController
 -- REQUEST ATTACK (Unified Attack Interface)
 -- This is the SINGLE entry point for all attack requests in TargetBot.
 -- Uses AttackStateMachine for state-based attack management.
+-- OPTIMIZED: Uses consolidated validateCreature for reduced pcall overhead
 -- ═══════════════════════════════════════════════════════════════════════════
 TargetBot.requestAttack = function(creature, reason, force)
   if not creature then return false end
   
-  -- Safe dead check
-  local okDead, isDead = pcall(function() return creature:isDead() end)
-  if okDead and isDead then return false end
+  -- OPTIMIZED: Use isCreatureDead helper (single pcall)
+  if isCreatureDead(creature) then return false end
   
-  if not g_game or not g_game.attack then return false end
+  local Client = getClient()
+  if not (Client and Client.attack) and not (g_game and g_game.attack) then return false end
 
-  local okId, id = pcall(function() return creature:getId() end)
-  if not okId or not id then return false end
+  -- OPTIMIZED: Use getCreatureId helper (single pcall)
+  local id = getCreatureId(creature)
+  if not id then return false end
 
   -- Calculate priority for this creature
-  local priority = 100
+  -- v2.4: Config priority scaled by 1000x for consistency with creature_priority.lua
+  local priority = 1000  -- Base priority (config priority 1)
   if TargetBot.Creature and TargetBot.Creature.getConfigs then
     local cfgs = TargetBot.Creature.getConfigs(creature)
     if cfgs and cfgs[1] then
-      priority = (cfgs[1].priority or 1) * 100
+      priority = (cfgs[1].priority or 1) * 1000
     end
   end
 
@@ -277,60 +386,6 @@ if EventBus then
     debouncedInvalidateAndRecalc()
   end, 20)
 
-  -- MonsterAI: React to imminent attacks and threat notifications
-  EventBus.on("monsterai/imminent_attack", function(creature, data)
-    -- data: { confidence = 0..1, timeToAttack = ms, reason = "wave"|"melee", ... }
-    if not MONSTERAI_INTEGRATION then return end
-    if not creature or not data then return end
-    local conf = data.confidence or 0
-    if conf < MONSTERAI_MIN_CONF then return end
-
-    -- Compute simple escape tile away from monster
-    local okP, ppos = pcall(function() return player and player:getPosition() end)
-    local okC, cpos = pcall(function() return creature and creature:getPosition() end)
-    if not okP or not okC or not ppos or not cpos then return end
-
-    local dx = (ppos.x - cpos.x)
-    local dy = (ppos.y - cpos.y)
-    local moveX = (dx ~= 0) and (dx > 0 and 1 or -1) or 0
-    local moveY = (dy ~= 0) and (dy > 0 and 1 or -1) or 0
-    local escapePos = { x = ppos.x + moveX, y = ppos.y + moveY, z = ppos.z }
-
-    local action = MONSTERAI_IMMINENT_ACTION
-    if action == "avoid" then
-      if MovementCoordinator and MovementCoordinator.Intent and MovementCoordinator.CONSTANTS then
-        MovementCoordinator.Intent.register(
-          MovementCoordinator.CONSTANTS.INTENT.EMERGENCY_ESCAPE,
-          escapePos,
-          math.min(0.95, conf),
-          "monsterai_imminent",
-          { src = creature, tta = data.timeToAttack }
-        )
-      end
-      -- Pause attacking briefly to let movement coordinator act
-      monsterAIWaitUntil = now + math.max(900, data.timeToAttack or 900)
-    elseif action == "wait" then
-      -- Pause attacking but don't register a move intent
-      monsterAIWaitUntil = now + math.max(800, data.timeToAttack or 800)
-    end
-
-    -- Force cache/invalidation so we re-evaluate target priorities asap
-    invalidateCache()
-  end, 50)
-
-  EventBus.on("monsterai/threat_detected", function(creature, data)
-    if not MONSTERAI_INTEGRATION then return end
-    -- Record AI threat and force a recalc so priorities react quickly
-    if creature then
-      local okId, id = pcall(function() return creature and creature:getId() end)
-      if okId and id and CreatureCache.monsters[id] then
-        -- store last known threat for display or debug
-        CreatureCache.monsters[id].lastAIThreat = data
-      end
-    end
-    invalidateCache()
-  end, 40)
-
   --------------------------------------------------------------------------------
   -- FOLLOW PLAYER INTEGRATION (Party Hunt Support)
   -- When Force Follow mode is active, TargetBot should reduce aggression
@@ -449,7 +504,8 @@ if onPlayerHealthChange then
 
         -- Force immediate cache refresh and attempt recovery hits
         -- Update local player reference (in case object changed on relogin)
-        player = g_game and g_game.getLocalPlayer() or player
+        local Client = getClient()
+        player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or player
         debouncedInvalidateAndRecalc()
 
         -- If TargetBot was previously enabled via storage, ensure it's on now to allow recovery
@@ -526,7 +582,12 @@ end
 local function evictOldestCreatures()
   local order = CreatureCache.accessOrder
   while #order > CreatureCache.maxSize do
-    local oldestId = table.remove(order, 1)
+    local oldestId = order[1]
+    -- Shift array left by 1
+    for i = 1, #order - 1 do
+      order[i] = order[i + 1]
+    end
+    order[#order] = nil
     if CreatureCache.monsters[oldestId] then
       CreatureCache.monsters[oldestId] = nil
       CreatureCache.monsterCount = CreatureCache.monsterCount - 1
@@ -564,13 +625,15 @@ local function cleanupCache()
 end
 
 -- Update a single creature in cache (called on events)
--- Improved with LRU tracking, distance-based filtering, and safe API calls
+-- OPTIMIZED: Uses consolidated validateCreature for reduced pcall overhead
 local function updateCreatureInCache(creature)
-  -- Safe check for dead creature
-  local okDead, isDead = pcall(function() return creature and creature:isDead() end)
-  if not creature or (okDead and isDead) then
-    local okId, id = pcall(function() return creature and creature:getId() end)
-    if okId and id and CreatureCache.monsters[id] then
+  -- Use optimized validation (single pcall for all properties)
+  local cv = validateCreature(creature)
+  
+  -- Handle dead or invalid creature
+  if not cv.valid or cv.isDead then
+    local id = cv.id or getCreatureId(creature)
+    if id and CreatureCache.monsters[id] then
       CreatureCache.monsters[id] = nil
       CreatureCache.monsterCount = CreatureCache.monsterCount - 1
       -- Remove from access order
@@ -585,17 +648,16 @@ local function updateCreatureInCache(creature)
     return
   end
   
-  -- Safe check for monster
-  local okMonster, isMonster = pcall(function() return creature:isMonster() end)
-  if not okMonster or not isMonster then return end
+  -- Skip non-monsters
+  if not cv.isMonster then return end
   
-  -- Safe get ID and positions
-  local okId, id = pcall(function() return creature:getId() end)
-  if not okId or not id then return end
+  local id = cv.id
+  if not id then return end
   
+  -- Get player position (separate call as player is a different object)
   local okPos, pos = pcall(function() return player:getPosition() end)
-  local okCpos, cpos = pcall(function() return creature:getPosition() end)
-  if not okPos or not pos or not okCpos or not cpos then return end
+  local cpos = cv.position
+  if not okPos or not pos or not cpos then return end
   
   -- Use TargetBotCore distance if available, otherwise calculate
   local dist
@@ -765,7 +827,8 @@ if EventBus then
     if not okMonster or not isMonster then return end
     
     -- Check if this is our current target
-    local target = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    local Client = getClient()
+    local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if not target then return end
     
     -- Safe ID comparison
@@ -864,7 +927,8 @@ if EventBus then
     if not creature then return end
     
     -- Check if this is our target (safe)
-    local target = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    local Client = getClient()
+    local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if not target then return end
     
     -- Safe ID comparison
@@ -964,7 +1028,8 @@ local function enforceChaseModeNow()
   end
   
   -- Only enforce if we're actively attacking
-  local isAttacking = g_game.isAttacking and g_game.isAttacking()
+  local Client = getClient()
+  local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
   if not isAttacking then
     ChaseModeEnforcer.enabled = false
     return
@@ -973,14 +1038,24 @@ local function enforceChaseModeNow()
   ChaseModeEnforcer.enabled = true
   
   -- Check current mode and enforce if different
-  local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+  local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
   if currentMode ~= desiredMode then
-    if g_game.setChaseMode then
-      g_game.setChaseMode(desiredMode)
+    if Client and Client.setChaseMode then
+      Client.setChaseMode(desiredMode)
       ChaseModeEnforcer.lastEnforcedMode = desiredMode
       ChaseModeEnforcer.lastEnforceTime = currentTime
       
       -- Emit event for other modules
+      if EventBus then
+        pcall(function()
+          EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand")
+        end)
+      end
+    elseif g_game and g_game.setChaseMode then
+      g_game.setChaseMode(desiredMode)
+      ChaseModeEnforcer.lastEnforcedMode = desiredMode
+      ChaseModeEnforcer.lastEnforceTime = currentTime
+      
       if EventBus then
         pcall(function()
           EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand")
@@ -1027,7 +1102,8 @@ if EventBus then
     if not ChaseModeEnforcer.enabled then return end
     
     -- Safe check if this is our target
-    local target = g_game.getAttackingCreature and g_game.getAttackingCreature()
+    local Client = getClient()
+    local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if not target then return end
     
     local okCid, cid = pcall(function() return creature:getId() end)
@@ -1141,7 +1217,7 @@ setWidgetTextSafe(ui.danger.right, "0")
 
 if ui and ui.editor and ui.editor.debug then ui.editor.debug:destroy() end
 
-local oldTibia = g_game.getClientVersion() < 960
+local oldTibia = getClientVersion() < 960
 
 -- config, its callback is called immediately, data can be nil
 -- Config setup moved down to after macro (to ensure macro and recalc exist before callback runs)
@@ -1202,8 +1278,10 @@ TargetBot.hasTargetableMonstersOnScreen = function()
   if not p then return false end
   
   -- Get all creatures in detection range
+  local Client = getClient()
   local creatures = (SpectatorCache and SpectatorCache.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)) 
-    or g_map.getSpectatorsInRange(p, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
+    or ((Client and Client.getSpectatorsInRange) and Client.getSpectatorsInRange(p, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE))
+    or (g_map and g_map.getSpectatorsInRange and g_map.getSpectatorsInRange(p, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE))
   
   if not creatures or #creatures == 0 then return false end
   
@@ -1373,7 +1451,10 @@ TargetBot.setOff = function(val)
   end
   
   -- Cancel current attack
-  if g_game and g_game.cancelAttackAndFollow then
+  local Client = getClient()
+  if Client and Client.cancelAttackAndFollow then
+    pcall(function() Client.cancelAttackAndFollow() end)
+  elseif g_game and g_game.cancelAttackAndFollow then
     pcall(function() g_game.cancelAttackAndFollow() end)
   end
   
@@ -1696,12 +1777,54 @@ end
 -- Only recalculates when cache is dirty (events occurred)
 --------------------------------------------------------------------------------
 
+-- PERFORMANCE: Path cache to avoid recalculating paths every tick
+local pathCache = {
+  entries = {},   -- {id -> {path, time, pos}}
+  TTL = 400       -- Path valid for 400ms
+}
+
+local function getCachedPath(creatureId, playerPos, creaturePos)
+  local entry = pathCache.entries[creatureId]
+  local currentTime = now or (os.time() * 1000)
+  if entry and (currentTime - entry.time) < pathCache.TTL then
+    -- Check if positions are still valid
+    if entry.playerZ == playerPos.z and entry.creatureZ == creaturePos.z then
+      return entry.path
+    end
+  end
+  return nil
+end
+
+local function setCachedPath(creatureId, path, playerPos, creaturePos)
+  pathCache.entries[creatureId] = {
+    path = path,
+    time = now or (os.time() * 1000),
+    playerZ = playerPos.z,
+    creatureZ = creaturePos.z
+  }
+end
+
+local function cleanupPathCache()
+  local currentTime = now or (os.time() * 1000)
+  local cutoff = currentTime - pathCache.TTL * 2
+  for id, entry in pairs(pathCache.entries) do
+    if entry.time < cutoff then
+      pathCache.entries[id] = nil
+    end
+  end
+end
+
 -- Helper: process a creature into target params (returns params, path) - pure helper to reduce duplication
 -- IMPROVED v2.2: More lenient path validation to prevent "leaving monsters behind"
-local function processCandidate(creature, pos, isCurrentTarget)
+-- PERFORMANCE: Uses path cache to avoid expensive recalculations
+local function processCandidate(creature, pos, isCurrentTarget, batchPaths)
   if not creature or creature:isDead() or not isTargetableCreature(creature) then return nil, nil end
   local cpos = creature:getPosition()
   if not cpos then return nil, nil end
+  
+  -- Get creature ID for path caching
+  local okId, creatureId = pcall(function() return creature:getId() end)
+  creatureId = okId and creatureId or nil
   
   -- v2.2: Calculate distance first - adjacent creatures should ALWAYS be targetable
   local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
@@ -1719,42 +1842,63 @@ local function processCandidate(creature, pos, isCurrentTarget)
   end
   
   -- ═══════════════════════════════════════════════════════════════════════════
-  -- REACHABILITY CHECK (v2.2): Improved with fallback strategies
+  -- REACHABILITY CHECK (v3.1): Enhanced with OpenTibiaBR batch pathfinding
+  -- PERFORMANCE: Check batch paths first, then cache, then calculate new
   -- ═══════════════════════════════════════════════════════════════════════════
   
   local path = nil
   local isReachable = true
   
-  -- Try multiple path strategies for better success rate
-  local pathStrategies = {
-    -- Strategy 1: Standard path params
-    {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = true, precision = 1},
-    -- Strategy 2: Ignore creatures more aggressively (creatures might move)
-    {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = false, precision = 1},
-    -- Strategy 3: For current target, try even harder
-    {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = false, ignoreCreatures = true, allowOnlyVisibleTiles = false, precision = 2}
-  }
-  
-  -- Use MonsterAI.Reachability if available (but don't let it block adjacent/current targets)
-  if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable and not isCurrentTarget then
-    local reachResult, reason, cachedPath = MonsterAI.Reachability.isReachable(creature)
-    if reachResult and cachedPath then
-      path = cachedPath
-    elseif not reachResult and dist > 3 then
-      -- Only skip if truly far and blocked
-      return nil, nil
+  -- OPENTIBIABR ENHANCEMENT: Check batch paths first (fastest)
+  if creatureId and batchPaths and batchPaths[creatureId] then
+    path = batchPaths[creatureId].path
+    if path and #path > 0 then
+      -- Cache this path for future use
+      setCachedPath(creatureId, path, pos, cpos)
     end
   end
   
-  -- If we don't have a path yet, try our strategies
+  -- PERFORMANCE: Try cached path if no batch path
+  if not path and creatureId then
+    path = getCachedPath(creatureId, pos, cpos)
+  end
+  
+  -- If no cached path, calculate new one
   if not path then
-    local maxStrategies = isCurrentTarget and 3 or 2
-    for strategyIdx = 1, maxStrategies do
-      local params = pathStrategies[strategyIdx]
-      path = findPath(pos, cpos, 12, params)
-      if path and #path > 0 then
-        break
+    -- Use MonsterAI.Reachability if available (but don't let it block adjacent/current targets)
+    if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable and not isCurrentTarget then
+      local reachResult, reason, cachedPath = MonsterAI.Reachability.isReachable(creature)
+      if reachResult and cachedPath then
+        path = cachedPath
+      elseif not reachResult and dist > 3 then
+        -- Only skip if truly far and blocked
+        return nil, nil
       end
+    end
+    
+    -- If we don't have a path yet, try pathfinding
+    if not path then
+      -- PERFORMANCE: Use only one strategy for non-current targets
+      local maxStrategies = isCurrentTarget and 2 or 1
+      local pathStrategies = {
+        -- Strategy 1: Standard path params
+        {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = true, precision = 1},
+        -- Strategy 2: More relaxed (only for current target)
+        {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = false, precision = 1}
+      }
+      
+      for strategyIdx = 1, maxStrategies do
+        local params = pathStrategies[strategyIdx]
+        path = findPath(pos, cpos, 12, params)
+        if path and #path > 0 then
+          break
+        end
+      end
+    end
+    
+    -- Cache the path result
+    if creatureId and path then
+      setCachedPath(creatureId, path, pos, cpos)
     end
   end
   
@@ -1816,8 +1960,10 @@ local function processCandidate(creature, pos, isCurrentTarget)
       
       if offset then
         probe = {x = probe.x + offset.x, y = probe.y + offset.y, z = probe.z}
-        local tile = g_map.getTile(probe)
-        if tile and not tile:isWalkable() and not tile:hasCreature() then
+        local Client = getClient()
+        local tile = (Client and Client.getTile) and Client.getTile(probe) or (g_map and g_map.getTile and g_map.getTile(probe))
+        local hasCreature = tile and tile.hasCreature and tile:hasCreature()
+        if tile and not tile:isWalkable() and not hasCreature then
           -- Only fail if truly blocked (not just creature in the way)
           return nil, nil
         end
@@ -1873,7 +2019,8 @@ local function recalculateBestTarget()
   local unreachableCount = 0  -- Track blocked path creatures
   
   -- v2.2: Track current target for stickiness - DO NOT lose it during recalculation
-  local currentAttackTarget = g_game.getAttackingCreature and g_game.getAttackingCreature()
+  local Client = getClient()
+  local currentAttackTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   local currentTargetId = currentAttackTarget and currentAttackTarget:getId() or nil
   local currentTargetStillValid = false  -- Will be set to true if current target is found
 
@@ -1899,7 +2046,23 @@ local function recalculateBestTarget()
     creatures = cacheCreatures
   end
   
-  -- If still no creatures, do a fresh scan
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- OPENTIBIABR ENHANCEMENT: Use getSightSpectators for line-of-sight detection
+  -- This gives us only creatures we can actually see (no obstacles between)
+  -- Falls back to standard detection on non-OpenTibiaBR clients
+  -- ═══════════════════════════════════════════════════════════════════════════
+  if not creatures or #creatures == 0 then
+    local otbr = getOpenTibiaBRTargeting()
+    if otbr and hasSightSpectators() then
+      -- Use OpenTibiaBR's optimized sight spectators
+      local sightCreatures = otbr.getVisibleCreatures(pos, false)
+      if sightCreatures and #sightCreatures > 0 then
+        creatures = sightCreatures
+      end
+    end
+  end
+  
+  -- If still no creatures, do a fresh scan with standard methods
   if not creatures or #creatures == 0 then
     creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
       and MovementCoordinator.MonsterCache.getNearby(MONSTER_DETECTION_RANGE)
@@ -1908,6 +2071,32 @@ local function recalculateBestTarget()
   end
   
   if not creatures then return nil, 0, 0 end
+  
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- OPENTIBIABR ENHANCEMENT: Pre-calculate batch paths to all monsters
+  -- Instead of calculating paths one by one, batch them for ~30-50% speedup
+  -- ═══════════════════════════════════════════════════════════════════════════
+  local batchPaths = nil
+  if hasBatchPathfinding() then
+    local otbr = getOpenTibiaBRTargeting()
+    if otbr then
+      -- Filter to only targetable monsters first
+      local targetableMonsters = {}
+      for i = 1, #creatures do
+        local creature = creatures[i]
+        if creature and isTargetableCreature(creature) then
+          local okPos, cpos = pcall(function() return creature:getPosition() end)
+          if okPos and cpos and cpos.z == pos.z then
+            targetableMonsters[#targetableMonsters + 1] = creature
+          end
+        end
+      end
+      -- Calculate all paths at once
+      if #targetableMonsters > 0 then
+        batchPaths = otbr.calculateBatchPaths(pos, targetableMonsters, 50, 0)
+      end
+    end
+  end
   
   -- Rebuild cache from live creatures
   CreatureCache.monsters = {}
@@ -1932,8 +2121,9 @@ local function recalculateBestTarget()
         local isCurrentTarget = (currentTargetId and id == currentTargetId)
         
         -- Calculate path and params (pass isCurrentTarget for enhanced path finding)
+        -- v3.1: Pass batchPaths for OpenTibiaBR optimization
         local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
-        local params, path = processCandidate(creature, pos, isCurrentTarget)
+        local params, path = processCandidate(creature, pos, isCurrentTarget, batchPaths)
         
         -- For current target, try harder to find a path if initial attempt failed
         if isCurrentTarget and (not path or not params or not params.config) then
@@ -2135,10 +2325,11 @@ local function primeCreatureCache()
 end
 
 -- Main TargetBot loop - optimized with EventBus caching
--- IMPROVED: Faster macro interval (200ms) for better responsiveness
+-- PERFORMANCE: 250ms macro interval balances responsiveness and CPU usage
 local lastRecalcTime = 0
-local RECALC_COOLDOWN_MS = 100  -- IMPROVED: Faster recalc cooldown
-targetbotMacro = macro(200, function()
+local RECALC_COOLDOWN_MS = 150  -- PERFORMANCE: Increased from 100ms
+local lastPathCacheCleanup = 0
+targetbotMacro = macro(250, function()
   local _msStart = os.clock()
   
   -- Update AttackStateMachine (runs silently - no separate button)
@@ -2156,7 +2347,9 @@ targetbotMacro = macro(200, function()
   end
 
   -- Prevent execution before login is complete to avoid freezing
-  if not g_game.isOnline() then return end
+  local Client = getClient()
+  local isOnline = (Client and Client.isOnline) and Client.isOnline() or (g_game and g_game.isOnline and g_game.isOnline())
+  if not isOnline then return end
 
   -- MonsterAI imminent-attack pause DISABLED (was blocking chase mode)
   -- If re-enabling, reduce the wait time significantly (max 100ms, not 900ms)
@@ -2179,24 +2372,33 @@ targetbotMacro = macro(200, function()
     local eventTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
     if eventTarget and not eventTarget:isDead() then
       -- EventTargeting is handling combat - ensure we're attacking AND chase mode is set
-      local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+      local Client = getClient()
+      local currentAttack = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
       
       -- CRITICAL: Chase is only active if enabled AND keepDistance is disabled
       local chaseEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
       local keepDistanceEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.keepDistance
       local useNativeChase = chaseEnabled and not keepDistanceEnabled
       
-      if useNativeChase and g_game.setChaseMode then
-        local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+      if useNativeChase then
+        local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
         if currentMode ~= 1 then
-          g_game.setChaseMode(1)  -- ChaseOpponent
+          if Client and Client.setChaseMode then
+            Client.setChaseMode(1)
+          elseif g_game and g_game.setChaseMode then
+            g_game.setChaseMode(1)
+          end
           if TargetBot then TargetBot.usingNativeChase = true end
         end
-      elseif not useNativeChase and g_game.setChaseMode then
+      elseif not useNativeChase then
         -- Chase disabled OR keepDistance enabled - ensure Stand mode
-        local currentMode = g_game.getChaseMode and g_game.getChaseMode() or 0
+        local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
         if currentMode ~= 0 then
-          g_game.setChaseMode(0)  -- DontChase / Stand
+          if Client and Client.setChaseMode then
+            Client.setChaseMode(0)
+          elseif g_game and g_game.setChaseMode then
+            g_game.setChaseMode(0)
+          end
           if TargetBot then TargetBot.usingNativeChase = false end
         end
       end
@@ -2252,8 +2454,10 @@ targetbotMacro = macro(200, function()
   cleanupCache()
   cleanupPathCache()
   
-  -- Handle walking if destination is set
-  TargetBot.walk()
+  -- Handle walking if destination is set (safety check for load order)
+  if TargetBot.walk then
+    TargetBot.walk()
+  end
   
   -- Check for looting first (event-driven: only process when dirty or when actively looting)
   local shouldProcessLoot = TargetBot.Looting.isDirty and TargetBot.Looting.isDirty() or (#TargetBot.Looting.list > 0)
@@ -2283,7 +2487,8 @@ targetbotMacro = macro(200, function()
     end
 
   -- MonsterAI scenario integration: prefer scenario optimal target when allowed
-  local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature() or nil
+  local Client = getClient()
+  local currentAttack = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.getOptimalTarget then
     local optimal = MonsterAI.Scenario.getOptimalTarget()
     if optimal and optimal.creature and not optimal.creature:isDead() then

@@ -388,7 +388,8 @@ function CaveBot.ReachDepot()
                           lockerTilePos.x = lockerTilePos.x + LOCKER_ACCESSTILE_MODIFIERS[item:getId()][1]
                           lockerTilePos.y = lockerTilePos.y + LOCKER_ACCESSTILE_MODIFIERS[item:getId()][2]
                     local lockerTile = g_map.getTile(lockerTilePos)
-                    if not lockerTile:hasCreature() then
+                    local hasCreature = lockerTile and lockerTile.hasCreature and lockerTile:hasCreature()
+                    if lockerTile and not hasCreature then
                         if findPath(pos(), tPos, 20, {ignoreNonPathable = false, precision = 1, ignoreCreatures = true}) then
                             local distance = getDistanceBetween(tPos, pPos)
                             table.insert(candidates, {pos=tPos, dist=distance})

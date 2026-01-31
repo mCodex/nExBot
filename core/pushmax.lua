@@ -195,8 +195,8 @@ end)
 local lastPushTime = 0
 local PUSH_COOLDOWN = 2000
 
--- Automatic push macro - executes the push when target and destination are set
-macro(200, function()
+-- Push handler function (shared by UnifiedTick and fallback macro)
+local function pushHandler()
   if not config.enabled then return end
   if not pushTarget or not targetTile then return end
   if now - lastPushTime < PUSH_COOLDOWN then return end
@@ -218,7 +218,8 @@ macro(200, function()
   end
   
   -- Check if target tile is walkable and not blocked
-  if isNotOk(fieldTable, targetTile) or targetTile:hasCreature() then
+  local hasCreature = targetTile and targetTile.hasCreature and targetTile:hasCreature()
+  if isNotOk(fieldTable, targetTile) or hasCreature then
     return -- Wait for tile to be clear
   end
   
@@ -230,10 +231,10 @@ macro(200, function()
       lastPushTime = now
     end
   end
-end)
+end
 
--- Clear tile macro - removes items from marked tile
-macro(300, function()
+-- Clear tile handler function
+local function clearTileHandler()
   if not config.enabled then return end
   if not cleanTile then return end
   
@@ -250,4 +251,23 @@ macro(300, function()
     local playerPos = player:getPosition()
     g_game.move(topItem, playerPos, topItem:getCount())
   end
-end)
+end
+
+-- Use UnifiedTick if available, fallback to standalone macros
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register("pushmax_push", {
+    interval = 200,
+    priority = UnifiedTick.Priority.NORMAL,
+    handler = pushHandler,
+    group = "combat"
+  })
+  UnifiedTick.register("pushmax_clear", {
+    interval = 300,
+    priority = UnifiedTick.Priority.LOW,
+    handler = clearTileHandler,
+    group = "combat"
+  })
+else
+  macro(200, pushHandler)
+  macro(300, clearTileHandler)
+end

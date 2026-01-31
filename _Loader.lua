@@ -1,9 +1,16 @@
 --[[
-  nExBot - Tibia Bot for OTClientV8
-  Main Loader Script (Optimized)
+  nExBot - Tibia Bot for OTClientV8 and OpenTibiaBR
+  Main Loader Script v2.0 (Restructured Architecture)
   
   This file loads all UI styles and scripts in the correct order.
   Core libraries must be loaded before dependent modules.
+  
+  Architecture v2.0:
+  - features/ - Feature modules (healing, targeting, cavebot, etc.)
+  - lib/      - Shared utility libraries (object_pool, player_utils, etc.)
+  - tools/    - Tool macros (fishing, auto_haste, etc.)
+  - core/     - Legacy core modules (backward compatible)
+  - private/  - User private scripts
   
   Optimization Best Practices Applied:
   1. Lazy loading for non-critical modules
@@ -12,6 +19,7 @@
   4. Error isolation per module
   5. Startup timing metrics
   6. Storage sanitization (sparse array prevention)
+  7. Client abstraction via ACL pattern
 ]]--
 
 local startTime = os.clock()
@@ -19,20 +27,23 @@ local loadTimes = {}
 
 local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
 local CORE_PATH = "/bot/" .. configName .. "/core"
+local LIB_PATH = "/bot/" .. configName .. "/lib"
+local TOOLS_PATH = "/bot/" .. configName .. "/tools"
+local FEATURES_PATH = "/bot/" .. configName .. "/features"
 
 -- Initialize global nExBot namespace if not exists
 nExBot = nExBot or {}
-nExBot.loadTimes = loadTimes  -- Expose for debugging
+nExBot.loadTimes = loadTimes
+nExBot.version = "2.0.0"
 
--- Suppress noisy debug prints by default. Set `nExBot.showDebug = true` in console to allow them.
+-- Suppress noisy debug prints by default
 nExBot.showDebug = nExBot.showDebug or false
 nExBot.suppressDebugPrefixes = nExBot.suppressDebugPrefixes or {"[HealBot]", "[MonsterInspector]"}
--- Opt-in slow-op instrumentation. Enable with `nExBot.slowOpInstrumentation = true`.
 nExBot.slowOpInstrumentation = nExBot.slowOpInstrumentation or false
+
 local _orig_print = print
 print = function(...)
   if nExBot.showDebug then return _orig_print(...) end
-  -- Safely inspect first argument without relying on 'select' (may be missing in some environments)
   local first = (...)
   local firstStr = nil
   if type(first) == "string" then
@@ -51,15 +62,10 @@ print = function(...)
   return _orig_print(...)
 end
 
-
-
 -- ============================================================================
 -- STORAGE SANITIZER (Fix sparse arrays that prevent saving)
 -- ============================================================================
 
--- Recursively fix sparse arrays in storage
--- Sparse arrays have numeric keys with gaps (e.g., {[1]="a", [5]="b"})
--- JSON serialization fails on these tables
 local function isSparseArray(tbl)
   if type(tbl) ~= "table" then return false end
   local minIndex, maxIndex, count = nil, nil, 0
@@ -70,15 +76,12 @@ local function isSparseArray(tbl)
       count = count + 1
     end
   end
-  -- It's sparse if numeric keys exist and there are gaps in the sequence
-  -- (i.e., not all integer keys between minIndex and maxIndex are present)
   return count > 0 and (maxIndex - minIndex + 1 > count)
 end
 
 local function sanitizeTable(tbl, path, depth)
   if type(tbl) ~= "table" or depth > 5 then return tbl end
   
-  -- If this table is a sparse array, convert numeric keys to strings
   if isSparseArray(tbl) then
     local fixed = {}
     for k, v in pairs(tbl) do
@@ -92,7 +95,6 @@ local function sanitizeTable(tbl, path, depth)
     return fixed
   end
   
-  -- Recursively sanitize child tables
   for k, v in pairs(tbl) do
     if type(v) == "table" then
       tbl[k] = sanitizeTable(v, path .. "." .. tostring(k), depth + 1)
@@ -102,7 +104,6 @@ local function sanitizeTable(tbl, path, depth)
   return tbl
 end
 
--- Sanitize storage on startup (non-blocking, chunked to avoid freezing)
 local function sanitizeStorage()
   if not storage then return end
   local sanitizeStart = os.clock()
@@ -112,7 +113,7 @@ local function sanitizeStorage()
   end
 
   local idx = 1
-  local chunkSize = 20 -- process 20 keys per tick
+  local chunkSize = 20
   local function processChunk()
     local stopAt = math.min(idx + chunkSize - 1, #keys)
     for i = idx, stopAt do
@@ -128,18 +129,15 @@ local function sanitizeStorage()
       loadTimes["sanitize"] = math.floor((os.clock() - sanitizeStart) * 1000)
     end
   end
-  -- Start asynchronous sanitization
   schedule(1, processChunk)
 end
 
--- Run sanitizer before loading any modules (non-blocking)
 sanitizeStorage()
 
 -- ============================================================================
 -- OPTIMIZED STYLE LOADING
 -- ============================================================================
 
--- Cache style files list to avoid repeated directory scans
 local function loadStyles()
   local styleStart = os.clock()
   local styleFiles = {}
@@ -154,7 +152,6 @@ local function loadStyles()
     end
   end
   
-  -- Batch load all styles
   for i = 1, #styleFiles do
     pcall(function() g_ui.importStyle(styleFiles[i]) end)
   end
@@ -163,20 +160,19 @@ local function loadStyles()
 end
 
 -- ============================================================================
--- OPTIMIZED SCRIPT LOADING
+-- SCRIPT LOADING UTILITIES
 -- ============================================================================
 
--- List of optional modules that should not show warnings if missing
 local OPTIONAL_MODULES = {
   ["HealBot"] = true,
   ["bot_core/init"] = true,
 }
 
--- Load a script with timing and error isolation
-local function loadScript(name, category)
+local function loadScript(name, category, basePath)
+  basePath = basePath or "/core/"
   local scriptStart = os.clock()
   local status, result = pcall(function()
-    return dofile("/core/" .. name .. ".lua")
+    return dofile(basePath .. name .. ".lua")
   end)
   
   local elapsed = math.floor((os.clock() - scriptStart) * 1000)
@@ -187,9 +183,6 @@ local function loadScript(name, category)
     nExBot.loadErrors = nExBot.loadErrors or {}
     nExBot.loadErrors[name] = errorMsg
     
-    -- Silence warnings for:
-    -- 1. Optional modules (listed above)
-    -- 2. "not found" errors (file doesn't exist)
     local isOptional = OPTIONAL_MODULES[name]
     local isNotFound = errorMsg:match("not found") or errorMsg:match("No such file")
     
@@ -202,11 +195,10 @@ local function loadScript(name, category)
   return result
 end
 
--- Load multiple scripts in a category
-local function loadCategory(categoryName, scripts)
+local function loadCategory(categoryName, scripts, basePath)
   local catStart = os.clock()
   for i = 1, #scripts do
-    loadScript(scripts[i], categoryName)
+    loadScript(scripts[i], categoryName, basePath)
   end
   loadTimes["_category_" .. categoryName] = math.floor((os.clock() - catStart) * 1000)
 end
@@ -217,73 +209,138 @@ end
 loadStyles()
 
 -- ============================================================================
--- SCRIPT CATEGORIES (Ordered by dependency)
+-- PHASE 1: ACL AND CLIENT ABSTRACTION
 -- ============================================================================
+loadCategory("acl", {
+  "acl/init",
+  "client_service",
+})
 
--- 1. Core Libraries (MUST load first, order matters)
+loadCategory("acl_compat", {
+  "acl/compat",
+})
+
+-- Store client info
+do
+  local aclStatus, acl = pcall(function()
+    return dofile("/core/acl/init.lua")
+  end)
+  if aclStatus and acl then
+    nExBot.clientType = acl.getClientType()
+    nExBot.clientName = acl.getClientName()
+    nExBot.isOTCv8 = acl.isOTCv8()
+    nExBot.isOpenTibiaBR = acl.isOpenTibiaBR()
+  else
+    nExBot.clientType = 1
+    nExBot.clientName = "OTCv8"
+    nExBot.isOTCv8 = true
+    nExBot.isOpenTibiaBR = false
+  end
+end
+
+-- ============================================================================
+-- PHASE 2: CONSTANTS
+-- ============================================================================
+loadCategory("constants", {
+  "constants/floor_items",
+  "constants/food_items",
+  "constants/directions",
+  "constants/attack_patterns",
+})
+
+-- ============================================================================
+-- PHASE 3: UTILS (Core shared utilities)
+-- ============================================================================
+loadCategory("utils", {
+  "utils/ring_buffer",
+  "utils/client_helper",
+  "utils/safe_creature",
+  "utils/weak_cache",
+  "utils/creature_events",
+})
+
+-- ============================================================================
+-- PHASE 4: CORE LIBRARIES (Legacy compatibility)
+-- ============================================================================
 loadCategory("core", {
-  "main",             -- Main initialization
-  "items",            -- Item definitions
-  "lib",              -- Utility library
-  "safe_call",        -- Safe function call utilities (MUST load after lib)
-  "new_cavebot_lib",  -- CaveBot library
-  "configs",          -- Configuration system
-  "bot_database",     -- Unified database (BotDB) - load AFTER configs
-  "character_db",     -- Per-character database (CharacterDB) - for multi-client
+  "main",
+  "items",
+  "lib",
+  "safe_call",
+  "new_cavebot_lib",
+  "configs",
+  "bot_database",
+  "character_db",
 })
 
--- 2. Architecture Layer (Event system, state management)
+-- ============================================================================
+-- PHASE 6: ARCHITECTURE LAYER
+-- ============================================================================
 loadCategory("architecture", {
-  "event_bus",            -- Centralized event bus
-  "unified_storage",      -- Per-character unified storage (MUST load after event_bus)
-  "door_items",           -- Door item database
-  "global_config",        -- Global configuration
-  "bot_core/init",        -- Unified BotCore system
+  "event_bus",
+  "unified_storage",
+  "unified_tick",
+  "creature_cache",
+  "door_items",
+  "global_config",
+  "bot_core/init",
 })
 
--- 3. Feature Modules (Main bot features)
-loadCategory("features", {
-  "extras",       -- Extra settings
-  "cavebot",      -- CaveBot integration
-  "alarms",       -- Alarm system
-  "Conditions",   -- Condition handlers
-  "Equipper",     -- Equipment manager
-  "pushmax",      -- Push maximizer
-  "combo",        -- Combo system
-  "HealBot",      -- Healing bot
-  "new_healer",   -- Friend healer
-  "AttackBot",    -- Attack bot
+-- ============================================================================
+-- PHASE 8: LEGACY FEATURE MODULES
+-- ============================================================================
+loadCategory("features_legacy", {
+  "extras",
+  "cavebot",
+  "alarms",
+  "Conditions",
+  "Equipper",
+  "pushmax",
+  "combo",
+  "HealBot",
+  "new_healer",
+  "AttackBot",
 })
 
--- 4. Tools and Utilities (Non-critical, can be deferred)
-loadCategory("tools", {
-  "ingame_editor",     -- In-game script editor
-  "Dropper",           -- Item dropper
-  "Containers",        -- Container manager
-  "container_opener",  -- Advanced container opening (BFS graph traversal)
-  "quiver_manager",    -- Quiver management
-  "quiver_label",      -- Quiver labels
-  "tools",             -- Miscellaneous tools
-  "antiRs",            -- Anti-RS protection
-  "depot_withdraw",    -- Depot withdrawal
-  "eat_food",          -- Auto eat food
-  "equip",             -- Equipment utilities
-  "exeta",             -- Exeta res handler
-  "outfit_cloner",     -- Outfit cloning via right-click menu
+-- ============================================================================
+-- PHASE 9: LEGACY TOOLS
+-- ============================================================================
+loadCategory("tools_legacy", {
+  "ingame_editor",
+  "Dropper",
+  "Containers",
+  "container_opener",
+  "quiver_manager",
+  "quiver_label",
+  "tools",
+  "antiRs",
+  "depot_withdraw",
+  "eat_food",
+  "equip",
+  "exeta",
+  "outfit_cloner",
 })
 
--- 5. Analytics and UI (Can be loaded last)
+-- ============================================================================
+-- PHASE 11: ANALYTICS AND UI
+-- ============================================================================
 loadCategory("analytics", {
-  "analyzer",       -- Session analyzer
-  "smart_hunt",     -- Hunt analytics
-  "spy_level",      -- Spy level display
-  "supplies",       -- Supply management
-  "depositer_config", -- Depositer settings
-  "npc_talk",       -- NPC interaction
-  "xeno_menu",      -- Xeno-style menu
-  "hold_target",    -- Hold target feature
-  "cavebot_control_panel", -- CaveBot control panel
+  "analyzer",
+  "smart_hunt",
+  "spy_level",
+  "supplies",
+  "depositer_config",
+  "npc_talk",
+  "xeno_menu",
+  "hold_target",
+  "cavebot_control_panel",
 })
+
+-- NOTE: TargetBot scripts are loaded by core/cavebot.lua (in features_legacy phase)
+-- to avoid duplicating the loading, we don't load them again here.
+
+-- NOTE: CaveBot scripts are loaded by core/cavebot.lua (in features_legacy phase)
+-- to avoid duplicating the loading, we don't load them again here.
 
 -- ============================================================================
 -- STARTUP COMPLETE
@@ -292,10 +349,49 @@ loadCategory("analytics", {
 local totalTime = math.floor((os.clock() - startTime) * 1000)
 loadTimes["_total"] = totalTime
 
--- Log startup performance (only if slow)
+-- ============================================================================
+-- STARTUP PROFILING SUMMARY
+-- ============================================================================
+
+-- Collect and sort all module load times for analysis
+local function getTopSlowestModules(n)
+  local modules = {}
+  for name, time in pairs(loadTimes) do
+    if not name:match("^_") then
+      modules[#modules + 1] = { name = name, time = time }
+    end
+  end
+  table.sort(modules, function(a, b) return a.time > b.time end)
+  local top = {}
+  for i = 1, math.min(n, #modules) do
+    top[i] = modules[i]
+  end
+  return top
+end
+
+-- Always show top 5 slowest modules when debug is enabled
+if nExBot.showDebug then
+  local top5 = getTopSlowestModules(5)
+  print("[nExBot] Startup profiling - Top 5 slowest modules:")
+  for i, m in ipairs(top5) do
+    print(string.format("  %d. %s: %dms", i, m.name, m.time))
+  end
+  print(string.format("  Total startup time: %dms", totalTime))
+end
+
+-- Export profiling helper for runtime analysis
+nExBot.getTopSlowestModules = getTopSlowestModules
+nExBot.printStartupProfile = function()
+  local top = getTopSlowestModules(10)
+  print("[nExBot] Startup Profile (Top 10):")
+  for i, m in ipairs(top) do
+    print(string.format("  %d. %s: %dms", i, m.name, m.time))
+  end
+  print(string.format("  Total: %dms", loadTimes["_total"] or 0))
+end
+
 if totalTime > 1000 then
   warn("[nExBot] Slow startup: " .. totalTime .. "ms")
-  -- Find slowest modules
   local slowModules = {}
   for name, time in pairs(loadTimes) do
     if time > 100 and not name:match("^_") then
@@ -305,29 +401,17 @@ if totalTime > 1000 then
   if #slowModules > 0 then
     warn("[nExBot] Slow modules: " .. table.concat(slowModules, ", "))
   end
+else
+  info("[nExBot v" .. nExBot.version .. "] Loaded in " .. totalTime .. "ms")
 end
 
 -- ============================================================================
 -- PRIVATE SCRIPTS AUTO-LOADER
 -- ============================================================================
--- Automatically loads user scripts from the /private folder
--- Scripts control their own tab using setDefaultTab() inside the script
--- 
--- Folder Structure:
---   private/
---   ├── my_script.lua
---   ├── hunting/
---   │   └── lure_helper.lua
---   └── utils/
---       └── mana_trainer.lua
---
--- On bot restart, it automatically detects new/removed files.
--- ============================================================================
 
 local PRIVATE_PATH = "/bot/" .. configName .. "/private"
 local PRIVATE_DOFILE_PATH = "/private"
 
--- Recursively collect all .lua files from a directory
 local function collectLuaFiles(folderPath, dofileBase, collected)
     collected = collected or {}
     
@@ -344,15 +428,12 @@ local function collectLuaFiles(folderPath, dofileBase, collected)
         local fullPath = folderPath .. "/" .. item
         local dofilePath = dofileBase .. "/" .. item
         
-        -- Check if it's a lua file
         if item:match("%.lua$") then
             collected[#collected + 1] = {
                 name = item,
                 path = dofilePath
             }
-        -- Check if it's a directory (no extension)
         elseif not item:match("%.") then
-            -- Try to recurse into it as a folder
             local subStatus, subItems = pcall(function()
                 return g_resources.listDirectoryFiles(fullPath, false, false)
             end)
@@ -365,32 +446,26 @@ local function collectLuaFiles(folderPath, dofileBase, collected)
     return collected
 end
 
--- Load private scripts
 local function loadPrivateScripts()
-    -- Check if private folder exists
     local status, items = pcall(function()
         return g_resources.listDirectoryFiles(PRIVATE_PATH, false, false)
     end)
     
     if not status or not items or #items == 0 then
-        return  -- Private folder doesn't exist or is empty
+        return
     end
     
     local privateStart = os.clock()
-    
-    -- Collect all lua files recursively
     local luaFiles = collectLuaFiles(PRIVATE_PATH, PRIVATE_DOFILE_PATH)
     
     if #luaFiles == 0 then
         return
     end
     
-    -- Sort for consistent load order
     table.sort(luaFiles, function(a, b) return a.path < b.path end)
     
     local loadedCount = 0
     
-    -- Load each script
     for i = 1, #luaFiles do
         local file = luaFiles[i]
         local scriptStart = os.clock()
@@ -414,15 +489,38 @@ local function loadPrivateScripts()
     loadTimes["_private_total"] = math.floor((os.clock() - privateStart) * 1000)
     
     if loadedCount > 0 then
-        info("[nExBot] Loaded " .. loadedCount .. " private script(s) in " .. loadTimes["_private_total"] .. "ms")
+        info("[nExBot] Loaded " .. loadedCount .. " private script(s)")
     end
 end
 
--- Run the private scripts loader
 loadPrivateScripts()
-
--- Initialize optional boot diagnostics (safe, tiny, runs only if enabled via ProfileStorage)
--- schedule(100, function() pcall(require, 'utils.boot_diagnostics') end)
 
 -- Return to Main tab
 setDefaultTab("Main")
+
+-- ============================================================================
+-- ACTIVATE UNIFIED TICK SYSTEM
+-- ============================================================================
+-- Start the consolidated tick system now that all modules are loaded
+-- This reduces ~30+ separate macro timers to a single 50ms master tick
+if UnifiedTick and UnifiedTick.start then
+  schedule(100, function()
+    UnifiedTick.start()
+    if nExBot.showDebug then
+      print("[nExBot] UnifiedTick master loop activated")
+    end
+  end)
+end
+
+-- Export nExBot API summary
+nExBot.API = {
+  Healing = nExBot.Healing,
+  Attacking = nExBot.Attacking,
+  Targeting = nExBot.Targeting,
+  CaveBot = nExBot.CaveBot,
+  Equipment = nExBot.Equipment,
+  Analyzer = nExBot.Analyzer,
+  SessionManager = nExBot.SessionManager,
+  LootTracker = nExBot.LootTracker,
+  BossTracker = nExBot.BossTracker,
+}

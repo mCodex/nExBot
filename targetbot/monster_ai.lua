@@ -41,8 +41,19 @@
 MonsterAI = MonsterAI or {}
 MonsterAI.VERSION = "2.2"
 
--- Time helper (milliseconds). Prefer existing global 'now' if available, else use g_clock.millis or os.time()*1000
-local function nowMs()
+--------------------------------------------------------------------------------
+-- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
+--------------------------------------------------------------------------------
+local function getClient()
+  return ClientHelper and ClientHelper.getClient() or ClientService
+end
+
+local function getClientVersion()
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
+end
+
+-- Time helper (use ClientHelper for DRY)
+local nowMs = ClientHelper and ClientHelper.nowMs or function()
   if now then return now end
   if g_clock and g_clock.millis then return g_clock.millis() end
   return os.time() * 1000
@@ -639,20 +650,14 @@ function MonsterAI.Metrics.collect()
       monsterCount = monsterCount + 1
     end
   end
-  table.insert(history.monsterCounts, {time = nowt, value = monsterCount})
-  while #history.monsterCounts > MonsterAI.Metrics.MAX_HISTORY do
-    table.remove(history.monsterCounts, 1)
-  end
+  BoundedPush(history.monsterCounts, {time = nowt, value = monsterCount}, MonsterAI.Metrics.MAX_HISTORY)
   
   -- Track threat level over time
   local threatLevel = 0
   if MonsterAI.RealTime and MonsterAI.RealTime.threatCache then
     threatLevel = MonsterAI.RealTime.threatCache.totalThreat or 0
   end
-  table.insert(history.threatLevels, {time = nowt, value = threatLevel})
-  while #history.threatLevels > MonsterAI.Metrics.MAX_HISTORY do
-    table.remove(history.threatLevels, 1)
-  end
+  BoundedPush(history.threatLevels, {time = nowt, value = threatLevel}, MonsterAI.Metrics.MAX_HISTORY)
   
   m.lastUpdateTime = nowt
   m.updateCyclesTotal = (m.updateCyclesTotal or 0) + 1
@@ -1094,10 +1099,8 @@ function MonsterAI.AutoTuner.applyDangerSuggestion(name, force)
     reasons = suggestion.reasons
   })
   
-  -- Keep history bounded
-  while #MonsterAI.AutoTuner.history > 100 do
-    table.remove(MonsterAI.AutoTuner.history, 1)
-  end
+  -- Keep history bounded (using BoundedPush for O(1) amortized)
+  TrimArray(MonsterAI.AutoTuner.history, 100)
   
   MonsterAI.RealTime.metrics.autoTuneAdjustments = (MonsterAI.RealTime.metrics.autoTuneAdjustments or 0) + 1
   
@@ -1536,7 +1539,14 @@ function MonsterAI.RealTime.findSafeTileFromArc(playerPos, monsterPos, monsterDi
       if not MonsterAI.Predictor.isPositionInWavePath(tile, monsterPos, monsterDir, range, width) then
         -- Check walkability
         local walkable = true
-        if g_map and g_map.isTileWalkable then
+        local Client = getClient()
+        if Client and Client.isTileWalkable then
+          local ok, result = pcall(Client.isTileWalkable, tile)
+          walkable = ok and result
+        elseif Client and Client.getTile then
+          local ok, mapTile = pcall(Client.getTile, tile)
+          walkable = ok and mapTile and mapTile:isWalkable()
+        elseif g_map and g_map.isTileWalkable then
           local ok, result = pcall(g_map.isTileWalkable, tile)
           walkable = ok and result
         elseif g_map and g_map.getTile then
@@ -1560,7 +1570,11 @@ function MonsterAI.RealTime.findSafeTileFromArc(playerPos, monsterPos, monsterDi
         local tile = { x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z }
         if not MonsterAI.Predictor.isPositionInWavePath(tile, monsterPos, monsterDir, range, width) then
           local walkable = true
-          if g_map and g_map.getTile then
+          local Client2 = getClient()
+          if Client2 and Client2.getTile then
+            local ok, mapTile = pcall(Client2.getTile, tile)
+            walkable = ok and mapTile and mapTile:isWalkable()
+          elseif g_map and g_map.getTile then
             local ok, mapTile = pcall(g_map.getTile, tile)
             walkable = ok and mapTile and mapTile:isWalkable()
           end
@@ -1908,11 +1922,22 @@ function MonsterAI.Tracker.update(creature)
     health = hp
   }
   
-  -- Keep samples within analysis window
-  table.insert(data.samples, sample)
-  while #data.samples > 0 and 
-        (currentTime - data.samples[1].time) > CONST.ANALYSIS_WINDOW do
-    table.remove(data.samples, 1)
+  -- Keep samples within analysis window (time-based trimming with batch)
+  data.samples[#data.samples + 1] = sample
+  if #data.samples > 0 and (currentTime - data.samples[1].time) > CONST.ANALYSIS_WINDOW then
+    -- Batch trim old samples
+    local cutoff = 1
+    while cutoff <= #data.samples and (currentTime - data.samples[cutoff].time) > CONST.ANALYSIS_WINDOW do
+      cutoff = cutoff + 1
+    end
+    if cutoff > 1 then
+      for i = 1, #data.samples - cutoff + 1 do
+        data.samples[i] = data.samples[i + cutoff - 1]
+      end
+      for i = #data.samples - cutoff + 2, #data.samples do
+        data.samples[i] = nil
+      end
+    end
   end
   
   -- ═══════════════════════════════════════════════════════════════════════════
@@ -1933,14 +1958,12 @@ function MonsterAI.Tracker.update(creature)
       end
       
       -- Track walk pattern
-      table.insert(data.walkSamples, {
+      BoundedPush(data.walkSamples, {
         time = nowt,
         isWalking = snapshot.isWalking,
         stepDuration = snapshot.stepDuration,
         direction = snapshot.walkDirection
-      })
-      -- Keep bounded
-      while #data.walkSamples > 50 do table.remove(data.walkSamples, 1) end
+      }, 50)
       
       -- Update walking ratio
       local walkingCount = 0
@@ -1964,8 +1987,7 @@ function MonsterAI.Tracker.update(creature)
     data.directionChanges = data.directionChanges + 1
     
     -- Track direction history
-    table.insert(data.directionHistory, { time = nowt, direction = dir })
-    while #data.directionHistory > 30 do table.remove(data.directionHistory, 1) end
+    BoundedPush(data.directionHistory, { time = nowt, direction = dir }, 30)
     
     -- Calculate turn frequency
     if #data.directionHistory >= 2 then
@@ -1986,8 +2008,7 @@ function MonsterAI.Tracker.update(creature)
   if hp ~= data.lastHealthPercent then
     local healthChange = data.lastHealthPercent - hp -- Positive = damage taken
     
-    table.insert(data.healthSamples, { time = nowt, percent = hp, change = healthChange })
-    while #data.healthSamples > 30 do table.remove(data.healthSamples, 1) end
+    BoundedPush(data.healthSamples, { time = nowt, percent = hp, change = healthChange }, 30)
     
     -- Calculate health change rate (per second)
     if #data.healthSamples >= 2 then
@@ -2027,8 +2048,7 @@ function MonsterAI.Tracker.update(creature)
     local dist = math.max(math.abs(pos.x - playerPos.x), math.abs(pos.y - playerPos.y))
     
     -- Track distance samples
-    table.insert(data.distanceSamples, { time = nowt, distance = dist })
-    while #data.distanceSamples > 30 do table.remove(data.distanceSamples, 1) end
+    BoundedPush(data.distanceSamples, { time = nowt, distance = dist }, 30)
     
     -- Calculate average distance
     local totalDist = 0
@@ -2483,9 +2503,7 @@ function MonsterAI.CombatFeedback.recordPrediction(monsterId, monsterName, predi
   })
   
   -- Keep bounded
-  while #MonsterAI.CombatFeedback.recentPredictions > 50 do
-    table.remove(MonsterAI.CombatFeedback.recentPredictions, 1)
-  end
+  TrimArray(MonsterAI.CombatFeedback.recentPredictions, 50)
 end
 
 -- Record damage received and correlate with predictions
@@ -2493,18 +2511,13 @@ function MonsterAI.CombatFeedback.recordDamage(amount, attributedMonsterId, attr
   local nowt = nowMs()
   local fb = MonsterAI.CombatFeedback
   
-  -- Record damage event
-  table.insert(fb.recentDamage, {
+  -- Record damage event (using BoundedPush for O(1))
+  BoundedPush(fb.recentDamage, {
     timestamp = nowt,
     amount = amount,
     attributedTo = attributedMonsterId,
     attributedName = attributedName
-  })
-  
-  -- Keep bounded
-  while #fb.recentDamage > 30 do
-    table.remove(fb.recentDamage, 1)
-  end
+  }, 30)
   
   -- Correlate with recent predictions
   local foundMatch = false
@@ -2774,10 +2787,7 @@ function MonsterAI.SpellTracker.recordSpell(creatureId, missileType, sourcePos, 
     -- Ignore very short intervals (likely multi-projectile spells)
     if interval > 200 then
       -- Record sample
-      table.insert(data.spellCooldownSamples, interval)
-      while #data.spellCooldownSamples > 30 do
-        table.remove(data.spellCooldownSamples, 1)
-      end
+      BoundedPush(data.spellCooldownSamples, interval, 30)
       
       -- Update EWMA
       local alpha = CONST.EWMA.ALPHA_DEFAULT
@@ -2803,16 +2813,10 @@ function MonsterAI.SpellTracker.recordSpell(creatureId, missileType, sourcePos, 
     sourcePos = sourcePos,
     targetPos = targetPos
   }
-  table.insert(data.spellHistory, spellRecord)
-  while #data.spellHistory > 50 do
-    table.remove(data.spellHistory, 1)
-  end
+  BoundedPush(data.spellHistory, spellRecord, 50)
   
   -- Track spell sequence for pattern detection
-  table.insert(data.spellSequence, missileType)
-  while #data.spellSequence > 10 do
-    table.remove(data.spellSequence, 1)
-  end
+  BoundedPush(data.spellSequence, missileType, 10)
   
   -- ═══════════════════════════════════════════════════════════════════════════
   -- TARGET ANALYSIS
@@ -2844,11 +2848,25 @@ function MonsterAI.SpellTracker.recordSpell(creatureId, missileType, sourcePos, 
   -- FREQUENCY TRACKING (rolling 60-second window)
   -- ═══════════════════════════════════════════════════════════════════════════
   data.frequencyWindow = data.frequencyWindow or {}
-  table.insert(data.frequencyWindow, nowt)
+  data.frequencyWindow[#data.frequencyWindow + 1] = nowt
   
-  -- Prune entries older than 60 seconds
-  while #data.frequencyWindow > 0 and (nowt - data.frequencyWindow[1]) > 60000 do
-    table.remove(data.frequencyWindow, 1)
+  -- Prune entries older than 60 seconds (batch trim)
+  local oldest = data.frequencyWindow[1]
+  if oldest and (nowt - oldest) > 60000 then
+    -- Find cutoff point
+    local cutoff = 1
+    while cutoff <= #data.frequencyWindow and (nowt - data.frequencyWindow[cutoff]) > 60000 do
+      cutoff = cutoff + 1
+    end
+    -- Shift elements
+    if cutoff > 1 then
+      for i = 1, #data.frequencyWindow - cutoff + 1 do
+        data.frequencyWindow[i] = data.frequencyWindow[i + cutoff - 1]
+      end
+      for i = #data.frequencyWindow - cutoff + 2, #data.frequencyWindow do
+        data.frequencyWindow[i] = nil
+      end
+    end
   end
   data.castFrequency = #data.frequencyWindow
   
@@ -2868,9 +2886,7 @@ function MonsterAI.SpellTracker.recordSpell(creatureId, missileType, sourcePos, 
     targetedPlayer = playerPos and targetPos and 
       math.max(math.abs(targetPos.x - playerPos.x), math.abs(targetPos.y - playerPos.y)) <= 1
   })
-  while #MonsterAI.SpellTracker.recentSpells > MonsterAI.SpellTracker.MAX_RECENT_SPELLS do
-    table.remove(MonsterAI.SpellTracker.recentSpells, 1)
-  end
+  TrimArray(MonsterAI.SpellTracker.recentSpells, MonsterAI.SpellTracker.MAX_RECENT_SPELLS)
   
   -- Update spell catalog
   if not MonsterAI.SpellTracker.spellCatalog[missileType] then
@@ -3141,9 +3157,8 @@ if EventBus then
         rt.positions = rt.positions or {}
         local pos = safeCreatureCall(creature, "getPosition", nil)
         if pos then
-          table.insert(rt.positions, { pos = pos, time = nowMs() })
-          -- Keep last 10 positions
-          while #rt.positions > 10 do table.remove(rt.positions, 1) end
+          -- Keep last 10 positions (using BoundedPush)
+          BoundedPush(rt.positions, { pos = pos, time = nowMs() }, 10)
         end
       end
     end
@@ -3204,9 +3219,10 @@ if EventBus then
       return score, data
     end
 
+    local Client = getClient()
     local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
       and MovementCoordinator.MonsterCache.getNearby(CONST.DAMAGE.CORRELATION_RADIUS)
-      or g_map.getSpectatorsInRange(playerPos, false, CONST.DAMAGE.CORRELATION_RADIUS, CONST.DAMAGE.CORRELATION_RADIUS)
+      or ((Client and Client.getSpectatorsInRange) and Client.getSpectatorsInRange(playerPos, false, CONST.DAMAGE.CORRELATION_RADIUS, CONST.DAMAGE.CORRELATION_RADIUS) or (g_map and g_map.getSpectatorsInRange and g_map.getSpectatorsInRange(playerPos, false, CONST.DAMAGE.CORRELATION_RADIUS, CONST.DAMAGE.CORRELATION_RADIUS)))
 
     local bestScore, bestData, bestMonster = 0, nil, nil
     for i = 1, #creatures do
@@ -3224,10 +3240,21 @@ if EventBus then
 
       -- Record damage sample for DPS calculation
       bestData.damageSamples = bestData.damageSamples or {}
-      table.insert(bestData.damageSamples, { time = nowt, amount = damage })
-      -- Trim samples older than DPS window
-      while #bestData.damageSamples > 0 and (nowt - bestData.damageSamples[1].time) > MonsterAI.DPS_WINDOW do
-        table.remove(bestData.damageSamples, 1)
+      bestData.damageSamples[#bestData.damageSamples + 1] = { time = nowt, amount = damage }
+      -- Trim samples older than DPS window (batch trim)
+      if #bestData.damageSamples > 0 then
+        local cutoff = 1
+        while cutoff <= #bestData.damageSamples and (nowt - bestData.damageSamples[cutoff].time) > MonsterAI.DPS_WINDOW do
+          cutoff = cutoff + 1
+        end
+        if cutoff > 1 then
+          for i = 1, #bestData.damageSamples - cutoff + 1 do
+            bestData.damageSamples[i] = bestData.damageSamples[i + cutoff - 1]
+          end
+          for i = #bestData.damageSamples - cutoff + 2, #bestData.damageSamples do
+            bestData.damageSamples[i] = nil
+          end
+        end
       end
       bestData.totalDamage = (bestData.totalDamage or 0) + damage
 
@@ -3268,7 +3295,8 @@ if EventBus then
       if not srcPos or not destPos then return end
       
       -- Get the source tile and find creatures on it
-      local srcTile = g_map and g_map.getTile and g_map.getTile(srcPos)
+      local Client = getClient()
+      local srcTile = (Client and Client.getTile) and Client.getTile(srcPos) or (g_map and g_map.getTile and g_map.getTile(srcPos))
       if not srcTile then return end
       
       local creatures = srcTile:getCreatures()
@@ -3317,17 +3345,17 @@ if EventBus then
           local pattern = MonsterAI.Patterns.knownMonsters[pname] or {}
           pattern.samples = pattern.samples or {}
           table.insert(pattern.samples, 1, observed) -- newest first
-          -- keep only last N samples
-          while #pattern.samples > 30 do table.remove(pattern.samples) end
+          -- keep only last N samples (trim from end since newest is at front)
+          while #pattern.samples > 30 do pattern.samples[#pattern.samples] = nil end
           MonsterAI.Patterns.persist(pname, { waveCooldown = data.ewmaCooldown, waveVariance = data.ewmaVariance, samples = pattern.samples, lastSeen = nowMs() })
         end
       end
 
       data.lastWaveTime = nowt
       data.observedWaveAttacks = data.observedWaveAttacks or {}
-      table.insert(data.observedWaveAttacks, nowt)
+      data.observedWaveAttacks[#data.observedWaveAttacks + 1] = nowt
       -- Bound the sample history to avoid unbounded growth
-      if #data.observedWaveAttacks > 100 then table.remove(data.observedWaveAttacks, 1) end
+      TrimArray(data.observedWaveAttacks, 100)
       data.missileCount = (data.missileCount or 0) + 1
       
       -- Emit wave observed event for other modules
@@ -3353,7 +3381,8 @@ if EventBus then
       if not srcPos then return end
       
       -- Get source tile
-      local srcTile = g_map and g_map.getTile and g_map.getTile(srcPos)
+      local Client2 = getClient()
+      local srcTile = (Client2 and Client2.getTile) and Client2.getTile(srcPos) or (g_map and g_map.getTile and g_map.getTile(srcPos))
       if not srcTile then return end
       
       local creatures = srcTile.getCreatures and srcTile:getCreatures()
@@ -3690,7 +3719,15 @@ function MonsterAI.updateAll()
     if SpectatorCache and SpectatorCache.getNearby then
       creatures = SpectatorCache.getNearby(8, 8) or {}
     else
-      local ok, result = pcall(function() return g_map.getSpectatorsInRange(playerPos, false, 8, 8) end)
+      local Client = getClient()
+      local ok, result = pcall(function()
+        if Client and Client.getSpectatorsInRange then
+          return Client.getSpectatorsInRange(playerPos, false, 8, 8)
+        elseif g_map and g_map.getSpectatorsInRange then
+          return g_map.getSpectatorsInRange(playerPos, false, 8, 8)
+        end
+        return {}
+      end)
       creatures = ok and result or {}
     end
   end
@@ -4073,20 +4110,49 @@ end
 -- You can disable via: MonsterAI.COLLECT_ENABLED = false
 MonsterAI.COLLECT_ENABLED = (MonsterAI.COLLECT_ENABLED == nil) and true or MonsterAI.COLLECT_ENABLED
 
--- Periodic background updater - now faster (500ms) for better responsiveness
--- The updateAll function is optimized and event-driven tracking handles most work
-macro(500, function()
-  if MonsterAI.COLLECT_ENABLED and MonsterAI.updateAll then
-    pcall(function() MonsterAI.updateAll() end)
-  end
-end)
+-- ============================================================================
+-- UNIFIED TICK INTEGRATION (Performance: consolidates macro overhead)
+-- Uses UnifiedTick system if available, falls back to individual macros
+-- ============================================================================
 
--- Auto-tuner periodic pass (runs every 30 seconds)
-macro(30000, function()
-  if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
-    pcall(function() MonsterAI.AutoTuner.runPass() end)
-  end
-end)
+if UnifiedTick and UnifiedTick.register then
+  -- Periodic background updater (500ms) - NORMAL priority
+  UnifiedTick.register({
+    id = "monsterai_update",
+    interval = 500,
+    priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.NORMAL or 50,
+    callback = function()
+      if MonsterAI.COLLECT_ENABLED and MonsterAI.updateAll then
+        pcall(function() MonsterAI.updateAll() end)
+      end
+    end
+  })
+  
+  -- Auto-tuner periodic pass (30000ms) - IDLE priority
+  UnifiedTick.register({
+    id = "monsterai_autotune",
+    interval = 30000,
+    priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.IDLE or 10,
+    callback = function()
+      if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
+        pcall(function() MonsterAI.AutoTuner.runPass() end)
+      end
+    end
+  })
+else
+  -- Fallback to traditional macros if UnifiedTick not loaded
+  macro(500, function()
+    if MonsterAI.COLLECT_ENABLED and MonsterAI.updateAll then
+      pcall(function() MonsterAI.updateAll() end)
+    end
+  end)
+  
+  macro(30000, function()
+    if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
+      pcall(function() MonsterAI.AutoTuner.runPass() end)
+    end
+  end)
+end
 
 -- ============================================================================
 -- SCENARIO MANAGER MODULE v2.1
@@ -4225,7 +4291,8 @@ function Scenario.detectScenario()
   local totalDanger = 0
   local monsterCount = 0
   
-  local creatures = g_map.getSpectators(playerPos, false) or {}
+  local Client = getClient()
+  local creatures = (Client and Client.getSpectators) and Client.getSpectators(playerPos, false) or (g_map and g_map.getSpectators and g_map.getSpectators(playerPos, false)) or {}
   
   for _, creature in ipairs(creatures) do
     if creature and isValidAliveMonster(creature) then
@@ -4669,18 +4736,13 @@ function Scenario.recordMovement()
     return
   end
   
-  -- Add current position
-  table.insert(history, {
+  -- Add current position (using BoundedPush for O(1))
+  BoundedPush(history, {
     x = playerPos.x,
     y = playerPos.y,
     time = nowt
-  })
+  }, 10)
   Scenario.state.lastMoveRecord = nowt
-  
-  -- Keep only last 10 positions
-  while #history > 10 do
-    table.remove(history, 1)
-  end
 end
 
 function Scenario.isZigzagging()
@@ -4831,7 +4893,8 @@ function Scenario.getOptimalTarget()
     candidates = MonsterAI.TargetBot.getSortedTargets({maxRange = 12})
   else
     -- Fallback to basic targeting
-    local creatures = g_map.getSpectators(playerPos, false) or {}
+    local Client2 = getClient()
+    local creatures = (Client2 and Client2.getSpectators) and Client2.getSpectators(playerPos, false) or (g_map and g_map.getSpectators and g_map.getSpectators(playerPos, false)) or {}
     for _, creature in ipairs(creatures) do
       if creature and isValidAliveMonster(creature) then
         local pos = safeCreatureCall(creature, "getPosition", nil)
@@ -4938,12 +5001,25 @@ if EventBus and EventBus.on then
   end)
 end
 
--- Periodic scenario update
-macro(500, function()
-  if MonsterAI.COLLECT_ENABLED then
-    pcall(function() Scenario.detectScenario() end)
-  end
-end)
+-- Periodic scenario update (using UnifiedTick if available)
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register({
+    id = "monsterai_scenario",
+    interval = 500,
+    priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.NORMAL or 50,
+    callback = function()
+      if MonsterAI.COLLECT_ENABLED then
+        pcall(function() Scenario.detectScenario() end)
+      end
+    end
+  })
+else
+  macro(500, function()
+    if MonsterAI.COLLECT_ENABLED then
+      pcall(function() Scenario.detectScenario() end)
+    end
+  end)
+end
 
 -- ============================================================================
 -- REACHABILITY MODULE v2.1
@@ -5102,7 +5178,8 @@ function Reachability.isReachable(creature, forceRecheck)
     if offset then
       probe = {x = probe.x + offset.x, y = probe.y + offset.y, z = probe.z}
       
-      local tile = g_map.getTile(probe)
+      local Client3 = getClient()
+      local tile = (Client3 and Client3.getTile) and Client3.getTile(probe) or (g_map and g_map.getTile and g_map.getTile(probe))
       if tile then
         -- Check if tile is walkable
         local walkable = tile.isWalkable and tile:isWalkable()
@@ -5139,7 +5216,10 @@ function Reachability.isReachable(creature, forceRecheck)
     -- For close creatures, check if there's a clear line
     local ok2, los = pcall(function()
       -- Use Bresenham line check if available
-      if g_map.isSightClear then
+      local Client4 = getClient()
+      if Client4 and Client4.isSightClear then
+        return Client4.isSightClear(playerPos, creaturePos)
+      elseif g_map and g_map.isSightClear then
         return g_map.isSightClear(playerPos, creaturePos)
       end
       return true  -- Assume LOS if API not available
@@ -5308,10 +5388,21 @@ function Reachability.validateTarget(creature)
   return true, reason, path
 end
 
--- Periodic cleanup
-macro(10000, function()
-  pcall(function() Reachability.cleanup() end)
-end)
+-- Periodic cleanup (using UnifiedTick if available)
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register({
+    id = "monsterai_reachability_cleanup",
+    interval = 10000,
+    priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.IDLE or 10,
+    callback = function()
+      pcall(function() Reachability.cleanup() end)
+    end
+  })
+else
+  macro(10000, function()
+    pcall(function() Reachability.cleanup() end)
+  end)
+end
 
 -- EventBus integration
 if EventBus and EventBus.on then
@@ -5763,7 +5854,8 @@ function TBI.getSortedTargets(options)
   local maxRange = options.maxRange or 10
   
   -- Get all creatures on screen
-  local creatures = g_map.getSpectators(playerPos, false) or {}
+  local Client = getClient()
+  local creatures = (Client and Client.getSpectators) and Client.getSpectators(playerPos, false) or (g_map and g_map.getSpectators and g_map.getSpectators(playerPos, false)) or {}
   
   for _, creature in ipairs(creatures) do
     if creature and isValidAliveMonster(creature) then

@@ -9,7 +9,8 @@ local M = {}
 M.records = {}
 M.thresholdMs = 120 -- default threshold for recording (ms)
 
-local function nowMs()
+-- Use ClientHelper if available, else local fallback
+local nowMs = (ClientHelper and ClientHelper.nowMs) or function()
   if g_clock and g_clock.millis then return g_clock.millis() end
   return os.clock() * 1000
 end

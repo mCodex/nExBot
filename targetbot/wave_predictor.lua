@@ -6,6 +6,15 @@
 WavePredictor = WavePredictor or {}
 WavePredictor.VERSION = "0.3"  -- Updated for OTClient API integration
 
+-- Use global ClientHelper (loaded by _Loader.lua) for cross-client compatibility
+local function getClient()
+  return ClientHelper and ClientHelper.getClient() or ClientService
+end
+
+local function getClientVersion()
+  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
+end
+
 -- Per-creature state
 local patterns = {} -- id -> { lastAttack = ts, cooldownEMA, directionBias, observedWidth, ... }
 
@@ -33,7 +42,8 @@ local function key(c)
   return tostring(id)
 end
 
-local function nowMs()
+-- Use ClientHelper for DRY
+local nowMs = ClientHelper and ClientHelper.nowMs or function()
   if now then return now end
   if g_clock and g_clock.millis then return g_clock.millis() end
   return os.time() * 1000
@@ -168,7 +178,8 @@ local function isTileSafeForWaveAvoidance(tilePos)
   if not tilePos then return false end
   
   -- Use OTClient tile API for fast validation
-  local tile = g_map.getTile(tilePos)
+  local Client = getClient()
+  local tile = (Client and Client.getTile) and Client.getTile(tilePos) or (g_map and g_map.getTile and g_map.getTile(tilePos))
   if not tile then return false end
   
   -- Must be walkable (ignore creatures for emergency evasion)
@@ -310,8 +321,7 @@ if EventBus then
     
     -- Track direction history
     p.directionHistory = p.directionHistory or {}
-    table.insert(p.directionHistory, { dir = newDir, time = nowMs() })
-    while #p.directionHistory > 20 do table.remove(p.directionHistory, 1) end
+    BoundedPush(p.directionHistory, { dir = newDir, time = nowMs() }, 20)
     
     -- Direction change detection
     if oldDir ~= nil and oldDir ~= newDir then
@@ -461,8 +471,7 @@ if EventBus then
     -- Record attack direction if provided
     if data and data.dir then
       p.attackDirections = p.attackDirections or {}
-      table.insert(p.attackDirections, data.dir)
-      while #p.attackDirections > 10 do table.remove(p.attackDirections, 1) end
+      BoundedPush(p.attackDirections, data.dir, 10)
     end
   end, 15)
   

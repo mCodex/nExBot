@@ -148,7 +148,8 @@ if true then
       vocText = "- ED"
   end
 
-  macro(5000, function()
+  -- Window title handler function
+  local function windowTitleHandler()
     if settings.title then
       if hppercent() > 0 then
           g_window.setTitle("Tibia - " .. name() .. " - " .. lvl() .. "lvl " .. vocText)
@@ -158,7 +159,19 @@ if true then
     else
       g_window.setTitle("Tibia - " .. name())
     end
-  end)
+  end
+
+  -- Use UnifiedTick if available, fallback to standalone macro
+  if UnifiedTick and UnifiedTick.register then
+    UnifiedTick.register("window_title", {
+      interval = 5000,
+      priority = UnifiedTick.Priority.IDLE,
+      handler = windowTitleHandler,
+      group = "ui"
+    })
+  else
+    macro(5000, windowTitleHandler)
+  end
 end
 
 addCheckBox("separatePm", "Open PM's in new Window", false, rightPanel, "PM's will be automatically opened in new tab after receiving one.")
@@ -193,7 +206,8 @@ if true then
   -- script
   if settings.useAll and settings.useAll:len() > 0 then
     hotkey(settings.useAll, function()
-        if not modules.game_walking.wsadWalking then return end
+        local wsadWalking = modules and modules.game_walking and modules.game_walking.wsadWalking
+        if not wsadWalking then return end
         for _, tile in pairs(g_map.getTiles(posz())) do
             if distanceFromPlayer(tile:getPosition()) < 2 then
                 for _, item in pairs(tile:getItems()) do
@@ -263,12 +277,25 @@ end
 
 addCheckBox("antiKick", "Anti - Kick", true, rightPanel, "Turn every 10 minutes to prevent kick.")
 if true then
-  macro(600*1000, function()
+  -- Anti-kick handler function
+  local function antiKickHandler()
     if not settings.antiKick then return end
     local dir = player:getDirection()
     turn((dir + 1) % 4)
     schedule(50, function() turn(dir) end)
-  end)
+  end
+
+  -- Use UnifiedTick if available, fallback to standalone macro
+  if UnifiedTick and UnifiedTick.register then
+    UnifiedTick.register("anti_kick", {
+      interval = 600000, -- 10 minutes
+      priority = UnifiedTick.Priority.IDLE,
+      handler = antiKickHandler,
+      group = "tools"
+    })
+  else
+    macro(600*1000, antiKickHandler)
+  end
 end
 
 
@@ -310,7 +337,8 @@ if true then
     return pos.x .. "," .. pos.y .. "," .. pos.z
   end
   
-  macro(400, function()
+  -- Skin Monsters handler function (shared by UnifiedTick and fallback macro)
+  local function skinMonstersHandler()
     if not CaveBot or type(CaveBot.isOn) ~= "function" or not CaveBot.isOn() or not settings.stake then return end
     
     local playerPos = player:getPosition()
@@ -383,7 +411,22 @@ if true then
         CaveBot.delay(300)
       end
     end
-  end)
+  end
+  
+  -- Use UnifiedTick if available, fallback to standalone macro
+  if UnifiedTick and UnifiedTick.register then
+    -- Register with UnifiedTick for consolidated tick management
+    -- Lower priority since skinning is not combat-critical
+    UnifiedTick.register("skin_monsters", {
+      interval = 400,
+      priority = UnifiedTick.Priority.LOW,
+      handler = skinMonstersHandler,
+      group = "tools"
+    })
+  else
+    -- Fallback to standalone macro if UnifiedTick not available
+    macro(400, skinMonstersHandler)
+  end
 end
 
 
@@ -435,7 +478,7 @@ if true then
   end
 
   onKeyPress(function(keys)
-    local wsadWalking = modules.game_walking.wsadWalking
+    local wsadWalking = modules and modules.game_walking and modules.game_walking.wsadWalking
     if not settings.autoOpenDoors then return end
     local pos = player:getPosition()
     if keys == 'Up' or (wsadWalking and keys == 'W') then
@@ -510,14 +553,27 @@ end
 
 addCheckBox("suppliesControl", "TargetBot off if low supply", false, leftPanel, "Turn off TargetBot if either one of supply amount is below 50% of minimum.")
 if true then
-  macro(500, function()
+  -- Supplies control handler function
+  local function suppliesControlHandler()
     if not settings.suppliesControl then return end
     if TargetBot.isOff() then return end
     if CaveBot.isOff() then return end
     if type(hasSupplies()) == 'table' then
         TargetBot.setOff()
     end
-  end)
+  end
+
+  -- Use UnifiedTick if available, fallback to standalone macro
+  if UnifiedTick and UnifiedTick.register then
+    UnifiedTick.register("supplies_control", {
+      interval = 500,
+      priority = UnifiedTick.Priority.LOW,
+      handler = suppliesControlHandler,
+      group = "tools"
+    })
+  else
+    macro(500, suppliesControlHandler)
+  end
 end
 
 addCheckBox("holdMwall", "Hold MW/WG", true, rightPanel, "Mark tiles with below hotkeys to automatically use Magic Wall or Wild Growth")
@@ -530,7 +586,9 @@ if true then
   local wgHot
 
   local candidates = {}
-  local m = macro(100, function()
+  
+  -- Hold MW/WG handler function (shared by UnifiedTick and fallback macro)
+  local function holdMwWgHandler()
     mwHot = settings.holdMwHot
     wgHot = settings.holdWgHot
     
@@ -551,7 +609,32 @@ if true then
           end
         end
       end
-  end)
+  end
+  
+  -- Use UnifiedTick if available, fallback to standalone macro
+  local m
+  local macroEnabled = true  -- Track enabled state for event handlers
+  if UnifiedTick and UnifiedTick.register then
+    -- Register with UnifiedTick for consolidated tick management
+    UnifiedTick.register("hold_mw_wg", {
+      interval = 100,
+      priority = UnifiedTick.Priority.HIGH,
+      handler = holdMwWgHandler,
+      group = "combat"
+    })
+    -- Create isOff/isOn compatibility functions
+    m = {
+      isOff = function() return not macroEnabled end,
+      isOn = function() return macroEnabled end,
+      setOn = function(enabled) 
+        macroEnabled = enabled
+        UnifiedTick.setEnabled("hold_mw_wg", enabled)
+      end
+    }
+  else
+    -- Fallback to standalone macro if UnifiedTick not available
+    m = macro(100, holdMwWgHandler)
+  end
 
   onRemoveThing(function(tile, thing)
     if not settings.holdMwall then return end
@@ -575,7 +658,7 @@ if true then
   end)
 
   onKeyDown(function(keys)
-    local wsadWalking = modules.game_walking.wsadWalking
+    local wsadWalking = modules and modules.game_walking and modules.game_walking.wsadWalking
     if not wsadWalking then return end
     if not settings.holdMwall then return end
     if m.isOff() then return end
@@ -598,7 +681,7 @@ if true then
   end)
 
   onKeyPress(function(keys)
-    local wsadWalking = modules.game_walking.wsadWalking
+    local wsadWalking = modules and modules.game_walking and modules.game_walking.wsadWalking
     if not wsadWalking then return end
     if not settings.holdMwall then return end
     if m.isOff() then return end

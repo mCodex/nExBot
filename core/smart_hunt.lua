@@ -870,14 +870,14 @@ local function updateTrends(metrics)
   lastTrendUpdate = now
   
   -- Add new samples
-  table.insert(trendData.xpPerHour, metrics.xpPerHour)
-  table.insert(trendData.killsPerHour, metrics.killsPerHour)
-  table.insert(trendData.damageRatio, metrics.damageRatio)
+  trendData.xpPerHour[#trendData.xpPerHour + 1] = metrics.xpPerHour
+  trendData.killsPerHour[#trendData.killsPerHour + 1] = metrics.killsPerHour
+  trendData.damageRatio[#trendData.damageRatio + 1] = metrics.damageRatio
   
-  -- Trim to max samples
-  while #trendData.xpPerHour > trendData.maxSamples do table.remove(trendData.xpPerHour, 1) end
-  while #trendData.killsPerHour > trendData.maxSamples do table.remove(trendData.killsPerHour, 1) end
-  while #trendData.damageRatio > trendData.maxSamples do table.remove(trendData.damageRatio, 1) end
+  -- Trim to max samples (using TrimArray for O(1) amortized)
+  TrimArray(trendData.xpPerHour, trendData.maxSamples)
+  TrimArray(trendData.killsPerHour, trendData.maxSamples)
+  TrimArray(trendData.damageRatio, trendData.maxSamples)
 end
 
 -- Calculate trend direction: -1 (declining), 0 (stable), 1 (improving)

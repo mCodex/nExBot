@@ -1,4 +1,7 @@
-CaveBot.Editor.ExampleFunctions = {}
+-- Ensure CaveBot.Editor exists before adding ExampleFunctions
+CaveBot = CaveBot or {}
+CaveBot.Editor = CaveBot.Editor or {}
+CaveBot.Editor.ExampleFunctions = CaveBot.Editor.ExampleFunctions or {}
 
 local function addExampleFunction(title, text)
   return table.insert(CaveBot.Editor.ExampleFunctions, {title, text:trim()})
@@ -102,7 +105,8 @@ return true
 ]])
 
 addExampleFunction("Logout", [[
-g_game.safeLogout()
+local Client = ClientService
+if Client and Client.safeLogout then Client.safeLogout() elseif g_game then g_game.safeLogout() end
 delay(1000)
 return "retry"
 ]])

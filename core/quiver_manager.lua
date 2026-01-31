@@ -1,5 +1,5 @@
 --[[
-  Quiver Manager - Optimized for nExBot v1.0.0
+  Quiver Manager - Optimized for nExBot v1.0.1 (ClientService refactor)
   
   Automatically manages ammunition in quiver:
   - Moves correct ammo type (arrows/bolts) into quiver based on equipped weapon
@@ -7,7 +7,13 @@
   - Uses O(1) lookups and smart cooldowns for performance
   - Only works with open containers (no auto-opening)
   - Uses EventBus equipment:change for reactive weapon detection
+  - Cross-client compatible (OTCv8 / OpenTibiaBR)
 ]]
+
+-- ClientService helper for cross-client compatibility
+local function getClient()
+  return ClientService
+end
 
 if voc() == 2 or voc() == 12 then
     -- Weapon and ammo definitions
@@ -35,7 +41,9 @@ if voc() == 2 or voc() == 12 then
     
     -- Find ammo item in OPEN containers only (simple and reliable)
     local function findAmmoItem(ammoIds)
-        for _, container in pairs(g_game.getContainers()) do
+        local Client = getClient()
+        local containers = (Client and Client.getContainers) and Client.getContainers() or (g_game and g_game.getContainers and g_game.getContainers()) or {}
+        for _, container in pairs(containers) do
             local cname = container:getName():lower()
             if not cname:find("quiver") then
                 for _, item in ipairs(container:getItems()) do
@@ -97,7 +105,9 @@ if voc() == 2 or voc() == 12 then
 
     -- Find a valid destination container for wrong ammo
     local function findDestContainer(quiverContainer)
-        for _, container in pairs(g_game.getContainers()) do
+        local Client = getClient()
+        local containers = (Client and Client.getContainers) and Client.getContainers() or (g_game and g_game.getContainers and g_game.getContainers()) or {}
+        for _, container in pairs(containers) do
             if container ~= quiverContainer and not containerIsFull(container) then
                 local cname = container:getName():lower()
                 if not cname:find("loot") and not cname:find("quiver") and 
@@ -125,7 +135,12 @@ if voc() == 2 or voc() == 12 then
                 end
                 if destContainer then
                     local pos = destContainer:getSlotPosition(destContainer:getItemsCount())
-                    g_game.move(item, pos, item:getCount())
+                    local Client = getClient()
+                    if Client and Client.move then
+                        Client.move(item, pos, item:getCount())
+                    elseif g_game and g_game.move then
+                        g_game.move(item, pos, item:getCount())
+                    end
                     return false -- Moved something, not done yet
                 end
             end
@@ -136,7 +151,12 @@ if voc() == 2 or voc() == 12 then
             local ammoItem, ammoId = findAmmoItem(ammoList)
             if ammoItem then
                 local pos = quiverContainer:getSlotPosition(quiverContainer:getItemsCount())
-                g_game.move(ammoItem, pos, ammoItem:getCount())
+                local Client = getClient()
+                if Client and Client.move then
+                    Client.move(ammoItem, pos, ammoItem:getCount())
+                elseif g_game and g_game.move then
+                    g_game.move(ammoItem, pos, ammoItem:getCount())
+                end
                 return false -- Moved something, not done yet
             end
         end
@@ -207,8 +227,8 @@ if voc() == 2 or voc() == 12 then
         return cachedWeaponType ~= nil and cachedQuiverContainer ~= nil
     end
     
-    -- Main macro - runs less frequently, with cooldown protection
-    local quiverManagerMacro = macro(300, "Quiver Manager", function()
+    -- Quiver manager handler function (shared by UnifiedTick and fallback macro)
+    local function quiverManagerHandler()
         -- Skip if nothing changed
         if not needsCheck then return end
         
@@ -263,6 +283,25 @@ if voc() == 2 or voc() == 12 then
         else
             lastMoveTime = currentTime -- Just moved something, apply cooldown
         end
-    end)
+    end
+    
+    -- Use UnifiedTick if available, fallback to standalone macro
+    local quiverManagerMacro
+    if UnifiedTick and UnifiedTick.register then
+        UnifiedTick.register("quiver_manager", {
+            interval = 300,
+            priority = UnifiedTick.Priority.LOW,
+            handler = quiverManagerHandler,
+            group = "equipment"
+        })
+        -- Create dummy macro for UI toggle and BotDB compatibility
+        quiverManagerMacro = macro(300, "Quiver Manager", function() end)
+        quiverManagerMacro:setOn(true)
+        quiverManagerMacro.onSwitch = function(m)
+            UnifiedTick.setEnabled("quiver_manager", m:isOn())
+        end
+    else
+        quiverManagerMacro = macro(300, "Quiver Manager", quiverManagerHandler)
+    end
     BotDB.registerMacro(quiverManagerMacro, "quiverManager")
 end

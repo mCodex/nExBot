@@ -2,8 +2,11 @@
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
 
+-- Use WeakCache if available for memory-efficient caching
+local WC = WeakCache
+
 TargetBot.Creature = {}
-TargetBot.Creature.configsCache = {}
+TargetBot.Creature.configsCache = (WC and WC.createWeakValues) and WC.createWeakValues() or {}
 TargetBot.Creature.cached = 0
 TargetBot.Creature.lastCacheClear = 0
 
@@ -24,7 +27,8 @@ TargetBot.Creature.resetConfigs = function()
 end
 
 TargetBot.Creature.resetConfigsCache = function()
-  TargetBot.Creature.configsCache = {}
+  -- Recreate with weak values for automatic GC
+  TargetBot.Creature.configsCache = (WC and WC.createWeakValues) and WC.createWeakValues() or {}
   TargetBot.Creature.cached = 0
   TargetBot.Creature.lastCacheClear = now
   cacheAccessOrder = {}

@@ -23,7 +23,15 @@ end
 function SafeCall.global(funcName, ...)
     -- This is a fallback for dynamic function calls
     -- For performance, use the cached convenience functions below
-    return safeCallFunction(_G and _G[funcName], ...)
+    -- Note: In OTClient Lua, we need to be careful about environment access
+    -- Try to get the function directly by name evaluation
+    local fn = nil
+    local getFunc = loadstring("return " .. funcName)
+    if getFunc then
+        local ok, result = pcall(getFunc)
+        if ok then fn = result end
+    end
+    return safeCallFunction(fn, ...)
 end
 
 -- Pure function: Safely call a global function that returns a value, with fallback
@@ -159,9 +167,7 @@ function SafeCall.call(func, ...)
     return false, nil
 end
 
--- Export to global namespace for easy access (only if _G is available)
-if _G then
-    _G.SafeCall = SafeCall
-end
+-- Export to global namespace for easy access (OTClient doesn't have _G)
+SafeCall = SafeCall  -- Makes it globally accessible
 
 return SafeCall

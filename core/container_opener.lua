@@ -183,6 +183,75 @@ function ContainerOpener.getClosedInventoryContainer(slot)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- OPENTIBIABR ENHANCED OPERATIONS
+-- Uses ClientService for cross-client compatibility
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Refresh a container's contents (OpenTibiaBR feature)
+-- Useful when container state may be stale
+function ContainerOpener.refreshContainer(container)
+  local Client = ClientService or getClient and getClient()
+  if Client and Client.refreshContainer then
+    return Client.refreshContainer(container)
+  end
+  -- Fallback: re-fetch from g_game
+  if container and container.getId then
+    local id = container:getId()
+    return safeCall(function() return g_game.getContainer(id) end)
+  end
+  return container
+end
+
+-- Request container queue sync (OpenTibiaBR feature)
+-- Forces server to re-sync container state
+function ContainerOpener.requestContainerQueue()
+  local Client = ClientService or getClient and getClient()
+  if Client and Client.requestContainerQueue then
+    return Client.requestContainerQueue()
+  end
+end
+
+-- Open container at specific position (OpenTibiaBR feature)
+-- More precise than g_game.open for ground items
+function ContainerOpener.openContainerAtPosition(item, pos)
+  local Client = ClientService or getClient and getClient()
+  if Client and Client.openContainerAt then
+    return Client.openContainerAt(item, pos)
+  end
+  -- Fallback to standard open
+  return safeCall(function()
+    g_game.open(item, nil)
+    return true
+  end)
+end
+
+-- Check if using OpenTibiaBR client (has enhanced container APIs)
+function ContainerOpener.hasEnhancedAPIs()
+  local Client = ClientService or getClient and getClient()
+  if Client and Client.isOpenTibiaBR then
+    return Client.isOpenTibiaBR()
+  end
+  return false
+end
+
+-- Get all containers with forced refresh (for accuracy)
+function ContainerOpener.getAllContainersRefreshed()
+  -- Request queue sync first if available
+  ContainerOpener.requestContainerQueue()
+  
+  local containers = safeCall(function() return g_game.getContainers() end) or {}
+  local result = {}
+  
+  for _, container in pairs(containers) do
+    -- Refresh each container for accurate state
+    local refreshed = ContainerOpener.refreshContainer(container) or container
+    table.insert(result, refreshed)
+  end
+  
+  return result
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- EXPORT
 -- ═══════════════════════════════════════════════════════════════════════════
 

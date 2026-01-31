@@ -238,7 +238,9 @@ Panel
   end
 
   local utanaCast = nil
-  macro(500, function()
+  
+  -- Cure conditions handler (500ms)
+  local function cureConditionsHandler()
     if not config.enabled or modules.game_cooldown.isGroupCooldownIconActive(2) then return end
     if hppercent() > 95 then
       if config.curePoison and mana() >= config.poisonCost and isPoisioned() then say("exana pox") 
@@ -251,12 +253,34 @@ Panel
     if (not config.ignoreInPz or not isInPz()) and config.holdUtura and mana() >= config.uturaCost and canCast(config.uturaType) and hppercent() < 90 then say(config.uturaType)
     elseif (not config.ignoreInPz or not isInPz()) and config.holdUtana and mana() >= config.utanaCost and (not utanaCast or (now - utanaCast > 120000)) then say("utana vid") utanaCast = now
     end
-  end)
-
-  macro(50, function()
+  end
+  
+  -- Hold spells handler (50ms - high frequency for responsiveness)
+  local function holdSpellsHandler()
     if not config.enabled then return end
     if (not config.ignoreInPz or not isInPz()) and config.holdUtamo and mana() >= config.utamoCost and not hasManaShield() then say("utamo vita")
     elseif ((not config.ignoreInPz or not isInPz()) and standTime() < 5000 and config.holdHaste and mana() >= config.hasteCost and not hasHaste() and not getSpellCoolDown(config.hasteSpell) and (not target() or not config.stopHaste or TargetBot.isCaveBotActionAllowed())) and standTime() < 3000 then say(config.hasteSpell)
     elseif config.cureParalyse and mana() >= config.paralyseCost and isParalyzed() and not getSpellCoolDown(config.paralyseSpell) then say(config.paralyseSpell)
     end
-  end)
+  end
+  
+  -- Use UnifiedTick if available (reduces macro overhead)
+  if UnifiedTick and UnifiedTick.register then
+    UnifiedTick.register("conditions_cure", {
+      interval = 500,
+      priority = UnifiedTick.Priority and UnifiedTick.Priority.NORMAL or 50,
+      handler = cureConditionsHandler,
+      group = "conditions"
+    })
+    
+    UnifiedTick.register("conditions_hold_spells", {
+      interval = 50,
+      priority = UnifiedTick.Priority and UnifiedTick.Priority.HIGH or 75,
+      handler = holdSpellsHandler,
+      group = "conditions"
+    })
+  else
+    -- Fallback to traditional macros
+    macro(500, cureConditionsHandler)
+    macro(50, holdSpellsHandler)
+  end

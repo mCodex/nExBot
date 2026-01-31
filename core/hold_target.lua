@@ -9,7 +9,8 @@ onKeyPress(function(keys)
     end
 end)
 
-local holdTargetMacro = macro(100, "Hold Target", function()
+-- Hold Target handler function (shared by UnifiedTick and fallback macro)
+local function holdTargetHandler()
     -- if attacking then save it as target, but check pos z in case of marking by mistake on other floor
     if target and target() and target():getPosition().z == posz() and not target():isNpc() then
         targetID = target():getId()
@@ -27,5 +28,27 @@ local holdTargetMacro = macro(100, "Hold Target", function()
             end
         end
     end
-end)
+end
+
+-- Use UnifiedTick if available, fallback to standalone macro
+local holdTargetMacro
+if UnifiedTick and UnifiedTick.register then
+    -- Register with UnifiedTick for consolidated tick management
+    UnifiedTick.register("hold_target", {
+        interval = 100,
+        priority = UnifiedTick.Priority.HIGH,
+        handler = holdTargetHandler,
+        group = "targeting"
+    })
+    -- Create a dummy macro for UI toggle compatibility
+    holdTargetMacro = macro(100, "Hold Target", function() end)
+    holdTargetMacro:setOn(true)
+    -- Sync macro toggle with UnifiedTick handler
+    holdTargetMacro.onSwitch = function(m)
+        UnifiedTick.setEnabled("hold_target", m:isOn())
+    end
+else
+    -- Fallback to standalone macro if UnifiedTick not available
+    holdTargetMacro = macro(100, "Hold Target", holdTargetHandler)
+end
 BotDB.registerMacro(holdTargetMacro, "holdTarget") 
