@@ -347,8 +347,8 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
   else
     -- NOT current target - apply penalty for switching
     -- This makes switching harder, especially when we have a wounded target
-    local Client2 = getClient()
-    local currentTarget = (Client2 and Client2.getAttackingCreature) and Client2.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+    local Client = getClient()
+    local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if currentTarget and not currentTarget:isDead() then
       local currentHP = currentTarget:getHealthPercent()
       if currentHP < 70 then
