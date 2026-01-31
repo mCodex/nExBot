@@ -411,9 +411,9 @@ local function eatFromOpenContainers()
                 end
                 -- Close if no more food
                 if not hasFood then
-                  local Client2 = getClient()
-                  if Client2 and Client2.close then
-                    Client2.close(container)
+                  local Client = getClient()
+                  if Client and Client.close then
+                    Client.close(container)
                   elseif g_game and g_game.close then
                     g_game.close(container)
                   end
