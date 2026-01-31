@@ -831,8 +831,8 @@ function AttackStateMachine.findBestTarget()
   updatePlayerRef()
   if not player then return nil, 0 end
   
-  local playerPos = player:getPosition()
-  if not playerPos then return nil, 0 end
+  local ok, playerPos = pcall(function() return player:getPosition() end)
+  if not ok or not playerPos then return nil, 0 end
   
   local bestTarget = nil
   local bestPriority = 0
