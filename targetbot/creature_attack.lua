@@ -10,7 +10,51 @@
 local SafeCall = SafeCall or require("core.safe_call")
 
 -- SafeCreature module for safe creature access (prevents pcall boilerplate)
-local SC = SafeCreature
+-- Defensive wrapper to handle cases where SafeCreature isn't fully loaded
+local SC = SafeCreature or {}
+
+-- Defensive helper functions (fallback if SafeCreature methods missing)
+local function safeIsMonster(creature)
+  if SC.isMonster then return SC.isMonster(creature) end
+  if not creature then return false end
+  local ok, result = pcall(function() return creature:isMonster() end)
+  return ok and result == true
+end
+
+local function safeIsDead(creature)
+  if SC.isDead then return SC.isDead(creature) end
+  if not creature then return true end
+  local ok, result = pcall(function() return creature:isDead() end)
+  return ok and result == true
+end
+
+local function safeGetHealthPercent(creature)
+  if SC.getHealthPercent then return SC.getHealthPercent(creature) end
+  if not creature then return 0 end
+  local ok, hp = pcall(function() return creature:getHealthPercent() end)
+  return ok and hp or 0
+end
+
+local function safeGetPosition(creature)
+  if SC.getPosition then return SC.getPosition(creature) end
+  if not creature then return nil end
+  local ok, pos = pcall(function() return creature:getPosition() end)
+  return ok and pos or nil
+end
+
+local function safeGetId(creature)
+  if SC.getId then return SC.getId(creature) end
+  if not creature then return nil end
+  local ok, id = pcall(function() return creature:getId() end)
+  return ok and id or nil
+end
+
+local function safeGetName(creature)
+  if SC.getName then return SC.getName(creature) end
+  if not creature then return nil end
+  local ok, name = pcall(function() return creature:getName() end)
+  return ok and name or nil
+end
 
 -- Load PathUtils if available (shared module for DRY)
 local PathUtils = nil
@@ -798,14 +842,19 @@ if EventBus then
   local monsterDirections = {}  -- id -> lastDirection
   
   EventBus.on("creature:move", function(creature, oldPos)
-    -- Safe creature checks using SafeCreature module
-    if not SC then return end
-    if not SC.isMonster(creature) then return end
-    if SC.isDead(creature) then return end
+    -- Safe creature checks using safe wrapper functions
+    if not safeIsMonster(creature) then return end
+    if safeIsDead(creature) then return end
     
     -- Safe property access
-    local id = SC.getId(creature)
-    local newDir = SC.getDirection(creature)
+    local id = safeGetId(creature)
+    local newDir = nil
+    if SC.getDirection then
+      newDir = SC.getDirection(creature)
+    else
+      local ok, dir = pcall(function() return creature:getDirection() end)
+      if ok then newDir = dir end
+    end
     if not id or not newDir then return end
     
     local oldDir = monsterDirections[id]
@@ -816,7 +865,7 @@ if EventBus then
     -- If direction changed, monster might be turning to attack
     if oldDir and oldDir ~= newDir then
       local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
-      local monsterPos = SC.getPosition(creature)
+      local monsterPos = safeGetPosition(creature)
       if not okPpos or not playerPos or not monsterPos then return end
       
       local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
@@ -833,8 +882,8 @@ if EventBus then
             and MovementCoordinator.MonsterCache.getNearby(7) 
             or {}
           for _, c in ipairs(creatures) do
-            -- Safe monster check using SafeCreature
-            if SC.isMonster(c) and not SC.isDead(c) then
+            -- Safe monster check using safe wrapper functions
+            if safeIsMonster(c) and not safeIsDead(c) then
               monsters[#monsters + 1] = c
             end
           end
@@ -846,7 +895,7 @@ if EventBus then
             
             if safePos and MovementCoordinator and MovementCoordinator.Intent then
               local confidence = 0.75 + (5 - dist) * 0.03  -- Higher confidence for closer monsters
-              local mName = SC.getName(creature) or "unknown"
+              local mName = safeGetName(creature) or "unknown"
               MovementCoordinator.Intent.register(
                 MovementCoordinator.CONSTANTS.INTENT.WAVE_AVOIDANCE, 
                 safePos, 
@@ -903,12 +952,12 @@ if EventBus then
   
   -- When monster appears close, immediately check if repositioning is needed
   EventBus.on("monster:appear", function(creature)
-    -- Safe creature checks using SafeCreature module
-    if not SC or not SC.isMonster(creature) then return end
+    -- Safe creature checks using safe wrapper functions
+    if not safeIsMonster(creature) then return end
     
     -- Safe position access
     local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
-    local monsterPos = SC.getPosition(creature)
+    local monsterPos = safeGetPosition(creature)
     if not okPpos or not playerPos or not monsterPos then return end
     
     local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
@@ -925,8 +974,8 @@ if EventBus then
           and MovementCoordinator.MonsterCache.getNearby(5) 
           or {}
         for _, c in ipairs(creatures) do
-          -- Safe monster check using SafeCreature
-          if SC.isMonster(c) and not SC.isDead(c) then
+          -- Safe monster check using safe wrapper functions
+          if safeIsMonster(c) and not safeIsDead(c) then
             monsters[#monsters + 1] = c
           end
         end

@@ -80,6 +80,13 @@ local CONFIG = {
   LOW_HP = 50,                      -- INCREASED: Below 50%, require huge priority advantage (was 30%)
   WOUNDED_HP = 75,                  -- INCREASED: Below 75%, require significant advantage (was 50%)
   
+  -- Path-blocked handling (v5.0 - Skip unreachable monsters)
+  PATH_CHECK_INTERVAL = 500,        -- Check path every 500ms when attacking
+  PATH_BLOCKED_TIMEOUT = 3000,      -- If blocked for 3 seconds, skip this monster
+  PATH_BLOCKED_MAX_ATTEMPTS = 5,    -- Max failed path attempts before skipping
+  PATH_BLOCKED_SKIP_DURATION = 10000, -- Skip this monster for 10 seconds
+  PATH_BLOCKED_MIN_DISTANCE = 2,    -- Only check path if distance > 2 (adjacent is always reachable)
+  
   -- Performance
   UPDATE_INTERVAL = 50,             -- State machine tick interval (50ms = 20 FPS)
   HEALTH_CHECK_INTERVAL = 100,      -- How often to check target health
@@ -119,6 +126,12 @@ local state = {
   pendingTarget = nil,
   pendingPriority = 0,
   
+  -- Path-blocked tracking (v5.0 - Skip unreachable monsters)
+  pathBlockedAttempts = 0,       -- How many times we failed to reach target
+  pathBlockedSince = 0,          -- When path blocking started
+  lastPathCheck = 0,             -- Last time we checked path
+  pathBlockedSkipList = {},      -- {creatureId -> skipUntil timestamp}
+  
   -- Statistics
   stats = {
     attacksIssued = 0,
@@ -126,7 +139,8 @@ local state = {
     switchesBlocked = 0,
     switchesAllowed = 0,
     recoveries = 0,
-    targetsKilled = 0
+    targetsKilled = 0,
+    pathBlockedSkips = 0         -- Track skipped path-blocked monsters
   }
 }
 
@@ -181,12 +195,48 @@ end
 -- SAFE CREATURE ACCESS HELPERS (v4.0 - Using SafeCreature module for DRY)
 -- ============================================================================
 
--- Use global SafeCreature module
-local SC = SafeCreature
+-- Use global SafeCreature module (with defensive nil check)
+local SC = SafeCreature or {}
 
--- Safe creature property access (delegates to SafeCreature)
+-- Defensive fallback functions if SafeCreature not loaded
+local function safeGetId(creature)
+  if SC.getId then return SC.getId(creature) end
+  if not creature then return nil end
+  local ok, id = pcall(function() return creature:getId() end)
+  return ok and id or nil
+end
+
+local function safeGetHealthPercent(creature)
+  if SC.getHealthPercent then return SC.getHealthPercent(creature) end
+  if not creature then return 0 end
+  local ok, hp = pcall(function() return creature:getHealthPercent() end)
+  return ok and hp or 0
+end
+
+local function safeIsDead(creature)
+  if SC.isDead then return SC.isDead(creature) end
+  if not creature then return true end
+  local ok, dead = pcall(function() return creature:isDead() end)
+  return ok and dead == true
+end
+
+local function safeGetPosition(creature)
+  if SC.getPosition then return SC.getPosition(creature) end
+  if not creature then return nil end
+  local ok, pos = pcall(function() return creature:getPosition() end)
+  return ok and pos or nil
+end
+
+local function safeGetName(creature)
+  if SC.getName then return SC.getName(creature) end
+  if not creature then return "Unknown" end
+  local ok, name = pcall(function() return creature:getName() end)
+  return ok and name or "Unknown"
+end
+
+-- Safe creature property access (delegates to SafeCreature or fallback)
 local function getCreatureId(creature)
-  return SC and SC.getId(creature) or nil
+  return safeGetId(creature)
 end
 
 -- Fast creature lookup by ID (uses OpenTibiaBR when available)
@@ -211,14 +261,11 @@ local function getCreatureById(creatureId)
 end
 
 local function getCreatureHealth(creature)
-  return SC and SC.getHealthPercent(creature) or 0
+  return safeGetHealthPercent(creature)
 end
 
 local function isCreatureDead(creature)
-  if SC then return SC.isDead(creature) end
-  if not creature then return true end
-  local ok, dead = pcall(function() return creature:isDead() end)
-  if ok and dead then return true end
+  if safeIsDead(creature) then return true end
   return getCreatureHealth(creature) <= 0
 end
 
@@ -238,11 +285,138 @@ local function isCreatureValidById(creatureId)
 end
 
 local function getCreaturePosition(creature)
-  return SC and SC.getPosition(creature) or nil
+  return safeGetPosition(creature)
 end
 
 local function getCreatureName(creature)
-  return SC and SC.getName(creature) or "Unknown"
+  return safeGetName(creature)
+end
+
+-- ============================================================================
+-- PATH-BLOCKED DETECTION (v5.0 - Skip unreachable monsters)
+-- Prevents bot from wasting time on monsters it can't reach
+-- ============================================================================
+
+-- Check if a creature is on the skip list
+local function isCreatureSkipped(creatureId)
+  if not creatureId then return false end
+  local skipUntil = state.pathBlockedSkipList[creatureId]
+  if not skipUntil then return false end
+  
+  local currentTime = nowMs()
+  if currentTime >= skipUntil then
+    -- Skip expired - remove from list
+    state.pathBlockedSkipList[creatureId] = nil
+    return false
+  end
+  
+  return true
+end
+
+-- Add creature to skip list
+local function skipCreature(creatureId, duration)
+  if not creatureId then return end
+  duration = duration or CONFIG.PATH_BLOCKED_SKIP_DURATION
+  state.pathBlockedSkipList[creatureId] = nowMs() + duration
+  state.stats.pathBlockedSkips = (state.stats.pathBlockedSkips or 0) + 1
+  log("Skipping path-blocked creature ID " .. tostring(creatureId) .. " for " .. tostring(duration) .. "ms")
+end
+
+-- Clean up expired skip entries
+local function cleanupSkipList()
+  local currentTime = nowMs()
+  for creatureId, skipUntil in pairs(state.pathBlockedSkipList) do
+    if currentTime >= skipUntil then
+      state.pathBlockedSkipList[creatureId] = nil
+    end
+  end
+end
+
+-- Check if there's a valid path to the target
+local function checkPathToTarget()
+  if not state.targetCreature or not player then return true end  -- Assume reachable if no data
+  
+  local playerPos = safeGetPosition(player)
+  local targetPos = getCreaturePosition(state.targetCreature)
+  
+  if not playerPos or not targetPos then return true end  -- Assume reachable if no position
+  if playerPos.z ~= targetPos.z then return false end  -- Different floor = unreachable
+  
+  -- Calculate distance
+  local dist = math.max(math.abs(playerPos.x - targetPos.x), math.abs(playerPos.y - targetPos.y))
+  
+  -- Adjacent creatures are always reachable
+  if dist <= CONFIG.PATH_BLOCKED_MIN_DISTANCE then
+    return true
+  end
+  
+  -- Try to find a path
+  local path = nil
+  if findPath then
+    local pathParams = {
+      ignoreLastCreature = true,
+      ignoreNonPathable = true,
+      ignoreCost = true,
+      ignoreCreatures = true,
+      allowOnlyVisibleTiles = true,
+      precision = 1
+    }
+    local ok, result = pcall(findPath, playerPos, targetPos, 12, pathParams)
+    if ok then
+      path = result
+    end
+  end
+  
+  return path and #path > 0
+end
+
+-- Reset path-blocked tracking (call when switching targets)
+local function resetPathBlockedState()
+  state.pathBlockedAttempts = 0
+  state.pathBlockedSince = 0
+  state.lastPathCheck = 0
+end
+
+-- Update path-blocked state and return true if target should be skipped
+local function updatePathBlockedState()
+  local currentTime = nowMs()
+  
+  -- Rate-limit path checks
+  if (currentTime - state.lastPathCheck) < CONFIG.PATH_CHECK_INTERVAL then
+    return false  -- Don't check yet, don't skip
+  end
+  state.lastPathCheck = currentTime
+  
+  -- Check if path exists
+  local hasPath = checkPathToTarget()
+  
+  if hasPath then
+    -- Path found - reset blocked state
+    resetPathBlockedState()
+    return false
+  end
+  
+  -- Path is blocked
+  if state.pathBlockedSince == 0 then
+    state.pathBlockedSince = currentTime
+  end
+  state.pathBlockedAttempts = state.pathBlockedAttempts + 1
+  
+  -- Check if we should skip this monster
+  local blockedDuration = currentTime - state.pathBlockedSince
+  
+  if blockedDuration >= CONFIG.PATH_BLOCKED_TIMEOUT or 
+     state.pathBlockedAttempts >= CONFIG.PATH_BLOCKED_MAX_ATTEMPTS then
+    -- Skip this monster
+    local creatureId = getCreatureId(state.targetCreature)
+    if creatureId then
+      skipCreature(creatureId)
+    end
+    log("Path blocked timeout: " .. tostring(blockedDuration) .. "ms, attempts: " .. tostring(state.pathBlockedAttempts))
+    return true  -- Signal to skip
+  end
+  
+  return false
 end
 
 -- ============================================================================
@@ -586,7 +760,41 @@ local function handleAttacking()
     log("Target killed: " .. getCreatureName(state.targetCreature))
     state.targetCreature = nil
     state.targetId = nil
+    resetPathBlockedState()
     transition(STATE.IDLE, "target_killed")
+    return
+  end
+  
+  -- v5.0: Check for path-blocked state
+  -- If we can't reach the target for too long, skip it and find another
+  if updatePathBlockedState() then
+    -- Path blocked - skip this monster
+    log("Target path blocked, skipping: " .. getCreatureName(state.targetCreature))
+    
+    -- End MonsterAI engagement if active
+    if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.endEngagement then
+      MonsterAI.Scenario.endEngagement("path_blocked")
+    end
+    
+    -- Cancel current attack
+    local Client = getClient()
+    if Client and Client.cancelAttackAndFollow then
+      pcall(Client.cancelAttackAndFollow)
+    elseif g_game and g_game.cancelAttackAndFollow then
+      pcall(g_game.cancelAttackAndFollow)
+    end
+    
+    state.targetCreature = nil
+    state.targetId = nil
+    resetPathBlockedState()
+    transition(STATE.IDLE, "path_blocked")
+    
+    -- Emit event for CaveBot to potentially proceed
+    if EventBus and EventBus.emit then
+      pcall(function()
+        EventBus.emit("targetbot/path_blocked_skip")
+      end)
+    end
     return
   end
   
@@ -763,6 +971,9 @@ end
 function AttackStateMachine.forceSwitch(creature)
   if not creature or isCreatureDead(creature) then return false end
   
+  -- Reset path-blocked state for new target
+  resetPathBlockedState()
+  
   state.targetCreature = creature
   state.targetId = getCreatureId(creature)
   state.targetHealth = getCreatureHealth(creature)
@@ -782,6 +993,7 @@ function AttackStateMachine.stop()
   state.targetId = nil
   state.switchRequested = false
   state.pendingTarget = nil
+  resetPathBlockedState()
   transition(STATE.IDLE, "manual_stop")
   
   -- Cancel game attack
@@ -812,6 +1024,10 @@ function AttackStateMachine.reset()
   state.pendingTarget = nil
   state.pendingPriority = 0
   
+  -- Reset path-blocked state
+  resetPathBlockedState()
+  state.pathBlockedSkipList = {}
+  
   log("State machine reset")
 end
 
@@ -822,8 +1038,33 @@ function AttackStateMachine.getStats()
     targetId = state.targetId,
     targetHealth = state.targetHealth,
     attackConfirmed = state.attackConfirmed,
+    pathBlockedAttempts = state.pathBlockedAttempts,
+    pathBlockedSkipCount = state.stats.pathBlockedSkips or 0,
     stats = state.stats
   }
+end
+
+-- Check if target is currently path-blocked (for external modules like CaveBot)
+function AttackStateMachine.isPathBlocked()
+  return state.pathBlockedAttempts > 0 and state.pathBlockedSince > 0
+end
+
+-- Get number of skipped creatures (for status display)
+function AttackStateMachine.getSkippedCount()
+  local count = 0
+  local currentTime = nowMs()
+  for _, skipUntil in pairs(state.pathBlockedSkipList) do
+    if currentTime < skipUntil then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+-- Clear skip list (for manual reset or area change)
+function AttackStateMachine.clearSkipList()
+  state.pathBlockedSkipList = {}
+  resetPathBlockedState()
 end
 
 -- Find best target (uses EventTargeting or CreatureCache)
@@ -836,6 +1077,9 @@ function AttackStateMachine.findBestTarget()
   
   local bestTarget = nil
   local bestPriority = 0
+  
+  -- Cleanup expired skip list entries periodically
+  cleanupSkipList()
   
   -- Get live monsters
   local creatures = nil
@@ -864,22 +1108,26 @@ function AttackStateMachine.findBestTarget()
       -- Check if monster
       local okMonster, isMonster = pcall(function() return creature:isMonster() end)
       if okMonster and isMonster and not isCreatureDead(creature) then
-        local creaturePos = getCreaturePosition(creature)
-        if creaturePos and creaturePos.z == playerPos.z then
-          -- Check if in targetbot config
-          local hasConfig = false
-          if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
-            local configs = TargetBot.Creature.getConfigs(creature)
-            hasConfig = configs and #configs > 0
-          end
-          
-          if hasConfig then
-            local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
-            local priority = calculatePriority(creature, dist)
+        -- v5.0: Skip path-blocked creatures
+        local creatureId = getCreatureId(creature)
+        if not isCreatureSkipped(creatureId) then
+          local creaturePos = getCreaturePosition(creature)
+          if creaturePos and creaturePos.z == playerPos.z then
+            -- Check if in targetbot config
+            local hasConfig = false
+            if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+              local configs = TargetBot.Creature.getConfigs(creature)
+              hasConfig = configs and #configs > 0
+            end
             
-            if priority > bestPriority then
-              bestPriority = priority
-              bestTarget = creature
+            if hasConfig then
+              local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
+              local priority = calculatePriority(creature, dist)
+              
+              if priority > bestPriority then
+                bestPriority = priority
+                bestTarget = creature
+              end
             end
           end
         end

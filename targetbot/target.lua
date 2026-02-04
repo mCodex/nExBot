@@ -760,6 +760,14 @@ if EventBus then
       data.pathTime = nil
     end
     invalidateCache()
+    
+    -- v5.0: Clear path-blocked skip list on significant movement (floor change)
+    if newPos and oldPos and newPos.z ~= oldPos.z then
+      -- Floor changed - clear skip list
+      if AttackStateMachine and AttackStateMachine.clearSkipList then
+        AttackStateMachine.clearSkipList()
+      end
+    end
   end, 60)
   
   -- Target changes
@@ -2551,8 +2559,15 @@ targetbotMacro = macro(250, function()
     local unreachableCount = CreatureCache.unreachableCount or 0
     local reachableOnScreen = CreatureCache.monsterCount or 0
     
+    -- v5.0: Also check AttackStateMachine for skipped creatures
+    local smSkippedCount = 0
+    if AttackStateMachine and AttackStateMachine.getSkippedCount then
+      smSkippedCount = AttackStateMachine.getSkippedCount()
+    end
+    local totalBlocked = unreachableCount + smSkippedCount
+    
     -- Check if there are REACHABLE monsters on screen
-    if reachableOnScreen > 0 then
+    if reachableOnScreen > 0 and reachableOnScreen > smSkippedCount then
       -- There are reachable monsters but no valid target (edge case)
       setStatusRight("Targeting (" .. tostring(reachableOnScreen) .. ")")
       if EventTargeting and EventTargeting.refreshLiveCount then
@@ -2561,11 +2576,18 @@ targetbotMacro = macro(250, function()
       invalidateCache()
       cavebotAllowance = now + 300
       return
-    elseif unreachableCount > 0 then
+    elseif totalBlocked > 0 then
       -- All creatures have blocked paths - allow CaveBot to proceed
       -- Don't waste time trying to attack creatures we can't reach
-      setStatusRight("Blocked (" .. tostring(unreachableCount) .. ")")
+      setStatusRight("Blocked (" .. tostring(totalBlocked) .. ")")
       cavebotAllowance = now + 100  -- Allow CaveBot immediately
+      
+      -- Emit event for CaveBot to know it can proceed
+      if EventBus and EventBus.emit then
+        pcall(function()
+          EventBus.emit("targetbot/all_blocked", totalBlocked)
+        end)
+      end
       return
     end
     

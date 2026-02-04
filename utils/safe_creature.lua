@@ -14,7 +14,9 @@
   - Easier to add logging/telemetry
 ]]
 
-local SafeCreature = {}
+-- Initialize global SafeCreature namespace (accessible by all modules)
+SafeCreature = SafeCreature or {}
+local SafeCreature = SafeCreature
 
 -- ============================================================================
 -- BASIC ACCESSORS

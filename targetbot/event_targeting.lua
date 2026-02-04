@@ -41,7 +41,51 @@ local function getClientVersion()
 end
 
 -- SafeCreature module for safe creature access (DRY)
-local SC = SafeCreature
+-- Defensive wrapper to handle cases where SafeCreature isn't fully loaded
+local SC = SafeCreature or {}
+
+-- Defensive helper functions (fallback if SafeCreature methods missing)
+local function safeIsMonster(creature)
+  if SC.isMonster then return SC.isMonster(creature) end
+  if not creature then return false end
+  local ok, result = pcall(function() return creature:isMonster() end)
+  return ok and result == true
+end
+
+local function safeIsDead(creature)
+  if SC.isDead then return SC.isDead(creature) end
+  if not creature then return true end
+  local ok, result = pcall(function() return creature:isDead() end)
+  return ok and result == true
+end
+
+local function safeGetHealthPercent(creature)
+  if SC.getHealthPercent then return SC.getHealthPercent(creature) end
+  if not creature then return 0 end
+  local ok, hp = pcall(function() return creature:getHealthPercent() end)
+  return ok and hp or 0
+end
+
+local function safeGetPosition(creature)
+  if SC.getPosition then return SC.getPosition(creature) end
+  if not creature then return nil end
+  local ok, pos = pcall(function() return creature:getPosition() end)
+  return ok and pos or nil
+end
+
+local function safeGetId(creature)
+  if SC.getId then return SC.getId(creature) end
+  if not creature then return nil end
+  local ok, id = pcall(function() return creature:getId() end)
+  return ok and id or nil
+end
+
+local function safeGetName(creature)
+  if SC.getName then return SC.getName(creature) end
+  if not creature then return nil end
+  local ok, name = pcall(function() return creature:getName() end)
+  return ok and name or nil
+end
 
 -- ============================================================================
 -- DEPENDENCIES
@@ -234,48 +278,23 @@ local function isTargetableMonster(creature)
     return true
   end
   
-  -- Fallback: Use SafeCreature module for DRY
-  if SC then
-    if SC.isDead(creature) then return false end
-    if not SC.isMonster(creature) then return false end
-    if SC.getHealthPercent(creature) <= 0 then return false end
-    
-    -- For old Tibia, all monsters are targetable
-    if liveMonsterState.oldTibia then return true end
-    
-    -- For new Tibia, check creature type to exclude other player's summons
-    local creatureType = nil
-    local okType, cType = pcall(function() return creature:getType() end)
-    if okType then creatureType = cType end
-    if creatureType and creatureType >= 3 then
-      return false  -- Summon
-    end
-    
-    return true
-  end
-  
-  -- Last resort fallback: individual pcall checks
-  local ok, isDead = pcall(function() return creature:isDead() end)
-  if ok and isDead then return false end
-  
-  local ok2, isMonster = pcall(function() return creature:isMonster() end)
-  if not ok2 or not isMonster then return false end
-  
-  -- Health check - skip dead monsters
-  local okHp, hp = pcall(function() return creature:getHealthPercent() end)
-  if okHp and hp and hp <= 0 then return false end
+  -- Fallback: Use safe wrapper functions for DRY
+  if safeIsDead(creature) then return false end
+  if not safeIsMonster(creature) then return false end
+  if safeGetHealthPercent(creature) <= 0 then return false end
   
   -- For old Tibia, all monsters are targetable
   if liveMonsterState.oldTibia then return true end
   
   -- For new Tibia, check creature type to exclude other player's summons
-  local okType, creatureType = pcall(function() return creature:getType() end)
-  if okType and creatureType then
-    -- Type 0 = player, 1 = monster, 2 = NPC, 3+ = summons
-    return creatureType < 3
+  local creatureType = nil
+  local okType, cType = pcall(function() return creature:getType() end)
+  if okType then creatureType = cType end
+  if creatureType and creatureType >= 3 then
+    return false  -- Summon
   end
   
-  return true  -- Default to true if we can't determine type
+  return true
 end
 
 -- Get live count of targetable monsters using direct API
@@ -573,13 +592,9 @@ end
 function EventTargeting.PathValidator.getPath(creature)
   if not creature then return nil, 999, false end
   
-  -- Safe ID access using SafeCreature
-  local id = SC and SC.getId(creature) or nil
-  if not id then
-    local okId, cid = pcall(function() return creature:getId() end)
-    if not okId or not cid then return nil, 999, false end
-    id = cid
-  end
+  -- Safe ID access using safe wrapper
+  local id = safeGetId(creature)
+  if not id then return nil, 999, false end
   
   local entry = creatureCache.entries[id]
   
@@ -653,12 +668,9 @@ function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
   -- ═══════════════════════════════════════════════════════════════════════════
   local priority = 0  -- Start at 0, build up from config priority
   
-  -- Safe HP access using SafeCreature
-  local hp = SC and SC.getHealthPercent(creature) or nil
-  if not hp then
-    local okHp, cHp = pcall(function() return creature:getHealthPercent() end)
-    hp = (okHp and cHp) or 100
-  end
+  -- Safe HP access using safe wrapper
+  local hp = safeGetHealthPercent(creature)
+  if hp == 0 then hp = 100 end  -- Default to 100 if not available
   
   local pathLen = path and #path or 10
   

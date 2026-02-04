@@ -36,6 +36,47 @@ local FriendHealerEnhanced = BotCore.FriendHealerEnhanced
 BotCore.FriendHealer = BotCore.FriendHealerEnhanced
 
 -- SafeCreature module for safe creature access (DRY)
+-- Defensive: ensure SafeCreature is available, create minimal fallback if not
+if not SafeCreature then
+  warn("[FriendHealer] SafeCreature module not loaded, using inline fallback")
+  SafeCreature = {
+    isPlayer = function(creature)
+      if not creature then return false end
+      local ok, result = pcall(function() return creature:isPlayer() end)
+      return ok and result == true
+    end,
+    getName = function(creature)
+      if not creature then return nil end
+      local ok, name = pcall(function() return creature:getName() end)
+      return ok and name or nil
+    end,
+    getPosition = function(creature)
+      if not creature then return nil end
+      local ok, pos = pcall(function() return creature:getPosition() end)
+      return ok and pos or nil
+    end,
+    getHealthPercent = function(creature)
+      if not creature then return 100 end
+      local ok, hp = pcall(function() return creature:getHealthPercent() end)
+      return ok and hp or 100
+    end,
+    isDead = function(creature)
+      if not creature then return true end
+      local ok, result = pcall(function() return creature:isDead() end)
+      return ok and result == true
+    end,
+    getId = function(creature)
+      if not creature then return nil end
+      local ok, id = pcall(function() return creature:getId() end)
+      return ok and id or nil
+    end,
+    distance = function(pos1, pos2)
+      if not pos1 or not pos2 then return 999 end
+      if pos1.z ~= pos2.z then return 999 end
+      return math.max(math.abs(pos1.x - pos2.x), math.abs(pos1.y - pos2.y))
+    end
+  }
+end
 local SC = SafeCreature
 
 -- Module version for debugging
