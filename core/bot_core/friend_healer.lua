@@ -380,6 +380,12 @@ local function isFriend(creature, config)
     local okVoc, v = pcall(function() return creature:getVocation() end)
     if okVoc then voc = v end
   end
+  if not voc and VocationUtils and VocationUtils.getCreatureVocationShort then
+    local short = VocationUtils.getCreatureVocationShort(creature)
+    if short then
+      voc = short
+    end
+  end
   
   local vocConditions = config.conditions or {}
   local function checkVocation()
@@ -393,9 +399,10 @@ local function isFriend(creature, config)
     if vocConditions.paladins and (voc == 7 or vocLower:find("paladin")) then return true end
     if vocConditions.druids and (voc == 6 or vocLower:find("druid")) then return true end
     if vocConditions.sorcerers and (voc == 5 or vocLower:find("sorcerer")) then return true end
+    if vocConditions.monks and (vocLower:find("monk") or vocLower == "mn") then return true end
     
     -- If any vocation filter is enabled but doesn't match, reject
-    if vocConditions.knights or vocConditions.paladins or vocConditions.druids or vocConditions.sorcerers then
+    if vocConditions.knights or vocConditions.paladins or vocConditions.druids or vocConditions.sorcerers or vocConditions.monks then
       return false
     end
     
@@ -423,13 +430,6 @@ local function isFriend(creature, config)
   if vocConditions.friends then
     local friendCheck = g_game and g_game.isFriend and g_game.isFriend(name)
     if friendCheck then return true end
-  end
-  
-  -- Check BotServer members
-  if vocConditions.botserver and nExBot and nExBot.BotServerMembers then
-    if nExBot.BotServerMembers[name] then
-      return true
-    end
   end
   
   return false
@@ -620,7 +620,7 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
   -- ========== PRIORITY 6: Mana Item (for supporting mage friends) ==========
   -- Note: Mana potions typically require close range (distance <= 1)
   if config.useManaItem then
-    -- Only use mana items if friend's mana is low (requires BotServer sync)
+    -- Only use mana items if friend's mana is low
     -- For now, only use on friends explicitly marked for mana support
     if config.manaFriends and config.manaFriends[friendName] then
       if not isPotionOnCooldown() and distance <= 1 then

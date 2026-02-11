@@ -1652,6 +1652,42 @@ CaveBot.gotoNextWaypointInRange = function()
   return CaveBot.findBestWaypoint(true)
 end
 
+-- Throttled recovery request for unreachable waypoints
+local waypointRecovery = {
+  lastRequest = 0,
+  cooldown = 1500
+}
+
+CaveBot.requestWaypointRecovery = function(reason)
+  local nowt = now or (os.time() * 1000)
+  if (nowt - waypointRecovery.lastRequest) < waypointRecovery.cooldown then
+    return false
+  end
+  waypointRecovery.lastRequest = nowt
+
+  if CaveBot.findBestWaypoint and CaveBot.findBestWaypoint(true) then
+    return true
+  end
+
+  local playerPos = player and player:getPosition()
+  if not playerPos then return false end
+
+  local maxDist = storage.extras.gotoMaxDistance or 50
+  local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
+    maxCandidates = 25,
+    preferCurrentFloor = true,
+    searchAllFloors = false,
+    excludeCompletedFloorChange = true
+  })
+
+  if nearestChild then
+    focusWaypointBefore(nearestChild, nearestIndex)
+    return true
+  end
+
+  return false
+end
+
 -- Original function for backward compatibility (redirects to optimized version)
 CaveBot.gotoNextWaypointInRangeLegacy = function()
   local currentAction = ui.list:getFocusedChild()

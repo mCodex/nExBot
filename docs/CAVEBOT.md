@@ -276,7 +276,11 @@ WaypointGuard = {
 **Triggers when:**
 - Player is on different floor than current waypoint
 - Player is >100 tiles from current waypoint
-- After 3 consecutive failures → **skips to next waypoint**
+- After 3 consecutive failures → **skips to next waypoint** and requests recovery
+
+**Behavior:**
+- Rate-limited checks (every 5 seconds) to avoid heavy pathfinding
+- Skips unreachable waypoints and lets recovery find the nearest reachable one
 
 ### Pull System Integration
 

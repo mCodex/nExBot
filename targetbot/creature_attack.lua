@@ -99,6 +99,183 @@ local dynamicLureDelay = false
 local smartPullState = { lastEval = 0, lowStreak = 0, highStreak = 0, active = false, lastChange = 0 }
 local dynamicLureState = { lastTrigger = 0 }
 
+local function countMonstersByRange(range)
+  local playerPos = player and player:getPosition()
+  if not playerPos then return 0 end
+
+  if SpectatorCache and SpectatorCache.getNearby then
+    local specs = SpectatorCache.getNearby(range, range) or {}
+    local count = 0
+    for i = 1, #specs do
+      local creature = specs[i]
+      if creature and safeIsMonster(creature) and not safeIsDead(creature) then
+        count = count + 1
+      end
+    end
+    return count
+  end
+
+  local Client = getClient()
+  local specs = (Client and Client.getSpectatorsInRange) and Client.getSpectatorsInRange(playerPos, false, range, range)
+    or (g_map and g_map.getSpectatorsInRange and g_map.getSpectatorsInRange(playerPos, false, range, range))
+    or {}
+
+  local count = 0
+  for i = 1, #specs do
+    local creature = specs[i]
+    if creature and safeIsMonster(creature) and not safeIsDead(creature) then
+      count = count + 1
+    end
+  end
+
+  return count
+end
+
+local function safeGetMonsters(range)
+  if SafeCall and SafeCall.getMonsters then
+    return SafeCall.getMonsters(range) or 0
+  end
+  if getMonsters then
+    return getMonsters(range) or 0
+  end
+  return countMonstersByRange(range)
+end
+
+local function evaluateLureAndPull(creature, config, targets)
+  if not creature or not config then return false end
+
+  local cpos = creature:getPosition()
+  local pos = player:getPosition()
+  if not cpos or not pos then return false end
+
+  local creatureHealth = creature:getHealthPercent()
+  local killUnder = storage.extras.killUnder or 30
+  local targetIsLowHealth = creatureHealth < killUnder
+  local isTrapped = isPlayerTrapped(pos)
+
+  -- Anchor position management (used by keepDistance and rePosition)
+  if config.anchor then
+    if not anchorPosition or distanceFromPlayer(anchorPosition) > (config.anchorRange or 5) * 2 then
+      anchorPosition = pos
+    end
+  else
+    anchorPosition = nil
+  end
+
+  -- External data for dynamic lure delay system
+  if config.lureMin and config.lureMax and config.dynamicLure then
+    targetBotLure = config.lureMin >= targets
+    if targets >= config.lureMax then
+      targetBotLure = false
+    end
+  end
+  targetCount = targets
+  delayValue = config.lureDelay
+  lureMax = config.lureMax or 0
+  dynamicLureDelay = config.dynamicLureDelay
+  delayFrom = config.delayFrom
+
+  if not targetIsLowHealth and not isTrapped then
+    if config.smartPull then
+      local nowt = now or (os.time() * 1000)
+      if (nowt - smartPullState.lastEval) >= 300 then
+        smartPullState.lastEval = nowt
+
+        local screenMonsters = 0
+        if EventTargeting and EventTargeting.getLiveMonsterCount then
+          screenMonsters = EventTargeting.getLiveMonsterCount() or 0
+        else
+          screenMonsters = countMonstersByRange(7)
+        end
+
+        if screenMonsters == 0 then
+          smartPullState.active = false
+          smartPullState.lowStreak = 0
+          smartPullState.highStreak = 0
+        else
+          local pullRange = config.smartPullRange or 2
+          local pullMin = config.smartPullMin or 3
+          local pullShape = config.smartPullShape or (nExBot.SHAPE and nExBot.SHAPE.CIRCLE) or 2
+          local pullOff = pullMin + 1
+
+          local nearbyMonsters = 0
+          if getMonstersAdvanced then
+            nearbyMonsters = SafeCall.global("getMonstersAdvanced", pullRange, pullShape) or 0
+          elseif getMonsters then
+            nearbyMonsters = getMonsters(pullRange) or 0
+          else
+            nearbyMonsters = countMonstersByRange(pullRange)
+          end
+
+          local underImmediateThreat = false
+          if MonsterAI and MonsterAI.getImmediateThreat then
+            local threatData = MonsterAI.getImmediateThreat()
+            underImmediateThreat = threatData.immediateThreat and threatData.highestConfidence >= 0.7
+          end
+
+          if underImmediateThreat then
+            smartPullState.active = false
+            smartPullState.lowStreak = 0
+            smartPullState.highStreak = 0
+          else
+            if nearbyMonsters < pullMin then
+              smartPullState.lowStreak = smartPullState.lowStreak + 1
+              smartPullState.highStreak = 0
+            elseif nearbyMonsters >= pullOff then
+              smartPullState.highStreak = smartPullState.highStreak + 1
+              smartPullState.lowStreak = 0
+            else
+              smartPullState.lowStreak = 0
+              smartPullState.highStreak = 0
+            end
+
+            if smartPullState.lowStreak >= 2 then
+              smartPullState.active = true
+              smartPullState.lastChange = nowt
+            elseif smartPullState.highStreak >= 2 then
+              smartPullState.active = false
+              smartPullState.lastChange = nowt
+            end
+          end
+        end
+      end
+      TargetBot.smartPullActive = smartPullState.active
+    else
+      TargetBot.smartPullActive = false
+      smartPullState.active = false
+      smartPullState.lowStreak = 0
+      smartPullState.highStreak = 0
+    end
+
+    if not TargetBot.smartPullActive and TargetBot.canLure() and config.dynamicLure then
+      local nowt = now or (os.time() * 1000)
+      if targetBotLure and (nowt - (dynamicLureState.lastTrigger or 0)) > 700 then
+        dynamicLureState.lastTrigger = nowt
+        TargetBot.allowCaveBot(250)
+        return true
+      end
+    end
+
+    if config.closeLure and config.closeLureAmount then
+      if safeGetMonsters(1) >= config.closeLureAmount then
+        TargetBot.allowCaveBot(250)
+        return true
+      end
+    end
+
+    if not config.dynamicLure then
+      local screenMonsters = safeGetMonsters(7)
+      if screenMonsters > 0 then
+        -- Keep CaveBot paused until screen is clear
+      end
+    end
+  else
+    TargetBot.smartPullActive = false
+  end
+
+  return false
+end
+
 -- Use TargetCore if available (DRY - avoid duplicate implementations)
 local Core = TargetCore or {}
 local Geometry = Core.Geometry or {}
@@ -1395,8 +1572,8 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
         end
         
         -- Allow CaveBot to walk away from blocked creature
-        if TargetBot.allowCavebot then
-          TargetBot.allowCavebot("blocked_creature")
+        if TargetBot.allowCaveBot then
+          TargetBot.allowCaveBot(300)
         end
         
         return  -- Skip attack
@@ -1465,10 +1642,14 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     end)
   end
 
+  local lureTriggered = evaluateLureAndPull(creature, config, targets)
+
   if not isLooting then
     -- When using native chase mode, skip custom walking - OTClient handles it
     -- Only use custom walking for keepDistance, avoidAttacks, rePosition, or when chase is disabled
-    if not useNativeChase then
+    if lureTriggered then
+      -- Lure/pull requested CaveBot movement, skip custom walking this tick
+    elseif not useNativeChase then
       TargetBot.Creature.walk(creature, config, targets)
     elseif config.avoidAttacks or config.rePosition then
       -- Still allow wave avoidance and repositioning even with chase enabled
@@ -1531,157 +1712,8 @@ TargetBot.Creature.walk = function(creature, config, targets)
     - All lure features respect killUnder threshold
   ]]
   
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- PHASE 1: CONTEXT GATHERING
-  -- ═══════════════════════════════════════════════════════════════════════════
-  
-  local creatureHealth = creature:getHealthPercent()
-  local killUnder = storage.extras.killUnder or 30
-  local targetIsLowHealth = creatureHealth < killUnder
-  local isTrapped = isPlayerTrapped(pos)
-  
-  -- Calculate path distance to creature
-  local path = findPath(pos, cpos, 10, {ignoreCreatures = true, ignoreNonPathable = true, ignoreCost = true})
-  local pathLen = path and #path or 0
-  
-  -- Count nearby monsters for lure decisions
-  local nearbyMonsterCount = targets  -- Use passed target count
-  
-  -- Anchor position management (used by keepDistance and rePosition)
-  if config.anchor then
-    if not anchorPosition or distanceFromPlayer(anchorPosition) > (config.anchorRange or 5) * 2 then
-      anchorPosition = pos  -- Set new anchor
-    end
-  else
-    anchorPosition = nil  -- Clear anchor if disabled
-  end
-  
-  -- External data for dynamic lure delay system
-  if config.lureMin and config.lureMax and config.dynamicLure then
-    targetBotLure = config.lureMin >= targets
-    if targets >= config.lureMax then
-      targetBotLure = false
-    end
-  end
-  targetCount = targets
-  delayValue = config.lureDelay
-  lureMax = config.lureMax or 0
-  dynamicLureDelay = config.dynamicLureDelay
-  delayFrom = config.delayFrom
-
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- PHASE 2: LURE DECISIONS (CaveBot delegation)
-  -- These all delegate to CaveBot and return early
-  -- Never trigger if target has low health
-  -- ═══════════════════════════════════════════════════════════════════════════
-  
-  if not targetIsLowHealth and not isTrapped then
-    -- Pull System: Pause CaveBot when monster pack is too small but we have targets
-    -- This prevents running to next waypoint and losing the respawn
-    -- ENHANCED: Consider MonsterAI threat data for smarter decisions
-    if config.smartPull then
-      local nowt = now or (os.time() * 1000)
-      if (nowt - smartPullState.lastEval) >= 300 then
-        smartPullState.lastEval = nowt
-
-        -- SAFEGUARD: Only try to pull if there are ANY monsters on screen
-        local screenMonsters = 0
-        if EventTargeting and EventTargeting.getLiveMonsterCount then
-          screenMonsters = EventTargeting.getLiveMonsterCount() or 0
-        else
-          screenMonsters = SafeCall.getMonsters(7) or 0
-        end
-
-        if screenMonsters == 0 then
-          smartPullState.active = false
-          smartPullState.lowStreak = 0
-          smartPullState.highStreak = 0
-        else
-          local pullRange = config.smartPullRange or 2
-          local pullMin = config.smartPullMin or 3
-          local pullShape = config.smartPullShape or (nExBot.SHAPE and nExBot.SHAPE.CIRCLE) or 2
-          local pullOff = pullMin + 1  -- hysteresis
-
-          local nearbyMonsters = 0
-          if getMonstersAdvanced then
-            nearbyMonsters = SafeCall.global("getMonstersAdvanced", pullRange, pullShape) or 0
-          else
-            nearbyMonsters = getMonsters(pullRange) or 0
-          end
-
-          -- ENHANCED: Check MonsterAI for imminent threats
-          local underImmediateThreat = false
-          if MonsterAI and MonsterAI.getImmediateThreat then
-            local threatData = MonsterAI.getImmediateThreat()
-            underImmediateThreat = threatData.immediateThreat and threatData.highestConfidence >= 0.7
-          end
-
-          if underImmediateThreat then
-            smartPullState.active = false
-            smartPullState.lowStreak = 0
-            smartPullState.highStreak = 0
-          else
-            if nearbyMonsters < pullMin then
-              smartPullState.lowStreak = smartPullState.lowStreak + 1
-              smartPullState.highStreak = 0
-            elseif nearbyMonsters >= pullOff then
-              smartPullState.highStreak = smartPullState.highStreak + 1
-              smartPullState.lowStreak = 0
-            else
-              smartPullState.lowStreak = 0
-              smartPullState.highStreak = 0
-            end
-
-            if smartPullState.lowStreak >= 2 then
-              smartPullState.active = true
-              smartPullState.lastChange = nowt
-            elseif smartPullState.highStreak >= 2 then
-              smartPullState.active = false
-              smartPullState.lastChange = nowt
-            end
-          end
-        end
-      end
-      TargetBot.smartPullActive = smartPullState.active
-    else
-      TargetBot.smartPullActive = false
-      smartPullState.active = false
-      smartPullState.lowStreak = 0
-      smartPullState.highStreak = 0
-    end
-    
-    -- Dynamic lure: Pull more monsters when target count is low
-    -- Only trigger if smartPull is not pausing us
-    if not TargetBot.smartPullActive and TargetBot.canLure() and config.dynamicLure then
-      local nowt = now or (os.time() * 1000)
-      if targetBotLure and (nowt - (dynamicLureState.lastTrigger or 0)) > 700 then
-        dynamicLureState.lastTrigger = nowt
-        return TargetBot.allowCaveBot(150)
-      end
-    end
-    
-    -- Legacy closeLure support
-    if config.closeLure and config.closeLureAmount then
-      if SafeCall.getMonsters(1) >= config.closeLureAmount then
-        return TargetBot.allowCaveBot(150)
-      end
-    end
-    
-    -- ═══════════════════════════════════════════════════════════════════════
-    -- KILL BEFORE WALK: When dynamicLure is DISABLED, do NOT allow CaveBot
-    -- to proceed until all monsters on screen are killed.
-    -- This ensures the screen is cleared before moving to the next waypoint.
-    -- ═══════════════════════════════════════════════════════════════════════
-    if not config.dynamicLure then
-      -- Check if there are still monsters on screen that need to be killed
-      local screenMonsters = SafeCall.getMonsters(7)  -- Full visible range
-      if screenMonsters > 0 then
-        -- Do NOT call allowCaveBot - keep CaveBot paused until screen is clear
-        -- Continue with normal attack/positioning below
-      end
-    end
-  else
-    TargetBot.smartPullActive = false
+  if config.anchor and not anchorPosition then
+    anchorPosition = pos
   end
 
   -- ═══════════════════════════════════════════════════════════════════════════

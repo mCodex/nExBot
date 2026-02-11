@@ -33,8 +33,10 @@ This guide covers all performance optimizations in nExBot v1.0.0:
 | CaveBot | Optimized Execution System | -60% CPU |
 | CaveBot | Walk State Tracking | No redundant pathfinding |
 | CaveBot | Waypoint Guard | No infinite loops |
+| CaveBot | Waypoint Guard throttling | Reduced far-waypoint cost |
 | CaveBot | autoWalk-first strategy | Faster walking |
 | Pull System | Screen monster check | No false activations |
+| Pull System | Lure/pull always evaluated | Consistent CaveBot coordination |
 | Eat Food | Event-driven | -80% CPU |
 
 ---

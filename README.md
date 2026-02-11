@@ -204,6 +204,7 @@ All systems work together seamlessly with a unified event bus, shared analytics,
 - ✅ **Floor-Change Detection** - Validates entire path before walking
 - ✅ **Field Navigation** - Automatically walks through damaging fields with keyboard
 - ✅ **Waypoint Recovery** - Finds nearest waypoint if stuck
+- ✅ **Waypoint Guard** - Skips unreachable waypoints with throttled checks
 - ✅ **Pull Integration** - Pauses navigation during TargetBot pulls
 - ✅ **Tool Management** - Auto-equips and uses tools
 - ✅ **Supply Refilling** - Automatically replenishes potions at depots

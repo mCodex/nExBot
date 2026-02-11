@@ -166,6 +166,65 @@ local function pathfinder()
   return true
 end
 
+-- Waypoint guard to prevent heavy pathfinding on unreachable waypoints
+local WaypointGuard = CaveBot.WaypointGuard or {
+  CHECK_INTERVAL = 5000,
+  EXTREME_DISTANCE = 100,
+  MAX_FAILURES = 3,
+  lastKey = nil,
+  lastCheck = 0,
+  failures = 0,
+  lastSkip = false,
+  cooldownUntil = 0
+}
+CaveBot.WaypointGuard = WaypointGuard
+
+local function shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist)
+  if not destPos or not playerPos then return false end
+
+  local dist2d = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
+  local floorMismatch = destPos.z ~= playerPos.z
+
+  if floorMismatch and dist2d < WaypointGuard.EXTREME_DISTANCE then
+    dist2d = WaypointGuard.EXTREME_DISTANCE
+  end
+
+  if not floorMismatch and dist2d <= maxDist then
+    WaypointGuard.lastSkip = false
+    return false
+  end
+
+  local key = destPos.x .. "," .. destPos.y .. "," .. destPos.z
+  if WaypointGuard.lastKey ~= key then
+    WaypointGuard.lastKey = key
+    WaypointGuard.failures = 0
+    WaypointGuard.lastCheck = 0
+    WaypointGuard.lastSkip = false
+    WaypointGuard.cooldownUntil = 0
+  end
+
+  if WaypointGuard.cooldownUntil > now then
+    return true
+  end
+
+  if (now - WaypointGuard.lastCheck) < WaypointGuard.CHECK_INTERVAL then
+    return WaypointGuard.lastSkip
+  end
+
+  WaypointGuard.lastCheck = now
+  WaypointGuard.failures = WaypointGuard.failures + 1
+  WaypointGuard.lastSkip = true
+
+  if dist2d >= WaypointGuard.EXTREME_DISTANCE or WaypointGuard.failures >= WaypointGuard.MAX_FAILURES then
+    WaypointGuard.cooldownUntil = now + WaypointGuard.CHECK_INTERVAL
+    if CaveBot.requestWaypointRecovery then
+      CaveBot.requestWaypointRecovery("guard")
+    end
+  end
+
+  return true
+end
+
 -- it adds an action widget to list
 CaveBot.addAction = function(action, value, focus)
   action = action:lower()
@@ -425,6 +484,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   }
   local precision = tonumber(posMatch[1][5]) or 1
   local playerPos = player:getPosition()
+  local maxDist = storage.extras.gotoMaxDistance or 50  -- Realistic pathfinding limit
   
   -- EARLY CHECK: Was this exact floor-change waypoint just completed?
   -- This is the most reliable way to prevent re-executing a waypoint we just used
@@ -437,6 +497,10 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- MULTI-FLOOR WAYPOINT HANDLING
   -- If the waypoint is on a different Z level, determine how to handle it
   if destPos.z ~= playerPos.z then
+    if shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist) then
+      noPath = 0
+      return true
+    end
     local dist2D = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
     local floorDiff = math.abs(destPos.z - playerPos.z)
     
@@ -474,10 +538,13 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Distance calculations
   local distX = math.abs(destPos.x - playerPos.x)
   local distY = math.abs(destPos.y - playerPos.y)
-  local maxDist = storage.extras.gotoMaxDistance or 50  -- Realistic pathfinding limit
   
   -- Too far
   if (distX + distY) > maxDist then
+    if shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist) then
+      noPath = 0
+      return true
+    end
     noPath = noPath + 1
     pathfinder()
     return false

@@ -257,6 +257,7 @@ loadCategory("utils", {
   "utils/safe_creature",
   "utils/weak_cache",
   "utils/creature_events",
+  "utils/vocation_utils",
 })
 
 -- ============================================================================

@@ -137,15 +137,29 @@ addCheckBox("reachable", "Target only pathable mobs", false, leftPanel, "Ignore 
 addCheckBox("title", "Custom Window Title", true, rightPanel, "Personalize OTCv8 window name according to character specific.")
 if true then
   local vocText = ""
+  local Vocations = Vocations
+  if not Vocations then
+    local ok, mod = pcall(function() return dofile("/core/vocations.lua") end)
+    if ok and mod then
+      Vocations = mod
+    end
+  end
 
-  if voc() == 1 or voc() == 11 then
-      vocText = "- EK"
-  elseif voc() == 2 or voc() == 12 then
-      vocText = "- RP"
-  elseif voc() == 3 or voc() == 13 then
-      vocText = "- MS"
-  elseif voc() == 4 or voc() == 14 then
-      vocText = "- ED"
+  if Vocations and Vocations.getShortName then
+    local short = Vocations.getShortName(voc())
+    if short ~= "" then
+      vocText = "- " .. short
+    end
+  else
+    if voc() == 1 or voc() == 11 then
+        vocText = "- EK"
+    elseif voc() == 2 or voc() == 12 then
+        vocText = "- RP"
+    elseif voc() == 3 or voc() == 13 then
+        vocText = "- MS"
+    elseif voc() == 4 or voc() == 14 then
+        vocText = "- ED"
+    end
   end
 
   -- Window title handler function

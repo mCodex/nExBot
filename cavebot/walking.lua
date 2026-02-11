@@ -551,6 +551,8 @@ local PathCursor = {
   destPos = nil,  -- Track destination for path reuse
   lastChunkEnd = nil,  -- Track where last chunk ended for continuity
   smoothingActive = false,  -- Whether path smoothing is enabled
+  lastChunkDir = nil,
+  lastChunkTime = 0,
 }
 
 local function resetPathCursor()
@@ -560,6 +562,8 @@ local function resetPathCursor()
   PathCursor.destPos = nil
   PathCursor.lastChunkEnd = nil
   PathCursor.smoothingActive = false
+  PathCursor.lastChunkDir = nil
+  PathCursor.lastChunkTime = 0
 end
 
 -- IMPROVED: Path smoothing function - removes unnecessary zig-zag movements
@@ -579,48 +583,38 @@ local function smoothPath(path, startPos)
     else
       -- Look ahead to see if we can simplify the path
       local nextPos = applyOffset(pos, offset)
-      
-      -- Check if the next 2-3 directions form a zig-zag pattern
+
+      -- Check for zig-zag patterns and convert to diagonals when safe
       if i + 2 <= #path then
         local dir2 = path[i + 1]
         local dir3 = path[i + 2]
-        
-        -- Detect zig-zag: direction changes then changes back (e.g., E, N, E or N, E, N)
         if dir == dir3 and dir ~= dir2 then
-          -- This is a zig-zag pattern, try to find a diagonal shortcut
           local offset2 = getDirectionOffset(dir2)
           if offset2 then
-            -- Calculate combined movement
-            local totalDx = offset.x + offset2.x + offset.x
-            local totalDy = offset.y + offset2.y + offset.y
-            
-            -- Check if we can take a more direct diagonal path
-            local midPos1 = applyOffset(pos, offset)
-            local midPos2 = applyOffset(midPos1, offset2)
-            local endPos = applyOffset(midPos2, offset)
-            
-            -- Try diagonal approach if available
-            local diagonalDir = getDirectionTo(pos, endPos)
+            -- Compute diagonal target (pos + dir + dir2)
+            local diagPos = applyOffset(pos, {x = offset.x + offset2.x, y = offset.y + offset2.y})
+            local diagonalDir = getDirectionTo(pos, diagPos)
             if diagonalDir then
-              local diagOffset = getDirectionOffset(diagonalDir)
-              if diagOffset then
-                local diagPos = applyOffset(pos, diagOffset)
-                local Client = getClient()
-                local tile = (Client and Client.getTile) and Client.getTile(diagPos) or (g_map and g_map.getTile(diagPos))
-                if tile and tile:isWalkable() and not isFloorChangeTile(diagPos) then
-                  -- Can take diagonal - continue with simplified path
-                  -- (Still add original dirs for safety, but mark for potential optimization)
-                end
+              local Client = getClient()
+              local tile = (Client and Client.getTile) and Client.getTile(diagPos) or (g_map and g_map.getTile(diagPos))
+              if tile and tile:isWalkable() and not isFloorChangeTile(diagPos) then
+                smoothed[#smoothed + 1] = diagonalDir
+                -- Continue with the last direction in the pattern to reach the same end
+                smoothed[#smoothed + 1] = dir
+                pos = applyOffset(diagPos, offset)
+                i = i + 3
+                goto continue_smooth
               end
             end
           end
         end
       end
-      
+
       -- Add direction to smoothed path
       smoothed[#smoothed + 1] = dir
       pos = nextPos
       i = i + 1
+      ::continue_smooth::
     end
   end
   
@@ -658,9 +652,9 @@ local function calculateOptimalChunkSize(path, startPos, baseSafeSteps)
     lastDir = dir
   end
   
-  -- If path is very zig-zaggy, use smaller chunks
-  if directionChanges > chunkSize * 0.5 then
-    chunkSize = math.max(3, math.floor(chunkSize * 0.6))
+  -- If path is very zig-zaggy, use smaller chunks (with hysteresis)
+  if chunkSize >= 6 and directionChanges >= 3 and directionChanges > chunkSize * 0.65 then
+    chunkSize = math.max(4, math.floor(chunkSize * 0.7))
   end
   
   return chunkSize
@@ -1023,6 +1017,19 @@ CaveBot.walkTo = function(dest, maxDist, params)
   -- IMPROVED: Track direction for smoothness analysis
   local chunkDirection = getDirectionTo(playerPos, chunkDestination)
   if chunkDirection then
+    -- Prefer PathUtils smoothing when available
+    if PathUtils and PathUtils.getSmoothedDirection then
+      local smoothedDir = PathUtils.getSmoothedDirection(chunkDirection, false)
+      if smoothedDir and smoothedDir ~= chunkDirection then
+        local smoothedOffset = getDirectionOffset(smoothedDir)
+        if smoothedOffset then
+          chunkDestination = applyOffset(playerPos, smoothedOffset)
+          chunkDirection = smoothedDir
+          stepsToWalk = 1
+        end
+      end
+    end
+
     -- Check for erratic direction changes
     if PATH_SMOOTHING.lastDirection and not areSimilarDirections(PATH_SMOOTHING.lastDirection, chunkDirection) then
       PATH_SMOOTHING.directionChanges = PATH_SMOOTHING.directionChanges + 1
@@ -1030,8 +1037,11 @@ CaveBot.walkTo = function(dest, maxDist, params)
       -- If too many direction changes, apply dampening
       if PATH_SMOOTHING.directionChanges >= PATH_SMOOTHING.directionChangeThreshold then
         if now - PATH_SMOOTHING.lastDirectionTime < PATH_SMOOTHING.directionDampingTime then
-          -- Skip this walk to prevent oscillation
-          return true
+          -- Hold previous chunk briefly to prevent oscillation
+          if PathCursor.lastChunkEnd then
+            chunkDestination = PathCursor.lastChunkEnd
+            stepsToWalk = 1
+          end
         end
         PATH_SMOOTHING.directionChanges = 0  -- Reset after dampening
       end
@@ -1046,6 +1056,8 @@ CaveBot.walkTo = function(dest, maxDist, params)
   
   -- Store chunk end position for continuity tracking
   PathCursor.lastChunkEnd = chunkDestination
+  PathCursor.lastChunkDir = chunkDirection
+  PathCursor.lastChunkTime = now
   
   -- FIELD HANDLING: Use keyboard walking for paths with fields
   -- autoWalk/map-click doesn't work through fire/poison/energy fields

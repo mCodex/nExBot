@@ -21,6 +21,8 @@
 - **🧠 Movement Coordinator** - Dynamic confidence thresholds
 - **🛡️ Balanced Behavior** - Conservative with few monsters, reactive with many
 - **📊 Hunt Analyzer** - Better insights and recommendations
+- **🗺️ Waypoint Guard** - Skips unreachable waypoints and requests recovery
+- **🎯 Pull/Lure Coordination** - TargetBot pull and dynamic lure stay active with native chase
 
 ---
 

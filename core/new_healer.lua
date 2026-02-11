@@ -75,9 +75,9 @@ if not storage[panelName] then
             paladins = true,
             druids = false,
             sorcerers = false,
+            monks = false,
             party = true,
             guild = false,
-            botserver = false,
             friends = false
         }
     }
@@ -330,6 +330,14 @@ targetSettings.vocations.box.sorcerers.onClick = function(widget)
     updateBotCoreConfig()
 end
 
+targetSettings.vocations.box.monks:setChecked(config.conditions.monks)
+targetSettings.vocations.box.monks.onClick = function(widget)
+    config.conditions.monks = not config.conditions.monks
+    widget:setChecked(config.conditions.monks)
+    validate(widget, 2)
+    updateBotCoreConfig()
+end
+
 targetSettings.groups.box.friends:setChecked(config.conditions.friends)
 targetSettings.groups.box.friends.onClick = function(widget)
     config.conditions.friends = not config.conditions.friends
@@ -350,14 +358,6 @@ targetSettings.groups.box.guild:setChecked(config.conditions.guild)
 targetSettings.groups.box.guild.onClick = function(widget)
     config.conditions.guild = not config.conditions.guild
     widget:setChecked(config.conditions.guild)
-    validate(widget)
-    updateBotCoreConfig()
-end
-
-targetSettings.groups.box.botserver:setChecked(config.conditions.botserver)
-targetSettings.groups.box.botserver.onClick = function(widget)
-    config.conditions.botserver = not config.conditions.botserver
-    widget:setChecked(config.conditions.botserver)
     validate(widget)
     updateBotCoreConfig()
 end
@@ -645,25 +645,27 @@ local function legacyIsCandidate(spec)
         return false
     end
 
-    local specText = spec:getText() or ""
-    -- Check vocation filter
-    if storage.extras and storage.extras.checkPlayer and specText:len() > 0 then
-        if specText:find("EK") and not config.conditions.knights or
-           specText:find("RP") and not config.conditions.paladins or
-           specText:find("ED") and not config.conditions.druids or
-           specText:find("MS") and not config.conditions.sorcerers then
-           if not config.customPlayers[name] then
-               return nil
-           end
+    local VocationUtils = VocationUtils
+    if storage.extras and storage.extras.checkPlayer then
+        local short = VocationUtils and VocationUtils.getCreatureVocationShort and VocationUtils.getCreatureVocationShort(spec)
+        if short then
+            if short == "EK" and not config.conditions.knights or
+               short == "RP" and not config.conditions.paladins or
+               short == "ED" and not config.conditions.druids or
+               short == "MS" and not config.conditions.sorcerers or
+               short == "MN" and not config.conditions.monks then
+               if not config.customPlayers[name] then
+                   return nil
+               end
+            end
         end
     end
 
     local okParty = config.conditions.party and spec:isPartyMember()
     local okFriend = config.conditions.friends and isFriend and isFriend(spec)
     local okGuild = config.conditions.guild and spec:getEmblem() == 1
-    local okBotServer = config.conditions.botserver and nExBot and nExBot.BotServerMembers and nExBot.BotServerMembers[name]
 
-    if not (okParty or okFriend or okGuild or okBotServer) and not config.customPlayers[name] then
+    if not (okParty or okFriend or okGuild) and not config.customPlayers[name] then
         return nil
     end
 

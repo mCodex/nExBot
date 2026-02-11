@@ -1560,7 +1560,11 @@ TargetBot.save = function()
 end
 
 TargetBot.allowCaveBot = function(time)
-  cavebotAllowance = now + time
+  local ms = tonumber(time) or 200
+  if ms < 50 then
+    ms = 50
+  end
+  cavebotAllowance = now + ms
 end
 
 TargetBot.disableLuring = function()

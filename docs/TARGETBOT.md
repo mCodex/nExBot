@@ -40,6 +40,7 @@ TargetBot is the **combat intelligence system** that handles:
 - **Wave detection & reactivity:** TargetBot increases reactivity and movement strategy when wave attacks are detected.
 - **Separation of concerns:** Attack execution is focused in AttackBot; TargetBot now emphasises selection, positioning and tactical coordination.
 - **EventBus-first design:** Uses EventBus events for coordinated decisions across modules for more predictable behavior.
+- **Pull + Dynamic Lure always evaluated:** Lure/pull decisions run even when native chase handles movement.
 
 ---
 
