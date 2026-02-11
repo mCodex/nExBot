@@ -344,7 +344,7 @@ AttackBotPanel < Panel
     anchors.left: prev.right
     margin-left: 7
     anchors.verticalCenter: prev.verticalCenter
-    text: CD: 
+    text: CD (s): 
     font: verdana-11px-rounded
 
   SpinBox
@@ -355,7 +355,7 @@ AttackBotPanel < Panel
     size: 60 20
     minimum: 0
     maximum: 999999
-    step: 100
+    step: 1
     value: 0
     editable: true
     focusable: true

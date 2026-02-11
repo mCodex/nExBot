@@ -1170,6 +1170,136 @@ local nowMs = ClientHelper and ClientHelper.nowMs or function()
   return os.time() * 1000
 end
 
+local function toCooldownMs(cd)
+  local value = tonumber(cd) or 0
+  if value <= 0 then return 0 end
+  -- Backward compatibility: treat large values as already in ms
+  if value >= 1000 then return value end
+  return value * 1000
+end
+
+local spellState = {}
+local globalCastBackoffUntil = 0
+local GLOBAL_CAST_BACKOFF = 250
+local FAILED_CAST_BACKOFF = 350
+
+local function getSpellKey(entry)
+  return (entry and entry.spell or ""):lower()
+end
+
+local function getSpellState(key)
+  if not key or key == "" then return nil end
+  local state = spellState[key]
+  if not state then
+    state = { nextReadyAt = 0, lastAttemptAt = 0 }
+    spellState[key] = state
+  end
+  return state
+end
+
+local function applyGlobalBackoff(ms)
+  if not ms or ms <= 0 then return end
+  local untilTs = nowMs() + ms
+  if untilTs > globalCastBackoffUntil then
+    globalCastBackoffUntil = untilTs
+  end
+end
+
+local function isGlobalBackoffActive()
+  return nowMs() < globalCastBackoffUntil
+end
+
+local function confirmSpellCast(spellKey, beforeTs, onSuccess, onFail)
+  schedule(120, function()
+    local afterTs = SpellCastTable and SpellCastTable[spellKey] and SpellCastTable[spellKey].t or 0
+    if afterTs > (beforeTs or 0) then
+      if onSuccess then onSuccess() end
+    else
+      if onFail then onFail() end
+    end
+  end)
+end
+
+local function attemptSpellCast(entry, context)
+  local spellKey = getSpellKey(entry)
+  if spellKey == "" then return false end
+
+  -- For Absolute Sweep (category 5, pattern 8) respect rotation setting
+  if entry.category == 5 and entry.pattern == 8 and context and context._attackCache and context._attackCache.bestSweepDir and context.settings and context.settings.Rotate then
+    local desired = context._attackCache.bestSweepDir
+    if player:getDirection() ~= desired then
+      -- Prevent rapid oscillation by enforcing a small cooldown
+      if now - lastAutoRotate < rotationCooldown then
+        return true
+      end
+
+      -- Rotation attempt window and throttling (avoid starvation)
+      local cache = context._attackCache
+      if cache then
+        if cache.rotationAttemptsDir ~= desired then
+          cache.rotationAttemptsDir = desired
+          cache.rotationAttempts = 0
+          cache.rotationAttemptsStart = now
+        else
+          if cache.rotationAttemptsStart and now - cache.rotationAttemptsStart > 3000 then
+            cache.rotationAttempts = 0
+            cache.rotationAttemptsStart = now
+          end
+        end
+
+        local MAX_ROTATE_ATTEMPTS = 3
+        if (cache.rotationAttempts or 0) >= MAX_ROTATE_ATTEMPTS then
+          -- allow attack to proceed without rotating
+        else
+          -- Rotate towards best side and defer attack to next tick
+          turn(desired)
+          lastAutoRotate = now
+          cache.rotationAttempts = (cache.rotationAttempts or 0) + 1
+          return true
+        end
+      else
+        -- No cache available: rotate normally
+        turn(desired)
+        lastAutoRotate = now
+        return true
+      end
+    end
+  end
+
+  local state = getSpellState(spellKey)
+  local cdMs = toCooldownMs(entry.cooldown)
+
+  if context.settings.Cooldown and state and nowMs() < state.nextReadyAt then
+    return false
+  end
+
+  local canCastCaller = SafeCall.getCachedCaller("canCast")
+  if canCastCaller then
+    local ok = canCastCaller(spellKey, not currentSettings.ignoreMana, not currentSettings.Cooldown)
+    if ok == false then return false end
+  end
+
+  local beforeTs = SpellCastTable and SpellCastTable[spellKey] and SpellCastTable[spellKey].t or 0
+  if state then state.lastAttemptAt = nowMs() end
+
+  cast(spellKey, math.max(cdMs, 100))
+
+  confirmSpellCast(spellKey, beforeTs, function()
+    if state then
+      state.nextReadyAt = nowMs() + cdMs
+    end
+    applyGlobalBackoff(GLOBAL_CAST_BACKOFF)
+    recordAttackAction(entry.category, entry.spell)
+  end, function()
+    if context.settings.Cooldown and state then
+      state.nextReadyAt = math.max(state.nextReadyAt or 0, nowMs() + FAILED_CAST_BACKOFF)
+    end
+    applyGlobalBackoff(FAILED_CAST_BACKOFF)
+  end)
+
+  return true
+end
+
 -- Check individual action cooldown
 local function ready(key, cd)
   if not key then return true end
@@ -1450,7 +1580,15 @@ local function evaluateEntry(entry, context, cache)
   if context.mana < entry.mana then return false end
 
   -- Cooldown check
-  if not ready(entry.key or tostring(entry.itemId or entry.spell), entry.cooldown or 1000) then return false end
+  local cdMs = toCooldownMs(entry.cooldown)
+  if context.settings.Cooldown then
+    if entry.spell then
+      local state = getSpellState(getSpellKey(entry))
+      if state and nowMs() < state.nextReadyAt then return false end
+    else
+      if not ready(entry.key or tostring(entry.itemId or entry.spell), cdMs) then return false end
+    end
+  end
 
   -- Target checks
   if not context.target then return false end
@@ -1587,57 +1725,15 @@ end
 
 -- Pure function: Execute attack action
 local function executeAttack(entry, context)
+  if entry.spell then
+    return attemptSpellCast(entry, context)
+  end
+
   -- Mark action as used for cooldown tracking
   stamp(entry.key or tostring(entry.itemId or entry.spell))
-  
   recordAttackAction(entry.category, entry.itemId > 100 and entry.itemId or entry.spell)
-  
-  if entry.category == 1 or entry.category == 4 or entry.category == 5 then
-    -- For Absolute Sweep (category 5, pattern 8) respect rotation setting
-    if entry.category == 5 and entry.pattern == 8 and context and context._attackCache and context._attackCache.bestSweepDir and context.settings and context.settings.Rotate then
-      local desired = context._attackCache.bestSweepDir
-      if player:getDirection() ~= desired then
-        -- Prevent rapid oscillation by enforcing a small cooldown
-        if now - lastAutoRotate < rotationCooldown then
-          return -- defer, don't rotate yet
-        end
 
-        -- Rotation attempt window and throttling (avoid starvation)
-        local cache = context._attackCache
-        if cache then
-          if cache.rotationAttemptsDir ~= desired then
-            cache.rotationAttemptsDir = desired
-            cache.rotationAttempts = 0
-            cache.rotationAttemptsStart = now
-          else
-            if cache.rotationAttemptsStart and now - cache.rotationAttemptsStart > 3000 then
-              cache.rotationAttempts = 0
-              cache.rotationAttemptsStart = now
-            end
-          end
-
-          local MAX_ROTATE_ATTEMPTS = 3
-          if (cache.rotationAttempts or 0) >= MAX_ROTATE_ATTEMPTS then
-            -- allow attack to proceed without rotating
-          else
-            -- Rotate towards best side and defer attack to next tick
-            turn(desired)
-            lastAutoRotate = now
-            cache.rotationAttempts = (cache.rotationAttempts or 0) + 1
-            return
-          end
-        else
-          -- No cache available: rotate normally
-          turn(desired)
-          lastAutoRotate = now
-          return
-        end
-      end
-    end
-    -- Spells
-    cast(entry.spell, entry.cooldown)
-    if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
-  elseif entry.category == 3 then
+  if entry.category == 3 then
     -- Targeted runes
     local okTargeted = useRuneOnTarget(entry.itemId, context.target)
     if okTargeted and context and context._attackCache then context._attackCache.rotationAttempts = 0 end
@@ -1658,6 +1754,8 @@ local function executeAttack(entry, context)
       end
     end
   end
+
+  return true
 end
 
 -- Main simplified attack function
@@ -1667,6 +1765,8 @@ function attackBotMain()
   if not panel or not panel.entryList then return end
   if not target() then return end
   if SafeCall.isInPz() then return end
+
+  if isGlobalBackoffActive() then return end
   
   -- Cooldown gating
   if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then return end
@@ -1691,35 +1791,10 @@ function attackBotMain()
   -- Get entries
   local entries = panel.entryList:getChildren()
 
-  -- Precompute unique availability for spells/items to avoid repeated expensive checks
-  local availableSpells = {}
   local availableItems = {}
   local canCastCaller = SafeCall.getCachedCaller("canCast")
-  for _, child in ipairs(entries) do
-    local entry = child.params
-    if not entry then goto precontinue end
-    if entry.itemId and entry.itemId > 100 then
-      if availableItems[entry.itemId] == nil then
-        availableItems[entry.itemId] = (not currentSettings.Visible) or SafeCall.findItem(entry.itemId)
-      end
-    else
-      local spellKey = (entry.spell or ""):lower()
-      if availableSpells[spellKey] == nil then
-        local ok = nil
-        if canCastCaller then
-          ok = canCastCaller(spellKey, not currentSettings.ignoreMana, not currentSettings.Cooldown)
-        end
-        -- If canCast is unavailable (nil), fallback to true to avoid blocking due to startup/load order
-        if ok == nil then ok = true end
-        availableSpells[spellKey] = ok and true or false
-      end
-    end
-    ::precontinue::
-  end
 
-
-
-  -- Execute first valid entry (priority order)
+  -- Execute valid entries (priority order)
   for _, child in ipairs(entries) do
     local entry = child.params
     if not entry then goto continue end
@@ -1727,19 +1802,33 @@ function attackBotMain()
     -- Resource availability check (item present or spell castable)
     local available = false
     if entry.itemId and entry.itemId > 100 then
+      if availableItems[entry.itemId] == nil then
+        availableItems[entry.itemId] = (not currentSettings.Visible) or SafeCall.findItem(entry.itemId)
+      end
       available = availableItems[entry.itemId]
     else
-      available = availableSpells[entry.spell or ""]
+      local spellKey = (entry.spell or ""):lower()
+      local ok = true
+      if canCastCaller then
+        ok = canCastCaller(spellKey, not currentSettings.ignoreMana, not currentSettings.Cooldown)
+      end
+      if ok == nil then ok = true end
+      available = ok
     end
 
     if not available then
     else
+      if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then break end
+      if modules.game_cooldown.isGroupCooldownIconActive(1) then break end
+
       local should = shouldExecuteEntry(entry, context)
       if not should then
       end
       if should then
-        executeAttack(entry, context)
-        return
+        local attempted = executeAttack(entry, context)
+        if entry.spell and attempted then return end
+        if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then break end
+        if modules.game_cooldown.isGroupCooldownIconActive(1) then break end
       end
     end
     ::continue::

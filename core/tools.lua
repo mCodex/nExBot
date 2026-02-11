@@ -435,10 +435,12 @@ local HASTE_SPELLS = {
   [2]  = { spell = "utani hur",      mana = 60  }, -- Paladin
   [3]  = { spell = "utani gran hur", mana = 100 }, -- Sorcerer
   [4]  = { spell = "utani gran hur", mana = 100 }, -- Druid
+  [5]  = { spells = { { spell = "utani gran hur", mana = 100 }, { spell = "utani hur", mana = 60 } } }, -- Monk
   [11] = { spell = "utani hur",      mana = 60  },
   [12] = { spell = "utani hur",      mana = 60  },
   [13] = { spell = "utani gran hur", mana = 100 },
   [14] = { spell = "utani gran hur", mana = 100 },
+  [15] = { spells = { { spell = "utani gran hur", mana = 100 }, { spell = "utani hur", mana = 60 } } }, -- Monk
 }
 
 local lastHasteCast = 0
@@ -462,6 +464,26 @@ local function isHasted()
   return false
 end
 
+local function resolveHasteSpell(vocation, currentMana)
+  local haste = HASTE_SPELLS[vocation]
+  if not haste then return nil end
+
+  if haste.spells then
+    for _, entry in ipairs(haste.spells) do
+      if currentMana >= entry.mana then
+        return entry
+      end
+    end
+    return nil
+  end
+
+  if currentMana >= haste.mana then
+    return haste
+  end
+
+  return nil
+end
+
 local autoHasteMacro = macro(500, "Auto Haste", function()
   if not player then return end
   
@@ -469,14 +491,12 @@ local autoHasteMacro = macro(500, "Auto Haste", function()
   if now - lastHasteCast < HASTE_CAST_COOLDOWN then return end
   
   local vocation = player:getVocation()
-  local haste = HASTE_SPELLS[vocation]
+  local currentMana = mana()
+  local haste = resolveHasteSpell(vocation, currentMana)
   if not haste then return end
   
   -- Check if already hasted
   if isHasted() then return end
-  
-  -- Check mana
-  if mana() < haste.mana then return end
   
   -- Check spell cooldown
   if getSpellCoolDown and getSpellCoolDown(haste.spell) then return end
