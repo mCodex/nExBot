@@ -260,12 +260,13 @@ do
       end
     end
 
-    -- Check OTBR-exclusive APIs
+    -- Check OTBR-exclusive APIs (only if moveRaw is absent — moveRaw means OTCv8)
     if not isOTBR then
-      if g_game and type(g_game.forceWalk) == "function" then
-        isOTBR = true
-      elseif g_map and type(g_map.findEveryPath) == "function" then
-        isOTBR = true
+      local hasMoveRaw = g_game and type(g_game.moveRaw) == "function"
+      if not hasMoveRaw then
+        if g_game and type(g_game.forceWalk) == "function" then
+          isOTBR = true
+        end
       end
     end
 

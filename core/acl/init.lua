@@ -149,8 +149,14 @@ local function detectClient(force)
   end
 
   -- ======================================================================
-  -- DECISION: file fingerprint > app fingerprint > API fingerprint
-  --           > legacy API probes > default OTCv8
+  -- DECISION PRIORITY:
+  -- 1. fileFingerprintOTBR  (disk-based, most reliable)
+  -- 2. appFingerprintOTBR   (branding strings, reliable)
+  -- 3. moveRaw=true         (OTCv8 POSITIVE — blocks weaker OTBR signals)
+  -- 4. forceWalk=true       (OTBR-only API, reliable when present)
+  -- 5. g_gameConfig         (OTBR config object)
+  -- 6. apiFingerprintOTBR   (WEAK — g_map APIs can false-positive on OTCv8)
+  -- 7. default              → OTCv8
   -- ======================================================================
   if signals.fileFingerprintOTBR then
     _clientType = ACL.ClientType.OPENTIBIABR
@@ -158,16 +164,17 @@ local function detectClient(force)
   elseif signals.appFingerprintOTBR then
     _clientType = ACL.ClientType.OPENTIBIABR
     ACL.clientName = "OpenTibiaBR"
-  elseif signals.apiFingerprintOTBR then
-    _clientType = ACL.ClientType.OPENTIBIABR
-    ACL.clientName = "OpenTibiaBR"
+  elseif signals.moveRaw then
+    -- moveRaw is OTCv8-exclusive; if present, this IS OTCv8
+    _clientType = ACL.ClientType.OTCV8
+    ACL.clientName = "OTCv8"
   elseif signals.forceWalk then
     _clientType = ACL.ClientType.OPENTIBIABR
     ACL.clientName = "OpenTibiaBR"
-  elseif signals.moveRaw then
-    _clientType = ACL.ClientType.OTCV8
-    ACL.clientName = "OTCv8"
   elseif signals.g_gameConfig then
+    _clientType = ACL.ClientType.OPENTIBIABR
+    ACL.clientName = "OpenTibiaBR"
+  elseif signals.apiFingerprintOTBR then
     _clientType = ACL.ClientType.OPENTIBIABR
     ACL.clientName = "OpenTibiaBR"
   else
