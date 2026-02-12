@@ -44,78 +44,149 @@ local _clientType = ACL.ClientType.UNKNOWN
 -- Detects which OTClient variant is running based on available APIs
 --------------------------------------------------------------------------------
 
-local function detectClient()
-  if _detected then
+local function detectClient(force)
+  if not force and _detected then
     return _clientType
   end
-  
-  -- Detection heuristics based on unique features
-  
-  -- Check for OpenTibiaBR specific features
-  local isOpenTibiaBR = false
-  local isOTCv8 = false
-  
-  -- OpenTibiaBR has g_gameConfig, paperdoll support, and protobuf
-  if g_gameConfig ~= nil then
-    isOpenTibiaBR = true
+
+  if not force and nExBot and nExBot.clientDetection and nExBot.clientDetection.type then
+    _clientType = nExBot.clientDetection.type
+    ACL.clientName = nExBot.clientDetection.name or ACL.clientName
+    ACL.currentClient = _clientType
+    _detected = true
+    return _clientType
   end
-  
-  -- OpenTibiaBR uses Controller:new() pattern in modules
-  if Controller ~= nil and type(Controller.new) == "function" then
-    isOpenTibiaBR = true
-  end
-  
-  -- OpenTibiaBR has g_paperdolls
-  if g_paperdolls ~= nil then
-    isOpenTibiaBR = true
-  end
-  
-  -- OTCv8 has specific bot module structure
-  if modules and modules.game_bot then
-    local botModule = modules.game_bot
-    -- OTCv8 uses contentsPanel.config pattern
-    if botModule.contentsPanel and botModule.contentsPanel.config then
-      isOTCv8 = true
-    end
-  end
-  
-  -- OTCv8 has g_creatures.getCreatures as a common pattern
-  if g_creatures and type(g_creatures.getCreatures) == "function" then
-    -- Both have this, but OTCv8 doesn't have g_gameConfig
-    if not g_gameConfig then
-      isOTCv8 = true
-    end
-  end
-  
-  -- Check for moveRaw which is OTCv8 specific
-  if g_game and type(g_game.moveRaw) == "function" then
-    isOTCv8 = true
-  end
-  
-  -- Final decision
-  if isOpenTibiaBR and not isOTCv8 then
-    _clientType = ACL.ClientType.OPENTIBIABR
-    ACL.clientName = "OpenTibiaBR"
-  elseif isOTCv8 then
-    _clientType = ACL.ClientType.OTCV8
-    ACL.clientName = "OTCv8"
-  else
-    -- Default fallback based on common features
-    if g_game and g_map and g_ui then
-      -- Try to detect based on forceWalk (OpenTibiaBR has it, OTCv8 doesn't)
-      if type(g_game.forceWalk) == "function" then
-        _clientType = ACL.ClientType.OPENTIBIABR
-        ACL.clientName = "OpenTibiaBR"
-      else
-        _clientType = ACL.ClientType.OTCV8
-        ACL.clientName = "OTCv8"
+
+  -- ======================================================================
+  -- FINGERPRINT 1: OTBR-only module files on disk (instant, always works)
+  -- These modules ship exclusively with OpenTibiaBR/OTClient-Redemption
+  -- and never exist in OTCv8.  g_resources.fileExists is available in the
+  -- bot sandbox from the very first line of _Loader.lua.
+  -- ======================================================================
+  local fileFingerprintOTBR = false
+  if g_resources and type(g_resources.fileExists) == "function" then
+    -- Any ONE hit is sufficient; ordered by likelihood of presence
+    local otbrOnlyPaths = {
+      "/modules/game_cyclopedia/game_cyclopedia.otmod",
+      "/modules/game_forge/game_forge.otmod",
+      "/modules/game_attachedeffects/attachedeffects.otmod",
+      "/modules/game_healthcircle/game_healthcircle.otmod",
+      "/modules/game_wheel/game_wheel.otmod",
+    }
+    for i = 1, #otbrOnlyPaths do
+      if g_resources.fileExists(otbrOnlyPaths[i]) then
+        fileFingerprintOTBR = true
+        break
       end
     end
   end
-  
+
+  -- ======================================================================
+  -- FINGERPRINT 2: g_app branding strings
+  -- OTBR sets org="otcr", name contains "Redemption"
+  -- ======================================================================
+  local appName = nil
+  local appCompactName = nil
+  local appOrgName = nil
+  if g_app then
+    if type(g_app.getName) == "function" then
+      local ok, result = pcall(g_app.getName)
+      if ok then appName = result end
+    end
+    if type(g_app.getCompactName) == "function" then
+      local ok, result = pcall(g_app.getCompactName)
+      if ok then appCompactName = result end
+    end
+    if type(g_app.getOrganizationName) == "function" then
+      local ok, result = pcall(g_app.getOrganizationName)
+      if ok then appOrgName = result end
+    end
+  end
+
+  local appNameLower = type(appName) == "string" and appName:lower() or nil
+  local appOrgLower = type(appOrgName) == "string" and appOrgName:lower() or nil
+
+  local appFingerprintOTBR = false
+  if appOrgLower == "otcr" or appOrgLower == "otbr" then
+    appFingerprintOTBR = true
+  elseif appNameLower and appNameLower:find("redemption") then
+    appFingerprintOTBR = true
+  end
+
+  -- ======================================================================
+  -- FINGERPRINT 3: OTBR-exclusive g_map / g_game APIs
+  -- ======================================================================
+  local apiFingerprintOTBR = false
+  if g_map then
+    if type(g_map.findEveryPath) == "function"
+      or type(g_map.getSightSpectators) == "function"
+      or type(g_map.getSpectatorsInRangeEx) == "function"
+      or type(g_map.getTilesInRange) == "function" then
+      apiFingerprintOTBR = true
+    end
+  end
+
+  local signals = {
+    fileFingerprintOTBR = fileFingerprintOTBR,
+    appName = appName,
+    appCompactName = appCompactName,
+    appOrganizationName = appOrgName,
+    appFingerprintOTBR = appFingerprintOTBR,
+    apiFingerprintOTBR = apiFingerprintOTBR,
+    forceWalk = (g_game and type(g_game.forceWalk) == "function") or false,
+    moveRaw = (g_game and type(g_game.moveRaw) == "function") or false,
+    g_gameConfig = (g_gameConfig ~= nil) or false,
+  }
+
+  -- Always log once so the user can report what the detection saw
+  if not ACL._signalsPrinted then
+    ACL._signalsPrinted = true
+    local parts = {}
+    for k, v in pairs(signals) do
+      parts[#parts + 1] = k .. "=" .. tostring(v)
+    end
+    print("[ACL] Detection signals: " .. table.concat(parts, ", "))
+  end
+
+  -- ======================================================================
+  -- DECISION: file fingerprint > app fingerprint > API fingerprint
+  --           > legacy API probes > default OTCv8
+  -- ======================================================================
+  if signals.fileFingerprintOTBR then
+    _clientType = ACL.ClientType.OPENTIBIABR
+    ACL.clientName = "OpenTibiaBR"
+  elseif signals.appFingerprintOTBR then
+    _clientType = ACL.ClientType.OPENTIBIABR
+    ACL.clientName = "OpenTibiaBR"
+  elseif signals.apiFingerprintOTBR then
+    _clientType = ACL.ClientType.OPENTIBIABR
+    ACL.clientName = "OpenTibiaBR"
+  elseif signals.forceWalk then
+    _clientType = ACL.ClientType.OPENTIBIABR
+    ACL.clientName = "OpenTibiaBR"
+  elseif signals.moveRaw then
+    _clientType = ACL.ClientType.OTCV8
+    ACL.clientName = "OTCv8"
+  elseif signals.g_gameConfig then
+    _clientType = ACL.ClientType.OPENTIBIABR
+    ACL.clientName = "OpenTibiaBR"
+  else
+    _clientType = ACL.ClientType.OTCV8
+    ACL.clientName = "OTCv8"
+  end
+
   _detected = true
   ACL.currentClient = _clientType
-  
+  ACL.lastDetection = {
+    type = _clientType,
+    name = ACL.clientName,
+    signals = signals
+  }
+
+  if nExBot then
+    nExBot.clientDetection = ACL.lastDetection
+  end
+
   return _clientType
 end
 
@@ -137,6 +208,16 @@ function ACL.isOpenTibiaBR()
   return detectClient() == ACL.ClientType.OPENTIBIABR
 end
 
+function ACL.refreshDetection()
+  _detected = false
+  return detectClient(true)
+end
+
+function ACL.getDetectionInfo()
+  detectClient()
+  return ACL.lastDetection
+end
+
 --------------------------------------------------------------------------------
 -- ADAPTER LOADING
 -- Loads the appropriate adapter based on detected client
@@ -144,6 +225,8 @@ end
 
 local adapters = {}
 local adapterLoaded = false
+local _lateDetectionQueued = false
+local _lateDetectionDone = false
 
 local function loadAdapter()
   if adapterLoaded then
@@ -168,9 +251,16 @@ local function loadAdapter()
   if status and result then
     adapters = result
   else
-    warn("[ACL] Failed to load adapter: " .. adapterPath)
+    warn("[ACL] Failed to load adapter: " .. adapterPath .. " (" .. tostring(result) .. ")")
     -- Return base adapter with noop functions
-    adapters = require("acl/adapters/base")
+    local baseOk, baseResult = pcall(function()
+      return dofile("/core/acl/adapters/base.lua")
+    end)
+    if baseOk and baseResult then
+      adapters = baseResult
+    else
+      adapters = {}
+    end
   end
   
   adapterLoaded = true
@@ -182,11 +272,17 @@ end
 -- Unified API that delegates to the appropriate adapter
 --------------------------------------------------------------------------------
 
--- Lazy-load adapters on first access
+-- Lazy-load adapters on first access (with recursion guard)
+local _adapterLookupActive = false
 setmetatable(ACL, {
   __index = function(t, key)
-    local adapter = loadAdapter()
-    if adapter[key] then
+    -- Prevent infinite recursion: if we're already inside loadAdapter,
+    -- don't try to load again
+    if _adapterLookupActive then return nil end
+    _adapterLookupActive = true
+    local ok, adapter = pcall(loadAdapter)
+    _adapterLookupActive = false
+    if ok and adapter and adapter[key] then
       rawset(t, key, adapter[key])
       return adapter[key]
     end
@@ -208,6 +304,35 @@ function ACL.init()
   
   -- Pre-load adapters
   loadAdapter()
+
+  if not _lateDetectionQueued then
+    _lateDetectionQueued = true
+    local function lateRefresh(reason)
+      if _lateDetectionDone then return end
+      _lateDetectionDone = true
+      local previousType = _clientType
+      local newType = detectClient(true)
+      if nExBot and nExBot.showDebug and newType ~= previousType then
+        print("[ACL] Late detection updated via " .. tostring(reason) .. ": " .. ACL.clientName)
+      end
+    end
+
+    if type(schedule) == "function" then
+      schedule(1500, function() lateRefresh("delay") end)
+    end
+
+    if type(connect) == "function" and g_game then
+      connect(g_game, {
+        onGameStart = function()
+          if type(schedule) == "function" then
+            schedule(100, function() lateRefresh("onGameStart") end)
+          else
+            lateRefresh("onGameStart")
+          end
+        end
+      })
+    end
+  end
   
   return true
 end

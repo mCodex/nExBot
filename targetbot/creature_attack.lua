@@ -1553,11 +1553,51 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   -- Prevents "Creature not reachable" errors
   -- ═══════════════════════════════════════════════════════════════════════════
   if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.validateTarget then
+    -- Debounce temporary reachability failures to avoid rapid cancel/re-attack
+    if TargetBot then
+      TargetBot.UnreachableTracker = TargetBot.UnreachableTracker or {
+        entries = {},
+        ttl = 800,
+        lastCleanup = 0,
+        cleanupInterval = 2000
+      }
+    end
+    local tracker = TargetBot and TargetBot.UnreachableTracker or nil
+    local timeNow = now or (os.time() * 1000)
+
     local isValid, reason, path = MonsterAI.Reachability.validateTarget(creature)
+    local creatureId = nil
+    pcall(function() creatureId = creature:getId() end)
+
+    if isValid and tracker and creatureId then
+      tracker.entries[creatureId] = nil
+    end
     
     if not isValid then
       -- Target is not reachable - skip attack and allow CaveBot to proceed
       if reason == "no_path" or reason == "blocked_tile" then
+        if tracker and creatureId then
+          local entry = tracker.entries[creatureId]
+          if not entry then
+            entry = { firstSeen = timeNow, lastSeen = timeNow }
+            tracker.entries[creatureId] = entry
+          else
+            entry.lastSeen = timeNow
+          end
+          if (timeNow - (entry.firstSeen or timeNow)) < tracker.ttl then
+            return  -- Grace period: don't cancel or re-issue yet
+          end
+
+          if (timeNow - (tracker.lastCleanup or 0)) > tracker.cleanupInterval then
+            for id, data in pairs(tracker.entries) do
+              if (timeNow - (data.lastSeen or timeNow)) > tracker.cleanupInterval then
+                tracker.entries[id] = nil
+              end
+            end
+            tracker.lastCleanup = timeNow
+          end
+        end
+
         -- Clear attack target to prevent OTClient errors
         local Client2 = getClient()
         local currentTarget = (Client2 and Client2.getAttackingCreature) and Client2.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
@@ -1605,10 +1645,7 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
       -- Use requestSwitch for rate-limited attack
       local priority = params.priority or (params.config and params.config.priority) or 100
       attackIssued = AttackStateMachine.requestSwitch(creature, priority * 100)
-    end
-    
-    -- Fallback only if AttackStateMachine not available
-    if not attackIssued then
+    else
       local ok, err = pcall(function()
         if Client and Client.attack then
           Client.attack(creature)

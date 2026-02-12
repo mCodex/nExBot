@@ -1130,7 +1130,9 @@ function MovementCoordinator.Execute.move(decision)
     -- Chase is only active if enabled AND keepDistance is disabled
     local useNativeChase = chaseEnabled and not keepDistanceEnabled
     
-    if useNativeChase and g_game.setChaseMode then
+    if useNativeChase and ChaseController then
+      ChaseController.setDesiredChase(true)
+    elseif useNativeChase and g_game.setChaseMode then
       g_game.setChaseMode(1) -- ChaseOpponent
       if TargetCore and TargetCore.Native then
         TargetCore.Native.lastChaseMode = 1
@@ -1139,7 +1141,9 @@ function MovementCoordinator.Execute.move(decision)
     elseif not useNativeChase then
       -- Chase disabled or keepDistance enabled - don't set chase mode
       -- But don't block execution - let other movement systems handle it
-      if g_game.setChaseMode then
+      if ChaseController then
+        ChaseController.setDesiredChase(false)
+      elseif g_game.setChaseMode then
         g_game.setChaseMode(0) -- DontChase
       end
       TargetBot.usingNativeChase = false

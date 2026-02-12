@@ -146,6 +146,10 @@ EventTargeting.CONSTANTS = {
   -- Cache settings
   CREATURE_CACHE_SIZE = 100,      -- Increased for larger spawns
   CREATURE_CACHE_TTL = 3000,      -- Reduced to 3s for faster cleanup
+
+  -- Pending target queue
+  MAX_PENDING_TARGETS = 40,
+  REQUEST_COOLDOWN = 200,
   
   -- Combat coordination
   COMBAT_PAUSE_DURATION = 300,    -- How long to pause CaveBot when engaging
@@ -161,6 +165,28 @@ EventTargeting.CONSTANTS = {
 }
 
 local CONST = EventTargeting.CONSTANTS
+
+-- Client-specific tuning (separate paths via ACL/ClientService)
+local function applyClientTuning()
+  local isOpenTibiaBR = ClientService and ClientService.isOpenTibiaBR and ClientService.isOpenTibiaBR()
+  if isOpenTibiaBR then
+    CONST.ACQUISITION_COOLDOWN = 60
+    CONST.DEBOUNCE_INTERVAL = 40
+    CONST.MAX_PROCESS_PER_TICK = 6
+    CONST.PATH_CACHE_TTL = 180
+    CONST.CREATURE_CACHE_TTL = 2500
+    CONST.REQUEST_COOLDOWN = 140
+  else
+    CONST.ACQUISITION_COOLDOWN = 100
+    CONST.DEBOUNCE_INTERVAL = 60
+    CONST.MAX_PROCESS_PER_TICK = 4
+    CONST.PATH_CACHE_TTL = 250
+    CONST.CREATURE_CACHE_TTL = 3200
+    CONST.REQUEST_COOLDOWN = 240
+  end
+end
+
+applyClientTuning()
 
 -- ============================================================================
 -- INTERNAL STATE
@@ -180,6 +206,8 @@ local targetState = {
   currentTarget = nil,
   currentTargetId = nil,
   lastAcquisition = 0,
+  lastRequestId = nil,
+  lastRequestTime = 0,
   pendingTargets = {},    -- Queue of targets to evaluate
   combatActive = false,
   lastCombatCheck = 0
@@ -815,6 +843,9 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
   -- Check cooldown
   if now - targetState.lastAcquisition < CONST.ACQUISITION_COOLDOWN then
     -- Queue for later evaluation
+    if #targetState.pendingTargets >= CONST.MAX_PENDING_TARGETS then
+      table.remove(targetState.pendingTargets, 1)
+    end
     table.insert(targetState.pendingTargets, {
       creature = creature,
       priority = priority,
@@ -969,33 +1000,37 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   local useNativeChase = chaseEnabled and not keepDistanceEnabled
   local Client = getClient()
   
-  if useNativeChase then
-    local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
-    if currentMode ~= 1 then
-      if Client and Client.setChaseMode then
-        Client.setChaseMode(1)
-      elseif g_game and g_game.setChaseMode then
-        g_game.setChaseMode(1)
+  if ChaseController then
+    ChaseController.setDesiredChase(useNativeChase)
+  else
+    if useNativeChase then
+      local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
+      if currentMode ~= 1 then
+        if Client and Client.setChaseMode then
+          Client.setChaseMode(1)
+        elseif g_game and g_game.setChaseMode then
+          g_game.setChaseMode(1)
+        end
+        -- Update cache for other modules
+        if TargetCore and TargetCore.Native then
+          TargetCore.Native.lastChaseMode = 1
+        end
+        if TargetBot then
+          TargetBot.usingNativeChase = true
+        end
       end
-      -- Update cache for other modules
-      if TargetCore and TargetCore.Native then
-        TargetCore.Native.lastChaseMode = 1
-      end
-      if TargetBot then
-        TargetBot.usingNativeChase = true
-      end
-    end
-  elseif not useNativeChase then
-    -- Chase is disabled OR keepDistance is enabled - use Stand mode
-    local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
-    if currentMode ~= 0 then
-      if Client and Client.setChaseMode then
-        Client.setChaseMode(0)
-      elseif g_game and g_game.setChaseMode then
-        g_game.setChaseMode(0)
-      end
-      if TargetBot then
-        TargetBot.usingNativeChase = false
+    elseif not useNativeChase then
+      -- Chase is disabled OR keepDistance is enabled - use Stand mode
+      local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
+      if currentMode ~= 0 then
+        if Client and Client.setChaseMode then
+          Client.setChaseMode(0)
+        elseif g_game and g_game.setChaseMode then
+          g_game.setChaseMode(0)
+        end
+        if TargetBot then
+          TargetBot.usingNativeChase = false
+        end
       end
     end
   end
@@ -1034,16 +1069,22 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   -- This is the SINGLE source of attack commands (prevents competing sources)
   -- ═══════════════════════════════════════════════════════════════════════════
   local sent = false
+  local currentTime = now or (os.time() * 1000)
+  local throttleSameTarget = (targetState.lastRequestId == id) and ((currentTime - (targetState.lastRequestTime or 0)) < CONST.REQUEST_COOLDOWN)
+  local smTargetId = AttackStateMachine and AttackStateMachine.getTargetId and AttackStateMachine.getTargetId()
   
   -- Use AttackStateMachine directly (always available - loaded as default)
   local smPriority = priorityHint or EventTargeting.TargetAcquisition.calculatePriority(creature, path)
-  sent = AttackStateMachine.requestSwitch(creature, smPriority)
-  if sent and EventTargeting.DEBUG then
-    print("[EventTargeting] Delegated to AttackStateMachine: " .. creature:getName())
-  end
-  
-  -- Only fallback to direct attack if state machine failed (should not happen)
-  if not sent then
+  if AttackStateMachine and AttackStateMachine.requestSwitch then
+    if smTargetId and smTargetId == id then
+      sent = true
+    elseif not throttleSameTarget then
+      sent = AttackStateMachine.requestSwitch(creature, smPriority)
+    end
+    if sent and EventTargeting.DEBUG then
+      print("[EventTargeting] Delegated to AttackStateMachine: " .. creature:getName())
+    end
+  else
     local Client = getClient()
     if Client and Client.attack then
       Client.attack(creature)
@@ -1060,6 +1101,11 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   local okCurId, curId = pcall(function() return currentAttack and currentAttack:getId() end)
   if not sent and not (currentAttack and okCurId and curId == id) then
     return
+  end
+
+  if sent then
+    targetState.lastRequestId = id
+    targetState.lastRequestTime = currentTime
   end
   
   targetState.currentTarget = creature

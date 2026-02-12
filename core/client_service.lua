@@ -61,6 +61,9 @@ function ClientService.getClientType()
   if acl then
     return acl.getClientType()
   end
+  if nExBot and nExBot.clientDetection and nExBot.clientDetection.type then
+    return nExBot.clientDetection.type
+  end
   return 0 -- UNKNOWN
 end
 
@@ -69,17 +72,32 @@ function ClientService.getClientName()
   if acl then
     return acl.getClientName()
   end
+  if nExBot and nExBot.clientDetection and nExBot.clientDetection.name then
+    return nExBot.clientDetection.name
+  end
   return "Unknown"
 end
 
 function ClientService.isOTCv8()
   local acl = loadACL()
-  return acl and acl.isOTCv8() or true -- Default to OTCv8
+  if acl then
+    return acl.isOTCv8()
+  end
+  if nExBot and nExBot.clientDetection and nExBot.clientDetection.type then
+    return nExBot.clientDetection.type == 1
+  end
+  return true -- Default to OTCv8
 end
 
 function ClientService.isOpenTibiaBR()
   local acl = loadACL()
-  return acl and acl.isOpenTibiaBR() or false
+  if acl then
+    return acl.isOpenTibiaBR()
+  end
+  if nExBot and nExBot.clientDetection and nExBot.clientDetection.type then
+    return nExBot.clientDetection.type == 2
+  end
+  return false
 end
 
 --------------------------------------------------------------------------------

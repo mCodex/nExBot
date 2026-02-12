@@ -2392,26 +2392,30 @@ targetbotMacro = macro(250, function()
       local keepDistanceEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.keepDistance
       local useNativeChase = chaseEnabled and not keepDistanceEnabled
       
-      if useNativeChase then
-        local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
-        if currentMode ~= 1 then
-          if Client and Client.setChaseMode then
-            Client.setChaseMode(1)
-          elseif g_game and g_game.setChaseMode then
-            g_game.setChaseMode(1)
+      if ChaseController then
+        ChaseController.setDesiredChase(useNativeChase)
+      else
+        if useNativeChase then
+          local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
+          if currentMode ~= 1 then
+            if Client and Client.setChaseMode then
+              Client.setChaseMode(1)
+            elseif g_game and g_game.setChaseMode then
+              g_game.setChaseMode(1)
+            end
+            if TargetBot then TargetBot.usingNativeChase = true end
           end
-          if TargetBot then TargetBot.usingNativeChase = true end
-        end
-      elseif not useNativeChase then
-        -- Chase disabled OR keepDistance enabled - ensure Stand mode
-        local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
-        if currentMode ~= 0 then
-          if Client and Client.setChaseMode then
-            Client.setChaseMode(0)
-          elseif g_game and g_game.setChaseMode then
-            g_game.setChaseMode(0)
+        elseif not useNativeChase then
+          -- Chase disabled OR keepDistance enabled - ensure Stand mode
+          local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
+          if currentMode ~= 0 then
+            if Client and Client.setChaseMode then
+              Client.setChaseMode(0)
+            elseif g_game and g_game.setChaseMode then
+              g_game.setChaseMode(0)
+            end
+            if TargetBot then TargetBot.usingNativeChase = false end
           end
-          if TargetBot then TargetBot.usingNativeChase = false end
         end
       end
       
@@ -2651,9 +2655,20 @@ targetbotMacro = macro(250, function()
       -- Use AttackStateMachine for all attack management
       local smState = AttackStateMachine.getState()
       local smTargetId = AttackStateMachine.getTargetId()
+      local allowSync = true
+
+      if EventTargeting and EventTargeting.isInCombat and EventTargeting.isInCombat() then
+        local evtTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
+        if evtTarget then
+          local okEvtId, evtId = pcall(function() return evtTarget:getId() end)
+          if okEvtId and evtId and evtId ~= id then
+            allowSync = false
+          end
+        end
+      end
       
       -- If state machine is targeting something different, sync it
-      if smTargetId ~= id then
+      if allowSync and smTargetId ~= id then
         pcall(function() AttackStateMachine.forceSwitch(bestTarget.creature) end)
       end
       

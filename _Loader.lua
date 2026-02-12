@@ -221,22 +221,118 @@ loadCategory("acl_compat", {
 })
 
 -- Store client info
+-- Detection runs inline to avoid dependency on adapter loading success.
+-- We re-use the same fingerprint logic from acl/init.lua but self-contained.
 do
+  local detected = false
+
+  -- Try ACL module first (may have been loaded in Phase 1)
   local aclStatus, acl = pcall(function()
     return dofile("/core/acl/init.lua")
   end)
-  if aclStatus and acl then
-    nExBot.clientType = acl.getClientType()
-    nExBot.clientName = acl.getClientName()
-    nExBot.isOTCv8 = acl.isOTCv8()
-    nExBot.isOpenTibiaBR = acl.isOpenTibiaBR()
-  else
-    nExBot.clientType = 1
-    nExBot.clientName = "OTCv8"
-    nExBot.isOTCv8 = true
-    nExBot.isOpenTibiaBR = false
+  if aclStatus and acl and acl.getClientType then
+    local ctype = acl.getClientType()
+    if ctype and ctype ~= 0 then
+      nExBot.clientType = ctype
+      nExBot.clientName = acl.getClientName()
+      nExBot.isOTCv8 = (ctype == 1)
+      nExBot.isOpenTibiaBR = (ctype == 2)
+      detected = true
+    end
+  end
+
+  -- Fallback: lightweight inline fingerprint if ACL failed or returned UNKNOWN
+  if not detected then
+    local isOTBR = false
+
+    -- Check OTBR-only module files on disk
+    if g_resources and type(g_resources.fileExists) == "function" then
+      local otbrPaths = {
+        "/modules/game_cyclopedia/game_cyclopedia.otmod",
+        "/modules/game_forge/game_forge.otmod",
+        "/modules/game_healthcircle/game_healthcircle.otmod",
+      }
+      for i = 1, #otbrPaths do
+        if g_resources.fileExists(otbrPaths[i]) then
+          isOTBR = true
+          break
+        end
+      end
+    end
+
+    -- Check OTBR-exclusive APIs
+    if not isOTBR then
+      if g_game and type(g_game.forceWalk) == "function" then
+        isOTBR = true
+      elseif g_map and type(g_map.findEveryPath) == "function" then
+        isOTBR = true
+      end
+    end
+
+    if isOTBR then
+      nExBot.clientType = 2
+      nExBot.clientName = "OpenTibiaBR"
+      nExBot.isOTCv8 = false
+      nExBot.isOpenTibiaBR = true
+    else
+      nExBot.clientType = 1
+      nExBot.clientName = "OTCv8"
+      nExBot.isOTCv8 = true
+      nExBot.isOpenTibiaBR = false
+    end
+  end
+
+  if not nExBot._clientPrinted then
+    nExBot._clientPrinted = true
+    print("[nExBot] Client detected: " .. tostring(nExBot.clientName) .. " (" .. tostring(nExBot.clientType) .. ")")
   end
 end
+
+-- Re-check detection after startup when globals are more likely to exist
+local function autoDetectClient(attempt, maxAttempts)
+  schedule(1500, function()
+    local ok, acl = pcall(function()
+      return dofile("/core/acl/init.lua")
+    end)
+    if ok and acl and acl.refreshDetection then
+      local prevType = nExBot.clientType
+      local prevName = nExBot.clientName
+      local newType = acl.refreshDetection()
+      nExBot.clientType = newType
+      nExBot.clientName = acl.getClientName()
+      nExBot.isOTCv8 = acl.isOTCv8()
+      nExBot.isOpenTibiaBR = acl.isOpenTibiaBR()
+
+      if newType ~= prevType or nExBot.clientName ~= prevName then
+        print("[nExBot] Client detected (late): " .. tostring(nExBot.clientName) .. " (" .. tostring(newType) .. ")")
+      end
+
+      if nExBot.isOpenTibiaBR then
+        return
+      end
+
+      if attempt >= maxAttempts then
+        if acl.getDetectionInfo then
+          local info = acl.getDetectionInfo()
+          if info and info.signals then
+            local keys = {}
+            for k, v in pairs(info.signals) do
+              if v then
+                table.insert(keys, k)
+              end
+            end
+            print("[nExBot] Client signals: signals=" .. table.concat(keys, ","))
+          end
+        end
+        return
+      end
+    end
+
+    autoDetectClient(attempt + 1, maxAttempts)
+  end)
+end
+
+autoDetectClient(1, 8)
 
 -- ============================================================================
 -- PHASE 2: CONSTANTS

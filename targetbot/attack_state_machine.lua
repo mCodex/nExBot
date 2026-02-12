@@ -65,15 +65,17 @@ end
 local CONFIG = {
   -- Attack timing
   -- IMPROVED v4.0: Increased intervals for less spam, more consistent attacking
-  ATTACK_REISSUE_INTERVAL = 1000,   -- Re-issue attack every 1000ms (server only needs periodic keepalive)
-  ATTACK_CONFIRM_TIMEOUT = 800,     -- Max time to wait for server confirmation
+  ATTACK_REISSUE_INTERVAL = 1200,   -- Re-issue attack every 1200ms (server only needs periodic keepalive)
+  ATTACK_CONFIRM_TIMEOUT = 900,     -- Max time to wait for server confirmation
   ATTACK_RECOVER_ATTEMPTS = 5,      -- Max recovery attempts before giving up
-  ATTACK_COOLDOWN = 200,            -- Minimum time between attack commands (prevents spam)
+  ATTACK_COOLDOWN = 250,            -- Minimum time between attack commands (prevents spam)
+  ATTACK_LOSS_GRACE = 350,          -- Grace window before treating attack as lost
   
   -- Target switching thresholds (STRICTER v3.0)
   SWITCH_PRIORITY_THRESHOLD = 500,  -- INCREASED: Need 500+ priority advantage to force switch (was 100)
   SWITCH_HP_THRESHOLD = 80,         -- INCREASED: Current target must be above 80% HP to allow switch (was 50%)
   SWITCH_COOLDOWN = 5000,           -- INCREASED: Minimum 5 seconds between target switches (was 800ms)
+  CONFIG_SWITCH_COOLDOWN = 700,     -- Minimum time between config-priority switches
   
   -- Health thresholds for stickiness (STRICTER v3.0)
   CRITICAL_HP = 30,                 -- INCREASED: Below 30%, NEVER switch (was 15%)
@@ -96,6 +98,28 @@ local CONFIG = {
 }
 
 AttackStateMachine.CONFIG = CONFIG
+
+-- Apply client-specific tuning (separate paths via ACL/ClientService)
+local function applyClientTuning()
+  local isOpenTibiaBR = ClientService and ClientService.isOpenTibiaBR and ClientService.isOpenTibiaBR()
+  if isOpenTibiaBR then
+    CONFIG.ATTACK_CONFIRM_TIMEOUT = 800
+    CONFIG.ATTACK_REISSUE_INTERVAL = 1000
+    CONFIG.ATTACK_COOLDOWN = 200
+    CONFIG.ATTACK_LOSS_GRACE = 300
+    CONFIG.SWITCH_COOLDOWN = 4000
+    CONFIG.CONFIG_SWITCH_COOLDOWN = 600
+  else
+    CONFIG.ATTACK_CONFIRM_TIMEOUT = 1000
+    CONFIG.ATTACK_REISSUE_INTERVAL = 1400
+    CONFIG.ATTACK_COOLDOWN = 300
+    CONFIG.ATTACK_LOSS_GRACE = 450
+    CONFIG.SWITCH_COOLDOWN = 5000
+    CONFIG.CONFIG_SWITCH_COOLDOWN = 800
+  end
+end
+
+applyClientTuning()
 
 -- ============================================================================
 -- INTERNAL STATE
@@ -616,7 +640,7 @@ local function shouldAllowSwitch(newCreature, newPriority)
     -- FAST PATH: Higher config priority = IMMEDIATE SWITCH
     -- Only a reduced cooldown applies (500ms instead of 5000ms)
     if newConfigPriority > currentConfigPriority then
-      local configSwitchCooldown = 500  -- Much shorter cooldown for config priority switches
+      local configSwitchCooldown = CONFIG.CONFIG_SWITCH_COOLDOWN or 700
       if (currentTime - state.lastSwitchTime) >= configSwitchCooldown then
         state.stats.switchesAllowed = (state.stats.switchesAllowed or 0) + 1
         log("CONFIG PRIORITY SWITCH: " .. newConfigPriority .. " > " .. currentConfigPriority)
@@ -802,14 +826,21 @@ local function handleAttacking()
   state.targetHealth = getCreatureHealth(state.targetCreature)
   
   -- Check if attack is still active
-  if not isAttackConfirmed() then
-    -- Attack was lost - enter recovery
-    transition(STATE.RECOVERING, "attack_lost")
-    return
+  local confirmed = isAttackConfirmed()
+  if not confirmed then
+    local sinceConfirmed = nowMs() - (state.lastAttackConfirmed or 0)
+    if sinceConfirmed >= CONFIG.ATTACK_LOSS_GRACE then
+      -- Attack was lost - enter recovery
+      transition(STATE.RECOVERING, "attack_lost")
+      return
+    end
   end
   
-  -- Update last confirmed time
-  state.lastAttackConfirmed = nowMs()
+  -- Update last confirmed time only when confirmed
+  if confirmed then
+    state.lastAttackConfirmed = nowMs()
+    state.attackConfirmed = true
+  end
   
   -- Check for pending switch request
   if state.switchRequested and state.pendingTarget then
