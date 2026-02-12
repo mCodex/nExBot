@@ -1,6 +1,16 @@
 local cavebotMacro = nil
 local config = nil
 
+-- Safe local fallback for TrimArray (some sandboxes / test clients don't expose the global)
+local TrimArray = TrimArray or (RingBuffer and RingBuffer.trimArray) or function(arr, maxSize)
+  if type(arr) ~= "table" or not maxSize or maxSize < 1 then return 0 end
+  local excess = #arr - maxSize
+  if excess <= 0 then return 0 end
+  for i = 1, maxSize do arr[i] = arr[i + excess] end
+  for i = maxSize + 1, #arr do arr[i] = nil end
+  return excess
+end
+
 -- Safe wrapper for CaveBot.resetWalking to prevent nil errors
 local function safeResetWalking()
   if CaveBot and CaveBot.resetWalking then

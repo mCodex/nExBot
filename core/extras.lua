@@ -759,19 +759,24 @@ if true then
           guild = guild:sub(1,10) -- change to proper (last) values
           guild = guild.."..."
         end
-        local voc
-        if text:lower():find("sorcerer") then
+        -- determine vocation shorthand safely (default to empty string)
+        local voc = ""
+        local ltext = text:lower()
+        if ltext:find("sorcerer") then
             voc = "MS"
-        elseif text:lower():find("druid") then
+        elseif ltext:find("druid") then
             voc = "ED"
-        elseif text:lower():find("knight") then
+        elseif ltext:find("knight") then
             voc = "EK"
-        elseif text:lower():find("paladin") then
+        elseif ltext:find("paladin") then
             voc = "RP"
+        elseif ltext:find("monk") then
+            voc = "MK" -- handle monk vocation
         end
         local creature = SafeCall.getCreatureByName(name)
         if creature then
-            creature:setText("\n"..level..voc.."\n"..guild)
+            -- include a space before vocation so output is readable; empty `voc` is safe
+            creature:setText("\n"..level..(voc ~= "" and (" "..voc) or "").."\n"..guild)
         end
         if found and now - found < 500 then
           modules.game_textmessage.clearMessages()
