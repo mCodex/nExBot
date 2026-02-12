@@ -1260,7 +1260,12 @@ end
 -- Re-issue attack command to maintain target lock
 local function reissueAttack()
   if not followState.currentAttackTarget then return false end
-  
+
+  -- Defer to AttackStateMachine when active (prevents competing attack commands)
+  if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
+    return true  -- ASM handles attack persistence
+  end
+
   local currentTime = now or (os.time() * 1000)
   if (currentTime - followState.lastAttackReissue) < ATTACK_REISSUE_INTERVAL then
     return true -- Still within interval, attack should be active

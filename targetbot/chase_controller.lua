@@ -285,10 +285,33 @@ end
 
 -- Hook into EventBus if available
 if EventBus then
+  -- CRITICAL FIX: OpenTibiaBR transiently fires combat:target(nil) for 200-500ms
+  -- during normal attacks. Reacting immediately disables chase + calls g_game.stop(),
+  -- which turns the transient nil into a REAL attack loss.
+  -- Use a delayed check: only act on nil if the ASM also considers the target gone.
+  local _pendingCancelEvent = nil
+  local CHASE_NIL_GRACE_MS = 1200  -- Must exceed ASM GRACE_PERIOD (1000ms on OTBR)
+
   EventBus.on("combat:target", function(creature, oldCreature)
-    if not creature then
-      ChaseController.onAttackCancelled()
+    if creature then
+      -- Target present: cancel any pending nil reaction
+      if _pendingCancelEvent then
+        removeEvent(_pendingCancelEvent)
+        _pendingCancelEvent = nil
+      end
+      return
     end
+
+    -- creature == nil: schedule a delayed reaction
+    if _pendingCancelEvent then return end  -- Already scheduled
+    _pendingCancelEvent = schedule(CHASE_NIL_GRACE_MS, function()
+      _pendingCancelEvent = nil
+      -- Only cancel if ASM also agrees the target is gone
+      if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
+        return  -- ASM still managing a target — transient nil, ignore
+      end
+      ChaseController.onAttackCancelled()
+    end)
   end, 100)  -- High priority
   
   EventBus.on("player:health", function(hp, maxHp)

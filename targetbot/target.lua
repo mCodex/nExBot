@@ -771,24 +771,44 @@ if EventBus then
   end, 60)
   
   -- Target changes
+  -- CRITICAL FIX: OpenTibiaBR transiently fires combat:target(nil).
+  -- Immediately emitting "targetbot/combat_end" disables ChaseModeEnforcer and
+  -- triggers chase disable cascades. Defer the nil branch.
   local lastCombatTargetId = nil
+  local _combatEndPending = nil
+  local COMBAT_END_GRACE_MS = 1200
+
   EventBus.on("combat:target", function(creature, oldCreature)
     invalidateCache()
 
     local newId = creature and creature:getId() or nil
     if newId ~= lastCombatTargetId then
       if creature then
+        -- Cancel any pending combat_end
+        if _combatEndPending then
+          removeEvent(_combatEndPending)
+          _combatEndPending = nil
+        end
         -- Combat started
         if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", true) else storage.targetbotCombatActive = true end
         pcall(function()
           EventBus.emit("targetbot/combat_start", creature, { id = newId, pos = creature:getPosition() })
         end)
+        lastCombatTargetId = newId
       else
-        -- Combat ended
-        if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", false) else storage.targetbotCombatActive = false end
-        pcall(function() EventBus.emit("targetbot/combat_end") end)
+        -- Defer combat_end to survive transient nils
+        if _combatEndPending then return end
+        _combatEndPending = schedule(COMBAT_END_GRACE_MS, function()
+          _combatEndPending = nil
+          -- Only emit combat_end if ASM also agrees target is gone
+          if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
+            return  -- ASM still managing — transient nil
+          end
+          if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", false) else storage.targetbotCombatActive = false end
+          pcall(function() EventBus.emit("targetbot/combat_end") end)
+          lastCombatTargetId = nil
+        end)
       end
-      lastCombatTargetId = newId
     end
   end, 70)
 
@@ -2305,6 +2325,15 @@ schedule(200, function() if not performPendingEnableOnce() then end end)
 schedule(600, function() if not performPendingEnableOnce() then end end)
 schedule(1600, function() if not performPendingEnableOnce() then warn('[TargetBot] post-init: deferred enable attempts exhausted') end end)
 
+-- Module load diagnostics: print whether key functions are available shortly after load
+-- Module init check (silent): mark module as initialized after a short delay and attempt pending enable
+schedule(1500, function()
+  moduleInitialized = true
+  pcall(function() performPendingEnableOnce() end)
+  -- Startup sanity log to confirm TargetBot module loaded
+  -- warn("[TargetBot] module initialized. TargetBot._removed=" .. tostring(TargetBot and TargetBot._removed) .. ", TargetBot.isOn=" .. tostring(TargetBot and TargetBot.isOn and TargetBot.isOn()))
+end)
+
 -- Prime the CreatureCache directly from current spectators (used when enabling targetbot)
 local function primeCreatureCache()
   local p = player and player:getPosition()
@@ -2535,7 +2564,10 @@ targetbotMacro = macro(250, function()
   end
 
   -- HARD STICKY: If we already attack a valid monster on screen, keep it
-  local currentAttack = g_game.getAttackingCreature and g_game.getAttackingCreature()
+  -- Use ACL-safe client getter instead of raw g_game (respects ACL pattern)
+  local Client_hs = getClient()
+  local currentAttack = (Client_hs and Client_hs.getAttackingCreature) and Client_hs.getAttackingCreature()
+    or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
   if currentAttack and not currentAttack:isDead() then
     local okPos, cpos = pcall(function() return currentAttack:getPosition() end)
     if okPos and cpos and cpos.z == pos.z then
@@ -2667,25 +2699,20 @@ targetbotMacro = macro(250, function()
         end
       end
       
-      -- v3.0: Only request a target switch when ASM is NOT actively attacking.
-      -- This prevents the attack-once-then-stop cycle caused by interrupting
-      -- the ATTACKING state every tick with forceSwitch.
+      -- v4.0: Only request attack when ASM is IDLE (not actively managing a target).
       if allowSync and smTargetId ~= id then
-        if smState == "IDLE" or smState == "RECOVERING" then
-          pcall(function() AttackStateMachine.requestSwitch(bestTarget.creature, 1000) end)
+        if smState == "IDLE" then
+          pcall(function() AttackStateMachine.requestAttack(bestTarget.creature, 1000) end)
         end
-        -- In ATTACKING/CONFIRMING/ACQUIRING states, the ASM owns the attack flow.
-        -- We do NOT interrupt it — the current target will be finished first.
+        -- In ENGAGING/LOCKED states the ASM owns the attack flow.
       end
-      
+
       -- Update AttackController based on state machine status
-      if smState == "ATTACKING" or smState == "RECOVERING" or smState == "CONFIRMING" then
-        -- State machine is handling it - trust it completely
+      if smState == "LOCKED" then
         AttackController.attackState = "confirmed"
         AttackController.lastConfirmedTime = nowt
         AttackController.lastTargetId = id
-      elseif smState == "ACQUIRING" then
-        -- State machine is acquiring target
+      elseif smState == "ENGAGING" then
         AttackController.attackState = "pending"
         AttackController.lastCommandTime = nowt
         AttackController.lastTargetId = id
@@ -2835,18 +2862,6 @@ end)
 
 -- Stop attacking the current target
 TargetBot.stopAttack = function(clearWalk)
-
-
--- Module load diagnostics: print whether key functions are available shortly after load
--- Module init check (silent): mark module as initialized after a short delay and attempt pending enable
-schedule(1500, function()
-  moduleInitialized = true
-  pcall(function() performPendingEnableOnce() end)
-  -- Startup sanity log to confirm TargetBot module loaded
-  -- warn("[TargetBot] module initialized. TargetBot._removed=" .. tostring(TargetBot and TargetBot._removed) .. ", TargetBot.isOn=" .. tostring(TargetBot and TargetBot.isOn and TargetBot.isOn()))
-end)
-
-
   if clearWalk then
     TargetBot.clearWalk()
   end

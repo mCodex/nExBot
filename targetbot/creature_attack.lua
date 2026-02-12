@@ -1598,17 +1598,16 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
           end
         end
 
-        -- Clear attack target to prevent OTClient errors
-        local Client2 = getClient()
-        local currentTarget = (Client2 and Client2.getAttackingCreature) and Client2.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
-        if currentTarget and currentTarget:getId() == creature:getId() then
-          pcall(function()
-            if Client2 and Client2.cancelAttackAndFollow then
-              Client2.cancelAttackAndFollow()
-            elseif g_game and g_game.cancelAttackAndFollow then
-              g_game.cancelAttackAndFollow()
-            end
-          end)
+        -- Route through ASM so it can cleanly transition to IDLE
+        if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
+          pcall(AttackStateMachine.stop)
+        else
+          local Client2 = getClient()
+          if Client2 and Client2.cancelAttackAndFollow then
+            pcall(Client2.cancelAttackAndFollow)
+          elseif g_game and g_game.cancelAttackAndFollow then
+            pcall(g_game.cancelAttackAndFollow)
+          end
         end
         
         -- Allow CaveBot to walk away from blocked creature
@@ -1642,18 +1641,14 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     -- This prevents attack spam while ensuring continuous attacking
     local attackIssued = false
     if AttackStateMachine and AttackStateMachine.requestSwitch then
-      -- Use requestSwitch for rate-limited attack
+      -- Use requestSwitch for rate-limited attack (sole attack issuer)
       local priority = params.priority or (params.config and params.config.priority) or 100
       attackIssued = AttackStateMachine.requestSwitch(creature, priority * 100)
     else
-      local ok, err = pcall(function()
-        if Client and Client.attack then
-          Client.attack(creature)
-        elseif g_game and g_game.attack then
-          g_game.attack(creature)
-        end
-      end)
-      if not ok then warn("[TargetBot] attack pcall failed: " .. tostring(err)) end
+      -- v4.1: NO direct Client.attack/g_game.attack fallback.
+      -- AttackStateMachine is the SOLE attack issuer (SRP).  Competing callers
+      -- cause the visible attack-blink on OpenTibiaBR ACL.
+      log("[TargetBot] AttackStateMachine unavailable — skipping attack (no fallback)")
     end
     
     -- IMPORTANT: Do NOT call g_game.follow() - it cancels the attack!

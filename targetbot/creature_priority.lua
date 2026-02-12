@@ -253,12 +253,14 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
       return (config.priority or 1) * 400  -- Scaled config priority
     end
     
-    -- RP Safe: Cancel attack on out-of-range target
+    -- RP Safe: Cancel attack on out-of-range target (route through ASM)
     if config.rpSafe then
       local Client = getClient()
       local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
       if currentTarget == creature then
-        if Client and Client.cancelAttackAndFollow then
+        if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
+          pcall(AttackStateMachine.stop)
+        elseif Client and Client.cancelAttackAndFollow then
           Client.cancelAttackAndFollow()
         elseif g_game and g_game.cancelAttackAndFollow then
           g_game.cancelAttackAndFollow()
@@ -400,13 +402,17 @@ TargetBot.Creature.calculatePriority = function(creature, config, path)
         -- Could pull extra monsters - reduce priority significantly
         priority = priority - largeAreaMonsters * 10
         
-        -- If currently attacking this and would pull, cancel
+        -- If currently attacking this and would pull, cancel (route through ASM)
         if isCurrentTarget and largeAreaMonsters >= 2 then
-          local Client3 = getClient()
-          if Client3 and Client3.cancelAttackAndFollow then
-            Client3.cancelAttackAndFollow()
-          elseif g_game and g_game.cancelAttackAndFollow then
-            g_game.cancelAttackAndFollow()
+          if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
+            pcall(AttackStateMachine.stop)
+          else
+            local Client3 = getClient()
+            if Client3 and Client3.cancelAttackAndFollow then
+              Client3.cancelAttackAndFollow()
+            elseif g_game and g_game.cancelAttackAndFollow then
+              g_game.cancelAttackAndFollow()
+            end
           end
           return 0
         end

@@ -107,12 +107,15 @@ State Diagram
     └───── re-confirm ──────────┘
 ```
 
-| Config Key | Default | Description |
-|------------|---------|-------------|
-| `ATTACK_REISSUE_INTERVAL` | 1200 ms | Re-send attack if server didn't confirm |
-| `ATTACK_CONFIRM_TIMEOUT` | 900 ms | Time to wait for `getAttackingCreature` |
-| `ATTACK_LOSS_GRACE` | 350 ms | Grace after losing target before IDLE |
-| `SWITCH_COOLDOWN` | 5000 ms | Minimum time between target switches |
+| Config Key | Default | OpenTibiaBR | Description |
+|------------|---------|-------------|-------------|
+| `ATTACK_REISSUE_INTERVAL` | 1400 ms | 1500 ms | Re-send attack if server didn't confirm |
+| `ATTACK_CONFIRM_TIMEOUT` | 1000 ms | 1200 ms | Time to wait for `getAttackingCreature` |
+| `ATTACK_COOLDOWN` | 300 ms | 350 ms | Minimum time between attack commands |
+| `ATTACK_LOSS_GRACE` | 450 ms | 800 ms | Grace after losing target before RECOVERING (must exceed ACL nil-report window) |
+| `RECOVER_COOLDOWN` | 600 ms | 800 ms | Minimum time between recovery re-attack attempts |
+| `STOP_START_DEBOUNCE` | 1000 ms | 1200 ms | IDLE hold-off time — prevents rapid stop→re-acquire loop on noisy clients |
+| `SWITCH_COOLDOWN` | 5000 ms | 4000 ms | Minimum time between target switches |
 
 ### Rules
 

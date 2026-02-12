@@ -1567,8 +1567,19 @@ if EventBus then
   end, 10)
   
   -- Combat target changed
+  -- CRITICAL FIX: OpenTibiaBR transiently fires combat:target(nil) for 200-500ms.
+  -- Immediately clearing target state + resuming CaveBot allows walk-away commands
+  -- that turn the transient nil into a REAL attack loss. Defer nil handling.
+  local _etPendingNil = nil
+  local ET_NIL_GRACE_MS = 1200
+
   EventBus.on("combat:target", function(creature, oldCreature)
     if creature then
+      -- Cancel any pending nil reaction
+      if _etPendingNil then
+        removeEvent(_etPendingNil)
+        _etPendingNil = nil
+      end
       targetState.currentTarget = creature
       targetState.currentTargetId = creature:getId()
       targetState.lastAcquisition = now
@@ -1576,12 +1587,20 @@ if EventBus then
       -- Ensure CaveBot is paused
       EventTargeting.CombatCoordinator.pauseCaveBot()
     else
-      -- Target cleared
-      if targetState.combatActive then
-        EventTargeting.CombatCoordinator.resumeCaveBot()
-      end
-      targetState.currentTarget = nil
-      targetState.currentTargetId = nil
+      -- Target nil: defer clearing to survive transient nils
+      if _etPendingNil then return end
+      _etPendingNil = schedule(ET_NIL_GRACE_MS, function()
+        _etPendingNil = nil
+        -- Only clear if ASM also considers target gone
+        if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
+          return  -- ASM still managing — transient nil
+        end
+        if targetState.combatActive then
+          EventTargeting.CombatCoordinator.resumeCaveBot()
+        end
+        targetState.currentTarget = nil
+        targetState.currentTargetId = nil
+      end)
     end
   end, 35)
   

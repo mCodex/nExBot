@@ -1,35 +1,30 @@
 --[[
-  Attack State Machine v1.0
-  
-  A deterministic, event-driven state machine for continuous monster targeting.
-  Ensures LINEAR attack behavior: one target at a time, until death.
-  
-  Key Principles:
-  1. SINGLE SOURCE OF TRUTH: Only this module issues attack commands
-  2. STATE-BASED: Clear states prevent race conditions
-  3. STICKY TARGETING: Once locked, stay locked until target dies
-  4. EVENT-DRIVEN: Reacts to game events in real-time
-  5. ANTI-SPAM: Intelligent attack re-issue without flooding server
-  
+  Attack State Machine v2.0 — Clean rewrite
+
+  Deterministic state machine for monster target management.
+  SOLE authority for issuing attack commands when TargetBot is active.
+
+  Design principles:
+  - 3 states (IDLE → ENGAGING → LOCKED) — down from 5
+  - Single rate-limited sendAttack() — never spams the server
+  - Grace-based confirmation in LOCKED — tolerates OpenTibiaBR transient nils
+  - No RECOVERING state — grace expiry simply re-enters ENGAGING
+  - 100ms tick rate (down from 50ms — 10 FPS is sufficient for combat)
+  - SRP: Only manages attack state. Target selection is external (target.lua).
+  - Path-blocked detection exposed as external filter, not in state handlers.
+
   States:
-  - IDLE: No target, waiting for monsters
-  - ACQUIRING: Found target, sending attack command
-  - ATTACKING: Currently attacking, monitoring target health
-  - CONFIRMING: Verifying attack registered with server
-  - RECOVERING: Attack was lost, re-acquiring same target
-  
-  Integration:
-  - Replaces scattered attack logic in target.lua and event_targeting.lua
-  - Uses EventBus for real-time monitoring
-  - Integrates with MonsterAI for threat assessment
+    IDLE     — No target. Passive game-sync only. Awaits requestAttack().
+    ENGAGING — Attack command sent, awaiting server confirmation. Auto-retries.
+    LOCKED   — Server confirmed. Monitors target until death or explicit switch.
 ]]
 
 -- ============================================================================
--- MODULE NAMESPACE
+-- MODULE
 -- ============================================================================
 
 AttackStateMachine = AttackStateMachine or {}
-AttackStateMachine.VERSION = "1.0"
+AttackStateMachine.VERSION = "2.0"
 AttackStateMachine.DEBUG = false
 
 -- ============================================================================
@@ -37,907 +32,513 @@ AttackStateMachine.DEBUG = false
 -- ============================================================================
 
 local STATE = {
-  IDLE = "IDLE",           -- No target
-  ACQUIRING = "ACQUIRING", -- Sending attack command
-  ATTACKING = "ATTACKING", -- Locked on target
-  CONFIRMING = "CONFIRMING", -- Waiting for server confirmation
-  RECOVERING = "RECOVERING"  -- Re-acquiring lost attack
+  IDLE     = "IDLE",
+  ENGAGING = "ENGAGING",
+  LOCKED   = "LOCKED",
 }
 
 AttackStateMachine.STATE = STATE
 
 -- ============================================================================
--- CONFIGURATION (Tunable)
--- IMPROVED v3.0: Stricter values for linear targeting (anti-zigzag)
+-- CLIENT HELPERS (reuse global ClientHelper — DRY)
 -- ============================================================================
 
---------------------------------------------------------------------------------
--- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
---------------------------------------------------------------------------------
 local function getClient()
   return ClientHelper and ClientHelper.getClient() or ClientService
 end
 
-local function getClientVersion()
-  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
+local nowMs = (ClientHelper and ClientHelper.nowMs) or function()
+  return now or (os.time() * 1000)
 end
 
+-- ============================================================================
+-- CONFIGURATION (minimal surface, client-tuned)
+-- ============================================================================
+
 local CONFIG = {
-  -- Attack timing
-  -- IMPROVED v4.0: Increased intervals for less spam, more consistent attacking
-  ATTACK_REISSUE_INTERVAL = 1200,   -- Re-issue attack every 1200ms (server only needs periodic keepalive)
-  ATTACK_CONFIRM_TIMEOUT = 900,     -- Max time to wait for server confirmation
-  ATTACK_RECOVER_ATTEMPTS = 5,      -- Max recovery attempts before giving up
-  ATTACK_COOLDOWN = 250,            -- Minimum time between attack commands (prevents spam)
-  ATTACK_LOSS_GRACE = 350,          -- Grace window before treating attack as lost
-  
-  -- Target switching thresholds (STRICTER v3.0)
-  SWITCH_PRIORITY_THRESHOLD = 500,  -- INCREASED: Need 500+ priority advantage to force switch (was 100)
-  SWITCH_HP_THRESHOLD = 80,         -- INCREASED: Current target must be above 80% HP to allow switch (was 50%)
-  SWITCH_COOLDOWN = 5000,           -- INCREASED: Minimum 5 seconds between target switches (was 800ms)
-  CONFIG_SWITCH_COOLDOWN = 700,     -- Minimum time between config-priority switches
-  
-  -- Health thresholds for stickiness (STRICTER v3.0)
-  CRITICAL_HP = 30,                 -- INCREASED: Below 30%, NEVER switch (was 15%)
-  LOW_HP = 50,                      -- INCREASED: Below 50%, require huge priority advantage (was 30%)
-  WOUNDED_HP = 75,                  -- INCREASED: Below 75%, require significant advantage (was 50%)
-  
-  -- Path-blocked handling (v5.0 - Skip unreachable monsters)
-  PATH_CHECK_INTERVAL = 500,        -- Check path every 500ms when attacking
-  PATH_BLOCKED_TIMEOUT = 3000,      -- If blocked for 3 seconds, skip this monster
-  PATH_BLOCKED_MAX_ATTEMPTS = 5,    -- Max failed path attempts before skipping
-  PATH_BLOCKED_SKIP_DURATION = 10000, -- Skip this monster for 10 seconds
-  PATH_BLOCKED_MIN_DISTANCE = 2,    -- Only check path if distance > 2 (adjacent is always reachable)
-  
-  -- Performance
-  UPDATE_INTERVAL = 50,             -- State machine tick interval (50ms = 20 FPS)
-  HEALTH_CHECK_INTERVAL = 100,      -- How often to check target health
-  
+  -- Timing
+  TICK_INTERVAL      = 100,   -- State machine tick rate (ms)
+  COMMAND_COOLDOWN   = 400,   -- Hard minimum between attack commands (ms)
+  CONFIRM_TIMEOUT    = 1200,  -- Max wait in ENGAGING for confirmation (ms)
+  GRACE_PERIOD       = 600,   -- Stay LOCKED despite transient nil reports (ms)
+  KEEPALIVE_INTERVAL = 2000,  -- Re-issue attack while LOCKED to keep server alive (ms)
+  STOP_DEBOUNCE      = 800,   -- After stop/IDLE, block requestAttack for this long (ms)
+  ENGAGE_RETRIES     = 3,     -- Max retries in ENGAGING before forfeit
+
+  -- Target switching
+  SWITCH_COOLDOWN        = 3000,  -- Min time between target switches (ms)
+  CONFIG_SWITCH_COOLDOWN = 500,   -- Reduced cooldown for user-configured priority switch
+  CRITICAL_HP            = 30,    -- Below this HP%, never switch away
+
+  -- Path-blocked skip list (external filter, not used in state handlers)
+  PATH_SKIP_DURATION = 10000,
+
   -- Debug
-  LOG_STATE_CHANGES = false
+  LOG_STATE_CHANGES = false,
 }
 
-AttackStateMachine.CONFIG = CONFIG
-
--- Apply client-specific tuning (separate paths via ACL/ClientService)
+--- Apply client-specific timing overrides via ACL.
 local function applyClientTuning()
-  local isOpenTibiaBR = ClientService and ClientService.isOpenTibiaBR and ClientService.isOpenTibiaBR()
-  if isOpenTibiaBR then
-    CONFIG.ATTACK_CONFIRM_TIMEOUT = 800
-    CONFIG.ATTACK_REISSUE_INTERVAL = 1000
-    CONFIG.ATTACK_COOLDOWN = 200
-    CONFIG.ATTACK_LOSS_GRACE = 300
-    CONFIG.SWITCH_COOLDOWN = 4000
-    CONFIG.CONFIG_SWITCH_COOLDOWN = 600
-  else
-    CONFIG.ATTACK_CONFIRM_TIMEOUT = 1000
-    CONFIG.ATTACK_REISSUE_INTERVAL = 1400
-    CONFIG.ATTACK_COOLDOWN = 300
-    CONFIG.ATTACK_LOSS_GRACE = 450
-    CONFIG.SWITCH_COOLDOWN = 5000
-    CONFIG.CONFIG_SWITCH_COOLDOWN = 800
+  local isOTBR = ClientService and ClientService.isOpenTibiaBR and ClientService.isOpenTibiaBR()
+  if isOTBR then
+    -- OpenTibiaBR reports getAttackingCreature()=nil transiently for 200-500ms
+    -- during normal attacks. Use generous values to avoid false re-engage cycles.
+    CONFIG.COMMAND_COOLDOWN   = 500
+    CONFIG.CONFIRM_TIMEOUT    = 1500
+    CONFIG.GRACE_PERIOD       = 1000
+    CONFIG.KEEPALIVE_INTERVAL = 2500
+    CONFIG.STOP_DEBOUNCE      = 1000
   end
 end
 
 applyClientTuning()
+AttackStateMachine.CONFIG = CONFIG
+
+-- ============================================================================
+-- CREATURE HELPERS (delegate to SafeCreature when loaded)
+-- ============================================================================
+
+local SC = SafeCreature or {}
+
+local function cId(c)
+  if not c then return nil end
+  if SC.getId then return SC.getId(c) end
+  local ok, v = pcall(function() return c:getId() end)
+  return ok and v or nil
+end
+
+local function cHp(c)
+  if not c then return 0 end
+  if SC.getHealthPercent then return SC.getHealthPercent(c) end
+  local ok, v = pcall(function() return c:getHealthPercent() end)
+  return ok and v or 0
+end
+
+local function cDead(c)
+  if not c then return true end
+  if SC.isDead then return SC.isDead(c) end
+  local ok, v = pcall(function() return c:isDead() end)
+  return (ok and v == true) or cHp(c) <= 0
+end
+
+local function cName(c)
+  if not c then return "?" end
+  if SC.getName then return SC.getName(c) end
+  local ok, v = pcall(function() return c:getName() end)
+  return ok and v or "?"
+end
 
 -- ============================================================================
 -- INTERNAL STATE
 -- ============================================================================
 
 local state = {
-  -- Current state
-  current = STATE.IDLE,
-  previousState = nil,
-  stateEnterTime = 0,
-  
-  -- Target tracking
-  targetId = nil,
-  targetCreature = nil,
-  targetHealth = 100,
-  targetPriority = 0,
-  targetConfig = nil,
-  
+  current         = STATE.IDLE,
+  previous        = nil,
+  enteredAt       = 0,
+
+  -- Target
+  targetId        = nil,
+  creature        = nil,
+  hp              = 100,
+  priority        = 0,
+
   -- Attack tracking
-  lastAttackCommand = 0,
-  lastAttackConfirmed = 0,
-  attackConfirmed = false,
-  recoverAttempts = 0,
-  
-  -- Switch tracking
-  lastSwitchTime = 0,
-  switchRequested = false,
-  pendingTarget = nil,
-  pendingPriority = 0,
-  
-  -- Path-blocked tracking (v5.0 - Skip unreachable monsters)
-  pathBlockedAttempts = 0,       -- How many times we failed to reach target
-  pathBlockedSince = 0,          -- When path blocking started
-  lastPathCheck = 0,             -- Last time we checked path
-  pathBlockedSkipList = {},      -- {creatureId -> skipUntil timestamp}
-  
+  lastCommandAt   = 0,
+  lastConfirmedAt = 0,
+  retries         = 0,
+
+  -- Debounce / switch
+  lastStopAt      = 0,
+  lastSwitchAt    = 0,
+  pendingSwitch   = nil,  -- { creature, priority } or nil
+
+  -- Path-blocked skip list (populated by external code)
+  skipList        = {},   -- creatureId → expireTimestamp
+
   -- Statistics
   stats = {
-    attacksIssued = 0,
-    attacksConfirmed = 0,
-    switchesBlocked = 0,
-    switchesAllowed = 0,
-    recoveries = 0,
-    targetsKilled = 0,
-    pathBlockedSkips = 0         -- Track skipped path-blocked monsters
-  }
+    commands  = 0,
+    confirms  = 0,
+    kills     = 0,
+    switches  = 0,
+    skips     = 0,
+  },
 }
 
--- Cached player reference
 local player = nil
+local lastTick = 0
 
 -- ============================================================================
--- UTILITY FUNCTIONS (use ClientHelper for DRY)
+-- LOGGING
 -- ============================================================================
-
-local nowMs = ClientHelper and ClientHelper.nowMs or function()
-  return now or (os.time() * 1000)
-end
 
 local function log(msg)
   if AttackStateMachine.DEBUG then
-    print("[AttackSM] " .. msg)
+    print("[ASM] " .. msg)
   end
 end
 
-local function logState(newState, reason)
+local function logTransition(to, reason)
   if CONFIG.LOG_STATE_CHANGES or AttackStateMachine.DEBUG then
-    print(string.format("[AttackSM] %s -> %s (%s)", state.current, newState, reason or ""))
+    print(string.format("[ASM] %s -> %s (%s)", state.current, to, reason or ""))
   end
 end
 
-local function updatePlayerRef()
+-- ============================================================================
+-- STATE TRANSITION (single point of change)
+-- ============================================================================
+
+local function transition(to, reason)
+  if state.current == to then return end
+  logTransition(to, reason)
+
+  state.previous = state.current
+  state.current = to
+  state.enteredAt = nowMs()
+
+  if to == STATE.IDLE then
+    state.lastStopAt = nowMs()
+    state.retries = 0
+  end
+
+  if EventBus and EventBus.emit then
+    pcall(EventBus.emit, "attacksm:state_changed", to, state.previous, reason)
+  end
+end
+
+-- ============================================================================
+-- GAME INTERACTION
+-- ============================================================================
+
+local function updatePlayer()
   if not player or not pcall(function() return player:getPosition() end) then
-    local Client = getClient()
-    player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or nil
+    local C = getClient()
+    player = (C and C.getLocalPlayer and C.getLocalPlayer())
+          or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
+          or nil
   end
   return player
 end
 
--- ============================================================================
--- OPENTIBIABR TARGETING ENHANCEMENT (v3.1)
--- Use fast creature lookup when available
--- ============================================================================
-local OpenTibiaBRTargeting = nil
-local function loadOpenTibiaBRTargeting()
-  if OpenTibiaBRTargeting then return OpenTibiaBRTargeting end
-  local ok, result = pcall(function()
-    return dofile("nExBot/targetbot/opentibiabr_targeting.lua")
-  end)
-  if ok and result then
-    OpenTibiaBRTargeting = result
+--- Get the creature the game client currently targets.
+local function gameTarget()
+  local C = getClient()
+  if C and C.getAttackingCreature then
+    local ok, c = pcall(C.getAttackingCreature)
+    return ok and c or nil
   end
-  return OpenTibiaBRTargeting
-end
-
--- ============================================================================
--- SAFE CREATURE ACCESS HELPERS (v4.0 - Using SafeCreature module for DRY)
--- ============================================================================
-
--- Use global SafeCreature module (with defensive nil check)
-local SC = SafeCreature or {}
-
--- Defensive fallback functions if SafeCreature not loaded
-local function safeGetId(creature)
-  if SC.getId then return SC.getId(creature) end
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
-end
-
-local function safeGetHealthPercent(creature)
-  if SC.getHealthPercent then return SC.getHealthPercent(creature) end
-  if not creature then return 0 end
-  local ok, hp = pcall(function() return creature:getHealthPercent() end)
-  return ok and hp or 0
-end
-
-local function safeIsDead(creature)
-  if SC.isDead then return SC.isDead(creature) end
-  if not creature then return true end
-  local ok, dead = pcall(function() return creature:isDead() end)
-  return ok and dead == true
-end
-
-local function safeGetPosition(creature)
-  if SC.getPosition then return SC.getPosition(creature) end
-  if not creature then return nil end
-  local ok, pos = pcall(function() return creature:getPosition() end)
-  return ok and pos or nil
-end
-
-local function safeGetName(creature)
-  if SC.getName then return SC.getName(creature) end
-  if not creature then return "Unknown" end
-  local ok, name = pcall(function() return creature:getName() end)
-  return ok and name or "Unknown"
-end
-
--- Safe creature property access (delegates to SafeCreature or fallback)
-local function getCreatureId(creature)
-  return safeGetId(creature)
-end
-
--- Fast creature lookup by ID (uses OpenTibiaBR when available)
-local function getCreatureById(creatureId)
-  if not creatureId then return nil end
-  
-  -- Try OpenTibiaBR fast lookup first
-  local otbr = loadOpenTibiaBRTargeting()
-  if otbr and otbr.getCreatureById then
-    local creature = otbr.getCreatureById(creatureId)
-    if creature then return creature end
+  if g_game and g_game.getAttackingCreature then
+    local ok, c = pcall(g_game.getAttackingCreature)
+    return ok and c or nil
   end
-  
-  -- Fallback: check current attack target
-  local Client = getClient()
-  local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
-  if target and getCreatureId(target) == creatureId then
-    return target
-  end
-  
   return nil
 end
 
-local function getCreatureHealth(creature)
-  return safeGetHealthPercent(creature)
+--- Is the game client currently attacking our tracked target?
+local function isConfirmed()
+  local gt = gameTarget()
+  return gt ~= nil and cId(gt) == state.targetId
 end
 
-local function isCreatureDead(creature)
-  if safeIsDead(creature) then return true end
-  return getCreatureHealth(creature) <= 0
-end
+--- Issue a single attack command. Rate-limited by COMMAND_COOLDOWN.
+--- Returns true if the command was actually sent.
+local function sendAttack(creature, reason)
+  if not creature or cDead(creature) then return false end
 
--- Fast creature validation by ID (v3.1)
-local function isCreatureValidById(creatureId)
-  if not creatureId then return false end
-  
-  -- Try OpenTibiaBR fast validation first
-  local otbr = loadOpenTibiaBRTargeting()
-  if otbr and otbr.isCreatureValid then
-    return otbr.isCreatureValid(creatureId)
-  end
-  
-  -- Fallback: get creature and check
-  local creature = getCreatureById(creatureId)
-  return creature and not isCreatureDead(creature)
-end
-
-local function getCreaturePosition(creature)
-  return safeGetPosition(creature)
-end
-
-local function getCreatureName(creature)
-  return safeGetName(creature)
-end
-
--- ============================================================================
--- PATH-BLOCKED DETECTION (v5.0 - Skip unreachable monsters)
--- Prevents bot from wasting time on monsters it can't reach
--- ============================================================================
-
--- Check if a creature is on the skip list
-local function isCreatureSkipped(creatureId)
-  if not creatureId then return false end
-  local skipUntil = state.pathBlockedSkipList[creatureId]
-  if not skipUntil then return false end
-  
-  local currentTime = nowMs()
-  if currentTime >= skipUntil then
-    -- Skip expired - remove from list
-    state.pathBlockedSkipList[creatureId] = nil
+  local t = nowMs()
+  if (t - state.lastCommandAt) < CONFIG.COMMAND_COOLDOWN then return false end
+  if (t - state.lastStopAt) < CONFIG.STOP_DEBOUNCE then
+    log("Suppressed: stop debounce")
     return false
   end
-  
+
+  local ok = false
+  local C = getClient()
+  if C and C.attack then
+    ok = pcall(C.attack, creature)
+  elseif g_game and g_game.attack then
+    ok = pcall(g_game.attack, creature)
+  end
+
+  if ok then
+    state.lastCommandAt = t
+    state.stats.commands = state.stats.commands + 1
+    log("Attack -> " .. cName(creature) .. " (" .. (reason or "") .. ")")
+
+    -- MonsterAI engagement lock (anti-zigzag)
+    if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.startEngagement then
+      pcall(MonsterAI.Scenario.startEngagement, cId(creature), cHp(creature))
+    end
+  end
+
+  return ok
+end
+
+--- Cancel game attack via ACL-safe path.
+local function cancelAttack()
+  local C = getClient()
+  if C and C.cancelAttackAndFollow then
+    pcall(C.cancelAttackAndFollow)
+  elseif g_game and g_game.cancelAttackAndFollow then
+    pcall(g_game.cancelAttackAndFollow)
+  end
+end
+
+-- ============================================================================
+-- TARGET MANAGEMENT (internal)
+-- ============================================================================
+
+local function clearTarget()
+  state.creature = nil
+  state.targetId = nil
+  state.hp = 100
+  state.priority = 0
+  state.pendingSwitch = nil
+end
+
+local function setTarget(creature, priority, reason)
+  state.creature = creature
+  state.targetId = cId(creature)
+  state.hp = cHp(creature)
+  state.priority = priority or 0
+  state.retries = 0
+  state.pendingSwitch = nil
+  state.lastSwitchAt = nowMs()
+  state.stats.switches = state.stats.switches + 1
+  transition(STATE.ENGAGING, reason or "new_target")
+  -- Fire attack immediately instead of waiting for next tick (saves 100-250ms)
+  sendAttack(creature, "engage_immediate")
+end
+
+-- ============================================================================
+-- SWITCH EVALUATION
+-- ============================================================================
+
+local function getConfigPriority(creature)
+  if not (TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs) then return 0 end
+  local configs = TargetBot.Creature.getConfigs(creature)
+  if not configs then return 0 end
+  local best = 0
+  for i = 1, #configs do
+    local p = configs[i].priority or 0
+    if p > best then best = p end
+  end
+  return best
+end
+
+local function shouldSwitch(newCreature, newPriority)
+  -- Always allow if current target is dead/gone
+  if not state.creature or cDead(state.creature) then
+    return true, "target_dead"
+  end
+
+  local t = nowMs()
+
+  -- Fast path: user-configured priority override
+  local newCfg = getConfigPriority(newCreature)
+  local curCfg = getConfigPriority(state.creature)
+  if newCfg > curCfg and (t - state.lastSwitchAt) >= CONFIG.CONFIG_SWITCH_COOLDOWN then
+    return true, "config_priority"
+  end
+
+  -- MonsterAI engagement lock
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
+    local allowed, reason = MonsterAI.Scenario.shouldAllowTargetSwitch(
+      cId(newCreature), newPriority or 0, cHp(newCreature))
+    if not allowed then return false, "monsterai_" .. (reason or "locked") end
+  end
+
+  -- Standard switch cooldown
+  if (t - state.lastSwitchAt) < CONFIG.SWITCH_COOLDOWN then
+    return false, "cooldown"
+  end
+
+  -- Never switch from critical HP target
+  if cHp(state.creature) < CONFIG.CRITICAL_HP then
+    return false, "critical_hp"
+  end
+
+  -- Require significant calculated-priority advantage
+  if (newPriority or 0) - state.priority >= 500 then
+    return true, "priority"
+  end
+
+  return false, "insufficient"
+end
+
+-- ============================================================================
+-- PATH-BLOCKED SKIP LIST
+-- External filter for target selection (NOT used in state handlers — SRP).
+-- Populated by creature_attack.lua or target.lua, queried by findBestTarget.
+-- ============================================================================
+
+function AttackStateMachine.isSkipped(creatureId)
+  if not creatureId then return false end
+  local exp = state.skipList[creatureId]
+  if not exp then return false end
+  if nowMs() >= exp then
+    state.skipList[creatureId] = nil
+    return false
+  end
   return true
 end
 
--- Add creature to skip list
-local function skipCreature(creatureId, duration)
-  if not creatureId then return end
-  duration = duration or CONFIG.PATH_BLOCKED_SKIP_DURATION
-  state.pathBlockedSkipList[creatureId] = nowMs() + duration
-  state.stats.pathBlockedSkips = (state.stats.pathBlockedSkips or 0) + 1
-  log("Skipping path-blocked creature ID " .. tostring(creatureId) .. " for " .. tostring(duration) .. "ms")
+function AttackStateMachine.skipCreature(cid, duration)
+  if not cid then return end
+  state.skipList[cid] = nowMs() + (duration or CONFIG.PATH_SKIP_DURATION)
+  state.stats.skips = state.stats.skips + 1
+  log("Skip creature " .. tostring(cid))
 end
 
--- Clean up expired skip entries
-local function cleanupSkipList()
-  local currentTime = nowMs()
-  for creatureId, skipUntil in pairs(state.pathBlockedSkipList) do
-    if currentTime >= skipUntil then
-      state.pathBlockedSkipList[creatureId] = nil
-    end
-  end
+function AttackStateMachine.clearSkipList()
+  state.skipList = {}
 end
 
--- Check if there's a valid path to the target
-local function checkPathToTarget()
-  if not state.targetCreature or not player then return true end  -- Assume reachable if no data
-  
-  local playerPos = safeGetPosition(player)
-  local targetPos = getCreaturePosition(state.targetCreature)
-  
-  if not playerPos or not targetPos then return true end  -- Assume reachable if no position
-  if playerPos.z ~= targetPos.z then return false end  -- Different floor = unreachable
-  
-  -- Calculate distance
-  local dist = math.max(math.abs(playerPos.x - targetPos.x), math.abs(playerPos.y - targetPos.y))
-  
-  -- Adjacent creatures are always reachable
-  if dist <= CONFIG.PATH_BLOCKED_MIN_DISTANCE then
-    return true
+function AttackStateMachine.getSkippedCount()
+  local t, n = nowMs(), 0
+  for _, exp in pairs(state.skipList) do
+    if t < exp then n = n + 1 end
   end
-  
-  -- Try to find a path
-  local path = nil
-  if findPath then
-    local pathParams = {
-      ignoreLastCreature = true,
-      ignoreNonPathable = true,
-      ignoreCost = true,
-      ignoreCreatures = true,
-      allowOnlyVisibleTiles = true,
-      precision = 1
-    }
-    local ok, result = pcall(findPath, playerPos, targetPos, 12, pathParams)
-    if ok then
-      path = result
-    end
-  end
-  
-  return path and #path > 0
-end
-
--- Reset path-blocked tracking (call when switching targets)
-local function resetPathBlockedState()
-  state.pathBlockedAttempts = 0
-  state.pathBlockedSince = 0
-  state.lastPathCheck = 0
-end
-
--- Update path-blocked state and return true if target should be skipped
-local function updatePathBlockedState()
-  local currentTime = nowMs()
-  
-  -- Rate-limit path checks
-  if (currentTime - state.lastPathCheck) < CONFIG.PATH_CHECK_INTERVAL then
-    return false  -- Don't check yet, don't skip
-  end
-  state.lastPathCheck = currentTime
-  
-  -- Check if path exists
-  local hasPath = checkPathToTarget()
-  
-  if hasPath then
-    -- Path found - reset blocked state
-    resetPathBlockedState()
-    return false
-  end
-  
-  -- Path is blocked
-  if state.pathBlockedSince == 0 then
-    state.pathBlockedSince = currentTime
-  end
-  state.pathBlockedAttempts = state.pathBlockedAttempts + 1
-  
-  -- Check if we should skip this monster
-  local blockedDuration = currentTime - state.pathBlockedSince
-  
-  if blockedDuration >= CONFIG.PATH_BLOCKED_TIMEOUT or 
-     state.pathBlockedAttempts >= CONFIG.PATH_BLOCKED_MAX_ATTEMPTS then
-    -- Skip this monster
-    local creatureId = getCreatureId(state.targetCreature)
-    if creatureId then
-      skipCreature(creatureId)
-    end
-    log("Path blocked timeout: " .. tostring(blockedDuration) .. "ms, attempts: " .. tostring(state.pathBlockedAttempts))
-    return true  -- Signal to skip
-  end
-  
-  return false
-end
-
--- ============================================================================
--- STATE MACHINE CORE
--- ============================================================================
-
--- Transition to a new state
-local function transition(newState, reason)
-  if state.current == newState then return end
-  
-  logState(newState, reason)
-  state.previousState = state.current
-  state.current = newState
-  state.stateEnterTime = nowMs()
-  
-  -- Emit state change event
-  if EventBus and EventBus.emit then
-    pcall(function()
-      EventBus.emit("attacksm:state_changed", newState, state.previousState, reason)
-    end)
-  end
-end
-
--- Get current attacking creature from game
-local function getGameAttackTarget()
-  local Client = getClient()
-  if (Client and Client.getAttackingCreature) then
-    local ok, creature = pcall(Client.getAttackingCreature)
-    return ok and creature or nil
-  elseif g_game and g_game.getAttackingCreature then
-    local ok, creature = pcall(g_game.getAttackingCreature)
-    return ok and creature or nil
-  end
-  return nil
-end
-
--- Issue attack command (centralized, rate-limited)
--- IMPROVED v3.0: Now triggers engagement lock for linear targeting
-local function issueAttack(creature, reason)
-  if not creature or isCreatureDead(creature) then return false end
-  
-  local currentTime = nowMs()
-  
-  -- Rate limiting
-  if (currentTime - state.lastAttackCommand) < CONFIG.ATTACK_COOLDOWN then
-    return false
-  end
-  
-  -- Issue the attack
-  local success = false
-  local Client = getClient()
-  if (Client and Client.attack) then
-    local ok, err = pcall(function() Client.attack(creature) end)
-    success = ok
-    if ok then
-      state.lastAttackCommand = currentTime
-      state.attackConfirmed = false
-      state.stats.attacksIssued = state.stats.attacksIssued + 1
-      log("Attack issued: " .. getCreatureName(creature) .. " (" .. (reason or "unknown") .. ")")
-      
-      -- ENGAGEMENT LOCK: Start engagement with this target
-      -- This prevents target switching once we start attacking
-      if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.startEngagement then
-        local creatureId = getCreatureId(creature)
-        local health = nil
-        pcall(function() health = creature:getHealthPercent() end)
-        MonsterAI.Scenario.startEngagement(creatureId, health)
-      end
-    else
-      log("Attack failed: " .. tostring(err))
-    end
-  elseif g_game and g_game.attack then
-    local ok, err = pcall(function() g_game.attack(creature) end)
-    success = ok
-    if ok then
-      state.lastAttackCommand = currentTime
-      state.attackConfirmed = false
-      state.stats.attacksIssued = state.stats.attacksIssued + 1
-      log("Attack issued (g_game fallback): " .. getCreatureName(creature) .. " (" .. (reason or "unknown") .. ")")
-      
-      if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.startEngagement then
-        local creatureId = getCreatureId(creature)
-        local health = nil
-        pcall(function() health = creature:getHealthPercent() end)
-        MonsterAI.Scenario.startEngagement(creatureId, health)
-      end
-    else
-      log("Attack failed (g_game fallback): " .. tostring(err))
-    end
-  end
-  
-  return success
-end
-
--- Check if attack is confirmed (game is actually attacking our target)
-local function isAttackConfirmed()
-  local gameTarget = getGameAttackTarget()
-  if not gameTarget then return false end
-  
-  local gameTargetId = getCreatureId(gameTarget)
-  return gameTargetId and gameTargetId == state.targetId
-end
-
--- ============================================================================
--- PRIORITY CALCULATION
--- ============================================================================
-
--- Calculate target priority (unified with TargetBot.Creature)
-local function calculatePriority(creature, dist)
-  if not creature then return 0 end
-  
-  -- Use TargetBot's calculation if available
-  if TargetBot and TargetBot.Creature and TargetBot.Creature.calculateParams then
-    local ok, params = pcall(function()
-      return TargetBot.Creature.calculateParams(creature, nil)
-    end)
-    if ok and params and params.priority then
-      return params.priority
-    end
-  end
-  
-  -- Fallback: Basic priority calculation
-  local priority = 0
-  
-  -- Config priority (primary factor)
-  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
-    local configs = TargetBot.Creature.getConfigs(creature)
-    if configs and #configs > 0 then
-      for i = 1, #configs do
-        local cfg = configs[i]
-        if cfg.priority and cfg.priority > 0 then
-          priority = priority + (cfg.priority * 100)
-          break
-        end
-      end
-    end
-  end
-  
-  -- Distance bonus
-  dist = dist or 10
-  priority = priority + math.max(0, (10 - dist)) * 5
-  
-  -- Health bonus (wounded targets)
-  local hp = getCreatureHealth(creature)
-  if hp < 100 then
-    priority = priority + ((100 - hp) * 0.5)
-  end
-  
-  return priority
-end
-
--- Check if a switch to new target should be allowed
--- IMPROVED v3.1: Config priority (user-set) takes precedence over calculated priority
--- When a monster with HIGHER user-configured priority appears, switch immediately!
-local function shouldAllowSwitch(newCreature, newPriority)
-  if not state.targetCreature or isCreatureDead(state.targetCreature) then
-    -- Target is dead - end engagement and allow switch
-    if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.endEngagement then
-      MonsterAI.Scenario.endEngagement("target_dead")
-    end
-    return true, "current_dead"
-  end
-  
-  local currentTime = nowMs()
-  
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- FAST PATH: CONFIG PRIORITY CHECK (User-set priority takes precedence!)
-  -- If new creature has HIGHER user-configured priority, bypass most checks
-  -- This is the KEY feature for multi-monster configurations
-  -- ═══════════════════════════════════════════════════════════════════════════
-  local newConfigPriority = 0
-  local currentConfigPriority = 0
-  
-  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
-    -- Get new creature's config priority
-    local newConfigs = TargetBot.Creature.getConfigs(newCreature)
-    if newConfigs and #newConfigs > 0 then
-      for i = 1, #newConfigs do
-        local cfg = newConfigs[i]
-        if cfg.priority and cfg.priority > newConfigPriority then
-          newConfigPriority = cfg.priority
-        end
-      end
-    end
-    
-    -- Get current target's config priority
-    local currentConfigs = TargetBot.Creature.getConfigs(state.targetCreature)
-    if currentConfigs and #currentConfigs > 0 then
-      for i = 1, #currentConfigs do
-        local cfg = currentConfigs[i]
-        if cfg.priority and cfg.priority > currentConfigPriority then
-          currentConfigPriority = cfg.priority
-        end
-      end
-    end
-    
-    -- FAST PATH: Higher config priority = IMMEDIATE SWITCH
-    -- Only a reduced cooldown applies (500ms instead of 5000ms)
-    if newConfigPriority > currentConfigPriority then
-      local configSwitchCooldown = CONFIG.CONFIG_SWITCH_COOLDOWN or 700
-      if (currentTime - state.lastSwitchTime) >= configSwitchCooldown then
-        state.stats.switchesAllowed = (state.stats.switchesAllowed or 0) + 1
-        log("CONFIG PRIORITY SWITCH: " .. newConfigPriority .. " > " .. currentConfigPriority)
-        return true, "config_priority"
-      end
-    end
-  end
-  
-  -- Check MonsterAI engagement lock (only if not bypassed by config priority)
-  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
-    local newCreatureId = getCreatureId(newCreature)
-    local newHealth = getCreatureHealth(newCreature)
-    local allowed, reason = MonsterAI.Scenario.shouldAllowTargetSwitch(newCreatureId, newPriority, newHealth)
-    if not allowed then
-      state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
-      return false, "monsterai_" .. (reason or "blocked")
-    end
-  end
-  
-  -- Standard switch cooldown
-  if (currentTime - state.lastSwitchTime) < CONFIG.SWITCH_COOLDOWN then
-    state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
-    return false, "cooldown"
-  end
-  
-  -- Current target health check
-  local currentHp = getCreatureHealth(state.targetCreature)
-  
-  -- CRITICAL HP: Never switch (unless config priority is higher - handled above)
-  if currentHp < CONFIG.CRITICAL_HP then
-    state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
-    return false, "critical_hp"
-  end
-  
-  -- Priority comparison (calculated priority, not config priority)
-  local priorityAdvantage = newPriority - state.targetPriority
-  local requiredAdvantage = CONFIG.SWITCH_PRIORITY_THRESHOLD
-  
-  -- Adjust required advantage based on current target health
-  if currentHp < CONFIG.LOW_HP then
-    requiredAdvantage = requiredAdvantage * 3  -- 1500 priority needed
-  elseif currentHp < CONFIG.WOUNDED_HP then
-    requiredAdvantage = requiredAdvantage * 2  -- 1000 priority needed
-  end
-  
-  if priorityAdvantage >= requiredAdvantage then
-    state.stats.switchesAllowed = (state.stats.switchesAllowed or 0) + 1
-    return true, "priority_advantage"
-  end
-  
-  state.stats.switchesBlocked = (state.stats.switchesBlocked or 0) + 1
-  return false, "insufficient_priority"
+  return n
 end
 
 -- ============================================================================
 -- STATE HANDLERS
 -- ============================================================================
 
--- IDLE: Looking for targets
+--- IDLE: No target. Respect debounce, then passively sync with game target.
 local function handleIdle()
-  -- Check if there's a game target we should sync with
-  local gameTarget = getGameAttackTarget()
-  if gameTarget and not isCreatureDead(gameTarget) then
-    -- Sync with existing game target
-    state.targetId = getCreatureId(gameTarget)
-    state.targetCreature = gameTarget
-    state.targetHealth = getCreatureHealth(gameTarget)
-    state.targetPriority = calculatePriority(gameTarget)
-    state.attackConfirmed = true
-    state.lastAttackConfirmed = nowMs()
-    transition(STATE.ATTACKING, "sync_with_game")
-    return
-  end
-  
-  -- Look for best target
-  local bestTarget, bestPriority = AttackStateMachine.findBestTarget()
-  if bestTarget then
-    state.targetCreature = bestTarget
-    state.targetId = getCreatureId(bestTarget)
-    state.targetHealth = getCreatureHealth(bestTarget)
-    state.targetPriority = bestPriority
-    state.recoverAttempts = 0
-    transition(STATE.ACQUIRING, "new_target")
+  if (nowMs() - state.lastStopAt) < CONFIG.STOP_DEBOUNCE then return end
+
+  -- Passive sync: if game is already attacking something, adopt it
+  local gt = gameTarget()
+  if gt and not cDead(gt) then
+    state.creature = gt
+    state.targetId = cId(gt)
+    state.hp = cHp(gt)
+    state.priority = 0  -- External caller will update via requestAttack
+    state.lastConfirmedAt = nowMs()
+    transition(STATE.LOCKED, "game_sync")
   end
 end
 
--- ACQUIRING: Sending attack command
-local function handleAcquiring()
-  if not state.targetCreature or isCreatureDead(state.targetCreature) then
-    transition(STATE.IDLE, "target_lost")
-    return
-  end
-  
-  -- Issue attack
-  if issueAttack(state.targetCreature, "acquire") then
-    transition(STATE.CONFIRMING, "attack_sent")
-  else
-    -- Retry on next tick
-    if (nowMs() - state.stateEnterTime) > 1000 then
-      -- Timeout - give up on this target
-      transition(STATE.IDLE, "acquire_timeout")
-    end
-  end
-end
-
--- CONFIRMING: Waiting for server confirmation
-local function handleConfirming()
-  if not state.targetCreature or isCreatureDead(state.targetCreature) then
-    state.stats.targetsKilled = state.stats.targetsKilled + 1
+--- ENGAGING: Attack sent, waiting for server confirmation.
+--- Sends one command per COMMAND_COOLDOWN. Retries up to ENGAGE_RETRIES.
+local function handleEngaging()
+  -- Target died?
+  if not state.creature or cDead(state.creature) then
+    state.stats.kills = state.stats.kills + 1
+    clearTarget()
     transition(STATE.IDLE, "target_died")
     return
   end
-  
-  -- Check if confirmed
-  if isAttackConfirmed() then
-    state.attackConfirmed = true
-    state.lastAttackConfirmed = nowMs()
-    state.stats.attacksConfirmed = state.stats.attacksConfirmed + 1
-    transition(STATE.ATTACKING, "confirmed")
+
+  -- Already confirmed? Promote to LOCKED immediately.
+  if isConfirmed() then
+    state.lastConfirmedAt = nowMs()
+    state.stats.confirms = state.stats.confirms + 1
+    transition(STATE.LOCKED, "confirmed")
     return
   end
-  
-  local elapsed = nowMs() - state.stateEnterTime
-  
-  -- Timeout - try again
-  if elapsed > CONFIG.ATTACK_CONFIRM_TIMEOUT then
-    state.recoverAttempts = state.recoverAttempts + 1
-    if state.recoverAttempts >= CONFIG.ATTACK_RECOVER_ATTEMPTS then
-      transition(STATE.IDLE, "confirm_failed")
-    else
-      transition(STATE.ACQUIRING, "retry")
+
+  -- Timeout → retry or forfeit
+  if (nowMs() - state.enteredAt) > CONFIG.CONFIRM_TIMEOUT then
+    state.retries = state.retries + 1
+    if state.retries >= CONFIG.ENGAGE_RETRIES then
+      log("Engage failed after " .. state.retries .. " retries")
+      clearTarget()
+      transition(STATE.IDLE, "timeout")
+      return
     end
+    state.enteredAt = nowMs()  -- Reset for next attempt
   end
+
+  -- Send attack command (will no-op if still within COMMAND_COOLDOWN)
+  sendAttack(state.creature, "engage")
 end
 
--- ATTACKING: Locked on target, monitoring
-local function handleAttacking()
-  -- Check target death
-  if not state.targetCreature or isCreatureDead(state.targetCreature) then
-    state.stats.targetsKilled = state.stats.targetsKilled + 1
-    log("Target killed: " .. getCreatureName(state.targetCreature))
-    state.targetCreature = nil
-    state.targetId = nil
-    resetPathBlockedState()
+--- LOCKED: Attack confirmed. Monitor target, handle grace, keepalive.
+local function handleLocked()
+  -- Target died?
+  if not state.creature or cDead(state.creature) then
+    state.stats.kills = state.stats.kills + 1
+    log("Kill: " .. cName(state.creature))
+    clearTarget()
     transition(STATE.IDLE, "target_killed")
     return
   end
-  
-  -- v5.0: Check for path-blocked state
-  -- If we can't reach the target for too long, skip it and find another
-  if updatePathBlockedState() then
-    -- Path blocked - skip this monster
-    log("Target path blocked, skipping: " .. getCreatureName(state.targetCreature))
-    
-    -- End MonsterAI engagement if active
-    if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.endEngagement then
-      MonsterAI.Scenario.endEngagement("path_blocked")
-    end
-    
-    -- Cancel current attack
-    local Client = getClient()
-    if Client and Client.cancelAttackAndFollow then
-      pcall(Client.cancelAttackAndFollow)
-    elseif g_game and g_game.cancelAttackAndFollow then
-      pcall(g_game.cancelAttackAndFollow)
-    end
-    
-    state.targetCreature = nil
-    state.targetId = nil
-    resetPathBlockedState()
-    transition(STATE.IDLE, "path_blocked")
-    
-    -- Emit event for CaveBot to potentially proceed
-    if EventBus and EventBus.emit then
-      pcall(function()
-        EventBus.emit("targetbot/path_blocked_skip")
-      end)
-    end
+
+  -- Update health cache
+  state.hp = cHp(state.creature)
+
+  -- Confirmation check with grace window
+  if isConfirmed() then
+    state.lastConfirmedAt = nowMs()
+  elseif (nowMs() - state.lastConfirmedAt) > CONFIG.GRACE_PERIOD then
+    -- Attack genuinely lost → re-engage (single retry path, no separate state)
+    log("Attack lost after " .. CONFIG.GRACE_PERIOD .. "ms grace")
+    state.retries = 0
+    transition(STATE.ENGAGING, "grace_expired")
     return
   end
-  
-  -- Update health
-  state.targetHealth = getCreatureHealth(state.targetCreature)
-  
-  -- Check if attack is still active
-  local confirmed = isAttackConfirmed()
-  if not confirmed then
-    local sinceConfirmed = nowMs() - (state.lastAttackConfirmed or 0)
-    if sinceConfirmed >= CONFIG.ATTACK_LOSS_GRACE then
-      -- Attack was lost - enter recovery
-      transition(STATE.RECOVERING, "attack_lost")
-      return
-    end
-  end
-  
-  -- Update last confirmed time only when confirmed
-  if confirmed then
-    state.lastAttackConfirmed = nowMs()
-    state.attackConfirmed = true
-  end
-  
-  -- Check for pending switch request
-  if state.switchRequested and state.pendingTarget then
-    local allowed, reason = shouldAllowSwitch(state.pendingTarget, state.pendingPriority)
+
+  -- Process pending switch request
+  if state.pendingSwitch then
+    local ps = state.pendingSwitch
+    state.pendingSwitch = nil
+    local allowed, reason = shouldSwitch(ps.creature, ps.priority)
     if allowed then
-      -- Switch to new target
-      state.targetCreature = state.pendingTarget
-      state.targetId = getCreatureId(state.pendingTarget)
-      state.targetHealth = getCreatureHealth(state.pendingTarget)
-      state.targetPriority = state.pendingPriority
-      state.lastSwitchTime = nowMs()
-      state.recoverAttempts = 0
-      log("Switching target: " .. reason)
-      transition(STATE.ACQUIRING, "switch")
+      setTarget(ps.creature, ps.priority, "switch:" .. reason)
     else
-      log("Switch blocked: " .. reason)
+      log("Switch denied: " .. reason)
     end
-    state.switchRequested = false
-    state.pendingTarget = nil
-    state.pendingPriority = 0
+    return
   end
-  
-  -- Periodic attack re-issue (keep server connection alive)
-  local timeSinceAttack = nowMs() - state.lastAttackCommand
-  if timeSinceAttack > CONFIG.ATTACK_REISSUE_INTERVAL then
-    issueAttack(state.targetCreature, "keepalive")
-  end
-end
 
--- RECOVERING: Re-acquiring lost attack
-local function handleRecovering()
-  if not state.targetCreature or isCreatureDead(state.targetCreature) then
-    state.stats.targetsKilled = state.stats.targetsKilled + 1
-    transition(STATE.IDLE, "target_died_recovery")
-    return
-  end
-  
-  state.recoverAttempts = state.recoverAttempts + 1
-  state.stats.recoveries = state.stats.recoveries + 1
-  
-  if state.recoverAttempts >= CONFIG.ATTACK_RECOVER_ATTEMPTS then
-    log("Recovery failed after " .. state.recoverAttempts .. " attempts")
-    transition(STATE.IDLE, "recovery_failed")
-    return
-  end
-  
-  -- Try to re-acquire
-  if issueAttack(state.targetCreature, "recover") then
-    transition(STATE.CONFIRMING, "recovery_attack_sent")
+  -- Periodic keepalive (re-issue to keep server connection)
+  if (nowMs() - state.lastCommandAt) > CONFIG.KEEPALIVE_INTERVAL then
+    sendAttack(state.creature, "keepalive")
   end
 end
 
 -- ============================================================================
--- MAIN UPDATE LOOP
+-- UPDATE LOOP
 -- ============================================================================
-
-local lastUpdate = 0
 
 local function update()
-  -- Check if TargetBot is enabled
+  -- TargetBot must be enabled
   if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
     if state.current ~= STATE.IDLE then
-      transition(STATE.IDLE, "targetbot_disabled")
+      clearTarget()
+      transition(STATE.IDLE, "targetbot_off")
     end
     return
   end
-  
-  -- Check explicit disable flag
+
   if TargetBot and TargetBot.explicitlyDisabled then
     if state.current ~= STATE.IDLE then
-      transition(STATE.IDLE, "explicitly_disabled")
+      clearTarget()
+      transition(STATE.IDLE, "disabled")
     end
     return
   end
-  
-  -- Rate limit updates
-  local currentTime = nowMs()
-  if (currentTime - lastUpdate) < CONFIG.UPDATE_INTERVAL then
-    return
-  end
-  lastUpdate = currentTime
-  
-  -- Update player reference
-  updatePlayerRef()
+
+  -- Tick rate limiting
+  local t = nowMs()
+  if (t - lastTick) < CONFIG.TICK_INTERVAL then return end
+  lastTick = t
+
+  updatePlayer()
   if not player then return end
-  
-  -- State handlers
+
+  -- Dispatch to current state handler
   if state.current == STATE.IDLE then
     handleIdle()
-  elseif state.current == STATE.ACQUIRING then
-    handleAcquiring()
-  elseif state.current == STATE.CONFIRMING then
-    handleConfirming()
-  elseif state.current == STATE.ATTACKING then
-    handleAttacking()
-  elseif state.current == STATE.RECOVERING then
-    handleRecovering()
+  elseif state.current == STATE.ENGAGING then
+    handleEngaging()
+  elseif state.current == STATE.LOCKED then
+    handleLocked()
   end
 end
 
@@ -945,326 +546,184 @@ end
 -- PUBLIC API
 -- ============================================================================
 
--- Get current state
 function AttackStateMachine.getState()
   return state.current
 end
 
--- Get current target
 function AttackStateMachine.getTarget()
-  return state.targetCreature
+  return state.creature
 end
 
--- Get target ID
 function AttackStateMachine.getTargetId()
   return state.targetId
 end
 
--- Is currently attacking?
-function AttackStateMachine.isAttacking()
-  return state.current == STATE.ATTACKING or state.current == STATE.CONFIRMING
+--- Returns true if ASM is actively managing a target (ENGAGING or LOCKED).
+function AttackStateMachine.isActive()
+  return state.current ~= STATE.IDLE
 end
 
--- Is attack confirmed by server?
+--- Backward-compatible alias for isActive().
+AttackStateMachine.isAttacking = AttackStateMachine.isActive
+
+--- Returns true only when attack is server-confirmed (LOCKED + game agrees).
+function AttackStateMachine.isLocked()
+  return state.current == STATE.LOCKED
+end
+
 function AttackStateMachine.isConfirmed()
-  return state.attackConfirmed and isAttackConfirmed()
+  return state.current == STATE.LOCKED and isConfirmed()
 end
 
--- Request a target switch (will be evaluated based on priority)
-function AttackStateMachine.requestSwitch(creature, priority)
-  if not creature or isCreatureDead(creature) then return false end
-  
-  local newId = getCreatureId(creature)
-  if newId == state.targetId then return false end -- Already targeting this
-  
-  priority = priority or calculatePriority(creature)
-  
-  -- If idle, just acquire directly
+function AttackStateMachine.wasRecentlyStopped()
+  return (nowMs() - state.lastStopAt) < CONFIG.STOP_DEBOUNCE
+end
+
+--- Request to attack a creature. Respects debounce and switch priority.
+--- If IDLE, starts immediately. If LOCKED, queues for priority evaluation.
+function AttackStateMachine.requestAttack(creature, priority)
+  if not creature or cDead(creature) then return false end
+  if (nowMs() - state.lastStopAt) < CONFIG.STOP_DEBOUNCE then return false end
+
+  local id = cId(creature)
+  if id == state.targetId then return false end  -- Already targeting
+
   if state.current == STATE.IDLE then
-    state.targetCreature = creature
-    state.targetId = newId
-    state.targetHealth = getCreatureHealth(creature)
-    state.targetPriority = priority
-    state.recoverAttempts = 0
-    transition(STATE.ACQUIRING, "direct_acquire")
+    setTarget(creature, priority, "request")
     return true
   end
-  
-  -- Queue the switch request for evaluation
-  state.switchRequested = true
-  state.pendingTarget = creature
-  state.pendingPriority = priority
-  
+
+  -- Queue for evaluation in handleLocked
+  state.pendingSwitch = { creature = creature, priority = priority or 0 }
   return true
 end
 
--- Force switch to a specific target (bypasses priority check)
-function AttackStateMachine.forceSwitch(creature)
-  if not creature or isCreatureDead(creature) then return false end
-  
-  -- Reset path-blocked state for new target
-  resetPathBlockedState()
-  
-  state.targetCreature = creature
-  state.targetId = getCreatureId(creature)
-  state.targetHealth = getCreatureHealth(creature)
-  state.targetPriority = calculatePriority(creature)
-  state.lastSwitchTime = nowMs()
-  state.recoverAttempts = 0
-  state.switchRequested = false
-  state.pendingTarget = nil
-  
-  transition(STATE.ACQUIRING, "force_switch")
+--- Force-attack a creature. Bypasses priority checks and stop debounce.
+--- Used by hold_target and other explicit user-initiated overrides.
+function AttackStateMachine.forceAttack(creature)
+  if not creature or cDead(creature) then return false end
+
+  local id = cId(creature)
+  if id == state.targetId and state.current ~= STATE.IDLE then return false end
+
+  state.lastStopAt = 0  -- Clear debounce for force attacks
+  setTarget(creature, getConfigPriority(creature) * 100, "force")
   return true
 end
 
--- Stop attacking
+--- Stop attacking. Cancels game attack and enters IDLE with debounce.
 function AttackStateMachine.stop()
-  state.targetCreature = nil
-  state.targetId = nil
-  state.switchRequested = false
-  state.pendingTarget = nil
-  resetPathBlockedState()
-  transition(STATE.IDLE, "manual_stop")
-  
-  -- Cancel game attack
-  local Client = getClient()
-  if Client and Client.cancelAttackAndFollow then
-    pcall(Client.cancelAttackAndFollow)
-  elseif g_game and g_game.cancelAttackAndFollow then
-    pcall(g_game.cancelAttackAndFollow)
+  clearTarget()
+  transition(STATE.IDLE, "stop")
+  cancelAttack()
+
+  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.endEngagement then
+    pcall(MonsterAI.Scenario.endEngagement, "manual_stop")
   end
 end
 
--- Reset all state
+--- Reset all internal state (used when TargetBot is disabled/toggled).
 function AttackStateMachine.reset()
-  state.current = STATE.IDLE
-  state.previousState = nil
-  state.stateEnterTime = 0
-  state.targetId = nil
-  state.targetCreature = nil
-  state.targetHealth = 100
-  state.targetPriority = 0
-  state.targetConfig = nil
-  state.lastAttackCommand = 0
-  state.lastAttackConfirmed = 0
-  state.attackConfirmed = false
-  state.recoverAttempts = 0
-  state.lastSwitchTime = 0
-  state.switchRequested = false
-  state.pendingTarget = nil
-  state.pendingPriority = 0
-  
-  -- Reset path-blocked state
-  resetPathBlockedState()
-  state.pathBlockedSkipList = {}
-  
-  log("State machine reset")
+  state.current         = STATE.IDLE
+  state.previous        = nil
+  state.enteredAt       = 0
+  state.targetId        = nil
+  state.creature        = nil
+  state.hp              = 100
+  state.priority        = 0
+  state.lastCommandAt   = 0
+  state.lastConfirmedAt = 0
+  state.retries         = 0
+  state.lastStopAt      = 0
+  state.lastSwitchAt    = 0
+  state.pendingSwitch   = nil
+  state.skipList         = {}
+  state.stats = { commands = 0, confirms = 0, kills = 0, switches = 0, skips = 0 }
+  log("Reset")
 end
 
--- Get statistics
 function AttackStateMachine.getStats()
   return {
-    state = state.current,
-    targetId = state.targetId,
-    targetHealth = state.targetHealth,
-    attackConfirmed = state.attackConfirmed,
-    pathBlockedAttempts = state.pathBlockedAttempts,
-    pathBlockedSkipCount = state.stats.pathBlockedSkips or 0,
-    stats = state.stats
+    state        = state.current,
+    targetId     = state.targetId,
+    targetHealth = state.hp,
+    stats        = state.stats,
   }
 end
 
--- Check if target is currently path-blocked (for external modules like CaveBot)
-function AttackStateMachine.isPathBlocked()
-  return state.pathBlockedAttempts > 0 and state.pathBlockedSince > 0
-end
+-- Backward-compatible aliases (consumers use requestSwitch/forceSwitch)
+AttackStateMachine.requestSwitch = AttackStateMachine.requestAttack
+AttackStateMachine.forceSwitch   = AttackStateMachine.forceAttack
 
--- Get number of skipped creatures (for status display)
-function AttackStateMachine.getSkippedCount()
-  local count = 0
-  local currentTime = nowMs()
-  for _, skipUntil in pairs(state.pathBlockedSkipList) do
-    if currentTime < skipUntil then
-      count = count + 1
-    end
-  end
-  return count
-end
-
--- Clear skip list (for manual reset or area change)
-function AttackStateMachine.clearSkipList()
-  state.pathBlockedSkipList = {}
-  resetPathBlockedState()
-end
-
--- Find best target (uses EventTargeting or CreatureCache)
-function AttackStateMachine.findBestTarget()
-  updatePlayerRef()
-  if not player then return nil, 0 end
-  
-  local ok, playerPos = pcall(function() return player:getPosition() end)
-  if not ok or not playerPos then return nil, 0 end
-  
-  local bestTarget = nil
-  local bestPriority = 0
-  
-  -- Cleanup expired skip list entries periodically
-  cleanupSkipList()
-  
-  -- Get live monsters
-  local creatures = nil
-  if EventTargeting and EventTargeting.getLiveMonsterCount then
-    local count, liveCreatures = EventTargeting.getLiveMonsterCount()
-    if liveCreatures and #liveCreatures > 0 then
-      creatures = liveCreatures
-    end
-  end
-  
-  -- Fallback to spectators
-  if not creatures or #creatures == 0 then
-    local Client = getClient()
-    if Client and Client.getSpectatorsInRange then
-      creatures = Client.getSpectatorsInRange(playerPos, false, 8, 8)
-    elseif g_map and g_map.getSpectatorsInRange then
-      creatures = g_map.getSpectatorsInRange(playerPos, false, 8, 8)
-    end
-  end
-  
-  if not creatures then return nil, 0 end
-  
-  for i = 1, #creatures do
-    local creature = creatures[i]
-    if creature then
-      -- Check if monster
-      local okMonster, isMonster = pcall(function() return creature:isMonster() end)
-      if okMonster and isMonster and not isCreatureDead(creature) then
-        -- v5.0: Skip path-blocked creatures
-        local creatureId = getCreatureId(creature)
-        if not isCreatureSkipped(creatureId) then
-          local creaturePos = getCreaturePosition(creature)
-          if creaturePos and creaturePos.z == playerPos.z then
-            -- Check if in targetbot config
-            local hasConfig = false
-            if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
-              local configs = TargetBot.Creature.getConfigs(creature)
-              hasConfig = configs and #configs > 0
-            end
-            
-            if hasConfig then
-              local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
-              local priority = calculatePriority(creature, dist)
-              
-              if priority > bestPriority then
-                bestPriority = priority
-                bestTarget = creature
-              end
-            end
-          end
-        end
-      end
-    end
-  end
-  
-  return bestTarget, bestPriority
-end
+-- Backward-compatible stubs (path-blocked moved to external filter)
+function AttackStateMachine.isPathBlocked() return false end
+function AttackStateMachine.findBestTarget() return nil, 0 end
 
 -- ============================================================================
 -- EVENTBUS INTEGRATION
+-- Only bookkeeping updates — minimal state transitions (death/disappear only)
 -- ============================================================================
 
 if EventBus then
-  -- Monster appears - check if higher priority than current
-  EventBus.on("monster:appear", function(creature)
-    if not creature then return end
-    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then return end
-    
-    -- If idle, let normal update handle it
-    if state.current == STATE.IDLE then return end
-    
-    -- Check priority
-    local priority = calculatePriority(creature)
-    if priority > state.targetPriority then
-      AttackStateMachine.requestSwitch(creature, priority)
+  -- Game combat target changed
+  -- NOTE: On OpenTibiaBR, combat:target(nil) fires transiently during normal
+  -- attacks. We NEVER transition on nil — the grace window in handleLocked
+  -- handles confirmation loss cleanly.
+  EventBus.on("combat:target", function(creature, oldCreature)
+    if not creature then return end  -- Nil → grace window handles it
+
+    local id = cId(creature)
+    if id == state.targetId then
+      -- Same target confirmed — update bookkeeping
+      state.lastConfirmedAt = nowMs()
+    elseif state.current ~= STATE.IDLE then
+      -- Different target → external override (player click, party sync, etc.)
+      state.creature = creature
+      state.targetId = id
+      state.hp = cHp(creature)
+      state.lastConfirmedAt = nowMs()
+      if state.current ~= STATE.LOCKED then
+        transition(STATE.LOCKED, "external_sync")
+      end
     end
-  end, 30)
-  
+  end, 40)
+
   -- Monster health changed
   EventBus.on("monster:health", function(creature, percent)
     if not creature then return end
-    
-    local creatureId = getCreatureId(creature)
-    if creatureId == state.targetId then
-      state.targetHealth = percent or 0
-      
-      -- Check for death
+    if cId(creature) == state.targetId then
+      state.hp = percent or 0
       if percent and percent <= 0 then
-        state.stats.targetsKilled = state.stats.targetsKilled + 1
-        transition(STATE.IDLE, "target_health_zero")
+        state.stats.kills = state.stats.kills + 1
+        clearTarget()
+        transition(STATE.IDLE, "health_zero")
       end
     end
   end, 50)
-  
-  -- Monster dies/disappears
+
+  -- Monster disappeared
   EventBus.on("monster:disappear", function(creature)
     if not creature then return end
-    
-    local creatureId = getCreatureId(creature)
-    if creatureId == state.targetId then
-      state.stats.targetsKilled = state.stats.targetsKilled + 1
-      transition(STATE.IDLE, "target_disappeared")
+    if cId(creature) == state.targetId then
+      state.stats.kills = state.stats.kills + 1
+      clearTarget()
+      transition(STATE.IDLE, "disappeared")
     end
   end, 50)
-  
-  -- Combat target changed (sync with game state)
-  EventBus.on("combat:target", function(creature, oldCreature)
-    if not creature then
-      -- Attack was cancelled externally
-      if state.current == STATE.ATTACKING then
-        transition(STATE.RECOVERING, "external_cancel")
-      end
-      return
-    end
-    
-    local newId = getCreatureId(creature)
-    if newId ~= state.targetId and state.current ~= STATE.IDLE then
-      -- Game switched to different target - sync
-      state.targetCreature = creature
-      state.targetId = newId
-      state.targetHealth = getCreatureHealth(creature)
-      state.targetPriority = calculatePriority(creature)
-      state.attackConfirmed = true
-      state.lastAttackConfirmed = nowMs()
-      log("Synced with game target: " .. getCreatureName(creature))
-    end
-  end, 40)
-  
+
   -- TargetBot disabled
   EventBus.on("targetbot/disabled", function()
     AttackStateMachine.reset()
   end, 100)
-  
-  -- Player moved - re-evaluate paths
-  EventBus.on("player:move", function(newPos, oldPos)
-    -- Path validity might have changed, but don't interrupt current attack
-  end, 10)
 end
 
 -- ============================================================================
--- INTERNAL UPDATE LOOP
+-- TICK & INIT
 -- ============================================================================
 
--- The update function is called automatically by the TargetBot macro in target.lua
--- This runs silently as part of the targeting system - no separate button needed
 AttackStateMachine.update = update
 
--- ============================================================================
--- INITIALIZATION
--- ============================================================================
+updatePlayer()
+log("Attack State Machine v" .. AttackStateMachine.VERSION .. " loaded")
 
--- Initialize on load
-updatePlayerRef()
-log("Attack State Machine v" .. AttackStateMachine.VERSION .. " initialized")
-
--- Export for other modules
 return AttackStateMachine
