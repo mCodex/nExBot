@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![OTClientV8](https://img.shields.io/badge/OTClientV8-compatible-orange.svg)
 ![OpenTibiaBR](https://img.shields.io/badge/OpenTibiaBR-compatible-brightgreen.svg)
@@ -119,34 +119,42 @@ All systems work together seamlessly with a unified event bus, shared analytics,
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  INTELLIGENT TARGETING & COMBAT COORDINATION                │
+│  INTELLIGENT TARGETING & COMBAT COORDINATION  (v3.0)        │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  📊 Weighted Priority Scoring                              │
-│  ├─ Health Status (dying targets get priority)             │
-│  ├─ Distance (closer = higher priority)                    │
-│  ├─ Danger Level (threats evaluated real-time)             │
-│  └─ Custom Patterns (!, *, #100-#110)                      │
+│  ⚡ AttackStateMachine (SOLE attack issuer)                 │
+│  ├─ IDLE → ACQUIRING → CONFIRMING → ATTACKING → RECOVERING │
+│  ├─ Only ONE module can issue attacks (no competing issuers)│
+│  ├─ Engagement lock prevents target-switching mid-fight     │
+│  └─ Configurable reissue interval (1200ms default)         │
 │                                                             │
-│  🧠 Monster Behavior AI                                     │
-│  ├─ Pattern Recognition (static/chase/kite/erratic)       │
-│  ├─ Attack Prediction (forecasts enemy waves)              │
+│  📊 9-Stage Priority Scoring (TBI)                         │
+│  ├─ Distance, health, tracker data, wave prediction        │
+│  ├─ Classification, movement/trajectory, adaptive weights  │
+│  ├─ Telemetry correlation, final clamp                     │
+│  └─ Scenario-aware stickiness bonuses                      │
+│                                                             │
+│  🧠 Monster Insights v3.0 (12 SRP modules)                │
+│  ├─ Pattern Recognition (static/chase/kite/erratic)        │
+│  ├─ Attack Prediction (EWMA cooldown + wave anticipation)  │
 │  ├─ Confidence Scoring (0-1 reliability metric)            │
-│  └─ Behavior Database (learns from observation)            │
+│  ├─ Spell Tracker (missile/cast frequency analysis)        │
+│  ├─ Combat Feedback (adaptive accuracy learning)           │
+│  └─ Reachability (pathfinding + cache + blocked list)      │
 │                                                             │
-│  ⚡ Advanced Movement                                        │
+│  ⚡ Advanced Movement                                       │
 │  ├─ Wave Attack Avoidance (front-arc detection)            │
-│  ├─ Dynamic Reactivity (7+ monsters = more reactive)       │
+│  ├─ Dynamic Reactivity (volume adaptation)                 │
 │  ├─ Tactical Reposition (multi-factor tile scoring)        │
 │  ├─ AoE Spell Optimization (calculates best position)      │
 │  ├─ Keep Distance (ranged positioning)                     │
 │  └─ Anchor System (prevent wandering too far)              │
 │                                                             │
-│  🛑 Safety Features                                         │
+│  🛑 Safety Features                                        │
 │  ├─ Auto-stop on death                                     │
 │  ├─ Low HP warnings                                        │
 │  ├─ Trapped detection (no escape routes)                   │
-│  └─ Anti-oscillation (stops erratic movement)              │
+│  └─ Anti-zigzag (engagement lock + scenario awareness)     │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -411,11 +419,16 @@ GAME TICK (250ms for CaveBot, event-driven for others)
     │   ├─ Validate path (floor-change check)
     │   └─ Execute movement/action
     │
-    ├─→ TargetBot Combat
-    │   ├─ Evaluate creature threat
-    │   ├─ Calculate optimal position
-    │   ├─ Predict enemy attacks
-    │   └─ Execute movement or spell
+    ├─→ TargetBot Combat (v3.0 attack flow)
+    │   ├─ MonsterAI subsystems collect data (EWMA, spells, patterns)
+    │   ├─ TBI calculates 9-stage priority for each creature
+    │   ├─ Scenario manager enforces engagement lock (anti-zigzag)
+    │   ├─ AttackStateMachine (SOLE issuer) manages attack lifecycle
+    │   │   ├─ IDLE → ACQUIRING: requestSwitch(creature, priority)
+    │   │   ├─ ACQUIRING → CONFIRMING: g_game.attack() sent
+    │   │   ├─ CONFIRMING → ATTACKING: server confirmed (getAttackingCreature)
+    │   │   └─ ATTACKING → RECOVERING: target dead/gone/unreachable
+    │   └─ creature_attack.lua handles chase/positioning/spells
     │
     └─→ HealBot Response
         ├─ Check health thresholds
@@ -528,7 +541,7 @@ nExBot/
 │   ├── heal_engine.lua               # Healing algorithm
 │   ├── Containers.lua                # Backpack/depot management
 │   ├── analyzer.lua                  # Loot tracking
-│   ├── smart_hunt.lua                # Hunt analyzer v2.0
+│   ├── smart_hunt.lua                # Hunt Analyzer v3.0 (auto-start CaveBot+TargetBot)
 │   └── 20+ other modules
 │
 ├── 📁 cavebot/                       # Navigation system
@@ -541,15 +554,28 @@ nExBot/
 │   └── 10+ extension modules
 │
 ├── 📁 targetbot/                     # Combat system
-│   ├── target.lua                    # Creature targeting & UI
+│   ├── target.lua                    # Main targeting loop & UI
 │   ├── core.lua                      # Pure utility functions
 │   ├── creature_attack.lua           # Movement & combat logic
 │   ├── creature_priority.lua         # Target scoring algorithm
-│   ├── monster_ai.lua                # AI pattern recognition
-│   ├── attack_state_machine.lua      # Deterministic target state
-│   ├── event_targeting.lua           # Event-driven target updates
+│   ├── attack_state_machine.lua      # SOLE attack issuer (state machine)
+│   ├── event_targeting.lua           # Event-driven target acquisition
 │   ├── movement_coordinator.lua      # Intent-based movement voting
-│   └── 10+ other modules
+│   │
+│   │  ── Monster Insights v3.0 (SRP modules) ──────────────
+│   ├── monster_ai_core.lua           # Namespace, helpers, constants
+│   ├── monster_patterns.lua          # Pattern persistence & lookup
+│   ├── monster_tracking.lua          # Per-creature EWMA learning
+│   ├── monster_prediction.lua        # Wave/beam prediction & confidence
+│   ├── monster_combat_feedback.lua   # Adaptive targeting weights
+│   ├── monster_spell_tracker.lua     # Spell/missile cooldown analysis
+│   ├── auto_tuner.lua                # Behaviour classification & tuning
+│   ├── monster_scenario.lua          # Scenario detection & engagement locks
+│   ├── monster_reachability.lua      # Smart unreachable detection
+│   ├── monster_tbi.lua               # 9-stage priority scoring (TBI)
+│   ├── monster_ai.lua                # Orchestrator / glue (v3.0 slim)
+│   ├── monster_inspector.lua         # Pattern visualization UI
+│   └── 5+ other modules
 │
 ├── 📁 cavebot_configs/               # User waypoint scripts (.cfg)
 ├── 📁 targetbot_configs/             # User creature configs (.json)
@@ -577,6 +603,8 @@ nExBot/
 | **Pure Functions** | Testability & reliability | TargetCore geometry functions |
 | **Intent Voting** | Coordinated movement | MovementCoordinator resolves conflicts |
 | **Behavior Database** | Pattern learning | MonsterAI tracks creature types |
+| **State Machine** | Deterministic attacks | AttackStateMachine (sole issuer) |
+| **Engagement Lock** | Anti-zigzag | Scenario.startEngagement prevents target flicker |
 | **Multi-Factor Scoring** | Smart decisions | Tile evaluation uses 5+ factors |
 
 ---

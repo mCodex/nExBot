@@ -2667,9 +2667,15 @@ targetbotMacro = macro(250, function()
         end
       end
       
-      -- If state machine is targeting something different, sync it
+      -- v3.0: Only request a target switch when ASM is NOT actively attacking.
+      -- This prevents the attack-once-then-stop cycle caused by interrupting
+      -- the ATTACKING state every tick with forceSwitch.
       if allowSync and smTargetId ~= id then
-        pcall(function() AttackStateMachine.forceSwitch(bestTarget.creature) end)
+        if smState == "IDLE" or smState == "RECOVERING" then
+          pcall(function() AttackStateMachine.requestSwitch(bestTarget.creature, 1000) end)
+        end
+        -- In ATTACKING/CONFIRMING/ACQUIRING states, the ASM owns the attack flow.
+        -- We do NOT interrupt it — the current target will be finished first.
       end
       
       -- Update AttackController based on state machine status

@@ -82,12 +82,20 @@ importStyle("/targetbot/monster_inspector.otui")
 dofile("/targetbot/core.lua")
 
 -- Load new optimized modules (SRP extractions from monster_ai.lua)
-dofile("/targetbot/monster_tracking.lua")     -- Per-monster data collection with ring buffers
-dofile("/targetbot/monster_prediction.lua")   -- Wave/attack prediction logic
-dofile("/targetbot/auto_tuner.lua")           -- Monster classification and auto-tuning
+-- v3.0: All subsystems loaded BEFORE monster_ai.lua (the orchestrator/glue)
+dofile("/targetbot/monster_ai_core.lua")        -- Namespace, helpers, constants (FIRST)
+dofile("/targetbot/monster_patterns.lua")       -- Pattern persistence and lookup
+dofile("/targetbot/monster_tracking.lua")       -- Per-creature data collection, EWMA learning
+dofile("/targetbot/monster_prediction.lua")     -- Wave/beam prediction, confidence scoring
+dofile("/targetbot/monster_combat_feedback.lua") -- Adaptive targeting weight adjustment
+dofile("/targetbot/monster_spell_tracker.lua")  -- Spell/missile tracking, cooldown analysis
+dofile("/targetbot/auto_tuner.lua")             -- Monster classification and danger tuning
+dofile("/targetbot/monster_scenario.lua")       -- Scenario detection, engagement locks, anti-zigzag
+dofile("/targetbot/monster_reachability.lua")   -- Smart unreachable creature detection
+dofile("/targetbot/monster_tbi.lua")            -- 9-stage TargetBot Intelligence priority scoring
 
--- Load AI and optimization modules (before creature_attack)
-dofile("/targetbot/monster_ai.lua")           -- Monster behavior analysis
+-- Load AI orchestrator (wires EventBus → subsystems, updateAll, public API)
+dofile("/targetbot/monster_ai.lua")           -- Monster AI orchestrator / glue (v3.0)
 dofile("/targetbot/movement_coordinator.lua") -- Coordinated movement system
 
 -- Load AttackStateMachine for linear, consistent targeting (before creature.lua)

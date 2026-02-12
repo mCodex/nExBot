@@ -1,4 +1,4 @@
-# 📚 nExBot Documentation v1.0
+# 📚 nExBot Documentation v3.0
 
 <div align="center">
 
@@ -10,19 +10,17 @@
 
 ---
 
-## 🆕 What's New in v1.0
+## 🆕 What's New in v3.0
 
-- **🎯 Dynamic Scaling** - Movement thresholds scale with monster count
-- **📦 Container Panel v6** - Event-driven container opener (resolves nested/sibling backpack issues, improved quiver integration, reactive onAddItem scanning)
+- **🎯 AttackStateMachine** - Single source of truth for all attacks; eliminates the attack-once-then-stop bug
+- **🧠 Monster Insights v3.0** - Decomposed from a 6 000-line monolith into 12 focused SRP modules
+- **🔒 Engagement Lock** - Linear targeting prevents target zigzag completely
+- **📊 Hunt Analyzer auto-start** - Now triggers for both CaveBot AND TargetBot users
+- **📦 9-Stage TBI Scoring** - Enhanced priority calculator with adaptive weights and combat feedback
+- **🛡️ Smart Reachability** - Pathfinding-based unreachable detection with caching
 
 > [!TIP]
-> See `docs/CONTAINERS.md` for developer notes and migration guidance. See `CHANGELOG.md` for full history.
-- **⚡ Adaptive Reactivity** - More reactive when surrounded (7+ monsters)
-- **🧠 Movement Coordinator** - Dynamic confidence thresholds
-- **🛡️ Balanced Behavior** - Conservative with few monsters, reactive with many
-- **📊 Hunt Analyzer** - Better insights and recommendations
-- **🗺️ Waypoint Guard** - Skips unreachable waypoints and requests recovery
-- **🎯 Pull/Lure Coordination** - TargetBot pull and dynamic lure stay active with native chase
+> See [TARGETBOT.md](./TARGETBOT.md) for the full v3.0 architecture and attack flow.
 
 ---
 

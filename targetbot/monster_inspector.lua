@@ -691,7 +691,9 @@ local function clearPatterns()
     UnifiedStorage.set("targetbot.monsterPatterns", {})
   end
   storage.monsterPatterns = {}
-  MonsterAI.Patterns.knownMonsters = {}
+  if MonsterAI and MonsterAI.Patterns and MonsterAI.Patterns.knownMonsters then
+    MonsterAI.Patterns.knownMonsters = {}
+  end
   refreshPatterns()
   print("[MonsterInspector] Cleared stored monster patterns")
 end

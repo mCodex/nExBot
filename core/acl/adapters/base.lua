@@ -587,4 +587,8 @@ function BaseAdapter.callbacks.emit(eventType, ...)
   end
 end
 
+-- Register globally as fallback for sandbox environments where dofile
+-- doesn't propagate return values through pcall wrappers
+ACL_BaseAdapter = BaseAdapter
+
 return BaseAdapter

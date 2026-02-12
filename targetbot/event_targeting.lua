@@ -1085,13 +1085,10 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
       print("[EventTargeting] Delegated to AttackStateMachine: " .. creature:getName())
     end
   else
-    local Client = getClient()
-    if Client and Client.attack then
-      Client.attack(creature)
-      sent = true
-    elseif g_game and g_game.attack then
-      g_game.attack(creature)
-      sent = true
+    -- v3.0: No fallback — AttackStateMachine is the SOLE attack issuer.
+    -- If ASM is not loaded, we simply do not attack (prevents competing issuers).
+    if EventTargeting.DEBUG then
+      print("[EventTargeting] AttackStateMachine unavailable — skipping attack")
     end
   end
 
@@ -1915,17 +1912,15 @@ if onCreatureAppear then
             end
 
             -- Immediate attack (rate-limited to prevent spam)
+            -- v3.0: Route ALL attacks through AttackStateMachine (sole issuer)
             local sent = false
-            local Client3 = getClient()
-            local sent = false
-            if TargetBot and TargetBot.requestAttack then
+            if AttackStateMachine and AttackStateMachine.requestSwitch then
+              local priority = EventTargeting.TargetAcquisition
+                and EventTargeting.TargetAcquisition.calculatePriority
+                and EventTargeting.TargetAcquisition.calculatePriority(creature) or 100
+              sent = AttackStateMachine.requestSwitch(creature, priority + 200) -- +200 for high-priority event
+            elseif TargetBot and TargetBot.requestAttack then
               sent = TargetBot.requestAttack(creature, "event_high_priority")
-            elseif (Client3 and Client3.attack) then
-              Client3.attack(creature)
-              sent = true
-            elseif g_game and g_game.attack then
-              g_game.attack(creature)
-              sent = true
             end
           
             -- If attack was throttled and we are not already attacking this creature, bail

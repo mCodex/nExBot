@@ -1,463 +1,257 @@
 --[[
-  Monster Prediction Module - Extracted from monster_ai.lua
+  Monster Prediction Module v3.0 — Real Implementation
   
-  Single Responsibility: Predict monster behavior and attack timing.
+  Single Responsibility: Wave/beam attack prediction, position danger
+  assessment, and confidence aggregation.
   
-  This module handles:
-  - Wave/beam attack prediction
-  - Position danger assessment
-  - Direction-based threat detection
-  - Attack arc calculations
+  Replaces the dead-code v1.0 extraction that was never wired in.
+  Populates: MonsterAI.Predictor, MonsterAI.Confidence
   
-  Depends on: monster_tracking.lua, directions.lua
-  Used by: creature_position.lua, target.lua
+  Depends on: monster_ai_core.lua, monster_patterns.lua, monster_tracking.lua
 ]]
 
 -- ============================================================================
--- MODULE NAMESPACE
+-- HELPERS (from core)
 -- ============================================================================
 
-local MonsterPrediction = {}
-MonsterPrediction.VERSION = "1.0"
+local H = MonsterAI._helpers
+local nowMs            = H.nowMs
+local isCreatureValid  = H.isCreatureValid
+local safeCreatureCall = H.safeCreatureCall
+local safeGetId        = H.safeGetId
+local safeIsDead       = H.safeIsDead
+
+local CONST = MonsterAI.CONSTANTS
 
 -- ============================================================================
--- CONFIGURATION
+-- PREDICTOR
 -- ============================================================================
 
-MonsterPrediction.CONFIG = {
-  -- Prediction confidence thresholds
-  CONFIDENCE = {
-    VERY_HIGH = 0.85,
-    HIGH = 0.70,
-    MEDIUM = 0.50,
-    LOW = 0.30,
-    VERY_LOW = 0.15
-  },
-  
-  -- Timing thresholds
-  IMMEDIATE_THREAT_WINDOW = 800,    -- ms before predicted attack
-  ATTACK_PREDICTION_HORIZON = 2000, -- ms ahead to predict
-  FACING_PLAYER_THRESHOLD = 0.6,    -- Confidence for "facing player"
-  DIRECTION_CHANGE_COOLDOWN = 150,  -- ms between direction processing
-  CONSECUTIVE_TURNS_ALERT = 2,      -- Quick turns to trigger alert
-}
+MonsterAI.Predictor = MonsterAI.Predictor or {}
 
--- ============================================================================
--- TIME HELPER (use ClientHelper for DRY)
--- ============================================================================
+--- Predict if a monster is about to use a wave attack.
+-- @return isPredicted, confidence, timeToAttack
+function MonsterAI.Predictor.predictWaveAttack(creature)
+  if not creature then return false, 0, 999999 end
+  if not isCreatureValid(creature) then return false, 0, 999999 end
+  if safeIsDead(creature) then return false, 0, 999999 end
 
-local nowMs = ClientHelper and ClientHelper.nowMs or function()
-  if now then return now end
-  if g_clock and g_clock.millis then return g_clock.millis() end
-  return os.time() * 1000
+  local id = safeGetId(creature)
+  if not id then return false, 0, 999999 end
+
+  local data    = MonsterAI.Tracker.monsters[id]
+  local pattern = MonsterAI.Patterns.get(safeCreatureCall(creature, "getName", "Unknown"))
+
+  -- No wave attacks known for this species
+  if not pattern.hasWaveAttack then
+    return false, 0.8, 999999
+  end
+
+  -- Check if monster is facing the player (primary indicator)
+  local monsterPos = safeCreatureCall(creature, "getPosition", nil)
+  local monsterDir = safeCreatureCall(creature, "getDirection", 0)
+  if not monsterPos then return false, 0, 999999 end
+
+  local playerPos = nil
+  if player then
+    local okP, pPos = pcall(function() return player:getPosition() end)
+    if okP then playerPos = pPos end
+  end
+  if not playerPos then return false, 0, 999999 end
+
+  local isFacingPlayer = MonsterAI.Predictor.isFacingPosition(monsterPos, monsterDir, playerPos)
+  if not isFacingPlayer then
+    return false, 0.7, 999999
+  end
+
+  -- Time since last observed wave attack
+  local timeSinceLastWave = 999999
+  if data and data.lastAttackTime > 0 then
+    timeSinceLastWave = now - data.lastAttackTime
+  end
+
+  -- Predicted cooldown
+  local cooldown    = data and data.predictedWaveCooldown or pattern.waveCooldown
+  local timeToAttack = math.max(0, cooldown - timeSinceLastWave)
+
+  -- ─── CONFIDENCE CALCULATION ────────────────────────────────────────────
+  local confidence = 0.5 -- base
+  if data then confidence = confidence + data.confidence * 0.3 end
+  if isFacingPlayer then confidence = confidence + 0.2 end
+  if timeSinceLastWave > cooldown * 0.8 then confidence = confidence + 0.15 end
+
+  -- Variance penalty (noisy observations → lower confidence)
+  local function variancePenalty(d)
+    if not d or not d.ewmaVariance or not d.ewmaCooldown or d.ewmaCooldown <= 0 then return 0 end
+    local std   = math.sqrt(d.ewmaVariance or 0)
+    local ratio = std / (d.ewmaCooldown + 1e-6)
+    return math.min(CONST.EWMA.VARIANCE_PENALTY_MAX, ratio * CONST.EWMA.VARIANCE_PENALTY_SCALE)
+  end
+
+  local vp = variancePenalty(data)
+  if vp > 0 then confidence = confidence * (1 - vp) end
+
+  confidence = math.max(math.min(confidence, 0.95), 0.05)
+
+  return timeToAttack < 500, confidence, timeToAttack
 end
 
 -- ============================================================================
--- DIRECTION VECTORS
+-- DIRECTION HELPERS (pure functions)
 -- ============================================================================
 
-local DIR_VECTORS = {
-  [0] = {x = 0, y = -1},   -- North
-  [1] = {x = 1, y = -1},   -- NorthEast
-  [2] = {x = 1, y = 0},    -- East
-  [3] = {x = 1, y = 1},    -- SouthEast
-  [4] = {x = 0, y = 1},    -- South
-  [5] = {x = -1, y = 1},   -- SouthWest
-  [6] = {x = -1, y = 0},   -- West
-  [7] = {x = -1, y = -1}   -- NorthWest
+local FALLBACK_DIRS = {
+  [0] = { x =  0, y = -1 },
+  [1] = { x =  1, y =  0 },
+  [2] = { x =  0, y =  1 },
+  [3] = { x = -1, y =  0 },
+  [4] = { x =  1, y = -1 },
+  [5] = { x =  1, y =  1 },
+  [6] = { x = -1, y =  1 },
+  [7] = { x = -1, y = -1 }
 }
 
--- ============================================================================
--- CORE PREDICTION FUNCTIONS
--- ============================================================================
+--- Check if monster is facing a position.
+function MonsterAI.Predictor.isFacingPosition(monsterPos, monsterDir, targetPos)
+  local dirVec = TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.DIR_VECTORS
+    and TargetCore.CONSTANTS.DIR_VECTORS[monsterDir]
+  if not dirVec then dirVec = FALLBACK_DIRS[monsterDir] end
+  if not dirVec then return false end
 
---[[
-  Check if a monster is facing a target position
-  @param monsterPos Position of the monster
-  @param direction Direction the monster is facing (0-7)
-  @param targetPos Position to check
-  @param tolerance Angular tolerance (default 1 = 45 degrees)
-  @return boolean, number (isFacing, angle)
-]]
-function MonsterPrediction.isFacingPosition(monsterPos, direction, targetPos, tolerance)
-  if not monsterPos or not targetPos then return false, 0 end
-  tolerance = tolerance or 1
-  
   local dx = targetPos.x - monsterPos.x
   local dy = targetPos.y - monsterPos.y
-  
-  if dx == 0 and dy == 0 then
-    return true, 0  -- Same position
+
+  if dirVec.x == 0 then
+    return (dy * dirVec.y) > 0 and math.abs(dx) <= 1
+  elseif dirVec.y == 0 then
+    return (dx * dirVec.x) > 0 and math.abs(dy) <= 1
+  else
+    local inX = (dirVec.x > 0 and dx > 0) or (dirVec.x < 0 and dx < 0)
+    local inY = (dirVec.y > 0 and dy > 0) or (dirVec.y < 0 and dy < 0)
+    return inX and inY
   end
-  
-  -- Calculate angle to target (0-7 direction scale)
-  local angle = math.atan2(dy, dx)
-  local targetDir = math.floor((angle + math.pi) / (math.pi / 4)) % 8
-  
-  -- Convert to match OTClient direction system
-  -- OTClient: 0=N, 1=E, 2=S, 3=W, 4=NE, 5=SE, 6=SW, 7=NW
-  local dirMapping = {
-    [0] = 2,   -- East -> 2
-    [1] = 5,   -- SouthEast -> 5
-    [2] = 4,   -- South -> 4
-    [3] = 6,   -- SouthWest -> 6
-    [4] = 6,   -- West -> 6
-    [5] = 7,   -- NorthWest -> 7
-    [6] = 0,   -- North -> 0
-    [7] = 1    -- NorthEast -> 1
-  }
-  
-  targetDir = dirMapping[targetDir] or 0
-  
-  -- Check if direction matches within tolerance
-  local diff = math.abs(direction - targetDir)
-  if diff > 4 then diff = 8 - diff end
-  
-  return diff <= tolerance, diff
 end
 
---[[
-  Check if a position is within a wave/beam attack path
-  @param pos Position to check
-  @param monsterPos Monster's position
-  @param direction Monster's facing direction
-  @param range Wave attack range
-  @param width Wave width (0 = single tile, 1 = 3 tiles wide, etc.)
-  @return boolean
-]]
-function MonsterPrediction.isPositionInWavePath(pos, monsterPos, direction, range, width)
-  if not pos or not monsterPos then return false end
-  
-  range = range or 5
-  width = width or 1
-  
-  local dirVec = DIR_VECTORS[direction]
-  if not dirVec then return false end
-  
-  -- Check if position is in front of monster
-  local dx = pos.x - monsterPos.x
-  local dy = pos.y - monsterPos.y
-  
-  -- Distance along attack direction
-  local alongDist = dx * dirVec.x + dy * dirVec.y
-  if alongDist <= 0 or alongDist > range then
-    return false  -- Behind or too far
-  end
-  
-  -- Perpendicular distance (how far off the center line)
-  local perpDist = math.abs(dx * (-dirVec.y) + dy * dirVec.x)
-  
-  return perpDist <= width
-end
+-- ============================================================================
+-- POSITION DANGER ASSESSMENT
+-- ============================================================================
 
---[[
-  Get tiles in a wave attack path
-  @param monsterPos Monster's position
-  @param direction Monster's facing direction
-  @param range Wave attack range
-  @param width Wave width
-  @return array of positions
-]]
-function MonsterPrediction.getWavePathTiles(monsterPos, direction, range, width)
-  if not monsterPos then return {} end
-  
-  range = range or 5
-  width = width or 1
-  
-  local dirVec = DIR_VECTORS[direction]
-  if not dirVec then return {} end
-  
-  local tiles = {}
-  
-  -- Get perpendicular vector
-  local perpX, perpY = -dirVec.y, dirVec.x
-  
-  -- Generate all tiles in the wave path
-  for dist = 1, range do
-    local centerX = monsterPos.x + dirVec.x * dist
-    local centerY = monsterPos.y + dirVec.y * dist
-    
-    for offset = -width, width do
-      tiles[#tiles + 1] = {
-        x = centerX + perpX * offset,
-        y = centerY + perpY * offset,
-        z = monsterPos.z
-      }
-    end
-  end
-  
-  return tiles
-end
+--- Predict danger level for a position given nearby monsters.
+-- @return dangerLevel (WAVE_DANGER enum), confidence
+function MonsterAI.Predictor.predictPositionDanger(position, monsters)
+  local totalDanger     = 0
+  local totalConfidence = 0
+  local count           = 0
 
---[[
-  Calculate time until next predicted wave attack
-  @param trackingData Monster tracking data (from monster_tracking.lua)
-  @param patternData Monster pattern data (known behavior)
-  @return number (ms until attack, 0 if imminent, -1 if unknown)
-]]
-function MonsterPrediction.getTimeToNextWave(trackingData, patternData)
-  if not trackingData then return -1 end
-  
-  local nowt = nowMs()
-  local cooldown = trackingData.ewmaCooldown or (patternData and patternData.waveCooldown) or 2000
-  local lastWave = trackingData.lastWaveTime or 0
-  
-  if lastWave == 0 then
-    return -1  -- Never observed a wave
-  end
-  
-  local elapsed = nowt - lastWave
-  local remaining = cooldown - elapsed
-  
-  return math.max(0, remaining)
-end
+  for i = 1, #monsters do
+    local monster = monsters[i]
+    if monster and not safeIsDead(monster) then
+      local isPredicted, conf, timeToAttack = MonsterAI.Predictor.predictWaveAttack(monster)
 
---[[
-  Get threat level from a monster
-  @param trackingData Monster tracking data
-  @param patternData Monster pattern data
-  @param playerPos Player's current position
-  @return number (0-1 threat level), table (threat details)
-]]
-function MonsterPrediction.getThreatLevel(trackingData, patternData, playerPos)
-  if not trackingData or not playerPos then
-    return 0, nil
-  end
-  
-  local threat = 0
-  local details = {
-    isFacing = false,
-    timeToAttack = -1,
-    distance = 99,
-    confidence = 0
-  }
-  
-  local monsterPos = trackingData.lastPosition
-  if not monsterPos or monsterPos.z ~= playerPos.z then
-    return 0, details
-  end
-  
-  -- Distance factor
-  local dist = math.max(
-    math.abs(monsterPos.x - playerPos.x),
-    math.abs(monsterPos.y - playerPos.y)
-  )
-  details.distance = dist
-  
-  if dist > 7 then
-    return 0, details  -- Too far
-  end
-  
-  -- Facing factor
-  local isFacing, angleDiff = MonsterPrediction.isFacingPosition(
-    monsterPos, 
-    trackingData.lastDirection, 
-    playerPos
-  )
-  details.isFacing = isFacing
-  
-  if isFacing then
-    threat = threat + 0.4
-    
-    -- Time to attack factor
-    local timeToAttack = MonsterPrediction.getTimeToNextWave(trackingData, patternData)
-    details.timeToAttack = timeToAttack
-    
-    if timeToAttack >= 0 and timeToAttack < MonsterPrediction.CONFIG.IMMEDIATE_THREAT_WINDOW then
-      threat = threat + 0.4 * (1 - timeToAttack / MonsterPrediction.CONFIG.IMMEDIATE_THREAT_WINDOW)
-    end
-    
-    -- In wave path factor
-    local range = patternData and patternData.waveRange or 5
-    local width = patternData and patternData.waveWidth or 1
-    
-    if MonsterPrediction.isPositionInWavePath(playerPos, monsterPos, trackingData.lastDirection, range, width) then
-      threat = threat + 0.2
-    end
-  end
-  
-  -- Distance factor (closer = more dangerous)
-  threat = threat + (0.2 * (1 - dist / 7))
-  
-  -- Confidence from tracking data
-  details.confidence = trackingData.confidence or 0.1
-  
-  return math.min(1, threat), details
-end
-
---[[
-  Find safe tile to escape from wave attack
-  @param playerPos Player's current position
-  @param monsterPos Monster's position
-  @param direction Monster's facing direction
-  @param patternData Monster pattern data
-  @return Position (safe tile) or nil
-]]
-function MonsterPrediction.findSafeTile(playerPos, monsterPos, direction, patternData)
-  if not playerPos or not monsterPos then return nil end
-  
-  local range = patternData and patternData.waveRange or 5
-  local width = patternData and patternData.waveWidth or 1
-  
-  local dirVec = DIR_VECTORS[direction] or {x = 0, y = 0}
-  
-  -- Get perpendicular directions (safe directions)
-  local perpX, perpY = -dirVec.y, dirVec.x
-  
-  local candidates = {}
-  
-  -- Check perpendicular tiles
-  for dist = 1, 2 do
-    for _, mult in ipairs({1, -1}) do
-      local tile = {
-        x = playerPos.x + perpX * dist * mult,
-        y = playerPos.y + perpY * dist * mult,
-        z = playerPos.z
-      }
-      
-      if not MonsterPrediction.isPositionInWavePath(tile, monsterPos, direction, range, width) then
-        -- Score by distance from monster (further = safer)
-        local distFromMonster = math.abs(tile.x - monsterPos.x) + math.abs(tile.y - monsterPos.y)
-        candidates[#candidates + 1] = { pos = tile, score = distFromMonster }
+      -- Emit wave prediction for other modules (Exeta Amp, etc.)
+      if isPredicted and conf >= 0.5 and EventBus and EventBus.emit then
+        pcall(function() EventBus.emit("monsterai:wave_predicted", monster, conf, timeToAttack) end)
       end
-    end
-  end
-  
-  -- Also try diagonal escapes
-  for dx = -1, 1 do
-    for dy = -1, 1 do
-      if dx ~= 0 or dy ~= 0 then
-        local tile = { x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z }
-        
-        if not MonsterPrediction.isPositionInWavePath(tile, monsterPos, direction, range, width) then
-          local distFromMonster = math.abs(tile.x - monsterPos.x) + math.abs(tile.y - monsterPos.y)
-          candidates[#candidates + 1] = { pos = tile, score = distFromMonster + 0.5 }
+
+      if isPredicted and timeToAttack < 1000 then
+        local mpos    = safeCreatureCall(monster, "getPosition", nil)
+        local mdir    = safeCreatureCall(monster, "getDirection", 0)
+        local pattern = MonsterAI.Patterns.get(safeCreatureCall(monster, "getName", "Unknown"))
+
+        if mpos then
+          local inDanger = MonsterAI.Predictor.isPositionInWavePath(
+            position, mpos, mdir, pattern.waveRange, pattern.waveWidth
+          )
+          if inDanger then
+            local urgency    = 1 - (timeToAttack / 1000)
+            totalDanger     = totalDanger + (pattern.dangerLevel * urgency)
+            totalConfidence = totalConfidence + conf
+            count           = count + 1
+          end
         end
       end
     end
   end
-  
-  -- Sort by score (higher = better)
-  table.sort(candidates, function(a, b) return a.score > b.score end)
-  
-  return candidates[1] and candidates[1].pos or nil
-end
 
---[[
-  Predict monster's next position
-  @param trackingData Monster tracking data
-  @param horizonMs How far ahead to predict (ms)
-  @return Position (predicted position) or nil
-]]
-function MonsterPrediction.predictPosition(trackingData, horizonMs)
-  if not trackingData then return nil end
-  
-  horizonMs = horizonMs or 500
-  
-  local pos = trackingData.lastPosition
-  if not pos then return nil end
-  
-  -- If monster is stationary, predict same position
-  local stationaryRatio = trackingData.stationaryCount / math.max(1, trackingData.movementSamples)
-  if stationaryRatio > 0.7 then
-    return pos
+  if count == 0 then return CONST.WAVE_DANGER.NONE, 0.8 end
+
+  local avgDanger     = totalDanger / count
+  local avgConfidence = totalConfidence / count
+
+  local level = CONST.WAVE_DANGER.NONE
+  if avgDanger >= 3 then     level = CONST.WAVE_DANGER.CRITICAL
+  elseif avgDanger >= 2 then level = CONST.WAVE_DANGER.HIGH
+  elseif avgDanger >= 1 then level = CONST.WAVE_DANGER.MEDIUM
+  elseif avgDanger > 0 then  level = CONST.WAVE_DANGER.LOW
   end
-  
-  -- Calculate movement vector from recent samples
-  local samples = trackingData.samples
-  if not samples or #samples < 2 then return pos end
-  
-  local oldest = samples[1]
-  local newest = samples[#samples]
-  
-  if not oldest or not newest then return pos end
-  
-  local dt = (newest.time - oldest.time) / 1000  -- seconds
-  if dt <= 0 then return pos end
-  
-  local dx = (newest.pos.x - oldest.pos.x) / dt
-  local dy = (newest.pos.y - oldest.pos.y) / dt
-  
-  -- Predict future position
-  local predictedX = pos.x + dx * (horizonMs / 1000)
-  local predictedY = pos.y + dy * (horizonMs / 1000)
-  
-  return {
-    x = math.floor(predictedX + 0.5),
-    y = math.floor(predictedY + 0.5),
-    z = pos.z
-  }
+
+  return level, avgConfidence
 end
 
---[[
-  Get attack danger level for a position (considering all nearby monsters)
-  @param position Position to check
-  @param monsters Array of monster tracking data
-  @param patterns Table of monster patterns
-  @return number (0-10 danger level), array of threats
-]]
-function MonsterPrediction.getPositionDanger(position, monsters, patterns)
-  if not position then return 0, {} end
-  
-  monsters = monsters or {}
-  patterns = patterns or {}
-  
-  local totalDanger = 0
-  local threats = {}
-  
-  for id, data in pairs(monsters) do
-    local patternData = patterns[data.name and data.name:lower()] or {}
-    local threat, details = MonsterPrediction.getThreatLevel(data, patternData, position)
-    
-    if threat > 0 then
-      totalDanger = totalDanger + threat * 2  -- Scale to 0-10
-      
-      if threat > 0.3 then
-        threats[#threats + 1] = {
-          id = id,
-          name = data.name,
-          threat = threat,
-          details = details
-        }
-      end
-    end
+--- Check if a position is in wave attack path (pure function).
+function MonsterAI.Predictor.isPositionInWavePath(pos, monsterPos, monsterDir, range, width)
+  range = range or 5
+  width = width or 1
+
+  local dirVec = TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.DIR_VECTORS
+    and TargetCore.CONSTANTS.DIR_VECTORS[monsterDir]
+  if not dirVec then dirVec = FALLBACK_DIRS[monsterDir] end
+  if not dirVec then return false end
+
+  local dx   = pos.x - monsterPos.x
+  local dy   = pos.y - monsterPos.y
+  local dist = math.max(math.abs(dx), math.abs(dy))
+
+  if dist == 0 or dist > range then return false end
+
+  if dirVec.x == 0 then
+    return (dy * dirVec.y) > 0 and math.abs(dx) <= width
+  elseif dirVec.y == 0 then
+    return (dx * dirVec.x) > 0 and math.abs(dy) <= width
+  else
+    local inX = (dirVec.x > 0 and dx > 0) or (dirVec.x < 0 and dx < 0)
+    local inY = (dirVec.y > 0 and dy > 0) or (dirVec.y < 0 and dy < 0)
+    return inX and inY
   end
-  
-  return math.min(10, totalDanger), threats
 end
 
---[[
-  Check if immediate threat exists (any monster about to attack)
-  @param monsters Table of monster tracking data
-  @param patterns Table of monster patterns
-  @param playerPos Player's position
-  @return boolean, table (immediateThreat, details)
-]]
-function MonsterPrediction.hasImmediateThreat(monsters, patterns, playerPos)
-  if not playerPos then return false, nil end
-  
-  monsters = monsters or {}
-  patterns = patterns or {}
-  
-  for id, data in pairs(monsters) do
-    local patternData = patterns[data.name and data.name:lower()] or {}
-    local threat, details = MonsterPrediction.getThreatLevel(data, patternData, playerPos)
-    
-    if threat >= 0.6 then
-      local timeToAttack = details and details.timeToAttack or -1
-      
-      if timeToAttack >= 0 and timeToAttack < MonsterPrediction.CONFIG.IMMEDIATE_THREAT_WINDOW then
-        return true, {
-          monster = data,
-          timeToAttack = timeToAttack,
-          threat = threat,
-          details = details
-        }
-      end
-    end
+-- ============================================================================
+-- CONFIDENCE SYSTEM
+-- Aggregates confidence from multiple sources for decision making.
+-- ============================================================================
+
+MonsterAI.Confidence = MonsterAI.Confidence or {}
+
+--- Weighted aggregation of confidence sources.
+-- @param sources: array of {name, confidence, weight}
+-- @return aggregated confidence (0-1)
+function MonsterAI.Confidence.aggregate(sources)
+  if not sources or #sources == 0 then return 0.5 end
+  local weightedSum, totalWeight = 0, 0
+  for i = 1, #sources do
+    local s = sources[i]
+    weightedSum = weightedSum + (s.confidence * s.weight)
+    totalWeight = totalWeight + s.weight
   end
-  
-  return false, nil
+  if totalWeight == 0 then return 0.5 end
+  return weightedSum / totalWeight
 end
 
-return MonsterPrediction
+--- Determine if we should act based on a confidence threshold.
+function MonsterAI.Confidence.shouldAct(confidence, threshold)
+  threshold = threshold or CONST.CONFIDENCE.MEDIUM
+  return confidence >= threshold
+end
+
+--- Map a numeric confidence to a category string.
+function MonsterAI.Confidence.getCategory(confidence)
+  if confidence >= CONST.CONFIDENCE.VERY_HIGH then return "VERY_HIGH"
+  elseif confidence >= CONST.CONFIDENCE.HIGH   then return "HIGH"
+  elseif confidence >= CONST.CONFIDENCE.MEDIUM then return "MEDIUM"
+  elseif confidence >= CONST.CONFIDENCE.LOW    then return "LOW"
+  else return "VERY_LOW" end
+end
+
+if MonsterAI.DEBUG then
+  print("[MonsterAI] Prediction module v3.0 loaded")
+end

@@ -25,6 +25,12 @@
 
 setDefaultTab("HP")
 
+-- Safe resolve ring_buffer utilities (may not be in global scope in all sandboxes)
+local BoundedPush = BoundedPush or (RingBuffer and RingBuffer.boundedPush) or function(arr, item, max)
+  arr[#arr + 1] = item
+  while #arr > (max or 50) do table.remove(arr, 1) end
+end
+
 -- Use centralized constants (dofile loads FoodItems globally)
 if not FoodItems then
   dofile("constants/food_items.lua")

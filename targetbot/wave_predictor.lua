@@ -6,6 +6,12 @@
 WavePredictor = WavePredictor or {}
 WavePredictor.VERSION = "0.3"  -- Updated for OTClient API integration
 
+-- Safe resolve ring_buffer utilities (may not be in global scope in all sandboxes)
+local BoundedPush = BoundedPush or (RingBuffer and RingBuffer.boundedPush) or function(arr, item, max)
+  arr[#arr + 1] = item
+  while #arr > (max or 50) do table.remove(arr, 1) end
+end
+
 -- Use global ClientHelper (loaded by _Loader.lua) for cross-client compatibility
 local function getClient()
   return ClientHelper and ClientHelper.getClient() or ClientService

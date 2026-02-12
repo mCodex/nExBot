@@ -12,23 +12,54 @@
   - Enhanced walk system with prewalk
 ]]
 
--- Load base adapter
-local BaseAdapter = dofile("/core/acl/adapters/base.lua")
+-- Load base adapter (pcall-guarded, dofile may not return values in OTClient sandbox)
+local BaseAdapter
+do
+  local ok, res = pcall(dofile, "/core/acl/adapters/base.lua")
+  if ok and type(res) == "table" then
+    BaseAdapter = res
+  else
+    -- Fallback: try global set by base.lua
+    BaseAdapter = ACL_BaseAdapter or nil
+  end
+end
 
 -- Create OpenTibiaBR adapter extending base
 local OpenTibiaBRAdapter = {}
 
--- Copy all base adapter properties
-for k, v in pairs(BaseAdapter) do
-  if type(v) == "table" then
-    OpenTibiaBRAdapter[k] = {}
-    for k2, v2 in pairs(v) do
-      OpenTibiaBRAdapter[k][k2] = v2
+-- Copy all base adapter properties (guard against nil from failed load)
+if BaseAdapter and type(BaseAdapter) == "table" then
+  for k, v in pairs(BaseAdapter) do
+    if type(v) == "table" then
+      OpenTibiaBRAdapter[k] = {}
+      for k2, v2 in pairs(v) do
+        OpenTibiaBRAdapter[k][k2] = v2
+      end
+    else
+      OpenTibiaBRAdapter[k] = v
     end
-  else
-    OpenTibiaBRAdapter[k] = v
   end
+else
+  warn("[ACL] BaseAdapter failed to load — OpenTibiaBR adapter using empty base")
 end
+
+-- Ensure required sub-tables exist even if BaseAdapter copy was skipped
+OpenTibiaBRAdapter.game                = OpenTibiaBRAdapter.game                or {}
+OpenTibiaBRAdapter.map                 = OpenTibiaBRAdapter.map                 or {}
+OpenTibiaBRAdapter.ui                  = OpenTibiaBRAdapter.ui                  or {}
+OpenTibiaBRAdapter.modules             = OpenTibiaBRAdapter.modules             or {}
+OpenTibiaBRAdapter.utils               = OpenTibiaBRAdapter.utils               or {}
+OpenTibiaBRAdapter.callbacks           = OpenTibiaBRAdapter.callbacks            or {}
+OpenTibiaBRAdapter._registeredCallbacks = OpenTibiaBRAdapter._registeredCallbacks or {}
+OpenTibiaBRAdapter.cooldown            = OpenTibiaBRAdapter.cooldown             or {}
+OpenTibiaBRAdapter.bot                 = OpenTibiaBRAdapter.bot                  or {}
+OpenTibiaBRAdapter.containers          = OpenTibiaBRAdapter.containers           or {}
+OpenTibiaBRAdapter.creatures           = OpenTibiaBRAdapter.creatures            or {}
+OpenTibiaBRAdapter.events              = OpenTibiaBRAdapter.events               or {}
+
+-- Register globally so init.lua can pick up the adapter even when dofile
+-- doesn't propagate return values through pcall wrappers in the sandbox
+ACL_LoadedAdapter = OpenTibiaBRAdapter
 
 -- Adapter metadata
 OpenTibiaBRAdapter.NAME = "OpenTibiaBR"

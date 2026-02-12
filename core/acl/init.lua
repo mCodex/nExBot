@@ -255,8 +255,13 @@ local function loadAdapter()
     return dofile("/core/" .. adapterPath .. ".lua")
   end)
   
+  -- dofile may not propagate return values in OTClient sandbox;
+  -- adapters also register themselves as _G.ACL_LoadedAdapter
   if status and result then
     adapters = result
+  elseif status and ACL_LoadedAdapter then
+    adapters = ACL_LoadedAdapter
+    ACL_LoadedAdapter = nil
   else
     warn("[ACL] Failed to load adapter: " .. adapterPath .. " (" .. tostring(result) .. ")")
     -- Return base adapter with noop functions

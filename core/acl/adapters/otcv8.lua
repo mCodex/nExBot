@@ -10,23 +10,54 @@
   - Specific spectator patterns
 ]]
 
--- Load base adapter
-local BaseAdapter = dofile("/core/acl/adapters/base.lua")
+-- Load base adapter (pcall-guarded, dofile may not return values in OTClient sandbox)
+local BaseAdapter
+do
+  local ok, res = pcall(dofile, "/core/acl/adapters/base.lua")
+  if ok and type(res) == "table" then
+    BaseAdapter = res
+  else
+    -- Fallback: try global set by base.lua
+    BaseAdapter = ACL_BaseAdapter or nil
+  end
+end
 
 -- Create OTCv8 adapter extending base
 local OTCv8Adapter = {}
 
--- Copy all base adapter properties
-for k, v in pairs(BaseAdapter) do
-  if type(v) == "table" then
-    OTCv8Adapter[k] = {}
-    for k2, v2 in pairs(v) do
-      OTCv8Adapter[k][k2] = v2
+-- Copy all base adapter properties (guard against nil from failed load)
+if BaseAdapter and type(BaseAdapter) == "table" then
+  for k, v in pairs(BaseAdapter) do
+    if type(v) == "table" then
+      OTCv8Adapter[k] = {}
+      for k2, v2 in pairs(v) do
+        OTCv8Adapter[k][k2] = v2
+      end
+    else
+      OTCv8Adapter[k] = v
     end
-  else
-    OTCv8Adapter[k] = v
   end
+else
+  warn("[ACL] BaseAdapter failed to load — OTCv8 adapter using empty base")
 end
+
+-- Ensure required sub-tables exist even if BaseAdapter copy was skipped
+OTCv8Adapter.game                = OTCv8Adapter.game                or {}
+OTCv8Adapter.map                 = OTCv8Adapter.map                 or {}
+OTCv8Adapter.ui                  = OTCv8Adapter.ui                  or {}
+OTCv8Adapter.modules             = OTCv8Adapter.modules             or {}
+OTCv8Adapter.utils               = OTCv8Adapter.utils               or {}
+OTCv8Adapter.callbacks           = OTCv8Adapter.callbacks            or {}
+OTCv8Adapter._registeredCallbacks = OTCv8Adapter._registeredCallbacks or {}
+OTCv8Adapter.cooldown            = OTCv8Adapter.cooldown             or {}
+OTCv8Adapter.bot                 = OTCv8Adapter.bot                  or {}
+OTCv8Adapter.containers          = OTCv8Adapter.containers           or {}
+OTCv8Adapter.creatures           = OTCv8Adapter.creatures            or {}
+OTCv8Adapter.events              = OTCv8Adapter.events               or {}
+
+-- Register globally so init.lua can pick up the adapter even when dofile
+-- doesn't propagate return values through pcall wrappers in the sandbox
+ACL_LoadedAdapter = OTCv8Adapter
 
 -- Adapter metadata
 OTCv8Adapter.NAME = "OTCv8"

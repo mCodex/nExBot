@@ -1777,7 +1777,10 @@ end
 
 -- Background tracking (no visible button)
 macro(5000, function()
-  if CaveBot and type(CaveBot.isOn) == "function" and CaveBot.isOn() and not isSessionActive() then
+  -- v3.0: Auto-start session when EITHER CaveBot OR TargetBot is active
+  local caveBotOn = CaveBot and type(CaveBot.isOn) == "function" and CaveBot.isOn()
+  local targetBotOn = TargetBot and type(TargetBot.isOn) == "function" and TargetBot.isOn()
+  if (caveBotOn or targetBotOn) and not isSessionActive() then
     startSession()
   end
   updateTracking()
