@@ -20,14 +20,9 @@
 
 TargetCore = TargetCore or {}
 
--- Use global ClientHelper for consistency (loaded by _Loader.lua)
-local function getClient()
-  return ClientHelper and ClientHelper.getClient() or ClientService
-end
-
-local function getClientVersion()
-  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
-end
+-- Use shared ClientHelper aliases (loaded by _Loader.lua)
+local getClient = nExBot.Shared.getClient
+local getClientVersion = nExBot.Shared.getClientVersion
 
 -- ============================================================================
 -- CONSTANTS (Centralized, immutable)

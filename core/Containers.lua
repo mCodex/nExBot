@@ -75,15 +75,8 @@ local DEFAULT_CONFIG = {
     windowHeight = 200
 }
 
--- Deep clone utility
-local function deepClone(t)
-    if type(t) ~= "table" then return t end
-    local copy = {}
-    for k, v in pairs(t) do
-        copy[k] = deepClone(v)
-    end
-    return copy
-end
+-- Alias shared deepClone (DRY)
+local deepClone = nExBot.Shared.deepClone
 
 -- ============================================================================
 -- STORAGE & STATE (Per-Character with CharacterDB)
@@ -1143,9 +1136,7 @@ end
 -- ============================================================================
 -- CLIENT SERVICE HELPERS (Cross-client compatibility)
 -- ============================================================================
-local function getClient()
-  return ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 -- Request container queue sync (OpenTibiaBR feature for accuracy)
 local function requestContainerSync()

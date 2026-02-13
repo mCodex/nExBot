@@ -7,25 +7,22 @@ local function ensureCurrentSettings()
     if not HealBotConfig then HealBotConfig = {} end
     -- Ensure profile container exists and has 5 profiles
     if not HealBotConfig[healPanelName] or type(HealBotConfig[healPanelName]) ~= "table" or #HealBotConfig[healPanelName] ~= 5 then
-      local function makeDefaultProfiles()
-        local t = {}
-        for i=1,5 do
-          t[i] = {
-            enabled = false,
-            spellTable = {},
-            itemTable = {},
-            name = "Profile #" .. i,
-            Visible = true,
-            Cooldown = true,
-            Interval = true,
-            Conditions = true,
-            Delay = true,
-            MessageDelay = false
-          }
-        end
-        return t
+      local profiles = {}
+      for i = 1, 5 do
+        profiles[i] = {
+          enabled = false,
+          spellTable = {},
+          itemTable = {},
+          name = "Profile #" .. i,
+          Visible = true,
+          Cooldown = true,
+          Interval = true,
+          Conditions = true,
+          Delay = true,
+          MessageDelay = false
+        }
       end
-      HealBotConfig[healPanelName] = makeDefaultProfiles()
+      HealBotConfig[healPanelName] = profiles
       pcall(saveHeal)
     end
     if not HealBotConfig.currentHealBotProfile or HealBotConfig.currentHealBotProfile < 1 or HealBotConfig.currentHealBotProfile > 5 then
@@ -333,68 +330,22 @@ Panel
 ui:setId(healPanelName)
 
 if not HealBotConfig[healPanelName] or not HealBotConfig[healPanelName][1] or #HealBotConfig[healPanelName] ~= 5 then
-  HealBotConfig[healPanelName] = {
-    [1] = {
+  local profiles = {}
+  for i = 1, 5 do
+    profiles[i] = {
       enabled = false,
       spellTable = {},
       itemTable = {},
-      name = "Profile #1",
+      name = "Profile #" .. i,
       Visible = true,
       Cooldown = true,
       Interval = true,
       Conditions = true,
       Delay = true,
       MessageDelay = false
-    },
-    [2] = {
-      enabled = false,
-      spellTable = {},
-      itemTable = {},
-      name = "Profile #2",
-      Visible = true,
-      Cooldown = true,
-      Interval = true,
-      Conditions = true,
-      Delay = true,
-      MessageDelay = false
-    },
-    [3] = {
-      enabled = false,
-      spellTable = {},
-      itemTable = {},
-      name = "Profile #3",
-      Visible = true,
-      Cooldown = true,
-      Interval = true,
-      Conditions = true,
-      Delay = true,
-      MessageDelay = false
-    },
-    [4] = {
-      enabled = false,
-      spellTable = {},
-      itemTable = {},
-      name = "Profile #4",
-      Visible = true,
-      Cooldown = true,
-      Interval = true,
-      Conditions = true,
-      Delay = true,
-      MessageDelay = false
-    },
-    [5] = {
-      enabled = false,
-      spellTable = {},
-      itemTable = {},
-      name = "Profile #5",
-      Visible = true,
-      Cooldown = true,
-      Interval = true,
-      Conditions = true,
-      Delay = true,
-      MessageDelay = false
-    },
-  }
+    }
+  end
+  HealBotConfig[healPanelName] = profiles
 end
 
 -- Load character-specific profile if available

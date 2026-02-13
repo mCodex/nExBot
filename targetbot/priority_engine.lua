@@ -52,14 +52,9 @@ end
 -- HELPERS
 -- ============================================================================
 
-local function nowMs()
-  return (ClientHelper and ClientHelper.nowMs and ClientHelper.nowMs())
-      or now or (os.time() * 1000)
-end
+local nowMs = nExBot.Shared.nowMs
 
-local function getClient()
-  return (ClientHelper and ClientHelper.getClient()) or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 local function safeGet(obj, method, default)
   if not obj then return default end

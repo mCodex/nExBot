@@ -3,10 +3,7 @@
 
 CaveBot.Extensions.Imbuing = {}
 
--- Use global ClientHelper (loaded by _Loader.lua)
-local function getClient()
-    return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 local SHRINES = {25060, 25061, 25182, 25183}
 local currentIndex = 1

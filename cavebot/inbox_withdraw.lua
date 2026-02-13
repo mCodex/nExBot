@@ -1,9 +1,6 @@
 CaveBot.Extensions.InWithdraw = {}
 
--- ClientService helper for cross-client compatibility
-local function getClient()
-    return ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 CaveBot.Extensions.InWithdraw.setup = function()
 	CaveBot.registerAction("inwithdraw", "#002FFF", function(value, retries)

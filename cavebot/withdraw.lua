@@ -1,9 +1,6 @@
 CaveBot.Extensions.Withdraw = {}
 
--- Use global ClientHelper for cross-client compatibility
-local function getClient()
-    return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 CaveBot.Extensions.Withdraw.setup = function()
 	CaveBot.registerAction("withdraw", "#002FFF", function(value, retries)

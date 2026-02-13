@@ -48,10 +48,7 @@ minimap.onMouseRelease = function(widget,pos,button)
   local mapPos = minimap:getTilePosition(pos)
   if not mapPos then return end
   
-  -- ClientService helper for cross-client compatibility
-  local function getClient()
-    return ClientService
-  end
+  local getClient = nExBot.Shared.getClient
   
   local Client = getClient()
   local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer())

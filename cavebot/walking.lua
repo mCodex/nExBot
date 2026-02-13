@@ -49,10 +49,7 @@ if not CaveBot.fullResetWalking then
   CaveBot.fullResetWalking = function() end
 end
 
--- Get ClientService reference for cross-client compatibility
-local function getClient()
-  return ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 -- ============================================================================
 -- MODULE STATE (minimal, well-defined)
@@ -1352,13 +1349,6 @@ onPlayerPositionChange(function(newPos, oldPos)
   
   FloorChangeCache.tiles = {}  -- Clear cache on any floor change
 end)
-
--- DEBUG: Verify file loaded completely
-if CaveBot.resetWalking then
-  info("[CaveBot Walking] Module loaded successfully - resetWalking is defined")
-else
-  warn("[CaveBot Walking] ERROR: resetWalking is NOT defined after loading!")
-end
 
 -- Safeguard: ensure module closes cleanly
 return true

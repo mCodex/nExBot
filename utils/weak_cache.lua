@@ -79,11 +79,7 @@ function WeakCache.createLRU(maxSize, ttl)
     misses = 0
   }
   
-  local function nowMs()
-    if now then return now end
-    if g_clock and g_clock.millis then return g_clock.millis() end
-    return os.time() * 1000
-  end
+  local nowMs = nExBot.Shared.nowMs
   
   -- Remove oldest entry
   local function evict()
@@ -188,11 +184,7 @@ function WeakCache.createTTL(defaultTTL)
     misses = 0
   }
   
-  local function nowMs()
-    if now then return now end
-    if g_clock and g_clock.millis then return g_clock.millis() end
-    return os.time() * 1000
-  end
+  local nowMs = nExBot.Shared.nowMs
   
   -- Get value from cache
   function cache:get(key)

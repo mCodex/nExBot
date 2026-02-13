@@ -1,9 +1,6 @@
 CaveBot.Extensions.ClearTile = {}
 
--- ClientService helper for cross-client compatibility
-local function getClient()
-    return ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 CaveBot.Extensions.ClearTile.setup = function()
   CaveBot.registerAction("ClearTile", "#00FFFF", function(value, retries)

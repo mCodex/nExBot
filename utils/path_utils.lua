@@ -33,9 +33,7 @@ local PathUtils = {}
 -- CLIENT SERVICE ABSTRACTION (ACL Pattern)
 -- ============================================================================
 
-local function getClient()
-  return ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 local function getGame()
   local Client = getClient()

@@ -24,15 +24,10 @@ if not FoodItems then
 end
 
 --------------------------------------------------------------------------------
--- CLIENTSERVICE HELPERS (using global ClientHelper for consistency)
+-- CLIENTSERVICE HELPERS (shared aliases)
 --------------------------------------------------------------------------------
-local function getClient()
-  return ClientHelper and ClientHelper.getClient() or ClientService
-end
-
-local function getClientVersion()
-  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
-end
+local getClient = nExBot.Shared.getClient
+local getClientVersion = nExBot.Shared.getClientVersion
 
 TargetBot.EatFood = {}
 

@@ -18,10 +18,7 @@ local stats = {
   invalidations = 0
 }
 
--- Use global ClientHelper (loaded by _Loader.lua)
-local function getClient()
-    return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 local function makeKey(rx, ry)
   return tostring(rx) .. "x" .. tostring(ry)

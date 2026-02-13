@@ -68,11 +68,7 @@ local stats = {
 }
 
 -- Time helper
-local function nowMs()
-  if now then return now end
-  if g_clock and g_clock.millis then return g_clock.millis() end
-  return os.time() * 1000
-end
+local nowMs = nExBot.Shared.nowMs
 
 -- ============================================================================
 -- HANDLER REGISTRATION

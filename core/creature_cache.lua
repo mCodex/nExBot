@@ -86,9 +86,7 @@ end
 -- CLIENT HELPERS
 -- ============================================================================
 
-local function getClient()
-  return ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 local function getLocalPlayer()
   local Client = getClient()

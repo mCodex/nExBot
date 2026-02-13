@@ -7,14 +7,9 @@
   v5.0.0: Integrated PathUtils for DRY, added anti-zigzag, native API optimization
 ]]
 
--- Use global ClientHelper (loaded by _Loader.lua) for cross-client compatibility
-local function getClient()
-  return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
-local function getClientVersion()
-  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
-end
+local getClientVersion = nExBot.Shared.getClientVersion
 
 -- Load PathUtils if available (shared module for DRY)
 local PathUtils = nil

@@ -32,17 +32,11 @@ MonsterAI = MonsterAI or {}
 MonsterAI.VERSION = "3.0"
 
 -- ============================================================================
--- CLIENT SERVICE HELPERS (DRY — shared across all subsystems)
+-- CLIENT SERVICE HELPERS (shared aliases)
 -- ============================================================================
 
-local function getClient()
-  return ClientHelper and ClientHelper.getClient() or ClientService
-end
-
-local function getClientVersion()
-  return ClientHelper and ClientHelper.getClientVersion()
-    or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
-end
+local getClient = nExBot.Shared.getClient
+local getClientVersion = nExBot.Shared.getClientVersion
 
 -- Time helper (use ClientHelper for DRY)
 local nowMs = ClientHelper and ClientHelper.nowMs or function()

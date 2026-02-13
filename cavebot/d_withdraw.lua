@@ -1,9 +1,6 @@
 CaveBot.Extensions.DWithdraw = {}
 
--- Use global ClientHelper (loaded by _Loader.lua)
-local function getClient()
-    return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 CaveBot.Extensions.DWithdraw.setup = function()
 	CaveBot.registerAction("dpwithdraw", "#002FFF", function(value, retries)

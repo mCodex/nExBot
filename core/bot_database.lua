@@ -97,15 +97,8 @@ local SCHEMA = {
 -- PURE UTILITY FUNCTIONS
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Deep clone a table (pure function, no side effects)
-local function deepClone(obj)
-  if type(obj) ~= "table" then return obj end
-  local clone = {}
-  for k, v in pairs(obj) do
-    clone[k] = deepClone(v)
-  end
-  return clone
-end
+-- Alias shared deepClone (DRY)
+local deepClone = nExBot.Shared.deepClone
 
 -- Get nested value by dot-separated path (pure function)
 -- Example: getPath({a = {b = 1}}, "a.b") => 1

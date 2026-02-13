@@ -100,15 +100,8 @@ local SCHEMA = {
 -- PURE UTILITY FUNCTIONS
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Deep clone a table
-local function deepClone(t)
-  if type(t) ~= "table" then return t end
-  local copy = {}
-  for k, v in pairs(t) do
-    copy[k] = deepClone(v)
-  end
-  return copy
-end
+-- Alias shared deepClone (DRY)
+local deepClone = nExBot.Shared.deepClone
 
 -- Get value by dot-path
 local function getPath(data, path)

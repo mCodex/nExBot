@@ -1,9 +1,6 @@
-local version = "1.0.0"
+local version = nExBot.version or "0.0.0"
 
--- Get ClientService reference for cross-client compatibility
-local function getClient()
-  return ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 UI.Label("nExBot v" .. version)
 UI.Separator()

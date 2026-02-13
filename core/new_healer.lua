@@ -8,7 +8,8 @@
     - Shares exhaustion with HealBot via BotCore.Cooldown
     - Priority-based: Self-healing ALWAYS takes precedence
     - Event-driven for instant response to health changes
-    - Memoized target selection for performance
+    - Custom player list persisted per-character via CharacterDB
+    - Vocation filtering integrated with VocationUtils
 ]]
 
 setDefaultTab("Main")
@@ -84,6 +85,42 @@ if not storage[panelName] then
 end
 
 local config = storage[panelName]
+
+-- ============================================================================
+-- CHARACTERDB INTEGRATION: Per-character custom players list
+-- Migrates from shared storage to per-character storage on first load
+-- ============================================================================
+
+local function loadCharacterCustomPlayers()
+  if not CharacterDB or not CharacterDB.isReady or not CharacterDB.isReady() then
+    return
+  end
+  -- Try to load per-character custom players
+  local charPlayers = CharacterDB.get("friendHealer.customPlayers")
+  if charPlayers and type(charPlayers) == "table" and #charPlayers > 0 then
+    config.customPlayers = charPlayers
+  elseif config.customPlayers and #config.customPlayers > 0 then
+    -- Migrate existing shared custom players to CharacterDB
+    CharacterDB.set("friendHealer.customPlayers", config.customPlayers)
+  end
+  -- Also load per-character conditions
+  local charConditions = CharacterDB.get("friendHealer.conditions")
+  if charConditions and type(charConditions) == "table" then
+    for k, v in pairs(charConditions) do
+      config.conditions[k] = v
+    end
+  end
+end
+
+-- Defer loading until player is available
+schedule(500, loadCharacterCustomPlayers)
+
+-- Save custom players to both storage and CharacterDB
+local function saveCustomPlayers()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("friendHealer.customPlayers", config.customPlayers)
+  end
+end
 
 -- ============================================================================
 -- BOTCORE INTEGRATION: Build config for FriendHealer module
@@ -206,15 +243,21 @@ local customList = healerWindow.customList
 local priority = healerWindow.priority
 
 -- customList
--- create entries on the list
-for name, health in pairs(config.customPlayers) do
+-- DRY: Helper to create a player entry widget
+local function createPlayerEntry(name, health)
     local widget = UI.createWidget("HealerPlayerEntry", customList.playerList.list)
     widget.remove.onClick = function()
         config.customPlayers[name] = nil
         widget:destroy()
+        saveCustomPlayers()
         updateBotCoreConfig()
     end
     widget:setText("["..health.."%]  "..name)
+    return widget
+end
+
+for name, health in pairs(config.customPlayers) do
+    createPlayerEntry(name, health)
 end
 
 customList.playerList.onDoubleClick = function()
@@ -227,17 +270,19 @@ local function clearFields()
     customList.playerList:show()
 end
 
-local function capitalFistLetter(str)
-    return (string.gsub(str, "^%l", string.upper))
+-- Use Shared.properCase for name formatting (fixes leading space bug)
+local properCase = nExBot and nExBot.Shared and nExBot.Shared.properCase or function(str)
+  local words = {}
+  for word in str:gmatch("%S+") do
+    words[#words + 1] = word:sub(1,1):upper() .. word:sub(2)
   end
+  return table.concat(words, " ")
+end
 
 customList.addPanel.add.onClick = function()
-    local name = ""
-    local words = string.split(customList.addPanel.name:getText(), " ")
+    local rawName = customList.addPanel.name:getText()
+    local name = properCase(rawName)
     local health = tonumber(customList.addPanel.health:getText())
-    for i, word in ipairs(words) do
-      name = name .. " " .. capitalFistLetter(word)
-    end
 
     if not health then    
         clearFields()
@@ -254,13 +299,8 @@ customList.addPanel.add.onClick = function()
         return warn("[Friend Healer] Player already added to custom list.")
     else
         config.customPlayers[name] = health
-        local widget = UI.createWidget("HealerPlayerEntry", customList.playerList.list)
-        widget.remove.onClick = function()
-            config.customPlayers[name] = nil
-            widget:destroy()
-            updateBotCoreConfig()
-        end
-        widget:setText("["..health.."%]  "..name)
+        createPlayerEntry(name, health)
+        saveCustomPlayers()
         updateBotCoreConfig()
     end
 
@@ -297,70 +337,32 @@ local function validate(widget, category)
         label:setTooltip("")
     end
 end
--- targetSettings
-targetSettings.vocations.box.knights:setChecked(config.conditions.knights)
-targetSettings.vocations.box.knights.onClick = function(widget)
-    config.conditions.knights = not config.conditions.knights
-    widget:setChecked(config.conditions.knights)
-    validate(widget, 2)
+-- DRY: Generic checkbox binder for condition toggles
+local function bindConditionCheckbox(widget, conditionKey, category)
+  widget:setChecked(config.conditions[conditionKey])
+  widget.onClick = function(w)
+    config.conditions[conditionKey] = not config.conditions[conditionKey]
+    w:setChecked(config.conditions[conditionKey])
+    validate(w, category or 0)
     updateBotCoreConfig()
+    -- Persist to CharacterDB if available
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+      CharacterDB.set("friendHealer.conditions", config.conditions)
+    end
+  end
 end
 
-targetSettings.vocations.box.paladins:setChecked(config.conditions.paladins)
-targetSettings.vocations.box.paladins.onClick = function(widget)
-    config.conditions.paladins = not config.conditions.paladins
-    widget:setChecked(config.conditions.paladins)
-    validate(widget, 2)
-    updateBotCoreConfig()
-end
+-- Vocation checkboxes (category 2 = requires checkPlayer)
+bindConditionCheckbox(targetSettings.vocations.box.knights, "knights", 2)
+bindConditionCheckbox(targetSettings.vocations.box.paladins, "paladins", 2)
+bindConditionCheckbox(targetSettings.vocations.box.druids, "druids", 2)
+bindConditionCheckbox(targetSettings.vocations.box.sorcerers, "sorcerers", 2)
+bindConditionCheckbox(targetSettings.vocations.box.monks, "monks", 2)
 
-targetSettings.vocations.box.druids:setChecked(config.conditions.druids)
-targetSettings.vocations.box.druids.onClick = function(widget)
-    config.conditions.druids = not config.conditions.druids
-    widget:setChecked(config.conditions.druids)
-    validate(widget, 2)
-    updateBotCoreConfig()
-end
-
-targetSettings.vocations.box.sorcerers:setChecked(config.conditions.sorcerers)
-targetSettings.vocations.box.sorcerers.onClick = function(widget)
-    config.conditions.sorcerers = not config.conditions.sorcerers
-    widget:setChecked(config.conditions.sorcerers)
-    validate(widget, 2)
-    updateBotCoreConfig()
-end
-
-targetSettings.vocations.box.monks:setChecked(config.conditions.monks)
-targetSettings.vocations.box.monks.onClick = function(widget)
-    config.conditions.monks = not config.conditions.monks
-    widget:setChecked(config.conditions.monks)
-    validate(widget, 2)
-    updateBotCoreConfig()
-end
-
-targetSettings.groups.box.friends:setChecked(config.conditions.friends)
-targetSettings.groups.box.friends.onClick = function(widget)
-    config.conditions.friends = not config.conditions.friends
-    widget:setChecked(config.conditions.friends)
-    validate(widget)
-    updateBotCoreConfig()
-end
-
-targetSettings.groups.box.party:setChecked(config.conditions.party)
-targetSettings.groups.box.party.onClick = function(widget)
-    config.conditions.party = not config.conditions.party
-    widget:setChecked(config.conditions.party)
-    validate(widget)
-    updateBotCoreConfig()
-end
-
-targetSettings.groups.box.guild:setChecked(config.conditions.guild)
-targetSettings.groups.box.guild.onClick = function(widget)
-    config.conditions.guild = not config.conditions.guild
-    widget:setChecked(config.conditions.guild)
-    validate(widget)
-    updateBotCoreConfig()
-end
+-- Group checkboxes (category 0 = no special requirement)
+bindConditionCheckbox(targetSettings.groups.box.friends, "friends")
+bindConditionCheckbox(targetSettings.groups.box.party, "party")
+bindConditionCheckbox(targetSettings.groups.box.guild, "guild")
 
 validate(targetSettings.vocations.box.knights)
 validate(targetSettings.groups.box.friends)
@@ -645,19 +647,16 @@ local function legacyIsCandidate(spec)
         return false
     end
 
-    local VocationUtils = VocationUtils
-    if storage.extras and storage.extras.checkPlayer then
-        local short = VocationUtils and VocationUtils.getCreatureVocationShort and VocationUtils.getCreatureVocationShort(spec)
-        if short then
-            if short == "EK" and not config.conditions.knights or
-               short == "RP" and not config.conditions.paladins or
-               short == "ED" and not config.conditions.druids or
-               short == "MS" and not config.conditions.sorcerers or
-               short == "MN" and not config.conditions.monks then
-               if not config.customPlayers[name] then
-                   return nil
-               end
-            end
+    -- Vocation filter (map-based for DRY/KISS)
+    local vocConditionMap = {
+      EK = "knights", RP = "paladins", ED = "druids",
+      MS = "sorcerers", MN = "monks"
+    }
+    if storage.extras and storage.extras.checkPlayer and VocationUtils and VocationUtils.getCreatureVocationShort then
+        local short = VocationUtils.getCreatureVocationShort(spec)
+        local condKey = short and vocConditionMap[short]
+        if condKey and not config.conditions[condKey] and not config.customPlayers[name] then
+            return nil
         end
     end
 

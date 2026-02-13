@@ -1,19 +1,8 @@
 CaveBot.Actions = {}
 nExBot.lastLabel = ""
 
--- Get ClientService reference for cross-client compatibility
-local function getClient()
-  return ClientService
-end
-
--- Get client version (cached for performance)
-local function getClientVersion()
-  local Client = getClient()
-  if Client and Client.getClientVersion then
-    return Client.getClientVersion()
-  end
-  return g_game and g_game.getClientVersion and g_game.getClientVersion() or 1200
-end
+local getClient = nExBot.Shared.getClient
+local getClientVersion = nExBot.Shared.getClientVersion
 
 local oldTibia = getClientVersion() < 960
 local nextTile = nil

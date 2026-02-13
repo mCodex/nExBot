@@ -12,14 +12,9 @@ local BoundedPush = BoundedPush or (RingBuffer and RingBuffer.boundedPush) or fu
   while #arr > (max or 50) do table.remove(arr, 1) end
 end
 
--- Use global ClientHelper (loaded by _Loader.lua) for cross-client compatibility
-local function getClient()
-  return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
-local function getClientVersion()
-  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
-end
+local getClientVersion = nExBot.Shared.getClientVersion
 
 -- Per-creature state
 local patterns = {} -- id -> { lastAttack = ts, cooldownEMA, directionBias, observedWidth, ... }

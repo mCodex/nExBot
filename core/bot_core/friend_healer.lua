@@ -35,47 +35,10 @@ local FriendHealerEnhanced = BotCore.FriendHealerEnhanced
 -- Also expose as BotCore.FriendHealer for backward compatibility with new_healer.lua
 BotCore.FriendHealer = BotCore.FriendHealerEnhanced
 
--- SafeCreature module for safe creature access (DRY)
--- Defensive: ensure SafeCreature is available, create minimal fallback if not
+-- SafeCreature is loaded early in boot; require it (no inline duplication)
 if not SafeCreature then
-  warn("[FriendHealer] SafeCreature module not loaded, using inline fallback")
-  SafeCreature = {
-    isPlayer = function(creature)
-      if not creature then return false end
-      local ok, result = pcall(function() return creature:isPlayer() end)
-      return ok and result == true
-    end,
-    getName = function(creature)
-      if not creature then return nil end
-      local ok, name = pcall(function() return creature:getName() end)
-      return ok and name or nil
-    end,
-    getPosition = function(creature)
-      if not creature then return nil end
-      local ok, pos = pcall(function() return creature:getPosition() end)
-      return ok and pos or nil
-    end,
-    getHealthPercent = function(creature)
-      if not creature then return 100 end
-      local ok, hp = pcall(function() return creature:getHealthPercent() end)
-      return ok and hp or 100
-    end,
-    isDead = function(creature)
-      if not creature then return true end
-      local ok, result = pcall(function() return creature:isDead() end)
-      return ok and result == true
-    end,
-    getId = function(creature)
-      if not creature then return nil end
-      local ok, id = pcall(function() return creature:getId() end)
-      return ok and id or nil
-    end,
-    distance = function(pos1, pos2)
-      if not pos1 or not pos2 then return 999 end
-      if pos1.z ~= pos2.z then return 999 end
-      return math.max(math.abs(pos1.x - pos2.x), math.abs(pos1.y - pos2.y))
-    end
-  }
+  warn("[FriendHealer] SafeCreature module not loaded – friend healer disabled")
+  return
 end
 local SC = SafeCreature
 
@@ -354,86 +317,56 @@ local function shouldHealFriend(selfHpPercent, friendHpPercent)
 end
 
 -- Check if creature matches friend conditions (improved with SafeCreature module)
-local function isFriend(creature, config)
+-- Vocation short-code to condition key mapping (DRY: single map, no if-chains)
+local VOC_CONDITION_MAP = {
+  EK = "knights", RP = "paladins", ED = "druids", MS = "sorcerers", MN = "monks"
+}
+
+local function isFriendForHealing(creature, config)
   if not creature then return false end
-  
-  -- Use SafeCreature for safe player checks
   if not SC.isPlayer(creature) then return false end
   
-  -- Check if local player (skip self)
   local okLocal, isLocal = pcall(function() return creature:isLocalPlayer() end)
   if okLocal and isLocal then return false end
   
-  -- Get creature name safely
   local name = SC.getName(creature)
   if not name then return false end
   
-  -- Check custom player list first (with custom HP threshold)
+  -- Custom player list has highest priority (with custom HP threshold)
   if config.customPlayers and config.customPlayers[name] then
-    return true, config.customPlayers[name]  -- Returns custom HP threshold
+    return true, config.customPlayers[name]
   end
   
-  -- ========== Vocation filtering ==========
-  -- Get creature's vocation (if available via outfit or other means)
-  local voc = nil
-  if creature.getVocation then
-    local okVoc, v = pcall(function() return creature:getVocation() end)
-    if okVoc then voc = v end
-  end
-  if not voc and VocationUtils and VocationUtils.getCreatureVocationShort then
-    local short = VocationUtils.getCreatureVocationShort(creature)
-    if short then
-      voc = short
-    end
-  end
-  
+  -- Vocation filtering via VocationUtils (DRY: uses shared lookup map)
   local vocConditions = config.conditions or {}
-  local function checkVocation()
-    -- If no vocation data available, allow all (fallback)
-    if not voc then return true end
-    
-    local vocLower = type(voc) == "string" and voc:lower() or ""
-    
-    -- Check enabled vocations
-    if vocConditions.knights and (voc == 8 or vocLower:find("knight")) then return true end
-    if vocConditions.paladins and (voc == 7 or vocLower:find("paladin")) then return true end
-    if vocConditions.druids and (voc == 6 or vocLower:find("druid")) then return true end
-    if vocConditions.sorcerers and (voc == 5 or vocLower:find("sorcerer")) then return true end
-    if vocConditions.monks and (vocLower:find("monk") or vocLower == "mn") then return true end
-    
-    -- If any vocation filter is enabled but doesn't match, reject
-    if vocConditions.knights or vocConditions.paladins or vocConditions.druids or vocConditions.sorcerers or vocConditions.monks then
-      return false
+  if VocationUtils and VocationUtils.getCreatureVocationShort then
+    local short = VocationUtils.getCreatureVocationShort(creature)
+    local condKey = short and VOC_CONDITION_MAP[short]
+    if condKey then
+      if not vocConditions[condKey] then return false end
     end
-    
-    return true
   end
   
-  if not checkVocation() then
-    return false
-  end
-  
-  -- ========== Group filtering ==========
-  -- Check party membership (safe)
+  -- Group filtering: party, guild, friends list
   if vocConditions.party then
-    local okParty, isParty = pcall(function() return creature:isPartyMember() end)
-    if okParty and isParty then return true end
+    local okP, isP = pcall(function() return creature:isPartyMember() end)
+    if okP and isP then return true end
   end
-  
-  -- Check guild membership (safe)
   if vocConditions.guild then
-    local okEmblem, emblem = pcall(function() return creature:getEmblem() end)
-    if okEmblem and emblem == 1 then return true end
+    local okE, emb = pcall(function() return creature:getEmblem() end)
+    if okE and emb == 1 then return true end
   end
-  
-  -- Check friends list (g_game.isFriend)
+  -- Integrate with global isFriend() from lib.lua (uses storage.playerList.friendList)
   if vocConditions.friends then
-    local friendCheck = g_game and g_game.isFriend and g_game.isFriend(name)
-    if friendCheck then return true end
+    local globalFriend = _G.isFriend and _G.isFriend(creature)
+    if globalFriend then return true end
   end
   
   return false
 end
+
+-- Alias for backward compat (local scope)
+local isFriend = isFriendForHealing
 
 -- Calculate urgency score for friend
 local function calculateUrgency(hpPercent, distance)
@@ -806,26 +739,10 @@ end
 -- EVENTBUS INTEGRATION (Improved for accuracy and performance)
 -- ============================================================================
 
--- Safe helper to get creature name
-local function safeGetName(creature)
-  if not creature then return nil end
-  local ok, name = pcall(function() return creature:getName() end)
-  return ok and name or nil
-end
-
--- Safe helper to get creature HP percent
-local function safeGetHpPercent(creature)
-  if not creature then return nil end
-  local ok, hp = pcall(function() return creature:getHealthPercent() end)
-  return ok and hp or nil
-end
-
--- Safe helper to check if creature is dead
-local function safeIsDead(creature)
-  if not creature then return true end
-  local ok, isDead = pcall(function() return creature:isDead() end)
-  return ok and isDead or true
-end
+-- DRY: Reuse SafeCreature instead of duplicating pcall wrappers
+local safeGetName = SC.getName
+local safeGetHpPercent = SC.getHealthPercent
+local safeIsDead = SC.isDead
 
 function FriendHealerEnhanced.setupEventListeners()
   if not EventBus then return end

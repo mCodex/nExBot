@@ -27,9 +27,7 @@ OpenTibiaBRTargeting.DEBUG = false
 -- CLIENT SERVICE HELPER (using global ClientHelper)
 -- ============================================================================
 
-local function getClient()
-  return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 local function isOpenTibiaBR()
   local Client = getClient()

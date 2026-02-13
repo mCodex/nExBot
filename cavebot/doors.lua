@@ -1,9 +1,6 @@
 CaveBot.Extensions.OpenDoors = {}
 
--- Use global ClientHelper (loaded by _Loader.lua)
-local function getClient()
-    return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 CaveBot.Extensions.OpenDoors.setup = function()
   CaveBot.registerAction("OpenDoors", "#00FFFF", function(value, retries)

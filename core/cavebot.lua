@@ -30,13 +30,6 @@ safeDofile("/cavebot/recorder.lua")
 safeDofile("/cavebot/tools.lua")
 safeDofile("/cavebot/walking.lua")
 
--- DEBUG: Verify walking module loaded correctly
-if CaveBot and CaveBot.resetWalking then
-  info("[CaveBot] walking.lua: resetWalking is properly defined")
-else
-  warn("[CaveBot] walking.lua: ERROR - resetWalking is NOT defined!")
-end
-
 safeDofile("/cavebot/minimap.lua")
 
 -- Defer auxiliary modules to reduce startup cost; cavebot.lua must be last (depends on all above)

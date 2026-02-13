@@ -10,10 +10,7 @@
   - Cross-client compatible (OTCv8 / OpenTibiaBR)
 ]]
 
--- ClientService helper for cross-client compatibility
-local function getClient()
-  return ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 if voc() == 2 or voc() == 12 then
     -- Weapon and ammo definitions

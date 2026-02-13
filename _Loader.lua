@@ -34,7 +34,13 @@ local FEATURES_PATH = "/bot/" .. configName .. "/features"
 -- Initialize global nExBot namespace if not exists
 nExBot = nExBot or {}
 nExBot.loadTimes = loadTimes
-nExBot.version = "2.0.0"
+
+-- Read version from project root file (single source of truth)
+do
+  local versionPath = "/bot/" .. configName .. "/version"
+  local ok, content = pcall(g_resources.readFileContents, versionPath)
+  nExBot.version = (ok and content) and content:match("^%s*(.-)%s*$") or "0.0.0"
+end
 
 -- Suppress noisy debug prints by default
 nExBot.showDebug = nExBot.showDebug or false
@@ -343,23 +349,25 @@ loadCategory("constants", {
   "constants/food_items",
   "constants/directions",
   "constants/attack_patterns",
-})
+}, "/")
 
 -- ============================================================================
 -- PHASE 3: UTILS (Core shared utilities)
 -- ============================================================================
 loadCategory("utils", {
+  "utils/shared",
   "utils/ring_buffer",
   "utils/client_helper",
   "utils/safe_creature",
   "utils/weak_cache",
   "utils/creature_events",
   "utils/vocation_utils",
-})
+}, "/")
 
 -- ============================================================================
 -- PHASE 4: CORE LIBRARIES (Legacy compatibility)
 -- ============================================================================
+loadScript("updater", "core")  -- Load updater first so its UI appears above main.lua
 loadCategory("core", {
   "main",
   "items",

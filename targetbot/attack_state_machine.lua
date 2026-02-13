@@ -93,14 +93,9 @@ end
 -- CLIENT + CREATURE HELPERS (single source: SafeCreature / ClientService)
 -- ============================================================================
 
-local function nowMs()
-  if ClientHelper and ClientHelper.nowMs then return ClientHelper.nowMs() end
-  return now or (os.time() * 1000)
-end
+local nowMs = nExBot.Shared.nowMs
 
-local function getClient()
-  return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 local function cId(c)
   if not c then return nil end

@@ -4,10 +4,7 @@ local Tools = CaveBot.Tools
 local USE_COOLDOWN = 600
 local lastUseTime = 0
 
--- Use global ClientHelper for cross-client compatibility
-local function getClient()
-    return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 local function hasDoorItems()
   return DoorItems and DoorItems.isClosedDoor

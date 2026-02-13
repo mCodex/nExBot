@@ -58,10 +58,7 @@ local CONFIG = {
 -- CLIENT SERVICE HELPERS (Cross-client compatibility: OTCv8 / OpenTibiaBR)
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- ClientService helper for cross-client compatibility
-local function getClient()
-  return ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- SCHEMA DEFINITION (Single Source of Truth for All Defaults)
@@ -202,15 +199,8 @@ local SCHEMA = {
 -- PURE UTILITY FUNCTIONS
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Deep clone a table (pure function, no side effects)
-local function deepClone(obj)
-  if type(obj) ~= "table" then return obj end
-  local clone = {}
-  for k, v in pairs(obj) do
-    clone[k] = deepClone(v)
-  end
-  return clone
-end
+-- Alias shared deepClone (DRY)
+local deepClone = nExBot.Shared.deepClone
 
 -- Deep merge two tables (source into target, returns new table)
 local function deepMerge(target, source)

@@ -1,10 +1,7 @@
 CaveBot.Extensions.StandLure = {}
 local enable = nil
 
--- Use global ClientHelper for cross-client compatibility
-local function getClient()
-    return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 local function modPos(dir)
     local y = 0

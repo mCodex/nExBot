@@ -5,16 +5,10 @@ setDefaultTab("Tools")
 -- CLIENT SERVICE HELPERS (Cross-client compatibility: OTCv8 / OpenTibiaBR)
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- ClientService helper for cross-client compatibility
-local function getClient()
-  return ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 -- Version check helper
-local function getClientVersion()
-  local Client = getClient()
-  return (Client and Client.getClientVersion) and Client.getClientVersion() or (g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200
-end
+local getClientVersion = nExBot.Shared.getClientVersion
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- PROFILE STORAGE INTEGRATION

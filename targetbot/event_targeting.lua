@@ -31,14 +31,9 @@ EventTargeting = EventTargeting or {}
 EventTargeting.VERSION = "2.2"
 EventTargeting.DEBUG = false
 
--- Use global ClientHelper (loaded by _Loader.lua) for cross-client compatibility
-local function getClient()
-  return ClientHelper and ClientHelper.getClient() or ClientService
-end
-
-local function getClientVersion()
-  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
-end
+-- Use shared ClientHelper aliases (loaded by _Loader.lua) for cross-client compatibility
+local getClient = nExBot.Shared.getClient
+local getClientVersion = nExBot.Shared.getClientVersion
 
 -- SafeCreature module for safe creature access (DRY)
 -- Defensive wrapper to handle cases where SafeCreature isn't fully loaded

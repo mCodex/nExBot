@@ -113,9 +113,8 @@ function nExBot.releasePos(p)
 end
 
 --------------------------------------------------------------------------------
--- MEMOIZATION - Cache function results for pure functions
+-- MEMOIZATION - (reserved for future use)
 --------------------------------------------------------------------------------
-local MemoCache = {}
 
 function logInfo(text)
     local timestamp = os.date("%H:%M:%S")
@@ -203,13 +202,7 @@ end
 -- returns boolean
 function containerIsFull(c)
     if not c then return false end
-
-    if c:getCapacity() > #c:getItems() then
-        return false
-    else
-        return true
-    end
-
+    return c:getCapacity() <= #c:getItems()
 end
 
 function dropItem(idOrObject)
@@ -611,149 +604,74 @@ function isEnemy(c)
     return isEnemyResult
 end
 
+-- Cache last distribution result to avoid redundant scans
+local _lastDistTime = 0
+local _lastDistResult = nil
+
 function getPlayerDistribution()
-    local friends = {}
-    local neutrals = {}
-    local enemies = {}
-    for i, spec in ipairs(SafeCall.global("getSpectators") or {}) do
+    -- Memoize for 100ms to avoid triple-scanning when getFriends/getNeutrals/getEnemies
+    -- are called in quick succession
+    if _lastDistResult and (now - _lastDistTime) < 100 then
+        return _lastDistResult.friends, _lastDistResult.neutrals, _lastDistResult.enemies
+    end
+    local friends, neutrals, enemies = {}, {}, {}
+    for _, spec in ipairs(SafeCall.global("getSpectators") or {}) do
         if spec:isPlayer() and not spec:isLocalPlayer() then
             if isFriend(spec) then
-                table.insert(friends, spec)
+                friends[#friends + 1] = spec
             elseif isEnemy(spec) then
-                table.insert(enemies, spec)
+                enemies[#enemies + 1] = spec
             else
-                table.insert(neutrals, spec)
+                neutrals[#neutrals + 1] = spec
             end
         end
     end
-
+    _lastDistResult = {friends = friends, neutrals = neutrals, enemies = enemies}
+    _lastDistTime = now
     return friends, neutrals, enemies
 end
 
 function getFriends()
-    local friends, neutrals, enemies = getPlayerDistribution()
-
+    local friends = getPlayerDistribution()
     return friends
 end
 
 function getNeutrals()
-    local friends, neutrals, enemies = getPlayerDistribution()
-
+    local _, neutrals = getPlayerDistribution()
     return neutrals
 end
 
 function getEnemies()
-    local friends, neutrals, enemies = getPlayerDistribution()
-
+    local _, _, enemies = getPlayerDistribution()
     return enemies
 end
 
 -- based on first word in string detects if text is a offensive spell
 -- returns boolean
 function isAttSpell(expr)
-    if string.starts(expr, "exori") or string.starts(expr, "exevo") then
-        return true
-    else
-        return false
-    end
+    return string.starts(expr, "exori") or string.starts(expr, "exevo")
 end
 
--- returns dressed-up item id based on not dressed id
--- returns number
+-- Item activation/deactivation lookup tables (KISS: O(1) lookup replaces O(n) if-chain)
+local ITEM_ACTIVE_MAP = {
+    [3049]=3086, [3050]=3087, [3051]=3088, [3052]=3089, [3053]=3090,
+    [3091]=3094, [3092]=3095, [3093]=3096, [3097]=3099, [3098]=3100,
+    [16114]=16264, [23531]=23532, [23533]=23534, [23544]=23528, [23529]=23530,
+    [30343]=30342, [30344]=30345, [30403]=30402, [31621]=31616, [32621]=32635,
+}
+local ITEM_INACTIVE_MAP = {}
+for inactive, active in pairs(ITEM_ACTIVE_MAP) do
+    ITEM_INACTIVE_MAP[active] = inactive
+end
+
 function getActiveItemId(id)
     if not id then return false end
-
-    if id == 3049 then
-        return 3086
-    elseif id == 3050 then
-        return 3087
-    elseif id == 3051 then
-        return 3088
-    elseif id == 3052 then
-        return 3089
-    elseif id == 3053 then
-        return 3090
-    elseif id == 3091 then
-        return 3094
-    elseif id == 3092 then
-        return 3095
-    elseif id == 3093 then
-        return 3096
-    elseif id == 3097 then
-        return 3099
-    elseif id == 3098 then
-        return 3100
-    elseif id == 16114 then
-        return 16264
-    elseif id == 23531 then
-        return 23532
-    elseif id == 23533 then
-        return 23534
-    elseif id == 23544 then
-        return 23528
-    elseif id == 23529 then
-        return 23530
-    elseif id == 30343 then -- Sleep Shawl
-        return 30342
-    elseif id == 30344 then -- Enchanted Pendulet
-        return 30345
-    elseif id == 30403 then -- Enchanted Theurgic Amulet
-        return 30402
-    elseif id == 31621 then -- Blister Ring
-        return 31616
-    elseif id == 32621 then -- Ring of Souls
-        return 32635
-    else
-        return id
-    end
+    return ITEM_ACTIVE_MAP[id] or id
 end
 
--- returns not dressed item id based on dressed-up id
--- returns number
 function getInactiveItemId(id)
     if not id then return false end
-
-    if id == 3086 then
-        return 3049
-    elseif id == 3087 then
-        return 3050
-    elseif id == 3088 then
-        return 3051
-    elseif id == 3089 then
-        return 3052
-    elseif id == 3090 then
-        return 3053
-    elseif id == 3094 then
-        return 3091
-    elseif id == 3095 then
-        return 3092
-    elseif id == 3096 then
-        return 3093
-    elseif id == 3099 then
-        return 3097
-    elseif id == 3100 then
-        return 3098
-    elseif id == 16264 then
-        return 16114
-    elseif id == 23532 then
-        return 23531
-    elseif id == 23534 then
-        return 23533
-    elseif id == 23530 then
-        return 23529
-    elseif id == 30342 then -- Sleep Shawl
-        return 30343
-    elseif id == 30345 then -- Enchanted Pendulet
-        return 30344
-    elseif id == 30402 then -- Enchanted Theurgic Amulet
-        return 30403
-    elseif id == 31616 then -- Blister Ring
-        return 31621
-    elseif id == 32635 then -- Ring of Souls
-        return 32621
-    else
-        return id
-    end
+    return ITEM_INACTIVE_MAP[id] or id
 end
 
 -- returns amount of monsters within the range of position
@@ -793,176 +711,87 @@ end
 local isOldTibia = getClientVersion() < 960
 
 --------------------------------------------------------------------------------
--- ADVANCED MONSTER COUNTING SYSTEM
--- Supports multiple mathematical shapes for accurate counting:
--- - SQUARE: Chebyshev distance (max(dx, dy)) - default, fastest
--- - CIRCLE: Euclidean distance (sqrt(dx² + dy²)) - most accurate
--- - DIAMOND: Manhattan distance (dx + dy) - cross pattern
--- - CROSS: Only cardinal directions (N/E/S/W)
--- - CONE: Directional cone in front of player
+-- SHAPE-BASED CREATURE COUNTING
+-- Delegates to BotCore.Creatures when available; provides standalone fallback.
+-- Shape constants and isInShape are the single source of truth here.
+-- BotCore.Creatures reuses these via nExBot.SHAPE / nExBot.isInShape.
 --------------------------------------------------------------------------------
 
--- Shape type enum for cleaner code
 local SHAPE = {
-  SQUARE = 1,   -- Chebyshev distance (default Tibia range)
-  CIRCLE = 2,   -- Euclidean distance (true circle)
-  DIAMOND = 3,  -- Manhattan distance (rotated square)
-  CROSS = 4,    -- Cardinal directions only
-  CONE = 5      -- Directional cone
+  SQUARE = 1, CIRCLE = 2, DIAMOND = 3, CROSS = 4, CONE = 5
 }
-
--- Export shape constants
 nExBot.SHAPE = SHAPE
 
--- Pre-computed direction vectors for cone calculations
-local CONE_DIRECTIONS = {
-  [0] = {x = 0, y = -1},  -- North
-  [1] = {x = 1, y = 0},   -- East
-  [2] = {x = 0, y = 1},   -- South
-  [3] = {x = -1, y = 0}   -- West
+local CONE_DIRS = {
+  [0] = {x=0,y=-1}, [1] = {x=1,y=0}, [2] = {x=0,y=1}, [3] = {x=-1,y=0}
 }
 
--- Pure function: Check if position is within shape
--- @param dx: x distance from center
--- @param dy: y distance from center
--- @param range: maximum range
--- @param shape: shape type (SHAPE enum)
--- @param direction: player direction (0-3) for cone shape
--- @param coneAngle: cone half-angle in tiles (default 1)
--- @return boolean
-local function isInShape(dx, dy, range, shape, direction, coneAngle)
+local function isInShape(dx, dy, range, shape, direction, cone)
   shape = shape or SHAPE.SQUARE
-  
-  if shape == SHAPE.SQUARE then
-    -- Chebyshev distance: max(|dx|, |dy|) <= range
-    return math.max(dx, dy) <= range
-    
-  elseif shape == SHAPE.CIRCLE then
-    -- Euclidean distance: sqrt(dx² + dy²) <= range
-    -- Use squared comparison to avoid sqrt
-    return (dx * dx + dy * dy) <= (range * range)
-    
-  elseif shape == SHAPE.DIAMOND then
-    -- Manhattan distance: |dx| + |dy| <= range
-    return (dx + dy) <= range
-    
-  elseif shape == SHAPE.CROSS then
-    -- Only cardinal directions (exactly on X or Y axis)
-    return (dx == 0 or dy == 0) and math.max(dx, dy) <= range
-    
-  elseif shape == SHAPE.CONE then
-    -- Cone in front of player
+  if shape == SHAPE.SQUARE then return math.max(dx, dy) <= range end
+  if shape == SHAPE.CIRCLE then return (dx*dx + dy*dy) <= (range*range) end
+  if shape == SHAPE.DIAMOND then return (dx + dy) <= range end
+  if shape == SHAPE.CROSS then return (dx == 0 or dy == 0) and math.max(dx, dy) <= range end
+  if shape == SHAPE.CONE then
     direction = direction or 0
-    coneAngle = coneAngle or 1
-    
-    local dir = CONE_DIRECTIONS[direction]
-    if not dir then return false end
-    
-    -- Check if in front (positive dot product with direction)
-    local dotX = dx * dir.x
-    local dotY = dy * dir.y
-    
-    -- For North/South, check Y direction and X spread
-    -- For East/West, check X direction and Y spread
-    if dir.y ~= 0 then
-      -- North (y = -1) or South (y = 1)
-      local inFront = (dy * dir.y) > 0  -- Moving in correct direction
-      local withinSpread = dx <= coneAngle
-      local withinRange = dy <= range
-      return inFront and withinSpread and withinRange
+    cone = cone or 1
+    local d = CONE_DIRS[direction]
+    if not d then return false end
+    if d.y ~= 0 then
+      return (dy * d.y) > 0 and dx <= cone and dy <= range
     else
-      -- East (x = 1) or West (x = -1)
-      local inFront = (dx * dir.x) > 0
-      local withinSpread = dy <= coneAngle
-      local withinRange = dx <= range
-      return inFront and withinSpread and withinRange
+      return (dx * d.x) > 0 and dy <= cone and dx <= range
     end
   end
-  
   return false
 end
+nExBot.isInShape = isInShape
 
--- Advanced monster counting with shape support
--- @param range: maximum range (default 10)
--- @param shape: shape type from SHAPE enum (default SQUARE)
--- @param options: optional table {multifloor, direction, coneAngle, center, filter}
--- @return number of monsters
 function getMonstersAdvanced(range, shape, options)
+  -- Delegate to BotCore.Creatures if loaded (DRY: single implementation)
+  if BotCore and BotCore.Creatures and BotCore.Creatures.getMonsterCount then
+    options = options or {}
+    options.shape = shape
+    return BotCore.Creatures.getMonsterCount(range, options)
+  end
+  -- Standalone fallback
   range = range or 10
   shape = shape or SHAPE.SQUARE
   options = options or {}
-  
-  local multifloor = options.multifloor
   local direction = options.direction or (player and player:getDirection())
-  local coneAngle = options.coneAngle or 1
+  local cone = options.coneAngle or 1
   local center = options.center or (player and player:getPosition())
-  local filter = options.filter  -- Optional filter function(creature) -> boolean
-  
+  local filter = options.filter
   if not center then return 0 end
-  
-  local mobs = 0
-  local px, py = center.x, center.y
-  
-  for _, spec in pairs(getSpectators(multifloor)) do
+  local mobs, px, py = 0, center.x, center.y
+  for _, spec in pairs(getSpectators(options.multifloor)) do
     if spec:isMonster() and (isOldTibia or spec:getType() < 3) then
-      -- Apply custom filter if provided
       if not filter or filter(spec) then
-        local specPos = spec:getPosition()
-        local dx = math.abs(specPos.x - px)
-        local dy = math.abs(specPos.y - py)
-        
-        if isInShape(dx, dy, range, shape, direction, coneAngle) then
+        local sp = spec:getPosition()
+        if isInShape(math.abs(sp.x-px), math.abs(sp.y-py), range, shape, direction, cone) then
           mobs = mobs + 1
         end
       end
     end
   end
-  
   return mobs
 end
 
--- Optimized getMonsters with cached version check and pre-fetched player position
--- Backward compatible - uses SQUARE shape (Chebyshev distance)
 function getMonsters(range, multifloor)
-    range = range or 10
-    local mobs = 0
-    local playerPos = player:getPosition()
-    local px, py, pz = playerPos.x, playerPos.y, playerPos.z
-    
-    for _, spec in pairs(getSpectators(multifloor)) do
-        if spec:isMonster() and (isOldTibia or spec:getType() < 3) then
-            local specPos = spec:getPosition()
-            -- Inline distance calculation (faster than function call)
-            local dx = math.abs(specPos.x - px)
-            local dy = math.abs(specPos.y - py)
-            if math.max(dx, dy) <= range then
-                mobs = mobs + 1
-            end
-        end
-    end
-    return mobs
+    return getMonstersAdvanced(range, SHAPE.SQUARE, {multifloor = multifloor})
 end
 
--- Get monsters in a circular area (true distance)
 function getMonstersCircle(range, multifloor)
   return getMonstersAdvanced(range, SHAPE.CIRCLE, {multifloor = multifloor})
 end
 
--- Get monsters in diamond/cross pattern
 function getMonstersDiamond(range, multifloor)
   return getMonstersAdvanced(range, SHAPE.DIAMOND, {multifloor = multifloor})
 end
 
--- Get monsters in cone in front of player
 function getMonstersCone(range, spread, multifloor)
-  return getMonstersAdvanced(range, SHAPE.CONE, {
-    multifloor = multifloor,
-    coneAngle = spread or 1
-  })
+  return getMonstersAdvanced(range, SHAPE.CONE, {multifloor = multifloor, coneAngle = spread or 1})
 end
-
--- Export isInShape for other modules
-nExBot.isInShape = isInShape
 
 -- Optimized getPlayers with reduced function calls
 function getPlayers(range, multifloor)
@@ -1016,32 +845,19 @@ end
 -- padding is only for multifloor
 -- returns boolean
 function isSafe(range, multifloor, padding)
-    local onSame = 0
-    local onAnother = 0
     if not multifloor and padding then
         multifloor = false
         padding = false
     end
-
     for _, spec in pairs(getSpectators(multifloor)) do
-        if spec:isPlayer() and not spec:isLocalPlayer() and
-            not isFriend(spec:getName()) then
-            if spec:getPosition().z == posz() and
-                distanceFromPlayer(spec:getPosition()) <= range then
-                onSame = onSame + 1
-            end
-            if multifloor and padding and spec:getPosition().z ~= posz() and
-                distanceFromPlayer(spec:getPosition()) <= (range + padding) then
-                onAnother = onAnother + 1
-            end
+        if spec:isPlayer() and not spec:isLocalPlayer() and not isFriend(spec:getName()) then
+            local specZ = spec:getPosition().z
+            local dist = distanceFromPlayer(spec:getPosition())
+            if specZ == posz() and dist <= range then return false end
+            if multifloor and padding and specZ ~= posz() and dist <= (range + padding) then return false end
         end
     end
-
-    if onSame + onAnother > 0 then
-        return false
-    else
-        return true
-    end
+    return true
 end
 
 -- returns amount of players within the range of local player position

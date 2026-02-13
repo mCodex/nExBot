@@ -4,14 +4,9 @@ lastAction = 0
 local cavebotAllowance = 0
 local lureEnabled = true
 
--- Use global ClientHelper (loaded by _Loader.lua) for cross-client compatibility
-local function getClient()
-  return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
-local function getClientVersion()
-  return ClientHelper and ClientHelper.getClientVersion() or ((g_game and g_game.getClientVersion and g_game.getClientVersion()) or 1200)
-end
+local getClientVersion = nExBot.Shared.getClientVersion
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- OPENTIBIABR TARGETING ENHANCEMENTS (v3.1)

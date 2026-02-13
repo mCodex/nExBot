@@ -20,12 +20,10 @@
 local ChaseController = {}
 
 -- ============================================================================
--- CLIENT SERVICE ABSTRACTION (using global ClientHelper)
+-- CLIENT SERVICE ABSTRACTION (shared alias)
 -- ============================================================================
 
-local function getClient()
-  return ClientHelper and ClientHelper.getClient() or ClientService
-end
+local getClient = nExBot.Shared.getClient
 
 local function getGame()
   return ClientHelper and ClientHelper.getGame() or ((getClient() and getClient().g_game) or g_game)
