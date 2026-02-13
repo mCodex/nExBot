@@ -73,7 +73,8 @@ S.state = {
   lastAttackCommandTime = 0,
   -- Grace period: keep engagement valid for this long after losing
   -- the attacking-creature signal (covers animation/server lag)
-  ENGAGEMENT_GRACE_MS   = 350
+  -- v3.1: aligned with CombatConstants.GRACE_PERIOD
+  ENGAGEMENT_GRACE_MS   = (CombatConstants and CombatConstants.GRACE_PERIOD) or 1500
 }
 
 -- ============================================================================
@@ -430,112 +431,44 @@ if EventBus and EventBus.on then
 end
 
 -- ============================================================================
--- PRIORITY MODIFIER
+-- PRIORITY MODIFIER (v3.1: delegates to PriorityEngine, kept for compat)
 -- ============================================================================
 
 function S.modifyPriority(cid, basePri, hp)
-  local cfg = S.configs[S.state.type] or S.configs[S.TYPES.FEW]
+  -- All scoring logic now lives in PriorityEngine.  Scenario-specific
+  -- bonuses (engagement, stickiness, finish-kill) are applied inside
+  -- PriorityEngine.scenarioScore().  This stub adds only the engagement
+  -- lock bonus that PriorityEngine expects us to provide.
   local p = basePri
-
-  -- Engagement bonus
   if cid == S.state.engagementLockId and S.state.isEngaged then
     p = p + 1000
     local drop = (S.state.engagementLockHealth or 100) - (hp or 100)
     if drop > 0 then p = p + drop * 5 end
   end
-
-  -- Target stickiness
-  if cid == S.state.targetLockId then
-    p = p + cfg.targetStickiness
-    if cfg.prioritizeFinishingKills and hp then
-      if hp < 20 then p = p + 200
-      elseif hp < 35 then p = p + 120
-      elseif hp < 50 then p = p + 80
-      elseif hp < 70 then p = p + 40 end
-    end
-    local tl = nowMs() - (S.state.targetLockTime or 0)
-    if tl > 2000 then p = p + math.min(100, tl / 100) end
-  end
-
-  if cfg.focusLowestHealth and hp then p = p + (100 - hp) * 0.5 end
-  if cfg.emergencyMode then
-    local td = MonsterAI.Tracker and MonsterAI.Tracker.monsters[cid]
-    if td and td.ewmaDps and td.ewmaDps > 50 then p = p + 40 end
-  end
   return p
 end
 
 -- ============================================================================
--- OPTIMAL TARGET SELECTION
+-- OPTIMAL TARGET SELECTION (v3.1: DEPRECATED — use PriorityEngine)
+-- Kept as a thin fallback; callers should use PriorityEngine.calculate()
 -- ============================================================================
 
 function S.getOptimalTarget()
   S.detectScenario()
-  local cfg  = S.configs[S.state.type]
-  local ppos = player and player:getPosition()
-  if not ppos then return nil end
-  local nowt = nowMs()
-
-  -- Existing lock still alive?
+  -- If PriorityEngine is loaded, it handles everything via the main
+  -- target.lua loop.  Return nil to signal "no override".
+  if PriorityEngine and PriorityEngine.calculate then
+    return nil
+  end
+  -- Legacy fallback: return locked target if still alive
   if S.state.targetLockId then
     local ld = MonsterAI.Tracker and MonsterAI.Tracker.monsters[S.state.targetLockId]
     if ld and ld.creature and not safeIsDead(ld.creature) then
-      local lHp = safeCreatureCall(ld.creature, "getHealthPercent", 100)
-      if S.state.type == S.TYPES.FEW then
-        local tl = nowt - S.state.targetLockTime
-        if (tl < 5000 or lHp < 50) and lHp < 80 then
-          return { creature = ld.creature, id = S.state.targetLockId, priority = 999, reason = "target_locked" }
-        end
-      end
-    else S.clearTargetLock() end
-  end
-
-  -- Gather candidates
-  local cands
-  if MonsterAI.TargetBot and MonsterAI.TargetBot.getSortedTargets then
-    cands = MonsterAI.TargetBot.getSortedTargets({maxRange = 12})
-  else
-    cands = {}
-    local C = getClient()
-    local creatures = (C and C.getSpectators) and C.getSpectators(ppos, false)
-      or (g_map and g_map.getSpectators and g_map.getSpectators(ppos, false)) or {}
-    for _, cr in ipairs(creatures) do
-      if cr and isValidAliveMonster(cr) then
-        local cp = safeCreatureCall(cr, "getPosition", nil)
-        if cp and cp.z == ppos.z then
-          local d = math.max(math.abs(cp.x - ppos.x), math.abs(cp.y - ppos.y))
-          if d <= 12 then
-            cands[#cands+1] = { creature = cr, id = safeGetId(cr), distance = d,
-              priority = 100 - d + (100 - safeCreatureCall(cr, "getHealthPercent", 100)) * 0.5,
-              name = safeCreatureCall(cr, "getName", "unknown") }
-          end
-        end
-      end
+      return { creature = ld.creature, id = S.state.targetLockId, priority = 999, reason = "target_locked" }
     end
-    table.sort(cands, function(a,b) return a.priority > b.priority end)
+    S.clearTargetLock()
   end
-  if #cands == 0 then S.clearTargetLock(); return nil end
-
-  for _, c in ipairs(cands) do
-    c.priority = S.modifyPriority(c.id, c.priority, safeCreatureCall(c.creature, "getHealthPercent", 100))
-  end
-  table.sort(cands, function(a,b) return a.priority > b.priority end)
-
-  local best   = cands[1]
-  local bestHp = safeCreatureCall(best.creature, "getHealthPercent", 100)
-  local ok, reason = S.shouldAllowTargetSwitch(best.id, best.priority, bestHp)
-
-  if ok then
-    S.lockTarget(best.id, bestHp); best.reason = reason
-    return best
-  else
-    local ld = MonsterAI.Tracker and MonsterAI.Tracker.monsters[S.state.targetLockId]
-    if ld and ld.creature and not safeIsDead(ld.creature) then
-      return { creature = ld.creature, id = S.state.targetLockId, priority = 999, reason = "switch_blocked:" .. reason }
-    end
-    S.lockTarget(best.id, bestHp)
-    return best
-  end
+  return nil
 end
 
 -- ============================================================================

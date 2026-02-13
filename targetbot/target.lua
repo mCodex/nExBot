@@ -2699,12 +2699,11 @@ targetbotMacro = macro(250, function()
         end
       end
       
-      -- v4.0: Only request attack when ASM is IDLE (not actively managing a target).
-      if allowSync and smTargetId ~= id then
-        if smState == "IDLE" then
-          pcall(function() AttackStateMachine.requestAttack(bestTarget.creature, 1000) end)
-        end
-        -- In ENGAGING/LOCKED states the ASM owns the attack flow.
+      -- v5.0: ALWAYS call requestAttack — ASM v3.0 handles REAFFIRM,
+      -- pendingSwitch, and duplicate-target logic internally.
+      -- The old "IDLE only" guard was a root cause of "attack once then stop".
+      if allowSync then
+        AttackStateMachine.requestAttack(bestTarget.creature, 1000)
       end
 
       -- Update AttackController based on state machine status

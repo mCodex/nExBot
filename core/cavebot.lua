@@ -99,6 +99,7 @@ dofile("/targetbot/monster_ai.lua")           -- Monster AI orchestrator / glue 
 dofile("/targetbot/movement_coordinator.lua") -- Coordinated movement system
 
 -- Load AttackStateMachine for linear, consistent targeting (before creature.lua)
+dofile("/targetbot/combat_constants.lua")      -- Shared timing constants for attack pipeline
 dofile("/targetbot/attack_state_machine.lua") -- State machine for attack persistence
 
 -- Load TargetBot modules
@@ -110,6 +111,7 @@ dofile("/targetbot/event_targeting.lua")      -- High-performance EventBus targe
 -- Monster inspector UI (visualize learned patterns)
 dofile("/targetbot/monster_inspector.lua")
 dofile("/targetbot/creature_attack.lua")
+dofile("/targetbot/priority_engine.lua")      -- Unified priority scoring engine
 dofile("/targetbot/creature_editor.lua")
 dofile("/targetbot/creature_priority.lua")
 dofile("/targetbot/looting.lua")

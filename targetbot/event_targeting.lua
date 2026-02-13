@@ -1943,7 +1943,7 @@ if onCreatureAppear then
             end
           
             -- If attack was throttled and we are not already attacking this creature, bail
-            local currentAttack = (Client3 and Client3.getAttackingCreature) and Client3.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+            local currentAttack = (ClientService and ClientService.getAttackingCreature) and ClientService.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
             local okCurId2, curId2 = pcall(function() return currentAttack and currentAttack:getId() end)
             local okNewId2, newId2 = pcall(function() return creature:getId() end)
             if not sent and not (currentAttack and okCurId2 and okNewId2 and curId2 == newId2) then

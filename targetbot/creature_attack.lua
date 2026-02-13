@@ -2147,8 +2147,8 @@ TargetBot.Creature.walk = function(creature, config, targets)
         local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
           and TargetCore.PathSafety.isTileSafe(candidates[i])
           or (function()
-            local Client3 = getClient()
-            local t = (Client3 and Client3.getTile) and Client3.getTile(candidates[i]) or (g_map and g_map.getTile and g_map.getTile(candidates[i]))
+            local C = getClient()
+            local t = (C and C.getTile) and C.getTile(candidates[i]) or (g_map and g_map.getTile and g_map.getTile(candidates[i]))
             local hasCreature = t and t.hasCreature and t:hasCreature()
             return t and t:isWalkable() and not hasCreature
           end)()
@@ -2204,12 +2204,12 @@ TargetBot.Creature.walk = function(creature, config, targets)
     if config.chase and not config.keepDistance and pathLen > 1 and fallbackDirectDist > fallbackChaseThreshold then
       -- First check if native chase is active and should be working
       local nativeChaseMayWork = false
-      local Client4 = getClient()
-      local hasGetChaseMode = (Client4 and Client4.getChaseMode) or (g_game and g_game.getChaseMode)
-      local hasIsAttacking = (Client4 and Client4.isAttacking) or (g_game and g_game.isAttacking)
+      local Client = getClient()
+      local hasGetChaseMode = (Client and Client.getChaseMode) or (g_game and g_game.getChaseMode)
+      local hasIsAttacking = (Client and Client.isAttacking) or (g_game and g_game.isAttacking)
       if hasGetChaseMode and hasIsAttacking then
-        local isAttacking = (Client4 and Client4.isAttacking) and Client4.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
-        local chaseMode = (Client4 and Client4.getChaseMode) and Client4.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode())
+        local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
+        local chaseMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode())
         nativeChaseMayWork = isAttacking and chaseMode == 1
       end
       

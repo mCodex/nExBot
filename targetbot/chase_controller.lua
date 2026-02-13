@@ -290,7 +290,7 @@ if EventBus then
   -- which turns the transient nil into a REAL attack loss.
   -- Use a delayed check: only act on nil if the ASM also considers the target gone.
   local _pendingCancelEvent = nil
-  local CHASE_NIL_GRACE_MS = 1200  -- Must exceed ASM GRACE_PERIOD (1000ms on OTBR)
+  local CHASE_NIL_GRACE_MS = (CombatConstants and CombatConstants.GRACE_PERIOD and CombatConstants.GRACE_PERIOD + 200) or 1700  -- Must exceed ASM GRACE_PERIOD
 
   EventBus.on("combat:target", function(creature, oldCreature)
     if creature then
