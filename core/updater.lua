@@ -86,7 +86,7 @@ end
 local function writeFile(relativePath, content)
   local fullPath = BOT_BASE_PATH .. "/" .. relativePath
   local ok, err = pcall(g_resources.writeFileContents, fullPath, content)
-  if not ok then warn("[Updater] Write failed: " .. relativePath .. " – " .. tostring(err)) end
+  if not ok then warn("[Updater] Write failed: " .. relativePath .. " - " .. tostring(err)) end
   return ok
 end
 
@@ -119,7 +119,7 @@ local function detectHttpBackend()
     return _httpBackend
   end
 
-  warn("[Updater] No HTTP module detected – update will fallback to browser.")
+  warn("[Updater] No HTTP module detected - update will fallback to browser.")
   return nil
 end
 
@@ -245,7 +245,7 @@ local function checkForUpdate(callback)
   if _state.isChecking then callback(false, nil, nil, "Already checking") return end
   if not detectHttpBackend() then
     _state.status = "no_http"
-    callback(false, nil, nil, "No HTTP module – cannot check")
+    callback(false, nil, nil, "No HTTP module - cannot check")
     return
   end
 
@@ -288,7 +288,7 @@ local function applyUpdate(callback, onProgress)
   _state.progress = 0
   _state.errors   = {}
 
-  info("[Updater] Updating to v" .. tostring(_state.remoteVer) .. " …")
+  info("[Updater] Updating to v" .. tostring(_state.remoteVer) .. " ...")
 
   fetchFileTree(function(fileList, err)
     if err or not fileList or #fileList == 0 then
@@ -307,7 +307,7 @@ local function applyUpdate(callback, onProgress)
       callback(false, "No updatable files"); return
     end
 
-    info("[Updater] Downloading " .. #updateFiles .. " files …")
+    info("[Updater] Downloading " .. #updateFiles .. " files ...")
 
     local idx = 0
     local function downloadNext()
@@ -343,7 +343,7 @@ local function applyUpdate(callback, onProgress)
       downloadFile(filePath, function(content, dlErr)
         if dlErr or not content then
           _state.errors[#_state.errors + 1] = filePath
-          warn("[Updater] Failed: " .. filePath .. " – " .. tostring(dlErr))
+          warn("[Updater] Failed: " .. filePath .. " - " .. tostring(dlErr))
         else
           writeFile(filePath, content)
         end
@@ -371,10 +371,10 @@ end
 local function bindCheckClick()
   if not _ui then return end
   _ui.checkNow.onClick = function()
-    _ui.checkNow:setText("…"); _ui.checkNow:disable()
+    _ui.checkNow:setText("..."); _ui.checkNow:disable()
 
     if not detectHttpBackend() then
-      info("[Updater] No HTTP module – opening releases page.")
+      info("[Updater] No HTTP module - opening releases page.")
       openInBrowser(GITHUB_RELEASES)
       schedule(2000, function() resetCheckButton() end)
       return
@@ -390,7 +390,7 @@ local function bindCheckClick()
 
       if available then
         _ui.checkNow:setText("Update!")
-        info("[Updater] v" .. tostring(localVer) .. " → v" .. tostring(remoteVer))
+        info("[Updater] v" .. tostring(localVer) .. " -> v" .. tostring(remoteVer))
         -- re-bind button to trigger download
         _ui.checkNow.onClick = function()
           _ui.checkNow:setText("0%"); _ui.checkNow:disable()
