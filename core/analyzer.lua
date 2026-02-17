@@ -940,6 +940,28 @@ function hightlightText(widget, color, duration)
   end
 end
 
+-- forward-declare refreshKills so callbacks can use it before the main definition
+if not refreshKills then
+  function refreshKills()
+    if not killedList then return end
+    killedList:destroyChildren()
+    local kills = 0
+    for k,v in pairs(killList) do
+      kills = kills + 1
+      local label = UI.createWidget("ListLabel", killedList)
+      if label then
+        label:setText(v .. "x " .. k)
+      end
+    end
+    if kills == 0 then
+      local label = UI.createWidget("ListLabel", killedList)
+      if label then
+        label:setText("None")
+      end
+    end
+  end
+end
+
 local nameRegex = [[Loot of (?:an |a |the |)([^:]+)]]
 onTextMessage(function(mode, text)
     if not storage.analyzers.lootChannel then return end
