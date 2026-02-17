@@ -422,11 +422,13 @@ end
 --   config.useManaItem        - Enable mana potion on friend
 --   config.useSio             - Enable exura sio spell
 --   config.useGranSio         - Enable exura gran sio spell
+--   config.useTioSio          - Enable exura tio sio spell
 --   config.useMasRes          - Enable exura gran mas res (area heal)
 --   config.customSpell        - Enable custom healing spell
 --   config.customSpellName    - Name of custom spell
 --   config.settings.healAt    - HP% threshold to heal (default 80)
 --   config.settings.granSioAt - HP% threshold for gran sio (default 40)
+--   config.settings.tioSioAt  - HP% threshold for tio sio (default 65)
 --   config.settings.itemRange - Max range for item use (default 6)
 --   config.settings.masResPlayers - Min players for mas res (default 2)
 --   config.settings.healthItem - UH rune ID (default 3160)
@@ -452,6 +454,7 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
   -- Config values from UI
   local healAt = settings.healAt or 80
   local granSioAt = settings.granSioAt or 40
+  local tioSioAt = settings.tioSioAt or 65
   local itemRange = settings.itemRange or 6
   local masResPlayers = settings.masResPlayers or 2
   local minSelfHp = settings.minPlayerHp or 80
@@ -501,7 +504,22 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
     end
   end
   
-  -- ========== PRIORITY 3: Exura Sio (normal single target heal) ==========
+  -- ========== PRIORITY 3: Exura Tio Sio (medium single target heal) ==========
+  if config.useTioSio and friendHp < tioSioAt then
+    local manaCost = 120
+    if currentMana >= manaCost and not isHealingGroupOnCooldown() and distance <= 7 then
+      return {
+        type = "spell",
+        spell = "exura tio sio",
+        targetName = friendName,
+        manaCost = manaCost,
+        urgency = calculateUrgency(friendHp, distance),
+        source = "tioSio"
+      }
+    end
+  end
+  
+  -- ========== PRIORITY 4: Exura Sio (normal single target heal) ==========
   if config.useSio and friendHp < healAt then
     local manaCost = 100
     if currentMana >= manaCost and not isHealingGroupOnCooldown() and distance <= 7 then
@@ -601,7 +619,7 @@ function FriendHealerEnhanced.executeAction(action)
     return success
     
   elseif action.type == "spell" then
-    -- Single target heal spell (exura sio, exura gran sio, custom)
+    -- Single target heal spell (exura sio, exura tio sio, exura gran sio, custom)
     local success = castHealSpellOnFriend(action.spell, action.targetName, action.manaCost)
     if success then
       _state.spellCount = (_state.spellCount or 0) + 1
@@ -922,8 +940,8 @@ function FriendHealerEnhanced.onFriendHealthChange(creature, newHpPercent, oldHp
   local ok, isLocal = pcall(function() return creature:isLocalPlayer() end)
   if ok and isLocal then return end
   
-  local config = getConfig()
-  if not config.enabled then return end
+  local config = _state.config
+  if not config or not config.enabled then return end
   
   -- Check if this is a friend
   local isFriendMatch = isFriend(creature, config)

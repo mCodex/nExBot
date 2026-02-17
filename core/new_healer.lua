@@ -56,10 +56,11 @@ if not storage[panelName] then
         priorities = {
             {name="Custom Spell",           enabled=false, custom=true},
             {name="Exura Gran Sio",         enabled=true,              strong = true},
-            {name="Exura Sio",              enabled=true,                            normal = true},
-            {name="Exura Gran Mas Res",     enabled=true,                                          area = true},
-            {name="Health Item",            enabled=true,                                                      health=true},
-            {name="Mana Item",              enabled=true,                                                                  mana=true}
+            {name="Exura Tio Sio",          enabled=true,                             medium = true},
+            {name="Exura Sio",              enabled=true,                                            normal = true},
+            {name="Exura Gran Mas Res",     enabled=true,                                                          area = true},
+            {name="Health Item",            enabled=true,                                                                      health=true},
+            {name="Mana Item",              enabled=true,                                                                                  mana=true}
         },
         settings = {
             {type="HealItem",       text="Mana Item ",                   value=268},
@@ -68,6 +69,7 @@ if not storage[panelName] then
             {type="HealScroll",     text="Mas Res Players: ",            value=2},
             {type="HealScroll",     text="Heal Friend at: ",             value=80},
             {type="HealScroll",     text="Use Gran Sio at: ",            value=40},
+            {type="HealScroll",     text="Use Tio Sio at: ",             value=65},
             {type="HealScroll",     text="Min Player HP%: ",             value=80},
             {type="HealScroll",     text="Min Player MP%: ",             value=50},
         },
@@ -139,12 +141,14 @@ local function buildBotCoreConfig()
       masResPlayers = config.settings[4] and config.settings[4].value or 2,
       healAt = config.settings[5] and config.settings[5].value or 80,
       granSioAt = config.settings[6] and config.settings[6].value or 40,
-      minPlayerHp = config.settings[7] and config.settings[7].value or 80,
-      minPlayerMp = config.settings[8] and config.settings[8].value or 50,
+      tioSioAt = config.settings[7] and config.settings[7].value or 65,
+      minPlayerHp = config.settings[8] and config.settings[8].value or 80,
+      minPlayerMp = config.settings[9] and config.settings[9].value or 50,
     },
     -- Priority actions (in order)
     useSio = false,
     useGranSio = false,
+    useTioSio = false,
     useMasRes = false,
     useHealthItem = false,
     useManaItem = false,
@@ -156,6 +160,7 @@ local function buildBotCoreConfig()
   for _, p in ipairs(config.priorities or {}) do
     if p.enabled then
       if p.strong then bcConfig.useGranSio = true end
+      if p.medium then bcConfig.useTioSio = true end
       if p.normal then bcConfig.useSio = true end
       if p.area then bcConfig.useMasRes = true end
       if p.health then bcConfig.useHealthItem = true end
@@ -700,8 +705,8 @@ friendHealerMacro = macro(100, function()
         return 
     end
 
-    local minHp = config.settings[7].value
-    local minMp = config.settings[8].value
+    local minHp = config.settings[8].value
+    local minMp = config.settings[9].value
 
     -- Safety: Don't heal friends if self needs healing
     if hppercent() <= minHp or manapercent() <= minMp then return end

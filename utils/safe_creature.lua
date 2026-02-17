@@ -126,6 +126,17 @@ function SafeCreature.isNpc(creature)
 end
 
 --[[
+  Check if creature is the local player safely
+  @param creature Creature object
+  @return boolean
+]]
+function SafeCreature.isLocalPlayer(creature)
+  if not creature then return false end
+  local ok, result = pcall(function() return creature:isLocalPlayer() end)
+  return ok and result == true
+end
+
+--[[
   Check if creature is dead safely
   @param creature Creature object
   @return boolean
@@ -133,6 +144,17 @@ end
 function SafeCreature.isDead(creature)
   if not creature then return true end
   local ok, result = pcall(function() return creature:isDead() end)
+  return ok and result == true
+end
+
+--[[
+  Check if creature is removed (no longer valid in game world)
+  @param creature Creature object
+  @return boolean
+]]
+function SafeCreature.isRemoved(creature)
+  if not creature then return true end
+  local ok, result = pcall(function() return creature:isRemoved() end)
   return ok and result == true
 end
 
@@ -145,6 +167,50 @@ function SafeCreature.isWalking(creature)
   if not creature then return false end
   local ok, result = pcall(function() return creature:isWalking() end)
   return ok and result == true
+end
+
+--[[
+  Check if creature is a party member safely
+  @param creature Creature object
+  @return boolean
+]]
+function SafeCreature.isPartyMember(creature)
+  if not creature then return false end
+  local ok, result = pcall(function() return creature:isPartyMember() end)
+  return ok and result == true
+end
+
+--[[
+  Get creature type safely (0=player, 1=monster, 2=npc, etc.)
+  @param creature Creature object
+  @return number|nil Type or nil if invalid
+]]
+function SafeCreature.getType(creature)
+  if not creature then return nil end
+  local ok, result = pcall(function() return creature:getType() end)
+  return ok and result or nil
+end
+
+--[[
+  Get creature emblem safely
+  @param creature Creature object
+  @return number Emblem type or 0 if invalid
+]]
+function SafeCreature.getEmblem(creature)
+  if not creature then return 0 end
+  local ok, result = pcall(function() return creature:getEmblem() end)
+  return ok and result or 0
+end
+
+--[[
+  Get creature shield safely
+  @param creature Creature object
+  @return number Shield type or 0 if invalid
+]]
+function SafeCreature.getShield(creature)
+  if not creature then return 0 end
+  local ok, result = pcall(function() return creature:getShield() end)
+  return ok and result or 0
 end
 
 -- ============================================================================
@@ -171,6 +237,25 @@ function SafeCreature.getOutfit(creature)
   if not creature then return nil end
   local ok, outfit = pcall(function() return creature:getOutfit() end)
   return ok and outfit or nil
+end
+
+-- ============================================================================
+-- GENERIC SAFE CALL (for methods not yet wrapped)
+-- ============================================================================
+
+--[[
+  Call any creature method safely with a default return value
+  @param creature Creature object
+  @param methodName string Method name (e.g., "getStepDuration")
+  @param default any Default value if call fails (default: nil)
+  @return any Method result or default
+]]
+function SafeCreature.call(creature, methodName, default)
+  if not creature or not methodName then return default end
+  local method = creature[methodName]
+  if not method then return default end
+  local ok, result = pcall(method, creature)
+  return ok and result or default
 end
 
 -- ============================================================================

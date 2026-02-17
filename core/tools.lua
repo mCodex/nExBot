@@ -127,21 +127,31 @@ UI.Label("Tools:")
 
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- AUTO LEVITATE - Event-Driven with Z+1 Field Analysis (EventBus)
--- Analyzes Z+1 fields in movement direction to detect levitate opportunities
--- Works WITHOUT requiring walls - detects ground above adjacent tiles
--- Keeps character moving smoothly while detecting up/down opportunities
+-- AUTO LEVITATE v2.0 — Event-Driven with Look-Ahead & CaveBot Integration
+-- Analyzes Z±1 fields in movement direction to detect levitate opportunities
+-- Supports look-ahead (1-2 sqm) for earlier detection
+-- Integrates with CaveBot intended floor change system
 -- ═══════════════════════════════════════════════════════════════════════════
 
 local autoLevitateEnabled = false
 local lastLevCast = 0
 local LEV_CD = 1950  -- Slightly under 2s for faster re-cast
 local MIN_MANA = 50
+local _levHandledStep = 0  -- tick of last handled levitate (prevents triple-fire)
+local LEV_DEDUP_MS = 300   -- dedup window for same-step triggers
 
 -- Cached depth setting
 local levDepth = BotDB.get("macros.autoLevitateDepth") or 1
 
--- All 8 directions with offsets
+-- Cardinal directions only (diagonals can't levitate in Tibia)
+local CARDINAL_DIRS = {
+  {dx = 0, dy = -1},   -- 1: North
+  {dx = 1, dy = 0},    -- 2: East
+  {dx = 0, dy = 1},    -- 3: South
+  {dx = -1, dy = 0},   -- 4: West
+}
+
+-- Full 8 directions for key mapping
 local DIRS = {
   {dx = 0, dy = -1},   -- 1: North
   {dx = 1, dy = 0},    -- 2: East
@@ -153,193 +163,192 @@ local DIRS = {
   {dx = -1, dy = -1},  -- 8: NW
 }
 
--- Player direction (0-7) to DIRS index (1-8)
-local DIR_TO_IDX = {[0]=1, [1]=2, [2]=3, [3]=4, [4]=5, [5]=6, [6]=7, [7]=8}
-
--- Map key names to direction indices
+-- Map key names to direction indices (cardinal only for levitate)
 local KEY_TO_DIR = {
   ["Up"] = 1, ["Numpad8"] = 1, ["W"] = 1,
   ["Right"] = 2, ["Numpad6"] = 2, ["D"] = 2,
   ["Down"] = 3, ["Numpad2"] = 3, ["S"] = 3,
   ["Left"] = 4, ["Numpad4"] = 4, ["A"] = 4,
-  ["Numpad9"] = 5, ["Numpad3"] = 6, ["Numpad1"] = 7, ["Numpad7"] = 8,
+  -- Diagonals intentionally excluded: levitate spell only works cardinally
 }
 
+-- DRY helper: get tile at position
+local function _getTile(x, y, z)
+  local Client = getClient()
+  if Client and Client.getTile then
+    return Client.getTile({x = x, y = y, z = z})
+  end
+  if g_map and g_map.getTile then
+    return g_map.getTile({x = x, y = y, z = z})
+  end
+  return nil
+end
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- Z+1 FIELD ANALYSIS - Core detection logic
+-- Z+1 FIELD ANALYSIS — Core detection logic (DRY refactored)
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Direct check for levitate opportunity in a specific direction (no caching)
+-- Direct check for levitate opportunity in a specific direction
 -- Returns "up", "down", or nil
 local function checkLevitateDirection(px, py, pz, dirIdx)
   local d = DIRS[dirIdx]
   if not d then return nil end
-  
+  -- Only cardinal directions can levitate
+  if dirIdx > 4 then return nil end
+
   local fx, fy = px + d.dx, py + d.dy
-  
-  -- CHECK UP: Is there ground at Z-1 (one level above the adjacent tile)?
-  -- This works regardless of whether the current-level tile is walkable or not
+
+  -- CHECK UP: Is there ground at Z-1 above the adjacent tile?
   if pz > 0 then
-    local Client = getClient()
-    local aboveTile = (Client and Client.getTile) and Client.getTile({x = fx, y = fy, z = pz - 1}) or (g_map and g_map.getTile and g_map.getTile({x = fx, y = fy, z = pz - 1}))
+    local aboveTile = _getTile(fx, fy, pz - 1)
     if aboveTile and aboveTile:getGround() then
-      -- Ground exists above! This is ALWAYS a levitate-up opportunity
       return "up"
     end
-    
     -- Check extra depth levels if configured
     for depth = 2, levDepth do
       local zcheck = pz - depth
       if zcheck < 0 then break end
-      local aboveD = (Client and Client.getTile) and Client.getTile({x = fx, y = fy, z = zcheck}) or (g_map and g_map.getTile and g_map.getTile({x = fx, y = fy, z = zcheck}))
+      local aboveD = _getTile(fx, fy, zcheck)
       if aboveD and aboveD:getGround() then
         return "up"
       end
     end
   end
-  
+
   -- CHECK DOWN: No ground at current level + ground below
-  local Client = getClient()
-  local currentTile = (Client and Client.getTile) and Client.getTile({x = fx, y = fy, z = pz}) or (g_map and g_map.getTile and g_map.getTile({x = fx, y = fy, z = pz}))
+  local currentTile = _getTile(fx, fy, pz)
   local hasCurrentGround = currentTile and currentTile:getGround()
-  
+
   if not hasCurrentGround and pz < 15 then
-    local belowTile = (Client and Client.getTile) and Client.getTile({x = fx, y = fy, z = pz + 1}) or (g_map and g_map.getTile and g_map.getTile({x = fx, y = fy, z = pz + 1}))
+    local belowTile = _getTile(fx, fy, pz + 1)
     if belowTile and belowTile:getGround() then
       return "down"
     end
   end
-  
+
   return nil
 end
 
--- Check if we're standing on a tile where we could levitate up
--- (checks the tile we're currently on, not adjacent)
-local function checkCurrentTileLevitate(px, py, pz, dirIdx)
+-- Look-ahead: check 1-2 sqm ahead of current position for upcoming levitate
+-- Returns nil or {distance, levType, dirIdx}
+local function lookAheadLevitate(px, py, pz, dirIdx)
   local d = DIRS[dirIdx]
-  if not d then return nil end
-  
-  local fx, fy = px + d.dx, py + d.dy
-  
-  -- Check if there's ground above the adjacent tile
-  if pz > 0 then
-    local Client = getClient()
-    local aboveTile = (Client and Client.getTile) and Client.getTile({x = fx, y = fy, z = pz - 1}) or (g_map and g_map.getTile and g_map.getTile({x = fx, y = fy, z = pz - 1}))
-    if aboveTile and aboveTile:getGround() then
-      return "up"
+  if not d or dirIdx > 4 then return nil end
+
+  for ahead = 1, 2 do
+    local ax, ay = px + d.dx * ahead, py + d.dy * ahead
+    local result = checkLevitateDirection(ax, ay, pz, dirIdx)
+    if result then
+      return {distance = ahead, levType = result, dirIdx = dirIdx}
     end
   end
-  
   return nil
 end
 
--- Cast levitate spell
-local function castLev(levType)
+-- Cast levitate spell with CaveBot integration
+local function castLev(levType, dirIdx)
   if levType == "up" then
     say("exani hur up")
   else
     say("exani hur down")
   end
   lastLevCast = now
+  _levHandledStep = now
+
+  -- Notify CaveBot of intended floor change (prevents step-back)
+  if CaveBot and CaveBot.setIntendedFloorChange then
+    local p = player and player:getPosition()
+    if p then
+      local targetZ = levType == "up" and (p.z - 1) or (p.z + 1)
+      pcall(CaveBot.setIntendedFloorChange, targetZ)
+    end
+  end
 end
 
--- Core levitate check - uses DIRECT check, no caching for immediate response
-local function tryLevitate(px, py, pz, dirIdx)
-  if not autoLevitateEnabled then return false end
-  if (now - lastLevCast) < LEV_CD then return false end
-  if mana() < MIN_MANA then return false end
-  
-  -- Direct check in the specified direction
-  local levType = checkLevitateDirection(px, py, pz, dirIdx)
-  
-  if levType then
-    -- Turn player to face the direction before casting
-    local newDir = dirIdx - 1  -- Convert back to 0-7
-    if turn then turn(newDir) end
-    castLev(levType)
-    return true
-  end
-  
+-- ═══════════════════════════════════════════════════════════════════════════
+-- EVENT-DRIVEN TRIGGERS
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Common guard: returns true if we should skip this trigger
+local function shouldSkipLevitate()
+  if not autoLevitateEnabled then return true end
+  if (now - lastLevCast) < LEV_CD then return true end
+  if (now - _levHandledStep) < LEV_DEDUP_MS then return true end
+  if mana() < MIN_MANA then return true end
   return false
 end
 
--- ═══════════════════════════════════════════════════════════════════════════
--- EVENT-DRIVEN TRIGGERS (EventBus)
--- ═══════════════════════════════════════════════════════════════════════════
-
--- TRIGGER 1: EventBus player:move - check from OLD position (before the move)
--- This catches cases where player walked onto a tile that had levitate above
+-- TRIGGER 1: EventBus player:move — check from OLD position
 if EventBus then
   EventBus.on("player:move", function(newPos, oldPos)
-    if not autoLevitateEnabled then return end
+    if shouldSkipLevitate() then return end
     if not player then return end
-    if (now - lastLevCast) < LEV_CD then return end
-    if mana() < MIN_MANA then return end
-    
+
     -- Calculate movement direction
     local moveDx = newPos.x - oldPos.x
     local moveDy = newPos.y - oldPos.y
-    
-    -- Find direction index from movement delta
+
     local dirIdx = nil
-    for i, d in ipairs(DIRS) do
+    for i = 1, 4 do  -- cardinal only
+      local d = DIRS[i]
       if d.dx == moveDx and d.dy == moveDy then
         dirIdx = i
         break
       end
     end
-    
     if not dirIdx then return end
-    
-    -- KEY FIX: Check from OLD position - this is where the levitate opportunity was
+
+    -- Check from OLD position first
     local levType = checkLevitateDirection(oldPos.x, oldPos.y, oldPos.z, dirIdx)
-    
     if levType then
       local newDir = dirIdx - 1
       if turn then turn(newDir) end
-      castLev(levType)
+      castLev(levType, dirIdx)
       return
     end
-    
-    -- Also check if the NEW position has levitate opportunities in same direction
-    -- (for chained levitate scenarios)
+
+    -- Check from NEW position + look-ahead for chained levitate
     local levType2 = checkLevitateDirection(newPos.x, newPos.y, newPos.z, dirIdx)
     if levType2 then
       local newDir = dirIdx - 1
       if turn then turn(newDir) end
-      castLev(levType2)
+      castLev(levType2, dirIdx)
     end
-  end, 100)  -- High priority for instant response
+  end, 100)
 end
 
--- TRIGGER 2: Key press - fires BEFORE movement, most reliable for wall-less levitate
+-- TRIGGER 2: Key press — fires BEFORE movement for instant response
 onKeyDown(function(keys)
-  if not autoLevitateEnabled then return end
-  if (now - lastLevCast) < LEV_CD then return end
-  
+  if shouldSkipLevitate() then return end
+
   local dirIdx = KEY_TO_DIR[keys]
   if not dirIdx then return end
-  
+
   local p = player
   if not p then return end
-  
   local pos = p:getPosition()
   if not pos then return end
-  
-  if mana() < MIN_MANA then return end
-  
-  -- Direct check - this fires BEFORE the walk happens
+
+  -- Direct check at current position
   local levType = checkLevitateDirection(pos.x, pos.y, pos.z, dirIdx)
-  
   if levType then
     local newDir = dirIdx - 1
     if turn then turn(newDir) end
-    castLev(levType)
+    castLev(levType, dirIdx)
+    return
+  end
+
+  -- Look-ahead: detect upcoming levitate 1-2 sqm ahead
+  local ahead = lookAheadLevitate(pos.x, pos.y, pos.z, dirIdx)
+  if ahead and ahead.distance == 1 then
+    -- Only pre-cast if 1 sqm away (2 sqm ahead is just informational)
+    local newDir = dirIdx - 1
+    if turn then turn(newDir) end
+    castLev(ahead.levType, dirIdx)
   end
 end)
 
--- TRIGGER 3: Lightweight backup macro (100ms) for held keys
--- Faster polling for continuous walking scenarios
+-- TRIGGER 3: Backup macro (60ms) for held keys — faster than v1's 100ms
 local heldDirKeys = {}
 local lastBackupCheck = 0
 
@@ -353,35 +362,29 @@ onKeyUp(function(keys)
   if dir then heldDirKeys[dir] = false end
 end)
 
-macro(100, function()
-  if not autoLevitateEnabled then return end
-  if (now - lastLevCast) < LEV_CD then return end
-  if (now - lastBackupCheck) < 90 then return end
+macro(60, function()
+  if shouldSkipLevitate() then return end
+  if (now - lastBackupCheck) < 55 then return end
   lastBackupCheck = now
-  
-  -- Only check if a direction key is held
+
   local anyHeld = false
   for _, v in pairs(heldDirKeys) do
     if v then anyHeld = true break end
   end
   if not anyHeld then return end
-  
+
   local p = player
   if not p then return end
-  
   local pos = p:getPosition()
   if not pos then return end
-  
-  if mana() < MIN_MANA then return end
-  
-  -- Check all held directions with direct check
-  for dirIdx = 1, 8 do
+
+  for dirIdx = 1, 4 do  -- cardinal only
     if heldDirKeys[dirIdx] then
       local levType = checkLevitateDirection(pos.x, pos.y, pos.z, dirIdx)
       if levType then
         local newDir = dirIdx - 1
         if turn then turn(newDir) end
-        castLev(levType)
+        castLev(levType, dirIdx)
         return
       end
     end

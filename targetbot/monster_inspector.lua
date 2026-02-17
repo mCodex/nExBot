@@ -572,7 +572,7 @@ local function buildSummary()
   end
   
   table.insert(lines, "Patterns:")
-  local patterns = storage.monsterPatterns or {}
+  local patterns = (UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() and UnifiedStorage.get("targetbot.monsterPatterns")) or {}
 
   if isTableEmpty(patterns) then
     -- If no persisted patterns, try to show live tracking info (useful while hunting)
@@ -640,7 +640,7 @@ function refreshPatterns()
     warn("[MonsterInspector] refreshPatterns: textContent widget missing after updateWidgetRefs; aborting refresh.")
     -- Diagnostic dump to help root-cause: storage and tracker stats
     local count = 0
-    local patterns = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or (storage and storage.monsterPatterns) or {}
+    local patterns = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or {}
     for _ in pairs(patterns) do count = count + 1 end
     print(string.format("[MonsterInspector][DIAG] monsterPatterns count=%d", count))
     if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.stats then
@@ -670,7 +670,7 @@ end
 local function exportPatterns()
   local lines = {}
   table.insert(lines, "name,cooldown_ms,variance,confidence,last_seen")
-  local patterns = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or storage.monsterPatterns or {}
+  local patterns = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or {}
   for name, p in pairs(patterns) do
     local cd = p.waveCooldown and tostring(math.floor(p.waveCooldown)) or ""
     local var = p.waveVariance and tostring(p.waveVariance) or ""
@@ -690,7 +690,6 @@ local function clearPatterns()
   if UnifiedStorage then
     UnifiedStorage.set("targetbot.monsterPatterns", {})
   end
-  storage.monsterPatterns = {}
   if MonsterAI and MonsterAI.Patterns and MonsterAI.Patterns.knownMonsters then
     MonsterAI.Patterns.knownMonsters = {}
   end
@@ -799,7 +798,7 @@ nExBot.MonsterInspector.showWindow = function()
     refreshPatterns()
 
     -- If storage is empty, retry after a short delay to let updater collect samples
-    local patterns = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or (storage and storage.monsterPatterns)
+    local patterns = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or {}
     local hasPatterns = patterns and next(patterns) ~= nil
     if not hasPatterns then
       schedule(500, function()
@@ -823,7 +822,7 @@ nExBot.MonsterInspector.toggleWindow = function()
       if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end
       refreshPatterns()
       -- Retry shortly if no patterns yet
-      local patterns2 = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or (storage and storage.monsterPatterns)
+      local patterns2 = (UnifiedStorage and UnifiedStorage.get("targetbot.monsterPatterns")) or {}
       if not (patterns2 and next(patterns2) ~= nil) then
         schedule(500, function() if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end; refreshPatterns() end)
       end

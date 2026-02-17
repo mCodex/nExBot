@@ -56,17 +56,14 @@ local nowMs = nExBot.Shared.nowMs
 
 local getClient = nExBot.Shared.getClient
 
-local function safeGet(obj, method, default)
-  if not obj then return default end
-  local ok, v = pcall(function() return obj[method](obj) end)
-  return ok and v or default
-end
+-- Delegate to SafeCreature for safe accessors (DRY)
+local SC = SafeCreature or {}
 
-local function cId(c)   return safeGet(c, "getId", nil)   end
-local function cHp(c)   return safeGet(c, "getHealthPercent", 100) end
-local function cName(c) return safeGet(c, "getName", "?") end
-local function cPos(c)  return safeGet(c, "getPosition", nil) end
-local function cDead(c) return safeGet(c, "isDead", true) end
+local function cId(c)   return SC.getId and SC.getId(c) or nil end
+local function cHp(c)   return SC.getHealthPercent and SC.getHealthPercent(c) or 100 end
+local function cName(c) return SC.getName and SC.getName(c) or "?" end
+local function cPos(c)  return SC.getPosition and SC.getPosition(c) or nil end
+local function cDead(c) return SC.isDead and SC.isDead(c) or true end
 
 local player
 local function getPlayer()
@@ -160,6 +157,8 @@ local SCORE = {
   COOLDOWN_SOON     = 5,
   LOW_VAR           = 4,
   HIGH_VAR          = 6,
+  -- Threat cap: prevents threatScore from overriding config.priority differences
+  THREAT_CAP        = 350,
 }
 
 PriorityEngine.SCORE = SCORE
@@ -194,9 +193,22 @@ local function distanceScore(pathLen)
   return SCORE.DIST[pathLen] or 0
 end
 
+-- Cached gameTarget for the current scoring cycle (avoid repeated pcalls)
+local _cachedGT     = nil   -- cached creature reference
+local _cachedGTTick = 0     -- tick when it was cached
+
+local function getCachedGameTarget()
+  local t = nowMs()
+  if (t - _cachedGTTick) > 50 then  -- refresh every 50ms (one per scoring batch)
+    _cachedGT     = gameTarget()
+    _cachedGTTick = t
+  end
+  return _cachedGT
+end
+
 -- 4. Stickiness / switch penalty
 local function stickinessScore(creature, hp, config)
-  local gt = gameTarget()
+  local gt = getCachedGameTarget()
   local isCurrent = gt and (cId(gt) == cId(creature))
   local s = 0
 
@@ -395,7 +407,8 @@ local function threatScore(creature)
     end
   end
 
-  return s
+  -- Cap threat so it can't override config.priority level differences (1000)
+  return math.min(s, SCORE.THREAT_CAP)
 end
 
 -- 6. Scenario / anti-zigzag score
@@ -492,19 +505,19 @@ end
 -- 7. Speed / walk score (from OTClient API)
 local function mobilityScore(creature, config)
   local s = 0
-  local speed = safeGet(creature, "getSpeed", 0)
+  local speed = SC.call and SC.call(creature, "getSpeed", 0) or 0
   if speed > 0 then
     local pp = getPlayer()
-    local pSpeed = pp and safeGet(pp, "getSpeed", 220) or 220
+    local pSpeed = pp and (SC.call and SC.call(pp, "getSpeed", 220) or 220) or 220
     local ratio = speed / math.max(1, pSpeed)
     if ratio < 0.6 then s = s + 8
     elseif ratio < 0.8 then s = s + 4
     elseif ratio > 1.3 and config.chase then s = s - 5 end
   end
-  local walking = safeGet(creature, "isWalking", false)
+  local walking = SC.call and SC.call(creature, "isWalking", false) or false
   if not walking then s = s + 3
   else
-    local ticks = safeGet(creature, "getStepTicksLeft", 0)
+    local ticks = SC.call and SC.call(creature, "getStepTicksLeft", 0) or 0
     if ticks > 200 then s = s - 2 end
   end
   return s
@@ -542,7 +555,7 @@ function PriorityEngine.calculate(creature, config, path)
     return 0
   end
 
-  -- Aggregate
+  -- Aggregate all sub-scores
   local total = baseScore(config)
               + healthScore(hp, config)
               + distanceScore(pathLen)
@@ -551,7 +564,8 @@ function PriorityEngine.calculate(creature, config, path)
               + scenarioScore(creature, hp)
               + mobilityScore(creature, config)
 
-  return total
+  -- Ensure non-negative
+  return math.max(0, total)
 end
 
 -- ============================================================================

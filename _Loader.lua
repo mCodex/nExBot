@@ -362,6 +362,8 @@ loadCategory("utils", {
   "utils/weak_cache",
   "utils/creature_events",
   "utils/vocation_utils",
+  "utils/event_debouncer",
+  "utils/path_strategy",
 }, "/")
 
 -- ============================================================================

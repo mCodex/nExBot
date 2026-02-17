@@ -1,5 +1,37 @@
 local VocationUtils = {}
 
+-- Vocation ID constants (base + promoted)
+VocationUtils.IDS = {
+  KNIGHT  = {1, 11},
+  PALADIN = {2, 12},
+  SORCERER = {3, 13},
+  DRUID   = {4, 14},
+  MONK    = {5, 15},
+}
+
+local function matchesId(vocId, list)
+  if not vocId or not list then return false end
+  for i = 1, #list do
+    if vocId == list[i] then return true end
+  end
+  return false
+end
+
+function VocationUtils.isKnight(vocId)  return matchesId(vocId, VocationUtils.IDS.KNIGHT) end
+function VocationUtils.isPaladin(vocId) return matchesId(vocId, VocationUtils.IDS.PALADIN) end
+function VocationUtils.isSorcerer(vocId) return matchesId(vocId, VocationUtils.IDS.SORCERER) end
+function VocationUtils.isDruid(vocId)   return matchesId(vocId, VocationUtils.IDS.DRUID) end
+function VocationUtils.isMonk(vocId)    return matchesId(vocId, VocationUtils.IDS.MONK) end
+
+function VocationUtils.getShortName(vocId)
+  if VocationUtils.isKnight(vocId) then return "EK" end
+  if VocationUtils.isPaladin(vocId) then return "RP" end
+  if VocationUtils.isSorcerer(vocId) then return "MS" end
+  if VocationUtils.isDruid(vocId) then return "ED" end
+  if VocationUtils.isMonk(vocId) then return "MN" end
+  return ""
+end
+
 local nameCache = {}
 local CACHE_TTL = 600000
 
@@ -118,5 +150,8 @@ function VocationUtils.registerLookParser()
 end
 
 VocationUtils.registerLookParser()
+
+-- Backward compat: expose as Vocations global so existing code (extras.lua etc.) works
+Vocations = VocationUtils
 
 return VocationUtils

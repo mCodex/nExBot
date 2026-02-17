@@ -431,43 +431,10 @@ if EventBus and EventBus.on then
 end
 
 -- ============================================================================
--- PRIORITY MODIFIER (v3.1: delegates to PriorityEngine, kept for compat)
--- ============================================================================
-
-function S.modifyPriority(cid, basePri, hp)
-  -- All scoring logic now lives in PriorityEngine.  Scenario-specific
-  -- bonuses (engagement, stickiness, finish-kill) are applied inside
-  -- PriorityEngine.scenarioScore().  This stub adds only the engagement
-  -- lock bonus that PriorityEngine expects us to provide.
-  local p = basePri
-  if cid == S.state.engagementLockId and S.state.isEngaged then
-    p = p + 1000
-    local drop = (S.state.engagementLockHealth or 100) - (hp or 100)
-    if drop > 0 then p = p + drop * 5 end
-  end
-  return p
-end
-
--- ============================================================================
--- OPTIMAL TARGET SELECTION (v3.1: DEPRECATED — use PriorityEngine)
--- Kept as a thin fallback; callers should use PriorityEngine.calculate()
+-- OPTIMAL TARGET SELECTION — Removed (PriorityEngine is the sole authority)
 -- ============================================================================
 
 function S.getOptimalTarget()
-  S.detectScenario()
-  -- If PriorityEngine is loaded, it handles everything via the main
-  -- target.lua loop.  Return nil to signal "no override".
-  if PriorityEngine and PriorityEngine.calculate then
-    return nil
-  end
-  -- Legacy fallback: return locked target if still alive
-  if S.state.targetLockId then
-    local ld = MonsterAI.Tracker and MonsterAI.Tracker.monsters[S.state.targetLockId]
-    if ld and ld.creature and not safeIsDead(ld.creature) then
-      return { creature = ld.creature, id = S.state.targetLockId, priority = 999, reason = "target_locked" }
-    end
-    S.clearTargetLock()
-  end
   return nil
 end
 

@@ -712,6 +712,100 @@ function MonsterAI.Metrics.getSummary()
   }
 end
 
+-- ============================================================================
+-- PER-CHARACTER METRICS PERSISTENCE (via UnifiedStorage)
+-- Cumulative metrics survive across sessions for each character.
+-- ============================================================================
+
+local METRICS_KEY       = "targetbot.monsterMetrics.aggregate"
+local TYPE_STATS_KEY    = "targetbot.monsterMetrics.typeStats"
+local METRICS_SAVE_INTERVAL = 30000  -- ms between saves
+
+-- Merge persisted cumulative metrics into current session on load
+function MonsterAI.Metrics.loadPersisted()
+  if not UnifiedStorage or not UnifiedStorage.get then return end
+
+  local saved = UnifiedStorage.get(METRICS_KEY)
+  if saved and type(saved) == "table" then
+    local m = MonsterAI.Metrics.aggregate
+    -- Accumulate counters from prior sessions
+    m.totalDamageReceived = (m.totalDamageReceived or 0) + (saved.totalDamageReceived or 0)
+    m.totalDamageDealt    = (m.totalDamageDealt or 0)    + (saved.totalDamageDealt or 0)
+    m.totalKills          = (m.totalKills or 0)          + (saved.totalKills or 0)
+    m.totalDeaths         = (m.totalDeaths or 0)         + (saved.totalDeaths or 0)
+    m.predictionsTotal    = (m.predictionsTotal or 0)    + (saved.predictionsTotal or 0)
+    m.predictionsCorrect  = (m.predictionsCorrect or 0)  + (saved.predictionsCorrect or 0)
+    m.predictionsMissed   = (m.predictionsMissed or 0)   + (saved.predictionsMissed or 0)
+    m.updateCyclesTotal   = (m.updateCyclesTotal or 0)   + (saved.updateCyclesTotal or 0)
+    -- Recalculate derived accuracy
+    if m.predictionsTotal > 0 then
+      m.predictionAccuracy = m.predictionsCorrect / m.predictionsTotal
+    end
+  end
+
+  -- Load typeStats
+  local savedTypes = UnifiedStorage.get(TYPE_STATS_KEY)
+  if savedTypes and type(savedTypes) == "table" then
+    for nameLower, stats in pairs(savedTypes) do
+      local existing = MonsterAI.Telemetry.typeStats[nameLower]
+      if existing then
+        -- Merge: accumulate counters, keep EWMA averages from saved
+        existing.sampleCount      = existing.sampleCount + (stats.sampleCount or 0)
+        existing.killCount        = (existing.killCount or 0) + (stats.killCount or 0)
+        existing.totalDamageDealt = (existing.totalDamageDealt or 0) + (stats.totalDamageDealt or 0)
+        existing.totalKillTime    = (existing.totalKillTime or 0) + (stats.totalKillTime or 0)
+        existing.waveAttackCount  = (existing.waveAttackCount or 0) + (stats.waveAttackCount or 0)
+      else
+        MonsterAI.Telemetry.typeStats[nameLower] = stats
+      end
+    end
+  end
+end
+
+-- Save current cumulative metrics to per-character storage
+function MonsterAI.Metrics.persist()
+  if not UnifiedStorage or not UnifiedStorage.set then return end
+
+  MonsterAI.Metrics.collect()  -- refresh aggregate first
+  local m = MonsterAI.Metrics.aggregate
+
+  local toSave = {
+    totalDamageReceived = m.totalDamageReceived or 0,
+    totalDamageDealt    = m.totalDamageDealt or 0,
+    totalKills          = m.totalKills or 0,
+    totalDeaths         = m.totalDeaths or 0,
+    predictionsTotal    = m.predictionsTotal or 0,
+    predictionsCorrect  = m.predictionsCorrect or 0,
+    predictionsMissed   = m.predictionsMissed or 0,
+    updateCyclesTotal   = m.updateCyclesTotal or 0,
+    lastSaveTime        = nowMs(),
+  }
+  UnifiedStorage.set(METRICS_KEY, toSave)
+
+  -- Save typeStats (strip ephemeral fields)
+  local typeSnapshot = {}
+  for nameLower, stats in pairs(MonsterAI.Telemetry.typeStats) do
+    typeSnapshot[nameLower] = {
+      name              = stats.name,
+      sampleCount       = stats.sampleCount or 0,
+      avgSpeed          = stats.avgSpeed or 0,
+      avgDPS            = stats.avgDPS or 0,
+      avgHealthDrain    = stats.avgHealthDrain or 0,
+      totalDamageDealt  = stats.totalDamageDealt or 0,
+      killCount         = stats.killCount or 0,
+      totalKillTime     = stats.totalKillTime or 0,
+      waveAttackCount   = stats.waveAttackCount or 0,
+      lastSeen          = stats.lastSeen or 0,
+      isRanged          = stats.isRanged,
+      isMelee           = stats.isMelee,
+      isAOE             = stats.isAOE,
+      isSummoner        = stats.isSummoner,
+      estimatedDanger   = stats.estimatedDanger,
+    }
+  end
+  UnifiedStorage.set(TYPE_STATS_KEY, typeSnapshot)
+end
+
 -- Aggregate type statistics from tracked monsters
 function MonsterAI.Telemetry.updateTypeStats(name, data)
   if not name or name == "" then return end
@@ -2217,6 +2311,8 @@ if UnifiedTick and UnifiedTick.register then
       if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
         pcall(function() MonsterAI.AutoTuner.runPass() end)
       end
+      -- Persist per-character metrics every autotune cycle
+      pcall(function() MonsterAI.Metrics.persist() end)
     end
   })
 else
@@ -2231,6 +2327,8 @@ else
     if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
       pcall(function() MonsterAI.AutoTuner.runPass() end)
     end
+    -- Persist per-character metrics every autotune cycle
+    pcall(function() MonsterAI.Metrics.persist() end)
   end)
 end
 
@@ -2251,3 +2349,8 @@ end)
 MonsterAI.DEBUG = MonsterAI.DEBUG or false
 local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
 if MonsterAI.DEBUG then print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded; automatic collection=" .. tostring(MonsterAI.COLLECT_ENABLED) .. "; auto-tune=" .. tostring(MonsterAI.AUTO_TUNE_ENABLED)) end
+
+-- Load persisted per-character metrics (deferred to allow UnifiedStorage to initialize first)
+schedule(3000, function()
+  pcall(function() MonsterAI.Metrics.loadPersisted() end)
+end)

@@ -203,8 +203,8 @@ local CACHE_TTL = 2000
 function PathUtils.isFloorChangeTile(pos)
   if not pos then return false end
   
-  -- Cache cleanup (periodic)
-  if now - floorChangeCacheTime > 5000 then
+  -- Cache cleanup (periodic, aligned with CACHE_TTL)
+  if now - floorChangeCacheTime > CACHE_TTL then
     floorChangeCache = {}
     floorChangeCacheTime = now
   end
@@ -474,37 +474,36 @@ PathUtils.DIRECTION_CHANGE_DELAY = 150  -- ms
 PathUtils.MAX_DIRECTION_CHANGES = 3     -- max rapid changes before dampening
 PathUtils.DAMPING_MULTIPLIER = 2        -- extra delay when oscillating
 
+-- Pre-built lookup tables for direction checks (PERFORMANCE: avoids per-call allocation)
+local ADJACENT_DIRS = {
+  [North] = {[NorthEast] = true, [NorthWest] = true},
+  [East] = {[NorthEast] = true, [SouthEast] = true},
+  [South] = {[SouthEast] = true, [SouthWest] = true},
+  [West] = {[NorthWest] = true, [SouthWest] = true},
+  [NorthEast] = {[North] = true, [East] = true},
+  [SouthEast] = {[South] = true, [East] = true},
+  [SouthWest] = {[South] = true, [West] = true},
+  [NorthWest] = {[North] = true, [West] = true},
+}
+
+local OPPOSITE_DIRS = {
+  [North] = South, [South] = North,
+  [East] = West, [West] = East,
+  [NorthEast] = SouthWest, [SouthWest] = NorthEast,
+  [NorthWest] = SouthEast, [SouthEast] = NorthWest,
+}
+
 -- Check if two directions are similar (same or adjacent)
 function PathUtils.areSimilarDirections(dir1, dir2)
   if dir1 == nil or dir2 == nil then return true end
   if dir1 == dir2 then return true end
-  
-  local adjacent = {
-    [North] = {NorthEast = true, NorthWest = true},
-    [East] = {NorthEast = true, SouthEast = true},
-    [South] = {SouthEast = true, SouthWest = true},
-    [West] = {NorthWest = true, SouthWest = true},
-    [NorthEast] = {North = true, East = true},
-    [SouthEast] = {South = true, East = true},
-    [SouthWest] = {South = true, West = true},
-    [NorthWest] = {North = true, West = true},
-  }
-  
-  return adjacent[dir1] and adjacent[dir1][dir2] or false
+  return ADJACENT_DIRS[dir1] and ADJACENT_DIRS[dir1][dir2] or false
 end
 
 -- Check if direction is opposite (causes zigzag)
 function PathUtils.areOppositeDirections(dir1, dir2)
   if dir1 == nil or dir2 == nil then return false end
-  
-  local opposites = {
-    [North] = South, [South] = North,
-    [East] = West, [West] = East,
-    [NorthEast] = SouthWest, [SouthWest] = NorthEast,
-    [NorthWest] = SouthEast, [SouthEast] = NorthWest,
-  }
-  
-  return opposites[dir1] == dir2
+  return OPPOSITE_DIRS[dir1] == dir2
 end
 
 -- Get smoothed direction (prevents zigzag)
@@ -707,7 +706,7 @@ end
 -- MODULE EXPORT
 -- ============================================================================
 
--- Make PathUtils globally available (OTClient doesn't have _G, use direct assignment)
-PathUtils = PathUtils  -- This makes it globally accessible
+-- Make PathUtils globally available
+PathUtils = PathUtils
 
 return PathUtils

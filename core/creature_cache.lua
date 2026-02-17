@@ -120,70 +120,27 @@ local function getSpectatorsInRange(pos, rangeX, rangeY)
 end
 
 -- ============================================================================
--- CREATURE VALIDATION (Safe accessors)
+-- CREATURE VALIDATION (Delegates to SafeCreature)
 -- ============================================================================
 
-local function safeGetId(creature)
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
-end
+local SC = SafeCreature or {}
 
-local function safeIsMonster(creature)
-  if not creature then return false end
-  local ok, result = pcall(function() return creature:isMonster() end)
-  return ok and result or false
-end
-
-local function safeIsPlayer(creature)
-  if not creature then return false end
-  local ok, result = pcall(function() return creature:isPlayer() end)
-  return ok and result or false
-end
-
-local function safeIsNpc(creature)
-  if not creature then return false end
-  local ok, result = pcall(function() return creature:isNpc() end)
-  return ok and result or false
-end
-
-local function safeIsDead(creature)
-  if not creature then return true end
-  local ok, result = pcall(function() return creature:isDead() end)
-  return ok and result or true
-end
-
-local function safeIsRemoved(creature)
-  if not creature then return true end
-  local ok, result = pcall(function() return creature:isRemoved() end)
-  return ok and result or true
-end
-
-local function safeGetPosition(creature)
-  if not creature then return nil end
-  local ok, pos = pcall(function() return creature:getPosition() end)
-  return ok and pos or nil
-end
-
-local function safeGetName(creature)
-  if not creature then return nil end
-  local ok, name = pcall(function() return creature:getName() end)
-  return ok and name or nil
-end
-
-local function safeGetHealthPercent(creature)
-  if not creature then return 0 end
-  local ok, hp = pcall(function() return creature:getHealthPercent() end)
-  return ok and hp or 0
-end
+local function safeGetId(creature)        return SC.getId and SC.getId(creature) or nil end
+local function safeIsMonster(creature)     return SC.isMonster and SC.isMonster(creature) or false end
+local function safeIsPlayer(creature)      return SC.isPlayer and SC.isPlayer(creature) or false end
+local function safeIsNpc(creature)         return SC.isNpc and SC.isNpc(creature) or false end
+local function safeIsDead(creature)        return SC.isDead and SC.isDead(creature) or true end
+local function safeIsRemoved(creature)     return SC.isRemoved and SC.isRemoved(creature) or true end
+local function safeGetPosition(creature)   return SC.getPosition and SC.getPosition(creature) or nil end
+local function safeGetName(creature)       return SC.getName and SC.getName(creature) or nil end
+local function safeGetHealthPercent(creature) return SC.getHealthPercent and SC.getHealthPercent(creature) or 0 end
 
 -- Check if creature is valid and alive
 local function isValidCreature(creature)
   if not creature then return false end
-  local ok, valid = pcall(function()
-    return creature:getId() and not creature:isDead() and not creature:isRemoved()
-  end)
-  return ok and valid or false
+  local id = safeGetId(creature)
+  if not id then return false end
+  return not safeIsDead(creature) and not safeIsRemoved(creature)
 end
 
 -- ============================================================================

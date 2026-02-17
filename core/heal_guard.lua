@@ -1,3 +1,0 @@
--- Heal safety guard: DISABLED by user request.
--- Kept as placeholder for backward compatibility with _Loader.lua.
--- This module intentionally does nothing.
