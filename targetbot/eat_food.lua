@@ -594,6 +594,7 @@ if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
   end)
 
   EventBus.on("tile:add", function(tile, thing)
+    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then return end
     addCorpseDebounced(tile, thing)
   end, 10)
 end

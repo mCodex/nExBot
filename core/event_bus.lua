@@ -89,6 +89,47 @@ schedule(200, function()
   if ok and p then _zLastKnown = p.z end
 end)
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Tile-event burst guard: frame-based throttle for onAddThing / onRemoveThing
+-- In crowded cities, 200-500+ tile events fire per second (player movement,
+-- viewport scroll, NPC ground effects).  Each crossing the C++→Lua bridge.
+-- We count tile events per frame; 12+ in one tick = burst → suppress 80ms.
+-- ═══════════════════════════════════════════════════════════════════════════
+local _tileBlocked      = false
+local _tileBurstFrame   = 0
+local _tileBurstCount   = 0
+local _TILE_BURST_THRESHOLD = 12
+local _TILE_COOLDOWN_MS     = 80
+
+-- Global guard for external modules (mirrors zChanging())
+function tileThrottled()
+  return _tileBlocked
+end
+
+local function _tileActivate()
+  if _tileBlocked then return end
+  _tileBlocked = true
+  schedule(_TILE_COOLDOWN_MS, function()
+    _tileBlocked = false
+  end)
+end
+
+-- Returns true when the event should be suppressed.
+local function _tileBurst()
+  if _tileBlocked then return true end
+  if now ~= _tileBurstFrame then
+    _tileBurstFrame = now
+    _tileBurstCount = 1
+  else
+    _tileBurstCount = _tileBurstCount + 1
+  end
+  if _tileBurstCount >= _TILE_BURST_THRESHOLD then
+    _tileActivate()
+    return true
+  end
+  return false
+end
+
 -- Subscribe to an event
 -- @param event string: Event name (e.g., "creature:appear", "player:move")
 -- @param callback function: Handler function
@@ -485,9 +526,11 @@ if onTalk then
 end
 
 -- Tile events (filtered to items only — creature movement is handled by creature events)
+-- Guarded by both z-change block AND tile-burst throttle to prevent city freezes.
 if onAddThing then
   onAddThing(function(tile, thing)
     if _zBlocked then return end
+    if _tileBurst() then return end
     if thing and thing.isItem and thing:isItem() then
       EventBus.emit("tile:add", tile, thing)
     end
@@ -497,6 +540,7 @@ end
 if onRemoveThing then
   onRemoveThing(function(tile, thing)
     if _zBlocked then return end
+    if _tileBurst() then return end
     if thing and thing.isItem and thing:isItem() then
       EventBus.emit("tile:remove", tile, thing)
     end

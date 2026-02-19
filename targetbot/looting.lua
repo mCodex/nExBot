@@ -73,10 +73,12 @@ TargetBot.Looting.setup = function()
 
     -- Map tile changes can affect loot availability (containers added/removed)
     EventBus.on("tile:add", function(tile, thing)
+      if TargetBot and TargetBot.isOn and not TargetBot.isOn() then return end
       markDirtyDebounced()
     end, 10)
 
     EventBus.on("tile:remove", function(tile, thing)
+      if TargetBot and TargetBot.isOn and not TargetBot.isOn() then return end
       markDirtyDebounced()
     end, 10)
   end

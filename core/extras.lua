@@ -262,12 +262,11 @@ addCheckBox("timers", "MW & WG Timers", true, rightPanel, "Show times for Magic 
 if true then
   local activeTimers = {}
 
-  onAddThing(function(tile, thing)
+  -- Consolidated: uses EventBus "tile:add"/"tile:remove" instead of direct
+  -- onAddThing/onRemoveThing native hooks.  event_bus.lua already filters to
+  -- isItem() and applies z-change + tile-burst throttling before emitting.
+  EventBus.on("tile:add", function(tile, thing)
     if not settings.timers then return end
-    if zChanging() then return end
-    if not thing:isItem() then
-      return
-    end
     local timer = 0
     if thing:getId() == 2129 then -- mwall id
       timer = 20000 -- mwall time
@@ -282,20 +281,16 @@ if true then
       activeTimers[pos] = now + timer
     end
     tile:setTimer(activeTimers[pos] - now)
-  end)
+  end, 30)
 
-  onRemoveThing(function(tile, thing)
+  EventBus.on("tile:remove", function(tile, thing)
     if not settings.timers then return end
-    if zChanging() then return end
-    if not thing:isItem() then
-      return
-    end
     if (thing:getId() == 2129 or thing:getId() == 2130) and tile:getGround() then
       local pos = tile:getPosition().x .. "," .. tile:getPosition().y .. "," .. tile:getPosition().z
       activeTimers[pos] = nil
       tile:setTimer(0)
     end  
-  end)
+  end, 30)
 end
 
 
@@ -665,9 +660,11 @@ if true then
     m = macro(100, holdMwWgHandler)
   end
 
-  onRemoveThing(function(tile, thing)
+  -- Consolidated: uses EventBus instead of direct native hooks.
+  -- event_bus.lua already filters to isItem() and applies z-change +
+  -- tile-burst throttling before emitting.
+  EventBus.on("tile:remove", function(tile, thing)
     if not settings.holdMwall then return end
-    if zChanging() then return end
       if thing:getId() ~= 2129 then return end
       if tile:getText():find("HOLD") then
           table.insert(candidates, tile:getPosition())
@@ -676,17 +673,16 @@ if true then
             return useWith(rune, tile:getTopUseThing())
           end
       end
-  end)
+  end, 30)
 
-  onAddThing(function(tile, thing)
+  EventBus.on("tile:add", function(tile, thing)
     if not settings.holdMwall then return end
-    if zChanging() then return end
       if m.isOff() then return end
       if thing:getId() ~= 2129 then return end
       if tile:getText():len() > 0 then
           table.remove(candidates, table.find(candidates,tile))
       end
-  end)
+  end, 30)
 
   onKeyDown(function(keys)
     local wsadWalking = modules and modules.game_walking and modules.game_walking.wsadWalking
