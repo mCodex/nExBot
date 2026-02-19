@@ -477,7 +477,7 @@ if UnifiedTick and UnifiedTick.register then
     callback = function() if MonsterAI.COLLECT_ENABLED then pcall(S.detectScenario) end end })
 else
   macro(500, function()
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+    if zChanging() then
       return
     end
     if MonsterAI.COLLECT_ENABLED then pcall(S.detectScenario) end

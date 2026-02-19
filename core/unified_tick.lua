@@ -210,7 +210,7 @@ end
   Dispatches to handlers based on their intervals
 ]]
 function UnifiedTick._tick()
-  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+  if zChanging() then
     return
   end
   if not UnifiedTick.ENABLED then return end

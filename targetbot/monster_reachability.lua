@@ -227,7 +227,7 @@ if UnifiedTick and UnifiedTick.register then
     callback = function() pcall(R.cleanup) end })
 else
   macro(10000, function()
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+    if zChanging() then
       return
     end
     pcall(R.cleanup)

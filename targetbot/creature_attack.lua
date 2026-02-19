@@ -2248,7 +2248,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
 end
 
 onPlayerPositionChange(function(newPos, oldPos)
-  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+  if zChanging() then
     return
   end
   if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end

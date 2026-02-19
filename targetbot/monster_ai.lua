@@ -2349,7 +2349,7 @@ if UnifiedTick and UnifiedTick.register then
 else
   -- Fallback to traditional macros if UnifiedTick not loaded
   macro(500, function()
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+    if zChanging() then
       return
     end
     if shouldCollect() and MonsterAI.updateAll then
@@ -2358,7 +2358,7 @@ else
   end)
   
   macro(30000, function()
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+    if zChanging() then
       return
     end
     if not shouldCollect() then return end

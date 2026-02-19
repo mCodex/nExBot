@@ -413,7 +413,7 @@ local function followLeaderHandler()
 end
 
 onCreaturePositionChange(function(creature, oldPos, newPos)
-  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+  if zChanging() then return end
   if creature:getName() == toFollow and newPos then
     toFollowPos[newPos.z] = newPos
   end

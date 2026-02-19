@@ -2402,7 +2402,7 @@ targetbotMacro = macro(250, function()
   end
 
   -- Z-change guard: pause target processing during floor transitions
-  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+  if zChanging() then
     return
   end
   

@@ -178,7 +178,7 @@ end
 if onCreatureAppear then
   onCreatureAppear(function(creature)
     -- Skip during z-change: dozens of creatures appear at once during floor transitions
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
     if creature:isMonster() then
       EventBus.emit("monster:appear", creature)
     elseif creature:isPlayer() then
@@ -193,7 +193,7 @@ end
 if onCreatureDisappear then
   onCreatureDisappear(function(creature)
     -- Skip during z-change: dozens of creatures disappear at once during floor transitions
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
     if creature:isMonster() then
       EventBus.emit("monster:disappear", creature)
     elseif creature:isPlayer() then
@@ -229,7 +229,7 @@ end
 if onCreatureHealthPercentChange then
   onCreatureHealthPercentChange(function(creature, percent)
     -- Skip during z-change to reduce aggregate callback volume
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
     -- Get cached old HP (default to 100 if not tracked)
     local oldPercent = creatureHealthCache[creature] or 100
     creatureHealthCache[creature] = percent
@@ -279,45 +279,35 @@ if onCreatureHealthPercentChange then
 end
 
 -- Player events
--- Z-change guard: short cooldown window to avoid heavy work during floor transitions
+-- Z-change guard: lightweight global function to suppress bulk callbacks during floor transitions
 nExBot = nExBot or {}
-if not nExBot.ZChangeGuard then
-  nExBot.ZChangeGuard = {
-    cooldown = 300,
-    lastChange = 0,
-    fromZ = nil,
-    toZ = nil,
-    lastLog = 0
-  }
 
-  function nExBot.ZChangeGuard.set(oldPos, newPos)
-    if not oldPos or not newPos then return end
-    local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
-    nExBot.ZChangeGuard.lastChange = nowt
-    nExBot.ZChangeGuard.fromZ = oldPos.z
-    nExBot.ZChangeGuard.toZ = newPos.z
-    if nowt - (nExBot.ZChangeGuard.lastLog or 0) >= 800 then
-      nExBot.ZChangeGuard.lastLog = nowt
-      print(string.format("[ZGuard] z-change %s -> %s (cooldown=%sms)", tostring(oldPos.z), tostring(newPos.z), tostring(nExBot.ZChangeGuard.cooldown)))
-    end
-  end
+-- Local state for fastest possible access (no table lookups in hot path)
+local _zLastChange = 0
+local _zCooldown = 250  -- ms: time to suppress callbacks after floor change
+local _zLastLog = 0
 
-  function nExBot.ZChangeGuard.isActive()
-    local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
-    return (nowt - (nExBot.ZChangeGuard.lastChange or 0)) < (nExBot.ZChangeGuard.cooldown or 300)
+-- Global function: single call, no table lookups, minimal overhead
+-- Usage: if zChanging() then return end
+function zChanging()
+  return (now - _zLastChange) < _zCooldown
+end
+
+-- Set z-change state (called from onPlayerPositionChange)
+local function _zSet(oldPos, newPos)
+  _zLastChange = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
+  if (now - _zLastLog) >= 800 then
+    _zLastLog = now
+    print(string.format("[ZGuard] z-change %s -> %s", tostring(oldPos.z), tostring(newPos.z)))
   end
 end
 
 if onPlayerPositionChange then
   onPlayerPositionChange(function(newPos, oldPos)
     if newPos and oldPos and newPos.z ~= oldPos.z then
-      if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.set then
-        nExBot.ZChangeGuard.set(oldPos, newPos)
-      end
+      _zSet(oldPos, newPos)
       EventBus.emit("player:z_change", newPos, oldPos)
-      -- After cooldown, emit settled event so modules can do a single bulk refresh
-      local cooldown = (nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.cooldown or 300) + 50
-      schedule(cooldown, function()
+      schedule(_zCooldown + 50, function()
         EventBus.emit("player:z_change_settled", newPos, oldPos)
       end)
     end
@@ -465,7 +455,7 @@ end
 if onAddThing then
   onAddThing(function(tile, thing)
     -- Skip during z-change: hundreds of tile events fire during floor transitions
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
     if thing and thing.isItem and thing:isItem() then
       EventBus.emit("tile:add", tile, thing)
     end
@@ -475,7 +465,7 @@ end
 if onRemoveThing then
   onRemoveThing(function(tile, thing)
     -- Skip during z-change: hundreds of tile events fire during floor transitions
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
     if thing and thing.isItem and thing:isItem() then
       EventBus.emit("tile:remove", tile, thing)
     end
@@ -599,7 +589,7 @@ end
 -- Creature walk events
 if onWalk then
   onWalk(function(creature, oldPos, newPos)
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
     EventBus.emit("creature:walk", creature, oldPos, newPos)
     if creature:isMonster() then
       EventBus.emit("monster:walk", creature, oldPos, newPos)
@@ -612,7 +602,7 @@ end
 -- Creature turn events
 if onTurn then
   onTurn(function(creature, direction)
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
     EventBus.emit("creature:turn", creature, direction)
   end)
 end

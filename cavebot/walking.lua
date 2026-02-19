@@ -1320,7 +1320,7 @@ onPlayerPositionChange(function(newPos, oldPos)
   end
 
   -- Z-change guard: avoid heavy step-back logic during manual transitions
-  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+  if zChanging() then
     lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
     resetStepBackAttempts()
     resetFloorChangeCacheThrottled()

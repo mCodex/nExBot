@@ -971,8 +971,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   hasPlayerMoved()
 
   -- Z-change guard: skip heavy processing during manual floor transitions
-  local zGuard = nExBot and nExBot.ZChangeGuard
-  if zGuard and zGuard.isActive and zGuard.isActive() then
+  if zChanging() then
     local pp = player and player:getPosition()
     local intended = CaveBot.isFloorChangeIntended and pp and CaveBot.isFloorChangeIntended(pp.z)
     if not intended then

@@ -1720,7 +1720,7 @@ macro(100, function()
   end
 
   -- Z-change guard: avoid heavy scans during floor transitions
-  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+  if zChanging() then
     return
   end
   

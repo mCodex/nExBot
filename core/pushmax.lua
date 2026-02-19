@@ -182,7 +182,7 @@ end)
 
 onCreaturePositionChange(function(creature, newPos, oldPos)
   if not config.enabled then return end
-  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+  if zChanging() then return end
   if creature == player then
     resetData()
   end

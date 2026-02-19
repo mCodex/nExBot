@@ -241,7 +241,7 @@ if true then
 
   onAddThing(function(tile, thing)
     if not settings.timers then return end
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
     if not thing:isItem() then
       return
     end
@@ -263,7 +263,7 @@ if true then
 
   onRemoveThing(function(tile, thing)
     if not settings.timers then return end
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
     if not thing:isItem() then
       return
     end
@@ -644,7 +644,7 @@ if true then
 
   onRemoveThing(function(tile, thing)
     if not settings.holdMwall then return end
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
       if thing:getId() ~= 2129 then return end
       if tile:getText():find("HOLD") then
           table.insert(candidates, tile:getPosition())
@@ -657,7 +657,7 @@ if true then
 
   onAddThing(function(tile, thing)
     if not settings.holdMwall then return end
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
       if m.isOff() then return end
       if thing:getId() ~= 2129 then return end
       if tile:getText():len() > 0 then
@@ -730,7 +730,7 @@ if true then
 
   onPlayerPositionChange(function(x,y)
     if not settings.checkPlayer then return end
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+    if zChanging() then
       return
     end
     if x.z ~= y.z then
@@ -740,7 +740,7 @@ if true then
 
   onCreatureAppear(function(creature)
     if not settings.checkPlayer then return end
-    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
+    if zChanging() then return end
     if creature:isPlayer() and creature:getText() == "" and creature:getPosition().z == posz() and creature ~= player then
         g_game.look(creature)
         found = now

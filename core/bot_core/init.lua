@@ -69,7 +69,7 @@ dofile(basePath .. "friend_healer.lua")
 
 -- Single tick handler - runs at 50ms for critical healing response
 local function onBotCoreTick()
-  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+  if zChanging() then
     return
   end
   -- Update stats once per tick (memoized, skips if already updated)
