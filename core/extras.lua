@@ -8,7 +8,18 @@ end
 local settings = storage[panelName]
 
 -- basic elements
+-- Ensure style is loaded (fallback for batch loader)
+if g_ui and g_ui.importStyle then
+  pcall(function()
+    local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
+    g_ui.importStyle("/bot/" .. configName .. "/core/extras.otui")
+  end)
+end
 extrasWindow = UI.createWindow('ExtrasWindow')
+if not extrasWindow then
+  warn("[nExBot] ExtrasWindow style not found — skipping extras panel")
+  return
+end
 extrasWindow:hide()
 extrasWindow.closeButton.onClick = function(widget)
   extrasWindow:hide()
@@ -20,7 +31,9 @@ extrasWindow.onGeometryChange = function(widget, old, new)
   settings.height = new.height
 end
 
-extrasWindow:setHeight(settings.height or 360)
+local extrasHeight = settings.height
+if not extrasHeight or extrasHeight < 200 then extrasHeight = 360 end
+extrasWindow:setHeight(extrasHeight)
 
 -- available options for dest param
 local rightPanel = extrasWindow.content.right
@@ -98,7 +111,17 @@ local addScrollBar = function(id, title, min, max, defaultValue, dest, tooltip)
 end
 
 UI.Button("nExBot Settings and Scripts", function()
-  if not extrasWindow then return end
+  if not extrasWindow then
+    warn("[nExBot] extrasWindow is nil — attempting to recreate")
+    local ok, w = pcall(UI.createWindow, 'ExtrasWindow')
+    if ok and w then
+      extrasWindow = w
+      extrasWindow:setHeight(settings.height or 360)
+    else
+      warn("[nExBot] Failed to recreate ExtrasWindow: " .. tostring(w))
+      return
+    end
+  end
   extrasWindow:show()
   extrasWindow:raise()
   extrasWindow:focus()
