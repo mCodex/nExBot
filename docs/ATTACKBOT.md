@@ -31,7 +31,7 @@ Key capabilities:
 
 ## Attack Types
 
-### Single Target Spells
+### Single-Target Spells
 
 Direct damage spells that hit a single creature:
 

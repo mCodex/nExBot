@@ -35,7 +35,7 @@ That's it. HealBot will keep you alive while you hunt.
 
 When your health changes, HealBot runs this evaluation:
 
-```
+```text
 Health Changed →
   ├── Is HP ≤ threshold of any spell? →
   │     Yes → Is spell off cooldown? → Do I have enough mana? → Cast spell
@@ -167,7 +167,7 @@ The Conditions panel (separate from HealBot) lets you configure automatic cures 
 
 ### Knight
 
-```
+```text
 Spells:   exura vita @ 50% HP  |  exura @ 30% HP
 Potions:  Great Health Potion @ 40% HP
 Support:  utito tempo (always)
@@ -176,7 +176,7 @@ Food:     Every 3 minutes
 
 ### Paladin
 
-```
+```text
 Spells:   exura vita @ 55% HP  |  exura @ 35% HP
 Potions:  Great Health Potion @ 45% HP  |  Great Spirit Potion @ 60% mana
 Support:  utani hur (when moving)
@@ -185,7 +185,7 @@ Food:     Every 3 minutes
 
 ### Sorcerer / Druid
 
-```
+```text
 Spells:   exura @ 60% HP  |  exura vita @ 40% HP  |  exura gran @ 20% HP
 Potions:  Health Potion @ 30% HP  |  Great Mana Potion @ 50% mana
 Support:  utamo vita (at 80% HP)  |  utani hur (always)

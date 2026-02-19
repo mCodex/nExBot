@@ -76,7 +76,7 @@ The reachability system caches pathfinding results per creature ID with TTL expi
 
 CaveBot tries the client's built-in `autoWalk` first, which uses the game engine's fast pathfinding. Only when autoWalk fails does it fall back to manual `findPath` calls.
 
-```
+```text
 1. autoWalk (fast, client-native)
 2. findPath simple (local pathfinding)
 3. findPath ignore creatures (if distance ≤ 30)
@@ -89,7 +89,7 @@ Most walks complete with a single autoWalk call.
 
 Pathfinding is capped at **50 tiles** maximum. Beyond that, autoWalk is used exclusively. This prevents O(n²) pathfinding explosions that would freeze the client.
 
-```
+```text
 50 tiles:  ~2,500 nodes → fast
 100 tiles: ~10,000 nodes → slow
 200 tiles: ~40,000 nodes → client freeze
@@ -125,7 +125,7 @@ On startup, nExBot scans all stored data for sparse arrays (which prevent JSON s
 
 ### Cache Lifecycle
 
-```
+```text
 Module loaded → Cache is nil
 First access  → Build and cache
 Config change → Invalidate cache

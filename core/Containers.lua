@@ -1341,6 +1341,11 @@ end
 -- CONTAINER EVENT HANDLERS
 -- ============================================================================
 
+-- Helper: check if TargetBot looting is actively using container windows
+local function isLootLocked()
+    return TargetBot and TargetBot.Looting and TargetBot.Looting.isLocked and TargetBot.Looting.isLocked()
+end
+
 onContainerOpen(function(container, previousContainer)
     if not container then return end
 
@@ -1351,8 +1356,8 @@ onContainerOpen(function(container, previousContainer)
     applyMinimize(container)
     applyRename(container)
 
-    -- Trigger sorting macro
-    if sortingMacro then sortingMacro:setOn() end
+    -- Trigger sorting macro (suppress during active looting to prevent container fights)
+    if sortingMacro and not isLootLocked() then sortingMacro:setOn() end
 
     -- If BFS active and config says open nested: prioritize same-type children
     if ContainerBFS.isActive() then
@@ -1371,7 +1376,7 @@ onContainerOpen(function(container, previousContainer)
 end)
 
 onContainerClose(function(container)
-    if container and not container.lootContainer then
+    if container and not container.lootContainer and not isLootLocked() then
         if sortingMacro and (config.sortEnabled or config.forceOpen) then
             sortingMacro:setOn()
         end
@@ -1391,19 +1396,19 @@ onAddItem(function(container, slot, item, oldItem)
         end
     end
 
-    if sortingMacro and (config.sortEnabled or config.forceOpen) then
+    if sortingMacro and (config.sortEnabled or config.forceOpen) and not isLootLocked() then
         sortingMacro:setOn()
     end
 end)
 
 onRemoveItem(function(container, slot, item)
-    if sortingMacro and (config.sortEnabled or config.forceOpen) then
+    if sortingMacro and (config.sortEnabled or config.forceOpen) and not isLootLocked() then
         sortingMacro:setOn()
     end
 end)
 
 onPlayerInventoryChange(function(slot, item, oldItem)
-    if sortingMacro and (config.sortEnabled or config.forceOpen) then
+    if sortingMacro and (config.sortEnabled or config.forceOpen) and not isLootLocked() then
         sortingMacro:setOn()
     end
 end)
@@ -1688,6 +1693,9 @@ sortingMacro = macro(300, function(m)
     -- Don't interfere during container BFS
     if ContainerBFS.isActive() then return end
 
+    -- Don't interfere during active looting
+    if isLootLocked() then return end
+
     -- Item sorting
     if config.sortEnabled then
         for _, container in pairs(getContainers()) do
@@ -1710,8 +1718,8 @@ sortingMacro = macro(300, function(m)
         end
     end
 
-    -- Force open containers
-    if config.forceOpen then
+    -- Force open containers (skip while looting is locked to prevent open/close loop)
+    if config.forceOpen and not isLootLocked() then
         for _, entry in ipairs(config.containerList) do
             if entry.enabled then
                 local container = getContainerByItem(entry.itemId)

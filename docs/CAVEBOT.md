@@ -45,7 +45,7 @@ Key capabilities:
 
 Walk to a specific coordinate.
 
-```
+```text
 32000,32000,7        → Walk to exact position
 32000,32000,7,3      → Walk within 3 tiles of position
 ```
@@ -56,7 +56,7 @@ Walk to a specific coordinate.
 
 Mark a named position for jumps.
 
-```
+```text
 label:hunt
 label:refill
 label:depot
@@ -68,7 +68,7 @@ label:depot
 
 Jump execution to a named label.
 
-```
+```text
 gotolabel:hunt       → Resume from the "hunt" label
 gotolabel:depot      → Jump to depot sequence
 ```
@@ -79,7 +79,7 @@ gotolabel:depot      → Jump to depot sequence
 
 Check item quantity and branch if low.
 
-```
+```text
 3160,50,refill       → If mana potions < 50, goto "refill"
 3155,20,depot        → If SD runes < 20, goto "depot"
 ```
@@ -88,7 +88,7 @@ Check item quantity and branch if low.
 
 Check carrying capacity and branch if low.
 
-```
+```text
 200,depot            → If cap < 200 oz, goto "depot"
 ```
 
@@ -106,7 +106,7 @@ Deposit all loot in the depot. Works with the Depositor configuration panel wher
 
 Buy items from an NPC.
 
-```
+```text
 3160,200,Eremo       → Buy 200 mana potions from Eremo
 ```
 
@@ -134,7 +134,7 @@ Open a door at the current waypoint position.
 
 Pull a specified number of creatures before continuing.
 
-```
+```text
 lure Dragon 1        → Pull 1 Dragon before moving on
 ```
 
@@ -180,7 +180,7 @@ The walking engine is the heart of CaveBot. It handles pathfinding, field avoida
 
 Before walking any path, the engine validates every tile along the route. If any tile contains a floor-change element (stairs, ladders, ramps), the walk is truncated to stop **before** that tile.
 
-```
+```text
 Path Found → Validate each step → Floor change detected?
                                         ↓ Yes
                   Stop before the floor-change tile
@@ -208,7 +208,7 @@ If the player hasn't moved for 3 seconds while walking to a waypoint, CaveBot tr
 
 ### Pathfinding Strategy
 
-```
+```text
 1. Try autoWalk (client's built-in fast pathfinding)
 2. If that fails → findPath with simple settings
 3. If still failing and distance ≤ 30 → findPath ignoring creatures
@@ -248,7 +248,7 @@ If any supply is below threshold, CaveBot routes to the refill label.
 
 A typical refill sequence:
 
-```
+```text
 label:hunt
   ... hunting waypoints ...
   checkSupplies:3160,50,refill
@@ -331,7 +331,7 @@ nExBot ships with **50+ pre-built configs** for popular hunting spots:
 
 ### Basic Hunting Loop
 
-```
+```text
 label:hunt
 goto:32000,32000,7
 goto:32010,32000,7
@@ -348,7 +348,7 @@ gotolabel:hunt
 
 ### Full Refill with Bank
 
-```
+```text
 label:hunt
   ... waypoints ...
   checkSupplies:3160,50,refill

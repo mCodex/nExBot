@@ -40,17 +40,19 @@ local function isFullMessage(text)
   return false
 end
 
+local nowMs = nExBot.Shared.nowMs
+
 -- Listen for server messages to detect "You are full"
 onTextMessage(function(mode, text)
   if not eatFromCorpsesEnabled then return end
   if isFullMessage(text) then
     isPlayerFull = true
-    fullDetectedTime = now
+    fullDetectedTime = nowMs()
   end
 end)
 
 local function hasFullCooldownExpired()
-  return (now - fullDetectedTime) > FULL_COOLDOWN
+  return (nowMs() - fullDetectedTime) > FULL_COOLDOWN
 end
 
 -- Profile storage helpers

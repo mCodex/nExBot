@@ -18,7 +18,7 @@ Get nExBot up and running on your OTClient in minutes.
 
 The default data directory is:
 
-```
+```text
 Windows:  %APPDATA%\OTClientV8\<ServerName>\bot\
 Linux:    ~/.local/share/OTClientV8/<ServerName>/bot/
 ```
@@ -31,7 +31,7 @@ Replace `<ServerName>` with the name of the server you play on (e.g. `Tibia Real
 
 Copy the entire `nExBot` folder into the `bot/` directory so the structure looks like:
 
-```
+```text
 bot/
 └── nExBot/
     ├── _Loader.lua
@@ -58,7 +58,7 @@ You should see the Main, Cave, and Target tabs appear.
 
 On OTCR the data path is usually:
 
-```
+```text
 Windows:  %APPDATA%\otclientrc\<ServerName>\bot\
 Linux:    ~/.local/share/<otcr-data-dir>/<ServerName>/bot/
 ```
@@ -69,7 +69,7 @@ Linux:    ~/.local/share/<otcr-data-dir>/<ServerName>/bot/
 
 Same as above — copy the `nExBot` folder into `bot/`:
 
-```
+```text
 bot/
 └── nExBot/
     ├── _Loader.lua
@@ -130,7 +130,7 @@ Your per-character profiles are stored in `storage/` and will persist across upd
 
 After installation, the full directory tree looks like:
 
-```
+```text
 nExBot/
 ├── _Loader.lua              # Entry point — loads everything
 ├── version                  # Current version number

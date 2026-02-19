@@ -64,7 +64,7 @@ Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress i
 ### TargetBot — AI Combat
 - **AttackStateMachine** — sole attack issuer, eliminates attack-once-then-stop bugs
 - **9-stage TBI priority** — distance, health, danger, wave prediction, adaptive weights
-- **Monster Insights** — 12 SRP modules that learn monster behavior in real time
+- **Monster Insights** — 12 SRP modules that learn monster behavior in real-time
 - **Movement coordination** — intent-based voting resolves wave avoidance, keep-distance, AoE positioning, and chase
 
 ### CaveBot — Navigation
@@ -86,7 +86,7 @@ Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress i
 
 ## Architecture
 
-```
+```text
 _Loader.lua (entry point)
 ├── ACL (client detection + adapter)
 ├── EventBus (event-driven communication)

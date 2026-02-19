@@ -12,7 +12,7 @@ nExBot is a modular, event-driven bot built in Lua for OTClient. It uses a layer
 
 ## System Architecture
 
-```
+```text
 ┌──────────────────────────────────────────────────────┐
 │                    _Loader.lua                        │
 │              (Entry point, load phases)               │

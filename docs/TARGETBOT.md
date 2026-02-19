@@ -48,6 +48,8 @@ You can use patterns to match multiple creatures:
 
 ### 9-Stage Priority Scoring (TBI)
 
+TBI stands for **TargetBot Integration** — the module that bridges Monster Insights AI data into TargetBot's priority system (`monster_tbi.lua`).
+
 Each creature on screen receives a priority score through 9 sequential stages:
 
 | Stage | Factor | Influence |
@@ -72,7 +74,7 @@ All attacks in nExBot go through a single **AttackStateMachine** (ASM). No other
 
 ### State Flow
 
-```
+```text
 IDLE → ACQUIRING → CONFIRMING → ATTACKING → RECOVERING → IDLE
 ```
 
@@ -212,6 +214,25 @@ TargetBot includes an integrated looting system:
 - Configurable loot filters
 - Loot-to-container assignment (loot goes to designated backpack)
 - Integration with Hunt Analyzer for loot value tracking
+
+### Eat Food from Corpses
+
+TargetBot includes an optional **Eat Food** feature (`TargetBot.EatFood`) that consumes food items found inside corpses during normal looting. When enabled:
+
+- Food items are identified via a centralized ID list from `constants/food_items.lua`.
+- The system detects "You are full" server messages and pauses eating for 60 seconds.
+- A legacy fallback reads from `storage.foodItems` if the centralized list has no match, but only when the toggle is on.
+- Toggle the feature through the TargetBot UI or `TargetBot.EatFood.toggle()`.
+- **Standalone mode**: Works even without loot items or loot containers configured — corpses are opened solely to eat food, then closed. The status bar shows "Eating" instead of "Looting".
+- Nested containers inside corpses are skipped in eat-only mode (no loot items to find in sub-bags).
+
+### Loot Lock
+
+The looting system uses a **Loot Lock** protocol to prevent the Container Panel's "Force Open" feature from fighting with corpse windows:
+
+- **ACTIVE** phase: acquired when a corpse window is opened or being processed. The Container Panel suppresses all `sortingMacro` triggers and `forceOpen` re-opens.
+- **GRACE** phase: after the corpse is closed, an 800 ms cooldown keeps the lock held so any queued container events settle before `forceOpen` resumes.
+- Exposed via `TargetBot.Looting.isLocked()` and `TargetBot.Looting.isActive()`.
 
 ---
 

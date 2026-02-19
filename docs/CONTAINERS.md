@@ -35,7 +35,7 @@ Key capabilities:
 
 ### Main Backpack
 
-Your primary container that holds all other backpacks. Should be a large-capacity bag (e.g. Golden Backpack, Adventurer's Bag).
+Your primary container that holds all other backpacks. It should be a large-capacity bag (e.g., a Golden Backpack or an Adventurer's Bag).
 
 ### Loot Container
 
@@ -113,7 +113,7 @@ Quiver management is enabled by default — no toggle needed.
 
 ### Knight
 
-```
+```text
 Main BP: Golden Backpack
 ├── Supplies: Beach Bag (potions)
 ├── Loot: Beach Bag (drops)
@@ -122,7 +122,7 @@ Main BP: Golden Backpack
 
 ### Paladin
 
-```
+```text
 Main BP: Adventurer's Bag
 ├── Supplies: Beach Bag (potions)
 ├── Loot: Beach Bag (drops)
@@ -132,7 +132,7 @@ Main BP: Adventurer's Bag
 
 ### Mage
 
-```
+```text
 Main BP: Jewelled Backpack
 ├── Supplies: Beach Bag (mana potions)
 ├── Loot: Beach Bag (drops)
