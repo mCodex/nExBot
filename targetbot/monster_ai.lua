@@ -724,6 +724,7 @@ local METRICS_SAVE_INTERVAL = 30000  -- ms between saves
 -- Merge persisted cumulative metrics into current session on load
 function MonsterAI.Metrics.loadPersisted()
   if not UnifiedStorage or not UnifiedStorage.get then return end
+  if not UnifiedStorage.isReady or not UnifiedStorage.isReady() then return end
 
   local saved = UnifiedStorage.get(METRICS_KEY)
   if saved and type(saved) == "table" then

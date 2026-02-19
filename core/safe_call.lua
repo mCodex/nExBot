@@ -145,9 +145,21 @@ function SafeCall.chain(funcChain)
         local funcName = callSpec[1]
 
         if i == 1 then
+            -- Resolve function reference without calling it
             local fn = _resolvedFunctions[funcName]
             if fn == nil then
-                fn = SafeCall.global(funcName) -- resolves + caches
+                local getter = loadstring("return " .. funcName)
+                if getter then
+                    local ok, resolved = pcall(getter)
+                    if ok and resolved ~= nil then
+                        fn = resolved
+                        _resolvedFunctions[funcName] = fn
+                    else
+                        _resolvedFunctions[funcName] = false
+                    end
+                else
+                    _resolvedFunctions[funcName] = false
+                end
             end
             if not fn or fn == false then return nil end
             local ok, res = pcall(fn, select(2, unpack(callSpec)))
@@ -155,7 +167,7 @@ function SafeCall.chain(funcChain)
             result = res
         else
             if type(result) ~= "table" or not result[funcName] then return nil end
-            local ok, res = pcall(result[funcName], select(2, unpack(callSpec)))
+            local ok, res = pcall(result[funcName], result, select(2, unpack(callSpec)))
             if not ok then return nil end
             result = res
         end

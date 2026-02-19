@@ -133,7 +133,7 @@ local function safeIsDead(creature)        return SC.isDead and SC.isDead(creatu
 local function safeIsRemoved(creature)     return SC.isRemoved and SC.isRemoved(creature) or true end
 local function safeGetPosition(creature)   return SC.getPosition and SC.getPosition(creature) or nil end
 local function safeGetName(creature)       return SC.getName and SC.getName(creature) or nil end
-local function safeGetHealthPercent(creature) return SC.getHealthPercent and SC.getHealthPercent(creature) or 0 end
+local function safeGetHealthPercent(creature) return SC.getHealthPercent and SC.getHealthPercent(creature) or 100 end
 
 -- Check if creature is valid and alive
 local function isValidCreature(creature)

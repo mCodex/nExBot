@@ -614,14 +614,10 @@ local function refreshContainerList()
                     local containerItem = container:getContainerItem()
                     if containerItem and containerItem:getId() == entry.itemId then
                         local window = getContainerWindow(container:getId())
-                        if window then
-                            if entry.minimize then
-                                if window.minimize then window:minimize()
-                                elseif window.setOn then window:setOn(false) end
-                            else
-                                if window.maximize then window:maximize()
-                                elseif window.setOn then window:setOn(true) end
-                            end
+                        if entry.minimize then
+                            minimizeWindow(window)
+                        else
+                            maximizeWindow(window)
                         end
                     end
                 end
@@ -635,16 +631,14 @@ local function refreshContainerList()
             label.nested:setTooltip(entry.openNested and 'Opens Nested' or 'No Nested')
             saveConfig()  -- Persist to CharacterDB
             -- Trigger nested container opening if enabled
-            if ContainerOpener and ContainerOpener.isProcessing and entry.enabled and entry.openNested and entry.itemId then
+            if ContainerBFS and ContainerBFS.isActive() and entry.enabled and entry.openNested and entry.itemId then
                 for _, container in pairs(g_game.getContainers()) do
                     local containerItem = container:getContainerItem()
                     if containerItem and containerItem:getId() == entry.itemId then
-                        local parentSig = getItemSignature(containerItem)
                         for slot, item in ipairs(container:getItems()) do
                             if item:isContainer() and item:getId() == entry.itemId then
-                                if ContainerOpener and ContainerOpener.queueItem then
-                                    local resolvedIndex, slotId, absoluteSlotId = getSlotInfo(container, item, slot, nil)
-                                    ContainerOpener.queueItem(item, container:getId(), resolvedIndex, slotId, absoluteSlotId, true, parentSig)
+                                if ContainerBFS.queueItem then
+                                    ContainerBFS.queueItem(item, container:getId(), slot, true)
                                 else
                                     g_game.open(item)
                                 end
@@ -652,9 +646,6 @@ local function refreshContainerList()
                             end
                         end
                     end
-                end
-                if ContainerOpener and ContainerOpener.isProcessing then
-                    schedule(30, ContainerOpener.processNext)
                 end
             end
         end
@@ -1179,9 +1170,10 @@ end
 local ContainerTracker = {
     openedSlots = {},        -- slotKey -> timestamp (when opened)
     pendingSlots = {},       -- slotKey -> { timestamp, itemId }
-    openedItemIds = {},      -- itemId -> timestamp (track by item ID to prevent re-opens)
+    openedItemIds = {},      -- itemId -> count (track by item ID to prevent re-opens)
     openedContainerIds = {}, -- containerId -> true (containers that are currently open)
-    graceMs = 8000,          -- Grace period to prevent re-opening (increased from 4000)
+    bfsActive = false,       -- Set by ContainerOpener during BFS to make tracking permanent
+    graceMs = 8000,          -- Grace period to prevent re-opening (outside BFS only)
     pendingTimeoutMs = 3500, -- Timeout for pending opens (increased from 2500)
 }
 
@@ -1190,6 +1182,7 @@ function ContainerTracker.reset()
     ContainerTracker.pendingSlots = {}
     ContainerTracker.openedItemIds = {}
     ContainerTracker.openedContainerIds = {}
+    ContainerTracker.bfsActive = false
 end
 
 function ContainerTracker.markOpened(slotKey, itemId)
@@ -1227,6 +1220,8 @@ end
 function ContainerTracker.isRecentlyOpened(slotKey)
     local timestamp = ContainerTracker.openedSlots[slotKey]
     if not timestamp then return false end
+    -- During BFS, opened slots are permanent (never expire until reset)
+    if ContainerTracker.bfsActive then return true end
     return (getNow() - timestamp) < ContainerTracker.graceMs
 end
 
@@ -1247,7 +1242,7 @@ function ContainerTracker.getItemOpenCount(itemId)
 end
 
 -- Maximum times we'll open the same container type per session
-local MAX_OPENS_PER_ITEM_TYPE = 20
+local MAX_OPENS_PER_ITEM_TYPE = 50
 
 function ContainerTracker.canOpen(slotKey, itemId)
     -- Check if slot was recently opened
@@ -1263,6 +1258,8 @@ end
 
 -- Clear expired entries (call periodically)
 function ContainerTracker.cleanup()
+    -- Don't expire slots during active BFS processing
+    if ContainerTracker.bfsActive then return end
     local currentTime = getNow()
     for key, timestamp in pairs(ContainerTracker.openedSlots) do
         if (currentTime - timestamp) > ContainerTracker.graceMs * 2 then
@@ -1304,7 +1301,7 @@ function ContainerQueue.add(item, containerId, slotIndex, front)
     -- Additional check: limit same item type in queue
     if itemId then
         local queuedCount = ContainerQueue.queuedItemIds[itemId] or 0
-        if queuedCount >= 10 then return false end  -- Max 10 of same container type in queue
+        if queuedCount >= 30 then return false end  -- Max 30 of same container type in queue
         ContainerQueue.queuedItemIds[itemId] = queuedCount + 1
     end
     
@@ -1366,7 +1363,12 @@ end
 function ContainerScanner.wasRecentlyScanned(containerId)
     local timestamp = ContainerScanner.scannedContainers[containerId]
     if not timestamp then return false end
-    return (getNow() - timestamp) < ContainerScanner.scanCooldownMs
+    -- During BFS, use much longer cooldown to prevent re-scanning already-processed containers
+    local cooldown = ContainerScanner.scanCooldownMs
+    if ContainerTracker.bfsActive then
+        cooldown = 30000
+    end
+    return (getNow() - timestamp) < cooldown
 end
 
 -- Mark container as scanned
@@ -1375,7 +1377,7 @@ function ContainerScanner.markScanned(containerId)
 end
 
 -- Scan a container for nested containers and add them to queue
-function ContainerScanner.scan(container, prioritizeItemId)
+function ContainerScanner.scan(container, prioritizeItemId, forceRescan)
     if not container then return 0 end
     
     local containerName = container:getName() or ""
@@ -1383,8 +1385,8 @@ function ContainerScanner.scan(container, prioritizeItemId)
     
     local containerId = container:getId()
     
-    -- Skip if recently scanned (prevent over-scanning)
-    if ContainerScanner.wasRecentlyScanned(containerId) then return 0 end
+    -- Skip if recently scanned (prevent over-scanning) unless forced (page loads, rescans)
+    if not forceRescan and ContainerScanner.wasRecentlyScanned(containerId) then return 0 end
     ContainerScanner.markScanned(containerId)
     
     local items = container:getItems()
@@ -1476,7 +1478,7 @@ local ContainerOpener = {
     -- Timing configuration
     openDelayMs = 200,      -- Delay between opens (increased from 180)
     lastOpenTime = 0,
-    settleDelayMs = 6000,   -- Time to keep scanning after last activity (reduced from 8000)
+    settleDelayMs = 3000,   -- Time to keep scanning after last activity (proper tracking now)
     activeUntil = 0,        -- Timestamp until which we keep scanning
     
     -- Stability tracking
@@ -1509,6 +1511,7 @@ function ContainerOpener.reset()
     ContainerQueue.reset()
     ContainerTracker.reset()
     ContainerScanner.reset()
+    ContainerTracker.bfsActive = false
 end
 
 -- Extend active period (called when new activity detected)
@@ -1548,9 +1551,9 @@ function ContainerOpener.scheduleRescan(containerId)
         rescanTimers[containerId] = nil
         local container = g_game.getContainer(containerId)
         if container and ContainerOpener.isActive() then
-            ContainerScanner.scan(container)
+            ContainerScanner.scan(container, nil, true)
             ContainerScanner.handlePages(container, function(c)
-                ContainerScanner.scan(c)
+                ContainerScanner.scan(c, nil, true)
                 if ContainerOpener.isProcessing then
                     schedule(50, ContainerOpener.processNext)
                 end
@@ -1620,16 +1623,20 @@ function ContainerOpener.processNext()
     
     -- Validate item is still a container at that slot
     if not item or not item:isContainer() then
-        -- Item moved or changed, try to find it
+        -- Item moved or changed, try to find same container type
         for idx, candidate in ipairs(items) do
             if candidate and candidate:isContainer() then
-                local _, absSlot = getSlotInfo(parentContainer, idx)
-                local candidateKey = makeSlotKey(entry.containerId, absSlot)
-                if ContainerTracker.canOpen(candidateKey) then
-                    item = candidate
-                    entry.slotIndex = idx
-                    entry.slotKey = candidateKey
-                    break
+                local candidateId = candidate:getId()
+                if not entry.itemId or candidateId == entry.itemId then
+                    local _, absSlot = getSlotInfo(parentContainer, idx)
+                    local candidateKey = makeSlotKey(entry.containerId, absSlot)
+                    if ContainerTracker.canOpen(candidateKey, candidateId) then
+                        item = candidate
+                        entry.slotIndex = idx
+                        entry.slotKey = candidateKey
+                        entry.itemId = candidateId
+                        break
+                    end
                 end
             end
         end
@@ -1688,6 +1695,7 @@ end
 -- ============================================================================
 function ContainerOpener.finish()
     ContainerOpener.isProcessing = false
+    ContainerTracker.bfsActive = false
     ContainerOpener.lastPendingEntry = nil
     
     -- Cleanup tracker
@@ -1730,6 +1738,7 @@ end
 function ContainerOpener.start(onComplete)
     ContainerOpener.reset()
     ContainerOpener.isProcessing = true
+    ContainerTracker.bfsActive = true
     ContainerOpener.onComplete = onComplete
     ContainerOpener.lastOpenTime = 0
     ContainerOpener.extendActiveTime()
@@ -1748,6 +1757,7 @@ end
 function ContainerOpener.stop()
     ContainerOpener.isProcessing = false
     ContainerOpener.isPaused = false
+    ContainerTracker.bfsActive = false
 end
 
 -- Called when a container opens (from event handler)
@@ -1798,7 +1808,7 @@ function ContainerOpener.onContainerOpened(container)
     -- Handle paged containers
     ContainerScanner.handlePages(container, function(c)
         if ContainerOpener.isProcessing then
-            ContainerScanner.scan(c)
+            ContainerScanner.scan(c, nil, true)
             schedule(50, ContainerOpener.processNext)
         end
     end)
@@ -2268,6 +2278,11 @@ sortingMacro = macro(300, function(m)
     -- Early exit if no features enabled
     if not config.sortEnabled and not config.forceOpen then
         m:setOff()
+        return
+    end
+    
+    -- Don't interfere during container BFS opening process
+    if ContainerTracker.bfsActive then
         return
     end
     

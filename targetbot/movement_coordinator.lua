@@ -129,6 +129,7 @@ local scalingCache = {
 -- Lightweight monster cache maintained from EventBus
 MovementCoordinator.MonsterCache = MovementCoordinator.MonsterCache or {
   monsters = {}, -- map id -> creature
+  lastSeen = {},  -- map id -> timestamp for FIFO eviction
   lastUpdate = 0,
   MAX_SIZE = 200,  -- Prevent unbounded growth
   stats = { queries = 0, hits = 0, misses = 0, lastQuery = 0 }
@@ -153,16 +154,22 @@ local function cleanupMonsterCache()
     end)
     if not valid then
       cache.monsters[id] = nil
+      cache.lastSeen[id] = nil
       count = count - 1
     end
   end
-  -- Hard cap: if still too many, remove oldest by iterating
+  -- Hard cap: if still too many, remove oldest by lastSeen timestamp
   if count > cache.MAX_SIZE then
     local toRemove = count - cache.MAX_SIZE
+    -- Build sorted list by lastSeen (oldest first)
+    local entries = {}
     for id, _ in pairs(cache.monsters) do
-      if toRemove <= 0 then break end
-      cache.monsters[id] = nil
-      toRemove = toRemove - 1
+      entries[#entries + 1] = { id = id, ts = cache.lastSeen[id] or 0 }
+    end
+    table.sort(entries, function(a, b) return a.ts < b.ts end)
+    for i = 1, math.min(toRemove, #entries) do
+      cache.monsters[entries[i].id] = nil
+      cache.lastSeen[entries[i].id] = nil
     end
   end
 end
@@ -171,6 +178,7 @@ local function updateMonsterCacheFromCreature(creature)
   if not creature then return end
   local id = creature:getId() or tostring(creature)
   MovementCoordinator.MonsterCache.monsters[id] = creature
+  MovementCoordinator.MonsterCache.lastSeen[id] = now
   MovementCoordinator.MonsterCache.lastUpdate = now
   -- Periodic cleanup every 5 seconds during cache writes
   if (now - _lastCacheCleanup) > 5000 then
@@ -183,6 +191,7 @@ local function removeCreatureFromCache(creature)
   if not creature then return end
   local id = creature:getId() or tostring(creature)
   MovementCoordinator.MonsterCache.monsters[id] = nil
+  MovementCoordinator.MonsterCache.lastSeen[id] = nil
   MovementCoordinator.MonsterCache.lastUpdate = now
 end
 

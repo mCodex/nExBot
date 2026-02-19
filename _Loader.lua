@@ -363,6 +363,7 @@ loadCategory("utils", {
   "utils/creature_events",
   "utils/vocation_utils",
   "utils/event_debouncer",
+  "utils/path_utils",
   "utils/path_strategy",
 }, "/")
 

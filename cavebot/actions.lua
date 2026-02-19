@@ -575,8 +575,8 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     elseif minimapColor == 212 or minimapColor == 213 then
       expectedFloorAfterChange = destPos.z + 1  -- Stairs/hole down
     else
-      -- Fallback: check tile for clues, default to up
-      expectedFloorAfterChange = destPos.z - 1
+      -- Unknown minimap color: don't assume direction
+      expectedFloorAfterChange = nil
     end
     
     -- LOOP PREVENTION: Check if this floor change would create a loop

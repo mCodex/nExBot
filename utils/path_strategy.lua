@@ -230,7 +230,7 @@ end
 -- HUMANISED STEP TIMING
 -- ============================================================================
 
-local _stepCache = { speed = 0, cardinal = 0, diagonal = 0, ts = 0 }
+local _stepCache = { cardinal = 0, diagonal = 0, ts = 0 }
 local STEP_CACHE_TTL = 1000   -- 1 s
 
 --- Get humanised step duration (with jitter) for the local player.
@@ -472,7 +472,7 @@ end
 
 --- Advance cursor index by n steps and refresh TTL.
 function PathStrategy.advanceCursor(steps, stepDur)
-  Cursor.idx = math.min(Cursor.idx + steps, (#Cursor.path or 0) + 1)
+  Cursor.idx = math.min(Cursor.idx + steps, (Cursor.path and #Cursor.path or 0) + 1)
   Cursor.ts  = tick()
   Cursor.ttl = math.max(800, steps * (stepDur or 200) * 0.85)
 end
@@ -681,5 +681,5 @@ end
 -- GLOBAL EXPORT
 -- ============================================================================
 
-PathStrategy = PathStrategy  -- make global
+_G.PathStrategy = PathStrategy
 return PathStrategy

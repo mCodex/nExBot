@@ -553,13 +553,23 @@ schedule(100, function()
               prio = 1
             })
           end
+          if action.medium then
+            local tioSioAt = config.settings[7] and config.settings[7].value or 65
+            table.insert(friendSpells, {
+              name = "exura sio",
+              hp = tioSioAt,
+              mpCost = 120,
+              cd = 1100,
+              prio = 2
+            })
+          end
           if action.normal then
             table.insert(friendSpells, {
               name = "exura sio",
               hp = healAt,
               mpCost = 100,
               cd = 1100,
-              prio = 2
+              prio = 3
             })
           end
           if action.custom and action.name and action.name ~= "Custom Spell" then

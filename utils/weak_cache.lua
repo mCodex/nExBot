@@ -64,6 +64,7 @@ end
 -- ============================================================================
 
 -- Create an LRU cache with automatic eviction
+-- Uses a doubly-linked list for true O(1) touch/evict/remove.
 -- @param maxSize: maximum number of entries (default 100)
 -- @param ttl: optional time-to-live in milliseconds
 -- @return LRU cache object
@@ -72,7 +73,10 @@ function WeakCache.createLRU(maxSize, ttl)
   
   local cache = {
     data = {},
-    order = {},  -- Ordered list of keys (most recent last)
+    nodeMap = {},  -- key -> DLL node
+    head = nil,    -- oldest (eviction candidate)
+    tail = nil,    -- newest
+    size = 0,
     maxSize = maxSize,
     ttl = ttl,
     hits = 0,
@@ -81,38 +85,45 @@ function WeakCache.createLRU(maxSize, ttl)
   
   local nowMs = nExBot.Shared.nowMs
   
-  -- Remove oldest entry
-  -- Move key to end (most recent) - O(1) with index map
-  local orderIndex = {}  -- key -> position in cache.order
-  
-  local function touch(key)
-    local pos = orderIndex[key]
-    if pos then
-      -- Remove from current position by shifting elements down
-      for i = pos, #cache.order - 1 do
-        cache.order[i] = cache.order[i + 1]
-        orderIndex[cache.order[i]] = i
-      end
-      cache.order[#cache.order] = nil
-    end
-    -- Append to end
-    local newPos = #cache.order + 1
-    cache.order[newPos] = key
-    orderIndex[key] = newPos
+  -- Unlink a node from the doubly-linked list
+  local function unlink(node)
+    local p, n = node.prev, node.next
+    if p then p.next = n else cache.head = n end
+    if n then n.prev = p else cache.tail = p end
+    node.prev = nil
+    node.next = nil
   end
   
-  local function evict()
-    if #cache.order > 0 then
-      local oldestKey = cache.order[1]
-      -- Shift all elements down
-      for i = 1, #cache.order - 1 do
-        cache.order[i] = cache.order[i + 1]
-        orderIndex[cache.order[i]] = i
-      end
-      cache.order[#cache.order] = nil
-      orderIndex[oldestKey] = nil
-      cache.data[oldestKey] = nil
+  -- Append a node to the tail (most recently used)
+  local function appendToTail(node)
+    node.prev = cache.tail
+    node.next = nil
+    if cache.tail then cache.tail.next = node end
+    cache.tail = node
+    if not cache.head then cache.head = node end
+  end
+  
+  -- Move key to most-recently-used position — O(1)
+  local function touch(key)
+    local node = cache.nodeMap[key]
+    if not node then
+      node = { key = key }
+      cache.nodeMap[key] = node
+      cache.size = cache.size + 1
+    else
+      unlink(node)
     end
+    appendToTail(node)
+  end
+  
+  -- Evict the least-recently-used entry (head) — O(1)
+  local function evict()
+    local node = cache.head
+    if not node then return end
+    unlink(node)
+    cache.nodeMap[node.key] = nil
+    cache.data[node.key] = nil
+    cache.size = cache.size - 1
   end
   
   -- Get value from cache
@@ -125,7 +136,7 @@ function WeakCache.createLRU(maxSize, ttl)
     
     -- Check TTL
     if self.ttl and (nowMs() - entry.ts) > self.ttl then
-      self.data[key] = nil
+      self:remove(key)
       self.misses = self.misses + 1
       return nil
     end
@@ -137,9 +148,11 @@ function WeakCache.createLRU(maxSize, ttl)
   
   -- Set value in cache
   function cache:set(key, value)
-    -- Evict if at capacity
-    while #self.order >= self.maxSize do
-      evict()
+    -- Evict if at capacity and this is a new key
+    if not self.data[key] then
+      while self.size >= self.maxSize do
+        evict()
+      end
     end
     
     self.data[key] = {
@@ -149,21 +162,24 @@ function WeakCache.createLRU(maxSize, ttl)
     touch(key)
   end
   
-  -- Remove entry
+  -- Remove entry — O(1)
   function cache:remove(key)
     self.data[key] = nil
-    for i = 1, #self.order do
-      if self.order[i] == key then
-        table.remove(self.order, i)
-        break
-      end
+    local node = self.nodeMap[key]
+    if node then
+      unlink(node)
+      self.nodeMap[key] = nil
+      self.size = self.size - 1
     end
   end
   
   -- Clear all entries
   function cache:clear()
     self.data = {}
-    self.order = {}
+    self.nodeMap = {}
+    self.head = nil
+    self.tail = nil
+    self.size = 0
   end
   
   -- Get stats
@@ -172,7 +188,7 @@ function WeakCache.createLRU(maxSize, ttl)
     return {
       hits = self.hits,
       misses = self.misses,
-      size = #self.order,
+      size = self.size,
       maxSize = self.maxSize,
       hitRate = total > 0 and (self.hits / total) or 0
     }
