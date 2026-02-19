@@ -582,29 +582,34 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
       if item.lootTries < 5 then -- if can't be looted within 0.5s then skip it
         return TargetBot.Looting.lootItem(lootContainers, item)
       end
-    elseif storage.foodItems and storage.foodItems[1] and lastFoodConsumption + 5000 < now then
-      for _, food in ipairs(storage.foodItems) do
-        if item:getId() == food.id then
-          local Client = getClient()
-          if Client and Client.use then
-            Client.use(item)
-          elseif g_game and g_game.use then
-            g_game.use(item)
+    end
+
+    -- Eat food from corpses (single consolidated path)
+    if lastFoodConsumption + 3000 < now then
+      local itemId = item:getId()
+      local isFood = false
+
+      -- Check nExBot centralized food list (primary)
+      if TargetBot.EatFood and TargetBot.EatFood.isEnabled and TargetBot.EatFood.isEnabled()
+         and not (TargetBot.EatFood.isPlayerFull and TargetBot.EatFood.isPlayerFull()) then
+        local foodIds = TargetBot.EatFood.getFoodIds and TargetBot.EatFood.getFoodIds() or {}
+        isFood = foodIds[itemId] == true
+      end
+
+      -- Fallback: legacy storage.foodItems list
+      if not isFood and storage.foodItems and storage.foodItems[1] then
+        for _, food in ipairs(storage.foodItems) do
+          if itemId == food.id then
+            isFood = true
+            break
           end
-          lastFoodConsumption = now
-          return
         end
       end
-    end
-    
-    -- nExBot: Eat food from corpses feature
-    if TargetBot.EatFood and TargetBot.EatFood.isEnabled and TargetBot.EatFood.isEnabled() then
-      local itemId = item:getId()
-      local foodIds = TargetBot.EatFood.getFoodIds and TargetBot.EatFood.getFoodIds() or {}
-      if foodIds[itemId] and lastFoodConsumption + 3000 < now then
-        local Client2 = getClient()
-        if Client2 and Client2.use then
-          Client2.use(item)
+
+      if isFood then
+        local Client = getClient()
+        if Client and Client.use then
+          Client.use(item)
         elseif g_game and g_game.use then
           g_game.use(item)
         end

@@ -60,7 +60,6 @@ local function resetHuntSession()
   -- - storage.analyzers.trackedBoss (boss cooldowns still active)
   -- - storage.analyzers.customPrices (user preferences)
   -- - storage.analyzers.outfits (creature appearances, limited by LRU)
-  -- - storage.analyzers.lootChannel (user preference)
   -- - storage.analyzers.rarityFrames (user preference)
 end
 
@@ -111,7 +110,6 @@ if not storage.analyzers then
     trackedBoss = {},
     outfits = {},
     customPrices = {},
-    lootChannel = true,
     rarityFrames = true,
   }
 end
@@ -120,10 +118,7 @@ storage.analyzers = storage.analyzers or {}
 storage.analyzers.trackedLoot = storage.analyzers.trackedLoot or {}
 storage.analyzers.trackedBoss = storage.analyzers.trackedBoss or {}
 storage.analyzers.outfits = storage.analyzers.outfits or {}
--- Ensure lootChannel defaults to true if not set
-if storage.analyzers.lootChannel == nil then
-  storage.analyzers.lootChannel = true
-end
+
 local trackedLoot = storage.analyzers.trackedLoot
 
 --destroy old windows
@@ -964,7 +959,6 @@ end
 
 local nameRegex = [[Loot of (?:an |a |the |)([^:]+)]]
 onTextMessage(function(mode, text)
-    if not storage.analyzers.lootChannel then return end
     if not text:find("Loot of") and not text:find("The following items are available in your reward chest") then return end
     local name
 
@@ -1060,16 +1054,6 @@ onTextMessage(function(mode, text)
     add(t, formatted, getColor(combinedWorth), true)
     add(t, ")", "#FFFFFF", true)
 
-    -- get/create tab and write raw message
-    local tabName = "nExBot Loot"
-    local tab = console.getTab(tabName) or console.addTab(tabName, true)
-    console.addText(text, console.SpeakTypesSettings, tabName, "")
-
-    -- find last message in given tab and rewrite it with formatted string
-    local panel = console.consoleTabBar:getTabPanel(tab)
-    local consoleBuffer = panel:getChildById('consoleBuffer')
-    local message = consoleBuffer:getLastChild()
-    message:setColoredText(t)
 end)
 
 local function niceFormat(v)
@@ -1277,12 +1261,6 @@ settingsWindow.addItem.onClick = function()
     setFrames()
   end)
   refreshList()
-end
-
-settingsWindow.LootChannel:setOn(storage.analyzers.lootChannel)
-settingsWindow.LootChannel.onClick = function(widget)
-  storage.analyzers.lootChannel = not storage.analyzers.lootChannel
-  widget:setOn(storage.analyzers.lootChannel)
 end
 
 settingsWindow.RarityFrames:setOn(storage.analyzers.rarityFrames)

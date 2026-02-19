@@ -1,311 +1,200 @@
-# ⚔️ AttackBot Documentation
+# AttackBot
 
-**Automated attack spell and rune casting**
-
----
-
-## 📖 Overview
-
-AttackBot automates your offensive abilities:
-- Cast attack spells and runes
-- Optimized AoE decisions based on monster count
-- Combo rotations for maximum DPS
-- Safety checks to prevent waste
+Automated offensive spell and rune casting with intelligent AoE optimization.
 
 ---
 
-## 🚀 Quick Start
+## Overview
 
-### Basic Setup
+AttackBot handles all your offensive abilities automatically. It casts attack spells, uses runes, optimizes AoE positioning, and manages cooldowns — so you can focus on navigation and survival.
 
-1. **Open AttackBot Panel**
-   - Click AttackBot tab in main window
+Key capabilities:
 
-2. **Add Attack Rules**
-   - Click `Add` button
-   - Select spell or rune
-   - Set monster count condition
-   - Configure priority
-
-3. **Enable AttackBot**
-   - Toggle the ON/OFF switch
+- Single-target spell casting
+- Area-of-effect (AoE) spell optimization
+- Rune usage (Sudden Death, Avalanche, Great Fireball, etc.)
+- Monster count conditions for intelligent AoE decisions
+- Cooldown management and mana checks
+- Combo rotations with staggered cooldowns
+- Per-profile configurations (5 profiles)
 
 ---
 
-## 🔥 Attack Types
+## Quick Start
 
-### Single Target
-
-<details>
-<summary><b>⚡ Attack Spells</b></summary>
-
-| Class | Spell | Words | CD |
-|-------|-------|-------|-----|
-| Knight | Fierce Berserk | exori gran | 6s |
-| Knight | Berserk | exori | 4s |
-| Paladin | Divine Caldera | exevo mas san | 4s |
-| Mage | Wand/Rod Attack | - | 2s |
-
-</details>
-
-<details>
-<summary><b>🎯 Runes</b></summary>
-
-| Rune | Item ID | Damage Type |
-|------|---------|-------------|
-| Sudden Death | 3155 | Death |
-| Heavy Magic Missile | 3198 | Physical |
-| Fireball | 3189 | Fire |
-| Icicle | 3158 | Ice |
-
-</details>
+1. Open the **Main** tab and click **AttackBot**.
+2. Click **Add** to create an attack rule.
+3. Select a spell or rune, set a monster count condition, and configure priority.
+4. Toggle AttackBot **ON**.
 
 ---
 
-### Area of Effect (AoE)
+## Attack Types
 
-<details>
-<summary><b>💥 Area Spells</b></summary>
+### Single Target Spells
 
-| Class | Spell | Words | Area |
-|-------|-------|-------|------|
-| Knight | Groundshaker | exori mas | 5x5 |
-| Knight | Annihilation | exori gran ico | 3x3 |
-| Paladin | Mas San | exori san | 3x3 |
-| Mage | Hell's Core | exevo gran mas flam | 5x5 |
-| Mage | Rage of the Skies | exevo gran mas vis | 5x5 |
+Direct damage spells that hit a single creature:
 
-</details>
+| Vocation | Spell | Words | Cooldown |
+|----------|-------|-------|----------|
+| Knight | Fierce Berserk | `exori gran` | 6s |
+| Knight | Berserk | `exori` | 4s |
+| Knight | Front Sweep | `exori min` | 2s |
+| Paladin | Ethereal Spear | `exori con` | 2s |
+| Paladin | Divine Missile | `exori san` | 2s |
+| Sorcerer | Energy Strike | `exori vis` | 2s |
+| Druid | Terra Strike | `exori tera` | 2s |
 
-<details>
-<summary><b>🎯 Area Runes</b></summary>
+### AoE Spells
 
-| Rune | Item ID | Area |
-|------|---------|------|
-| Great Fireball | 3191 | 3x3 |
-| Avalanche | 3161 | 3x3 |
-| Thunderstorm | 3202 | 3x3 |
-| Stone Shower | 3175 | 3x3 |
+Area spells that damage multiple creatures at once:
 
-</details>
+| Vocation | Spell | Words | Area |
+|----------|-------|-------|------|
+| Knight | Groundshaker | `exori mas` | 5x5 |
+| Knight | Annihilation | `exori gran ico` | 3x3 |
+| Paladin | Divine Caldera | `exevo mas san` | 5x5 |
+| Sorcerer | Hell's Core | `exevo gran mas flam` | 5x5 |
+| Sorcerer | Rage of the Skies | `exevo gran mas vis` | 5x5 |
+| Druid | Eternal Winter | `exevo gran mas frigo` | 5x5 |
+
+### Runes
+
+Attack runes that don't require mana to use:
+
+| Rune | Damage Type | Area |
+|------|-------------|------|
+| Sudden Death | Death | Single target |
+| Heavy Magic Missile | Physical | Single target |
+| Great Fireball | Fire | 3x3 |
+| Avalanche | Ice | 3x3 |
+| Thunderstorm | Energy | 3x3 |
+| Stone Shower | Earth | 3x3 |
 
 ---
 
-## ⚙️ Optimized Algorithm
+## Attack Rules
 
-### Entry Caching System
+Each attack rule consists of:
 
-> [!NOTE]
-> AttackBot now caches attack entries for better performance!
+| Field | Description |
+|-------|-------------|
+| **Spell/Rune** | Which spell or rune to use |
+| **Monster Count** | Minimum monsters nearby to trigger this rule |
+| **Mana** | Minimum mana required |
+| **Cooldown** | Respected automatically |
+| **Priority** | Higher-priority rules are evaluated first |
 
-**How it works:**
-```lua
--- Entries are cached and only rebuilt when config changes
-cachedAttackEntries = nil  -- Reset on config change
+### Evaluation Order
 
-local function getAttackEntries()
-  if cachedAttackEntries then
-    return cachedAttackEntries
-  end
-  -- Build entries only once
-  cachedAttackEntries = buildEntries()
-  return cachedAttackEntries
-end
 ```
+For each rule (by priority):
+  1. Is the rule enabled?
+  2. Are there enough monsters in range?
+  3. Is the spell/rune off cooldown?
+  4. Do I have enough mana?
+  5. [Lazy] Do safety checks pass?
+  6. → Execute attack
+```
+
+> Safety checks (PvP protection, blacklisted players) are evaluated **last** for performance. Fast checks are done first to skip unnecessary work.
+
+---
+
+## Example Configurations
+
+### Knight AoE Build
+
+| Priority | Rule | Condition |
+|----------|------|-----------|
+| 1 | Groundshaker (`exori mas`) | Monsters ≥ 4 |
+| 2 | Fierce Berserk (`exori gran`) | Monsters ≥ 2 |
+| 3 | Berserk (`exori`) | Monsters ≥ 1 |
+| 4 | Front Kick (`exori ico`) | Always |
+
+### Mage Hunting Build
+
+| Priority | Rule | Condition |
+|----------|------|-----------|
+| 1 | Hell's Core (`exevo gran mas flam`) | Monsters ≥ 5 |
+| 2 | Great Fireball rune | Monsters ≥ 3 |
+| 3 | Wand attack | Monsters ≥ 1 |
+| 4 | Sudden Death rune | Target HP < 20% |
+
+### Paladin Team Hunt
+
+| Priority | Rule | Condition |
+|----------|------|-----------|
+| 1 | Divine Caldera (`exevo mas san`) | Monsters ≥ 3 |
+| 2 | Ethereal Spear (`exori con`) | Monsters ≥ 1 |
+| 3 | Sudden Death rune | Target HP < 30% |
+
+---
+
+## Performance Optimizations
+
+### Entry Caching
+
+Attack rules are compiled and cached. The cache is only rebuilt when the configuration changes — not every tick. This reduces CPU usage by around 50% compared to rebuilding every evaluation.
 
 ### Monster Count Caching
 
-```lua
--- Monster counts cached with 100ms TTL
-monsterCountCache = {
-  count = 0,
-  timestamp = 0,
-  TTL = 100  -- milliseconds
-}
-```
-
-> [!TIP]
-> Caching reduces CPU usage by ~70% in intense combat!
-
----
-
-### Priority Evaluation
-
-<details>
-<summary><b>📊 Attack Priority Flow</b></summary>
-
-```
-1. Check if attack entry is enabled
-2. Check monster count (from cache)
-3. Check spell/rune cooldown
-4. Check mana requirement
-5. Check safety conditions (lazy eval)
-6. Execute attack!
-```
-
-> [!IMPORTANT]
-> Safety checks are evaluated LAST (lazy evaluation) for efficiency.
-
-</details>
-
----
-
-## 🛡️ Safety Features
+The count of nearby monsters is cached with a 100 ms TTL. During intense combat, this avoids recounting creatures on every single iteration.
 
 ### Lazy Safety Evaluation
 
-> [!NOTE]
-> Safety is only checked when an attack would actually fire!
-
-**Old method (slow):**
-```lua
-for each entry do
-  checkSafety()     -- Always runs (expensive)
-  checkConditions()
-  attack()
-end
-```
-
-**New method (fast):**
-```lua
-for each entry do
-  checkConditions()  -- Fast checks first
-  if shouldAttack then
-    checkSafety()    -- Only if needed
-    attack()
-  end
-end
-```
-
-### Monster Filters
-
-| Filter | Description | Use Case |
-|--------|-------------|----------|
-| **Min Count** | Minimum monsters for AoE | Don't waste on 1 monster |
-| **Max Count** | Maximum monsters | Don't spam in crowds |
-| **Distance** | Target within range | Ranged attacks |
-| **Health%** | Target health | Finish low HP first |
+Safety checks (PvP flags, player blacklists) are the most expensive part of the evaluation. They are only run when an attack would actually fire — never speculatively.
 
 ---
 
-## 📝 Attack Entry Examples
+## Safety Features
 
-<details>
-<summary><b>Knight AoE Build</b></summary>
-
-```
-1. Monsters >= 4: Groundshaker (exori mas)
-2. Monsters >= 2: Fierce Berserk (exori gran)
-3. Monsters >= 1: Berserk (exori)
-4. Always: Front Kick (exori ico)
-```
-
-</details>
-
-<details>
-<summary><b>Mage Hunt Build</b></summary>
-
-```
-1. Monsters >= 5: Hell's Core (mas flam)
-2. Monsters >= 3: Great Fireball rune
-3. Monsters >= 1: Wand attack
-4. Target HP < 20%: Sudden Death (finish)
-```
-
-</details>
-
-<details>
-<summary><b>Paladin Team Hunt</b></summary>
-
-```
-1. Monsters >= 3: Divine Caldera
-2. Monsters >= 1: Ethereal Spear
-3. Target HP < 30%: Sudden Death
-```
-
-</details>
+| Feature | Description |
+|---------|-------------|
+| **PvP Protection** | Won't cast AoE if friendly players are in range |
+| **Blacklist** | Players that should never be hit |
+| **Anti-RS** | Stops all attacks if PK skull would result |
+| **Mana Guard** | Won't cast if mana is below a configured floor |
 
 ---
 
-## ⚠️ Common Issues
+## Analytics Integration
 
-<details>
-<summary><b>Attack not firing</b></summary>
+AttackBot reports detailed usage statistics to the Hunt Analyzer:
 
-**Check:**
-1. Is AttackBot enabled?
-2. Is there a valid target?
+- **Spell counts** — each attack spell with exact cast count
+- **Rune counts** — each rune type with usage count
+- **Empowerment buffs** — times `utito tempo` or `utamo vita` were cast
+- **Total attacks** — combined count of all attack actions
+
+These metrics feed into the Hunt Analyzer's efficiency calculations (attacks per kill, spell vs. rune balance, empowerment uptime).
+
+---
+
+## Troubleshooting
+
+### Attack not firing
+
+1. Is AttackBot **enabled**?
+2. Is there a valid target (TargetBot must be attacking something)?
 3. Is the spell on cooldown?
-4. Is mana sufficient?
-5. Are conditions met (monster count)?
+4. Is mana sufficient for the spell?
+5. Are monster count conditions met?
 
-</details>
+### AoE not triggering
 
-<details>
-<summary><b>AoE not triggering</b></summary>
+- Your monster count threshold may be too high — try lowering it
+- Check that monsters are within the spell's detection range
+- Verify that creatures are attackable (not NPCs or summons)
 
-**Cause:** Monster count not reached
+### Wasting runes on single targets
 
-**Solution:**
-1. Lower the minimum monster count
-2. Check monster detection range
-3. Verify monsters are attackable
+- Add a `Monsters ≥ 2` condition to area runes
+- Separate your AoE rules from single-target rules
+- Put single-target attacks at lower priority
 
-</details>
+### Spell priority conflicts
 
-<details>
-<summary><b>Wasting runes on single target</b></summary>
-
-**Solution:**
-1. Add monster count condition `>= 2`
-2. Use single target for low counts
-3. Separate AoE rules from single target
-
-</details>
-
----
-
-## 💡 Pro Tips
-
-> [!TIP]
-> **Priority:** Put emergency spells at top, fillers at bottom.
-
-> [!TIP]
-> **Efficiency:** Set AoE spells to trigger at 3+ monsters for better value.
-
-> [!TIP]
-> **Mana:** Add mana checks to prevent going OOM during fights.
-
-> [!TIP]
-> **Combo:** Stagger cooldowns - use fast spells between slow ones!
-
----
-
-## 📊 Analytics Integration
-
-AttackBot tracks detailed usage statistics that are displayed in Hunt Analyzer:
-
-### Tracked Metrics
-- **Individual spell counts** - Each attack spell with exact usage count
-- **Individual rune counts** - Each rune type with usage count
-- **Empowerment buffs** - Times utito tempo/utamo vita were cast
-- **Total attacks** - Combined count of all attack actions
-
-### API Access
-```lua
--- Get AttackBot analytics
-local data = AttackBot.getAnalytics()
--- data.spells = { ["exori gran ico"] = 2000, ["exori hur"] = 500 }
--- data.runes = { [3155] = 150 }  -- Sudden Death Rune
--- data.empowerments = 45
--- data.totalAttacks = 2650
-
--- Reset analytics (usually done by Hunt Analyzer on session start)
-AttackBot.resetAnalytics()
-```
-
-### Hunt Analyzer Integration
-AttackBot analytics are automatically pulled by Hunt Analyzer to provide:
-- Attacks per kill efficiency analysis
-- Spell vs rune usage balance recommendations
-- Empowerment uptime suggestions
+- Order rules so that expensive/powerful spells are at the top (highest priority)
+- Put filler attacks at the bottom
+- Stagger cooldowns: use fast spells between slow ones for maximum DPS
