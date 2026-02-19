@@ -69,6 +69,9 @@ dofile(basePath .. "friend_healer.lua")
 
 -- Single tick handler - runs at 50ms for critical healing response
 local function onBotCoreTick()
+  if zChanging() then
+    return
+  end
   -- Update stats once per tick (memoized, skips if already updated)
   if BotCore.Stats then
     BotCore.Stats.update()

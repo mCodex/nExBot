@@ -82,8 +82,14 @@ end
 -- @param maxLen number - maximum length
 function Shared.trimArray(arr, maxLen)
   if not arr or type(arr) ~= "table" then return end
-  while #arr > maxLen do
-    table.remove(arr, 1)
+  local excess = #arr - maxLen
+  if excess <= 0 then return end
+  -- Single-pass: shift retained elements to front, then nil-out tail
+  for i = 1, maxLen do
+    arr[i] = arr[i + excess]
+  end
+  for i = maxLen + 1, maxLen + excess do
+    arr[i] = nil
   end
 end
 

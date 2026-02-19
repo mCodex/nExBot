@@ -320,6 +320,7 @@ onTalk(function(name, level, mode, text, channelId, pos)
 end)
 
 onMissle(function(missle)
+  if zChanging() then return end
   if config.enabled and config.onShootEnabled then 
     if not config.shootLeader or config.shootLeader:len() == 0 then
       return
@@ -413,6 +414,7 @@ local function followLeaderHandler()
 end
 
 onCreaturePositionChange(function(creature, oldPos, newPos)
+  if zChanging() then return end
   if creature:getName() == toFollow and newPos then
     toFollowPos[newPos.z] = newPos
   end

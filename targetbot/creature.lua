@@ -10,6 +10,9 @@ TargetBot.Creature.configsCache = (WC and WC.createWeakValues) and WC.createWeak
 TargetBot.Creature.cached = 0
 TargetBot.Creature.lastCacheClear = 0
 
+-- Global exclude list: standalone "!Name" entries that block a creature across ALL configs
+TargetBot.Creature.globalExcludes = {}  -- array of {pattern=string, name=string}
+
 -- Cache configuration optimized for memory efficiency (tuned for lower memory usage)
 local CACHE_MAX_SIZE = 50   -- Reduced from 100 to limit memory per-character
 local CACHE_TTL = 10000      -- Clear cache every 10 seconds to free memory more aggressively
@@ -32,6 +35,8 @@ TargetBot.Creature.resetConfigsCache = function()
   TargetBot.Creature.cached = 0
   TargetBot.Creature.lastCacheClear = now
   cacheAccessOrder = {}
+  -- Rebuild global excludes from current config entries
+  TargetBot.Creature._rebuildGlobalExcludes()
 end
 
 -- LRU cache eviction - keeps most recently used entries
@@ -64,6 +69,24 @@ end
 
 -- Pre-compile regex patterns for faster matching
 local compiledPatterns = {}
+
+--- Rebuild the global exclude list by scanning all config widgets for
+--- entries that have no include patterns (regex == "^$") and only excludes.
+--- These standalone "!Name" entries act as a universal block list.
+TargetBot.Creature._rebuildGlobalExcludes = function()
+  TargetBot.Creature.globalExcludes = {}
+  if not TargetBot.targetList then return end
+  local children = TargetBot.targetList:getChildren()
+  for i = 1, #children do
+    local cfg = children[i].value
+    if cfg and cfg.regex == "^$" and cfg.excludeRegex then
+      TargetBot.Creature.globalExcludes[#TargetBot.Creature.globalExcludes + 1] = {
+        pattern = cfg.excludeRegex,
+        name    = cfg.name,
+      }
+    end
+  end
+end
 
 --[[
   Pattern Matching System:
@@ -189,6 +212,22 @@ TargetBot.Creature.getConfigs = function(creature)
       end
     end
     return cached
+  end
+
+  -- GLOBAL EXCLUDE CHECK: standalone "!Name" entries block this creature entirely
+  local globalExcls = TargetBot.Creature.globalExcludes
+  if globalExcls and #globalExcls > 0 then
+    for i = 1, #globalExcls do
+      local m = SafeCall.regexMatch(name, globalExcls[i].pattern)
+      if m and m[1] then
+        -- Creature is globally excluded — cache empty result and return
+        evictOldCacheEntries()
+        TargetBot.Creature.configsCache[name] = {}
+        cacheAccessOrder[#cacheAccessOrder + 1] = { name = name, time = now }
+        TargetBot.Creature.cached = TargetBot.Creature.cached + 1
+        return {}
+      end
+    end
   end
   
   -- Build configs list with optimized iteration

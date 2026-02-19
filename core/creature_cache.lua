@@ -62,9 +62,11 @@ local cache = {
   lastCleanup = 0,
   categoryDirty = true,
   
-  -- LRU tracking
-  accessOrder = {},  -- Array of IDs in access order
-  accessIndex = {},  -- id -> index in accessOrder
+  -- LRU tracking (O(1) doubly-linked list)
+  lruHead = {},    -- sentinel: lruHead.next = LRU (oldest)
+  lruTail = {},    -- sentinel: lruTail.prev = MRU (newest)
+  lruNodes = {},   -- id -> DLL node {id, prev, next}
+  lruSize = 0,
   
   -- Stats
   stats = {
@@ -74,6 +76,10 @@ local cache = {
     cleanups = 0
   }
 }
+
+-- Initialize DLL sentinels
+cache.lruHead.next = cache.lruTail
+cache.lruTail.prev = cache.lruHead
 
 -- Time helper (use ClientHelper for DRY)
 local nowMs = ClientHelper and ClientHelper.nowMs or function()
@@ -120,70 +126,89 @@ local function getSpectatorsInRange(pos, rangeX, rangeY)
 end
 
 -- ============================================================================
--- CREATURE VALIDATION (Safe accessors)
+-- CREATURE VALIDATION (Delegates to SafeCreature)
 -- ============================================================================
 
+local SC = SafeCreature or {}
+
 local function safeGetId(creature)
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
+  if SC and SC.getId then
+    local ok, result = pcall(SC.getId, creature)
+    return ok and result or nil
+  end
+  return nil
 end
 
 local function safeIsMonster(creature)
-  if not creature then return false end
-  local ok, result = pcall(function() return creature:isMonster() end)
-  return ok and result or false
+  if SC and SC.isMonster then
+    local ok, result = pcall(SC.isMonster, creature)
+    return ok and result or false
+  end
+  return false
 end
 
 local function safeIsPlayer(creature)
-  if not creature then return false end
-  local ok, result = pcall(function() return creature:isPlayer() end)
-  return ok and result or false
+  if SC and SC.isPlayer then
+    local ok, result = pcall(SC.isPlayer, creature)
+    return ok and result or false
+  end
+  return false
 end
 
 local function safeIsNpc(creature)
-  if not creature then return false end
-  local ok, result = pcall(function() return creature:isNpc() end)
-  return ok and result or false
+  if SC and SC.isNpc then
+    local ok, result = pcall(SC.isNpc, creature)
+    return ok and result or false
+  end
+  return false
 end
 
 local function safeIsDead(creature)
-  if not creature then return true end
-  local ok, result = pcall(function() return creature:isDead() end)
-  return ok and result or true
+  if SC and SC.isDead then
+    local ok, result = pcall(SC.isDead, creature)
+    return ok and result or true
+  end
+  return true
 end
 
 local function safeIsRemoved(creature)
-  if not creature then return true end
-  local ok, result = pcall(function() return creature:isRemoved() end)
-  return ok and result or true
+  if SC and SC.isRemoved then
+    local ok, result = pcall(SC.isRemoved, creature)
+    return ok and result or true
+  end
+  return true
 end
 
 local function safeGetPosition(creature)
-  if not creature then return nil end
-  local ok, pos = pcall(function() return creature:getPosition() end)
-  return ok and pos or nil
+  if SC and SC.getPosition then
+    local ok, result = pcall(SC.getPosition, creature)
+    return ok and result or nil
+  end
+  return nil
 end
 
 local function safeGetName(creature)
-  if not creature then return nil end
-  local ok, name = pcall(function() return creature:getName() end)
-  return ok and name or nil
+  if SC and SC.getName then
+    local ok, result = pcall(SC.getName, creature)
+    return ok and result or nil
+  end
+  return nil
 end
 
 local function safeGetHealthPercent(creature)
-  if not creature then return 0 end
-  local ok, hp = pcall(function() return creature:getHealthPercent() end)
-  return ok and hp or 0
+  if SC and SC.getHealthPercent then
+    local ok, result = pcall(SC.getHealthPercent, creature)
+    return ok and result or 100
+  end
+  return 100
 end
 
 -- Check if creature is valid and alive
 local function isValidCreature(creature)
   if not creature then return false end
-  local ok, valid = pcall(function()
-    return creature:getId() and not creature:isDead() and not creature:isRemoved()
-  end)
-  return ok and valid or false
+  local id = safeGetId(creature)
+  if not id then return false end
+  return not safeIsDead(creature) and not safeIsRemoved(creature)
 end
 
 -- ============================================================================
@@ -191,32 +216,45 @@ end
 -- ============================================================================
 
 local function touchLRU(id)
-  local idx = cache.accessIndex[id]
-  if idx then
-    -- Move to end (most recently used)
-    table.remove(cache.accessOrder, idx)
-    -- Update indices for shifted elements
-    for i = idx, #cache.accessOrder do
-      cache.accessIndex[cache.accessOrder[i]] = i
-    end
+  local node = cache.lruNodes[id]
+  if node then
+    -- Detach from current position
+    node.prev.next = node.next
+    node.next.prev = node.prev
+  else
+    -- New node
+    node = { id = id }
+    cache.lruNodes[id] = node
+    cache.lruSize = cache.lruSize + 1
   end
-  
-  -- Add to end
-  cache.accessOrder[#cache.accessOrder + 1] = id
-  cache.accessIndex[id] = #cache.accessOrder
+  -- Insert before tail (MRU position)
+  local prev = cache.lruTail.prev
+  prev.next = node
+  node.prev = prev
+  node.next = cache.lruTail
+  cache.lruTail.prev = node
+end
+
+local function removeLRU(id)
+  local node = cache.lruNodes[id]
+  if node then
+    node.prev.next = node.next
+    node.next.prev = node.prev
+    cache.lruNodes[id] = nil
+    cache.lruSize = cache.lruSize - 1
+  end
 end
 
 local function evictLRU()
-  if #cache.accessOrder == 0 then return end
-  
-  local evictId = cache.accessOrder[1]
-  -- Shift array left (O(n) but only on eviction, not every access)
-  for i = 1, #cache.accessOrder - 1 do
-    cache.accessOrder[i] = cache.accessOrder[i + 1]
-    cache.accessIndex[cache.accessOrder[i]] = i
-  end
-  cache.accessOrder[#cache.accessOrder] = nil
-  cache.accessIndex[evictId] = nil
+  local node = cache.lruHead.next
+  if node == cache.lruTail then return end
+
+  local evictId = node.id
+  -- Detach from DLL
+  node.prev.next = node.next
+  node.next.prev = node.prev
+  cache.lruNodes[evictId] = nil
+  cache.lruSize = cache.lruSize - 1
   
   -- Release entry to pool if configured
   local entry = cache.creatures[evictId]
@@ -250,7 +288,7 @@ function CreatureCache.set(creature)
   local entry = cache.creatures[id]
   if not entry then
     -- Check capacity
-    if #cache.accessOrder >= CreatureCache.CONFIG.MAX_SIZE then
+    if cache.lruSize >= CreatureCache.CONFIG.MAX_SIZE then
       evictLRU()
     end
     
@@ -331,14 +369,7 @@ function CreatureCache.remove(id)
     cache.creatures[id] = nil
     
     -- Remove from LRU
-    local idx = cache.accessIndex[id]
-    if idx then
-      table.remove(cache.accessOrder, idx)
-      cache.accessIndex[id] = nil
-      for i = idx, #cache.accessOrder do
-        cache.accessIndex[cache.accessOrder[i]] = i
-      end
-    end
+    removeLRU(id)
     
     cache.categoryDirty = true
   end
@@ -359,8 +390,12 @@ function CreatureCache.clear()
   cache.monsters = nil
   cache.players = nil
   cache.npcs = nil
-  cache.accessOrder = {}
-  cache.accessIndex = {}
+  cache.lruHead = {}
+  cache.lruTail = {}
+  cache.lruHead.next = cache.lruTail
+  cache.lruTail.prev = cache.lruHead
+  cache.lruNodes = {}
+  cache.lruSize = 0
   cache.categoryDirty = true
 end
 
@@ -619,7 +654,7 @@ function CreatureCache.getStats()
     evictions = cache.stats.evictions,
     cleanups = cache.stats.cleanups,
     hitRate = total > 0 and (cache.stats.hits / total) or 0,
-    size = #cache.accessOrder,
+    size = cache.lruSize,
     maxSize = CreatureCache.CONFIG.MAX_SIZE,
     monstersCount = cache.monsters and #cache.monsters or 0,
     playersCount = cache.players and #cache.players or 0

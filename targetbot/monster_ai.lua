@@ -712,6 +712,117 @@ function MonsterAI.Metrics.getSummary()
   }
 end
 
+-- ============================================================================
+-- PER-CHARACTER METRICS PERSISTENCE (via UnifiedStorage)
+-- Cumulative metrics survive across sessions for each character.
+-- ============================================================================
+
+local METRICS_KEY       = "targetbot.monsterMetrics.aggregate"
+local TYPE_STATS_KEY    = "targetbot.monsterMetrics.typeStats"
+local METRICS_SAVE_INTERVAL = 30000  -- ms between saves
+
+-- Merge persisted cumulative metrics into current session on load
+function MonsterAI.Metrics.loadPersisted()
+  if not UnifiedStorage or not UnifiedStorage.get then return end
+  if not UnifiedStorage.isReady or not UnifiedStorage.isReady() then return end
+
+  local saved = UnifiedStorage.get(METRICS_KEY)
+  if saved and type(saved) == "table" then
+    local m = MonsterAI.Metrics.aggregate
+    -- Accumulate counters from prior sessions
+    m.totalDamageReceived = (m.totalDamageReceived or 0) + (saved.totalDamageReceived or 0)
+    m.totalDamageDealt    = (m.totalDamageDealt or 0)    + (saved.totalDamageDealt or 0)
+    m.totalKills          = (m.totalKills or 0)          + (saved.totalKills or 0)
+    m.totalDeaths         = (m.totalDeaths or 0)         + (saved.totalDeaths or 0)
+    m.predictionsTotal    = (m.predictionsTotal or 0)    + (saved.predictionsTotal or 0)
+    m.predictionsCorrect  = (m.predictionsCorrect or 0)  + (saved.predictionsCorrect or 0)
+    m.predictionsMissed   = (m.predictionsMissed or 0)   + (saved.predictionsMissed or 0)
+    m.updateCyclesTotal   = (m.updateCyclesTotal or 0)   + (saved.updateCyclesTotal or 0)
+    -- Recalculate derived accuracy
+    if m.predictionsTotal > 0 then
+      m.predictionAccuracy = m.predictionsCorrect / m.predictionsTotal
+    end
+  end
+
+  -- Load typeStats
+  local savedTypes = UnifiedStorage.get(TYPE_STATS_KEY)
+  if savedTypes and type(savedTypes) == "table" then
+    for nameLower, stats in pairs(savedTypes) do
+      local existing = MonsterAI.Telemetry.typeStats[nameLower]
+      if existing then
+        -- Merge: accumulate counters, coerce loaded values to numbers
+        existing.sampleCount      = (existing.sampleCount or 0) + (tonumber(stats.sampleCount) or 0)
+        existing.killCount        = (existing.killCount or 0) + (tonumber(stats.killCount) or 0)
+        existing.totalDamageDealt = (existing.totalDamageDealt or 0) + (tonumber(stats.totalDamageDealt) or 0)
+        existing.totalKillTime    = (existing.totalKillTime or 0) + (tonumber(stats.totalKillTime) or 0)
+        existing.waveAttackCount  = (existing.waveAttackCount or 0) + (tonumber(stats.waveAttackCount) or 0)
+        -- Coerce EWMA/metadata fields to prevent nil arithmetic
+        existing.avgSpeed       = tonumber(existing.avgSpeed) or 0
+        existing.avgDPS         = tonumber(existing.avgDPS) or 0
+        existing.avgHealthDrain = tonumber(existing.avgHealthDrain) or 0
+        existing.lastSeen       = tonumber(existing.lastSeen) or 0
+      else
+        -- Normalize numeric fields before assigning to prevent arithmetic errors
+        stats.sampleCount      = tonumber(stats.sampleCount) or 0
+        stats.killCount        = tonumber(stats.killCount) or 0
+        stats.totalDamageDealt = tonumber(stats.totalDamageDealt) or 0
+        stats.totalKillTime    = tonumber(stats.totalKillTime) or 0
+        stats.waveAttackCount  = tonumber(stats.waveAttackCount) or 0
+        stats.avgSpeed         = tonumber(stats.avgSpeed) or 0
+        stats.avgDPS           = tonumber(stats.avgDPS) or 0
+        stats.avgHealthDrain   = tonumber(stats.avgHealthDrain) or 0
+        stats.lastSeen         = tonumber(stats.lastSeen) or 0
+        MonsterAI.Telemetry.typeStats[nameLower] = stats
+      end
+    end
+  end
+end
+
+-- Save current cumulative metrics to per-character storage
+function MonsterAI.Metrics.persist()
+  if not UnifiedStorage or not UnifiedStorage.set then return end
+  if not UnifiedStorage.isReady or not UnifiedStorage.isReady() then return end
+
+  MonsterAI.Metrics.collect()  -- refresh aggregate first
+  local m = MonsterAI.Metrics.aggregate
+
+  local toSave = {
+    totalDamageReceived = m.totalDamageReceived or 0,
+    totalDamageDealt    = m.totalDamageDealt or 0,
+    totalKills          = m.totalKills or 0,
+    totalDeaths         = m.totalDeaths or 0,
+    predictionsTotal    = m.predictionsTotal or 0,
+    predictionsCorrect  = m.predictionsCorrect or 0,
+    predictionsMissed   = m.predictionsMissed or 0,
+    updateCyclesTotal   = m.updateCyclesTotal or 0,
+    lastSaveTime        = nowMs(),
+  }
+  UnifiedStorage.set(METRICS_KEY, toSave)
+
+  -- Save typeStats (strip ephemeral fields)
+  local typeSnapshot = {}
+  for nameLower, stats in pairs(MonsterAI.Telemetry.typeStats) do
+    typeSnapshot[nameLower] = {
+      name              = stats.name,
+      sampleCount       = stats.sampleCount or 0,
+      avgSpeed          = stats.avgSpeed or 0,
+      avgDPS            = stats.avgDPS or 0,
+      avgHealthDrain    = stats.avgHealthDrain or 0,
+      totalDamageDealt  = stats.totalDamageDealt or 0,
+      killCount         = stats.killCount or 0,
+      totalKillTime     = stats.totalKillTime or 0,
+      waveAttackCount   = stats.waveAttackCount or 0,
+      lastSeen          = stats.lastSeen or 0,
+      isRanged          = stats.isRanged,
+      isMelee           = stats.isMelee,
+      isAOE             = stats.isAOE,
+      isSummoner        = stats.isSummoner,
+      estimatedDanger   = stats.estimatedDanger,
+    }
+  end
+  UnifiedStorage.set(TYPE_STATS_KEY, typeSnapshot)
+end
+
 -- Aggregate type statistics from tracked monsters
 function MonsterAI.Telemetry.updateTypeStats(name, data)
   if not name or name == "" then return end
@@ -1161,9 +1272,13 @@ end
 -- Alias for backward compatibility
 MonsterAI.RealTime.getImmediateThreat = MonsterAI.getImmediateThreat
 
+-- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
+local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
+
 if EventBus then
   -- Track monsters when they appear
   EventBus.on("monster:appear", function(creature)
+    if tbOff() then return end
     MonsterAI.Tracker.track(creature)
     
     -- Initialize direction tracking immediately
@@ -1199,6 +1314,7 @@ if EventBus then
   
   -- Untrack monsters when they disappear
   EventBus.on("monster:disappear", function(creature)
+    if tbOff() then return end
     if creature then
       local id = safeGetId(creature)
       if id then
@@ -1218,6 +1334,7 @@ if EventBus then
   
   -- CRITICAL: Direction change detection (primary wave anticipation)
   EventBus.on("creature:move", function(creature, oldPos)
+    if tbOff() then return end
     if not creature then return end
     if not safeIsMonster(creature) then return end
     
@@ -1249,6 +1366,7 @@ if EventBus then
   
   -- Update tracking on monster health change (potential attack indicator)
   EventBus.on("monster:health", function(creature, percent)
+    if tbOff() then return end
     if creature then
       MonsterAI.Tracker.update(creature)
       
@@ -1265,6 +1383,7 @@ if EventBus then
   
   -- Record when player takes damage (learning opportunity)
   EventBus.on("player:damage", function(damage, source)
+    if tbOff() then return end
     MonsterAI.Tracker.stats.totalDamageReceived = 
       MonsterAI.Tracker.stats.totalDamageReceived + damage
 
@@ -1367,6 +1486,7 @@ if EventBus then
   -- Enhanced with SpellTracker integration (v2.2)
   if onMissle then
     onMissle(function(missle)
+      if zChanging() then return end
       if not missle then return end
       
       local srcPos = missle:getSource()
@@ -1453,6 +1573,7 @@ if EventBus then
   -- Also listen for effect:missile EventBus event for additional coverage
   if EventBus then
     EventBus.on("effect:missile", function(missile)
+      if tbOff() then return end
       if not missile then return end
       
       local srcPos = missile.getSource and missile:getSource()
@@ -1490,6 +1611,7 @@ if EventBus then
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   if onCreatureTurn then
     onCreatureTurn(function(creature, direction)
+      if zChanging() then return end
       if not creature then return end
       if not safeIsMonster(creature) then return end
       if safeIsDead(creature) then return end
@@ -1580,6 +1702,7 @@ if EventBus then
   -- PLAYER ATTACK EVENT - Track engagement with monsters
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:attack", function(target)
+    if tbOff() then return end
     if not target then return end
     if not safeIsMonster(target) then return end
     
@@ -1611,6 +1734,7 @@ if EventBus then
   -- CREATURE DEATH EVENT - Finalize tracking and collect kill stats
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("creature:death", function(creature)
+    if tbOff() then return end
     if not creature then return end
     if not safeIsMonster(creature) then return end
     
@@ -1664,6 +1788,7 @@ if EventBus then
   -- PLAYER DEATH EVENT - Track session death stats
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:death", function()
+    if tbOff() then return end
     local nowt = nowMs()
     
     MonsterAI.Telemetry.session.deathCount = (MonsterAI.Telemetry.session.deathCount or 0) + 1
@@ -1712,6 +1837,7 @@ if EventBus then
   -- SPELL CAST EVENT - Track player damage output for kill time calculation
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:spell", function(spellName, target)
+    if tbOff() then return end
     if not target or not target:isMonster() then return end
     
     local id = target:getId()
@@ -1728,6 +1854,7 @@ if EventBus then
   -- COMBAT STATUS CHANGES - Track when entering/leaving combat
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:combat_start", function()
+    if tbOff() then return end
     local nowt = nowMs()
     MonsterAI.Telemetry.session.lastCombatStart = nowt
     
@@ -1752,6 +1879,7 @@ if EventBus then
   end, 20)
   
   EventBus.on("player:combat_end", function()
+    if tbOff() then return end
     local nowt = nowMs()
     local combatStart = MonsterAI.Telemetry.session.lastCombatStart or nowt
     local combatDuration = nowt - combatStart
@@ -2172,11 +2300,11 @@ end
 -- ENHANCED EVENTBUS EMISSIONS
 -- ============================================================================
 
--- Emit periodic stats update for interested modules
+-- Emit periodic stats update for interested modules (gated by TargetBot state)
 if EventBus then
   schedule(5000, function()
     local function emitStatsUpdate()
-      if EventBus and EventBus.emit then
+      if not tbOff() and EventBus and EventBus.emit then
         local stats = MonsterAI.getStatsSummary()
         EventBus.emit("monsterai:stats_update", stats)
       end
@@ -2187,8 +2315,16 @@ if EventBus then
 end
 
 -- Enable automatic collection by default so Monster Insights shows data without console commands
--- You can disable via: MonsterAI.COLLECT_ENABLED = false
+-- Collection is now gated by TargetBot.isOn() to prevent CPU waste when targeting is off
 MonsterAI.COLLECT_ENABLED = (MonsterAI.COLLECT_ENABLED == nil) and true or MonsterAI.COLLECT_ENABLED
+
+-- Helper: check if MonsterAI should actively process (respects TargetBot state)
+local function shouldCollect()
+  if not MonsterAI.COLLECT_ENABLED then return false end
+  -- Gate by TargetBot state: no point collecting data if targeting is off
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then return false end
+  return true
+end
 
 -- ============================================================================
 -- UNIFIED TICK INTEGRATION (Performance: consolidates macro overhead)
@@ -2202,7 +2338,7 @@ if UnifiedTick and UnifiedTick.register then
     interval = 500,
     priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.NORMAL or 50,
     callback = function()
-      if MonsterAI.COLLECT_ENABLED and MonsterAI.updateAll then
+      if shouldCollect() and MonsterAI.updateAll then
         pcall(function() MonsterAI.updateAll() end)
       end
     end
@@ -2214,40 +2350,51 @@ if UnifiedTick and UnifiedTick.register then
     interval = 30000,
     priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.IDLE or 10,
     callback = function()
+      if not shouldCollect() then return end
       if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
         pcall(function() MonsterAI.AutoTuner.runPass() end)
       end
+      pcall(function() MonsterAI.Metrics.persist() end)
     end
   })
 else
   -- Fallback to traditional macros if UnifiedTick not loaded
   macro(500, function()
-    if MonsterAI.COLLECT_ENABLED and MonsterAI.updateAll then
+    if zChanging() then
+      return
+    end
+    if shouldCollect() and MonsterAI.updateAll then
       pcall(function() MonsterAI.updateAll() end)
     end
   end)
   
   macro(30000, function()
+    if zChanging() then
+      return
+    end
+    if not shouldCollect() then return end
     if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
       pcall(function() MonsterAI.AutoTuner.runPass() end)
     end
+    pcall(function() MonsterAI.Metrics.persist() end)
   end)
 end
 
-schedule(2000, function()
-  local function emitBestTarget()
-    if EventBus and EventBus.emit then
-      local best = TBI and TBI.getBestTarget and TBI.getBestTarget()
-      if best then
-        EventBus.emit("targetbot:ai_recommendation", best.creature, best.priority, best.breakdown)
-      end
-    end
-    schedule(1000, emitBestTarget)  -- Every second
-  end
-  emitBestTarget()
-end)
+-- NOTE: TBI.getBestTarget emission is handled exclusively in monster_tbi.lua
+-- Removed duplicate schedule chain that was here (Phase 1.3 fix)
 
 -- Toggle to enable debug prints
 MonsterAI.DEBUG = MonsterAI.DEBUG or false
 local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
 if MonsterAI.DEBUG then print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded; automatic collection=" .. tostring(MonsterAI.COLLECT_ENABLED) .. "; auto-tune=" .. tostring(MonsterAI.AUTO_TUNE_ENABLED)) end
+
+-- Load persisted per-character metrics (deferred until UnifiedStorage is ready)
+if UnifiedStorage and UnifiedStorage.onReady then
+  UnifiedStorage.onReady(function()
+    pcall(function() MonsterAI.Metrics.loadPersisted() end)
+  end)
+else
+  schedule(3000, function()
+    pcall(function() MonsterAI.Metrics.loadPersisted() end)
+  end)
+end

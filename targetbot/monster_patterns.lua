@@ -50,7 +50,7 @@ local function getStoredPatterns()
   if UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() then
     return UnifiedStorage.get("targetbot.monsterPatterns") or {}
   end
-  return storage and storage.monsterPatterns or {}
+  return {}
 end
 
 local function setStoredPatterns(patterns)
@@ -59,10 +59,6 @@ local function setStoredPatterns(patterns)
     if EventBus and EventBus.emit then
       EventBus.emit("monsterAI:patternsUpdated", patterns)
     end
-  end
-  -- Keep in global storage for backward compatibility
-  if storage then
-    storage.monsterPatterns = patterns
   end
 end
 
@@ -83,6 +79,7 @@ function MonsterAI.Patterns.get(monsterName)
 end
 
 -- Persist partial updates to a known monster pattern
+-- Also runs decay at persist-time for patterns older than 7 days
 function MonsterAI.Patterns.persist(monsterName, updates)
   if not monsterName then return end
   local name = monsterName:lower()
@@ -92,6 +89,15 @@ function MonsterAI.Patterns.persist(monsterName, updates)
   end
   local patterns = getStoredPatterns()
   patterns[name] = MonsterAI.Patterns.knownMonsters[name]
+  -- Inline decay: remove stale patterns on every persist
+  local nowt = nowMs()
+  local decayWindow = 7 * 24 * 3600 * 1000 -- 7 days
+  for k, v in pairs(patterns) do
+    if v.lastSeen and (nowt - v.lastSeen) > decayWindow then
+      v.confidence = (v.confidence or 0.5) * 0.9
+      if v.waveCooldown then v.waveCooldown = v.waveCooldown * 1.05 end
+    end
+  end
   setStoredPatterns(patterns)
 end
 
@@ -135,13 +141,8 @@ for k, v in pairs(storedPatterns) do
   MonsterAI.Patterns.knownMonsters[k] = v
 end
 
--- Schedule recurring decay (hourly)
-if schedule then
-  schedule(3600000, function()
-    MonsterAI.decayPatterns()
-    schedule(3600000, function() MonsterAI.decayPatterns() end)
-  end)
-end
+-- Pattern decay now happens at persist-time (inside decayPatterns / persist)
+-- No need for a recurring schedule — decay is checked on every save.
 
 if MonsterAI.DEBUG then
   print("[MonsterAI] Patterns module loaded (" .. tostring(#storedPatterns) .. " patterns)")

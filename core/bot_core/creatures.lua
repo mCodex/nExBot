@@ -123,6 +123,9 @@ end
 -- Invalidate on position change
 if onPlayerPositionChange then
   onPlayerPositionChange(function()
+    if zChanging() then
+      return
+    end
     invalidateCache()
   end)
 end

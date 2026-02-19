@@ -1551,7 +1551,11 @@ if EventBus then
   
   -- Player moved - update distances and paths
   EventBus.on("player:move", function(newPos, oldPos)
-    -- Invalidate all path caches on player move
+    -- FLOOR CHANGE OPTIMIZATION: On z-change, old-floor creatures are irrelevant.
+    -- The 100ms macro will repopulate with new-floor creatures.
+    if newPos and oldPos and newPos.z ~= oldPos.z then return end
+    
+    -- Same-floor move: invalidate path caches
     for id, entry in pairs(creatureCache.entries) do
       entry.path = nil
       entry.pathTime = 0
@@ -1714,6 +1718,11 @@ macro(100, function()
   if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
     return
   end
+
+  -- Z-change guard: avoid heavy scans during floor transitions
+  if zChanging() then
+    return
+  end
   
   -- Update time (use global 'now' if available, else fallback)
   local currentTime = now or (os.time() * 1000)
@@ -1844,6 +1853,7 @@ end
 -- Register native callback if available (fastest path)
 if onCreatureAppear then
   onCreatureAppear(function(creature)
+    if zChanging() then return end
     if not creature then return end
     if not creature:isMonster() then return end
     if creature:isDead() then return end

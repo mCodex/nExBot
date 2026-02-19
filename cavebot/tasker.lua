@@ -161,7 +161,7 @@ end
 local regex = "Loot of ([a-z])* ([a-z A-Z]*):"
 local regex2 = "Loot of ([a-z A-Z]*):"
 onTextMessage(function(mode, text)
-   -- if CaveBot.isOff() then return end
+    if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
     if not text:lower():find("loot of") then return end
     if #regexMatch(text, regex) == 1 and #regexMatch(text, regex)[1] == 3 then
         monster = regexMatch(text, regex)[1][3]

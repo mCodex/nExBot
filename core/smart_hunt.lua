@@ -455,12 +455,14 @@ end
 -- ============================================================================
 
 onWalk(function(creature)
+  if zChanging() then return end
   if creature == player and isSessionActive() then
     analytics.metrics.tilesWalked = analytics.metrics.tilesWalked + 1
   end
 end)
 
 onCreatureHealthPercentChange(function(creature, healthPercent)
+  if zChanging() then return end
   if isSessionActive() and creature:isMonster() and healthPercent == 0 then
     analytics.metrics.kills = analytics.metrics.kills + 1
     local name = creature:getName()

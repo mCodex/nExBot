@@ -1368,14 +1368,12 @@ macro(500, function()
   local dmgSum = 0
     table.insert(expTable, exp())
     if #expTable > 15*60 then
-        for i,v in pairs(expTable) do
-            if i == 1 then
-              table.remove(expTable, i)
-            end
-        end
+        table.remove(expTable, 1)
     end
 
-    for i,v in pairs(dmgDistribution) do
+    -- Reverse-iterate to safely remove expired entries
+    for i = #dmgDistribution, 1, -1 do
+      local v = dmgDistribution[i]
       if now - v.t > 60*1000*10 then
         table.remove(dmgDistribution, i)
       else

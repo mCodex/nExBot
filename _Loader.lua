@@ -47,6 +47,9 @@ nExBot.showDebug = nExBot.showDebug or false
 nExBot.suppressDebugPrefixes = nExBot.suppressDebugPrefixes or {"[HealBot]", "[MonsterInspector]"}
 nExBot.slowOpInstrumentation = nExBot.slowOpInstrumentation or false
 
+-- NativeProfiler removed: wrapping every callback with pcall+os.clock added
+-- significant aggregate overhead during bulk events (z-change floor transitions).
+
 local _orig_print = print
 print = function(...)
   if nExBot.showDebug then return _orig_print(...) end
@@ -154,15 +157,30 @@ local function loadStyles()
     local ext = file:split(".")
     local extension = ext[#ext]:lower()
     if extension == "ui" or extension == "otui" then
-      styleFiles[#styleFiles + 1] = file
+      -- Ensure full path: if file doesn't start with '/' it's just a filename
+      local fullPath = file
+      if file:sub(1,1) ~= "/" then
+        fullPath = CORE_PATH .. "/" .. file
+      end
+      styleFiles[#styleFiles + 1] = fullPath
     end
   end
   
+  local failedStyles = {}
   for i = 1, #styleFiles do
-    pcall(function() g_ui.importStyle(styleFiles[i]) end)
+    local ok, err = pcall(function() g_ui.importStyle(styleFiles[i]) end)
+    if not ok then
+      failedStyles[#failedStyles + 1] = styleFiles[i] .. ": " .. tostring(err)
+    end
+  end
+  
+  if #failedStyles > 0 then
+    warn("[nExBot] Failed to load " .. #failedStyles .. " style(s): " .. table.concat(failedStyles, "; "))
   end
   
   loadTimes["styles"] = math.floor((os.clock() - styleStart) * 1000)
+  loadTimes["_styles_count"] = #styleFiles
+  loadTimes["_styles_failed"] = #failedStyles
 end
 
 -- ============================================================================
@@ -362,6 +380,9 @@ loadCategory("utils", {
   "utils/weak_cache",
   "utils/creature_events",
   "utils/vocation_utils",
+  "utils/event_debouncer",
+  "utils/path_utils",
+  "utils/path_strategy",
 }, "/")
 
 -- ============================================================================

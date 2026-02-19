@@ -86,6 +86,7 @@ end
 
 
 onTalk(function(name, level, mode, text, channelId, pos)
+  if CaveBot.isOff() then return end
   if mode == 51 and text:find("Your account balance is") then
     balance = getFirstNumberInText(text)
   end

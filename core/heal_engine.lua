@@ -51,10 +51,11 @@ local options = {
 local selfSpells = {}
 local selfPotions = {}
 
--- Friend healing spells (default config)
+-- Friend healing spells (default config, ordered by priority)
 local friendSpells = {
   { name = "exura gran sio", key = "exura gran sio", hp = 50, mpCost = 140, cd = 1100, prio = 1 },
-  { name = "exura sio", key = "exura sio", hp = 80, mpCost = 100, cd = 1100, prio = 2 },
+  { name = "exura tio sio",  key = "exura tio sio",  hp = 65, mpCost = 120, cd = 1100, prio = 2 },
+  { name = "exura sio",      key = "exura sio",      hp = 80, mpCost = 100, cd = 1100, prio = 3 },
 }
 
 -- Emergency fallback spell (last resort when HP critical)

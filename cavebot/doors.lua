@@ -21,16 +21,8 @@ CaveBot.Extensions.OpenDoors.setup = function()
 
     pos = {x=tonumber(pos[1]), y=tonumber(pos[2]), z=tonumber(pos[3])}  
 
-    local doorTile
-    if not doorTile then
-      local Client = getClient()
-      local tilesOnFloor = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
-      for i, tile in ipairs(tilesOnFloor) do
-        if tile:getPosition().x == pos.x and tile:getPosition().y == pos.y and tile:getPosition().z == pos.z then
-          doorTile = tile
-        end
-      end
-    end
+    local Client = getClient()
+    local doorTile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
 
     if not doorTile then
       return false

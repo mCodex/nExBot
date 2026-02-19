@@ -56,10 +56,11 @@ if not storage[panelName] then
         priorities = {
             {name="Custom Spell",           enabled=false, custom=true},
             {name="Exura Gran Sio",         enabled=true,              strong = true},
-            {name="Exura Sio",              enabled=true,                            normal = true},
-            {name="Exura Gran Mas Res",     enabled=true,                                          area = true},
-            {name="Health Item",            enabled=true,                                                      health=true},
-            {name="Mana Item",              enabled=true,                                                                  mana=true}
+            {name="Exura Tio Sio",          enabled=true,                             medium = true},
+            {name="Exura Sio",              enabled=true,                                            normal = true},
+            {name="Exura Gran Mas Res",     enabled=true,                                                          area = true},
+            {name="Health Item",            enabled=true,                                                                      health=true},
+            {name="Mana Item",              enabled=true,                                                                                  mana=true}
         },
         settings = {
             {type="HealItem",       text="Mana Item ",                   value=268},
@@ -68,6 +69,7 @@ if not storage[panelName] then
             {type="HealScroll",     text="Mas Res Players: ",            value=2},
             {type="HealScroll",     text="Heal Friend at: ",             value=80},
             {type="HealScroll",     text="Use Gran Sio at: ",            value=40},
+            {type="HealScroll",     text="Use Tio Sio at: ",             value=65},
             {type="HealScroll",     text="Min Player HP%: ",             value=80},
             {type="HealScroll",     text="Min Player MP%: ",             value=50},
         },
@@ -85,6 +87,37 @@ if not storage[panelName] then
 end
 
 local config = storage[panelName]
+
+local function normalizeSettings(settings)
+    if type(settings) ~= "table" then
+        settings = {}
+    end
+
+    local hasTio = false
+    for i = 1, #settings do
+        local text = settings[i] and settings[i].text
+        if text and text:find("Tio Sio") then
+            hasTio = true
+            break
+        end
+    end
+
+    if not hasTio then
+        table.insert(settings, 7, {type="HealScroll", text="Use Tio Sio at: ", value=65})
+    end
+
+    return settings
+end
+
+local function getSettingValue(idx, default)
+    local entry = config.settings and config.settings[idx]
+    if entry and entry.value ~= nil then
+        return entry.value
+    end
+    return default
+end
+
+config.settings = normalizeSettings(config.settings)
 
 -- ============================================================================
 -- CHARACTERDB INTEGRATION: Per-character custom players list
@@ -133,18 +166,20 @@ local function buildBotCoreConfig()
     customPlayers = config.customPlayers or {},
     conditions = config.conditions or {},
     settings = {
-      manaItem = config.settings[1] and config.settings[1].value or 268,
-      itemRange = config.settings[2] and config.settings[2].value or 6,
-      healthItem = config.settings[3] and config.settings[3].value or 3160,
-      masResPlayers = config.settings[4] and config.settings[4].value or 2,
-      healAt = config.settings[5] and config.settings[5].value or 80,
-      granSioAt = config.settings[6] and config.settings[6].value or 40,
-      minPlayerHp = config.settings[7] and config.settings[7].value or 80,
-      minPlayerMp = config.settings[8] and config.settings[8].value or 50,
+            manaItem = getSettingValue(1, 268),
+            itemRange = getSettingValue(2, 6),
+            healthItem = getSettingValue(3, 3160),
+            masResPlayers = getSettingValue(4, 2),
+            healAt = getSettingValue(5, 80),
+            granSioAt = getSettingValue(6, 40),
+            tioSioAt = getSettingValue(7, 65),
+            minPlayerHp = getSettingValue(8, 80),
+            minPlayerMp = getSettingValue(9, 50),
     },
     -- Priority actions (in order)
     useSio = false,
     useGranSio = false,
+    useTioSio = false,
     useMasRes = false,
     useHealthItem = false,
     useManaItem = false,
@@ -156,6 +191,7 @@ local function buildBotCoreConfig()
   for _, p in ipairs(config.priorities or {}) do
     if p.enabled then
       if p.strong then bcConfig.useGranSio = true end
+      if p.medium then bcConfig.useTioSio = true end
       if p.normal then bcConfig.useSio = true end
       if p.area then bcConfig.useMasRes = true end
       if p.health then bcConfig.useHealthItem = true end
@@ -534,8 +570,8 @@ schedule(100, function()
     -- Configure HealEngine friend spells based on UI priorities
     if HealEngine and HealEngine.setFriendSpells then
       local friendSpells = {}
-      local healAt = config.settings[5] and config.settings[5].value or 80
-      local granSioAt = config.settings[6] and config.settings[6].value or 40
+    local healAt = getSettingValue(5, 80)
+    local granSioAt = getSettingValue(6, 40)
       
       for i, action in ipairs(config.priorities or {}) do
         if action.enabled then
@@ -548,13 +584,23 @@ schedule(100, function()
               prio = 1
             })
           end
+          if action.medium then
+                        local tioSioAt = getSettingValue(7, 65)
+            table.insert(friendSpells, {
+              name = "exura tio sio",
+              hp = tioSioAt,
+              mpCost = 120,
+              cd = 1100,
+              prio = 2
+            })
+          end
           if action.normal then
             table.insert(friendSpells, {
               name = "exura sio",
               hp = healAt,
               mpCost = 100,
               cd = 1100,
-              prio = 2
+              prio = 3
             })
           end
           if action.custom and action.name and action.name ~= "Custom Spell" then
@@ -586,12 +632,13 @@ local function legacyHealAction(spec, targetsInRange)
     local dist = distanceFromPlayer(spec:getPosition())
     targetsInRange = targetsInRange or 0
 
-    local masResAmount = config.settings[4].value
-    local itemRange = config.settings[2].value
-    local healItem = config.settings[3].value
-    local manaItem = config.settings[1].value
-    local normalHeal = config.customPlayers[name] or config.settings[5].value
-    local strongHeal = config.customPlayers[name] and normalHeal/2 or config.settings[6].value
+    local masResAmount = getSettingValue(4, 2)
+    local itemRange = getSettingValue(2, 6)
+    local healItem = getSettingValue(3, 3160)
+    local manaItem = getSettingValue(1, 268)
+    local normalHeal = config.customPlayers[name] or getSettingValue(5, 80)
+    local strongHeal = config.customPlayers[name] and normalHeal/2 or getSettingValue(6, 40)
+    local mediumHeal = getSettingValue(7, 65)
 
     -- Check healing cooldown (shared with HealBot via BotCore)
     local canHeal = true
@@ -625,6 +672,9 @@ local function legacyHealAction(spec, targetsInRange)
                 if canCastGranSio then
                     return say('exura gran sio "'..name)
                 end
+            end
+            if action.medium and health <= mediumHeal and canCast('exura tio sio "'..name) then
+                return say('exura tio sio "'..name)
             end
             if (action.normal or action.custom) and health <= normalHeal and canCast('exura sio "'..name) then
                 return say('exura sio "'..name)
@@ -700,8 +750,8 @@ friendHealerMacro = macro(100, function()
         return 
     end
 
-    local minHp = config.settings[7].value
-    local minMp = config.settings[8].value
+    local minHp = getSettingValue(8, 80)
+    local minMp = getSettingValue(9, 50)
 
     -- Safety: Don't heal friends if self needs healing
     if hppercent() <= minHp or manapercent() <= minMp then return end

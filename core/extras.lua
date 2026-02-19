@@ -8,7 +8,18 @@ end
 local settings = storage[panelName]
 
 -- basic elements
-extrasWindow = UI.createWindow('ExtrasWindow', rootWidget)
+-- Ensure style is loaded (fallback for batch loader)
+if g_ui and g_ui.importStyle then
+  pcall(function()
+    local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
+    g_ui.importStyle("/bot/" .. configName .. "/core/extras.otui")
+  end)
+end
+extrasWindow = UI.createWindow('ExtrasWindow')
+if not extrasWindow then
+  warn("[nExBot] ExtrasWindow style not found — skipping extras panel")
+  return
+end
 extrasWindow:hide()
 extrasWindow.closeButton.onClick = function(widget)
   extrasWindow:hide()
@@ -20,7 +31,9 @@ extrasWindow.onGeometryChange = function(widget, old, new)
   settings.height = new.height
 end
 
-extrasWindow:setHeight(settings.height or 360)
+local extrasHeight = settings.height
+if not extrasHeight or extrasHeight < 200 then extrasHeight = 360 end
+extrasWindow:setHeight(extrasHeight)
 
 -- available options for dest param
 local rightPanel = extrasWindow.content.right
@@ -98,6 +111,17 @@ local addScrollBar = function(id, title, min, max, defaultValue, dest, tooltip)
 end
 
 UI.Button("nExBot Settings and Scripts", function()
+  if not extrasWindow then
+    warn("[nExBot] extrasWindow is nil — attempting to recreate")
+    local ok, w = pcall(UI.createWindow, 'ExtrasWindow')
+    if ok and w then
+      extrasWindow = w
+      extrasWindow:setHeight(settings.height or 360)
+    else
+      warn("[nExBot] Failed to recreate ExtrasWindow: " .. tostring(w))
+      return
+    end
+  end
   extrasWindow:show()
   extrasWindow:raise()
   extrasWindow:focus()
@@ -137,28 +161,10 @@ addCheckBox("reachable", "Target only pathable mobs", false, leftPanel, "Ignore 
 addCheckBox("title", "Custom Window Title", true, rightPanel, "Personalize OTCv8 window name according to character specific.")
 if true then
   local vocText = ""
-  local Vocations = Vocations
-  if not Vocations then
-    local ok, mod = pcall(function() return dofile("/core/vocations.lua") end)
-    if ok and mod then
-      Vocations = mod
-    end
-  end
-
   if Vocations and Vocations.getShortName then
     local short = Vocations.getShortName(voc())
     if short ~= "" then
       vocText = "- " .. short
-    end
-  else
-    if voc() == 1 or voc() == 11 then
-        vocText = "- EK"
-    elseif voc() == 2 or voc() == 12 then
-        vocText = "- RP"
-    elseif voc() == 3 or voc() == 13 then
-        vocText = "- MS"
-    elseif voc() == 4 or voc() == 14 then
-        vocText = "- ED"
     end
   end
 
@@ -222,26 +228,28 @@ if true then
     hotkey(settings.useAll, function()
         local wsadWalking = modules and modules.game_walking and modules.game_walking.wsadWalking
         if not wsadWalking then return end
-        for _, tile in pairs(g_map.getTiles(posz())) do
-            if distanceFromPlayer(tile:getPosition()) < 2 then
-                for _, item in pairs(tile:getItems()) do
-                    -- use
-                    if table.find(useId, item:getId()) then
-                        use(item)
-                        return
-                    elseif table.find(shovelId, item:getId()) then
-                        SafeCall.useWith(settings.shovel, item)
-                        return
-                    elseif table.find(ropeId, item:getId()) then
-                        SafeCall.useWith(settings.rope, item) 
-                        return
-                    elseif table.find(macheteId, item:getId()) then
-                        SafeCall.useWith(settings.machete, item)
-                        return
-                    elseif table.find(scytheId, item:getId()) then
-                        SafeCall.useWith(settings.scythe, item)
-                        return
-                    end
+        -- Only check adjacent tiles (distance < 2) instead of full floor scan
+        local playerPos = player:getPosition()
+        local nearTiles = getNearTiles(playerPos)
+        -- Also check tile under player
+        local playerTile = g_map.getTile(playerPos)
+        if playerTile then
+          for _, item in pairs(playerTile:getItems()) do
+            if table.find(useId, item:getId()) then return use(item)
+            elseif table.find(shovelId, item:getId()) then return SafeCall.useWith(settings.shovel, item)
+            elseif table.find(ropeId, item:getId()) then return SafeCall.useWith(settings.rope, item)
+            elseif table.find(macheteId, item:getId()) then return SafeCall.useWith(settings.machete, item)
+            elseif table.find(scytheId, item:getId()) then return SafeCall.useWith(settings.scythe, item)
+            end
+          end
+        end
+        for _, tile in pairs(nearTiles) do
+            for _, item in pairs(tile:getItems()) do
+                if table.find(useId, item:getId()) then return use(item)
+                elseif table.find(shovelId, item:getId()) then return SafeCall.useWith(settings.shovel, item)
+                elseif table.find(ropeId, item:getId()) then return SafeCall.useWith(settings.rope, item)
+                elseif table.find(macheteId, item:getId()) then return SafeCall.useWith(settings.machete, item)
+                elseif table.find(scytheId, item:getId()) then return SafeCall.useWith(settings.scythe, item)
                 end
             end
         end
@@ -256,6 +264,7 @@ if true then
 
   onAddThing(function(tile, thing)
     if not settings.timers then return end
+    if zChanging() then return end
     if not thing:isItem() then
       return
     end
@@ -277,6 +286,7 @@ if true then
 
   onRemoveThing(function(tile, thing)
     if not settings.timers then return end
+    if zChanging() then return end
     if not thing:isItem() then
       return
     end
@@ -375,44 +385,49 @@ if true then
       end
     end
     
-    for i, tile in ipairs(g_map.getTiles(playerZ)) do
-      local tilePos = tile:getPosition()
-      local posKey = getFailedPosKey(tilePos)
-      
-      -- Skip recently failed positions
-      if not failedPositions[posKey] then
-        local item = tile:getTopThing()
-        if item and item:isContainer() then
-          local itemId = item:getId()
-          local toolId = nil
-          
-          if hasKnife and knifeBodiesSet[itemId] then
-            toolId = 5908
-          elseif hasStake and stakeBodiesSet[itemId] then
-            toolId = 5942
-          elseif hasFishingRod and fishingBodiesSet[itemId] then
-            toolId = 3483
-          end
-          
-          if toolId then
-            -- Calculate distance
-            local dx = math.abs(tilePos.x - playerPos.x)
-            local dy = math.abs(tilePos.y - playerPos.y)
-            local dist = math.max(dx, dy)
-            
-            if dist < bestDistance then
-              if canReachTile(tilePos) then
-                bestCandidate = { item = item, toolId = toolId, pos = tilePos }
-                bestDistance = dist
-                if dist <= 1 then break end  -- Found adjacent, use immediately
-              else
-                -- Mark as failed to avoid rechecking
-                failedPositions[posKey] = currentTime + FAILED_POS_TTL
+    -- Scan only tiles within loot/skin range instead of entire floor
+    -- Use a radius scan centered on player (max skin reach is 7 sqm)
+    local SKIN_RADIUS = 7
+    for dx = -SKIN_RADIUS, SKIN_RADIUS do
+      for dy = -SKIN_RADIUS, SKIN_RADIUS do
+        local tilePos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerZ}
+        local posKey = getFailedPosKey(tilePos)
+        
+        -- Skip recently failed positions
+        if not failedPositions[posKey] then
+          local tile = g_map.getTile(tilePos)
+          if tile then
+            local item = tile:getTopThing()
+            if item and item:isContainer() then
+              local itemId = item:getId()
+              local toolId = nil
+              
+              if hasKnife and knifeBodiesSet[itemId] then
+                toolId = 5908
+              elseif hasStake and stakeBodiesSet[itemId] then
+                toolId = 5942
+              elseif hasFishingRod and fishingBodiesSet[itemId] then
+                toolId = 3483
+              end
+              
+              if toolId then
+                local dist = math.max(math.abs(dx), math.abs(dy))
+                
+                if dist < bestDistance then
+                  if canReachTile(tilePos) then
+                    bestCandidate = { item = item, toolId = toolId, pos = tilePos }
+                    bestDistance = dist
+                    if dist <= 1 then break end  -- Found adjacent, use immediately
+                  else
+                    failedPositions[posKey] = currentTime + FAILED_POS_TTL
+                  end
+                end
               end
             end
           end
         end
       end
+      if bestCandidate and bestDistance <= 1 then break end
     end
     
     if bestCandidate then
@@ -652,6 +667,7 @@ if true then
 
   onRemoveThing(function(tile, thing)
     if not settings.holdMwall then return end
+    if zChanging() then return end
       if thing:getId() ~= 2129 then return end
       if tile:getText():find("HOLD") then
           table.insert(candidates, tile:getPosition())
@@ -664,6 +680,7 @@ if true then
 
   onAddThing(function(tile, thing)
     if not settings.holdMwall then return end
+    if zChanging() then return end
       if m.isOff() then return end
       if thing:getId() ~= 2129 then return end
       if tile:getText():len() > 0 then
@@ -702,13 +719,17 @@ if true then
     if keys ~= mwHot and keys ~= wgHot then return end
 
     if (hold - now) < -1000 then
-      candidates = {}
-      for i, tile in ipairs(g_map.getTiles(posz())) do
-        local text = tile:getText()
-        if text:find("HOLD") then
-          tile:setText("")
+      -- Clear held positions from candidate list instead of scanning entire floor
+      for i, cpos in ipairs(candidates) do
+        local tile = g_map.getTile(cpos)
+        if tile then
+          local text = tile:getText()
+          if text:find("HOLD") then
+            tile:setText("")
+          end
         end
       end
+      candidates = {}
     end
   end)
 end
@@ -732,6 +753,9 @@ if true then
 
   onPlayerPositionChange(function(x,y)
     if not settings.checkPlayer then return end
+    if zChanging() then
+      return
+    end
     if x.z ~= y.z then
       schedule(20, function() checkPlayers() end)
     end
@@ -739,6 +763,7 @@ if true then
 
   onCreatureAppear(function(creature)
     if not settings.checkPlayer then return end
+    if zChanging() then return end
     if creature:isPlayer() and creature:getText() == "" and creature:getPosition().z == posz() and creature ~= player then
         g_game.look(creature)
         found = now

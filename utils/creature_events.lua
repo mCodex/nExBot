@@ -291,6 +291,6 @@ end
 -- ============================================================================
 
 -- Export to global (no _G in OTClient sandbox)
-if not CreatureEvents then CreatureEvents = CreatureEvents end
+CreatureEvents = CreatureEvents
 
 return CreatureEvents

@@ -210,6 +210,9 @@ end
   Dispatches to handlers based on their intervals
 ]]
 function UnifiedTick._tick()
+  if zChanging() then
+    return
+  end
   if not UnifiedTick.ENABLED then return end
   
   local nowt = nowMs()

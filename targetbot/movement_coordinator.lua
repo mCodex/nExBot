@@ -38,6 +38,9 @@
 
 MovementCoordinator = MovementCoordinator or {}
 MovementCoordinator.VERSION = "1.0"
+
+-- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
+local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 -- Toggle to enable movement coordinator debugging output
 MovementCoordinator.DEBUG = MovementCoordinator.DEBUG or false
 
@@ -129,7 +132,9 @@ local scalingCache = {
 -- Lightweight monster cache maintained from EventBus
 MovementCoordinator.MonsterCache = MovementCoordinator.MonsterCache or {
   monsters = {}, -- map id -> creature
+  lastSeen = {},  -- map id -> timestamp for FIFO eviction
   lastUpdate = 0,
+  MAX_SIZE = 200,  -- Prevent unbounded growth
   stats = { queries = 0, hits = 0, misses = 0, lastQuery = 0 }
 }
 
@@ -138,17 +143,58 @@ function MovementCoordinator.MonsterCache.getStats()
   return MovementCoordinator.MonsterCache.stats
 end
 
+-- Periodic cleanup of stale/dead entries (runs every 5s)
+local _lastCacheCleanup = 0
+local function cleanupMonsterCache()
+  local cache = MovementCoordinator.MonsterCache
+  local count = 0
+  for id, c in pairs(cache.monsters) do
+    count = count + 1
+    -- Remove dead, removed, or invalid creatures
+    local valid = false
+    pcall(function()
+      valid = c and not c:isDead() and not c:isRemoved() and c:isMonster()
+    end)
+    if not valid then
+      cache.monsters[id] = nil
+      cache.lastSeen[id] = nil
+      count = count - 1
+    end
+  end
+  -- Hard cap: if still too many, remove oldest by lastSeen timestamp
+  if count > cache.MAX_SIZE then
+    local toRemove = count - cache.MAX_SIZE
+    -- Build sorted list by lastSeen (oldest first)
+    local entries = {}
+    for id, _ in pairs(cache.monsters) do
+      entries[#entries + 1] = { id = id, ts = cache.lastSeen[id] or 0 }
+    end
+    table.sort(entries, function(a, b) return a.ts < b.ts end)
+    for i = 1, math.min(toRemove, #entries) do
+      cache.monsters[entries[i].id] = nil
+      cache.lastSeen[entries[i].id] = nil
+    end
+  end
+end
+
 local function updateMonsterCacheFromCreature(creature)
   if not creature then return end
   local id = creature:getId() or tostring(creature)
   MovementCoordinator.MonsterCache.monsters[id] = creature
+  MovementCoordinator.MonsterCache.lastSeen[id] = now
   MovementCoordinator.MonsterCache.lastUpdate = now
+  -- Periodic cleanup every 5 seconds during cache writes
+  if (now - _lastCacheCleanup) > 5000 then
+    _lastCacheCleanup = now
+    cleanupMonsterCache()
+  end
 end
 
 local function removeCreatureFromCache(creature)
   if not creature then return end
   local id = creature:getId() or tostring(creature)
   MovementCoordinator.MonsterCache.monsters[id] = nil
+  MovementCoordinator.MonsterCache.lastSeen[id] = nil
   MovementCoordinator.MonsterCache.lastUpdate = now
 end
 
@@ -174,6 +220,7 @@ if EventBus then
   local debounceUpdate = makeDebounce(100, function() scalingCache.lastUpdate = 0 end)
 
   EventBus.on("creature:appear", function(c)
+    if tbOff() then return end
     if c and c:isMonster() and not c:isDead() then
       updateMonsterCacheFromCreature(c)
       -- Notify WavePredictor if available (non-blocking)
@@ -185,6 +232,7 @@ if EventBus then
   end, 10)
 
   EventBus.on("creature:move", function(c, oldPos)
+    if tbOff() then return end
     if c and c:isMonster() and not c:isDead() then
       updateMonsterCacheFromCreature(c)
       -- Update WavePredictor about movement
@@ -196,6 +244,7 @@ if EventBus then
   end, 10)
 
   EventBus.on("monster:disappear", function(c)
+    if tbOff() then return end
     removeCreatureFromCache(c)
     
     -- IMPROVED: Also clean up MonsterAI tracker data for this creature
@@ -222,6 +271,7 @@ if EventBus then
   
   -- When our target moves, instantly register chase intent with walk prediction
   EventBus.on("creature:move", function(creature, oldPos)
+    if tbOff() then return end
     if not creature then return end
     
     -- Check if this is our current attack target
@@ -294,6 +344,7 @@ if EventBus then
   
   -- When monster appears nearby, check for danger
   EventBus.on("monster:appear", function(creature)
+    if tbOff() then return end
     if not creature then return end
     local playerPos = player and player:getPosition()
     local creaturePos = creature:getPosition()
@@ -312,6 +363,7 @@ if EventBus then
   
   -- When monster health changes to low, register finish kill intent
   EventBus.on("monster:health", function(creature, percent)
+    if tbOff() then return end
     if not creature or not percent then return end
     
     -- Check if this is our target
@@ -338,6 +390,7 @@ if EventBus then
   
   -- When player takes damage, consider emergency escape
   EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
+    if tbOff() then return end
     if not health or not maxHealth then return end
     local percent = (health / maxHealth) * 100
     local oldPercent = oldHealth and oldMax and ((oldHealth / oldMax) * 100) or 100
@@ -382,11 +435,13 @@ if EventBus then
   
   -- Clear stale intents when combat ends
   EventBus.on("targetbot/combat_end", function()
+    if tbOff() then return end
     MovementCoordinator.Intent.clear()
   end, 20)
   
   -- Clear chase intents when target dies
   EventBus.on("monster:disappear", function(creature)
+    if tbOff() then return end
     if not creature then return end
     local attackingCreature = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
     if attackingCreature and creature:getId() == attackingCreature:getId() then

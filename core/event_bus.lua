@@ -30,6 +30,65 @@ local eventQueue = { head = 1, tail = 0 }
 local processing = false
 local FLUSH_BATCH = 100 -- max events processed per flush to avoid blocking
 
+-- Z-change guard: frame-based burst detection + boolean block
+-- During floor transitions, dozens of creature events fire in a single frame.
+-- We count creature appear/disappear events per frame; 5+ = floor transition.
+nExBot = nExBot or {}
+local _zBlocked = false
+local _zCooldown = 150
+local _zLastLog = 0
+local _zLastKnown = nil
+local _burstFrame = 0
+local _burstCount = 0
+
+-- Ultra-fast guard: single boolean check (used by all external modules)
+function zChanging()
+  return _zBlocked
+end
+
+-- Activate z-change block (idempotent)
+local function _zActivate()
+  if _zBlocked then return end
+  _zBlocked = true
+  schedule(_zCooldown, function()
+    _zBlocked = false
+    local ok, p = pcall(pos)
+    if ok and p then _zLastKnown = p.z end
+    EventBus.emit("player:z_change_settled")
+  end)
+end
+
+-- Burst detector: counts creature appear/disappear events per frame.
+-- 5+ in the same frame (same `now` value) triggers instant block.
+local function _zBurst()
+  if _zBlocked then return true end
+  if now ~= _burstFrame then
+    _burstFrame = now
+    _burstCount = 1
+  else
+    _burstCount = _burstCount + 1
+  end
+  if _burstCount >= 5 then
+    _zActivate()
+    return true
+  end
+  return false
+end
+
+-- Called from onPlayerPositionChange on z-change
+local function _zSet(oldPos, newPos)
+  _zLastKnown = newPos.z
+  if (now - _zLastLog) >= 800 then
+    _zLastLog = now
+  end
+  _zActivate()
+end
+
+schedule(200, function()
+  local ok, p = pcall(pos)
+  if ok and p then _zLastKnown = p.z end
+end)
+
 -- Subscribe to an event
 -- @param event string: Event name (e.g., "creature:appear", "player:move")
 -- @param callback function: Handler function
@@ -83,7 +142,7 @@ end
 function EventBus.emit(event, ...)
   local handlers = listeners[event]
   if not handlers then return end
-  
+
   for i = 1, #handlers do
     local handler = handlers[i]
     local status, err = pcall(handler.callback, ...)
@@ -126,9 +185,14 @@ function EventBus.flush()
     eventQueue.head = eventQueue.head + 1
     if item then
       EventBus.emit(item.event, table.unpack(item.args))
-
     end
     processed = processed + 1
+  end
+
+  -- Compact ring buffer indices to prevent integer overflow over long sessions
+  if eventQueue.head > 10000 and eventQueue.head > eventQueue.tail then
+    eventQueue.head = 1
+    eventQueue.tail = 0
   end
 
   processing = false
@@ -172,6 +236,7 @@ end
 -- Creature events
 if onCreatureAppear then
   onCreatureAppear(function(creature)
+    if _zBurst() then return end
     if creature:isMonster() then
       EventBus.emit("monster:appear", creature)
     elseif creature:isPlayer() then
@@ -185,6 +250,7 @@ end
 
 if onCreatureDisappear then
   onCreatureDisappear(function(creature)
+    if _zBurst() then return end
     if creature:isMonster() then
       EventBus.emit("monster:disappear", creature)
     elseif creature:isPlayer() then
@@ -219,6 +285,7 @@ end
 
 if onCreatureHealthPercentChange then
   onCreatureHealthPercentChange(function(creature, percent)
+    if _zBlocked then return end
     -- Get cached old HP (default to 100 if not tracked)
     local oldPercent = creatureHealthCache[creature] or 100
     creatureHealthCache[creature] = percent
@@ -270,6 +337,13 @@ end
 -- Player events
 if onPlayerPositionChange then
   onPlayerPositionChange(function(newPos, oldPos)
+    if newPos and oldPos and newPos.z ~= oldPos.z then
+      _zSet(oldPos, newPos)
+      EventBus.emit("player:z_change", newPos, oldPos)
+      schedule(_zCooldown + 50, function()
+        EventBus.emit("player:z_change_settled", newPos, oldPos)
+      end)
+    end
     EventBus.emit("player:move", newPos, oldPos)
   end)
 end
@@ -280,71 +354,91 @@ if onManaChange then
   end)
 end
 
+-- Damage attribution state (debounced to max 4x/sec)
+local _damageAttrLastRun = 0
+local _damageAttrMinInterval = 250
+local _damageAttrCachedCreatures = nil
+local _damageAttrCacheTime = 0
+local _damageAttrCacheTTL = 200
+
+local function attributeDamageSource(damage)
+  local playerPos = nil
+  local ok, lp = pcall(function() return g_game and g_game.getLocalPlayer and g_game.getLocalPlayer() end)
+  if ok and lp then pcall(function() playerPos = lp:getPosition() end) end
+  if not playerPos then
+    EventBus.emit("player:damage", damage, nil)
+    return
+  end
+
+  -- Skip heavy MonsterAI scoring when collection is disabled
+  local useAI = MonsterAI and MonsterAI.COLLECT_ENABLED
+
+  local radius = (useAI and MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.DAMAGE and MonsterAI.CONSTANTS.DAMAGE.CORRELATION_RADIUS) or 7
+  local threshold = (useAI and MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.DAMAGE and MonsterAI.CONSTANTS.DAMAGE.CORRELATION_THRESHOLD) or 0.4
+
+  -- Cache spectator list for 200ms to avoid repeated API calls
+  local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
+  if not _damageAttrCachedCreatures or (nowt - _damageAttrCacheTime) > _damageAttrCacheTTL then
+    _damageAttrCachedCreatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
+      and MovementCoordinator.MonsterCache.getNearby(radius)
+      or g_map.getSpectatorsInRange(playerPos, false, radius, radius)
+    _damageAttrCacheTime = nowt
+  end
+
+  local creatures = _damageAttrCachedCreatures
+  if not creatures then
+    EventBus.emit("player:damage", damage, nil)
+    return
+  end
+
+  local bestMonster, bestScore = nil, 0
+  for i = 1, #creatures do
+    local m = creatures[i]
+    local okm, isValid = pcall(function() return m and m:isMonster() and not m:isDead() end)
+    if okm and isValid then
+      local mpos
+      pcall(function() mpos = m:getPosition() end)
+      if mpos then
+        local dist = math.max(math.abs(playerPos.x - mpos.x), math.abs(playerPos.y - mpos.y))
+        local score = 1 / (1 + dist)
+
+        -- Only do expensive MonsterAI scoring when AI collection is active
+        if useAI then
+          local okid, mid = pcall(function() return m:getId() end)
+          if okid and mid and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+            local data = MonsterAI.Tracker.monsters[mid]
+            if data then
+              if data.lastWaveTime and math.abs(nowt - data.lastWaveTime) < 800 then score = score + 1.2 end
+              if data.lastAttackTime and math.abs(nowt - data.lastAttackTime) < 1500 then score = score + 0.8 end
+            end
+          end
+          if MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition then
+            local okf, facing = pcall(function() return MonsterAI.Predictor.isFacingPosition(mpos, m:getDirection(), playerPos) end)
+            if okf and facing then score = score + 0.6 end
+          end
+        end
+
+        if score > bestScore then bestScore = score; bestMonster = m end
+      end
+    end
+  end
+
+  EventBus.emit("player:damage", damage, bestScore >= threshold and bestMonster or nil)
+end
+
 if onHealthChange then
   onHealthChange(function(localPlayer, health, maxHealth, oldHealth, oldMaxHealth)
     EventBus.emit("player:health", health, maxHealth, oldHealth, oldMaxHealth)
 
-    -- Emit a damage event when player's health drops so modules can correlate source
     if oldHealth and health and oldHealth > health then
       local damage = oldHealth - health
-      -- Best-effort attribution: search nearby monsters and pick best candidate
-      local playerPos = nil
-      local ok, lp = pcall(function() return g_game and g_game.getLocalPlayer and g_game.getLocalPlayer() end)
-      if ok and lp then pcall(function() playerPos = lp:getPosition() end) end
-      if not playerPos and player and player.getPosition then pcall(function() playerPos = player:getPosition() end) end
-
-      local bestMonster, bestScore = nil, 0
-      if playerPos then
-        local radius = (MonsterAI and MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.DAMAGE and MonsterAI.CONSTANTS.DAMAGE.CORRELATION_RADIUS) or 7
-        local threshold = (MonsterAI and MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.DAMAGE and MonsterAI.CONSTANTS.DAMAGE.CORRELATION_THRESHOLD) or 0.4
-
-        local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
-          and MovementCoordinator.MonsterCache.getNearby(radius)
-          or g_map.getSpectatorsInRange(playerPos, false, radius, radius)
-
-        local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
-        -- FIXED: Add nil check for creatures before iterating
-        if creatures then
-          for i = 1, #creatures do
-            local m = creatures[i]
-            -- FIXED: Properly capture both pcall return values
-            local okm, isValidMonster = pcall(function() return m and m:isMonster() and not m:isDead() end)
-            if okm and isValidMonster and m then
-              local mpos
-              pcall(function() mpos = m:getPosition() end)
-              if mpos then
-                local dist = math.max(math.abs(playerPos.x - mpos.x), math.abs(playerPos.y - mpos.y))
-                local score = 1 / (1 + dist)
-
-                -- Boost score with MonsterAI tracker info if available
-                local okid, mid = pcall(function() return m and m:getId() end)
-                if okid and mid and MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
-                  local data = MonsterAI.Tracker.monsters[mid]
-                  if data then
-                    if data.lastWaveTime and math.abs(nowt - data.lastWaveTime) < 800 then score = score + 1.2 end
-                    if data.lastAttackTime and math.abs(nowt - data.lastAttackTime) < 1500 then score = score + 0.8 end
-                  end
-                end
-
-                -- Prefer monsters facing player when possible
-                if MonsterAI and MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition then
-                  local okf, facing = pcall(function() return MonsterAI.Predictor.isFacingPosition(mpos, m:getDirection(), playerPos) end)
-                  if okf and facing then score = score + 0.6 end
-                end
-
-                if score > bestScore then bestScore = score; bestMonster = m end
-              end
-            end
-          end
-        end
-
-        if bestScore and bestScore >= threshold then
-          EventBus.emit("player:damage", damage, bestMonster)
-        else
-          EventBus.emit("player:damage", damage, nil)
-        end
+      -- Debounce: max 4 attributions per second to prevent CPU spikes
+      local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+      if (nowt - _damageAttrLastRun) >= _damageAttrMinInterval then
+        _damageAttrLastRun = nowt
+        attributeDamageSource(damage)
       else
-        -- No player position available: emit damage with unknown source
+        -- Fast path: emit damage without attribution
         EventBus.emit("player:damage", damage, nil)
       end
     end
@@ -390,16 +484,22 @@ if onTalk then
   end)
 end
 
--- Tile events
+-- Tile events (filtered to items only — creature movement is handled by creature events)
 if onAddThing then
   onAddThing(function(tile, thing)
-    EventBus.emit("tile:add", tile, thing)
+    if _zBlocked then return end
+    if thing and thing.isItem and thing:isItem() then
+      EventBus.emit("tile:add", tile, thing)
+    end
   end)
 end
 
 if onRemoveThing then
   onRemoveThing(function(tile, thing)
-    EventBus.emit("tile:remove", tile, thing)
+    if _zBlocked then return end
+    if thing and thing.isItem and thing:isItem() then
+      EventBus.emit("tile:remove", tile, thing)
+    end
   end)
 end
 
@@ -520,6 +620,7 @@ end
 -- Creature walk events
 if onWalk then
   onWalk(function(creature, oldPos, newPos)
+    if _zBlocked then return end
     EventBus.emit("creature:walk", creature, oldPos, newPos)
     if creature:isMonster() then
       EventBus.emit("monster:walk", creature, oldPos, newPos)
@@ -532,6 +633,7 @@ end
 -- Creature turn events
 if onTurn then
   onTurn(function(creature, direction)
+    if _zBlocked then return end
     EventBus.emit("creature:turn", creature, direction)
   end)
 end

@@ -1,12 +1,5 @@
 setDefaultTab("Cave")
 local panelName = "specialDeposit"
-local depositerPanel
-
-UI.Button("Stashing Settings", function()  
-    depositerPanel:show()
-    depositerPanel:raise()
-    depositerPanel:focus()
-end)
 
 if not storage[panelName] then
     storage[panelName] = {
@@ -17,18 +10,38 @@ end
 
 local config = storage[panelName]
 
-depositerPanel = UI.createWindow('DepositerPanel', rootWidget)
-depositerPanel:hide()
--- basic one
-depositerPanel.CloseButton.onClick = function()
-    depositerPanel:hide()
+-- Ensure style is loaded (batch loader uses full path, manual fallback for safety)
+if g_ui and g_ui.importStyle then
+  pcall(function()
+    local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
+    g_ui.importStyle("/bot/" .. configName .. "/core/depositer_config.otui")
+  end)
 end
 
-depositerPanel:setHeight(config.height or 380)
-depositerPanel.onGeometryChange = function(widget, old, new)
-    if old.height == 0 then return end  
-    config.height = new.height
+local depositerPanel = UI.createWindow('DepositerPanel')
+if depositerPanel then
+  depositerPanel:hide()
+  depositerPanel.CloseButton.onClick = function()
+      depositerPanel:hide()
+  end
+  local depHeight = config.height
+  if not depHeight or depHeight < 180 then depHeight = 380 end
+  depositerPanel:setHeight(depHeight)
+  depositerPanel.onGeometryChange = function(widget, old, new)
+      if old.height == 0 then return end  
+      config.height = new.height
+  end
 end
+
+UI.Button("Stashing Settings", function()  
+    if not depositerPanel then
+        warn("[nExBot] DepositerPanel failed to create — check depositer_config.otui style")
+        return
+    end
+    depositerPanel:show()
+    depositerPanel:raise()
+    depositerPanel:focus()
+end)
 
 function arabicToRoman(n)
     local t = {"I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XI", "XII", "XIV", "XV", "XVI", "XVII"}
@@ -36,6 +49,7 @@ function arabicToRoman(n)
 end
 
 local function refreshEntries()
+    if not depositerPanel then return end
     depositerPanel.DepositerList:destroyChildren()
     for _, entry in ipairs(config.items) do
       local panel = g_ui.createWidget("StashItem", depositerPanel.DepositerList)
@@ -109,9 +123,11 @@ local function refreshEntries()
 end
 refreshEntries()
 
-depositerPanel.title.onDoubleClick = function(widget)
-    table.insert(config.items, {id=0, index=0})
-    refreshEntries()
+if depositerPanel then
+  depositerPanel.title.onDoubleClick = function(widget)
+      table.insert(config.items, {id=0, index=0})
+      refreshEntries()
+  end
 end
 
 function getStashingIndex(id)

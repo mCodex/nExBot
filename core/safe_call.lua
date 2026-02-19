@@ -16,22 +16,43 @@ local function safeCallFunction(func, ...)
     return nil
 end
 
+-- Resolved function cache: avoids calling loadstring() on every invocation.
+-- loadstring compiles Lua bytecode each time which is extremely expensive
+-- in hot paths (getSpectators, getMonsters, etc. called every 50-200ms).
+local _resolvedFunctions = {}
+
 -- Pure function: Safely call a global function with arguments
 -- @param funcName: string name of the global function
 -- @param ...: arguments to pass to the function
 -- @return: result of the function call or nil if function doesn't exist
 function SafeCall.global(funcName, ...)
-    -- This is a fallback for dynamic function calls
-    -- For performance, use the cached convenience functions below
-    -- Note: In OTClient Lua, we need to be careful about environment access
-    -- Try to get the function directly by name evaluation
-    local fn = nil
-    local getFunc = loadstring("return " .. funcName)
-    if getFunc then
-        local ok, result = pcall(getFunc)
-        if ok then fn = result end
+    local fn = _resolvedFunctions[funcName]
+    if fn == nil then
+        -- First call: resolve once via loadstring, cache the result
+        local getter = loadstring("return " .. funcName)
+        if getter then
+            local ok, result = pcall(getter)
+            if ok and result ~= nil then
+                fn = result
+                _resolvedFunctions[funcName] = fn
+            else
+                _resolvedFunctions[funcName] = false -- mark as unresolvable
+            end
+        else
+            _resolvedFunctions[funcName] = false
+        end
     end
+    if fn == false then return nil end
     return safeCallFunction(fn, ...)
+end
+
+-- Invalidate a cached function (call if a global is redefined at runtime)
+function SafeCall.invalidateCache(funcName)
+    if funcName then
+        _resolvedFunctions[funcName] = nil
+    else
+        _resolvedFunctions = {}
+    end
 end
 
 -- Pure function: Safely call a global function that returns a value, with fallback
@@ -114,30 +135,41 @@ function SafeCall.exp(...) return safeCallFunction(exp, ...) end
 function SafeCall.getPrice(...) return safeCallFunction(getPrice, ...) end
 function SafeCall.getColor(...) return safeCallFunction(getColor, ...) end
 
--- Recursive function: Safely traverse nested function calls
--- @param funcChain: table of {funcName, args...} pairs
--- @return: final result or nil
+-- Simplified chain: resolve first function from cache, then traverse methods.
 function SafeCall.chain(funcChain)
     if not funcChain or #funcChain == 0 then return nil end
 
     local result = nil
-    for i, callSpec in ipairs(funcChain) do
+    for i = 1, #funcChain do
+        local callSpec = funcChain[i]
         local funcName = callSpec[1]
-        local args = {}
-        for j = 2, #callSpec do
-            args[j-1] = callSpec[j]
-        end
-
-        -- For chained calls, we need to get the function dynamically
-        -- This is less common, so we use the global method
-        local func = SafeCall.global(funcName)
-        if not func then return nil end
 
         if i == 1 then
-            result = func(unpack(args))
+            -- Resolve function reference without calling it
+            local fn = _resolvedFunctions[funcName]
+            if fn == nil then
+                local getter = loadstring("return " .. funcName)
+                if getter then
+                    local ok, resolved = pcall(getter)
+                    if ok and resolved ~= nil then
+                        fn = resolved
+                        _resolvedFunctions[funcName] = fn
+                    else
+                        _resolvedFunctions[funcName] = false
+                    end
+                else
+                    _resolvedFunctions[funcName] = false
+                end
+            end
+            if not fn or fn == false then return nil end
+            local ok, res = pcall(fn, select(2, unpack(callSpec)))
+            if not ok then return nil end
+            result = res
         else
             if type(result) ~= "table" or not result[funcName] then return nil end
-            result = result[funcName](unpack(args))
+            local ok, res = pcall(result[funcName], result, select(2, unpack(callSpec)))
+            if not ok then return nil end
+            result = res
         end
     end
 

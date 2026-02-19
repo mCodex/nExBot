@@ -30,6 +30,9 @@ local nowMs            = H.nowMs
 local safeGetId        = H.safeGetId
 local safeIsDead       = H.safeIsDead
 local safeIsRemoved    = H.safeIsRemoved
+
+-- Guard: returns true when TargetBot is disabled
+local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 local safeCreatureCall = H.safeCreatureCall
 local getClient        = H.getClient
 local isValidAliveMonster = H.isValidAliveMonster
@@ -427,47 +430,14 @@ function S.isZigzagging()
 end
 
 if EventBus and EventBus.on then
-  EventBus.on("player:move", function() S.recordMovement() end, 60)
+  EventBus.on("player:move", function() if tbOff() then return end; S.recordMovement() end, 60)
 end
 
 -- ============================================================================
--- PRIORITY MODIFIER (v3.1: delegates to PriorityEngine, kept for compat)
--- ============================================================================
-
-function S.modifyPriority(cid, basePri, hp)
-  -- All scoring logic now lives in PriorityEngine.  Scenario-specific
-  -- bonuses (engagement, stickiness, finish-kill) are applied inside
-  -- PriorityEngine.scenarioScore().  This stub adds only the engagement
-  -- lock bonus that PriorityEngine expects us to provide.
-  local p = basePri
-  if cid == S.state.engagementLockId and S.state.isEngaged then
-    p = p + 1000
-    local drop = (S.state.engagementLockHealth or 100) - (hp or 100)
-    if drop > 0 then p = p + drop * 5 end
-  end
-  return p
-end
-
--- ============================================================================
--- OPTIMAL TARGET SELECTION (v3.1: DEPRECATED — use PriorityEngine)
--- Kept as a thin fallback; callers should use PriorityEngine.calculate()
+-- OPTIMAL TARGET SELECTION — Removed (PriorityEngine is the sole authority)
 -- ============================================================================
 
 function S.getOptimalTarget()
-  S.detectScenario()
-  -- If PriorityEngine is loaded, it handles everything via the main
-  -- target.lua loop.  Return nil to signal "no override".
-  if PriorityEngine and PriorityEngine.calculate then
-    return nil
-  end
-  -- Legacy fallback: return locked target if still alive
-  if S.state.targetLockId then
-    local ld = MonsterAI.Tracker and MonsterAI.Tracker.monsters[S.state.targetLockId]
-    if ld and ld.creature and not safeIsDead(ld.creature) then
-      return { creature = ld.creature, id = S.state.targetLockId, priority = 999, reason = "target_locked" }
-    end
-    S.clearTargetLock()
-  end
   return nil
 end
 
@@ -489,10 +459,12 @@ end
 
 if EventBus and EventBus.on then
   EventBus.on("targetbot:target_changed", function(creature)
+    if tbOff() then return end
     if creature then S.lockTarget(creature:getId(), creature:getHealthPercent() or 100)
     else S.clearTargetLock() end
   end)
   EventBus.on("creature:death", function(creature)
+    if tbOff() then return end
     if creature and creature:getId() == S.state.targetLockId then S.clearTargetLock() end
     if creature and creature:getId() == S.state.engagementLockId then S.endEngagement("target_dead") end
   end)
@@ -504,7 +476,12 @@ if UnifiedTick and UnifiedTick.register then
     priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.NORMAL or 50,
     callback = function() if MonsterAI.COLLECT_ENABLED then pcall(S.detectScenario) end end })
 else
-  macro(500, function() if MonsterAI.COLLECT_ENABLED then pcall(S.detectScenario) end end)
+  macro(500, function()
+    if zChanging() then
+      return
+    end
+    if MonsterAI.COLLECT_ENABLED then pcall(S.detectScenario) end
+  end)
 end
 
 if MonsterAI.DEBUG then print("[MonsterAI] Scenario module v3.0 loaded") end

@@ -59,15 +59,44 @@ CaveBot.Extensions.Imbuing.setup = function()
       return true
     end
 
+    -- Search nearby tiles for shrine instead of full floor scan
     local Client = getClient()
-    local tilesOnFloor = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
-    for _, tile in ipairs(tilesOnFloor) do
-      for _, item in ipairs(tile:getItems()) do
-          local id = item:getId()
+    local playerPos = player:getPosition()
+    local nearTiles = getNearTiles(playerPos)
+    -- Also check tiles in a wider radius (up to 7 sqm) around player
+    local searchTiles = {}
+    -- Start with the player's own tile
+    local playerTile = (Client and Client.getTile) and Client.getTile(playerPos) or (g_map and g_map.getTile(playerPos))
+    if playerTile then searchTiles[#searchTiles+1] = playerTile end
+    for _, t in ipairs(nearTiles) do searchTiles[#searchTiles+1] = t end
+    -- Expand search to 7-tile radius if not found nearby
+    for _, tile in ipairs(searchTiles) do
+      for _, itm in ipairs(tile:getItems()) do
+          local id = itm:getId()
           if table.find(SHRINES, id) then
-            shrine = item
+            shrine = itm
             break
           end
+      end
+      if shrine then break end
+    end
+    -- Fallback: scan spectator range tiles if shrine not found nearby
+    if not shrine then
+      for dx = -7, 7 do
+        for dy = -7, 7 do
+          local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
+          local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
+          if tile then
+            for _, itm in ipairs(tile:getItems()) do
+              if table.find(SHRINES, itm:getId()) then
+                shrine = itm
+                break
+              end
+            end
+            if shrine then break end
+          end
+        end
+        if shrine then break end
       end
     end
 
