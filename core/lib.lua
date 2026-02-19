@@ -126,6 +126,9 @@ end
 
 -- scripts / functions
 onPlayerPositionChange(function(x,y)
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+        return
+    end
     nExBot.standTime = now
 end)
 

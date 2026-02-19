@@ -123,6 +123,9 @@ end
 -- Invalidate on position change
 if onPlayerPositionChange then
   onPlayerPositionChange(function()
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+      return
+    end
     invalidateCache()
   end)
 end

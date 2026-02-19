@@ -1718,6 +1718,11 @@ macro(100, function()
   if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
     return
   end
+
+  -- Z-change guard: avoid heavy scans during floor transitions
+  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+    return
+  end
   
   -- Update time (use global 'now' if available, else fallback)
   local currentTime = now or (os.time() * 1000)

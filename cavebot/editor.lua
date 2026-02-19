@@ -159,6 +159,9 @@ CaveBot.Editor.setup = function()
   
   -- callbacks
   onPlayerPositionChange(function(pos)
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+      return
+    end
     ui.pos:setText("Position: " .. pos.x .. ", " .. pos.y .. ", " .. pos.z) 
   end)
   ui.pos:setText("Position: " .. posx() .. ", " .. posy() .. ", " .. posz()) 

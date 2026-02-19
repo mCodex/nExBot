@@ -2400,6 +2400,11 @@ targetbotMacro = macro(250, function()
   if not config or not config.isOn or not config.isOn() then
     return
   end
+
+  -- Z-change guard: pause target processing during floor transitions
+  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+    return
+  end
   
   -- CRITICAL: Respect explicit disable flag - user turned it off manually
   if TargetBot and TargetBot.explicitlyDisabled then

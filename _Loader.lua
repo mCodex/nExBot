@@ -47,6 +47,9 @@ nExBot.showDebug = nExBot.showDebug or false
 nExBot.suppressDebugPrefixes = nExBot.suppressDebugPrefixes or {"[HealBot]", "[MonsterInspector]"}
 nExBot.slowOpInstrumentation = nExBot.slowOpInstrumentation or false
 
+-- NativeProfiler removed: wrapping every callback with pcall+os.clock added
+-- significant aggregate overhead during bulk events (z-change floor transitions).
+
 local _orig_print = print
 print = function(...)
   if nExBot.showDebug then return _orig_print(...) end

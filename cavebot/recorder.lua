@@ -15,6 +15,9 @@ local function setup()
   end
 
   onPlayerPositionChange(function(newPos, oldPos)
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+      return
+    end
     if CaveBot.isOn() or not isEnabled then return end    
     if not lastPos then
       -- first step

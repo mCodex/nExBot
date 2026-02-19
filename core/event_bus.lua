@@ -83,7 +83,7 @@ end
 function EventBus.emit(event, ...)
   local handlers = listeners[event]
   if not handlers then return end
-  
+
   for i = 1, #handlers do
     local handler = handlers[i]
     local status, err = pcall(handler.callback, ...)
@@ -177,6 +177,8 @@ end
 -- Creature events
 if onCreatureAppear then
   onCreatureAppear(function(creature)
+    -- Skip during z-change: dozens of creatures appear at once during floor transitions
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
     if creature:isMonster() then
       EventBus.emit("monster:appear", creature)
     elseif creature:isPlayer() then
@@ -190,6 +192,8 @@ end
 
 if onCreatureDisappear then
   onCreatureDisappear(function(creature)
+    -- Skip during z-change: dozens of creatures disappear at once during floor transitions
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
     if creature:isMonster() then
       EventBus.emit("monster:disappear", creature)
     elseif creature:isPlayer() then
@@ -224,6 +228,8 @@ end
 
 if onCreatureHealthPercentChange then
   onCreatureHealthPercentChange(function(creature, percent)
+    -- Skip during z-change to reduce aggregate callback volume
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
     -- Get cached old HP (default to 100 if not tracked)
     local oldPercent = creatureHealthCache[creature] or 100
     creatureHealthCache[creature] = percent
@@ -280,7 +286,8 @@ if not nExBot.ZChangeGuard then
     cooldown = 300,
     lastChange = 0,
     fromZ = nil,
-    toZ = nil
+    toZ = nil,
+    lastLog = 0
   }
 
   function nExBot.ZChangeGuard.set(oldPos, newPos)
@@ -289,6 +296,10 @@ if not nExBot.ZChangeGuard then
     nExBot.ZChangeGuard.lastChange = nowt
     nExBot.ZChangeGuard.fromZ = oldPos.z
     nExBot.ZChangeGuard.toZ = newPos.z
+    if nowt - (nExBot.ZChangeGuard.lastLog or 0) >= 800 then
+      nExBot.ZChangeGuard.lastLog = nowt
+      print(string.format("[ZGuard] z-change %s -> %s (cooldown=%sms)", tostring(oldPos.z), tostring(newPos.z), tostring(nExBot.ZChangeGuard.cooldown)))
+    end
   end
 
   function nExBot.ZChangeGuard.isActive()
@@ -304,6 +315,11 @@ if onPlayerPositionChange then
         nExBot.ZChangeGuard.set(oldPos, newPos)
       end
       EventBus.emit("player:z_change", newPos, oldPos)
+      -- After cooldown, emit settled event so modules can do a single bulk refresh
+      local cooldown = (nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.cooldown or 300) + 50
+      schedule(cooldown, function()
+        EventBus.emit("player:z_change_settled", newPos, oldPos)
+      end)
     end
     EventBus.emit("player:move", newPos, oldPos)
   end)
@@ -448,6 +464,8 @@ end
 -- Tile events (filtered to items only — creature movement is handled by creature events)
 if onAddThing then
   onAddThing(function(tile, thing)
+    -- Skip during z-change: hundreds of tile events fire during floor transitions
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
     if thing and thing.isItem and thing:isItem() then
       EventBus.emit("tile:add", tile, thing)
     end
@@ -456,6 +474,8 @@ end
 
 if onRemoveThing then
   onRemoveThing(function(tile, thing)
+    -- Skip during z-change: hundreds of tile events fire during floor transitions
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
     if thing and thing.isItem and thing:isItem() then
       EventBus.emit("tile:remove", tile, thing)
     end
@@ -579,6 +599,7 @@ end
 -- Creature walk events
 if onWalk then
   onWalk(function(creature, oldPos, newPos)
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
     EventBus.emit("creature:walk", creature, oldPos, newPos)
     if creature:isMonster() then
       EventBus.emit("monster:walk", creature, oldPos, newPos)
@@ -591,6 +612,7 @@ end
 -- Creature turn events
 if onTurn then
   onTurn(function(creature, direction)
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then return end
     EventBus.emit("creature:turn", creature, direction)
   end)
 end

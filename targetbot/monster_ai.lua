@@ -2349,12 +2349,18 @@ if UnifiedTick and UnifiedTick.register then
 else
   -- Fallback to traditional macros if UnifiedTick not loaded
   macro(500, function()
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+      return
+    end
     if shouldCollect() and MonsterAI.updateAll then
       pcall(function() MonsterAI.updateAll() end)
     end
   end)
   
   macro(30000, function()
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+      return
+    end
     if not shouldCollect() then return end
     if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
       pcall(function() MonsterAI.AutoTuner.runPass() end)

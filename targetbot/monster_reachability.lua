@@ -226,7 +226,12 @@ if UnifiedTick and UnifiedTick.register then
     priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.IDLE or 10,
     callback = function() pcall(R.cleanup) end })
 else
-  macro(10000, function() pcall(R.cleanup) end)
+  macro(10000, function()
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+      return
+    end
+    pcall(R.cleanup)
+  end)
 end
 
 -- EventBus hooks

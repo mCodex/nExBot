@@ -476,7 +476,12 @@ if UnifiedTick and UnifiedTick.register then
     priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.NORMAL or 50,
     callback = function() if MonsterAI.COLLECT_ENABLED then pcall(S.detectScenario) end end })
 else
-  macro(500, function() if MonsterAI.COLLECT_ENABLED then pcall(S.detectScenario) end end)
+  macro(500, function()
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+      return
+    end
+    if MonsterAI.COLLECT_ENABLED then pcall(S.detectScenario) end
+  end)
 end
 
 if MonsterAI.DEBUG then print("[MonsterAI] Scenario module v3.0 loaded") end
