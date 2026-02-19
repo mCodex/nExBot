@@ -333,7 +333,7 @@ local function tryCurrentWaypointReachable(playerPos, maxDist)
   if not current or current.action ~= "goto" then return false end
 
   local posMatch = regexMatch(current.value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
-  if not posMatch[1] then return false end
+  if not posMatch or not posMatch[1] or not posMatch[1][2] or not posMatch[1][3] or not posMatch[1][4] then return false end
 
   local destPos = {
     x = tonumber(posMatch[1][2]),

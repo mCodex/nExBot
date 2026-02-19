@@ -756,6 +756,11 @@ function MonsterAI.Metrics.loadPersisted()
         existing.totalDamageDealt = (existing.totalDamageDealt or 0) + (tonumber(stats.totalDamageDealt) or 0)
         existing.totalKillTime    = (existing.totalKillTime or 0) + (tonumber(stats.totalKillTime) or 0)
         existing.waveAttackCount  = (existing.waveAttackCount or 0) + (tonumber(stats.waveAttackCount) or 0)
+        -- Coerce EWMA/metadata fields to prevent nil arithmetic
+        existing.avgSpeed       = tonumber(existing.avgSpeed) or 0
+        existing.avgDPS         = tonumber(existing.avgDPS) or 0
+        existing.avgHealthDrain = tonumber(existing.avgHealthDrain) or 0
+        existing.lastSeen       = tonumber(existing.lastSeen) or 0
       else
         -- Normalize numeric fields before assigning to prevent arithmetic errors
         stats.sampleCount      = tonumber(stats.sampleCount) or 0
@@ -763,6 +768,10 @@ function MonsterAI.Metrics.loadPersisted()
         stats.totalDamageDealt = tonumber(stats.totalDamageDealt) or 0
         stats.totalKillTime    = tonumber(stats.totalKillTime) or 0
         stats.waveAttackCount  = tonumber(stats.waveAttackCount) or 0
+        stats.avgSpeed         = tonumber(stats.avgSpeed) or 0
+        stats.avgDPS           = tonumber(stats.avgDPS) or 0
+        stats.avgHealthDrain   = tonumber(stats.avgHealthDrain) or 0
+        stats.lastSeen         = tonumber(stats.lastSeen) or 0
         MonsterAI.Telemetry.typeStats[nameLower] = stats
       end
     end

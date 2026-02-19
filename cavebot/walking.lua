@@ -737,7 +737,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
   -- FLOOR-CHANGE PATH: Smart approach — keyboard steps near FC tile, guarded autoWalk far away
   if allowFloorChange then
     -- Don't re-dispatch if still walking
-    if player:isWalking() or (PathStrategy and PathStrategy.isAutoWalking()) then
+    if player:isWalking() or isAutoWalking() then
       return true
     end
 

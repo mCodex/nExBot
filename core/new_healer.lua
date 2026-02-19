@@ -102,7 +102,7 @@ local function normalizeSettings(settings)
         end
     end
 
-    if not hasTio or #settings < 9 then
+    if not hasTio then
         table.insert(settings, 7, {type="HealScroll", text="Use Tio Sio at: ", value=65})
     end
 
