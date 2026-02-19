@@ -1718,8 +1718,8 @@ sortingMacro = macro(300, function(m)
         end
     end
 
-    -- Force open containers (skip while looting is locked to prevent open/close loop)
-    if config.forceOpen and not isLootLocked() then
+    -- Force open containers (early return above already guards loot lock)
+    if config.forceOpen then
         for _, entry in ipairs(config.containerList) do
             if entry.enabled then
                 local container = getContainerByItem(entry.itemId)

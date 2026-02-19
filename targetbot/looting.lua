@@ -250,7 +250,11 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   for index, container in pairs(containers) do
     if container.lootContainer then
       lootLockAcquire()
-      TargetBot.Looting.lootContainer(lootContainers, container)
+      local ok, err = pcall(TargetBot.Looting.lootContainer, lootContainers, container)
+      if not ok then
+        lootLockRelease()
+        warn("[Looting] lootContainer error: " .. tostring(err))
+      end
       return true
     end
   end
@@ -625,17 +629,19 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
       local itemId = item:getId()
       local isFood = false
 
+      local eatFood = TargetBot.EatFood
+      local eatEnabled = eatFood and eatFood.isEnabled and eatFood.isEnabled()
+      local playerFull = eatFood and eatFood.isPlayerFull and eatFood.isPlayerFull()
+      local canEat = eatEnabled and not playerFull
+
       -- Check nExBot centralized food list (primary)
-      if TargetBot.EatFood and TargetBot.EatFood.isEnabled and TargetBot.EatFood.isEnabled()
-         and not (TargetBot.EatFood.isPlayerFull and TargetBot.EatFood.isPlayerFull()) then
-        local foodIds = TargetBot.EatFood.getFoodIds and TargetBot.EatFood.getFoodIds() or {}
+      if canEat then
+        local foodIds = eatFood.getFoodIds and eatFood.getFoodIds() or {}
         isFood = foodIds[itemId] == true
       end
 
       -- Fallback: legacy storage.foodItems list (still gated behind EatFood toggle)
-      if not isFood and TargetBot.EatFood and TargetBot.EatFood.isEnabled and TargetBot.EatFood.isEnabled()
-         and not (TargetBot.EatFood.isPlayerFull and TargetBot.EatFood.isPlayerFull())
-         and storage.foodItems and storage.foodItems[1] then
+      if not isFood and canEat and storage.foodItems and storage.foodItems[1] then
         for _, food in ipairs(storage.foodItems) do
           if itemId == food.id then
             isFood = true

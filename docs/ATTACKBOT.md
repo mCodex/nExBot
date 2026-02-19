@@ -87,7 +87,7 @@ Each attack rule consists of:
 
 ### Evaluation Order
 
-```
+```text
 For each rule (by priority):
   1. Is the rule enabled?
   2. Are there enough monsters in range?

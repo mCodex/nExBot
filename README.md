@@ -127,7 +127,7 @@ _Loader.lua (entry point)
 | [CaveBot](docs/CAVEBOT.md) | Navigation, waypoints, supply management |
 | [TargetBot](docs/TARGETBOT.md) | Combat AI, Monster Insights, movement |
 | [Containers](docs/CONTAINERS.md) | Container management, quiver system |
-| [Hunt Analyzer](docs/SMARTHUNT.md) | Session analytics and insights |
+| [Hunt Analyzer](docs/SMARTHUNT.md) | Session analytics and insights (SmartHunt) |
 | [Extras & Tools](docs/EXTRAS.md) | Safety, equipment, utilities |
 | [Architecture](docs/ARCHITECTURE.md) | Technical design and internals |
 | [Performance](docs/PERFORMANCE.md) | Optimization and tuning |
