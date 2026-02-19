@@ -30,6 +30,7 @@ local lockedLevel = pos().z
 local userLocked = false
 
 onPlayerPositionChange(function(newPos, oldPos)
+    if zChanging() then return end
     if not spyLevelEnabled then return end
     if not userLocked then
         lockedLevel = pos().z

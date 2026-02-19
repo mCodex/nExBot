@@ -730,6 +730,7 @@ local function getCachedPlayerPos()
 end
 
 onCreatureDisappear(function(creature)
+  if zChanging() then return end
   if SafeCall.isInPz() then return end
   -- Defensive: TargetBot or its isOn may not be ready during early load; guard safely
   if not TargetBot or not TargetBot.isOn or type(TargetBot.isOn) ~= 'function' or not TargetBot.isOn() then return end

@@ -541,6 +541,7 @@ end
 
 -- Hook: Track monster deaths for food corpses
 onCreatureDisappear(function(creature)
+  if zChanging() then return end
   if not eatFromCorpsesEnabled then return end
   if not player then return end
   if SafeCall.isInPz() then return end

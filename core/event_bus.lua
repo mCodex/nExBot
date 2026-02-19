@@ -30,6 +30,65 @@ local eventQueue = { head = 1, tail = 0 }
 local processing = false
 local FLUSH_BATCH = 100 -- max events processed per flush to avoid blocking
 
+-- Z-change guard: frame-based burst detection + boolean block
+-- During floor transitions, dozens of creature events fire in a single frame.
+-- We count creature appear/disappear events per frame; 5+ = floor transition.
+nExBot = nExBot or {}
+local _zBlocked = false
+local _zCooldown = 150
+local _zLastLog = 0
+local _zLastKnown = nil
+local _burstFrame = 0
+local _burstCount = 0
+
+-- Ultra-fast guard: single boolean check (used by all external modules)
+function zChanging()
+  return _zBlocked
+end
+
+-- Activate z-change block (idempotent)
+local function _zActivate()
+  if _zBlocked then return end
+  _zBlocked = true
+  schedule(_zCooldown, function()
+    _zBlocked = false
+    local ok, p = pcall(pos)
+    if ok and p then _zLastKnown = p.z end
+    EventBus.emit("player:z_change_settled")
+  end)
+end
+
+-- Burst detector: counts creature appear/disappear events per frame.
+-- 5+ in the same frame (same `now` value) triggers instant block.
+local function _zBurst()
+  if _zBlocked then return true end
+  if now ~= _burstFrame then
+    _burstFrame = now
+    _burstCount = 1
+  else
+    _burstCount = _burstCount + 1
+  end
+  if _burstCount >= 5 then
+    _zActivate()
+    return true
+  end
+  return false
+end
+
+-- Called from onPlayerPositionChange on z-change
+local function _zSet(oldPos, newPos)
+  _zLastKnown = newPos.z
+  if (now - _zLastLog) >= 800 then
+    _zLastLog = now
+  end
+  _zActivate()
+end
+
+schedule(200, function()
+  local ok, p = pcall(pos)
+  if ok and p then _zLastKnown = p.z end
+end)
+
 -- Subscribe to an event
 -- @param event string: Event name (e.g., "creature:appear", "player:move")
 -- @param callback function: Handler function
@@ -177,8 +236,7 @@ end
 -- Creature events
 if onCreatureAppear then
   onCreatureAppear(function(creature)
-    -- Skip during z-change: dozens of creatures appear at once during floor transitions
-    if zChanging() then return end
+    if _zBurst() then return end
     if creature:isMonster() then
       EventBus.emit("monster:appear", creature)
     elseif creature:isPlayer() then
@@ -192,8 +250,7 @@ end
 
 if onCreatureDisappear then
   onCreatureDisappear(function(creature)
-    -- Skip during z-change: dozens of creatures disappear at once during floor transitions
-    if zChanging() then return end
+    if _zBurst() then return end
     if creature:isMonster() then
       EventBus.emit("monster:disappear", creature)
     elseif creature:isPlayer() then
@@ -228,8 +285,7 @@ end
 
 if onCreatureHealthPercentChange then
   onCreatureHealthPercentChange(function(creature, percent)
-    -- Skip during z-change to reduce aggregate callback volume
-    if zChanging() then return end
+    if _zBlocked then return end
     -- Get cached old HP (default to 100 if not tracked)
     local oldPercent = creatureHealthCache[creature] or 100
     creatureHealthCache[creature] = percent
@@ -279,29 +335,6 @@ if onCreatureHealthPercentChange then
 end
 
 -- Player events
--- Z-change guard: lightweight global function to suppress bulk callbacks during floor transitions
-nExBot = nExBot or {}
-
--- Local state for fastest possible access (no table lookups in hot path)
-local _zLastChange = 0
-local _zCooldown = 250  -- ms: time to suppress callbacks after floor change
-local _zLastLog = 0
-
--- Global function: single call, no table lookups, minimal overhead
--- Usage: if zChanging() then return end
-function zChanging()
-  return (now - _zLastChange) < _zCooldown
-end
-
--- Set z-change state (called from onPlayerPositionChange)
-local function _zSet(oldPos, newPos)
-  _zLastChange = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
-  if (now - _zLastLog) >= 800 then
-    _zLastLog = now
-    print(string.format("[ZGuard] z-change %s -> %s", tostring(oldPos.z), tostring(newPos.z)))
-  end
-end
-
 if onPlayerPositionChange then
   onPlayerPositionChange(function(newPos, oldPos)
     if newPos and oldPos and newPos.z ~= oldPos.z then
@@ -454,8 +487,7 @@ end
 -- Tile events (filtered to items only — creature movement is handled by creature events)
 if onAddThing then
   onAddThing(function(tile, thing)
-    -- Skip during z-change: hundreds of tile events fire during floor transitions
-    if zChanging() then return end
+    if _zBlocked then return end
     if thing and thing.isItem and thing:isItem() then
       EventBus.emit("tile:add", tile, thing)
     end
@@ -464,8 +496,7 @@ end
 
 if onRemoveThing then
   onRemoveThing(function(tile, thing)
-    -- Skip during z-change: hundreds of tile events fire during floor transitions
-    if zChanging() then return end
+    if _zBlocked then return end
     if thing and thing.isItem and thing:isItem() then
       EventBus.emit("tile:remove", tile, thing)
     end
@@ -589,7 +620,7 @@ end
 -- Creature walk events
 if onWalk then
   onWalk(function(creature, oldPos, newPos)
-    if zChanging() then return end
+    if _zBlocked then return end
     EventBus.emit("creature:walk", creature, oldPos, newPos)
     if creature:isMonster() then
       EventBus.emit("monster:walk", creature, oldPos, newPos)
@@ -602,7 +633,7 @@ end
 -- Creature turn events
 if onTurn then
   onTurn(function(creature, direction)
-    if zChanging() then return end
+    if _zBlocked then return end
     EventBus.emit("creature:turn", creature, direction)
   end)
 end

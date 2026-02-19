@@ -1278,6 +1278,7 @@ CaveBot.getSafeAdjacentTiles = function(centerPos) return getSafeAdjacentTiles(c
 
 -- Floor change detection on position change
 onPlayerPositionChange(function(newPos, oldPos)
+  if zChanging() then return end
   if not oldPos or not newPos then return end
   
   -- Update last safe position when walking on same floor (away from floor-change tiles)
@@ -1319,17 +1320,6 @@ onPlayerPositionChange(function(newPos, oldPos)
     return  -- Done - no warning, no step-back
   end
 
-  -- Z-change guard: avoid heavy step-back logic during manual transitions
-  if zChanging() then
-    lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
-    resetStepBackAttempts()
-    resetFloorChangeCacheThrottled()
-    if CaveBot.recordFloorChange then
-      CaveBot.recordFloorChange(oldPos.z, newPos.z, nil)
-    end
-    return
-  end
-  
   -- ACCIDENTAL floor change - not triggered by a floor-change waypoint
     -- Throttle unintended floor-change handling to avoid repeated step-back loops
     local delay = getFloorChangeHandleDelay()

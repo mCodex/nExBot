@@ -1853,6 +1853,7 @@ end
 -- Register native callback if available (fastest path)
 if onCreatureAppear then
   onCreatureAppear(function(creature)
+    if zChanging() then return end
     if not creature then return end
     if not creature:isMonster() then return end
     if creature:isDead() then return end

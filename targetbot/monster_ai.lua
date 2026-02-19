@@ -1477,6 +1477,7 @@ if EventBus then
   -- Enhanced with SpellTracker integration (v2.2)
   if onMissle then
     onMissle(function(missle)
+      if zChanging() then return end
       if not missle then return end
       
       local srcPos = missle:getSource()
@@ -1601,6 +1602,7 @@ if EventBus then
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   if onCreatureTurn then
     onCreatureTurn(function(creature, direction)
+      if zChanging() then return end
       if not creature then return end
       if not safeIsMonster(creature) then return end
       if safeIsDead(creature) then return end
