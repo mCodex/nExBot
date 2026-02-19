@@ -98,6 +98,7 @@ local addScrollBar = function(id, title, min, max, defaultValue, dest, tooltip)
 end
 
 UI.Button("nExBot Settings and Scripts", function()
+  if not extrasWindow then return end
   extrasWindow:show()
   extrasWindow:raise()
   extrasWindow:focus()

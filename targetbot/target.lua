@@ -4,6 +4,9 @@ lastAction = 0
 local cavebotAllowance = 0
 local lureEnabled = true
 
+-- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
+local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
+
 local getClient = nExBot.Shared.getClient
 
 local getClientVersion = nExBot.Shared.getClientVersion
@@ -353,14 +356,17 @@ if EventBus then
   end)
 
   EventBus.on("monster:appear", function(creature)
+    if tbOff() then return end
     if creature then debouncedInvalidateAndRecalc() end
   end, 20)
 
   EventBus.on("monster:disappear", function(creature)
+    if tbOff() then return end
     debouncedInvalidateAndRecalc()
   end, 20)
 
   EventBus.on("creature:move", function(creature, oldPos)
+    if tbOff() then return end
     -- Safe check for monster
     local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
     if okMonster and isMonster then
@@ -369,15 +375,18 @@ if EventBus then
   end, 20)
 
   EventBus.on("monster:health", function(creature, percent)
+    if tbOff() then return end
     debouncedInvalidateAndRecalc()
   end, 20)
 
   EventBus.on("player:move", function(newPos, oldPos)
+    if tbOff() then return end
     -- Player movement changes proximity; trigger recalculation
     debouncedInvalidateAndRecalc()
   end, 10)
 
   EventBus.on("combat:target", function(creature, oldCreature)
+    if tbOff() then return end
     debouncedInvalidateAndRecalc()
   end, 20)
 
@@ -392,6 +401,7 @@ if EventBus then
   
   -- Listen for force follow mode activation from tools.lua
   EventBus.on("followplayer/force_follow", function(leaderPos, distance)
+    if tbOff() then return end
     pcall(function()
       followPlayerForceMode = true
       followPlayerForceExpiry = now + FORCE_FOLLOW_COMBAT_WINDOW_MS
@@ -403,6 +413,7 @@ if EventBus then
   
   -- Listen for follow player being enabled/disabled
   EventBus.on("followplayer/enabled", function(playerName)
+    if tbOff() then return end
     pcall(function()
       -- Reset force mode when following starts
       followPlayerForceMode = false
@@ -411,6 +422,7 @@ if EventBus then
   end, 80)
   
   EventBus.on("followplayer/disabled", function()
+    if tbOff() then return end
     pcall(function()
       -- Clear force mode when following stops
       followPlayerForceMode = false
@@ -729,16 +741,19 @@ end
 if EventBus then
   -- Monster appears - add to cache
   EventBus.on("monster:appear", function(creature)
+    if tbOff() then return end
     updateCreatureInCache(creature)
   end, 50)
   
   -- Monster disappears - remove from cache
   EventBus.on("monster:disappear", function(creature)
+    if tbOff() then return end
     removeCreatureFromCache(creature)
   end, 50)
   
   -- Monster health changes - update priority (high priority for targeting decisions)
   EventBus.on("monster:health", function(creature, percent)
+    if tbOff() then return end
     if percent <= 0 then
       removeCreatureFromCache(creature)
     else
@@ -749,6 +764,7 @@ if EventBus then
   
   -- Player moves - need to recalculate paths
   EventBus.on("player:move", function(newPos, oldPos)
+    if tbOff() then return end
     -- Invalidate all paths on player movement
     for id, data in pairs(CreatureCache.monsters) do
       data.path = nil
@@ -774,6 +790,7 @@ if EventBus then
   local COMBAT_END_GRACE_MS = 1200
 
   EventBus.on("combat:target", function(creature, oldCreature)
+    if tbOff() then return end
     invalidateCache()
 
     local newId = creature and creature:getId() or nil
@@ -809,6 +826,7 @@ if EventBus then
 
   -- Monitor player health to emit emergency events
   EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
+    if tbOff() then return end
     local cfg = (UnifiedStorage and UnifiedStorage.get("targetbot.priority")) or (ProfileStorage and ProfileStorage.get and ProfileStorage.get('targetPriority')) or {}
     local threshold = cfg and cfg.emergencyHP or 25
     local percent = 100
@@ -947,6 +965,7 @@ if EventBus then
   
   -- Event-driven finish kill: when low-HP target moves
   EventBus.on("monster:health", function(creature, percent)
+    if tbOff() then return end
     if not creature then return end
     
     -- Check if this is our target (safe)
@@ -988,6 +1007,7 @@ if EventBus then
   
   -- Emit event when target is acquired for other modules
   EventBus.on("combat:target", function(creature, oldCreature)
+    if tbOff() then return end
     if creature and MovementCoordinator then
       -- Notify MovementCoordinator of new target for chase tracking (safe)
       pcall(function()
@@ -1092,6 +1112,7 @@ end
 if EventBus then
   -- When target is acquired, enforce chase mode
   EventBus.on("targetbot/target_acquired", function(creature, creaturePos)
+    if tbOff() then return end
     pcall(function()
       enforceChaseModeNow()
     end)
@@ -1099,6 +1120,7 @@ if EventBus then
   
   -- When combat starts, enforce chase mode
   EventBus.on("targetbot/combat_start", function(creature, data)
+    if tbOff() then return end
     pcall(function()
       enforceChaseModeNow()
     end)
@@ -1106,6 +1128,7 @@ if EventBus then
   
   -- When combat ends, reset enforcement
   EventBus.on("targetbot/combat_end", function()
+    if tbOff() then return end
     pcall(function()
       ChaseModeEnforcer.enabled = false
     end)
@@ -1113,19 +1136,18 @@ if EventBus then
   
   -- Listen for player movement - re-check chase mode
   EventBus.on("player:move", function(newPos, oldPos)
+    if tbOff() then return end
     if ChaseModeEnforcer.enabled then
       pcall(function()
         enforceChaseModeNow()
       end)
     end
-  end, 5)  -- Low priority, after other handlers
+  end, 5)
   
   -- Listen for target movement - re-check chase mode
   EventBus.on("creature:move", function(creature, oldPos)
+    if tbOff() then return end
     if not ChaseModeEnforcer.enabled then return end
-    
-    -- Safe check if this is our target
-    local Client = getClient()
     local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if not target then return end
     
@@ -2238,12 +2260,12 @@ local function recalculateBestTarget()
   -- This implements "target stickiness" at the recalculation level
   if currentTargetStillValid and currentTargetParams and bestTarget then
     local currentHP = currentAttackTarget:getHealthPercent()
-    -- If current target is wounded, require MUCH higher priority to switch
+    -- If current target is wounded, require higher priority to switch
     if currentHP < 70 then
-      local switchThreshold = 30  -- Need 30+ priority advantage to switch
-      if currentHP < 50 then switchThreshold = 50 end  -- Need 50+ to switch from half-health
-      if currentHP < 30 then switchThreshold = 80 end  -- Need 80+ to switch from low HP
-      if currentHP < 15 then switchThreshold = 150 end -- Nearly impossible to switch from critical
+      local switchThreshold = 15  -- Need 15+ priority advantage to switch
+      if currentHP < 50 then switchThreshold = 25 end
+      if currentHP < 30 then switchThreshold = 40 end
+      if currentHP < 15 then switchThreshold = 75 end
       
       if bestTarget ~= currentTargetParams then
         local priorityAdvantage = bestTarget.priority - currentTargetParams.priority
@@ -2368,11 +2390,6 @@ local lastPathCacheCleanup = 0
 targetbotMacro = macro(250, function()
   local _msStart = os.clock()
   
-  -- Update AttackStateMachine (runs silently - no separate button)
-  if AttackStateMachine and AttackStateMachine.update then
-    pcall(AttackStateMachine.update)
-  end
-  
   if not config or not config.isOn or not config.isOn() then
     return
   end
@@ -2380,6 +2397,11 @@ targetbotMacro = macro(250, function()
   -- CRITICAL: Respect explicit disable flag - user turned it off manually
   if TargetBot and TargetBot.explicitlyDisabled then
     return
+  end
+
+  -- Update AttackStateMachine (only when TargetBot is ON)
+  if AttackStateMachine and AttackStateMachine.update then
+    pcall(AttackStateMachine.update)
   end
 
   -- Prevent execution before login is complete to avoid freezing
@@ -2558,7 +2580,8 @@ targetbotMacro = macro(250, function()
     liveMonsterCount = CreatureCache.monsterCount or 0
   end
 
-  -- HARD STICKY: If we already attack a valid monster on screen, keep it
+  -- HARD STICKY: If we already attack a valid nearby monster on screen, keep it
+  -- Only applies when current target is within 3 tiles (allow switching to adjacent when far)
   -- Use ACL-safe client getter instead of raw g_game (respects ACL pattern)
   local Client_hs = getClient()
   local currentAttack = (Client_hs and Client_hs.getAttackingCreature) and Client_hs.getAttackingCreature()
@@ -2567,7 +2590,7 @@ targetbotMacro = macro(250, function()
     local okPos, cpos = pcall(function() return currentAttack:getPosition() end)
     if okPos and cpos and cpos.z == pos.z then
       local dist = getDistanceBetween(pos, cpos)
-      if dist and dist <= 10 then
+      if dist and dist <= 3 then
         local cfgs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(currentAttack)
         if cfgs and cfgs[1] then
           bestTarget = {

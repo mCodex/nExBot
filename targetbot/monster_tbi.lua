@@ -14,6 +14,9 @@ local H = MonsterAI._helpers
 local nowMs            = H.nowMs
 local safeGetId        = H.safeGetId
 local safeIsDead       = H.safeIsDead
+
+-- Guard: returns true when TargetBot is disabled
+local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 local safeIsRemoved    = H.safeIsRemoved
 local safeCreatureCall = H.safeCreatureCall
 local getClient        = H.getClient
@@ -299,6 +302,7 @@ end
 
 if EventBus and EventBus.on then
   EventBus.on("targetbot:request_priority", function(creature, callback)
+    if tbOff() then return end
     if creature and callback then
       local p, bk = TBI.calculatePriority(creature)
       callback(p, bk)

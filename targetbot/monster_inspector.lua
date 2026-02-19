@@ -8,7 +8,8 @@ local function safeUnifiedGet(key, default)
   if not UnifiedStorage or not UnifiedStorage.get then return default end
   if not UnifiedStorage.isReady or not UnifiedStorage.isReady() then return default end
   local val = UnifiedStorage.get(key)
-  return val ~= nil and val or default
+  if val ~= nil then return val end
+  return default
 end
 
 -- Import the style first (try multiple paths to be robust across environments)
@@ -580,7 +581,7 @@ local function buildSummary()
   end
   
   table.insert(lines, "Patterns:")
-  local patterns = (UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() and UnifiedStorage.get("targetbot.monsterPatterns")) or {}
+  local patterns = safeUnifiedGet("targetbot.monsterPatterns", {})
 
   if isTableEmpty(patterns) then
     -- If no persisted patterns, try to show live tracking info (useful while hunting)

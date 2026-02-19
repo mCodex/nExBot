@@ -62,9 +62,11 @@ local cache = {
   lastCleanup = 0,
   categoryDirty = true,
   
-  -- LRU tracking
-  accessOrder = {},  -- Array of IDs in access order
-  accessIndex = {},  -- id -> index in accessOrder
+  -- LRU tracking (O(1) doubly-linked list)
+  lruHead = {},    -- sentinel: lruHead.next = LRU (oldest)
+  lruTail = {},    -- sentinel: lruTail.prev = MRU (newest)
+  lruNodes = {},   -- id -> DLL node {id, prev, next}
+  lruSize = 0,
   
   -- Stats
   stats = {
@@ -74,6 +76,10 @@ local cache = {
     cleanups = 0
   }
 }
+
+-- Initialize DLL sentinels
+cache.lruHead.next = cache.lruTail
+cache.lruTail.prev = cache.lruHead
 
 -- Time helper (use ClientHelper for DRY)
 local nowMs = ClientHelper and ClientHelper.nowMs or function()
@@ -148,32 +154,45 @@ end
 -- ============================================================================
 
 local function touchLRU(id)
-  local idx = cache.accessIndex[id]
-  if idx then
-    -- Move to end (most recently used)
-    table.remove(cache.accessOrder, idx)
-    -- Update indices for shifted elements
-    for i = idx, #cache.accessOrder do
-      cache.accessIndex[cache.accessOrder[i]] = i
-    end
+  local node = cache.lruNodes[id]
+  if node then
+    -- Detach from current position
+    node.prev.next = node.next
+    node.next.prev = node.prev
+  else
+    -- New node
+    node = { id = id }
+    cache.lruNodes[id] = node
+    cache.lruSize = cache.lruSize + 1
   end
-  
-  -- Add to end
-  cache.accessOrder[#cache.accessOrder + 1] = id
-  cache.accessIndex[id] = #cache.accessOrder
+  -- Insert before tail (MRU position)
+  local prev = cache.lruTail.prev
+  prev.next = node
+  node.prev = prev
+  node.next = cache.lruTail
+  cache.lruTail.prev = node
+end
+
+local function removeLRU(id)
+  local node = cache.lruNodes[id]
+  if node then
+    node.prev.next = node.next
+    node.next.prev = node.prev
+    cache.lruNodes[id] = nil
+    cache.lruSize = cache.lruSize - 1
+  end
 end
 
 local function evictLRU()
-  if #cache.accessOrder == 0 then return end
-  
-  local evictId = cache.accessOrder[1]
-  -- Shift array left (O(n) but only on eviction, not every access)
-  for i = 1, #cache.accessOrder - 1 do
-    cache.accessOrder[i] = cache.accessOrder[i + 1]
-    cache.accessIndex[cache.accessOrder[i]] = i
-  end
-  cache.accessOrder[#cache.accessOrder] = nil
-  cache.accessIndex[evictId] = nil
+  local node = cache.lruHead.next
+  if node == cache.lruTail then return end
+
+  local evictId = node.id
+  -- Detach from DLL
+  node.prev.next = node.next
+  node.next.prev = node.prev
+  cache.lruNodes[evictId] = nil
+  cache.lruSize = cache.lruSize - 1
   
   -- Release entry to pool if configured
   local entry = cache.creatures[evictId]
@@ -207,7 +226,7 @@ function CreatureCache.set(creature)
   local entry = cache.creatures[id]
   if not entry then
     -- Check capacity
-    if #cache.accessOrder >= CreatureCache.CONFIG.MAX_SIZE then
+    if cache.lruSize >= CreatureCache.CONFIG.MAX_SIZE then
       evictLRU()
     end
     
@@ -288,14 +307,7 @@ function CreatureCache.remove(id)
     cache.creatures[id] = nil
     
     -- Remove from LRU
-    local idx = cache.accessIndex[id]
-    if idx then
-      table.remove(cache.accessOrder, idx)
-      cache.accessIndex[id] = nil
-      for i = idx, #cache.accessOrder do
-        cache.accessIndex[cache.accessOrder[i]] = i
-      end
-    end
+    removeLRU(id)
     
     cache.categoryDirty = true
   end
@@ -316,8 +328,12 @@ function CreatureCache.clear()
   cache.monsters = nil
   cache.players = nil
   cache.npcs = nil
-  cache.accessOrder = {}
-  cache.accessIndex = {}
+  cache.lruHead = {}
+  cache.lruTail = {}
+  cache.lruHead.next = cache.lruTail
+  cache.lruTail.prev = cache.lruHead
+  cache.lruNodes = {}
+  cache.lruSize = 0
   cache.categoryDirty = true
 end
 

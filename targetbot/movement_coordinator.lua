@@ -38,6 +38,9 @@
 
 MovementCoordinator = MovementCoordinator or {}
 MovementCoordinator.VERSION = "1.0"
+
+-- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
+local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 -- Toggle to enable movement coordinator debugging output
 MovementCoordinator.DEBUG = MovementCoordinator.DEBUG or false
 
@@ -217,6 +220,7 @@ if EventBus then
   local debounceUpdate = makeDebounce(100, function() scalingCache.lastUpdate = 0 end)
 
   EventBus.on("creature:appear", function(c)
+    if tbOff() then return end
     if c and c:isMonster() and not c:isDead() then
       updateMonsterCacheFromCreature(c)
       -- Notify WavePredictor if available (non-blocking)
@@ -228,6 +232,7 @@ if EventBus then
   end, 10)
 
   EventBus.on("creature:move", function(c, oldPos)
+    if tbOff() then return end
     if c and c:isMonster() and not c:isDead() then
       updateMonsterCacheFromCreature(c)
       -- Update WavePredictor about movement
@@ -239,6 +244,7 @@ if EventBus then
   end, 10)
 
   EventBus.on("monster:disappear", function(c)
+    if tbOff() then return end
     removeCreatureFromCache(c)
     
     -- IMPROVED: Also clean up MonsterAI tracker data for this creature
@@ -265,6 +271,7 @@ if EventBus then
   
   -- When our target moves, instantly register chase intent with walk prediction
   EventBus.on("creature:move", function(creature, oldPos)
+    if tbOff() then return end
     if not creature then return end
     
     -- Check if this is our current attack target
@@ -337,6 +344,7 @@ if EventBus then
   
   -- When monster appears nearby, check for danger
   EventBus.on("monster:appear", function(creature)
+    if tbOff() then return end
     if not creature then return end
     local playerPos = player and player:getPosition()
     local creaturePos = creature:getPosition()
@@ -355,6 +363,7 @@ if EventBus then
   
   -- When monster health changes to low, register finish kill intent
   EventBus.on("monster:health", function(creature, percent)
+    if tbOff() then return end
     if not creature or not percent then return end
     
     -- Check if this is our target
@@ -381,6 +390,7 @@ if EventBus then
   
   -- When player takes damage, consider emergency escape
   EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
+    if tbOff() then return end
     if not health or not maxHealth then return end
     local percent = (health / maxHealth) * 100
     local oldPercent = oldHealth and oldMax and ((oldHealth / oldMax) * 100) or 100
@@ -425,11 +435,13 @@ if EventBus then
   
   -- Clear stale intents when combat ends
   EventBus.on("targetbot/combat_end", function()
+    if tbOff() then return end
     MovementCoordinator.Intent.clear()
   end, 20)
   
   -- Clear chase intents when target dies
   EventBus.on("monster:disappear", function(creature)
+    if tbOff() then return end
     if not creature then return end
     local attackingCreature = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
     if attackingCreature and creature:getId() == attackingCreature:getId() then

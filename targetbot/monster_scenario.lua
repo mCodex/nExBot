@@ -30,6 +30,9 @@ local nowMs            = H.nowMs
 local safeGetId        = H.safeGetId
 local safeIsDead       = H.safeIsDead
 local safeIsRemoved    = H.safeIsRemoved
+
+-- Guard: returns true when TargetBot is disabled
+local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 local safeCreatureCall = H.safeCreatureCall
 local getClient        = H.getClient
 local isValidAliveMonster = H.isValidAliveMonster
@@ -427,7 +430,7 @@ function S.isZigzagging()
 end
 
 if EventBus and EventBus.on then
-  EventBus.on("player:move", function() S.recordMovement() end, 60)
+  EventBus.on("player:move", function() if tbOff() then return end; S.recordMovement() end, 60)
 end
 
 -- ============================================================================
@@ -456,10 +459,12 @@ end
 
 if EventBus and EventBus.on then
   EventBus.on("targetbot:target_changed", function(creature)
+    if tbOff() then return end
     if creature then S.lockTarget(creature:getId(), creature:getHealthPercent() or 100)
     else S.clearTargetLock() end
   end)
   EventBus.on("creature:death", function(creature)
+    if tbOff() then return end
     if creature and creature:getId() == S.state.targetLockId then S.clearTargetLock() end
     if creature and creature:getId() == S.state.engagementLockId then S.endEngagement("target_dead") end
   end)

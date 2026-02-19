@@ -375,6 +375,7 @@ function PathStrategy.smoothPath(path, startPos)
     elseif i + 1 <= len then
       local d2 = path[i + 1]
       local o2 = dirOffset(d2)
+      local merged = false
       -- Try to merge two cardinal moves into one diagonal
       if o2 and d1 ~= d2 and not isDiagonal(d1) and not isDiagonal(d2) then
         local diagPos = {x = p.x + o1.x + o2.x, y = p.y + o1.y + o2.y, z = p.z}
@@ -398,21 +399,22 @@ function PathStrategy.smoothPath(path, startPos)
               smoothed[#smoothed + 1] = diagDir
               p = diagPos
               i = i + 2
-              goto continue
+              merged = true
             end
           end
         end
       end
-      -- no merge — emit d1 as-is
-      smoothed[#smoothed + 1] = d1
-      p = applyOff(p, o1)
-      i = i + 1
+      if not merged then
+        -- no merge — emit d1 as-is
+        smoothed[#smoothed + 1] = d1
+        p = applyOff(p, o1)
+        i = i + 1
+      end
     else
       smoothed[#smoothed + 1] = d1
       p = applyOff(p, o1)
       i = i + 1
     end
-    ::continue::
   end
 
   return #smoothed > 0 and smoothed or path

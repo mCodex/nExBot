@@ -415,16 +415,20 @@ if onTalk then
   end)
 end
 
--- Tile events
+-- Tile events (filtered to items only — creature movement is handled by creature events)
 if onAddThing then
   onAddThing(function(tile, thing)
-    EventBus.emit("tile:add", tile, thing)
+    if thing and thing.isItem and thing:isItem() then
+      EventBus.emit("tile:add", tile, thing)
+    end
   end)
 end
 
 if onRemoveThing then
   onRemoveThing(function(tile, thing)
-    EventBus.emit("tile:remove", tile, thing)
+    if thing and thing.isItem and thing:isItem() then
+      EventBus.emit("tile:remove", tile, thing)
+    end
   end)
 end
 

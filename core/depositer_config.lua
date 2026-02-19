@@ -3,6 +3,7 @@ local panelName = "specialDeposit"
 local depositerPanel
 
 UI.Button("Stashing Settings", function()  
+    if not depositerPanel then return end
     depositerPanel:show()
     depositerPanel:raise()
     depositerPanel:focus()
@@ -17,6 +18,7 @@ end
 
 local config = storage[panelName]
 
+pcall(function() g_ui.importStyle("/core/depositer_config.otui") end)
 depositerPanel = UI.createWindow('DepositerPanel', rootWidget)
 depositerPanel:hide()
 -- basic one

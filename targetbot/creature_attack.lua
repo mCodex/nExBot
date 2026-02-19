@@ -13,6 +13,9 @@ local SafeCall = SafeCall or require("core.safe_call")
 -- Defensive wrapper to handle cases where SafeCreature isn't fully loaded
 local SC = SafeCreature or {}
 
+-- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
+local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
+
 -- Defensive helper functions (fallback if SafeCreature methods missing)
 local function safeIsMonster(creature)
   if SC.isMonster then return SC.isMonster(creature) end
@@ -990,11 +993,13 @@ end
 -- EventBus integration: Reset avoidance state when monsters change
 if EventBus then
   EventBus.on("monster:disappear", function(creature)
+    if tbOff() then return end
     avoidanceState.lastSafePos = nil
     avoidanceState.consecutiveMoves = 0
   end, 20)
   
   EventBus.on("player:move", function(newPos, oldPos)
+    if tbOff() then return end
     -- Reset stickiness when player moves away from safe position
     if avoidanceState.lastSafePos then
       local atSafe = newPos.x == avoidanceState.lastSafePos.x and
@@ -1014,6 +1019,7 @@ if EventBus then
   local monsterDirections = {}  -- id -> lastDirection
   
   EventBus.on("creature:move", function(creature, oldPos)
+    if tbOff() then return end
     -- Safe creature checks using safe wrapper functions
     if not safeIsMonster(creature) then return end
     if safeIsDead(creature) then return end
@@ -1124,6 +1130,7 @@ if EventBus then
   
   -- When monster appears close, immediately check if repositioning is needed
   EventBus.on("monster:appear", function(creature)
+    if tbOff() then return end
     -- Safe creature checks using safe wrapper functions
     if not safeIsMonster(creature) then return end
     
@@ -1188,6 +1195,7 @@ if EventBus then
   
   -- Clear direction tracking when monster disappears
   EventBus.on("monster:disappear", function(creature)
+    if tbOff() then return end
     if creature then
       local id = creature:getId()
       if id then
@@ -1214,6 +1222,7 @@ if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
   end)
 
   EventBus.on("creature:appear", function(creature)
+    if tbOff() then return end
     if creature and creature:isMonster() then
       local p = player and player:getPosition()
       local cpos = creature and creature:getPosition()
@@ -1224,6 +1233,7 @@ if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
   end, 10)
 
   EventBus.on("creature:move", function(creature, oldPos)
+    if tbOff() then return end
     if creature and creature:isMonster() then
       local p = player and player:getPosition()
       local cpos = creature and creature:getPosition()
@@ -1234,6 +1244,7 @@ if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
   end, 10)
 
   EventBus.on("monster:disappear", function(creature)
+    if tbOff() then return end
     -- disappear may reduce danger; trigger a check
     debounceAvoid()
   end, 10)
@@ -2355,6 +2366,7 @@ if EventBus then
   
   -- React to monster deaths to update lure decisions quickly
   EventBus.on("monster:disappear", function(creature)
+    if tbOff() then return end
     if not creature then return end
     
     -- Check if this affects our target count significantly
@@ -2372,6 +2384,7 @@ if EventBus then
   
   -- React to monster appearances
   EventBus.on("monster:appear", function(creature)
+    if tbOff() then return end
     if not creature then return end
     
     local playerPos = player and player:getPosition()
@@ -2399,6 +2412,7 @@ if EventBus then
   local lastPullState = false
   
   EventBus.on("targetbot/combat_start", function(creature, data)
+    if tbOff() then return end
     -- When combat starts, evaluate pull system state
     schedule(100, function()
       if TargetBot and TargetBot.smartPullActive ~= lastPullState then
@@ -2416,6 +2430,7 @@ if EventBus then
   end, 12)
   
   EventBus.on("targetbot/combat_end", function()
+    if tbOff() then return end
     -- Combat ended - clear pull state
     if lastPullState then
       lastPullState = false

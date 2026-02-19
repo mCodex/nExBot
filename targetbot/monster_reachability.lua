@@ -14,6 +14,9 @@ local nowMs            = H.nowMs
 local safeGetId        = H.safeGetId
 local safeIsDead       = H.safeIsDead
 local safeIsRemoved    = H.safeIsRemoved
+
+-- Guard: returns true when TargetBot is disabled
+local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 local safeIsMonster    = H.safeIsMonster
 local safeCreatureCall = H.safeCreatureCall
 local getClient        = H.getClient
@@ -229,12 +232,14 @@ end
 -- EventBus hooks
 if EventBus and EventBus.on then
   EventBus.on("player:position", function(newPos, oldPos)
+    if tbOff() then return end
     if oldPos then
       local d = math.max(math.abs(newPos.x - oldPos.x), math.abs(newPos.y - oldPos.y))
       if d > 2 then R.clearCache() end
     end
   end)
   EventBus.on("creature:move", function(creature)
+    if tbOff() then return end
     if creature and safeIsMonster(creature) then
       local id = safeGetId(creature)
       if id and R.blockedCreatures[id] then R.clearBlocked(id); R.cache[id] = nil; R.cacheTime[id] = nil end

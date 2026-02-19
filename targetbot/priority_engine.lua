@@ -104,16 +104,16 @@ local SCORE = {
   HP_LIGHT      = 25,   -- hp ≤ 50
   HP_SCRATCHED  = 5,    -- hp ≤ 70
 
-  -- Distance weights (index = path length)
-  DIST = { [1]=14, [2]=10, [3]=6, [4]=3, [5]=3, [6]=1, [7]=1 },
+  -- Distance weights (index = path length) — strong proximity preference
+  DIST = { [1]=120, [2]=80, [3]=50, [4]=25, [5]=15, [6]=5, [7]=2 },
 
-  -- Stickiness
-  STICKY_BASE   = 70,   -- always applied to current target
-  STICKY_WOUNDED_50 = 55,
-  STICKY_WOUNDED_35 = 35,
-  STICKY_WOUNDED_25 = 45,
-  STICKY_WOUNDED_15 = 55,
-  STICKY_WOUNDED_10 = 80,
+  -- Stickiness (reduced to let distance influence switching)
+  STICKY_BASE   = 35,   -- always applied to current target
+  STICKY_WOUNDED_50 = 30,
+  STICKY_WOUNDED_35 = 20,
+  STICKY_WOUNDED_25 = 25,
+  STICKY_WOUNDED_15 = 35,
+  STICKY_WOUNDED_10 = 50,
   STICKY_DURATION_CAP = 30, -- max bonus from attack duration (ms/1000*5)
 
   -- Switch penalty on non-current target

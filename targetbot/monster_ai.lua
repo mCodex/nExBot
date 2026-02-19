@@ -751,7 +751,7 @@ function MonsterAI.Metrics.loadPersisted()
       local existing = MonsterAI.Telemetry.typeStats[nameLower]
       if existing then
         -- Merge: accumulate counters, keep EWMA averages from saved
-        existing.sampleCount      = existing.sampleCount + (stats.sampleCount or 0)
+        existing.sampleCount      = (existing.sampleCount or 0) + (stats.sampleCount or 0)
         existing.killCount        = (existing.killCount or 0) + (stats.killCount or 0)
         existing.totalDamageDealt = (existing.totalDamageDealt or 0) + (stats.totalDamageDealt or 0)
         existing.totalKillTime    = (existing.totalKillTime or 0) + (stats.totalKillTime or 0)
@@ -1256,9 +1256,13 @@ end
 -- Alias for backward compatibility
 MonsterAI.RealTime.getImmediateThreat = MonsterAI.getImmediateThreat
 
+-- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
+local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
+
 if EventBus then
   -- Track monsters when they appear
   EventBus.on("monster:appear", function(creature)
+    if tbOff() then return end
     MonsterAI.Tracker.track(creature)
     
     -- Initialize direction tracking immediately
@@ -1294,6 +1298,7 @@ if EventBus then
   
   -- Untrack monsters when they disappear
   EventBus.on("monster:disappear", function(creature)
+    if tbOff() then return end
     if creature then
       local id = safeGetId(creature)
       if id then
@@ -1313,6 +1318,7 @@ if EventBus then
   
   -- CRITICAL: Direction change detection (primary wave anticipation)
   EventBus.on("creature:move", function(creature, oldPos)
+    if tbOff() then return end
     if not creature then return end
     if not safeIsMonster(creature) then return end
     
@@ -1344,6 +1350,7 @@ if EventBus then
   
   -- Update tracking on monster health change (potential attack indicator)
   EventBus.on("monster:health", function(creature, percent)
+    if tbOff() then return end
     if creature then
       MonsterAI.Tracker.update(creature)
       
@@ -1360,6 +1367,7 @@ if EventBus then
   
   -- Record when player takes damage (learning opportunity)
   EventBus.on("player:damage", function(damage, source)
+    if tbOff() then return end
     MonsterAI.Tracker.stats.totalDamageReceived = 
       MonsterAI.Tracker.stats.totalDamageReceived + damage
 
@@ -1548,6 +1556,7 @@ if EventBus then
   -- Also listen for effect:missile EventBus event for additional coverage
   if EventBus then
     EventBus.on("effect:missile", function(missile)
+      if tbOff() then return end
       if not missile then return end
       
       local srcPos = missile.getSource and missile:getSource()
@@ -1675,6 +1684,7 @@ if EventBus then
   -- PLAYER ATTACK EVENT - Track engagement with monsters
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:attack", function(target)
+    if tbOff() then return end
     if not target then return end
     if not safeIsMonster(target) then return end
     
@@ -1706,6 +1716,7 @@ if EventBus then
   -- CREATURE DEATH EVENT - Finalize tracking and collect kill stats
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("creature:death", function(creature)
+    if tbOff() then return end
     if not creature then return end
     if not safeIsMonster(creature) then return end
     
@@ -1759,6 +1770,7 @@ if EventBus then
   -- PLAYER DEATH EVENT - Track session death stats
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:death", function()
+    if tbOff() then return end
     local nowt = nowMs()
     
     MonsterAI.Telemetry.session.deathCount = (MonsterAI.Telemetry.session.deathCount or 0) + 1
@@ -1807,6 +1819,7 @@ if EventBus then
   -- SPELL CAST EVENT - Track player damage output for kill time calculation
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:spell", function(spellName, target)
+    if tbOff() then return end
     if not target or not target:isMonster() then return end
     
     local id = target:getId()
@@ -1823,6 +1836,7 @@ if EventBus then
   -- COMBAT STATUS CHANGES - Track when entering/leaving combat
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:combat_start", function()
+    if tbOff() then return end
     local nowt = nowMs()
     MonsterAI.Telemetry.session.lastCombatStart = nowt
     
@@ -1847,6 +1861,7 @@ if EventBus then
   end, 20)
   
   EventBus.on("player:combat_end", function()
+    if tbOff() then return end
     local nowt = nowMs()
     local combatStart = MonsterAI.Telemetry.session.lastCombatStart or nowt
     local combatDuration = nowt - combatStart
@@ -2267,11 +2282,11 @@ end
 -- ENHANCED EVENTBUS EMISSIONS
 -- ============================================================================
 
--- Emit periodic stats update for interested modules
+-- Emit periodic stats update for interested modules (gated by TargetBot state)
 if EventBus then
   schedule(5000, function()
     local function emitStatsUpdate()
-      if EventBus and EventBus.emit then
+      if not tbOff() and EventBus and EventBus.emit then
         local stats = MonsterAI.getStatsSummary()
         EventBus.emit("monsterai:stats_update", stats)
       end
@@ -2349,7 +2364,13 @@ MonsterAI.DEBUG = MonsterAI.DEBUG or false
 local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
 if MonsterAI.DEBUG then print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded; automatic collection=" .. tostring(MonsterAI.COLLECT_ENABLED) .. "; auto-tune=" .. tostring(MonsterAI.AUTO_TUNE_ENABLED)) end
 
--- Load persisted per-character metrics (deferred to allow UnifiedStorage to initialize first)
-schedule(3000, function()
-  pcall(function() MonsterAI.Metrics.loadPersisted() end)
-end)
+-- Load persisted per-character metrics (deferred until UnifiedStorage is ready)
+if UnifiedStorage and UnifiedStorage.onReady then
+  UnifiedStorage.onReady(function()
+    pcall(function() MonsterAI.Metrics.loadPersisted() end)
+  end)
+else
+  schedule(3000, function()
+    pcall(function() MonsterAI.Metrics.loadPersisted() end)
+  end)
+end

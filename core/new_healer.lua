@@ -556,7 +556,7 @@ schedule(100, function()
           if action.medium then
             local tioSioAt = config.settings[7] and config.settings[7].value or 65
             table.insert(friendSpells, {
-              name = "exura sio",
+              name = "exura tio sio",
               hp = tioSioAt,
               mpCost = 120,
               cd = 1100,
@@ -607,6 +607,7 @@ local function legacyHealAction(spec, targetsInRange)
     local manaItem = config.settings[1].value
     local normalHeal = config.customPlayers[name] or config.settings[5].value
     local strongHeal = config.customPlayers[name] and normalHeal/2 or config.settings[6].value
+    local mediumHeal = config.settings[7] and config.settings[7].value or 65
 
     -- Check healing cooldown (shared with HealBot via BotCore)
     local canHeal = true
@@ -640,6 +641,9 @@ local function legacyHealAction(spec, targetsInRange)
                 if canCastGranSio then
                     return say('exura gran sio "'..name)
                 end
+            end
+            if action.medium and health <= mediumHeal and canCast('exura tio sio "'..name) then
+                return say('exura tio sio "'..name)
             end
             if (action.normal or action.custom) and health <= normalHeal and canCast('exura sio "'..name) then
                 return say('exura sio "'..name)
