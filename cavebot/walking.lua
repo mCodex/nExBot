@@ -63,6 +63,32 @@ local getClient = nExBot.Shared.getClient
 local expectedFloor = nil
 local lastWalkZ = nil
 
+-- Floor-change handling throttle (reduce repeated work on rapid z-changes)
+local FLOOR_CHANGE_HANDLE_DEFAULT = 200  -- ms, internal safe default
+local floorChangeThrottle = {
+  lastUnintended = 0,
+  lastCacheReset = 0
+}
+
+local function getFloorChangeHandleDelay()
+  local delay = FLOOR_CHANGE_HANDLE_DEFAULT
+  if storage and storage.cavebot and storage.cavebot.walking then
+    local v = tonumber(storage.cavebot.walking.floorChangeDelay)
+    if v and v >= 0 then
+      delay = v
+    end
+  end
+  return delay
+end
+
+local function resetFloorChangeCacheThrottled()
+  local delay = getFloorChangeHandleDelay()
+  if now - floorChangeThrottle.lastCacheReset >= delay then
+    FloorChangeCache.tiles = {}
+    floorChangeThrottle.lastCacheReset = now
+  end
+end
+
 -- OPTIMIZED: Use native API limits for best performance
 local MAX_PATHFIND_DIST = 50   -- OTClient A* limit is ~50-127 tiles
 local MAX_WALK_CHUNK = 40      -- Larger chunks = fewer path recalculations
@@ -1268,7 +1294,7 @@ onPlayerPositionChange(function(newPos, oldPos)
     -- INTENTIONAL floor change - accept it completely
     lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
     expectedFloor = nil  -- Clear any stale expectedFloor
-    FloorChangeCache.tiles = {}  -- Clear cache for new floor
+    resetFloorChangeCacheThrottled()  -- Clear cache for new floor
     resetStepBackAttempts()
     
     -- Record this floor change for loop prevention
@@ -1291,6 +1317,19 @@ onPlayerPositionChange(function(newPos, oldPos)
   end
   
   -- ACCIDENTAL floor change - not triggered by a floor-change waypoint
+    -- Throttle unintended floor-change handling to avoid repeated step-back loops
+    local delay = getFloorChangeHandleDelay()
+    if now - floorChangeThrottle.lastUnintended < delay then
+      lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
+      resetStepBackAttempts()
+      resetFloorChangeCacheThrottled()
+      if CaveBot.recordFloorChange then
+        CaveBot.recordFloorChange(oldPos.z, newPos.z, nil)
+      end
+      return
+    end
+    floorChangeThrottle.lastUnintended = now
+
   -- But it might still be from a recently completed floor change
   -- (e.g., the intendedFloorChange was cleared but we're still processing)
   
@@ -1336,7 +1375,7 @@ onPlayerPositionChange(function(newPos, oldPos)
     CaveBot.recordFloorChange(oldPos.z, newPos.z, nil)
   end
   
-  FloorChangeCache.tiles = {}  -- Clear cache on any floor change
+  resetFloorChangeCacheThrottled()  -- Clear cache on any floor change
 end)
 
 -- Safeguard: ensure module closes cleanly

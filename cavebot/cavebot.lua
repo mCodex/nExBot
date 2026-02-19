@@ -307,6 +307,79 @@ local walkState = {
   STUCK_TIMEOUT = 3000          -- Consider stuck after 3 seconds of no movement
 }
 
+-- Floor-change recovery throttle (reduce heavy scans on manual z-changes)
+local FLOOR_CHANGE_RECOVERY_DEFAULT = 200  -- ms, internal safe default
+local floorChangeRecovery = {
+  scheduled = false,
+  pendingZ = nil,
+  pendingFrom = nil,
+  lastRun = 0
+}
+
+local function getFloorChangeRecoveryDelay()
+  local delay = FLOOR_CHANGE_RECOVERY_DEFAULT
+  if storage and storage.cavebot and storage.cavebot.walking then
+    local v = tonumber(storage.cavebot.walking.floorChangeDelay)
+    if v and v >= 0 then
+      delay = v
+    end
+  end
+  return delay
+end
+
+local function tryCurrentWaypointReachable(playerPos, maxDist)
+  if not ui or not ui.list or not playerPos then return false end
+  local current = ui.list:getFocusedChild() or ui.list:getFirstChild()
+  if not current or current.action ~= "goto" then return false end
+
+  local posMatch = regexMatch(current.value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
+  if not posMatch[1] then return false end
+
+  local destPos = {
+    x = tonumber(posMatch[1][2]),
+    y = tonumber(posMatch[1][3]),
+    z = tonumber(posMatch[1][4])
+  }
+  if destPos.z ~= playerPos.z then return false end
+
+  local dist2d = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
+  if dist2d > maxDist then return false end
+
+  local path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true })
+  return path ~= nil
+end
+
+local function scheduleFloorChangeRecovery()
+  local delay = getFloorChangeRecoveryDelay()
+  if floorChangeRecovery.scheduled then return end
+
+  floorChangeRecovery.scheduled = true
+  schedule(delay, function()
+    floorChangeRecovery.scheduled = false
+    if now - floorChangeRecovery.lastRun < delay then return end
+    floorChangeRecovery.lastRun = now
+
+    local pp = player and player:getPosition()
+    if not pp then return end
+    if floorChangeRecovery.pendingZ and pp.z ~= floorChangeRecovery.pendingZ then return end
+
+    local maxDist = storage.extras.gotoMaxDistance or 50
+    if tryCurrentWaypointReachable(pp, maxDist) then return end
+
+    if findNearestGlobalWaypoint then
+      local child, idx = findNearestGlobalWaypoint(pp, maxDist, {
+        maxCandidates = 6,
+        preferCurrentFloor = true,
+        searchAllFloors = false,
+        excludeCompletedFloorChange = true
+      })
+      if child then
+        focusWaypointBefore(child, idx)
+      end
+    end
+  end)
+end
+
 -- Check if player has moved since last check
 local function hasPlayerMoved()
   local currentPos = pos()
@@ -931,23 +1004,13 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
         -- Unintended floor change - defer recovery to avoid blocking the macro tick
         safeResetWalking()
         resetWaypointEngine()
-        -- Schedule waypoint recovery asynchronously to prevent UI freeze
-        schedule(100, function()
-          if findNearestGlobalWaypoint then
-            local pp = player:getPosition()
-            if not pp then return end
-            local maxDist = storage.extras.gotoMaxDistance or 50
-            local child, idx = findNearestGlobalWaypoint(pp, maxDist, {
-              maxCandidates = 10,
-              preferCurrentFloor = true,
-              searchAllFloors = false,
-              excludeCompletedFloorChange = true
-            })
-            if child then
-              focusWaypointBefore(child, idx)
-            end
-          end
-        end)
+        floorChangeRecovery.pendingZ = playerPos.z
+        floorChangeRecovery.pendingFrom = lastPlayerFloor
+
+        -- Manual z-change: skip heavy recovery scans when not walking to a waypoint
+        if walkState and walkState.isWalkingToWaypoint then
+          scheduleFloorChangeRecovery()
+        end
       end
     end
     lastPlayerFloor = playerPos.z
