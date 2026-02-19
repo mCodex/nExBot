@@ -439,7 +439,7 @@ end
 -- prevents action blocking by scripts
 -- below callbacks are triggers to changing the var state
 local isUsingTime = now
-macro(100, function()
+macro(250, function()
     nExBot.isUsing = now < isUsingTime and true or false
 end)
 onUse(function(pos, itemId, stackPos, subType)

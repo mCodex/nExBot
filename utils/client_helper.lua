@@ -316,6 +316,6 @@ if EventBus and EventBus.on then
 end
 
 -- Expose as global for use by all modules (no _G in OTClient sandbox)
-if not ClientHelper then ClientHelper = ClientHelper end
+ClientHelper = ClientHelper
 
 return ClientHelper

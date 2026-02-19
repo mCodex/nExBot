@@ -2281,8 +2281,16 @@ if EventBus then
 end
 
 -- Enable automatic collection by default so Monster Insights shows data without console commands
--- You can disable via: MonsterAI.COLLECT_ENABLED = false
+-- Collection is now gated by TargetBot.isOn() to prevent CPU waste when targeting is off
 MonsterAI.COLLECT_ENABLED = (MonsterAI.COLLECT_ENABLED == nil) and true or MonsterAI.COLLECT_ENABLED
+
+-- Helper: check if MonsterAI should actively process (respects TargetBot state)
+local function shouldCollect()
+  if not MonsterAI.COLLECT_ENABLED then return false end
+  -- Gate by TargetBot state: no point collecting data if targeting is off
+  if TargetBot and TargetBot.isOn and not TargetBot.isOn() then return false end
+  return true
+end
 
 -- ============================================================================
 -- UNIFIED TICK INTEGRATION (Performance: consolidates macro overhead)
@@ -2296,7 +2304,7 @@ if UnifiedTick and UnifiedTick.register then
     interval = 500,
     priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.NORMAL or 50,
     callback = function()
-      if MonsterAI.COLLECT_ENABLED and MonsterAI.updateAll then
+      if shouldCollect() and MonsterAI.updateAll then
         pcall(function() MonsterAI.updateAll() end)
       end
     end
@@ -2308,42 +2316,32 @@ if UnifiedTick and UnifiedTick.register then
     interval = 30000,
     priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.IDLE or 10,
     callback = function()
+      if not shouldCollect() then return end
       if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
         pcall(function() MonsterAI.AutoTuner.runPass() end)
       end
-      -- Persist per-character metrics every autotune cycle
       pcall(function() MonsterAI.Metrics.persist() end)
     end
   })
 else
   -- Fallback to traditional macros if UnifiedTick not loaded
   macro(500, function()
-    if MonsterAI.COLLECT_ENABLED and MonsterAI.updateAll then
+    if shouldCollect() and MonsterAI.updateAll then
       pcall(function() MonsterAI.updateAll() end)
     end
   end)
   
   macro(30000, function()
+    if not shouldCollect() then return end
     if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
       pcall(function() MonsterAI.AutoTuner.runPass() end)
     end
-    -- Persist per-character metrics every autotune cycle
     pcall(function() MonsterAI.Metrics.persist() end)
   end)
 end
 
-schedule(2000, function()
-  local function emitBestTarget()
-    if EventBus and EventBus.emit then
-      local best = TBI and TBI.getBestTarget and TBI.getBestTarget()
-      if best then
-        EventBus.emit("targetbot:ai_recommendation", best.creature, best.priority, best.breakdown)
-      end
-    end
-    schedule(1000, emitBestTarget)  -- Every second
-  end
-  emitBestTarget()
-end)
+-- NOTE: TBI.getBestTarget emission is handled exclusively in monster_tbi.lua
+-- Removed duplicate schedule chain that was here (Phase 1.3 fix)
 
 -- Toggle to enable debug prints
 MonsterAI.DEBUG = MonsterAI.DEBUG or false

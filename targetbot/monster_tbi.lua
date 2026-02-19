@@ -305,11 +305,14 @@ if EventBus and EventBus.on then
     end
   end)
 
+  -- Canonical emitBestTarget chain (gated by TargetBot state to prevent CPU waste)
   schedule(2000, function()
     local function emit()
-      if EventBus and EventBus.emit then
-        local best = TBI.getBestTarget()
-        if best then EventBus.emit("targetbot:ai_recommendation", best.creature, best.priority, best.breakdown) end
+      if TargetBot and TargetBot.isOn and TargetBot.isOn() then
+        if EventBus and EventBus.emit then
+          local best = TBI.getBestTarget()
+          if best then EventBus.emit("targetbot:ai_recommendation", best.creature, best.priority, best.breakdown) end
+        end
       end
       schedule(1000, emit)
     end

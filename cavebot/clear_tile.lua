@@ -94,11 +94,13 @@ CaveBot.Extensions.ClearTile.setup = function()
         if c and c:isPlayer() then
 
           local candidates = {}
-          local tilesOnFloor = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
-          for _, tile in ipairs(tilesOnFloor) do
+          local adjacentTiles = getNearTiles(c:getPosition())
+          for _, tile in ipairs(adjacentTiles) do
             local tPos = tile:getPosition()
-            if getDistanceBetween(c:getPosition(), tPos) == 1 and tPos ~= pPos and tile:isWalkable() then
-              table.insert(candidates, tPos)
+            if tPos.x ~= pPos.x or tPos.y ~= pPos.y or tPos.z ~= pPos.z then
+              if tile:isWalkable() then
+                table.insert(candidates, tPos)
+              end
             end
           end
 

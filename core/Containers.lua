@@ -1139,20 +1139,30 @@ end
 local getClient = nExBot.Shared.getClient
 
 -- Request container queue sync (OpenTibiaBR feature for accuracy)
+-- Debounced to prevent excessive network calls
+local _lastSyncRequest = 0
+local SYNC_DEBOUNCE_MS = 500
 local function requestContainerSync()
+  local t = getNow()
+  if (t - _lastSyncRequest) < SYNC_DEBOUNCE_MS then return end
+  _lastSyncRequest = t
   local Client = getClient()
   if Client and Client.requestContainerQueue then
     pcall(function() Client.requestContainerQueue() end)
   end
 end
 
--- Refresh a single container (OpenTibiaBR feature)
+-- Refresh a single container (OpenTibiaBR feature) with per-container cooldown
+local _lastRefresh = {}  -- containerId -> timestamp
+local REFRESH_COOLDOWN_MS = 300
 local function refreshContainer(container)
   local Client = getClient()
-  if Client and Client.refreshContainer then
-    return pcall(function() Client.refreshContainer(container) end)
-  end
-  return false
+  if not (Client and Client.refreshContainer) then return false end
+  local cid = container:getId()
+  local t = getNow()
+  if _lastRefresh[cid] and (t - _lastRefresh[cid]) < REFRESH_COOLDOWN_MS then return false end
+  _lastRefresh[cid] = t
+  return pcall(function() Client.refreshContainer(container) end)
 end
 
 -- Check if using enhanced APIs
@@ -1527,30 +1537,25 @@ function ContainerOpener.markDirty(container)
     end
 end
 
--- Schedule delayed rescans to catch late-loaded items
+-- Schedule delayed rescans to catch late-loaded items (single scan instead of triple)
 local rescanTimers = {}
 function ContainerOpener.scheduleRescan(containerId)
     if not containerId or rescanTimers[containerId] then return end
     rescanTimers[containerId] = true
     
-    local delays = { 200, 500, 1000 }
-    for _, delay in ipairs(delays) do
-        schedule(delay, function()
-            local container = g_game.getContainer(containerId)
-            if container and ContainerOpener.isActive() then
-                ContainerScanner.scan(container)
-                ContainerScanner.handlePages(container, function(c)
-                    ContainerScanner.scan(c)
-                    if ContainerOpener.isProcessing then
-                        schedule(50, ContainerOpener.processNext)
-                    end
-                end)
-            end
-        end)
-    end
-    
-    schedule(1100, function()
+    -- Single delayed rescan at 500ms instead of 3 rescans at 200/500/1000ms
+    schedule(500, function()
         rescanTimers[containerId] = nil
+        local container = g_game.getContainer(containerId)
+        if container and ContainerOpener.isActive() then
+            ContainerScanner.scan(container)
+            ContainerScanner.handlePages(container, function(c)
+                ContainerScanner.scan(c)
+                if ContainerOpener.isProcessing then
+                    schedule(50, ContainerOpener.processNext)
+                end
+            end)
+        end
     end)
 end
 
@@ -2258,8 +2263,8 @@ local function openConfiguredContainer(itemId)
     return false
 end
 
--- Sorting macro - runs periodically to organize items
-sortingMacro = macro(150, function(m)
+-- Sorting macro - runs periodically to organize items (throttled to 300ms)
+sortingMacro = macro(300, function(m)
     -- Early exit if no features enabled
     if not config.sortEnabled and not config.forceOpen then
         m:setOff()

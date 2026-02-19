@@ -235,12 +235,12 @@ end
 -- Use UnifiedTick if available (reduces macro overhead)
 if UnifiedTick and UnifiedTick.register then
   UnifiedTick.register("alarms_health_mana", {
-    interval = 100,
+    interval = 500,
     priority = UnifiedTick.Priority and UnifiedTick.Priority.HIGH or 75,
     handler = healthManaAlarmHandler,
     group = "alarms"
   })
 else
   -- Fallback to traditional macro
-  macro(100, healthManaAlarmHandler)
+  macro(500, healthManaAlarmHandler)
 end

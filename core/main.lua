@@ -22,7 +22,7 @@ local label = blinkUI.blinkLabel
 local colors = {"#ff5555", "#ffaa00"}  -- alternate colors
 local idx = 1
 
-macro(300, function() -- change every 300ms
+macro(1000, function() -- cosmetic label blink (reduced from 300ms)
   idx = (idx % #colors) + 1
   label:setColor(colors[idx])
 end)

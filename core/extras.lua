@@ -204,26 +204,28 @@ if true then
     hotkey(settings.useAll, function()
         local wsadWalking = modules and modules.game_walking and modules.game_walking.wsadWalking
         if not wsadWalking then return end
-        for _, tile in pairs(g_map.getTiles(posz())) do
-            if distanceFromPlayer(tile:getPosition()) < 2 then
-                for _, item in pairs(tile:getItems()) do
-                    -- use
-                    if table.find(useId, item:getId()) then
-                        use(item)
-                        return
-                    elseif table.find(shovelId, item:getId()) then
-                        SafeCall.useWith(settings.shovel, item)
-                        return
-                    elseif table.find(ropeId, item:getId()) then
-                        SafeCall.useWith(settings.rope, item) 
-                        return
-                    elseif table.find(macheteId, item:getId()) then
-                        SafeCall.useWith(settings.machete, item)
-                        return
-                    elseif table.find(scytheId, item:getId()) then
-                        SafeCall.useWith(settings.scythe, item)
-                        return
-                    end
+        -- Only check adjacent tiles (distance < 2) instead of full floor scan
+        local playerPos = player:getPosition()
+        local nearTiles = getNearTiles(playerPos)
+        -- Also check tile under player
+        local playerTile = g_map.getTile(playerPos)
+        if playerTile then
+          for _, item in pairs(playerTile:getItems()) do
+            if table.find(useId, item:getId()) then return use(item)
+            elseif table.find(shovelId, item:getId()) then return SafeCall.useWith(settings.shovel, item)
+            elseif table.find(ropeId, item:getId()) then return SafeCall.useWith(settings.rope, item)
+            elseif table.find(macheteId, item:getId()) then return SafeCall.useWith(settings.machete, item)
+            elseif table.find(scytheId, item:getId()) then return SafeCall.useWith(settings.scythe, item)
+            end
+          end
+        end
+        for _, tile in pairs(nearTiles) do
+            for _, item in pairs(tile:getItems()) do
+                if table.find(useId, item:getId()) then return use(item)
+                elseif table.find(shovelId, item:getId()) then return SafeCall.useWith(settings.shovel, item)
+                elseif table.find(ropeId, item:getId()) then return SafeCall.useWith(settings.rope, item)
+                elseif table.find(macheteId, item:getId()) then return SafeCall.useWith(settings.machete, item)
+                elseif table.find(scytheId, item:getId()) then return SafeCall.useWith(settings.scythe, item)
                 end
             end
         end
@@ -357,44 +359,49 @@ if true then
       end
     end
     
-    for i, tile in ipairs(g_map.getTiles(playerZ)) do
-      local tilePos = tile:getPosition()
-      local posKey = getFailedPosKey(tilePos)
-      
-      -- Skip recently failed positions
-      if not failedPositions[posKey] then
-        local item = tile:getTopThing()
-        if item and item:isContainer() then
-          local itemId = item:getId()
-          local toolId = nil
-          
-          if hasKnife and knifeBodiesSet[itemId] then
-            toolId = 5908
-          elseif hasStake and stakeBodiesSet[itemId] then
-            toolId = 5942
-          elseif hasFishingRod and fishingBodiesSet[itemId] then
-            toolId = 3483
-          end
-          
-          if toolId then
-            -- Calculate distance
-            local dx = math.abs(tilePos.x - playerPos.x)
-            local dy = math.abs(tilePos.y - playerPos.y)
-            local dist = math.max(dx, dy)
-            
-            if dist < bestDistance then
-              if canReachTile(tilePos) then
-                bestCandidate = { item = item, toolId = toolId, pos = tilePos }
-                bestDistance = dist
-                if dist <= 1 then break end  -- Found adjacent, use immediately
-              else
-                -- Mark as failed to avoid rechecking
-                failedPositions[posKey] = currentTime + FAILED_POS_TTL
+    -- Scan only tiles within loot/skin range instead of entire floor
+    -- Use a radius scan centered on player (max skin reach is 7 sqm)
+    local SKIN_RADIUS = 7
+    for dx = -SKIN_RADIUS, SKIN_RADIUS do
+      for dy = -SKIN_RADIUS, SKIN_RADIUS do
+        local tilePos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerZ}
+        local posKey = getFailedPosKey(tilePos)
+        
+        -- Skip recently failed positions
+        if not failedPositions[posKey] then
+          local tile = g_map.getTile(tilePos)
+          if tile then
+            local item = tile:getTopThing()
+            if item and item:isContainer() then
+              local itemId = item:getId()
+              local toolId = nil
+              
+              if hasKnife and knifeBodiesSet[itemId] then
+                toolId = 5908
+              elseif hasStake and stakeBodiesSet[itemId] then
+                toolId = 5942
+              elseif hasFishingRod and fishingBodiesSet[itemId] then
+                toolId = 3483
+              end
+              
+              if toolId then
+                local dist = math.max(math.abs(dx), math.abs(dy))
+                
+                if dist < bestDistance then
+                  if canReachTile(tilePos) then
+                    bestCandidate = { item = item, toolId = toolId, pos = tilePos }
+                    bestDistance = dist
+                    if dist <= 1 then break end  -- Found adjacent, use immediately
+                  else
+                    failedPositions[posKey] = currentTime + FAILED_POS_TTL
+                  end
+                end
               end
             end
           end
         end
       end
+      if bestCandidate and bestDistance <= 1 then break end
     end
     
     if bestCandidate then
@@ -684,13 +691,17 @@ if true then
     if keys ~= mwHot and keys ~= wgHot then return end
 
     if (hold - now) < -1000 then
-      candidates = {}
-      for i, tile in ipairs(g_map.getTiles(posz())) do
-        local text = tile:getText()
-        if text:find("HOLD") then
-          tile:setText("")
+      -- Clear held positions from candidate list instead of scanning entire floor
+      for i, cpos in ipairs(candidates) do
+        local tile = g_map.getTile(cpos)
+        if tile then
+          local text = tile:getText()
+          if text:find("HOLD") then
+            tile:setText("")
+          end
         end
       end
+      candidates = {}
     end
   end)
 end

@@ -1750,25 +1750,6 @@ CaveBot.gotoNextWaypointInRangeLegacy = function()
   return false
 end
 
-local function reverseTable(t, max)
-  local reversedTable = {}
-  local itemCount = max or #t
-  for i, v in ipairs(t) do
-      reversedTable[itemCount + 1 - i] = v
-  end
-  return reversedTable
-end
-
-function rpairs(t)
-  test()
-	return function(t, i)
-		i = i - 1
-		if i ~= 0 then
-			return i, t[i]
-		end
-	end, t, #t + 1
-end
-
 CaveBot.gotoFirstPreviousReachableWaypoint = function()
   local currentAction = ui.list:getFocusedChild()
   local currentIndex = ui.list:getChildIndex(currentAction)

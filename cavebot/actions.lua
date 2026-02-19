@@ -9,8 +9,8 @@ local nextTile = nil
 
 local noPath = 0
 
--- Pre-computed direction lookup table for optimal performance
-local DIR_MOD_LOOKUP = {
+-- Use canonical direction table from Directions module (DRY)
+local DIR_MOD_LOOKUP = (Directions and Directions.DIR_TO_OFFSET) or (PathUtils and PathUtils.DIR_TO_OFFSET) or {
     [0] = { x = 0, y = -1 },   -- North
     [1] = { x = 1, y = 0 },    -- East
     [2] = { x = 0, y = 1 },    -- South
@@ -80,9 +80,30 @@ local function breakFurniture(destPos)
   local playerPos = player:getPosition()
   local playerZ = playerPos.z
   local Client = getClient()
-  local tiles = (Client and Client.getTiles) and Client.getTiles(playerZ) or (g_map and g_map.getTiles(playerZ)) or {}
   
-  for i, tile in ipairs(tiles) do
+  -- Scan only tiles in a radius around player and destination instead of entire floor
+  local scannedSet = {}
+  local tilesToCheck = {}
+  
+  local function addTilesAround(centerPos, radius)
+    for dx = -radius, radius do
+      for dy = -radius, radius do
+        local checkPos = {x = centerPos.x + dx, y = centerPos.y + dy, z = playerZ}
+        local key = checkPos.x .. "," .. checkPos.y
+        if not scannedSet[key] then
+          scannedSet[key] = true
+          local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
+          if tile then tilesToCheck[#tilesToCheck+1] = tile end
+        end
+      end
+    end
+  end
+  
+  -- Check around player (walking range) and around destination
+  addTilesAround(playerPos, 7)
+  if destPos then addTilesAround(destPos, 3) end
+  
+  for i, tile in ipairs(tilesToCheck) do
     local topThing = tile:getTopThing()
     if topThing then
       local thingId = topThing:getId()
@@ -389,17 +410,8 @@ local WALK_STRATEGY = {
   FAILED = 3
 }
 
--- Direction offset lookup
-local DIR_OFFSET = {
-  [0] = { x = 0, y = -1 },   -- North
-  [1] = { x = 1, y = 0 },    -- East
-  [2] = { x = 0, y = 1 },    -- South
-  [3] = { x = -1, y = 0 },   -- West
-  [4] = { x = 1, y = -1 },   -- NorthEast
-  [5] = { x = 1, y = 1 },    -- SouthEast
-  [6] = { x = -1, y = 1 },   -- SouthWest
-  [7] = { x = -1, y = -1 }   -- NorthWest
-}
+-- Direction offset lookup (reuse canonical table)
+local DIR_OFFSET = DIR_MOD_LOOKUP
 
 -- Check if path is blocked by attackable monster
 local function getBlockingMonster(playerPos, destPos, maxDist)

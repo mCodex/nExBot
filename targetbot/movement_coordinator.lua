@@ -130,6 +130,7 @@ local scalingCache = {
 MovementCoordinator.MonsterCache = MovementCoordinator.MonsterCache or {
   monsters = {}, -- map id -> creature
   lastUpdate = 0,
+  MAX_SIZE = 200,  -- Prevent unbounded growth
   stats = { queries = 0, hits = 0, misses = 0, lastQuery = 0 }
 }
 
@@ -138,11 +139,44 @@ function MovementCoordinator.MonsterCache.getStats()
   return MovementCoordinator.MonsterCache.stats
 end
 
+-- Periodic cleanup of stale/dead entries (runs every 5s)
+local _lastCacheCleanup = 0
+local function cleanupMonsterCache()
+  local cache = MovementCoordinator.MonsterCache
+  local count = 0
+  for id, c in pairs(cache.monsters) do
+    count = count + 1
+    -- Remove dead, removed, or invalid creatures
+    local valid = false
+    pcall(function()
+      valid = c and not c:isDead() and not c:isRemoved() and c:isMonster()
+    end)
+    if not valid then
+      cache.monsters[id] = nil
+      count = count - 1
+    end
+  end
+  -- Hard cap: if still too many, remove oldest by iterating
+  if count > cache.MAX_SIZE then
+    local toRemove = count - cache.MAX_SIZE
+    for id, _ in pairs(cache.monsters) do
+      if toRemove <= 0 then break end
+      cache.monsters[id] = nil
+      toRemove = toRemove - 1
+    end
+  end
+end
+
 local function updateMonsterCacheFromCreature(creature)
   if not creature then return end
   local id = creature:getId() or tostring(creature)
   MovementCoordinator.MonsterCache.monsters[id] = creature
   MovementCoordinator.MonsterCache.lastUpdate = now
+  -- Periodic cleanup every 5 seconds during cache writes
+  if (now - _lastCacheCleanup) > 5000 then
+    _lastCacheCleanup = now
+    cleanupMonsterCache()
+  end
 end
 
 local function removeCreatureFromCache(creature)

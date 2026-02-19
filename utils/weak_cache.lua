@@ -82,22 +82,37 @@ function WeakCache.createLRU(maxSize, ttl)
   local nowMs = nExBot.Shared.nowMs
   
   -- Remove oldest entry
-  local function evict()
-    if #cache.order > 0 then
-      local oldestKey = table.remove(cache.order, 1)
-      cache.data[oldestKey] = nil
+  -- Move key to end (most recent) - O(1) with index map
+  local orderIndex = {}  -- key -> position in cache.order
+  
+  local function touch(key)
+    local pos = orderIndex[key]
+    if pos then
+      -- Remove from current position by shifting elements down
+      for i = pos, #cache.order - 1 do
+        cache.order[i] = cache.order[i + 1]
+        orderIndex[cache.order[i]] = i
+      end
+      cache.order[#cache.order] = nil
     end
+    -- Append to end
+    local newPos = #cache.order + 1
+    cache.order[newPos] = key
+    orderIndex[key] = newPos
   end
   
-  -- Move key to end (most recent)
-  local function touch(key)
-    for i = 1, #cache.order do
-      if cache.order[i] == key then
-        table.remove(cache.order, i)
-        break
+  local function evict()
+    if #cache.order > 0 then
+      local oldestKey = cache.order[1]
+      -- Shift all elements down
+      for i = 1, #cache.order - 1 do
+        cache.order[i] = cache.order[i + 1]
+        orderIndex[cache.order[i]] = i
       end
+      cache.order[#cache.order] = nil
+      orderIndex[oldestKey] = nil
+      cache.data[oldestKey] = nil
     end
-    cache.order[#cache.order + 1] = key
   end
   
   -- Get value from cache

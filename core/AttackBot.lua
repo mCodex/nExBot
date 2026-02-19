@@ -1400,16 +1400,19 @@ end
 -- should return valid targets number (int) and position
 function getBestTileByPattern(pattern, minHp, maxHp, safePattern, monsterNamesTable)
   local Client = getClient()
-  local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
+  local playerPos = pos()
   local targetTile = {amount=0,pos=false}
 
-  for i, tile in pairs(tiles) do
-    local tPos = tile:getPosition()
-    local distance = distanceFromPlayer(tPos)
-    if tile:canShoot() and tile:isWalkable() and distance < 4 then
-      local amount = getMonstersInArea(2, tPos, pattern, minHp, maxHp, safePattern, monsterNamesTable)
-      if amount > targetTile.amount then
-        targetTile = {amount=amount,pos=tPos}
+  -- Only scan tiles within shootable range (max 3 sqm) instead of entire floor
+  for dx = -3, 3 do
+    for dy = -3, 3 do
+      local tPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
+      local tile = (Client and Client.getTile) and Client.getTile(tPos) or (g_map and g_map.getTile(tPos))
+      if tile and tile:canShoot() and tile:isWalkable() then
+        local amount = getMonstersInArea(2, tPos, pattern, minHp, maxHp, safePattern, monsterNamesTable)
+        if amount > targetTile.amount then
+          targetTile = {amount=amount,pos=tPos}
+        end
       end
     end
   end
