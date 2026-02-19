@@ -381,6 +381,8 @@ if EventBus then
 
   EventBus.on("player:move", function(newPos, oldPos)
     if tbOff() then return end
+    -- FLOOR CHANGE OPTIMIZATION: Skip recalc on z-change; no valid targets on new floor yet.
+    if newPos and oldPos and newPos.z ~= oldPos.z then return end
     -- Player movement changes proximity; trigger recalculation
     debouncedInvalidateAndRecalc()
   end, 10)
@@ -765,20 +767,23 @@ if EventBus then
   -- Player moves - need to recalculate paths
   EventBus.on("player:move", function(newPos, oldPos)
     if tbOff() then return end
-    -- Invalidate all paths on player movement
+    
+    -- FLOOR CHANGE OPTIMIZATION: On z-change, old-floor creatures are irrelevant.
+    -- Skip the expensive iteration; just invalidate + clear skip list.
+    if newPos and oldPos and newPos.z ~= oldPos.z then
+      invalidateCache()
+      if AttackStateMachine and AttackStateMachine.clearSkipList then
+        AttackStateMachine.clearSkipList()
+      end
+      return
+    end
+    
+    -- Same-floor move: invalidate paths so distances are recalculated
     for id, data in pairs(CreatureCache.monsters) do
       data.path = nil
       data.pathTime = nil
     end
     invalidateCache()
-    
-    -- v5.0: Clear path-blocked skip list on significant movement (floor change)
-    if newPos and oldPos and newPos.z ~= oldPos.z then
-      -- Floor changed - clear skip list
-      if AttackStateMachine and AttackStateMachine.clearSkipList then
-        AttackStateMachine.clearSkipList()
-      end
-    end
   end, 60)
   
   -- Target changes
@@ -1137,6 +1142,8 @@ if EventBus then
   -- Listen for player movement - re-check chase mode
   EventBus.on("player:move", function(newPos, oldPos)
     if tbOff() then return end
+    -- FLOOR CHANGE OPTIMIZATION: No target to chase on new floor yet.
+    if newPos and oldPos and newPos.z ~= oldPos.z then return end
     if ChaseModeEnforcer.enabled then
       pcall(function()
         enforceChaseModeNow()

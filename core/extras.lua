@@ -8,7 +8,7 @@ end
 local settings = storage[panelName]
 
 -- basic elements
-extrasWindow = UI.createWindow('ExtrasWindow', rootWidget)
+extrasWindow = UI.createWindow('ExtrasWindow')
 extrasWindow:hide()
 extrasWindow.closeButton.onClick = function(widget)
   extrasWindow:hide()

@@ -616,16 +616,17 @@ end
 
 --- AutoWalk to a destination via the native autowalk system.
 function PathStrategy.autoWalk(dest, maxSteps, opts)
+  maxSteps = maxSteps or DEFAULT_MAX_STEPS
   opts = opts or {}
   local adapter = acl()
   if adapter and adapter.game and adapter.game.autoWalk then
     return adapter.game.autoWalk(dest, maxSteps, opts)
   end
   if autoWalk then
-    return autoWalk(dest, maxSteps or DEFAULT_MAX_STEPS, opts)
+    return autoWalk(dest, maxSteps, opts)
   end
   if g_game and g_game.autoWalk then
-    return g_game.autoWalk(dest, maxSteps or DEFAULT_MAX_STEPS)
+    return g_game.autoWalk(dest, maxSteps)
   end
 end
 
@@ -683,5 +684,5 @@ end
 -- GLOBAL EXPORT
 -- ============================================================================
 
-_G.PathStrategy = PathStrategy
+if _G then _G.PathStrategy = PathStrategy end
 return PathStrategy

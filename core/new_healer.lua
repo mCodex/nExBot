@@ -719,8 +719,8 @@ friendHealerMacro = macro(100, function()
         return 
     end
 
-    local minHp = config.settings[8].value
-    local minMp = config.settings[9].value
+    local minHp = config.settings[8] and config.settings[8].value or 50
+    local minMp = config.settings[9] and config.settings[9].value or 50
 
     -- Safety: Don't heal friends if self needs healing
     if hppercent() <= minHp or manapercent() <= minMp then return end

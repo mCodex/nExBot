@@ -18,8 +18,14 @@ end
 
 local config = storage[panelName]
 
-pcall(function() g_ui.importStyle("/core/depositer_config.otui") end)
-depositerPanel = UI.createWindow('DepositerPanel', rootWidget)
+-- Ensure style is loaded (batch loader uses full path, manual fallback for safety)
+if g_ui and g_ui.importStyle then
+  pcall(function()
+    local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
+    g_ui.importStyle("/bot/" .. configName .. "/core/depositer_config.otui")
+  end)
+end
+depositerPanel = UI.createWindow('DepositerPanel')
 depositerPanel:hide()
 -- basic one
 depositerPanel.CloseButton.onClick = function()

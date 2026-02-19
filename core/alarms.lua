@@ -195,7 +195,7 @@ local function healthManaAlarmHandler()
   end
 
   if config.lowMana.enabled then
-    if hppercent() < config.lowMana.value then
+    if manapercent() < config.lowMana.value then
       return alarm("/sounds/Low_Mana.ogg", "Low Mana!")
     end
   end
@@ -235,12 +235,12 @@ end
 -- Use UnifiedTick if available (reduces macro overhead)
 if UnifiedTick and UnifiedTick.register then
   UnifiedTick.register("alarms_health_mana", {
-    interval = 500,
+    interval = 250,
     priority = UnifiedTick.Priority and UnifiedTick.Priority.HIGH or 75,
     handler = healthManaAlarmHandler,
     group = "alarms"
   })
 else
   -- Fallback to traditional macro
-  macro(500, healthManaAlarmHandler)
+  macro(250, healthManaAlarmHandler)
 end

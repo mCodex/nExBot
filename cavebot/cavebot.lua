@@ -635,7 +635,7 @@ local function executeRecovery()
   -- This is the key improvement for relog scenarios
   if attempt <= 3 and playerPos and findNearestGlobalWaypoint then
     local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
-      maxCandidates = 30,
+      maxCandidates = 15,
       preferCurrentFloor = true,
       searchAllFloors = false,
       excludeCompletedFloorChange = true  -- Don't select recently completed floor-change waypoints
@@ -654,7 +654,7 @@ local function executeRecovery()
   -- Strategy 4: EXTENDED GLOBAL SEARCH with cross-floor support
   if attempt <= 4 and playerPos and findNearestGlobalWaypoint then
     local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
-      maxCandidates = 50,
+      maxCandidates = 25,
       preferCurrentFloor = true,
       searchAllFloors = true,  -- Check adjacent floors
       excludeCompletedFloorChange = true
@@ -928,22 +928,26 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
         safeResetWalking()
         -- Do NOT call resetWaypointEngine or findNearestGlobalWaypoint!
       else
-        -- Unintended floor change - do the full reset and recovery
+        -- Unintended floor change - defer recovery to avoid blocking the macro tick
         safeResetWalking()
         resetWaypointEngine()
-        if resetStartupCheck then resetStartupCheck() end
-        if findNearestGlobalWaypoint then
-          local maxDist = storage.extras.gotoMaxDistance or 50
-          local child, idx = findNearestGlobalWaypoint(playerPos, maxDist, {
-            maxCandidates = 25,
-            preferCurrentFloor = true,
-            searchAllFloors = false,
-            excludeCompletedFloorChange = true  -- NEW: Don't select recently completed waypoints
-          })
-          if child then
-            focusWaypointBefore(child, idx)
+        -- Schedule waypoint recovery asynchronously to prevent UI freeze
+        schedule(100, function()
+          if findNearestGlobalWaypoint then
+            local pp = player:getPosition()
+            if not pp then return end
+            local maxDist = storage.extras.gotoMaxDistance or 50
+            local child, idx = findNearestGlobalWaypoint(pp, maxDist, {
+              maxCandidates = 10,
+              preferCurrentFloor = true,
+              searchAllFloors = false,
+              excludeCompletedFloorChange = true
+            })
+            if child then
+              focusWaypointBefore(child, idx)
+            end
           end
-        end
+        end)
       end
     end
     lastPlayerFloor = playerPos.z
@@ -1537,7 +1541,7 @@ checkStartupWaypoint = function()
   -- Current waypoint not reachable - find nearest globally
   local maxDist = storage.extras.gotoMaxDistance or 50
   local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
-    maxCandidates = 25,
+    maxCandidates = 10,
     preferCurrentFloor = true,
     searchAllFloors = false,
     excludeCompletedFloorChange = true  -- Don't select recently completed floor-change waypoints
@@ -1552,7 +1556,7 @@ checkStartupWaypoint = function()
   
   -- Extended search: larger distance, more candidates
   local extendedChild, extendedIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
-    maxCandidates = 40,
+    maxCandidates = 15,
     preferCurrentFloor = true,
     searchAllFloors = true,  -- Try adjacent floors
     excludeCompletedFloorChange = true
@@ -1684,7 +1688,7 @@ CaveBot.requestWaypointRecovery = function(reason)
 
   local maxDist = storage.extras.gotoMaxDistance or 50
   local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
-    maxCandidates = 25,
+    maxCandidates = 10,
     preferCurrentFloor = true,
     searchAllFloors = false,
     excludeCompletedFloorChange = true

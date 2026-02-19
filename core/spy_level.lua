@@ -10,7 +10,10 @@ local lockedLevel = pos().z
 
 onPlayerPositionChange(function(newPos, oldPos)
     lockedLevel = pos().z
-    modules.game_interface.getMapPanel():unlockVisibleFloor()
+    -- Only call unlockVisibleFloor on actual floor changes to avoid UI freezes
+    if not oldPos or newPos.z ~= oldPos.z then
+        modules.game_interface.getMapPanel():unlockVisibleFloor()
+    end
 end)
 
 onKeyPress(function(keys)

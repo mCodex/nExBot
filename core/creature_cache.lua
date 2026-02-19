@@ -592,7 +592,7 @@ function CreatureCache.getStats()
     evictions = cache.stats.evictions,
     cleanups = cache.stats.cleanups,
     hitRate = total > 0 and (cache.stats.hits / total) or 0,
-    size = #cache.accessOrder,
+    size = cache.lruSize,
     maxSize = CreatureCache.CONFIG.MAX_SIZE,
     monstersCount = cache.monsters and #cache.monsters or 0,
     playersCount = cache.players and #cache.players or 0

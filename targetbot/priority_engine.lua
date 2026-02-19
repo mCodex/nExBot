@@ -504,20 +504,21 @@ end
 
 -- 7. Speed / walk score (from OTClient API)
 local function mobilityScore(creature, config)
+  local function sc(obj, method, default) return SC.call and SC.call(obj, method, default) or default end
   local s = 0
-  local speed = SC.call and SC.call(creature, "getSpeed", 0) or 0
+  local speed = sc(creature, "getSpeed", 0)
   if speed > 0 then
     local pp = getPlayer()
-    local pSpeed = pp and (SC.call and SC.call(pp, "getSpeed", 220) or 220) or 220
+    local pSpeed = pp and sc(pp, "getSpeed", 220) or 220
     local ratio = speed / math.max(1, pSpeed)
     if ratio < 0.6 then s = s + 8
     elseif ratio < 0.8 then s = s + 4
     elseif ratio > 1.3 and config.chase then s = s - 5 end
   end
-  local walking = SC.call and SC.call(creature, "isWalking", false) or false
+  local walking = sc(creature, "isWalking", false)
   if not walking then s = s + 3
   else
-    local ticks = SC.call and SC.call(creature, "getStepTicksLeft", 0) or 0
+    local ticks = sc(creature, "getStepTicksLeft", 0)
     if ticks > 200 then s = s - 2 end
   end
   return s

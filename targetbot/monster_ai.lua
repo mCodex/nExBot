@@ -750,13 +750,19 @@ function MonsterAI.Metrics.loadPersisted()
     for nameLower, stats in pairs(savedTypes) do
       local existing = MonsterAI.Telemetry.typeStats[nameLower]
       if existing then
-        -- Merge: accumulate counters, keep EWMA averages from saved
-        existing.sampleCount      = (existing.sampleCount or 0) + (stats.sampleCount or 0)
-        existing.killCount        = (existing.killCount or 0) + (stats.killCount or 0)
-        existing.totalDamageDealt = (existing.totalDamageDealt or 0) + (stats.totalDamageDealt or 0)
-        existing.totalKillTime    = (existing.totalKillTime or 0) + (stats.totalKillTime or 0)
-        existing.waveAttackCount  = (existing.waveAttackCount or 0) + (stats.waveAttackCount or 0)
+        -- Merge: accumulate counters, coerce loaded values to numbers
+        existing.sampleCount      = (existing.sampleCount or 0) + (tonumber(stats.sampleCount) or 0)
+        existing.killCount        = (existing.killCount or 0) + (tonumber(stats.killCount) or 0)
+        existing.totalDamageDealt = (existing.totalDamageDealt or 0) + (tonumber(stats.totalDamageDealt) or 0)
+        existing.totalKillTime    = (existing.totalKillTime or 0) + (tonumber(stats.totalKillTime) or 0)
+        existing.waveAttackCount  = (existing.waveAttackCount or 0) + (tonumber(stats.waveAttackCount) or 0)
       else
+        -- Normalize numeric fields before assigning to prevent arithmetic errors
+        stats.sampleCount      = tonumber(stats.sampleCount) or 0
+        stats.killCount        = tonumber(stats.killCount) or 0
+        stats.totalDamageDealt = tonumber(stats.totalDamageDealt) or 0
+        stats.totalKillTime    = tonumber(stats.totalKillTime) or 0
+        stats.waveAttackCount  = tonumber(stats.waveAttackCount) or 0
         MonsterAI.Telemetry.typeStats[nameLower] = stats
       end
     end
@@ -766,6 +772,7 @@ end
 -- Save current cumulative metrics to per-character storage
 function MonsterAI.Metrics.persist()
   if not UnifiedStorage or not UnifiedStorage.set then return end
+  if not UnifiedStorage.isReady or not UnifiedStorage.isReady() then return end
 
   MonsterAI.Metrics.collect()  -- refresh aggregate first
   local m = MonsterAI.Metrics.aggregate
