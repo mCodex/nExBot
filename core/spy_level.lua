@@ -27,10 +27,13 @@ setDefaultTab("Tools")
 -- script
 
 local lockedLevel = pos().z
+local userLocked = false
 
 onPlayerPositionChange(function(newPos, oldPos)
     if not spyLevelEnabled then return end
-    lockedLevel = pos().z
+    if not userLocked then
+        lockedLevel = pos().z
+    end
     -- Only call unlockVisibleFloor on actual floor changes to avoid UI freezes
     if not oldPos or newPos.z ~= oldPos.z then
         modules.game_interface.getMapPanel():unlockVisibleFloor()
@@ -44,10 +47,12 @@ onKeyPress(function(keys)
     end
     if not spyLevelEnabled then return end
     if keys == keyDown then
+        userLocked = true
         lockedLevel = lockedLevel + 1
         modules.game_interface.getMapPanel():lockVisibleFloor(lockedLevel)
     elseif keys == keyUp then
-        lockedLevel = lockedLevel - 1
-        modules.game_interface.getMapPanel():lockVisibleFloor(lockedLevel)
+        userLocked = false
+        lockedLevel = pos().z
+        modules.game_interface.getMapPanel():unlockVisibleFloor()
     end
 end)

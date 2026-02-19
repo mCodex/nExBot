@@ -131,15 +131,77 @@ end
 
 local SC = SafeCreature or {}
 
-local function safeGetId(creature)        return SC.getId and SC.getId(creature) or nil end
-local function safeIsMonster(creature)     return SC.isMonster and SC.isMonster(creature) or false end
-local function safeIsPlayer(creature)      return SC.isPlayer and SC.isPlayer(creature) or false end
-local function safeIsNpc(creature)         return SC.isNpc and SC.isNpc(creature) or false end
-local function safeIsDead(creature)        return SC.isDead and SC.isDead(creature) or true end
-local function safeIsRemoved(creature)     return SC.isRemoved and SC.isRemoved(creature) or true end
-local function safeGetPosition(creature)   return SC.getPosition and SC.getPosition(creature) or nil end
-local function safeGetName(creature)       return SC.getName and SC.getName(creature) or nil end
-local function safeGetHealthPercent(creature) return SC.getHealthPercent and SC.getHealthPercent(creature) or 100 end
+local function safeGetId(creature)
+  if SC and SC.getId then
+    local ok, result = pcall(SC.getId, creature)
+    return ok and result or nil
+  end
+  return nil
+end
+
+local function safeIsMonster(creature)
+  if SC and SC.isMonster then
+    local ok, result = pcall(SC.isMonster, creature)
+    return ok and result or false
+  end
+  return false
+end
+
+local function safeIsPlayer(creature)
+  if SC and SC.isPlayer then
+    local ok, result = pcall(SC.isPlayer, creature)
+    return ok and result or false
+  end
+  return false
+end
+
+local function safeIsNpc(creature)
+  if SC and SC.isNpc then
+    local ok, result = pcall(SC.isNpc, creature)
+    return ok and result or false
+  end
+  return false
+end
+
+local function safeIsDead(creature)
+  if SC and SC.isDead then
+    local ok, result = pcall(SC.isDead, creature)
+    return ok and result or true
+  end
+  return true
+end
+
+local function safeIsRemoved(creature)
+  if SC and SC.isRemoved then
+    local ok, result = pcall(SC.isRemoved, creature)
+    return ok and result or true
+  end
+  return true
+end
+
+local function safeGetPosition(creature)
+  if SC and SC.getPosition then
+    local ok, result = pcall(SC.getPosition, creature)
+    return ok and result or nil
+  end
+  return nil
+end
+
+local function safeGetName(creature)
+  if SC and SC.getName then
+    local ok, result = pcall(SC.getName, creature)
+    return ok and result or nil
+  end
+  return nil
+end
+
+local function safeGetHealthPercent(creature)
+  if SC and SC.getHealthPercent then
+    local ok, result = pcall(SC.getHealthPercent, creature)
+    return ok and result or 100
+  end
+  return 100
+end
 
 -- Check if creature is valid and alive
 local function isValidCreature(creature)

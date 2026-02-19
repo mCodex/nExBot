@@ -273,8 +273,38 @@ if onCreatureHealthPercentChange then
 end
 
 -- Player events
+-- Z-change guard: short cooldown window to avoid heavy work during floor transitions
+nExBot = nExBot or {}
+if not nExBot.ZChangeGuard then
+  nExBot.ZChangeGuard = {
+    cooldown = 300,
+    lastChange = 0,
+    fromZ = nil,
+    toZ = nil
+  }
+
+  function nExBot.ZChangeGuard.set(oldPos, newPos)
+    if not oldPos or not newPos then return end
+    local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
+    nExBot.ZChangeGuard.lastChange = nowt
+    nExBot.ZChangeGuard.fromZ = oldPos.z
+    nExBot.ZChangeGuard.toZ = newPos.z
+  end
+
+  function nExBot.ZChangeGuard.isActive()
+    local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
+    return (nowt - (nExBot.ZChangeGuard.lastChange or 0)) < (nExBot.ZChangeGuard.cooldown or 300)
+  end
+end
+
 if onPlayerPositionChange then
   onPlayerPositionChange(function(newPos, oldPos)
+    if newPos and oldPos and newPos.z ~= oldPos.z then
+      if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.set then
+        nExBot.ZChangeGuard.set(oldPos, newPos)
+      end
+      EventBus.emit("player:z_change", newPos, oldPos)
+    end
     EventBus.emit("player:move", newPos, oldPos)
   end)
 end

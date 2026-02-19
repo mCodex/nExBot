@@ -726,6 +726,9 @@ if true then
 
   onPlayerPositionChange(function(x,y)
     if not settings.checkPlayer then return end
+    if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+      return
+    end
     if x.z ~= y.z then
       schedule(20, function() checkPlayers() end)
     end

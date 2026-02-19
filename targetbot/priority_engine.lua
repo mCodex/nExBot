@@ -59,11 +59,45 @@ local getClient = nExBot.Shared.getClient
 -- Delegate to SafeCreature for safe accessors (DRY)
 local SC = SafeCreature or {}
 
-local function cId(c)   return SC.getId and SC.getId(c) or nil end
-local function cHp(c)   return SC.getHealthPercent and SC.getHealthPercent(c) or 100 end
-local function cName(c) return SC.getName and SC.getName(c) or "?" end
-local function cPos(c)  return SC.getPosition and SC.getPosition(c) or nil end
-local function cDead(c) return SC.isDead and SC.isDead(c) or true end
+local function cId(c)
+  if SC and SC.getId then
+    local ok, result = pcall(SC.getId, c)
+    return ok and result or nil
+  end
+  return nil
+end
+
+local function cHp(c)
+  if SC and SC.getHealthPercent then
+    local ok, result = pcall(SC.getHealthPercent, c)
+    return ok and result or 100
+  end
+  return 100
+end
+
+local function cName(c)
+  if SC and SC.getName then
+    local ok, result = pcall(SC.getName, c)
+    return ok and result or "?"
+  end
+  return "?"
+end
+
+local function cPos(c)
+  if SC and SC.getPosition then
+    local ok, result = pcall(SC.getPosition, c)
+    return ok and result or nil
+  end
+  return nil
+end
+
+local function cDead(c)
+  if SC and SC.isDead then
+    local ok, result = pcall(SC.isDead, c)
+    return ok and result or false
+  end
+  return false
+end
 
 local player
 local function getPlayer()

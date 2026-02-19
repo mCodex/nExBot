@@ -970,6 +970,17 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   -- Update player position tracking
   hasPlayerMoved()
 
+  -- Z-change guard: skip heavy processing during manual floor transitions
+  local zGuard = nExBot and nExBot.ZChangeGuard
+  if zGuard and zGuard.isActive and zGuard.isActive() then
+    local pp = player and player:getPosition()
+    local intended = CaveBot.isFloorChangeIntended and pp and CaveBot.isFloorChangeIntended(pp.z)
+    if not intended then
+      if pp then lastPlayerFloor = pp.z end
+      return
+    end
+  end
+
   -- Guard against unintended floor changes: realign to nearest waypoint on current floor
   -- BUT: If the floor change was intended (from a floor-change waypoint), don't reset!
   local playerPos = player:getPosition()
@@ -1008,8 +1019,13 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
         floorChangeRecovery.pendingFrom = lastPlayerFloor
 
         -- Manual z-change: skip heavy recovery scans when not walking to a waypoint
-        if walkState and walkState.isWalkingToWaypoint then
+        if walkState and walkState.isWalkingToWaypoint and player and player:isWalking() then
           scheduleFloorChangeRecovery()
+        else
+          if walkState then
+            walkState.isWalkingToWaypoint = false
+            walkState.targetPos = nil
+          end
         end
       end
     end

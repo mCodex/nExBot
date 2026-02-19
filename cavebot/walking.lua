@@ -63,6 +63,12 @@ local getClient = nExBot.Shared.getClient
 local expectedFloor = nil
 local lastWalkZ = nil
 
+-- Floor change tile cache (for resetWalking)
+local FloorChangeCache = {
+  tiles = {},
+  lastUpdate = 0,
+}
+
 -- Floor-change handling throttle (reduce repeated work on rapid z-changes)
 local FLOOR_CHANGE_HANDLE_DEFAULT = 200  -- ms, internal safe default
 local floorChangeThrottle = {
@@ -84,7 +90,9 @@ end
 local function resetFloorChangeCacheThrottled()
   local delay = getFloorChangeHandleDelay()
   if now - floorChangeThrottle.lastCacheReset >= delay then
-    FloorChangeCache.tiles = {}
+    if FloorChangeCache then
+      FloorChangeCache.tiles = {}
+    end
     floorChangeThrottle.lastCacheReset = now
   end
 end
@@ -157,11 +165,6 @@ end
 -- PATH SMOOTHING CONSTANTS (For 40%+ accuracy improvement)
 -- ============================================================================
 
--- Floor change tile cache (for resetWalking)
-local FloorChangeCache = {
-  tiles = {},
-  lastUpdate = 0,
-}
 
 local PATH_SMOOTHING = {
   -- Direction consistency tracking
@@ -1314,6 +1317,17 @@ onPlayerPositionChange(function(newPos, oldPos)
     end
     
     return  -- Done - no warning, no step-back
+  end
+
+  -- Z-change guard: avoid heavy step-back logic during manual transitions
+  if nExBot and nExBot.ZChangeGuard and nExBot.ZChangeGuard.isActive and nExBot.ZChangeGuard.isActive() then
+    lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
+    resetStepBackAttempts()
+    resetFloorChangeCacheThrottled()
+    if CaveBot.recordFloorChange then
+      CaveBot.recordFloorChange(oldPos.z, newPos.z, nil)
+    end
+    return
   end
   
   -- ACCIDENTAL floor change - not triggered by a floor-change waypoint

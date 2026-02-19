@@ -551,6 +551,13 @@ function PathStrategy.safeStepCount(path, startPos, fromIdx)
   local safe  = 0
   local isFC  = PathUtils and PathUtils.isFloorChangeTile or function() return false end
 
+  for i = 1, math.max(0, fromIdx - 1) do
+    local off = dirOffset(path[i])
+    if not off then break end
+    probe = applyOff(probe, off)
+    if isFC(probe) then break end
+  end
+
   for i = fromIdx, #path do
     local off = dirOffset(path[i])
     if not off then break end
