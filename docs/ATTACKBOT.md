@@ -175,11 +175,11 @@ These metrics feed into the Hunt Analyzer's efficiency calculations (attacks per
 
 ### Attack not firing
 
-1. Is AttackBot **enabled**?
-2. Is there a valid target (TargetBot must be attacking something)?
-3. Is the spell on cooldown?
-4. Is mana sufficient for the spell?
-5. Are monster count conditions met?
+1. Confirm AttackBot is **enabled**
+2. Verify a valid target exists — TargetBot must be attacking something
+3. Is the spell off cooldown?
+4. Ensure sufficient mana for the spell
+5. Check that monster count conditions are met
 
 ### AoE not triggering
 

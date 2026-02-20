@@ -12,23 +12,28 @@ end)
 -- Hold Target handler function (shared by UnifiedTick and fallback macro)
 local function holdTargetHandler()
     -- if attacking then save it as target, but check pos z in case of marking by mistake on other floor
-    if target and target() and target():getPosition().z == posz() and not target():isNpc() then
-        targetID = target():getId()
-    elseif not (target and target()) then
+    local t = target and target()
+    local tpos = t and t:getPosition()
+    if tpos and tpos.z == posz() and not t:isNpc() then
+        targetID = t:getId()
+    elseif not t then
         -- there is no saved data, do nothing
         if not targetID then return end
 
         -- look for target
         for i, spec in ipairs(SafeCall.global("getSpectators") or {}) do
-            local sameFloor = spec:getPosition().z == posz()
-            local oldTarget = spec:getId() == targetID
-            
-            if sameFloor and oldTarget then
-                -- Route through ASM to prevent competing attack commands
-                if AttackStateMachine and AttackStateMachine.forceAttack then
-                    AttackStateMachine.forceAttack(spec)
-                else
-                    attack(spec)  -- Fallback if ASM not loaded
+            local specPos = spec:getPosition()
+            if specPos then
+                local sameFloor = specPos.z == posz()
+                local oldTarget = spec:getId() == targetID
+
+                if sameFloor and oldTarget then
+                    -- Route through ASM to prevent competing attack commands
+                    if AttackStateMachine and AttackStateMachine.forceAttack then
+                        AttackStateMachine.forceAttack(spec)
+                    else
+                        attack(spec)  -- Fallback if ASM not loaded
+                    end
                 end
             end
         end

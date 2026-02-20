@@ -157,19 +157,34 @@ local lootDirty = false
 -- ─── Loot Lock ────────────────────────────────────────────────────────────────
 -- Prevents Container Panel's forceOpen from fighting with corpse container
 -- windows. Two-phase: ACTIVE (holding windows) → GRACE (post-close cooldown).
+-- Stale-lock timeout auto-releases if a container open fails silently.
 -- ──────────────────────────────────────────────────────────────────────────────
 local _lootLocked = false
 local _lootLockGraceUntil = 0
+local _lootLockTime = 0
 local _LOOT_GRACE_MS = 800
+local _LOOT_LOCK_TIMEOUT_MS = 3000
 
 local function lootLockAcquire()
   _lootLocked = true
   _lootLockGraceUntil = 0
+  _lootLockTime = now or 0
 end
 
 local function lootLockRelease()
   _lootLocked = false
-  _lootLockGraceUntil = now + _LOOT_GRACE_MS
+  local currentNow = now or 0
+  _lootLockGraceUntil = currentNow + _LOOT_GRACE_MS
+end
+
+-- Auto-release stale locks and return a safe now value
+local function lootLockTick()
+  local currentNow = now or 0
+  if _lootLocked and currentNow - _lootLockTime > _LOOT_LOCK_TIMEOUT_MS then
+    _lootLocked = false
+    _lootLockGraceUntil = currentNow + _LOOT_GRACE_MS
+  end
+  return currentNow
 end
 
 TargetBot.Looting.getStatus = function()
@@ -178,13 +193,19 @@ end
 
 --- True while looting is manipulating container windows (includes grace).
 TargetBot.Looting.isLocked = function()
-  return _lootLocked or now < _lootLockGraceUntil
+  local currentNow = lootLockTick()
+  return _lootLocked or currentNow < _lootLockGraceUntil
 end
 
 --- True if there are corpses queued or container windows are locked.
 TargetBot.Looting.isActive = function()
-  return #TargetBot.Looting.list > 0 or _lootLocked or now < _lootLockGraceUntil
+  local currentNow = lootLockTick()
+  return #TargetBot.Looting.list > 0 or _lootLocked or currentNow < _lootLockGraceUntil
 end
+
+-- Expose lock functions so core/eat_food.lua can coordinate with Container Panel
+TargetBot.Looting.lootLockAcquire = function() lootLockAcquire() end
+TargetBot.Looting.lootLockRelease = function() lootLockRelease() end
 
 -- Mark looting state as needing re-evaluation
 TargetBot.Looting.markDirty = function()
@@ -192,7 +213,7 @@ TargetBot.Looting.markDirty = function()
 end
 
 -- Helper to reset dirty flag (called by TargetBot main loop)
-TargetBot.Looting.clearDirty = function()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      TargetBot.Looting.clearDirty = function()
   lootDirty = false
 end
 
@@ -207,6 +228,14 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   if not hasLootConfig and not eatFoodOnly then
     status = ""
     return false
+  end
+  -- In eat-only mode, skip corpse processing when the player is already full
+  if eatFoodOnly and not hasLootConfig then
+    local playerFull = TargetBot.EatFood and TargetBot.EatFood.isPlayerFull and TargetBot.EatFood.isPlayerFull()
+    if playerFull then
+      status = "Full"
+      return false
+    end
   end
   local maxDanger = tonumber((ui and ui.maxDangerPanel and ui.maxDangerPanel.value and ui.maxDangerPanel.value.getText) and ui.maxDangerPanel.value:getText() or nil) or 0
   if dangerLevel > maxDanger then
@@ -247,6 +276,9 @@ TargetBot.Looting.process = function(targets, dangerLevel)
 
   status = eatFoodOnly and not hasLootConfig and "Eating" or "Looting"
 
+  -- lootContainer keeps the lock held on early returns (loot item, eat food,
+  -- open nested) so the next tick continues processing. Only the final close
+  -- path calls lootLockRelease(). Error path releases immediately.
   for index, container in pairs(containers) do
     if container.lootContainer then
       lootLockAcquire()
@@ -263,6 +295,7 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   local dist = math.max(math.abs(pos.x-loot.pos.x), math.abs(pos.y-loot.pos.y))
   local maxRange = extras.looting or 40
   if loot.tries > 30 or loot.pos.z ~= pos.z or dist > maxRange then
+    if _lootLocked then lootLockRelease() end
     table.remove(TargetBot.Looting.list, extras.lootLast and #TargetBot.Looting.list or 1)
     return true
   end
@@ -282,6 +315,7 @@ TargetBot.Looting.process = function(targets, dangerLevel)
 
   local container = tile:getTopUseThing()
   if not container or not container:isContainer() then
+    if _lootLocked then lootLockRelease() end
     table.remove(TargetBot.Looting.list, extras.lootLast and #TargetBot.Looting.list or 1)
     return true
   end
@@ -664,9 +698,11 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
   end
 
   -- no more items to loot, open next nested container (BFS: first in queue)
-  -- Skip nested containers in eat-food-only mode (no loot items to find in sub-bags)
+  -- Open nested containers for both looting AND food eating (food is often
+  -- inside the corpse's body bag, not directly in the top-level corpse).
   local hasLootConfig = items[1] or ((ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn())
-  if #nestedContainers > 0 and hasLootConfig then
+  local eatEnabled = TargetBot.EatFood and TargetBot.EatFood.isEnabled and TargetBot.EatFood.isEnabled()
+  if #nestedContainers > 0 and (hasLootConfig or eatEnabled) then
     local nextContainer = nestedContainers[1]
     nextContainer.lootTries = (nextContainer.lootTries or 0) + 1
     if nextContainer.lootTries < 3 then -- Increased from 2 for more reliability

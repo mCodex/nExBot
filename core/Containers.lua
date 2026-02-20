@@ -1341,9 +1341,11 @@ end
 -- CONTAINER EVENT HANDLERS
 -- ============================================================================
 
--- Helper: check if TargetBot looting is actively using container windows
+-- Helper: check if TargetBot looting is actively using container windows.
+-- Uses isActive() (not isLocked()) so forceOpen stays suppressed while
+-- corpses remain in the loot queue, preventing the open/close loop.
 local function isLootLocked()
-    return TargetBot and TargetBot.Looting and TargetBot.Looting.isLocked and TargetBot.Looting.isLocked()
+    return TargetBot and TargetBot.Looting and TargetBot.Looting.isActive and TargetBot.Looting.isActive()
 end
 
 onContainerOpen(function(container, previousContainer)
