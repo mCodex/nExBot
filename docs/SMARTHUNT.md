@@ -1,140 +1,168 @@
-# Hunt Analyzer v3.0
+# Hunt Analyzer
 
-> Real-time session analytics that track kills, damage, loot, supply usage,
-> experience, and efficiency metrics while you hunt.
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Auto-Start Behaviour](#auto-start-behaviour)
-- [Tracked Metrics](#tracked-metrics)
-- [Insights Engine](#insights-engine)
-- [API for Other Modules](#api-for-other-modules)
-- [UI](#ui)
-- [Troubleshooting](#troubleshooting)
+Real-time session analytics that track kills, damage, loot, supply usage, experience, and efficiency metrics.
 
 ---
 
 ## Overview
 
-The Hunt Analyzer (`core/smart_hunt.lua`) is a lightweight analytics layer that
-passively records events from native OTClient callbacks and the EventBus.
-It maintains a per-session snapshot that can be viewed via the **Hunt Analyzer**
-button on the Main tab.
+The Hunt Analyzer (`smart_hunt.lua`) is a passive analytics engine that records data from every hunt session. It collects kills, spell casts, potion usage, loot, and experience — then computes efficiency metrics, trends, and actionable insights.
 
-Key design principles:
+Key capabilities:
 
-- **Zero-config** — starts automatically, no user action required
-- **Passive** — never issues game actions; read-only observation
-- **Low overhead** — callbacks are O(1); summary computed on-demand
+- Zero-config — starts automatically when CaveBot or TargetBot is enabled
+- Passive observation — never issues game actions
+- Real-time metrics (kills/hour, XP/hour, profit/hour)
+- Per-monster kill breakdown
+- Supply efficiency analysis
+- Hunt Score (0–100) composite rating
+- Trend indicators (improving/declining)
+- Session history
 
 ---
 
-## Auto-Start Behaviour
+## Auto-Start
 
-The Hunt Analyzer auto-starts a new session when **either**:
+The Hunt Analyzer automatically starts a new session when **either**:
 
-- **CaveBot** is turned on (`CaveBot.isOn()`)
-- **TargetBot** is turned on (`TargetBot.isOn()`)
+- **CaveBot** is turned on
+- **TargetBot** is turned on
 
-> **v3.0 change**: Previously only CaveBot triggered auto-start, so
-> TargetBot-only players missed session data.
-
-The background macro runs every 5 000 ms:
-
-```lua
-macro(5000, function()
-  local caveBotOn  = CaveBot  and CaveBot.isOn  and CaveBot.isOn()
-  local targetBotOn = TargetBot and TargetBot.isOn and TargetBot.isOn()
-  if (caveBotOn or targetBotOn) and not isSessionActive() then
-    startSession()
-  end
-  updateTracking()
-end)
-```
-
-A second macro (`1 000 ms`) calls `updateTracking()` for finer resolution on
-supply and health metrics.
+This means TargetBot-only players (without CaveBot) also get full session tracking. A background macro checks every 5 seconds and starts a session if one isn't already active.
 
 ---
 
 ## Tracked Metrics
 
-| Metric | Source | Notes |
-|--------|--------|-------|
-| Kills | `onCreatureHealthPercentChange` | Monster health → 0 |
-| Tiles walked | `onWalk` | Player movement |
-| Spells cast | `onSpellCooldown` | Any spell with `duration > 0` |
-| Runes used | `Analytics.trackRuneUse(name)` | Called by AttackBot |
-| Potions used | `Analytics.trackPotionUse(name)` | Called by HealBot |
-| Damage dealt | `HuntAnalytics.trackAttackSpell()` | Mana proxy |
-| Session duration | `os.time()` delta | Wall-clock elapsed |
-| Monster breakdown | `analytics.monsters[name]` | Per-creature-type kill count |
-
-### Consumption Tracking API
-
-Other modules report usage via the global `HuntAnalytics` alias:
-
-```lua
-HuntAnalytics.trackRuneUse("sudden death rune")
-HuntAnalytics.trackPotionUse("great health potion")
-HuntAnalytics.trackAttackSpell("exori vis", 0)  -- mana cost if known
-```
+| Metric | Source | Description |
+|--------|--------|-------------|
+| Kills | `onCreatureHealthPercentChange` | Monster health reaching 0 |
+| Monster breakdown | Per-creature-type counting | How many of each monster killed |
+| Spells cast | `onSpellCooldown` | Any spell with cooldown > 0 |
+| Runes used | AttackBot reporting | Each rune with usage count |
+| Potions used | HealBot reporting | Each potion with usage count |
+| Damage dealt | Mana proxy from AttackBot | Estimated from spell costs |
+| Tiles walked | `onWalk` callback | Player movement distance |
+| Session duration | `os.time()` delta | Wall-clock elapsed time |
+| XP gained | Experience tracking | Total and per-hour |
+| Loot value | Analyzer integration | Total and per-hour |
 
 ---
 
 ## Insights Engine
 
-The `buildInsights()` function computes derived metrics:
+The `buildInsights()` function computes derived analytics:
 
-- **Kills/hour** — `kills / sessionHours`
-- **Avg kill time** — from `MonsterAI.Telemetry.typeStats`
-- **Top-killed monster** — highest count in `analytics.monsters`
-- **Supply efficiency** — ratio of potions used per kill
-- **Loot summary** — integrated with `core/analyzer.lua`
+### Rate Metrics
+
+- **Kills/hour** — total kills divided by session hours
+- **XP/hour** — experience gained per hour, with peak tracking
+- **Profit/hour** — loot value minus supply cost per hour
+- **Damage/hour** — estimated damage output per hour
+
+### Efficiency Metrics
+
+- **Supply efficiency** — potions used per kill
+- **Damage per spell** — average damage per cast
+- **Attacks per kill** — how many attacks to kill each creature
+- **Combat uptime** — percentage of session spent in combat
+
+### Trend Analysis
+
+Each metric includes a trend indicator:
+
+- **↑** Improving compared to session average
+- **↓** Declining compared to session average
+- **→** Stable
 
 ---
 
-## API for Other Modules
+## Hunt Score
 
-```lua
--- Check if session is running
-Analytics.isSessionActive()  -- boolean
+The Hunt Score is a composite 0–100 rating based on five weighted factors:
 
--- Get current metrics snapshot
-Analytics.getMetrics()       -- { kills, tilesWalked, spellsCast, ... }
+| Factor | Weight | What it measures |
+|--------|--------|-----------------|
+| XP Efficiency | 25 pts | XP/hour relative to expected rate |
+| Kill Efficiency | 20 pts | Consistent kill rate |
+| Survivability | 25 pts | Deaths and near-deaths |
+| Resource Efficiency | 15 pts | Supply usage per kill |
+| Combat Uptime | 10 pts | Time actively fighting |
+| Profit Bonus | 5 pts | Net gold earned |
 
--- Build human-readable summary string
-Analytics.buildSummary()     -- multi-line text
+A score of 80+ indicates a well-optimized hunt.
 
--- Show analytics UI window
-Analytics.showAnalytics()
-```
+---
+
+## Loot Tracking
+
+Integrated with `core/analyzer.lua`, the loot tracker records:
+
+- Every item picked up during the session
+- Estimated value per item
+- Top 5 most valuable drops
+- Total loot value for profit calculation
 
 ---
 
 ## UI
 
-Click **Hunt Analyzer** on the Main tab. The window shows:
+Click **Hunt Analyzer** on the Main tab. The window displays:
 
 - Session duration
 - Total kills (with per-monster breakdown)
 - Tiles walked
 - Spells cast / Runes used / Potions used
-- Insights section (kills/hour, efficiency)
+- Rate metrics (XP/hour, kills/hour, profit/hour)
+- Insights section with recommendations
+- Hunt Score
 
-If the UI fails to open (edge-case on some clients), the summary is printed
-to the console as a fallback.
+If the UI fails to open (rare edge case), the summary is printed to the console as a fallback.
+
+---
+
+## API for Custom Scripts
+
+```lua
+-- Check if session is running
+Analytics.isSessionActive()        -- boolean
+
+-- Get current metrics snapshot
+Analytics.getMetrics()             -- table with all metrics
+
+-- Build human-readable summary string
+Analytics.buildSummary()           -- multi-line text
+
+-- Show the analytics UI window
+Analytics.showAnalytics()
+```
+
+### Reporting from Other Modules
+
+Other modules report usage through the global `HuntAnalytics` alias:
+
+```lua
+HuntAnalytics.trackRuneUse("sudden death rune")
+HuntAnalytics.trackPotionUse("great health potion")
+HuntAnalytics.trackAttackSpell("exori vis", manaCost)
+```
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| No data shown | Session never started | Turn on CaveBot _or_ TargetBot |
-| Kill count = 0 | Monster health events not firing | Verify `onCreatureHealthPercentChange` works on your server |
-| Analytics button missing | Module load error | Check `_Loader.lua` order; look for Lua errors in console |
-| Duplicate kills | Multiple tracking sources | The native callback is the single source of truth; EventBus `creature:death` does _not_ double-count |
+### No data shown
+
+Turn on **CaveBot** or **TargetBot** to auto-start a session. Manual-only hunting without either module enabled won't trigger session tracking.
+
+### Kill count stays at 0
+
+The kill counter relies on `onCreatureHealthPercentChange`. If this callback doesn't fire on your server, kills won't be counted. Check the server's OTClient compatibility.
+
+### Analytics button missing
+
+A module load error prevented the Hunt Analyzer from initializing. Check the console (`Ctrl+Shift+D`) for Lua errors during startup.
+
+### Duplicate kill counts
+
+The native callback is the single source of truth. EventBus `creature:death` events do not double-count — they are used for different subsystems.

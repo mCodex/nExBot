@@ -80,7 +80,39 @@ local CONFIG = {
   CORPSE_OPEN_DELAY = 300,        -- Delay between corpse operations
   CORPSE_EAT_DELAY = 200,         -- Delay after opening corpse to eat
   MAX_CORPSE_AGE_MS = 10000,      -- Max age of tracked corpse (10s)
+  CORPSE_LOCK_TIMEOUT_MS = 3000,  -- Stale-lock safety timeout
 }
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- LOOT LOCK BRIDGE (Nil-safe wrappers for TargetBot.Looting lock protocol)
+-- Prevents Container Panel forceOpen/sorting during corpse open/close.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local function acquireLootLock()
+  if TargetBot and TargetBot.Looting and TargetBot.Looting.lootLockAcquire then
+    TargetBot.Looting.lootLockAcquire()
+  end
+end
+
+local function releaseLootLock()
+  if TargetBot and TargetBot.Looting and TargetBot.Looting.lootLockRelease then
+    TargetBot.Looting.lootLockRelease()
+  end
+end
+
+local function isLootActive()
+  if TargetBot and TargetBot.Looting and TargetBot.Looting.isActive then
+    return TargetBot.Looting.isActive()
+  end
+  return false
+end
+
+local function isLootLocked()
+  if TargetBot and TargetBot.Looting and TargetBot.Looting.isLocked then
+    return TargetBot.Looting.isLocked()
+  end
+  return false
+end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- STATE MANAGEMENT (Module-private)
@@ -542,8 +574,21 @@ local function onCorpseContainerOpen(container)
   -- Check if this is a corpse container
   if not container then return end
   
+  -- Mark as loot container so Container Panel's onContainerClose guard
+  -- recognises it and skips triggering sortingMacro / forceOpen.
+  container.lootContainer = true
+  
   local items = container.getItems and container:getItems()
-  if not items then return end
+  if not items then
+    -- No items accessible — clean up
+    container.lootContainer = false
+    State.corpseContainerOpen = false
+    releaseLootLock()
+    schedule(100, function()
+      pcall(function() g_game.close(container) end)
+    end)
+    return
+  end
   
   -- Look for food in the corpse
   for _, item in pairs(items) do
@@ -557,7 +602,9 @@ local function onCorpseContainerOpen(container)
           
           -- Close the corpse container after eating
           schedule(200, function()
+            container.lootContainer = false
             pcall(function() g_game.close(container) end)
+            releaseLootLock()
           end)
         end)
         return
@@ -567,6 +614,8 @@ local function onCorpseContainerOpen(container)
   
   -- No food found, close container
   State.corpseContainerOpen = false
+  container.lootContainer = false
+  releaseLootLock()
   schedule(100, function()
     pcall(function() g_game.close(container) end)
   end)
@@ -574,6 +623,11 @@ end
 
 -- Main corpse eating function
 local function tryEatFromCorpse()
+  -- Yield if TargetBot looting is already processing corpses
+  if isLootActive() then
+    return false
+  end
+  
   -- Check if we need food
   local regenTime = getRegenTime()
   if regenTime >= CONFIG.EAT_FOOD_THRESHOLD then
@@ -663,14 +717,24 @@ local function tryEatFromCorpse()
             -- Mark this corpse as opened BEFORE opening it
             markCorpseOpened(tilePos)
             
+            -- Acquire loot lock BEFORE opening so Container Panel
+            -- suppresses forceOpen and sorting during the operation.
+            acquireLootLock()
+            
             -- Open the corpse
             State.corpseContainerOpen = true
+            State.corpseOpenTime = now or 0
             State.waitingForCorpse = tilePos
             
             local openOk = pcall(function() g_game.open(corpse) end)
             if not openOk then
               -- Try alternative method
-              pcall(function() g_game.use(corpse) end)
+              local useOk = pcall(function() g_game.use(corpse) end)
+              if not useOk then
+                -- Both methods failed — release lock immediately
+                State.corpseContainerOpen = false
+                releaseLootLock()
+              end
             end
             
             -- Remove from queue
@@ -711,6 +775,18 @@ local eatFromCorpsesMacro = macro(1000, "Eat from Corpses", function()
   
   -- Skip if already waiting for corpse
   if State.corpseContainerOpen then
+    -- Stale-lock safety: auto-reset if stuck for too long
+    local elapsed = (now or 0) - (State.corpseOpenTime or 0)
+    if elapsed > CONFIG.CORPSE_LOCK_TIMEOUT_MS then
+      State.corpseContainerOpen = false
+      State.corpseOpenTime = 0
+      releaseLootLock()
+    end
+    return
+  end
+  
+  -- Yield if TargetBot looting has the lock (avoid dual-system conflicts)
+  if isLootLocked() then
     return
   end
   

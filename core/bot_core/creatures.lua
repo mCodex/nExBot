@@ -171,11 +171,13 @@ function Creatures.getMonsterCount(range, options)
     if spec:isMonster() and (isOldClient or spec:getType() < 3) then
       if not filter or filter(spec) then
         local specPos = spec:getPosition()
-        local dx = math.abs(specPos.x - px)
-        local dy = math.abs(specPos.y - py)
-        
-        if isInShape(dx, dy, range, shape, direction, coneAngle) then
-          count = count + 1
+        if specPos then
+          local dx = math.abs(specPos.x - px)
+          local dy = math.abs(specPos.y - py)
+          
+          if isInShape(dx, dy, range, shape, direction, coneAngle) then
+            count = count + 1
+          end
         end
       end
     end
@@ -230,14 +232,16 @@ function Creatures.getPlayerCount(range, multifloor)
   for _, spec in pairs(getSpectators(multifloor)) do
     if spec:isPlayer() and not spec:isLocalPlayer() then
       local specPos = spec:getPosition()
-      local dx = math.abs(specPos.x - px)
-      local dy = math.abs(specPos.y - py)
-      
-      if math.max(dx, dy) <= range then
-        local shield = spec:getShield()
-        local emblem = spec:getEmblem()
-        if not ((shield ~= 1 and spec:isPartyMember()) or emblem == 1) then
-          count = count + 1
+      if specPos then
+        local dx = math.abs(specPos.x - px)
+        local dy = math.abs(specPos.y - py)
+        
+        if math.max(dx, dy) <= range then
+          local shield = spec:getShield()
+          local emblem = spec:getEmblem()
+          if not ((shield ~= 1 and spec:isPartyMember()) or emblem == 1) then
+            count = count + 1
+          end
         end
       end
     end
@@ -345,15 +349,18 @@ function Creatures.isSafe(range, multifloor, padding)
   
   for _, spec in pairs(getSpectators(multifloor)) do
     if spec:isPlayer() and not spec:isLocalPlayer() and not isFriend(spec:getName()) then
-      local specZ = spec:getPosition().z
-      local dist = Creatures.distanceFromPlayer(spec:getPosition())
-      
-      if specZ == posz() and dist <= range then
-        return false
-      end
-      
-      if multifloor and padding and specZ ~= posz() and dist <= (range + padding) then
-        return false
+      local specPos = spec:getPosition()
+      if specPos then
+        local specZ = specPos.z
+        local dist = Creatures.distanceFromPlayer(specPos)
+        
+        if specZ == posz() and dist <= range then
+          return false
+        end
+        
+        if multifloor and padding and specZ ~= posz() and dist <= (range + padding) then
+          return false
+        end
       end
     end
   end

@@ -1,304 +1,297 @@
-# TargetBot & Monster Insights v3.0
+# TargetBot
 
-> **TargetBot** is the combat brain of nExBot. It decides _what_ to attack, _when_ to
-> switch targets, and _how_ to position the player — all while learning monster
-> behaviour in real time.
+AI-powered creature targeting, combat positioning, and behavior prediction.
 
 ---
 
-## Table of Contents
+## Overview
 
-- [Architecture Overview](#architecture-overview)
-- [Attack Flow — AttackStateMachine](#attack-flow--attackstatemachine)
-- [Monster Insights Modules](#monster-insights-modules)
-- [9-Stage Priority Scoring (TBI)](#9-stage-priority-scoring-tbi)
-- [Scenario Manager & Anti-Zigzag](#scenario-manager--anti-zigzag)
-- [EventBus Wiring](#eventbus-wiring)
-- [Configuration Reference](#configuration-reference)
-- [Debugging & Diagnostics](#debugging--diagnostics)
+TargetBot is the combat brain of nExBot. It decides **what** to attack, **when** to switch targets, and **how** to position your character — all while learning monster behavior in real time through the Monster Insights AI system.
 
----
+Key capabilities:
 
-## Architecture Overview
-
-```
-                ┌── EventBus ──┐
-                │  creature:*  │
-                │  player:*    │
-                │  effect:*    │
-                └──────┬───────┘
-                       │ events
-       ┌───────────────┤───────────────┐
-       ▼               ▼               ▼
-  monster_tracking  monster_spell   monster_prediction
-  (EWMA learning)  _tracker        (wave anticipation)
-       │               │               │
-       └───────┬───────┴───────────────┘
-               ▼
-          monster_ai.lua  (orchestrator / glue)
-          VolumeAdaptation · RealTime · Telemetry · Metrics
-               │
-       ┌───────┼───────────────────────┐
-       ▼       ▼                       ▼
-  auto_tuner  monster_scenario     monster_tbi
-  (classify)  (engagement locks)   (9-stage priority)
-               │                       │
-               └──────────┬────────────┘
-                          ▼
-                   target.lua main loop
-                          │
-                ┌─────────▼──────────┐
-                │ AttackStateMachine │  ← SOLE attack issuer
-                │ IDLE → ACQUIRING → │
-                │ CONFIRMING →       │
-                │ ATTACKING →        │
-                │ RECOVERING         │
-                └────────────────────┘
-```
-
-### Loading Order (cavebot.lua)
-
-All SRP modules are loaded **before** the orchestrator:
-
-| # | File | Purpose |
-|---|------|---------|
-| 1 | `monster_ai_core.lua` | Namespace, helpers (`MonsterAI._helpers`), constants |
-| 2 | `monster_patterns.lua` | Pattern CRUD, persistence to `UnifiedStorage` |
-| 3 | `monster_tracking.lua` | Per-creature data, EWMA cooldown learning |
-| 4 | `monster_prediction.lua` | Wave/beam prediction, confidence aggregation |
-| 5 | `monster_combat_feedback.lua` | Tracks prediction accuracy, adjusts weights |
-| 6 | `monster_spell_tracker.lua` | Spell/missile frequency & cooldown analysis |
-| 7 | `auto_tuner.lua` | Behaviour classification + danger tuning |
-| 8 | `monster_scenario.lua` | Scenario detection, engagement locks, anti-zigzag |
-| 9 | `monster_reachability.lua` | Pathfinding cache + blocked-tile list |
-| 10 | `monster_tbi.lua` | 9-stage priority scoring |
-| 11 | **`monster_ai.lua`** | **Orchestrator** — EventBus wiring, `updateAll()`, public API |
-| 12 | `attack_state_machine.lua` | Deterministic state machine for attacks |
+- Intelligent target selection with 9-stage priority scoring
+- Attack State Machine — sole attack issuer, eliminates attack conflicts
+- Monster behavior learning (pattern recognition, spell tracking, wave prediction)
+- Movement coordination (wave avoidance, AoE positioning, keep distance)
+- Engagement lock system (anti-zigzag target switching)
+- Scenario-aware combat (adapts to 1 monster vs. swarm)
+- Looting with BFS container traversal
+- Per-creature configurations
+- Creature editor with pattern matching
 
 ---
 
-## Attack Flow — AttackStateMachine
+## Quick Start
 
-### The Problem (pre-v3.0)
-
-Three modules (`target.lua`, `event_targeting.lua`, legacy fallbacks) all called
-`g_game.attack()` independently, causing:
-
-1. Attack issued by module A → server confirms
-2. Module B issues _different_ attack → interrupts module A
-3. Module A re-issues → attack-once-then-stop cycle
-
-### The Solution
-
-**`AttackStateMachine`** is the **sole** module allowed to call `g_game.attack()`.
-All other modules call `AttackStateMachine.requestSwitch(creature, priority)`.
-
-```
-State Diagram
-─────────────
-  IDLE ──requestSwitch()──▶ ACQUIRING
-    ▲                           │
-    │                      g_game.attack()
-    │                           │
-    │                           ▼
-  RECOVERING ◀──death/gone── ATTACKING ◀── CONFIRMING
-    │ (350ms grace)             ▲          (900ms timeout)
-    │                           │
-    └───── re-confirm ──────────┘
-```
-
-| Config Key | Default | OpenTibiaBR | Description |
-|------------|---------|-------------|-------------|
-| `ATTACK_REISSUE_INTERVAL` | 1400 ms | 1500 ms | Re-send attack if server didn't confirm |
-| `ATTACK_CONFIRM_TIMEOUT` | 1000 ms | 1200 ms | Time to wait for `getAttackingCreature` |
-| `ATTACK_COOLDOWN` | 300 ms | 350 ms | Minimum time between attack commands |
-| `ATTACK_LOSS_GRACE` | 450 ms | 800 ms | Grace after losing target before RECOVERING (must exceed ACL nil-report window) |
-| `RECOVER_COOLDOWN` | 600 ms | 800 ms | Minimum time between recovery re-attack attempts |
-| `STOP_START_DEBOUNCE` | 1000 ms | 1200 ms | IDLE hold-off time — prevents rapid stop→re-acquire loop on noisy clients |
-| `SWITCH_COOLDOWN` | 5000 ms | 4000 ms | Minimum time between target switches |
-
-### Rules
-
-- `target.lua` main loop calls `requestSwitch()` (never `forceSwitch()`) and
-  **only when ASM is in IDLE or RECOVERING** state.
-- `event_targeting.lua` routes _all_ attacks through `AttackStateMachine`.
-  The `g_game.attack()` / `Client.attack()` fallbacks have been **removed**.
-- `TargetBot.attack(creature, force=true)` is the **only** path that may call
-  `forceSwitch()`, reserved for explicit user-initiated overrides.
+1. Open the **Target** tab.
+2. Click **+** to add a creature.
+3. Enter monster name (e.g. `Dragon`), configure spells and behavior.
+4. Toggle TargetBot **ON**.
+5. TargetBot will automatically target and fight creatures.
 
 ---
 
-## Monster Insights Modules
+## Target Selection
 
-### `monster_ai_core.lua`
+### Pattern Matching
 
-Foundation namespace (`MonsterAI`), shared helpers, and the `CONSTANTS` table
-(confidence thresholds, EWMA alphas, attack-type enum, movement-pattern enum,
-damage correlation, event-driven thresholds).
+You can use patterns to match multiple creatures:
 
-### `monster_patterns.lua`
+| Pattern | Matches |
+|---------|---------|
+| `Dragon` | Exact name "Dragon" |
+| `Dragon*` | Dragon, Dragon Lord, Dragon Knight |
+| `*Demon` | Demon, Grand Demon, Evil Demon |
+| `*, !Dragon` | Everything except Dragons |
+| `#100-#110` | Creature IDs 100–110 |
 
-Persistent monster-type data (`knownMonsters` map).  
-- `Patterns.get(name)` — returns pattern or safe empty table  
-- `Patterns.register(name, data)` — merge & persist via `UnifiedStorage`  
-- `Patterns.persist(name, partial)` — incremental update  
+### 9-Stage Priority Scoring (TBI)
 
-### `monster_tracking.lua`
+TBI stands for **TargetBot Integration** — the module that bridges Monster Insights AI data into TargetBot's priority system (`monster_tbi.lua`).
 
-Per-creature live tracking (`Tracker.monsters` map keyed by creature ID).  
-- `Tracker.track(creature)` — initialise tracking entry  
-- `Tracker.untrack(id)` — persist pattern data, cleanup  
-- `Tracker.update(creature)` — position/movement/speed sampling  
-- `Tracker.updateEWMA(data, observed)` — Welford EWMA for cooldown mean + variance  
-- `Tracker.getDPS(id)` — DPS over configurable sliding window  
+Each creature on screen receives a priority score through 9 sequential stages:
 
-### `monster_prediction.lua`
+| Stage | Factor | Influence |
+|-------|--------|-----------|
+| 1 | **Distance** | Closer creatures get higher priority |
+| 2 | **Health** | Low-health creatures get a bonus (finish kills) |
+| 3 | **Tracker Data** | Learned danger from EWMA cooldown and DPS |
+| 4 | **Wave Prediction** | Imminent wave attack adds urgency |
+| 5 | **Classification** | Ranged, summoner, kiter types get priority boosts |
+| 6 | **Movement** | Creatures charging toward you score higher |
+| 7 | **Adaptive Weights** | Combat feedback adjusts stages 3–5 over time |
+| 8 | **Telemetry** | Speed, casting signals from extended snapshots |
+| 9 | **Clamp** | Final score normalized to [0, 1000] |
 
-Wave/beam prediction engine.  
-- `Predictor.predictWaveAttack(creature)` — confidence-scored prediction  
-- `Predictor.isFacingPosition(monsterPos, dir, targetPos)` — direction check  
-- `Predictor.predictPositionDanger(pos)` — aggregate danger from all tracked monsters  
-- `Confidence.aggregate(values)` — combine multiple confidence scores  
-- `Confidence.shouldAct(score)` — threshold check  
+The creature with the highest score becomes the active target.
 
-### `monster_combat_feedback.lua`
+---
 
-Tracks wave predictions vs actual outcomes; adjusts targeting weights.  
-- `CombatFeedback.recordPrediction(id, name, predictedTime, confidence)`  
-- `CombatFeedback.recordDamage(amount, attributedId, attributedName)`  
-- `CombatFeedback.getWeights()` — returns adaptive weight multipliers  
+## Attack State Machine
 
-### `monster_spell_tracker.lua`
+All attacks in nExBot go through a single **AttackStateMachine** (ASM). No other module is allowed to call `g_game.attack()` directly — this eliminates the classic "attack once then stop" bug caused by competing attack issuers.
 
-Records every observed spell/missile per monster type.  
-- `SpellTracker.recordSpell(creatureId, spellType, srcPos, dstPos)`  
-- `SpellTracker.getMonsterSpells(creatureId)` — per-instance data  
-- `SpellTracker.getTypeSpellStats(name)` — aggregated type data  
-- `SpellTracker.analyzeReactivity(creatureId)` — returns threat level  
+### State Flow
 
-### `auto_tuner.lua`
+```text
+IDLE → ACQUIRING → CONFIRMING → ATTACKING → RECOVERING → IDLE
+```
 
-Behaviour classification + automatic danger tuning.  
-- `Classifier.classify(name, data)` — static/chaser/kiter/erratic/ranged/summoner  
-- `AutoTuner.suggestDanger(name)` — proposes TargetBot danger adjustment  
-- `AutoTuner.applyDangerSuggestion(name)` — writes to TargetBot config  
-- `AutoTuner.runPass()` — periodic sweep across all tracked types  
+| State | Description |
+|-------|-------------|
+| **IDLE** | No target. Waiting for `requestSwitch()`. |
+| **ACQUIRING** | Target selected, `g_game.attack()` sent. |
+| **CONFIRMING** | Waiting for server confirmation (up to 1000 ms). |
+| **ATTACKING** | Server confirmed. Actively fighting. |
+| **RECOVERING** | Target died or disappeared. Brief grace period before IDLE. |
 
-### `monster_scenario.lua`
+### Key Parameters
 
-Scenario detection and engagement lock system.
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Reissue Interval | 1400 ms | Re-send attack if server didn't confirm |
+| Confirm Timeout | 1000 ms | Wait time for server confirmation |
+| Attack Cooldown | 300 ms | Minimum time between attack commands |
+| Switch Cooldown | 5000 ms | Minimum time between target switches |
+| Loss Grace | 450 ms | Grace period after losing target |
+
+---
+
+## Monster Insights (AI System)
+
+Monster Insights is a machine-learning subsystem made up of 12 specialized modules. It runs in the background, collecting data on every monster you encounter, and feeds its analysis into the targeting and movement systems.
+
+### Pattern Recognition
+
+Classifies each monster type into a behavior profile:
+
+| Behavior | Description |
+|----------|-------------|
+| **Static** | Stays in place, doesn't chase |
+| **Chaser** | Actively pursues the player |
+| **Kiter** | Runs away, attacks from range |
+| **Erratic** | Unpredictable, random movement |
+| **Ranged** | Attacks from distance, prefers range |
+| **Summoner** | Spawns other creatures |
+
+Classification uses EWMA (Exponential Weighted Moving Average) on movement, attack frequency, and directional data.
+
+### Spell Tracking
+
+Records every observed spell and missile per monster type:
+
+- Spell frequency and cooldown analysis
+- Missile type identification
+- Threat level assessment per creature
+
+### Wave Prediction
+
+Predicts when a monster is about to use a wave or beam attack:
+
+- Monitors direction changes relative to player
+- Tracks attack cooldowns with EWMA
+- Outputs a confidence score (0–1)
+- Movement coordinator uses this to dodge preemptively
+
+### Combat Feedback
+
+Tracks the accuracy of predictions vs. actual outcomes:
+
+- Records prediction → result pairs
+- Adjusts targeting weights adaptively
+- Improves accuracy over multiple encounters
+
+### Auto-Tuner
+
+Automatically adjusts the danger rating of monster types:
+
+- Classifies behavior from collected data
+- Suggests danger adjustments to TargetBot config
+- Can apply changes automatically or present suggestions
+
+---
+
+## Movement Coordination
+
+TargetBot uses an **intent-based voting system** for movement. Multiple subsystems can request movement, and the MovementCoordinator resolves conflicts:
+
+### Movement Priorities
+
+| Priority | Intent | Description |
+|----------|--------|-------------|
+| 1 | **Wave Avoidance** | Dodge predicted wave attacks |
+| 2 | **Finish Kill** | Move into range of low-HP target |
+| 3 | **Spell Position** | Optimal position for AoE spells |
+| 4 | **Keep Distance** | Maintain range for ranged vocations |
+| 5 | **Reposition** | Multi-factor tile scoring for safety |
+| 6 | **Chase** | Close distance to target |
+| 7 | **Face Monster** | Turn toward target |
+
+Each intent carries a **confidence score**. Only the highest-confidence intent executes per tick. This prevents erratic movement from conflicting systems.
+
+### Dynamic Scaling
+
+Movement thresholds automatically scale based on nearby monster count:
+
+| Monsters | Scale | Behavior |
+|----------|-------|----------|
+| 1–2 | 1.0x | Conservative (full thresholds) |
+| 3–4 | 0.85x | Moderate reactivity |
+| 5–6 | 0.70x | High reactivity |
+| 7+ | 0.50x | Maximum reactivity |
+
+---
+
+## Engagement Lock (Anti-Zigzag)
+
+The Scenario Manager prevents the bot from rapidly switching between targets:
 
 | Scenario | Monsters | Switch Cooldown | Stickiness |
 |----------|----------|-----------------|------------|
 | IDLE | 0 | 0 ms | 0 |
-| SINGLE | 1 | 1 000 ms | 80 |
-| FEW | 2–3 | 5 000 ms | 150 |
-| MODERATE | 4–6 | 4 000 ms | 100 |
-| SWARM | 7–10 | 2 500 ms | 60 |
-| OVERWHELMING | 11+ | 1 500 ms | 40 |
+| SINGLE | 1 | 1000 ms | 80 |
+| FEW | 2–3 | 5000 ms | 150 |
+| MODERATE | 4–6 | 4000 ms | 100 |
+| SWARM | 7–10 | 2500 ms | 60 |
+| OVERWHELMING | 11+ | 1500 ms | 40 |
 
-**Key fix (v3.0)**: `endEngagement()` does **not** call `clearTargetLock()`.
-Target lock persists so `shouldAllowTargetSwitch()` can evaluate properly
-before allowing a new switch. `isEngaged()` validates via
-`g_game.getAttackingCreature()` + 350 ms grace period.
+Once engaged with a target, the system won't allow switching until:
+- The engaged creature dies or disappears
+- The creature becomes unreachable
+- The switch cooldown has elapsed AND the alternative has significantly higher priority
 
-### `monster_reachability.lua`
-
-Caches path-finding results per creature ID with TTL.  
-- `Reachability.isReachable(creature)` — pathfind + cache  
-- `Reachability.filterReachable(creatures)` — batch filter  
-- `Reachability.validateTarget(creature)` — full validation  
-
-### `monster_tbi.lua`
-
-9-stage weighted priority calculator.
-
-### `monster_ai.lua` (orchestrator)
-
-After v3.0 slimming (5 992 → 2 249 lines), this file contains:
-
-- **VolumeAdaptation** — adjusts tick intervals by monster count
-- **RealTime** — direction tracking, threat cache, prediction queue
-- **Telemetry** — OTClient extended creature snapshots
-- **Metrics** — centralised aggregator across all subsystems
-- **EventBus wiring** — connects native callbacks → subsystem methods
-- **`updateAll()`** — periodic tick entry-point (500 ms via UnifiedTick)
-- **Public API** — `getStatsSummary()`, `isPositionDangerous()`, etc.
+The engagement lock adds a **+1000 priority bonus** to the current target, making switches rare during active combat.
 
 ---
 
-## 9-Stage Priority Scoring (TBI)
+## Looting
 
-Each creature receives a priority score through 9 sequential stages:
+TargetBot includes an integrated looting system:
 
-| Stage | Weight | Input |
-|-------|--------|-------|
-| 1. Distance | `-dist * 3` | Chebyshev distance to player |
-| 2. Health | `(100 - hp%) * 0.5` | Finish low-health targets |
-| 3. Tracker data | EWMA cooldown, DPS | Learned danger from live data |
-| 4. Wave prediction | `confidence * 40` | Imminent wave attack bonus |
-| 5. Classification | behaviour category bonus | Ranged/summoner get +20–35 |
-| 6. Movement / Trajectory | facing player, closing speed | +25 if charging toward player |
-| 7. Adaptive weights | `CombatFeedback.getWeights()` | Scales stages 3–5 |
-| 8. Telemetry | snapshot enrichments | Speed multiplier, casting signals |
-| 9. Final clamp | `[0, 1000]` | Normalise result |
+- Automatic item pickup from dead creatures
+- BFS (breadth-first search) container traversal for nested loot
+- Configurable loot filters
+- Loot-to-container assignment (loot goes to designated backpack)
+- Integration with Hunt Analyzer for loot value tracking
 
----
+### Eat Food from Corpses
 
-## Scenario Manager & Anti-Zigzag
+TargetBot includes an optional **Eat Food** feature (`TargetBot.EatFood`) that consumes food items found inside corpses during normal looting. When enabled:
 
-### Engagement Lock
+- Food items are identified via a centralized ID list from `constants/food_items.lua`.
+- The system detects "You are full" server messages and pauses eating for 60 seconds.
+- A legacy fallback reads from `storage.foodItems` if the centralized list has no match, but only when the toggle is on.
+- Toggle the feature through the TargetBot UI or `TargetBot.EatFood.toggle()`.
+- **Standalone mode**: Works even without loot items or loot containers configured — corpses are opened solely to eat food, then closed. The status bar shows "Eating" instead of "Looting".
+- Nested containers inside corpses are skipped in eat-only mode (no loot items to find in sub-bags).
 
-Once `Scenario.startEngagement(id, hp)` is called, the system:
+### Loot Lock
 
-1. Sets `isEngaged = true`, `engagementLockId = id`
-2. `shouldAllowTargetSwitch()` returns `false` for _any other_ creature
-   while the engaged creature is alive and reachable
-3. Target lock adds a +1 000 priority bonus to the engaged creature
-4. `endEngagement()` is called **only** when the creature dies, is removed,
-   or becomes unreachable — it does **not** call `clearTargetLock()`
+The looting system uses a **Loot Lock** protocol to prevent the Container Panel's "Force Open" feature from fighting with corpse windows:
 
-### Zigzag Detection
-
-The `movementHistory` buffer (last 10 positions) is analysed for direction
-reversals. If ≥ 50 % of movements reverse direction and average switch time
-is below 5 s, the system forces the current target lock.
+- **ACTIVE** phase: acquired when a corpse window is opened or being processed. The Container Panel suppresses all `sortingMacro` triggers and `forceOpen` re-opens.
+- **GRACE** phase: after the corpse is closed, an 800 ms cooldown keeps the lock held so any queued container events settle before `forceOpen` resumes.
+- Exposed via `TargetBot.Looting.isLocked()` and `TargetBot.Looting.isActive()`.
 
 ---
 
-## EventBus Wiring
+## Creature Editor
 
-All event connections are in the `if EventBus then … end` block of
-`monster_ai.lua`. Key hooks:
+The creature editor lets you configure per-monster behavior:
 
-| Event | Handler |
-|-------|---------|
-| `monster:appear` | `Tracker.track()` + init RealTime direction |
-| `monster:disappear` | `Tracker.untrack()` + cleanup prediction queue |
-| `creature:move` | Direction change → `RealTime.onDirectionChange()` |
-| `monster:health` | `Tracker.update()` + activity timestamp |
-| `player:damage` | Damage correlation → EWMA update → CombatFeedback |
-| `effect:missile` / `onMissle` | SpellTracker + wave observation |
-| `onCreatureTurn` | Native turn callback → immediate threat detection |
-| `creature:death` | Kill stats → classification → AutoTuner suggestion |
+| Setting | Description |
+|---------|-------------|
+| **Name** | Monster name or pattern |
+| **Priority** | Base weight for targeting |
+| **Danger** | Danger rating (auto-tuned by AI) |
+| **Keep Distance** | Enable ranged positioning |
+| **Distance Range** | How far to stay |
+| **Avoid Waves** | Dodge wave attacks |
+| **Lure Count** | Pull this many before fighting |
+| **Attack Spells** | Spells to use against this creature |
+| **Attack Runes** | Runes to use against this creature |
 
 ---
 
-## Configuration Reference
+## Reachability System
 
-### TargetBot Creature Configs
+TargetBot caches pathfinding results per creature to avoid repeated expensive calculations:
 
-```lua
+- `isReachable(creature)` — pathfind with caching
+- `filterReachable(creatures)` — batch filter
+- Unreachable creatures are deprioritized
+- Cache entries expire on a TTL to handle changing terrain
+
+---
+
+## Exeta Res (Challenge)
+
+The Exeta Res module automatically casts `exeta res` (challenge) to attract monsters to you. Useful for knights who need to maintain aggro during team hunts:
+
+- Configurable monster count threshold
+- Cooldown management
+- Only casts when monsters are in range
+
+---
+
+## Configuration
+
+### Creature Configs
+
+Stored as JSON files in `targetbot_configs/`:
+
+```json
 {
-  name = "Dragon Lord",
-  priority = 3,          -- Base weight (×1000 internally)
-  danger = 8,            -- AutoTuner may adjust this
-  keepDistance = true,
-  keepDistanceRange = 4,
-  avoidWaves = true,
-  lureCount = 0,
-  attackSpells = { "exori gran vis", "exori vis" },
-  attackRunes = { 3161 },  -- sudden death
+  "name": "Dragon Lord",
+  "priority": 3,
+  "danger": 8,
+  "keepDistance": true,
+  "keepDistanceRange": 4,
+  "avoidWaves": true,
+  "lureCount": 0,
+  "attackSpells": ["exori gran vis", "exori vis"],
+  "attackRunes": [3161]
 }
 ```
 
@@ -306,14 +299,27 @@ All event connections are in the `if EventBus then … end` block of
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `MonsterAI.COLLECT_ENABLED` | `true` | Master switch for data collection |
-| `MonsterAI.AUTO_TUNE_ENABLED` | `true` | Enable danger auto-tuning |
-| `MonsterAI.DEBUG` | `false` | Verbose console output |
-| `MonsterAI.COLLECT_EXTENDED` | `true` | Full OTClient telemetry snapshots |
+| `MonsterAI.COLLECT_ENABLED` | true | Master data-collection switch |
+| `MonsterAI.AUTO_TUNE_ENABLED` | true | Enable danger auto-tuning |
+| `MonsterAI.DEBUG` | false | Verbose console output |
 
 ---
 
-## Debugging & Diagnostics
+## Monster Inspector
+
+The Monster Inspector UI shows live data from Monster Insights:
+
+- Behavior classification for each tracked creature
+- Pattern confidence scores
+- Spell/attack history
+- EWMA cooldown data
+- Movement pattern visualization
+
+Open it from the Target tab to see what the AI is learning about each monster type.
+
+---
+
+## Debugging
 
 ```lua
 -- Print full stats summary
@@ -328,10 +334,37 @@ print(MonsterAI.Scenario.getStats())
 -- Inspect ASM state
 print(AttackStateMachine.getState(), AttackStateMachine.getTargetId())
 
--- View TBI breakdown for a creature
-local c = g_game.getAttackingCreature()
-if c then print(MonsterAI.TargetBot.debugCreature(c)) end
-
 -- Enable verbose logging
 MonsterAI.DEBUG = true
 ```
+
+---
+
+## Troubleshooting
+
+### TargetBot not attacking
+
+1. Is TargetBot **enabled** (green toggle)?
+2. Are there creatures configured in the creature list?
+3. Are matching monsters on screen?
+4. Do you have mana for attack spells?
+5. Check ASM state — it should be ATTACKING when a target is present.
+
+### Target keeps switching (zigzag)
+
+- This should be rare with engagement locks. Check the scenario:
+  - FEW monsters (2–3) has a 5-second switch cooldown
+  - Ensure creature priorities are configured properly
+  - Enable `MonsterAI.DEBUG` to see why switches occur
+
+### Not attacking after target dies
+
+- The ASM enters RECOVERING state for 350–600 ms after a kill
+- This is normal — it prevents attacking the wrong creature during the transition
+- If it seems stuck, check for `STOP_START_DEBOUNCE` timing
+
+### Monsters not being looted
+
+- Verify looting is enabled in the Target tab
+- Check that loot containers are open
+- Make sure the creature died within looting range

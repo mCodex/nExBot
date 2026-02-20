@@ -480,21 +480,10 @@ FeaturesWindow < MainWindow
     anchors.bottom: ID.bottom
 
   BotSwitch
-    id: LootChannel
-    anchors.left: CustomPrices.left
-    anchors.right: parent.horizontalCenter
-    margin-right: 2
-    anchors.top: prev.top
-    margin-top: 20
-    text: Loot Channel
-    font: verdana-11px-rounded   
-
-  BotSwitch
     id: RarityFrames
-    anchors.left: parent.horizontalCenter
-    margin-left: 2
+    anchors.left: CustomPrices.left
     anchors.right: CustomPrices.right
-    anchors.top: secondSeparator.top
+    anchors.top: prev.top
     margin-top: 20
     text: Rarity Frames
     font: verdana-11px-rounded   

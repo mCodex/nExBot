@@ -1,324 +1,337 @@
-# 🗺️ CaveBot Documentation
+# CaveBot
 
-**Automated waypoint navigation and hunting**
-
----
-
-## 📖 Overview
-
-CaveBot automates your hunting route by following waypoints. It handles:
-- Walking between locations
-- Opening doors
-- Using tools (rope, shovel, machete)
-- Refilling supplies
-- Depositing loot
+Automated waypoint navigation, supply management, and hunting route automation.
 
 ---
 
-## 🆕 What's New (Recent Improvements)
+## Overview
 
-- **Walking smoothing & tuning:** Movement timing and smoothing adjusted to reduce jitter and improve pathing stability across servers.
-- **Chunked walking:** Paths are split into short segments (max 15 tiles) to avoid stale pathing and repeated expensive calculations.
-- **Waypoint Guard improvements:** More robust distance checks and auto-skip for unreachable waypoints.
-- **Event-driven integration:** Better coordination with TargetBot (Pull System) and other modules using the EventBus.
+CaveBot is nExBot's navigation engine. It follows a list of waypoints to walk your character through hunting routes, open doors, use tools, refill supplies, deposit loot, and interact with NPCs — all automatically.
 
----
+Key capabilities:
 
----
-
-## 🚀 Walking Module v3.2.0
-
-### Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Floor-Change Prevention** | Validates entire path before walking, never steps on stairs/ramps |
-| **Field Handling** | Respects `ignoreFields` config, uses keyboard walking for fire/poison |
-| **Chunked Walking** | Max 15 tiles per autoWalk call keeps paths fresh |
-| **Tiered Validation** | Thorough check (20 tiles), fast minimap for distant |
-| **Pathfinding Limit** | Realistic 50-tile limit matching game engine |
-| **Keyboard Fallback** | Uses `walk(direction)` when autoWalk fails on fields |
-
-### How Floor-Change Prevention Works
-
-```
-Path Found → Validate Each Step → Floor Change Detected?
-                                        ↓ YES
-              Stop at step BEFORE floor change
-              Calculate safe destination
-              autoWalk to safe point only
-```
-
-### Field Handling
-
-When paths cross fire/poison/energy fields:
-
-1. Normal pathfinding tries without `ignoreFields`
-2. If fails, retries with `ignoreFields = true`
-3. Uses keyboard `walk(direction)` step-by-step
-4. This bypasses autoWalk's inability to cross fields
-
-### Configuration
-
-Enable **"Ignore fields"** in CaveBot Config to walk through damaging fields.
+- Waypoint-based route navigation
+- Floor-change prevention (never accidentally walks on stairs)
+- Intelligent field handling (fire, poison, energy)
+- Door opening and tool usage (rope, shovel, machete)
+- Supply refilling and loot depositing
+- NPC trading (buy/sell)
+- Lure and stand-lure systems
+- Bank operations (deposit gold, withdraw)
+- Imbuing automation (OTCR only)
+- Travel system (boats, carpets, teleports)
+- Task/quest management
+- Save/load complete routes as config files
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### Creating a Simple Route
-
-1. **Open the Editor**
-   - Click `Show Editor` in CaveBot panel
-
-2. **Add Waypoints**
-   - Stand at desired location
-   - Click `Add Goto` to add walk waypoint
-   - Repeat for your entire route
-
-3. **Add Labels**
-   - Use `label` action to mark important spots
-   - Example: `label:hunt`, `label:depot`
-
-4. **Save Configuration**
-   - Enter a name in the config dropdown
-   - Click save icon
+1. Open the **Cave** tab.
+2. Click **Show Editor** to open the waypoint editor.
+3. Stand at your starting location and click **Add Goto**.
+4. Walk to your next location and click **Add Goto** again.
+5. Repeat until your route is complete.
+6. Save your config with a name (e.g. `Dragon_Darashia`).
+7. Toggle CaveBot **ON** and press **Start** (`Ctrl+Z`).
 
 ---
 
-## 📍 Waypoint Types
+## Waypoint Types
 
-### Movement Actions
+### Movement
 
-<details>
-<summary><b>🚶 goto</b></summary>
+#### goto
 
 Walk to a specific coordinate.
 
-**Format:** `x,y,z` or `x,y,z,precision`
-
-**Examples:**
-```
-32000,32000,7      → Walk to exact position
-32000,32000,7,3    → Walk within 3 tiles of position
+```text
+32000,32000,7        → Walk to exact position
+32000,32000,7,3      → Walk within 3 tiles of position
 ```
 
-> [!TIP]
-> Use precision for areas where exact positioning isn't needed.
+> Use the **precision** parameter (4th value) to avoid wasting time on exact positioning. A value of 2–3 is recommended for most waypoints.
 
-</details>
+#### label
 
-<details>
-<summary><b>🏷️ label</b></summary>
+Mark a named position for jumps.
 
-Mark a location with a name for jumping.
-
-**Format:** `labelName`
-
-**Examples:**
-```
+```text
 label:hunt
 label:refill
 label:depot
 ```
 
-> [!IMPORTANT]
-> Labels are case-sensitive! `Hunt` ≠ `hunt`
+> Labels are case-sensitive. `Hunt` and `hunt` are different labels.
 
-</details>
+#### gotolabel
 
-<details>
-<summary><b>↪️ gotolabel</b></summary>
+Jump execution to a named label.
 
-Jump to a labeled waypoint.
-
-**Format:** `labelName`
-
-**Examples:**
-```
-gotolabel:hunt     → Jump to "hunt" label
-gotolabel:depot    → Jump to "depot" label
+```text
+gotolabel:hunt       → Resume from the "hunt" label
+gotolabel:depot      → Jump to depot sequence
 ```
 
-</details>
+### Conditional
 
----
+#### checkSupplies
 
-### Conditional Actions
+Check item quantity and branch if low.
 
-<details>
-<summary><b>🎒 checkSupplies</b></summary>
-
-Check if supplies are low and go to refill.
-
-**Format:** `itemId,minAmount,gotoLabel`
-
-**Examples:**
-```
-3160,50,refill     → If mana potions < 50, goto refill
-3155,20,depot      → If health potions < 20, goto depot
+```text
+3160,50,refill       → If mana potions < 50, goto "refill"
+3155,20,depot        → If SD runes < 20, goto "depot"
 ```
 
-</details>
+#### checkCapacity
 
-<details>
-<summary><b>⚖️ checkCapacity</b></summary>
+Check carrying capacity and branch if low.
 
-Check if capacity is low.
-
-**Format:** `minCap,gotoLabel`
-
-**Examples:**
-```
-200,depot          → If cap < 200, goto depot
+```text
+200,depot            → If cap < 200 oz, goto "depot"
 ```
 
-</details>
+#### posCheck
 
-<details>
-<summary><b>🧪 checkMana</b></summary>
-
-Check mana percentage.
-
-**Format:** `minPercent,gotoLabel`
-
-**Examples:**
-```
-30,refill          → If mana% < 30, goto refill
-```
-
-</details>
-
----
+Check if the player is on a specific floor or position and branch accordingly.
 
 ### Town Actions
 
-<details>
-<summary><b>🏦 depositor</b></summary>
+#### depositor
 
-Deposit items in depot.
+Deposit all loot in the depot. Works with the Depositor configuration panel where you set which items to deposit and which to keep.
 
-**Format:** `depositAll` or item-specific
+#### buy
 
-> [!TIP]
-> Configure deposit settings in the Depositor panel for full control.
+Buy items from an NPC.
 
-</details>
-
-<details>
-<summary><b>🛒 buy</b></summary>
-
-Buy items from NPC.
-
-**Format:** `itemId,amount,npcName`
-
-**Examples:**
-```
-3160,200,Eremo     → Buy 200 mana potions from Eremo
+```text
+3160,200,Eremo       → Buy 200 mana potions from Eremo
 ```
 
-</details>
+#### sell
 
-<details>
-<summary><b>💰 sell</b></summary>
+Sell items to an NPC. The Sell All module can automatically sell all configured loot items.
 
-Sell items to NPC.
+#### bank
 
-**Format:** `itemId,npcName`
+Deposit or withdraw gold from the bank NPC.
 
-</details>
+### Tools
 
----
+#### rope / shovel / machete
 
-## 🛡️ Safety Features
+Use the corresponding tool at the current position. CaveBot detects rope holes, stone piles, and jungle grass automatically.
 
-### Optimized Execution System
+#### door
 
-> [!NOTE]
-> CaveBot now intelligently skips macro execution when not needed!
+Open a door at the current waypoint position.
 
-**How it works:**
-- Tracks walk state (isWalkingToWaypoint, targetPos)
-- Skips execution while player is actively walking
-- Detects arrival at waypoint automatically
-- Auto-recovers from stuck state after 3 seconds
+### Special
+
+#### lure
+
+Pull a specified number of creatures before continuing.
+
+```text
+lure Dragon 1        → Pull 1 Dragon before moving on
+```
+
+#### standLure
+
+Stand in place and lure creatures to your position. Unlike regular lure, the character doesn't chase — it waits for monsters to come.
+
+#### action
+
+Execute custom Lua code at a waypoint.
 
 ```lua
--- The bot only executes when there's work to do
-if shouldSkipExecution() then return end  -- Walking? Skip!
+action() function()
+  if player:getHealth() < 200 then
+    CaveBot.setOff()
+  end
+end
+```
+
+#### travel
+
+Use boats, carpets, or teleports to travel between cities.
+
+#### imbuing
+
+Automatically apply imbuements at an imbuing shrine (OTCR-specific).
+
+#### tasker
+
+Interact with task NPCs to accept or complete tasks.
+
+#### withdraw / d_withdraw / inbox_withdraw
+
+Withdraw items from the depot, depot box, or inbox.
+
+---
+
+## Walking Engine (v3.2)
+
+The walking engine is the heart of CaveBot. It handles pathfinding, field avoidance, and floor-change safety.
+
+### Floor-Change Prevention
+
+Before walking any path, the engine validates every tile along the route. If any tile contains a floor-change element (stairs, ladders, ramps), the walk is truncated to stop **before** that tile.
+
+```text
+Path Found → Validate each step → Floor change detected?
+                                        ↓ Yes
+                  Stop before the floor-change tile
+                  Walk only to the safe point
+```
+
+### Field Handling
+
+When a path crosses fire, poison, or energy fields:
+
+1. Normal pathfinding tries without `ignoreFields`
+2. If it fails, retries with `ignoreFields = true`
+3. Uses keyboard step-by-step walking (`walk(direction)`) to cross each field tile
+4. This bypasses autoWalk's inability to cross damaging fields
+
+Enable **"Ignore fields"** in the CaveBot config panel to allow field crossing.
+
+### Chunked Walking
+
+Paths are split into segments of **max 15 tiles** per autoWalk call. This keeps pathfinding fresh and prevents stale routes in dynamic environments.
+
+### Stuck Detection
+
+If the player hasn't moved for 3 seconds while walking to a waypoint, CaveBot triggers recovery — it cancels the current walk and retries with alternative pathfinding strategies.
+
+### Pathfinding Strategy
+
+```text
+1. Try autoWalk (client's built-in fast pathfinding)
+2. If that fails → findPath with simple settings
+3. If still failing and distance ≤ 30 → findPath ignoring creatures
+4. If distance ≤ 15 → findPath allowing unseen tiles
+5. If distance > 50 → use autoWalk only (prevents freezes)
 ```
 
 ---
 
-### Waypoint Guard
+## Waypoint Guard
 
-> [!IMPORTANT]
-> Checks distance from CURRENT waypoint, not first waypoint!
+The Waypoint Guard prevents infinite loops when waypoints become unreachable.
 
-**Key improvements over old guard:**
-
-| Old Guard | New Waypoint Guard |
-|-----------|----------------|
-| Checked first waypoint | Checks **current focused waypoint** |
-| Ran every 250ms | **Rate-limited to every 5 seconds** |
-| Blocked execution | **Skips unreachable waypoint** |
-| Caused infinite loops | **3-failure auto-skip** |
-
-**Configuration:**
-```lua
-WaypointGuard = {
-  CHECK_INTERVAL = 5000,     -- Check every 5 seconds
-  EXTREME_DISTANCE = 100,    -- Only trigger if >100 tiles
-  MAX_FAILURES = 3           -- Skip waypoint after 3 failures
-}
-```
-
-**Triggers when:**
-- Player is on different floor than current waypoint
-- Player is >100 tiles from current waypoint
-- After 3 consecutive failures → **skips to next waypoint** and requests recovery
-
-**Behavior:**
-- Rate-limited checks (every 5 seconds) to avoid heavy pathfinding
-- Skips unreachable waypoints and lets recovery find the nearest reachable one
-
-### Pull System Integration
-
-When TargetBot's Pull System is active:
-- CaveBot **pauses** waypoint execution
-- Player stays and fights current monsters
-- Prevents running away from respawns
+| Behavior | Details |
+|----------|---------|
+| **Checks** | Current focused waypoint (not the first one) |
+| **Rate** | Every 5 seconds (not every tick) |
+| **Trigger** | Player is on wrong floor or > 100 tiles away |
+| **Recovery** | After 3 consecutive failures, skips to next waypoint |
 
 ---
 
-## ⚙️ Configuration
+## Supply Management
 
-### Settings Panel
+### Supply Check
+
+Before continuing a hunt loop, CaveBot can check your supply levels:
+
+- Health potions, mana potions, spirit potions
+- Runes (SD, Avalanche, GFB, etc.)
+- Ammunition (arrows, bolts)
+- Carrying capacity
+
+If any supply is below threshold, CaveBot routes to the refill label.
+
+### Refill Flow
+
+A typical refill sequence:
+
+```text
+label:hunt
+  ... hunting waypoints ...
+  checkSupplies:3160,50,refill
+  checkCapacity:200,depot
+  gotolabel:hunt
+
+label:refill
+  goto NPC location
+  buy:3160,200,NPC_Name
+  gotolabel:hunt
+
+label:depot
+  goto depot location
+  depositor
+  bank
+  gotolabel:refill
+```
+
+---
+
+## Depositor
+
+The Depositor module handles loot depositing at the depot. Configure it through the **Depositor Config** panel:
+
+- Set which items to deposit
+- Set items to keep (stackable supplies)
+- Configure deposit-all behavior
+- Works with both standard depots and OTCR stash
+
+---
+
+## Pull System Integration
+
+When TargetBot's Lure/Pull system is active, CaveBot **pauses** waypoint execution so the player stays in place and fights. Navigation only resumes after the lure target count is satisfied or all nearby monsters are dead.
+
+---
+
+## Recorder
+
+The CaveBot Recorder allows you to record waypoints by simply walking your route:
+
+1. Click **Record** in the editor
+2. Walk your hunting route manually
+3. The recorder captures each position as a goto waypoint
+4. Stop recording and save
+
+This is the fastest way to create a new route.
+
+---
+
+## Configuration
+
+### Settings
 
 | Setting | Description | Default |
 |---------|-------------|---------|
 | **Use Delay** | Delay after using items | 400ms |
 | **Walk Delay** | Delay between steps | 100ms |
-| **Ping Compensation** | Add to delays | 0ms |
+| **Ping Compensation** | Added to all delays | 0ms |
 | **Auto Use Tools** | Use rope/shovel automatically | ON |
+| **Ignore Fields** | Allow walking through fields | OFF |
 
-### Tool Configuration
+### Saving and Loading Configs
 
-| Tool | Item ID | Target Tiles |
-|------|---------|--------------|
-| Rope | Set in config | Rope holes |
-| Shovel | Set in config | Stone piles |
-| Machete | Set in config | Jungle grass |
-| Scythe | Set in config | Wheat |
+CaveBot configs are saved as `.cfg` files in the `cavebot_configs/` folder. Each config contains the complete list of waypoints for a hunting route.
+
+nExBot ships with **50+ pre-built configs** for popular hunting spots:
+
+- Asura Port Hope
+- Banuta Hydra/Medusa
+- Dragon Darashia
+- Demon Alburn
+- Hydra Oramond
+- Naga Astraea
+- And many more...
 
 ---
 
-## 📝 Script Examples
+## Script Examples
 
-<details>
-<summary><b>Basic Hunting Loop</b></summary>
+### Basic Hunting Loop
 
-```
+```text
 label:hunt
 goto:32000,32000,7
 goto:32010,32000,7
@@ -333,90 +346,63 @@ depositor
 gotolabel:hunt
 ```
 
-</details>
+### Full Refill with Bank
 
-<details>
-<summary><b>Full Refill Script</b></summary>
-
-```
+```text
 label:hunt
--- hunting waypoints here --
-checkSupplies:3160,50,refill
-checkCapacity:300,depot
-gotolabel:hunt
-
-label:refill
-goto:32500,32500,7  -- NPC location
-buy:3160,200,Eremo
-gotolabel:hunt
+  ... waypoints ...
+  checkSupplies:3160,50,refill
+  checkCapacity:300,depot
+  gotolabel:hunt
 
 label:depot
-goto:32600,32600,7  -- Depot location
-depositor
-gotolabel:refill
+  goto depot
+  depositor
+  bank
+  gotolabel:refill
+
+label:refill
+  goto NPC
+  buy:3160,200,NPC_Name
+  gotolabel:hunt
 ```
 
-</details>
+### Custom Action Waypoint
+
+```lua
+action() function()
+  -- Only hunt during green stamina
+  if Player.staminaInfo().greenRemaining > 0 then
+    CaveBot.setOn()
+  else
+    CaveBot.setOff()
+  end
+end
+```
 
 ---
 
-## ⚠️ Common Issues
+## Troubleshooting
 
-<details>
-<summary><b>Client freezes when far from waypoint</b></summary>
+### CaveBot stops moving
 
-**Cause:** Expensive pathfinding calculation
+1. Is CaveBot **enabled** and **started** (`Ctrl+Z`)?
+2. Is TargetBot's Pull System pausing navigation?
+3. Are the waypoint coordinates reachable from your current position?
+4. Is there a door or obstacle blocking the path?
+5. Check for field tiles — enable "Ignore fields" if needed.
 
-**Solution:** Already fixed! WaypointGuard now:
-1. Detects when player > 100 tiles away
-2. Uses autoWalk instead of findPath
-3. Prevents the freeze automatically
+### Stuck at a door
 
-</details>
+- Enable **Auto Open Doors** in config
+- Add a manual `door` waypoint before the goto past the door
+- Verify the door item IDs are recognized
 
-<details>
-<summary><b>Bot not walking</b></summary>
+### Wrong floor after teleport
 
-**Check:**
-1. Is CaveBot enabled? (green light)
-2. Is TargetBot blocking it? (check Pull System)
-3. Are there waypoints in the list?
-4. Is there a path to the waypoint?
+- Add a waypoint on each floor so CaveBot knows the expected floor
+- Use the floor-change prevention setting to avoid accidental stair use
 
-</details>
+### Client freezes when far from waypoint
 
-<details>
-<summary><b>Stuck at door</b></summary>
-
-**Solution:**
-1. Enable `Auto Open Doors` in config
-2. Make sure door item IDs are correct
-3. Add a manual `use` waypoint if needed
-
-</details>
-
-<details>
-<summary><b>Wrong floor after teleport</b></summary>
-
-**Cause:** Unexpected floor change
-
-**Solution:**
-1. The bot auto-detects floor changes
-2. Add a waypoint on each floor
-3. Use `stairs` action for known level changes
-
-</details>
-
----
-
-## 💡 Pro Tips
-
-> [!TIP]
-> **Efficiency Tip:** Use precision in waypoints to reduce exact positioning time.
-> `32000,32000,7,2` is faster than `32000,32000,7`
-
-> [!TIP]
-> **Memory Tip:** Keep scripts under 200 waypoints for best performance.
-
-> [!TIP]
-> **Safety Tip:** Always add a `label:depot` and escape route for emergencies.
+This is already handled. The Waypoint Guard detects when you're > 100 tiles from the current waypoint and uses autoWalk instead of expensive pathfinding. If it still freezes, check that your route doesn't have unreachable waypoints.
