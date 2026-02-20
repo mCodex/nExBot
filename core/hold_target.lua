@@ -16,8 +16,8 @@ local function holdTargetHandler()
     local tpos = t and t:getPosition()
     if tpos and tpos.z == posz() and not t:isNpc() then
         targetID = t:getId()
-    elseif not t then
-        -- there is no saved data, do nothing
+    else
+        -- No valid target (nil, wrong floor, NPC, or missing position)
         if not targetID then return end
 
         -- look for target
