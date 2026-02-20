@@ -34,6 +34,7 @@ local function holdTargetHandler()
                     else
                         attack(spec)  -- Fallback if ASM not loaded
                     end
+                    return
                 end
             end
         end
