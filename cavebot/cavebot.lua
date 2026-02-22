@@ -443,18 +443,22 @@ local function shouldSkipExecution()
         end
       end
       
-      -- Check if distance to target is decreasing (rolling minimum + tolerance)
+      -- Check if distance to target is decreasing (Chebyshev + rolling minimum)
+      -- Chebyshev matches OTClient diagonal movement better than Manhattan,
+      -- reducing false "regression" stops on curved paths around obstacles.
       if walkState.targetPos then
         local currentPos = pos()
         if currentPos then
-          local curDist = math.abs(currentPos.x - walkState.targetPos.x)
-                        + math.abs(currentPos.y - walkState.targetPos.y)
+          local curDist = math.max(
+            math.abs(currentPos.x - walkState.targetPos.x),
+            math.abs(currentPos.y - walkState.targetPos.y)
+          )
           -- Track rolling minimum distance (handles curved/obstacle paths)
           if not walkState.minDist or curDist < walkState.minDist then
             walkState.minDist = curDist
           end
-          -- Only stop if we've regressed beyond the best distance seen
-          local tolerance = 2
+          -- Only stop if we've regressed well beyond the best distance seen
+          local tolerance = 3
           if walkState.minDist and curDist > walkState.minDist + tolerance then
             -- Getting farther from closest point — stop and recompute
             if player.stopAutoWalk then
@@ -463,6 +467,18 @@ local function shouldSkipExecution()
             walkState.isWalkingToWaypoint = false
             walkState.targetPos = nil
             return false
+          end
+          -- Elapsed-progress check: if walking > 3s with zero distance decrease, stuck
+          if walkState.walkStartTime and walkState.walkStartDist then
+            local elapsed = now - walkState.walkStartTime
+            if elapsed > 3000 and curDist >= walkState.walkStartDist then
+              if player.stopAutoWalk then
+                pcall(player.stopAutoWalk, player)
+              end
+              walkState.isWalkingToWaypoint = false
+              walkState.targetPos = nil
+              return false
+            end
           end
         end
       end
@@ -573,7 +589,7 @@ WaypointEngine = {
   recoveryStartTime = 0,         -- When recovery began
   
   -- Thresholds (tuned for fast recovery)
-  STUCK_THRESHOLD = 4,           -- Failures before stuck (was 8)
+  STUCK_THRESHOLD = 3,           -- Failures before stuck (reduced: pathfinder() removed)
   STUCK_TIMEOUT = 4000,          -- Max time in stuck before recovery (was 10000)
   MOVEMENT_THRESHOLD = 3,        -- Min tiles to consider "progress"
   PROGRESS_WINDOW = 8000,        -- Time window for progress check (was 15000)
@@ -596,7 +612,23 @@ WaypointEngine = {
   -- Without this, recovery finds N-1 (closest reachable), N-1 completes
   -- instantly (player already there), advances back to N → infinite loop.
   stuckWaypoints = {},           -- child widget → expiry timestamp
-  BLACKLIST_TTL = 45000,         -- 45 seconds (survives one route circuit)
+  BLACKLIST_TTL = 60000,         -- 60 seconds base (survives one route circuit)
+  blacklistCounts = {},          -- child widget → hit count (for adaptive TTL)
+  BLACKLIST_MAX_TTL = 300000,    -- 5 minute cap for adaptive TTL
+  BLACKLIST_ADAPTIVE_WINDOW = 300000,  -- 5 min: reset counts after this
+  blacklistCountsResetTime = 0,  -- last time counts were purged
+
+  -- Recently-visited waypoints: ring buffer of last 4 focused goto indices.
+  -- Used by findReachableWaypoint() to penalize ping-pong oscillation.
+  recentWaypoints = {},          -- {index, time} entries
+  recentWaypointsHead = 1,
+  RECENT_CAPACITY = 4,
+  RECENT_WINDOW = 10000,         -- 10s: entries older than this are ignored
+  RECENT_PENALTY = 15,           -- Score penalty for recently-visited waypoints
+
+  -- Recovery coordination flag: set by focusWaypointForRecovery(),
+  -- checked by main loop to avoid resetting actionRetries on recovery focus changes.
+  recoveryJustFocused = false,
 
   -- TSP forward-bias scoring: track last successfully completed goto index
   -- so recovery searches can penalize backward waypoints and prefer forward.
@@ -758,10 +790,22 @@ local function transitionTo(newState)
   if newState == "RECOVERING" then
     WaypointEngine.recoveryStartTime = now
     if WaypointEngine.recoveryAttempt == 0 then
-      -- First entry into recovery: blacklist the current waypoint
+      -- First entry into recovery: blacklist the current waypoint with adaptive TTL
       local current = ui and ui.list and ui.list:getFocusedChild()
       if current and current.action == "goto" then
-        WaypointEngine.stuckWaypoints[current] = now + WaypointEngine.BLACKLIST_TTL
+        -- Adaptive TTL: doubles on repeated blacklisting (60s → 120s → 240s, cap 300s)
+        -- Purge stale counts every 5 minutes
+        if now - WaypointEngine.blacklistCountsResetTime > WaypointEngine.BLACKLIST_ADAPTIVE_WINDOW then
+          WaypointEngine.blacklistCounts = {}
+          WaypointEngine.blacklistCountsResetTime = now
+        end
+        local hits = (WaypointEngine.blacklistCounts[current] or 0) + 1
+        WaypointEngine.blacklistCounts[current] = hits
+        local ttl = math.min(
+          WaypointEngine.BLACKLIST_TTL * math.pow(2, hits - 1),
+          WaypointEngine.BLACKLIST_MAX_TTL
+        )
+        WaypointEngine.stuckWaypoints[current] = now + ttl
       end
     end
     WaypointEngine.recoveryAttempt = WaypointEngine.recoveryAttempt + 1
@@ -778,7 +822,17 @@ local function recordSuccess()
   -- Track last completed goto index for TSP forward-bias scoring
   local focused = ui and ui.list and ui.list:getFocusedChild()
   if focused and focused.action == "goto" then
-    WaypointEngine.lastCompletedGotoIndex = ui.list:getChildIndex(focused)
+    local idx = ui.list:getChildIndex(focused)
+    WaypointEngine.lastCompletedGotoIndex = idx
+    -- Record as recently visited (anti-oscillation)
+    local slot = WaypointEngine.recentWaypoints[WaypointEngine.recentWaypointsHead]
+    if not slot then
+      slot = {index = 0, time = 0}
+      WaypointEngine.recentWaypoints[WaypointEngine.recentWaypointsHead] = slot
+    end
+    slot.index = idx
+    slot.time = now
+    WaypointEngine.recentWaypointsHead = (WaypointEngine.recentWaypointsHead % WaypointEngine.RECENT_CAPACITY) + 1
   end
   if WaypointEngine.state ~= "NORMAL" then
     transitionTo("NORMAL")
@@ -806,6 +860,18 @@ end
 focusWaypointForRecovery = function(targetChild, targetIndex)
   ui.list:focusChild(targetChild)
   actionRetries = 0
+  WaypointEngine.recoveryJustFocused = true
+  -- Record this waypoint as recently visited (anti-oscillation)
+  if targetIndex then
+    local slot = WaypointEngine.recentWaypoints[WaypointEngine.recentWaypointsHead]
+    if not slot then
+      slot = {index = 0, time = 0}
+      WaypointEngine.recentWaypoints[WaypointEngine.recentWaypointsHead] = slot
+    end
+    slot.index = targetIndex
+    slot.time = now
+    WaypointEngine.recentWaypointsHead = (WaypointEngine.recentWaypointsHead % WaypointEngine.RECENT_CAPACITY) + 1
+  end
 end
 
 local function executeRecovery()
@@ -965,6 +1031,13 @@ resetWaypointEngine = function()
   WaypointEngine.walkToFailCount = 0
   WaypointEngine.lastMoveTime = now
   WaypointEngine.lastCompletedGotoIndex = 0
+  WaypointEngine.recoveryJustFocused = false
+  
+  -- Clear recently-visited ring buffer
+  for ri = 1, WaypointEngine.RECENT_CAPACITY do
+    WaypointEngine.recentWaypoints[ri] = nil
+  end
+  WaypointEngine.recentWaypointsHead = 1
   
   -- Clear caches
   cachedWaypointId = 0
@@ -1205,19 +1278,25 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   safeResetWalking()
   local result = actionDef.callback(currentAction.value, actionRetries, prevActionResult)
   
-  -- Detect focus change during callback (e.g., pathfinder() skipped to a new waypoint).
-  -- Reset actionRetries so the new waypoint starts fresh with retries=0.
+  -- Detect focus change during callback.
+  -- If recovery just changed focus (recoveryJustFocused), preserve the reset
+  -- but clear the flag. Otherwise reset actionRetries for user/callback focus changes.
   if uiList:getFocusedChild() ~= currentAction then
-    actionRetries = 0
+    if WaypointEngine.recoveryJustFocused then
+      WaypointEngine.recoveryJustFocused = false
+      -- actionRetries already set to 0 by focusWaypointForRecovery
+    else
+      actionRetries = 0
+    end
   end
   
   -- Handle result
   if result == "retry" then
     actionRetries = actionRetries + 1
     -- Safety valve: if action retries indefinitely, record as failure.
-    -- Goto gets a higher threshold because walkTo retries are expected
-    -- (progressive strategies: attack blocker at retries>2, ignoreCreatures at retries>5).
-    local retryLimit = (actionType == "goto") and 16 or 8
+    -- Goto threshold aligned slightly above goto's own maxRetries (8)
+    -- so WaypointEngine triggers recovery, not just the action itself.
+    local retryLimit = (actionType == "goto") and 10 or 8
     if actionRetries > retryLimit then
       recordFailure(actionType == "goto")
     end
@@ -1478,7 +1557,20 @@ end
 -- recovery, eliminating the WP_N→WP_{N-1}→WP_N oscillation.
 CaveBot.blacklistWaypoint = function(child, ttl)
   if not child then return end
-  WaypointEngine.stuckWaypoints[child] = now + (ttl or WaypointEngine.BLACKLIST_TTL)
+  if not ttl then
+    -- Adaptive TTL: use blacklistCounts for escalation
+    if now - WaypointEngine.blacklistCountsResetTime > WaypointEngine.BLACKLIST_ADAPTIVE_WINDOW then
+      WaypointEngine.blacklistCounts = {}
+      WaypointEngine.blacklistCountsResetTime = now
+    end
+    local hits = (WaypointEngine.blacklistCounts[child] or 0) + 1
+    WaypointEngine.blacklistCounts[child] = hits
+    ttl = math.min(
+      WaypointEngine.BLACKLIST_TTL * math.pow(2, hits - 1),
+      WaypointEngine.BLACKLIST_MAX_TTL
+    )
+  end
+  WaypointEngine.stuckWaypoints[child] = now + ttl
 end
 
 --[[
@@ -1570,10 +1662,12 @@ end
 --
 -- Asymmetric scoring:
 --   forward waypoints  → score = tileDistance  (no penalty)
---   backward waypoints → score = tileDistance + backwardOrderDist * 1.5
+--   backward waypoints → score = tileDistance + backwardOrderDist * 4.0
+--   recently visited   → score += RECENT_PENALTY (15) if visited within 10s
 --
 -- This ensures that after chasing a monster off-route the bot always
 -- resumes ahead when possible, only backtracking as a last resort.
+-- Recently-visited penalty prevents ping-pong oscillation.
 -- ============================================================================
 
 --[[
@@ -1638,20 +1732,35 @@ findReachableWaypoint = function(playerPos, options)
     local dist = chebyshevDist(playerPos, wp)
     if dist > maxDist then goto continue end
 
-    -- Direction filter + asymmetric scoring
+    -- Direction filter + asymmetric scoring (forward-biased)
+    -- Forward window: lastGoto+1 .. lastGoto+actionCount/2 (wrapping)
     local fwd = (actionCount > 0 and lastGoto > 0) and ((i - lastGoto) % actionCount) or 0
     local isForward = (fwd > 0 and fwd <= actionCount / 2) or lastGoto == 0
 
     if direction == "forward"  and not isForward then goto continue end
     if direction == "backward" and isForward     then goto continue end
 
-    -- Score: forward = pure distance; backward = distance + penalty
+    -- Score: forward = pure distance; backward = distance + strong penalty.
+    -- Penalty 4.0 ensures backward WP at 3 tiles (3 + 1×4 = 7) loses to
+    -- forward WP at 6 tiles (6 + 0 = 6). Only genuine dead-ends backtrack.
     local backtrackPenalty = 0
     if not isForward and actionCount > 0 and lastGoto > 0 then
       local bwd = (lastGoto - i) % actionCount
-      backtrackPenalty = bwd * 1.5
+      backtrackPenalty = bwd * 4.0
     end
-    local score = dist + backtrackPenalty
+
+    -- Recently-visited penalty: prevent ping-pong oscillation between waypoints.
+    -- If this waypoint was focused in the last RECENT_WINDOW ms, add RECENT_PENALTY.
+    local recentPenalty = 0
+    for ri = 1, WaypointEngine.RECENT_CAPACITY do
+      local slot = WaypointEngine.recentWaypoints[ri]
+      if slot and slot.index == i and (now - slot.time) < WaypointEngine.RECENT_WINDOW then
+        recentPenalty = WaypointEngine.RECENT_PENALTY
+        break
+      end
+    end
+
+    local score = dist + backtrackPenalty + recentPenalty
 
     candidates[#candidates + 1] = {
       index    = i,
