@@ -507,6 +507,11 @@ end
 CaveBot.clearWalkingState = function()
   walkState.isWalkingToWaypoint = false
   walkState.targetPos = nil
+  walkState.walkStartTime = nil
+  walkState.walkExpectedDuration = nil
+  walkState.walkStartDist = nil
+  walkState.minDist = nil
+  walkState.lastVerifyTime = nil
 end
 
 -- ============================================================================
@@ -763,9 +768,11 @@ local function recordSuccess()
   end
 end
 
-local function recordFailure()
+local function recordFailure(isWalkFailure)
   WaypointEngine.failureCount = WaypointEngine.failureCount + 1
-  WaypointEngine.walkToFailCount = WaypointEngine.walkToFailCount + 1
+  if isWalkFailure then
+    WaypointEngine.walkToFailCount = WaypointEngine.walkToFailCount + 1
+  end
 end
 
 -- ============================================================================
@@ -1248,7 +1255,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if result == "retry" then
     actionRetries = actionRetries + 1
     if actionRetries > 20 then
-      recordFailure()  -- Many retries = likely stuck
+      recordFailure(actionType == "goto")  -- Many retries = likely stuck
     end
     return
   end
@@ -1257,7 +1264,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if result == true then
     recordSuccess()
   else
-    recordFailure()
+    recordFailure(actionType == "goto")
     -- CRITICAL FIX: goto actions that return false should NOT advance to next waypoint.
     -- This was the primary cause of the "loop standing still" bug — the bot would rapidly
     -- cycle through all unreachable waypoints (1→2→…→N→1) at ~13/s doing nothing.
