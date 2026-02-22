@@ -522,6 +522,8 @@ local checkStartupWaypoint       -- Defined in STARTUP DETECTION section
 local invalidateWaypointCache    -- Defined in WAYPOINT CACHE section
 local resetStartupCheck          -- Defined in STARTUP DETECTION section
 local buildWaypointCache         -- Defined in WAYPOINT CACHE section
+local focusWaypointForRecovery   -- Defined in RECOVERY STRATEGIES section
+local resetWaypointEngine        -- Defined below runWaypointEngine
 local chebyshevDist = Directions.chebyshevDistance  -- SSoT: constants/directions.lua
 local waypointPositionCache = {} -- Waypoint position cache table
 local waypointCacheValid = false
@@ -786,7 +788,7 @@ end
 -- focuses N-1, N-1 succeeds → advances to N → N unreachable → recovery → loop.
 -- @param targetChild widget The waypoint widget to focus
 -- @param targetIndex number The index of the waypoint (unused, kept for API compat)
-local function focusWaypointForRecovery(targetChild, targetIndex)
+focusWaypointForRecovery = function(targetChild, targetIndex)
   ui.list:focusChild(targetChild)
   actionRetries = 0
 end
@@ -997,7 +999,7 @@ local function runWaypointEngine()
 end
 
 -- Reset engine state
-local function resetWaypointEngine()
+resetWaypointEngine = function()
   WaypointEngine.state = "NORMAL"
   WaypointEngine.failureCount = 0
   WaypointEngine.totalMovement = 0
