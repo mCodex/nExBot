@@ -502,35 +502,16 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
       noPath = 0
       return true
     end
-    local dist2D = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
-    local floorDiff = math.abs(destPos.z - playerPos.z)
     
-    -- CASE 1: Check if we just completed a floor change TO our current floor
-    local recentChange = CaveBot.getRecentFloorChange and CaveBot.getRecentFloorChange()
-    if recentChange and recentChange.toZ == playerPos.z then
-      -- We recently changed TO this floor
-      -- Only skip if we're close horizontally AND this waypoint is for the floor we left
-      if recentChange.fromZ == destPos.z and dist2D <= 10 then
-        noPath = 0
-        return true
-      end
+    -- RELIABLE CHECK: Was this floor-change waypoint already completed?
+    -- This is the only reliable way to skip — actual completion tracking
+    if CaveBot.wasFloorChangeWaypointCompleted and CaveBot.wasFloorChangeWaypointCompleted(destPos) then
+      noPath = 0
+      return true
     end
     
-    -- CASE 2: Check if we recently came FROM this floor
-    -- If the waypoint is on a floor we just LEFT, skip it
-    if recentChange and recentChange.fromZ == destPos.z then
-      -- This waypoint is for the floor we just left - skip if close
-      if dist2D <= 10 then
-        noPath = 0
-        return true
-      end
-    end
-    
-    -- REMOVED CASE 3: The aggressive 8-tile skip was causing back-and-forth issues
-    -- by skipping valid waypoints that the player needs to reach
-    -- Now we only skip based on actual floor change history, not proximity alone
-    
-    -- CASE 4: Standard floor mismatch - we need to find a path to this floor
+    -- Standard floor mismatch — we need to find a path to this floor
+    -- Reset noPath on floor change to prevent stale counter
     noPath = noPath + 1
     pathfinder()
     return false
@@ -632,8 +613,8 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return true
   end
 
-  -- Max retries
-  local maxRetries = CaveBot.Config.get("mapClick") and 8 or 40
+  -- Max retries (reduced for faster stuck detection)
+  local maxRetries = CaveBot.Config.get("mapClick") and 6 or 12
   if retries >= maxRetries then
     noPath = noPath + 1
     pathfinder()
@@ -698,7 +679,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false
   end
   
-  CaveBot.delay(50)  -- Minimal delay for fast retry
+  CaveBot.delay(30)  -- Fast retry cycle
   return "retry"
 end)
 

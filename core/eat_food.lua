@@ -765,50 +765,6 @@ local function setupCorpseContainerListener()
   end
 end
 
--- Eat from corpses macro
-local eatFromCorpsesMacro = macro(1000, "Eat from Corpses", function()
-  -- Skip if not needed
-  local regenTime = getRegenTime()
-  if regenTime >= CONFIG.EAT_FOOD_THRESHOLD then
-    return
-  end
-  
-  -- Skip if already waiting for corpse
-  if State.corpseContainerOpen then
-    -- Stale-lock safety: auto-reset if stuck for too long
-    local elapsed = (now or 0) - (State.corpseOpenTime or 0)
-    if elapsed > CONFIG.CORPSE_LOCK_TIMEOUT_MS then
-      State.corpseContainerOpen = false
-      State.corpseOpenTime = 0
-      releaseLootLock()
-    end
-    return
-  end
-  
-  -- Yield if TargetBot looting has the lock (avoid dual-system conflicts)
-  if isLootLocked() then
-    return
-  end
-  
-  -- Try to eat from corpse
-  tryEatFromCorpse()
-end)
-
--- Add tooltip
-if eatFromCorpsesMacro and eatFromCorpsesMacro.button then
-  eatFromCorpsesMacro.button:setTooltip(
-    "Opens recently killed monster corpses to eat food inside.\n" ..
-    "Tracks monster deaths using EventBus.\n" ..
-    "Only opens corpses within " .. CONFIG.CORPSE_SCAN_RANGE .. " tiles.\n" ..
-    "Automatically closes corpse after eating."
-  )
-end
-
--- Register with BotDB for persistence
-if BotDB and BotDB.registerMacro then
-  BotDB.registerMacro(eatFromCorpsesMacro, "eatFromCorpses")
-end
-
 -- Setup tracking and listeners
 setupCorpseTracking()
 setupCorpseContainerListener()

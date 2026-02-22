@@ -27,9 +27,8 @@
   - PathFindIgnoreCreatures = 16
   
   ANTI-ZIGZAG SYSTEM:
-  - Direction smoothing via PathUtils.getSmoothedDirection()
-  - Minimum delay between direction changes
-  - Opposite direction dampening
+  - Sole direction smoothing via PathStrategy.smoothDirection() (DirectionGuard)
+  - 3-entry ring buffer with 150ms opposite rejection
 ]]
 
 -- Load shared modules (set as globals in _Loader Phase 3)
@@ -162,27 +161,8 @@ local function canWalkDirection(dir)
 end
 
 -- ============================================================================
--- PATH SMOOTHING CONSTANTS (For 40%+ accuracy improvement)
+-- DIRECTION UTILITIES
 -- ============================================================================
-
-
-local PATH_SMOOTHING = {
-  -- Direction consistency tracking
-  lastDirection = nil,
-  lastDirectionTime = 0,
-  directionChanges = 0,
-  directionChangeThreshold = 3,  -- Max rapid changes before dampening
-  directionDampingTime = 150,    -- ms to wait before allowing direction change
-  
-  -- Path stability
-  lastWaypointPos = nil,
-  lastPathTime = 0,
-  pathStabilityBonus = 0,  -- Bonus time added for stable walking
-  
-  -- Destination caching for continuous walking
-  cachedDestination = nil,
-  destinationReachedAt = 0,
-}
 
 -- Calculate direction from position A to position B (returns cardinal/diagonal direction)
 local function getDirectionTo(fromPos, toPos)
@@ -204,32 +184,6 @@ local function getDirectionTo(fromPos, toPos)
   if nx == -1 and ny == -1 then return NorthWest end
   
   return nil
-end
-
--- Use PathUtils for direction similarity (DRY)
-local function areSimilarDirections(dir1, dir2)
-  if PathUtils and PathUtils.areSimilarDirections then
-    return PathUtils.areSimilarDirections(dir1, dir2)
-  end
-  -- Fallback
-  if dir1 == nil or dir2 == nil then return true end
-  return dir1 == dir2
-end
-
--- Anti-zigzag: Check if directions are opposite
-local function areOppositeDirections(dir1, dir2)
-  if PathUtils and PathUtils.areOppositeDirections then
-    return PathUtils.areOppositeDirections(dir1, dir2)
-  end
-  return false
-end
-
--- Anti-zigzag: Get smoothed direction to prevent oscillation
-local function getSmoothedDirection(dir, forceChange)
-  if PathUtils and PathUtils.getSmoothedDirection then
-    return PathUtils.getSmoothedDirection(dir, forceChange)
-  end
-  return dir
 end
 
 -- ============================================================================
@@ -276,79 +230,22 @@ local function posEquals(a, b)
 end
 
 -- ============================================================================
--- FIELD DETECTION (Use PathUtils if available)
+-- FLOOR-CHANGE & FIELD DETECTION (delegates to PathUtils — loaded in Phase 3)
 -- ============================================================================
 
--- Use PathUtils for field items if available
-local FIELD_ITEM_IDS = (PathUtils and PathUtils.FIELD_ITEMS) or {
-  -- Fire Fields
-  [1487] = true, [1488] = true, [1489] = true, [1490] = true, [1491] = true,
-  [1492] = true, [1493] = true, [1494] = true, [1495] = true, [1496] = true,
-  [1497] = true, [1498] = true, [1499] = true, [1500] = true, [1501] = true,
-  [1502] = true, [1503] = true, [1504] = true, [1505] = true, [1506] = true,
-  -- Old fire IDs
-  [2120] = true, [2121] = true, [2122] = true, [2123] = true, [2124] = true,
-  [2125] = true, [2126] = true, [2127] = true, [2128] = true,
-  
-  -- Energy Fields  
-  [1491] = true, [1495] = true,
-  [2119] = true, [2124] = true, [2125] = true,
-  [7487] = true, [7488] = true, [7489] = true, [7490] = true,
-  [8069] = true, [8070] = true, [8071] = true, [8072] = true,
-  
-  -- Poison Fields
-  [1490] = true, [1496] = true,
-  [1503] = true, [1504] = true, [1505] = true, [1506] = true,
-  [2118] = true, [2119] = true,
-  [7465] = true, [7466] = true, [7467] = true, [7468] = true,
-  
-  -- Magic Walls (treat as fields - block path)
-  [2128] = true, [2129] = true, [2130] = true,
-  [7491] = true, [7492] = true, [7493] = true, [7494] = true,
-  
-  -- Wild Growth
-  [2130] = true, [2131] = true,
-}
-
--- ============================================================================
--- FLOOR-CHANGE DETECTION (Use PathUtils for DRY)
--- ============================================================================
-
--- Use PathUtils for floor-change colors and items if available
-local FLOOR_CHANGE_COLORS = (PathUtils and PathUtils.FLOOR_CHANGE_COLORS) or {
-  [210] = true, [211] = true, [212] = true, [213] = true,
-}
-
-local FLOOR_CHANGE_ITEMS = (PathUtils and PathUtils.FLOOR_CHANGE_ITEMS) or {
-  -- Minimal fallback set
-  [414] = true, [415] = true, [416] = true, [417] = true,
-  [1956] = true, [1957] = true, [1958] = true, [1959] = true,
-  [1219] = true, [384] = true, [386] = true, [418] = true,
-}
-
--- Use PathUtils for floor-change detection (DRY)
 local function isFloorChangeTile(tilePos)
-  if PathUtils and PathUtils.isFloorChangeTile then
-    return PathUtils.isFloorChangeTile(tilePos)
-  end
-  -- Fallback: minimap color check
-  if not tilePos then return false end
-  local Client = getClient()
-  local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(tilePos) or (g_map and g_map.getMinimapColor(tilePos)) or 0
-  return FLOOR_CHANGE_COLORS[color] or false
+  if not PathUtils then return false end
+  return PathUtils.isFloorChangeTile(tilePos)
 end
 
--- Use PathUtils for field detection (DRY)
 local function isFieldTile(tilePos)
-  if PathUtils and PathUtils.isFieldTile then
-    return PathUtils.isFieldTile(tilePos)
-  end
-  return false
+  if not PathUtils then return false end
+  return PathUtils.isFieldTile(tilePos)
 end
 
--- Fast minimap-only check (for distant tiles - performance optimization)
 local function isFloorChangeTileFast(tilePos)
-  if PathUtils and PathUtils.isFloorChangeTileFast then
+  if not PathUtils then return false end
+  if PathUtils.isFloorChangeTileFast then
     return PathUtils.isFloorChangeTileFast(tilePos)
   end
   return isFloorChangeTile(tilePos)
@@ -448,35 +345,48 @@ end
 -- SAFE PATH FINDING (SRP: Finds paths avoiding floor changes)
 -- ============================================================================
 
--- Find alternate destination with safe path (optimized: quick search)
+-- Find alternate destination with safe path
+-- Searches radius 1 + radius 2 (24 tiles), sorted by distance, capped at 4 pathfind calls
 local function findSafeAlternate(playerPos, dest, maxDist, opts)
   opts = opts or {}
   local precision = opts.precision or 1
   local ignoreFields = opts.ignoreFields or false
-  
-  -- Quick search: only check immediate neighbors (radius 1)
-  for _, offset in ipairs(ADJACENT_OFFSETS) do
-    local candidate = {
-      x = dest.x + offset.x,
-      y = dest.y + offset.y,
-      z = dest.z
-    }
-    
-    if not posEquals(candidate, playerPos) and not isFloorChangeTile(candidate) then
-      -- Quick path check without full validation
-      local path = findPath(playerPos, candidate, maxDist, {
-        ignoreNonPathable = true,
-        ignoreCreatures = true,
-        ignoreFields = ignoreFields,
-        precision = precision
-      })
-      
-      if path and #path > 0 then
-        return candidate, path
+
+  -- Generate candidates at radius 1 and radius 2 (perimeter tiles only)
+  local candidates = {}
+  for r = 1, 2 do
+    for dx = -r, r do
+      for dy = -r, r do
+        if math.abs(dx) == r or math.abs(dy) == r then
+          local candidate = {x = dest.x + dx, y = dest.y + dy, z = dest.z}
+          if not posEquals(candidate, playerPos) and not isFloorChangeTile(candidate) then
+            local dist = math.abs(dx) + math.abs(dy)
+            candidates[#candidates + 1] = {pos = candidate, dist = dist}
+          end
+        end
       end
     end
   end
-  
+
+  -- Sort by Manhattan distance to original destination (prefer closer)
+  table.sort(candidates, function(a, b) return a.dist < b.dist end)
+
+  -- Check pathfinding for top 4 candidates (performance bound)
+  local checked = 0
+  for _, entry in ipairs(candidates) do
+    if checked >= 4 then break end
+    checked = checked + 1
+    local path = findPath(playerPos, entry.pos, maxDist, {
+      ignoreNonPathable = true,
+      ignoreCreatures = true,
+      ignoreFields = ignoreFields,
+      precision = precision
+    })
+    if path and #path > 0 then
+      return entry.pos, path
+    end
+  end
+
   return nil, nil
 end
 
@@ -558,45 +468,6 @@ local function smoothPath(path, startPos)
   end
   
   return #smoothed > 0 and smoothed or path
-end
-
--- IMPROVED: Calculate optimal chunk size based on path characteristics
-local function calculateOptimalChunkSize(path, startPos, baseSafeSteps)
-  if not path or #path == 0 then return 1 end
-  
-  local pathLen = #path
-  local chunkSize = baseSafeSteps
-  
-  -- For short paths, use smaller chunks for precision
-  if pathLen <= 5 then
-    chunkSize = math.min(chunkSize, pathLen)
-  -- For medium paths, use moderate chunks
-  elseif pathLen <= 15 then
-    chunkSize = math.min(chunkSize, 10)
-  -- For long paths, use larger chunks for speed
-  else
-    chunkSize = math.min(chunkSize, MAX_WALK_CHUNK)
-  end
-  
-  -- Check direction consistency - if path has many direction changes, use smaller chunks
-  local directionChanges = 0
-  local lastDir = nil
-  local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
-  
-  for i = 1, math.min(chunkSize, #path) do
-    local dir = path[i]
-    if lastDir and dir ~= lastDir then
-      directionChanges = directionChanges + 1
-    end
-    lastDir = dir
-  end
-  
-  -- If path is very zig-zaggy, use smaller chunks (with hysteresis)
-  if chunkSize >= 6 and directionChanges >= 3 and directionChanges > chunkSize * 0.65 then
-    chunkSize = math.max(4, math.floor(chunkSize * 0.7))
-  end
-  
-  return chunkSize
 end
 
 -- Track last safe position to allow a step-back on unexpected floor change
@@ -829,9 +700,6 @@ CaveBot.walkTo = function(dest, maxDist, params)
     path = PathStrategy.getCursor().path
   else
     if PathStrategy then PathStrategy.resetCursor() end
-    -- Reset direction tracking for new path
-    PATH_SMOOTHING.lastDirection = nil
-    PATH_SMOOTHING.directionChanges = 0
 
     -- Use PathStrategy relaxed multi-attempt pathfinding
     if PathStrategy then
@@ -862,17 +730,26 @@ CaveBot.walkTo = function(dest, maxDist, params)
 
     if PathStrategy then
       PathStrategy.setCursor(path, dest)
+      -- Smooth-once: convert L-shapes to diagonals at cursor creation time
+      local smoothed = PathStrategy.smoothPath(path, playerPos)
+      if smoothed and #smoothed > 0 and #smoothed <= #path then
+        path = smoothed
+        PathStrategy.getCursor().path = path
+        PathStrategy.getCursor().smoothed = true
+      end
     else
       PathCursor.path = path
       PathCursor.idx = 1
       PathCursor.ts = now
+      -- Smooth-once for legacy cursor
+      local legacySmoothed = smoothPath(path, playerPos)
+      if legacySmoothed and #legacySmoothed > 0 and #legacySmoothed <= #path then
+        path = legacySmoothed
+        PathCursor.path = path
+        PathCursor.smoothingActive = true
+      end
     end
   end
-
-  -- Close path selection block
-  
-
-  -- End of path selection block
 
   -- Hard guard: if path crosses any floor-change tile, try a nearby alternate before aborting
   if pathCrossesFloorChange(path, playerPos, #path) then
@@ -937,214 +814,81 @@ CaveBot.walkTo = function(dest, maxDist, params)
     end
   end
   
-  -- CHUNKED WALKING: Limit steps per call to keep paths fresh
-  local optimalChunkSize = PathStrategy
-    and PathStrategy.optimalChunk(path, safeSteps, MAX_WALK_CHUNK)
-    or calculateOptimalChunkSize(path, playerPos, safeSteps)
-  local walkSteps = math.min(safeSteps, optimalChunkSize, MAX_WALK_CHUNK)
+  -- PATH-FAITHFUL WALKING DISPATCH
+  -- Short/complex paths (≤15 tiles): keyboard step (follows computed path exactly)
+  -- Long straight paths (>15 tiles, low complexity): autoWalk with FC-safety verification
 
-  -- IMPROVED: Track destination for path continuity
+  local curIdx = PathStrategy and PathStrategy.getCursor().idx or PathCursor.idx or 1
+  local remainingSteps = #path - curIdx + 1
+  local stepsToWalk = math.min(safeSteps, remainingSteps)
+
+  if stepsToWalk <= 0 then
+    if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
+    return false
+  end
+
+  -- Track destination for path continuity
   if PathStrategy then
     PathStrategy.getCursor().dest = dest
   else
     PathCursor.destPos = dest
   end
 
-  -- IMPROVED: Apply path smoothing via PathStrategy for better diagonal merging
-  local curIdx = PathStrategy and PathStrategy.getCursor().idx or PathCursor.idx or 1
-  local curSmoothed = PathStrategy and PathStrategy.getCursor().smoothed or (PathCursor and PathCursor.smoothingActive)
-  if walkSteps >= 5 and not curSmoothed then
-    local remainingPath = {}
-    for i = curIdx, #path do
-      remainingPath[#remainingPath + 1] = path[i]
-    end
-    local smoothFn = PathStrategy and PathStrategy.smoothPath or smoothPath
-    local smoothedRemaining = smoothFn(remainingPath, playerPos)
-    if smoothedRemaining and #smoothedRemaining > 0 then
-      local newPath = {}
-      for i = 1, curIdx - 1 do
-        newPath[i] = path[i]
-      end
-      for i = 1, #smoothedRemaining do
-        newPath[curIdx + i - 1] = smoothedRemaining[i]
-      end
-      path = newPath
-      if PathStrategy then
-        local c = PathStrategy.getCursor()
-        c.path = path
-        c.smoothed = true
-      else
-        PathCursor.path = path
-        PathCursor.smoothingActive = true
-      end
-    end
-  end
-
-  -- Calculate the chunk destination using PathStrategy or legacy cursor
-  local stepsToWalk = math.min(walkSteps, #path - curIdx + 1)
-  local chunkDestination = PathStrategy
-    and PathStrategy.chunkDestination(path, playerPos, curIdx, stepsToWalk)
-    or {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-
-  if not PathStrategy then
-    for i = PathCursor.idx, math.min(PathCursor.idx + stepsToWalk - 1, #path) do
-      local offset = getDirectionOffset(path[i])
-      if offset then
-        chunkDestination = applyOffset(chunkDestination, offset)
-      end
-    end
-  end
-
-  -- Direction smoothing via PathStrategy (anti-zigzag)
-  local chunkDirection = PathStrategy
-    and PathStrategy.directionTo(playerPos, chunkDestination)
-    or getDirectionTo(playerPos, chunkDestination)
-
-  if chunkDirection then
-    local smoothedDir = PathStrategy
-      and PathStrategy.smoothDirection(chunkDirection)
-      or (PathUtils and PathUtils.getSmoothedDirection and PathUtils.getSmoothedDirection(chunkDirection, false))
-
-    if smoothedDir and smoothedDir ~= chunkDirection then
-      local smoothedOffset = getDirectionOffset(smoothedDir)
-      if smoothedOffset then
-        chunkDestination = applyOffset(playerPos, smoothedOffset)
-        chunkDirection = smoothedDir
-        stepsToWalk = 1
-      end
-    end
-
-    -- Legacy PATH_SMOOTHING dampening (still useful as secondary guard)
-    if PATH_SMOOTHING.lastDirection and not areSimilarDirections(PATH_SMOOTHING.lastDirection, chunkDirection) then
-      PATH_SMOOTHING.directionChanges = PATH_SMOOTHING.directionChanges + 1
-      if PATH_SMOOTHING.directionChanges >= PATH_SMOOTHING.directionChangeThreshold then
-        if now - PATH_SMOOTHING.lastDirectionTime < PATH_SMOOTHING.directionDampingTime then
-          local curChunkEnd = PathStrategy and PathStrategy.getCursor().chunkEnd or PathCursor.lastChunkEnd
-          if curChunkEnd then
-            chunkDestination = curChunkEnd
-            stepsToWalk = 1
-          end
-        end
-        PATH_SMOOTHING.directionChanges = 0
-      end
-    else
-      PATH_SMOOTHING.directionChanges = math.max(0, PATH_SMOOTHING.directionChanges - 1)
-    end
-
-    PATH_SMOOTHING.lastDirection = chunkDirection
-    PATH_SMOOTHING.lastDirectionTime = now
-  end
-
-  -- Store chunk end position for continuity tracking
-  if PathStrategy then
-    local c = PathStrategy.getCursor()
-    c.chunkEnd = chunkDestination
-    c.chunkDir = chunkDirection
-    c.chunkTs  = now
-  else
-    PathCursor.lastChunkEnd = chunkDestination
-    PathCursor.lastChunkDir = chunkDirection
-    PathCursor.lastChunkTime = now
-  end
-  
   -- FIELD HANDLING: Use keyboard walking for paths with fields
-  -- autoWalk/map-click doesn't work through fire/poison/energy fields
   if ignoreFields then
-    -- Walk through consecutive field tiles using keyboard walking
     local currentPos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-    for i = 1, #path do
+    for i = curIdx, #path do
       local dir = path[i]
       local offset = getDirectionOffset(dir)
       if not offset then break end
       local nextPos = applyOffset(currentPos, offset)
-      -- Check if nextPos is a field tile; if not, stop walking
-      if not isFieldTile(nextPos) then
-        break
-      end
+      if not isFieldTile(nextPos) then break end
       walk(dir)
       currentPos = nextPos
-      -- Optionally, check if we've reached the destination
-      if posEquals(currentPos, dest) then
-        return true
-      end
+      if posEquals(currentPos, dest) then return true end
     end
     return true
   end
-  
-  -- SMOOTH MOVEMENT: Use autoWalk for 2+ verified safe steps (more linear walking)
-  if stepsToWalk >= 2 then
-    local walkPrecision = 0
-    if stepsToWalk >= 10 then
-      walkPrecision = 1
-    end
 
-    -- OPTIMIZED: Check if player is already walking — don't interrupt smooth walks
-    if player:isWalking() then
-      local isOnTrack = math.abs(playerPos.x - chunkDestination.x) + math.abs(playerPos.y - chunkDestination.y) <= stepsToWalk + 2
-      if isOnTrack then
-        return true
-      end
-    end
-
-    -- Humanised step duration for TTL calculation
-    local stepDuration = PathStrategy and PathStrategy.rawStepDuration(false) or getCachedStepDuration(false)
-
-    -- FC-SAFETY: Verify native autoWalk path won't cross floor-change tiles
-    -- The planned path was validated safe via safeStepCount, but the native
-    -- pathfinder may find a shorter route THROUGH a hole or ladder.
-    local nativeSafe = true
-    if PathStrategy and not allowFloorChange then
-      local safe, nPath, unsafeIdx = PathStrategy.nativePathIsSafe(playerPos, chunkDestination)
-      if not safe then
-        nativeSafe = false
-        -- Reduce chunk to the safe prefix of the native path
-        if nPath and unsafeIdx and unsafeIdx > 1 then
-          local safeDest, safeN = PathStrategy.safePrefixDest(playerPos, nPath, unsafeIdx)
-          if safeN >= 2 then
-            chunkDestination = safeDest
-            stepsToWalk = safeN
-            nativeSafe = true  -- now safe after trimming
-          end
-        end
-      end
-    end
-
-    if not nativeSafe then
-      -- Native path is unsafe even after trimming — fall through to keyboard step below
-    else
-      -- Dispatch autowalk through PathStrategy (ACL-aware)
-      if PathStrategy then
-        PathStrategy.autoWalk(chunkDestination, maxDist, {ignoreNonPathable = true, precision = walkPrecision})
-        PathStrategy.advanceCursor(stepsToWalk, stepDuration)
-      else
-        autoWalk(chunkDestination, maxDist, {ignoreNonPathable = true, precision = walkPrecision})
-        PathCursor.idx = math.min(PathCursor.idx + stepsToWalk, #path + 1)
-        PathCursor.ts = now
-        PathCursor.TTL = math.max(800, stepsToWalk * stepDuration * 0.8)
-      end
-
-      resetStepBackAttempts()
-      return true
-    end
+  -- Determine path complexity (direction changes in remaining path)
+  local dirChanges = 0
+  local prevDir = nil
+  for i = curIdx, math.min(curIdx + stepsToWalk - 1, #path) do
+    if prevDir and path[i] ~= prevDir then dirChanges = dirChanges + 1 end
+    prevDir = path[i]
   end
 
-  -- For short safe paths (1 step), use direct walk via PathStrategy
-  local firstDir = path[curIdx]
-  local offset = getDirectionOffset(firstDir)
-  if offset then
-    if canWalkDirection(firstDir) then
+  -- DECISION: keyboard step for short/complex paths, autoWalk for long straight paths
+  local useAutoWalk = stepsToWalk > 15 and dirChanges <= stepsToWalk * 0.4
+
+  if not useAutoWalk then
+    -- KEYBOARD STEPPING: Follow computed path exactly, 1 step per tick
+    local dir = path[curIdx]
+    if not dir then
+      if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
+      return false
+    end
+
+    -- Apply direction smoothing (sole anti-zigzag via PathStrategy)
+    local smoothedDir = PathStrategy and PathStrategy.smoothDirection(dir) or dir
+
+    if canWalkDirection(smoothedDir) then
       if PathStrategy then
-        PathStrategy.walkStep(firstDir)
-        PathStrategy.advanceCursor(1, PathStrategy.rawStepDuration(firstDir and firstDir >= 4))
+        PathStrategy.walkStep(smoothedDir)
+        PathStrategy.advanceCursor(1, PathStrategy.rawStepDuration(smoothedDir and smoothedDir >= 4))
       else
-        local Client = getClient()
-        if Client and Client.walk then
-          Client.walk(firstDir)
-        elseif g_game and g_game.walk then
-          g_game.walk(firstDir, true)
-        else
-          walk(firstDir)
-        end
+        walk(smoothedDir)
+        PathCursor.idx = PathCursor.idx + 1
+      end
+      resetStepBackAttempts()
+      return true
+    elseif smoothedDir ~= dir and canWalkDirection(dir) then
+      -- Fallback to raw direction if smoothed direction is blocked
+      if PathStrategy then
+        PathStrategy.walkStep(dir)
+        PathStrategy.advanceCursor(1, PathStrategy.rawStepDuration(dir and dir >= 4))
+      else
+        walk(dir)
         PathCursor.idx = PathCursor.idx + 1
       end
       resetStepBackAttempts()
@@ -1154,8 +898,78 @@ CaveBot.walkTo = function(dest, maxDist, params)
       return false
     end
   end
-  
-  return false
+
+  -- AUTOWALK: Long straight path — delegate to native pathfinder with FC verification
+  local chunkSteps = math.min(stepsToWalk, MAX_WALK_CHUNK)
+  local chunkDest = PathStrategy
+    and PathStrategy.chunkDestination(path, playerPos, curIdx, chunkSteps)
+    or playerPos
+
+  if not PathStrategy then
+    local probe = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+    for i = PathCursor.idx, math.min(PathCursor.idx + chunkSteps - 1, #path) do
+      local offset = getDirectionOffset(path[i])
+      if offset then probe = applyOffset(probe, offset) end
+    end
+    chunkDest = probe
+  end
+
+  -- Don't interrupt if player is already walking toward chunk destination
+  if player:isWalking() then
+    local distToChunk = math.abs(playerPos.x - chunkDest.x) + math.abs(playerPos.y - chunkDest.y)
+    if distToChunk <= chunkSteps + 2 then
+      return true
+    end
+  end
+
+  -- FC-SAFETY: Verify native autoWalk path won't cross floor-change tiles
+  local nativeSafe = true
+  if PathStrategy and not allowFloorChange then
+    local safe, nPath, unsafeIdx = PathStrategy.nativePathIsSafe(playerPos, chunkDest)
+    if not safe then
+      nativeSafe = false
+      if nPath and unsafeIdx and unsafeIdx > 1 then
+        local safeDest, safeN = PathStrategy.safePrefixDest(playerPos, nPath, unsafeIdx)
+        if safeN >= 2 then
+          chunkDest = safeDest
+          chunkSteps = safeN
+          nativeSafe = true
+        end
+      end
+    end
+  end
+
+  if not nativeSafe then
+    -- Native path unsafe — fall back to keyboard step
+    local dir = path[curIdx]
+    if dir and canWalkDirection(dir) then
+      if PathStrategy then
+        PathStrategy.walkStep(dir)
+        PathStrategy.advanceCursor(1, PathStrategy.rawStepDuration(dir and dir >= 4))
+      else
+        walk(dir)
+        PathCursor.idx = PathCursor.idx + 1
+      end
+      resetStepBackAttempts()
+      return true
+    end
+    if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
+    return false
+  end
+
+  -- Dispatch autoWalk
+  local walkPrecision = chunkSteps >= 10 and 1 or 0
+  local stepDuration = PathStrategy and PathStrategy.rawStepDuration(false) or getCachedStepDuration(false)
+  if PathStrategy then
+    PathStrategy.autoWalk(chunkDest, maxDist, {ignoreNonPathable = true, precision = walkPrecision})
+    PathStrategy.advanceCursor(chunkSteps, stepDuration)
+  else
+    autoWalk(chunkDest, maxDist, {ignoreNonPathable = true, precision = walkPrecision})
+    PathCursor.idx = math.min(PathCursor.idx + chunkSteps, #path + 1)
+    PathCursor.ts = now
+  end
+  resetStepBackAttempts()
+  return true
 end
 
 -- ============================================================================
@@ -1213,13 +1027,6 @@ CaveBot.resetWalking = function()
   end
   resetPathCursor()
   resetStepBackAttempts()
-  
-  -- IMPROVED: Reset path smoothing state
-  PATH_SMOOTHING.lastDirection = nil
-  PATH_SMOOTHING.lastDirectionTime = 0
-  PATH_SMOOTHING.directionChanges = 0
-  PATH_SMOOTHING.lastWaypointPos = nil
-  PATH_SMOOTHING.cachedDestination = nil
 
   -- Note: We intentionally do NOT clear intendedFloorChange here
   -- as it should persist across walking resets during floor transitions

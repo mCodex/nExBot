@@ -3,42 +3,12 @@ local version = nExBot.version or "0.0.0"
 local getClient = nExBot.Shared.getClient
 
 UI.Label("nExBot v" .. version)
-UI.Separator()
 
--- Create a panel with blinking label
-local blinkUI = setupUI([[
-Panel
-  height: 20
-  Label
-    id: blinkLabel
-    anchors.left: parent.left
-    anchors.right: parent.right
-    text-align: center
-    text: TibiaRPGBrasil!
-    color: #ff5555
-]])
-
-local label = blinkUI.blinkLabel
-local colors = {"#ff5555", "#ffaa00"}  -- alternate colors
-local idx = 1
-
-macro(1000, function() -- cosmetic label blink (reduced from 300ms)
-  idx = (idx % #colors) + 1
-  label:setColor(colors[idx])
+local discordBtn = UI.Button("Join our Discord", function()
+  g_platform.openUrl("https://discord.gg/qKasgMN7gG")
 end)
-
-local docBtn = UI.Button("Website", function()
-  local Client = getClient()
-  if Client and Client.openUrl then
-    Client.openUrl("https://tibiarpgbrasil.com")
-  elseif g_platform and g_platform.openUrl then
-    g_platform.openUrl("https://tibiarpgbrasil.com")
-  end
-end)
-if docBtn then
-  docBtn:setTooltip("Opens RPG's website. More than 20 years online!")
+if discordBtn then
+  discordBtn:setTooltip("Join the nExBot Discord community for help, updates, and configs.")
 end
-
-UI.Label("The project wouldn't be possible without RPG's staff!")
 
 UI.Separator()
