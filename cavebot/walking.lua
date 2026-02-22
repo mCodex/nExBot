@@ -830,10 +830,27 @@ CaveBot.walkTo = function(dest, maxDist, params)
       local offset = getDirectionOffset(dir)
       if not offset then break end
       local nextPos = applyOffset(currentPos, offset)
-      if not isFieldTile(nextPos) then break end
+      if not isFieldTile(nextPos) then
+        -- Advance cursor to reflect steps already walked
+        if PathStrategy then
+          PathStrategy.getCursor().idx = i
+        else
+          PathCursor.idx = i
+        end
+        break
+      end
       walk(dir)
       currentPos = nextPos
-      if posEquals(currentPos, dest) then return true end
+      if posEquals(currentPos, dest) then
+        if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
+        return true
+      end
+    end
+    -- Advance cursor past all walked steps
+    if PathStrategy then
+      PathStrategy.getCursor().idx = #path + 1
+    else
+      PathCursor.idx = #path + 1
     end
     return true
   end

@@ -505,13 +505,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
       return "retry"  -- Don't signal success — let WaypointGuard handle recovery
     end
     
-    -- RELIABLE CHECK: Was this floor-change waypoint already completed?
-    -- This is the only reliable way to skip — actual completion tracking
-    if CaveBot.wasFloorChangeWaypointCompleted and CaveBot.wasFloorChangeWaypointCompleted(destPos) then
-      noPath = 0
-      return true
-    end
-    
     -- Standard floor mismatch — we need to find a path to this floor
     -- Reset noPath on floor change to prevent stale counter
     noPath = noPath + 1
@@ -540,7 +533,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- with minimap color for determining floor-change direction.
   local Client = getClient()
   local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(destPos) or (g_map and g_map.getMinimapColor(destPos)) or 0
-  local isFloorChange = FloorItems.isFloorChangeTile(destPos)
+  local isFloorChange = (FloorItems and FloorItems.isFloorChangeTile) and FloorItems.isFloorChangeTile(destPos) or false
   
   -- If destination is floor-change, use precision 0 and allow the floor change
   -- Also mark the intended floor change so we don't reset after using the ladder/stairs

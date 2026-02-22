@@ -2,6 +2,8 @@
 
 Run your own custom Lua scripts alongside nExBot without modifying any core files. Drop them into the `private/` folder and they are loaded automatically on startup.
 
+> **⚠ Trusted scripts only:** Files in `private/` are executed via Lua's `dofile` with full access to the bot environment. Only use scripts you wrote yourself or obtained from a trusted source — never run unverified code.
+
 ---
 
 ## Quick Start
@@ -25,7 +27,7 @@ That's it — no edits to `_Loader.lua` or any other file are needed.
 
 ## How It Works
 
-During startup, nExBot scans the `private/` folder **recursively** for every `.lua` file. Each file is executed via `dofile()` in alphabetical order (paths sorted lexicographically, subfolders included). Scripts inside subfolders are loaded as well.
+During startup, nExBot scans the `private/` folder **recursively** for every `.lua` file. Each file is executed via `dofile()` in alphabetical order (paths sorted lexicographically, subfolders included). Scripts inside subfolders are loaded as well. Because scripts run with full privileges, only place files from trusted sources in this folder.
 
 If a script fails to load, nExBot prints a warning to the console but continues loading the remaining scripts — one broken file won't break the rest.
 

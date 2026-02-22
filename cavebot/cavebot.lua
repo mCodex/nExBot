@@ -438,14 +438,20 @@ local function shouldSkipExecution()
         end
       end
       
-      -- Check if distance to target is decreasing
+      -- Check if distance to target is decreasing (rolling minimum + tolerance)
       if walkState.targetPos then
         local currentPos = pos()
         if currentPos then
           local curDist = math.abs(currentPos.x - walkState.targetPos.x)
                         + math.abs(currentPos.y - walkState.targetPos.y)
-          if walkState.walkStartDist and curDist > walkState.walkStartDist then
-            -- Getting farther — stop and recompute
+          -- Track rolling minimum distance (handles curved/obstacle paths)
+          if not walkState.minDist or curDist < walkState.minDist then
+            walkState.minDist = curDist
+          end
+          -- Only stop if we've regressed significantly beyond the best distance seen
+          local tolerance = 3
+          if walkState.minDist and curDist > walkState.minDist + tolerance then
+            -- Getting farther from closest point — stop and recompute
             if player.stopAutoWalk then
               pcall(player.stopAutoWalk, player)
             end
@@ -478,6 +484,7 @@ CaveBot.setWalkingToWaypoint = function(targetPos)
   walkState.lastPlayerPos = pos()
   walkState.walkStartTime = now
   walkState.lastVerifyTime = now
+  walkState.minDist = nil  -- Reset rolling minimum for new walk
   -- Calculate expected duration based on distance
   local currentPos = pos()
   if currentPos and targetPos then
@@ -576,7 +583,8 @@ WaypointEngine = {
   -- Without this, recovery finds N-1 (closest reachable), N-1 completes
   -- instantly (player already there), advances back to N → infinite loop.
   stuckWaypoints = {},           -- child widget → expiry timestamp
-  BLACKLIST_TTL = 120000         -- 120 seconds (survives multiple route circuits)
+  BLACKLIST_TTL = 45000,         -- 45 seconds (survives one route circuit)
+  blacklistFloor = nil           -- floor when blacklist was set
 }
 
 -- Pre-allocate progress buffer
@@ -623,6 +631,14 @@ local function isWaypointBlacklisted(child)
     return false
   end
   return true
+end
+
+-- Clear the entire blacklist (e.g. on floor change or route reset)
+local function clearWaypointBlacklist()
+  for k in pairs(WaypointEngine.stuckWaypoints) do
+    WaypointEngine.stuckWaypoints[k] = nil
+  end
+  WaypointEngine.blacklistFloor = nil
 end
 
 -- ============================================================================
@@ -1083,6 +1099,9 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   local playerPos = player:getPosition()
   if playerPos then
     if lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
+      -- Floor changed — clear waypoint blacklist (entries were for the old floor)
+      clearWaypointBlacklist()
+      
       -- Check if this floor change was intended using multiple methods:
       -- 1. intendedFloorChange is still active (rare - usually cleared by walking.lua)
       -- 2. recentFloorChange matches this transition (most reliable)
@@ -1206,7 +1225,12 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
         return
       end
     until skipped >= actionCount2
-    return  -- All blacklisted (shouldn't happen)
+    -- All waypoints blacklisted — clear blacklist to allow recovery
+    warn("[CaveBot] All waypoints blacklisted — clearing blacklist")
+    clearWaypointBlacklist()
+    uiList:focusChild(uiList:getChildByIndex(1))
+    actionRetries = 0
+    return
   end
   
   -- Direct table access (O(1))
