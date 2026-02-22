@@ -374,7 +374,7 @@ local function scheduleFloorChangeRecovery()
         excludeCompletedFloorChange = true
       })
       if child then
-        focusWaypointBefore(child, idx)
+        focusWaypointForRecovery(child, idx)
       end
     end
   end)
@@ -779,7 +779,7 @@ end
 -- focuses N-1, N-1 succeeds → advances to N → N unreachable → recovery → loop.
 -- @param targetChild widget The waypoint widget to focus
 -- @param targetIndex number The index of the waypoint (unused, kept for API compat)
-local function focusWaypointBefore(targetChild, targetIndex)
+local function focusWaypointForRecovery(targetChild, targetIndex)
   ui.list:focusChild(targetChild)
   actionRetries = 0
 end
@@ -839,7 +839,7 @@ local function executeRecovery()
     
     if nearestChild then
       print("[CaveBot] Recovery: Found waypoint via route-aware global search at index " .. nearestIndex)
-      focusWaypointBefore(nearestChild, nearestIndex)
+      focusWaypointForRecovery(nearestChild, nearestIndex)
       transitionTo("NORMAL")
       return true
     end
@@ -869,7 +869,7 @@ local function executeRecovery()
     
     if nearestChild then
       print("[CaveBot] Recovery: Found waypoint via extended global search at index " .. nearestIndex)
-      focusWaypointBefore(nearestChild, nearestIndex)
+      focusWaypointForRecovery(nearestChild, nearestIndex)
       transitionTo("NORMAL")
       return true
     end
@@ -1809,7 +1809,7 @@ checkStartupWaypoint = function()
   
   if nearestChild then
     print("[CaveBot] Startup: Found nearest reachable waypoint at index " .. nearestIndex)
-    focusWaypointBefore(nearestChild, nearestIndex)
+    focusWaypointForRecovery(nearestChild, nearestIndex)
     startupWaypointFound = true
     return
   end
@@ -1824,7 +1824,7 @@ checkStartupWaypoint = function()
   
   if extendedChild then
     print("[CaveBot] Startup: Found waypoint at extended range, index " .. extendedIndex)
-    focusWaypointBefore(extendedChild, extendedIndex)
+    focusWaypointForRecovery(extendedChild, extendedIndex)
   else
     warn("[CaveBot] Startup: No reachable waypoint found. Bot may be stuck.")
   end
@@ -1951,7 +1951,7 @@ CaveBot.requestWaypointRecovery = function(reason)
   })
 
   if nearestChild then
-    focusWaypointBefore(nearestChild, nearestIndex)
+    focusWaypointForRecovery(nearestChild, nearestIndex)
     return true
   end
 
