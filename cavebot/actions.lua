@@ -201,6 +201,11 @@ local function shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist)
   end
 
   if WaypointGuard.cooldownUntil > now then
+    -- Renew blacklist on every encounter while still in cooldown
+    if CaveBot.blacklistWaypoint and CaveBot.actionList then
+      local current = CaveBot.actionList:getFocusedChild()
+      if current then CaveBot.blacklistWaypoint(current) end
+    end
     return true
   end
 

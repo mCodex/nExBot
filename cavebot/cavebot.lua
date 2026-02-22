@@ -576,7 +576,7 @@ WaypointEngine = {
   -- Without this, recovery finds N-1 (closest reachable), N-1 completes
   -- instantly (player already there), advances back to N → infinite loop.
   stuckWaypoints = {},           -- child widget → expiry timestamp
-  BLACKLIST_TTL = 10000          -- 10 seconds (covers ~1 route circuit)
+  BLACKLIST_TTL = 120000         -- 120 seconds (survives multiple route circuits)
 }
 
 -- Pre-allocate progress buffer
@@ -1189,6 +1189,25 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   -- Get current action (single call pattern)
   local currentAction = uiList:getFocusedChild() or uiList:getFirstChild()
   if not currentAction then return end
+  
+  -- Fast skip: if current waypoint is blacklisted (unreachable), advance past it immediately
+  if isWaypointBlacklisted(currentAction) then
+    local actionCount2 = uiList:getChildCount()
+    local curIdx = uiList:getChildIndex(currentAction)
+    local nxtIdx = curIdx
+    local skipped = 0
+    repeat
+      nxtIdx = (nxtIdx % actionCount2) + 1
+      local nxtChild = uiList:getChildByIndex(nxtIdx)
+      skipped = skipped + 1
+      if nxtChild and not isWaypointBlacklisted(nxtChild) then
+        uiList:focusChild(nxtChild)
+        actionRetries = 0
+        return
+      end
+    until skipped >= actionCount2
+    return  -- All blacklisted (shouldn't happen)
+  end
   
   -- Direct table access (O(1))
   local actionType = currentAction.action
