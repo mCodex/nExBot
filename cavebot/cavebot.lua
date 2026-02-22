@@ -583,8 +583,7 @@ WaypointEngine = {
   -- Without this, recovery finds N-1 (closest reachable), N-1 completes
   -- instantly (player already there), advances back to N → infinite loop.
   stuckWaypoints = {},           -- child widget → expiry timestamp
-  BLACKLIST_TTL = 45000,         -- 45 seconds (survives one route circuit)
-  blacklistFloor = nil           -- floor when blacklist was set
+  BLACKLIST_TTL = 45000          -- 45 seconds (survives one route circuit)
 }
 
 -- Pre-allocate progress buffer
@@ -638,7 +637,6 @@ local function clearWaypointBlacklist()
   for k in pairs(WaypointEngine.stuckWaypoints) do
     WaypointEngine.stuckWaypoints[k] = nil
   end
-  WaypointEngine.blacklistFloor = nil
 end
 
 -- ============================================================================

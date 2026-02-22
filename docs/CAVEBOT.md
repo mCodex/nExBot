@@ -216,7 +216,7 @@ If the player hasn't moved for 3 seconds while walking to a waypoint, CaveBot tr
 5. If distance > 30, only attempts 1–2 run (early exit saves CPU)
 ```
 
-> For destinations more than 30 tiles away, relaxed pathfinding attempts 3 and 4 are skipped because they rarely help at long range and waste CPU with unnecessary A\* searches.
+> For destinations more than 30 tiles away, relaxed pathfinding attempts 3 and 4 are skipped because they rarely help at long-range and waste CPU with unnecessary A\* searches.
 
 ---
 
