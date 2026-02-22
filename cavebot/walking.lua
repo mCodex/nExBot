@@ -190,23 +190,11 @@ end
 -- DIRECTION UTILITIES (Use PathUtils where possible)
 -- ============================================================================
 
--- Use Directions constant module if available (DRY)
+-- Use Directions constant module (DRY: SSoT is constants/directions.lua)
 local Dirs = Directions
-local DIR_TO_OFFSET = (Dirs and Dirs.DIR_TO_OFFSET) or (PathUtils and PathUtils.DIR_TO_OFFSET) or {
-  [North] = {x = 0, y = -1},
-  [East] = {x = 1, y = 0},
-  [South] = {x = 0, y = 1},
-  [West] = {x = -1, y = 0},
-  [NorthEast] = {x = 1, y = -1},
-  [SouthEast] = {x = 1, y = 1},
-  [SouthWest] = {x = -1, y = 1},
-  [NorthWest] = {x = -1, y = -1}
-}
+local DIR_TO_OFFSET = Directions.DIR_TO_OFFSET
 
-local ADJACENT_OFFSETS = (Dirs and Dirs.ADJACENT_OFFSETS) or {
-  {x = 0, y = -1},  {x = 1, y = 0},  {x = 0, y = 1},  {x = -1, y = 0},
-  {x = 1, y = -1}, {x = 1, y = 1}, {x = -1, y = 1}, {x = -1, y = -1},
-}
+local ADJACENT_OFFSETS = Directions.ADJACENT_OFFSETS
 
 -- Pure: Get offset for direction (use PathUtils)
 local function getDirectionOffset(dir)

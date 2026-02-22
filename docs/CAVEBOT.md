@@ -172,7 +172,7 @@ Withdraw items from the depot, depot box, or inbox.
 
 ---
 
-## Walking Engine (v3.2)
+## Walking Engine (v3.3)
 
 The walking engine is the heart of CaveBot. It handles pathfinding, field avoidance, and floor-change safety.
 
@@ -209,25 +209,68 @@ If the player hasn't moved for 3 seconds while walking to a waypoint, CaveBot tr
 ### Pathfinding Strategy
 
 ```text
-1. Try autoWalk (client's built-in fast pathfinding)
-2. If that fails → findPath with simple settings
-3. If still failing and distance ≤ 30 → findPath ignoring creatures
-4. If distance ≤ 15 → findPath allowing unseen tiles
-5. If distance > 50 → use autoWalk only (prevents freezes)
+1. Try findPath with strict settings (visible tiles only)
+2. If that fails → findPath ignoring creatures
+3. If distance ≤ 30 → findPath allowing unseen tiles
+4. If distance ≤ 30 → findPath ignoring fields
+5. If distance > 30, only attempts 1–2 run (early exit saves CPU)
 ```
+
+> Far destinations (>30 tiles) skip the relaxed pathfinding attempts 3–4 because they rarely help at long range and waste CPU with unnecessary A* searches.
+
+---
+
+## Waypoint Advancement
+
+CaveBot processes waypoints sequentially. Each action's callback returns one of three results:
+
+| Result | Meaning | Behaviour |
+|--------|---------|-----------|
+| `true` | Success | Advance to the next waypoint |
+| `false` | Failure | For `goto`: stay on current waypoint, trigger stuck detection. For other actions: advance to next |
+| `"retry"` | In progress | Stay on same waypoint, increment retry counter |
+
+> **Why goto failures don't advance:** If `goto` returned `false` and the bot moved to the next waypoint, it would rapidly cycle through all unreachable waypoints (1→2→…→N→1) at ~13/s while the player stands still. Instead, the WaypointEngine's stuck detection kicks in and finds the nearest reachable waypoint via recovery strategies.
+
+---
+
+## Waypoint Recovery
+
+When the bot detects it's stuck (multiple consecutive failures or no progress for 2+ seconds), it transitions through a state machine:
+
+```text
+NORMAL → STUCK → RECOVERING → (success) → NORMAL
+                            → (exhaust all strategies) → STOPPED → reset → NORMAL
+```
+
+### Recovery Strategies (ordered by cost)
+
+| # | Strategy | Description |
+|---|----------|-------------|
+| 1 | Ignore creatures | Re-try current waypoint allowing creature pass-through |
+| 2 | Forward search | Find nearest reachable waypoint ahead in the route |
+| 3 | Global search | Route-aware search across all waypoints (max 8 candidates) |
+| 4 | Backward search | Check up to 100 previous waypoints |
+| 5 | Extended global | Larger radius, cross-floor (max 8 candidates) |
+| 6 | Skip waypoint | Last resort — move to the next waypoint |
+
+Recovery focuses the target waypoint directly and resets retries for a clean execution.
 
 ---
 
 ## Waypoint Guard
 
-The Waypoint Guard prevents infinite loops when waypoints become unreachable.
+The Waypoint Guard prevents excessive pathfinding on unreachable waypoints.
 
 | Behavior | Details |
-|----------|---------|
+|----------|--------|
 | **Checks** | Current focused waypoint (not the first one) |
 | **Rate** | Every 5 seconds (not every tick) |
 | **Trigger** | Player is on wrong floor or > 100 tiles away |
-| **Recovery** | After 3 consecutive failures, skips to next waypoint |
+| **Response** | Returns `"retry"`, pauses the `goto` action, requests WaypointEngine recovery |
+| **Recovery** | After 3 consecutive failures, triggers `requestWaypointRecovery()` to find a reachable waypoint |
+
+> The guard no longer returns `true` (success) when skipping unreachable waypoints. This prevents the rapid skip-all-waypoints cycle that caused the bot to stand still.
 
 ---
 
@@ -405,4 +448,4 @@ end
 
 ### Client freezes when far from waypoint
 
-This is already handled. The Waypoint Guard detects when you're > 100 tiles from the current waypoint and uses autoWalk instead of expensive pathfinding. If it still freezes, check that your route doesn't have unreachable waypoints.
+This is already handled. The Waypoint Guard detects when you're > 100 tiles from the current waypoint and pauses the goto action while requesting recovery. Pathfinding is capped at 50 tiles and uses a negative-result cache to avoid repeating failed A* searches. If the bot can't find any reachable waypoint, it will log a warning.

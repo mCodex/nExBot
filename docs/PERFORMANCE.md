@@ -68,22 +68,40 @@ The reachability system caches pathfinding results per creature ID with TTL expi
 - Cache invalidates when the creature moves significantly
 - **Impact:** Major reduction in pathfinding CPU during combat
 
+### Negative Pathfinding Cache
+
+When a destination is proven unreachable, the result is cached for 500ms:
+
+- Prevents the same A* search from running every 75ms tick
+- Max 32 entries with LRU eviction to bound memory
+- Automatically cleared when a path becomes available
+- **Impact:** Eliminates redundant pathfinding for stuck/unreachable scenarios
+
+### Pathfinding Relaxation Early Exit
+
+The multi-attempt pathfinding system (`findPathRelaxed`) uses progressive flag relaxation. For far destinations (>30 tiles), it exits early after 2 attempts instead of running all 4:
+
+- Attempts 3–4 (unseen tiles, ignore fields) only help for close-range blocked tiles
+- **Impact:** 50% fewer A* calls for far unreachable destinations
+
 ---
 
 ## Walking Optimizations
 
-### autoWalk-First Strategy
+### autoWalk + Pathfinding Strategy
 
-CaveBot tries the client's built-in `autoWalk` first, which uses the game engine's fast pathfinding. Only when autoWalk fails does it fall back to manual `findPath` calls.
+CaveBot uses a combined approach for movement:
 
 ```text
-1. autoWalk (fast, client-native)
-2. findPath simple (local pathfinding)
-3. findPath ignore creatures (if distance ≤ 30)
-4. findPath allow unseen (if distance ≤ 15)
+1. findPath strict (visible tiles, respect creatures)
+2. findPath ignore creatures (if step 1 fails)
+3. findPath allow unseen tiles (if distance ≤ 30)
+4. findPath ignore fields (if distance ≤ 30)
+5. Short paths (≤15 tiles) → keyboard step-by-step
+6. Long straight paths (>15 tiles) → autoWalk with chunking
 ```
 
-Most walks complete with a single autoWalk call.
+Most walks complete with a single findPath + autoWalk dispatch.
 
 ### Pathfinding Distance Limit
 
@@ -97,11 +115,12 @@ Pathfinding is capped at **50 tiles** maximum. Beyond that, autoWalk is used exc
 
 ### CaveBot Execution Skipping
 
-CaveBot's macro runs every 250 ms, but the Optimized Execution System skips iterations when unnecessary:
+CaveBot's macro runs every 75 ms, but the Smart Execution System skips iterations when unnecessary:
 
-- Skip while player is actively walking
+- Skip while player is actively walking (with 300ms mid-walk verification)
 - Skip during delays (after using items)
 - Skip when TargetBot's Pull System is active
+- Skip during floor-change recovery
 - **Impact:** ~60% fewer macro executions during walks
 
 ---
@@ -158,11 +177,16 @@ Affected parameters:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `MAX_PATHFIND_DIST` | 50 | Max pathfinding range (tiles) |
-| `FAR_WAYPOINT_DIST` | 100 | Distance threshold for autoWalk |
+| `FAR_WAYPOINT_DIST` | 100 | Distance threshold for Waypoint Guard |
 | `MONSTER_CACHE_TTL` | 100 ms | Monster count cache lifetime |
-| `CHECK_INTERVAL` | 2000 ms | Waypoint Guard check interval |
+| `CHECK_INTERVAL` | 5000 ms | Waypoint Guard check interval |
 | `EAT_COOLDOWN` | 1000 ms | Min time between eating |
 | `CREATURE_CACHE_SIZE` | 50 | LRU creature cache max entries |
+| `NOPATH_THRESHOLD` | 5 | Goto failures before triggering pathfinder recovery |
+| `MAX_CANDIDATES_GLOBAL` | 8 | Max waypoints checked during global recovery search |
+| `MAX_CANDIDATES_BEST` | 5 | Max waypoints checked during forward/backward search |
+| `NEG_CACHE_TTL` | 500 ms | Negative pathfinding cache lifetime |
+| `NEG_CACHE_MAX` | 32 | Max negative cache entries |
 
 > Only adjust these if you understand the performance trade-offs. Lower values = faster response but more CPU. Higher values = less CPU but slower response.
 
@@ -194,7 +218,7 @@ nExBot.printStartupProfile()
 | Component | Operation | Typical Speed |
 |-----------|-----------|---------------|
 | HealBot | Health check → spell cast | ~75 ms |
-| CaveBot | Pathfinding + walking | ~150 ms |
+| CaveBot | Pathfinding + walking | ~100 ms |
 | TargetBot | Target evaluation | ~50 ms |
 | Hunt Analyzer | Metric calculation | ~20 ms |
 | Monster AI | Behavior prediction | ~10 ms |

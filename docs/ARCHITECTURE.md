@@ -155,14 +155,17 @@ Each module is error-isolated — a failure in one module doesn't prevent others
 |---------|---------|------------|
 | **Event-Driven** | Efficient reactivity | EventBus, HealBot, TargetBot |
 | **State Machine** | Deterministic attacks | AttackStateMachine |
+| **State Machine** | Stuck detection + recovery | CaveBot WaypointEngine (NORMAL→STUCK→RECOVERING→STOPPED) |
 | **Intent Voting** | Conflict-free movement | MovementCoordinator |
 | **LRU Cache** | Bounded memory | Creature configs, pathfinding |
+| **Negative Cache** | Skip proven-unreachable paths | PathUtils findPath (500ms TTL) |
 | **Object Pool** | Reduce GC pressure | Path entries, position tables |
 | **EWMA** | Smooth statistics | Monster tracking, cooldowns |
 | **BFS Traversal** | Container opening/looting | ContainerOpener, Looting |
 | **Engagement Lock** | Anti-zigzag targeting | ScenarioManager |
 | **Lazy Evaluation** | Skip unnecessary work | Safety checks, pathfinding |
 | **Burst Detection** | Z-change protection | EventBus |
+| **SSoT Constants** | DRY direction/floor data | Directions, FloorItems modules |
 
 ---
 

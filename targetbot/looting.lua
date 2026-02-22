@@ -229,10 +229,10 @@ TargetBot.Looting.process = function(targets, dangerLevel)
     status = ""
     return false
   end
-  -- In eat-only mode, skip corpse processing when the player is already full
+  -- In eat-only mode, skip corpse processing when the player doesn't need food
   if eatFoodOnly and not hasLootConfig then
-    local playerFull = TargetBot.EatFood and TargetBot.EatFood.isPlayerFull and TargetBot.EatFood.isPlayerFull()
-    if playerFull then
+    local shouldEat = TargetBot.EatFood and TargetBot.EatFood.shouldEat and TargetBot.EatFood.shouldEat()
+    if not shouldEat then
       status = "Full"
       return false
     end
@@ -658,15 +658,13 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
       end
     end
 
-    -- Eat food from corpses (single consolidated path)
-    if lastFoodConsumption + 3000 < now then
+    -- Eat food from corpses — uses regen-aware shouldEat() check
+    if lastFoodConsumption + 1000 < now then
       local itemId = item:getId()
       local isFood = false
 
       local eatFood = TargetBot.EatFood
-      local eatEnabled = eatFood and eatFood.isEnabled and eatFood.isEnabled()
-      local playerFull = eatFood and eatFood.isPlayerFull and eatFood.isPlayerFull()
-      local canEat = eatEnabled and not playerFull
+      local canEat = eatFood and eatFood.shouldEat and eatFood.shouldEat()
 
       -- Check nExBot centralized food list (primary)
       if canEat then
@@ -692,6 +690,10 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
           g_game.use(item)
         end
         lastFoodConsumption = now
+        -- Reset full status since we just ate successfully
+        if eatFood and eatFood.resetFullStatus then
+          eatFood.resetFullStatus()
+        end
         return
       end
     end

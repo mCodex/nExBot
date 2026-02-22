@@ -1,8 +1,9 @@
 --[[
   nExBot - Eat Food from Corpses (State & Config Module)
 
-  Provides toggle state, food ID lookup, and "You are full" detection.
-  Actual food eating is handled by looting.lua during normal corpse processing.
+  Provides toggle state, food ID lookup, regeneration check, and
+  "You are full" server message detection.
+  Actual food eating is handled by looting.lua during corpse processing.
 ]]
 
 -- Use centralized food items constants
@@ -18,10 +19,14 @@ local FOOD_IDS = FoodItems.FOOD_IDS
 -- State variables
 local eatFromCorpsesEnabled = false
 
+-- Regeneration thresholds (in deciseconds: 1 sec = 10 ds)
+local REGEN_EAT_THRESHOLD = 400   -- Eat when regen < 40 seconds
+local REGEN_FULL_THRESHOLD = 600  -- Consider full when regen >= 60 seconds
+
 -- "You are full" detection state
 local isPlayerFull = false
 local fullDetectedTime = 0
-local FULL_COOLDOWN = 60000
+local FULL_COOLDOWN = 30000
 local FULL_MESSAGES = {
   "you are full",
   "you're full",
@@ -53,6 +58,24 @@ end)
 
 local function hasFullCooldownExpired()
   return (nowMs() - fullDetectedTime) > FULL_COOLDOWN
+end
+
+-- Get player regeneration time (deciseconds). Returns 0 if unavailable.
+local function getRegenTime()
+  -- Use core module export if available
+  if nExBot and nExBot.Food and nExBot.Food.getRegenTime then
+    return nExBot.Food.getRegenTime()
+  end
+  -- Inline fallback
+  if player and player.getRegenerationTime then
+    local ok, regen = pcall(function() return player:getRegenerationTime() end)
+    if ok then return regen end
+  end
+  if player and player.regeneration then
+    local ok, regen = pcall(function() return player:regeneration() end)
+    if ok then return regen end
+  end
+  return 0
 end
 
 -- Profile storage helpers
@@ -98,7 +121,27 @@ TargetBot.EatFood.isFood = function(itemId)
 end
 
 TargetBot.EatFood.isPlayerFull = function()
+  -- Primary: check regeneration time (reliable, no server message needed)
+  local regen = getRegenTime()
+  if regen >= REGEN_FULL_THRESHOLD then
+    return true
+  end
+  -- Secondary: "You are full" server message (fallback for edge cases)
   return isPlayerFull and not hasFullCooldownExpired()
+end
+
+-- Should the looting pipeline eat food right now?
+-- Combines enabled check, regen threshold, and full detection.
+TargetBot.EatFood.shouldEat = function()
+  if not eatFromCorpsesEnabled then return false end
+  local regen = getRegenTime()
+  if regen >= REGEN_EAT_THRESHOLD then return false end
+  if isPlayerFull and not hasFullCooldownExpired() then return false end
+  return true
+end
+
+TargetBot.EatFood.getRegenTime = function()
+  return getRegenTime()
 end
 
 TargetBot.EatFood.resetFullStatus = function()

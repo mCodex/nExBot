@@ -3,33 +3,13 @@ local enable = nil
 
 local getClient = nExBot.Shared.getClient
 
+-- Use Directions module for direction offsets (DRY: SSoT is constants/directions.lua)
 local function modPos(dir)
-    local y = 0
-    local x = 0
-
-    if dir == 0 then
-        y = -1
-    elseif dir == 1 then
-        x = 1
-    elseif dir == 2 then
-        y = 1
-    elseif dir == 3 then
-        x = -1
-    elseif dir == 4 then
-        y = -1
-        x = 1
-    elseif dir == 5 then
-        y = 1
-        x = 1
-    elseif dir == 6 then
-        y = 1
-        x = -1
-    elseif dir == 7 then
-        y = -1
-        x = -1
+    local offset = Directions.DIR_TO_OFFSET[dir]
+    if offset then
+        return {offset.x, offset.y}
     end
-
-    return {x, y}
+    return {0, 0}
 end
 local function reset(delay)
     if type(Supplies.hasEnough()) == 'table' then

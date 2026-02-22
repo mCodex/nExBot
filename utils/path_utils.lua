@@ -55,31 +55,14 @@ end
 -- DIRECTION CONSTANTS (Shared, no duplication)
 -- ============================================================================
 
-PathUtils.DIR_TO_OFFSET = {
-  [North] = {x = 0, y = -1},
-  [East] = {x = 1, y = 0},
-  [South] = {x = 0, y = 1},
-  [West] = {x = -1, y = 0},
-  [NorthEast] = {x = 1, y = -1},
-  [SouthEast] = {x = 1, y = 1},
-  [SouthWest] = {x = -1, y = 1},
-  [NorthWest] = {x = -1, y = -1}
-}
+-- Delegate to Directions module (DRY: SSoT is constants/directions.lua)
+PathUtils.DIR_TO_OFFSET = Directions.DIR_TO_OFFSET
 
-PathUtils.OFFSET_TO_DIR = {
-  ["0,-1"] = North,
-  ["1,0"] = East,
-  ["0,1"] = South,
-  ["-1,0"] = West,
-  ["1,-1"] = NorthEast,
-  ["1,1"] = SouthEast,
-  ["-1,1"] = SouthWest,
-  ["-1,-1"] = NorthWest
-}
+PathUtils.OFFSET_TO_DIR = Directions.OFFSET_TO_DIR
 
-PathUtils.CARDINAL_DIRS = {North, East, South, West}
-PathUtils.DIAGONAL_DIRS = {NorthEast, SouthEast, SouthWest, NorthWest}
-PathUtils.ALL_DIRS = {North, NorthEast, East, SouthEast, South, SouthWest, West, NorthWest}
+PathUtils.CARDINAL_DIRS = Directions.CARDINAL
+PathUtils.DIAGONAL_DIRS = Directions.DIAGONAL
+PathUtils.ALL_DIRS = Directions.ALL
 
 -- ============================================================================
 -- PATHFIND FLAGS (Native OTClientBR constants)
@@ -327,6 +310,13 @@ end
 local _fpCache = { key = "", time = 0, result = nil }
 local FINDPATH_CACHE_TTL = 200
 
+-- Negative result cache: remembers unreachable destinations to avoid repeated A* waste.
+-- Key: "startX,startY,startZ>goalX,goalY,goalZ:flags", value: expiry timestamp.
+local _fpNegCache = {}
+local FINDPATH_NEG_TTL = 500   -- 500ms before retrying an unreachable destination
+local FINDPATH_NEG_MAX = 32    -- max entries to prevent unbounded growth
+local _fpNegCount = 0
+
 -- Find path using native g_map.findPath with flags
 function PathUtils.findPath(startPos, goalPos, maxDist, params)
   if not startPos or not goalPos then return nil end
@@ -341,6 +331,12 @@ function PathUtils.findPath(startPos, goalPos, maxDist, params)
   if _fpCache.key == key and now - _fpCache.time < FINDPATH_CACHE_TTL then
     return _fpCache.result
   end
+
+  -- Negative cache: skip A* if we recently proved this dest unreachable
+  local negExpiry = _fpNegCache[key]
+  if negExpiry and now < negExpiry then
+    return nil
+  end
   
   local map = getMap()
   if not map or not map.findPath then return nil end
@@ -352,6 +348,30 @@ function PathUtils.findPath(startPos, goalPos, maxDist, params)
   local ret = nil
   if result == 0 and directions and #directions > 0 then
     ret = directions
+    -- Clear negative cache on success
+    if _fpNegCache[key] then
+      _fpNegCache[key] = nil
+      _fpNegCount = _fpNegCount - 1
+    end
+  else
+    -- Cache negative result
+    if not _fpNegCache[key] then
+      _fpNegCount = _fpNegCount + 1
+      -- Evict oldest entries if over limit
+      if _fpNegCount > FINDPATH_NEG_MAX then
+        local oldest_key, oldest_time = nil, math.huge
+        for k, v in pairs(_fpNegCache) do
+          if v < oldest_time then
+            oldest_key, oldest_time = k, v
+          end
+        end
+        if oldest_key then
+          _fpNegCache[oldest_key] = nil
+          _fpNegCount = _fpNegCount - 1
+        end
+      end
+    end
+    _fpNegCache[key] = now + FINDPATH_NEG_TTL
   end
   
   _fpCache.key = key
