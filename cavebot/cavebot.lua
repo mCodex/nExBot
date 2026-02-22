@@ -374,11 +374,14 @@ local function scheduleFloorChangeRecovery()
         excludeCompletedFloorChange = true
       })
       if child then
-        focusWaypointBefore(child, idx)
+        focusWaypointForRecovery(child, idx)
       end
     end
   end)
 end
+
+-- Forward-declare for hasPlayerMoved (full definition below in WAYPOINT ENGINE section)
+local WaypointEngine
 
 -- Check if player has moved since last check
 local function hasPlayerMoved()
@@ -395,23 +398,72 @@ local function hasPlayerMoved()
   if moved then
     walkState.lastPlayerPos = currentPos
     walkState.stuckCheckTime = now + walkState.STUCK_TIMEOUT
+    if WaypointEngine then
+      WaypointEngine.lastMoveTime = now
+    end
   end
   
   return moved
 end
 
 -- Check if we should skip execution
--- SIMPLIFIED: Only skip during active walking, don't block on walk state tracking
+-- Allows mid-walk verification every ~300ms to detect stuck/blocked states
 local function shouldSkipExecution()
   -- Active delay from previous action
   if now < walkState.delayUntil then
     return true
   end
   
-  -- Player is actively walking - wait for walk to complete
-  -- This is the only reliable check - player:isWalking() is definitive
+  -- Player is actively walking — allow through every 300ms for mid-walk verification
   if player:isWalking() then
-    return true
+    if not walkState.lastVerifyTime then
+      walkState.lastVerifyTime = now
+    end
+    
+    -- Allow mid-walk check every 300ms
+    if (now - walkState.lastVerifyTime) >= 300 then
+      walkState.lastVerifyTime = now
+      
+      -- Check if walk is taking too long (expected duration exceeded by 50%)
+      if walkState.walkStartTime and walkState.walkExpectedDuration then
+        local elapsed = now - walkState.walkStartTime
+        if elapsed > walkState.walkExpectedDuration * 1.5 then
+          -- Walking too long — stop and let macro recompute
+          if player.stopAutoWalk then
+            pcall(player.stopAutoWalk, player)
+          end
+          walkState.isWalkingToWaypoint = false
+          walkState.targetPos = nil
+          return false  -- Don't skip — let macro handle it
+        end
+      end
+      
+      -- Check if distance to target is decreasing (rolling minimum + tolerance)
+      if walkState.targetPos then
+        local currentPos = pos()
+        if currentPos then
+          local curDist = math.abs(currentPos.x - walkState.targetPos.x)
+                        + math.abs(currentPos.y - walkState.targetPos.y)
+          -- Track rolling minimum distance (handles curved/obstacle paths)
+          if not walkState.minDist or curDist < walkState.minDist then
+            walkState.minDist = curDist
+          end
+          -- Only stop if we've regressed significantly beyond the best distance seen
+          local tolerance = 3
+          if walkState.minDist and curDist > walkState.minDist + tolerance then
+            -- Getting farther from closest point — stop and recompute
+            if player.stopAutoWalk then
+              pcall(player.stopAutoWalk, player)
+            end
+            walkState.isWalkingToWaypoint = false
+            walkState.targetPos = nil
+            return false
+          end
+        end
+      end
+    end
+    
+    return true  -- Still walking, skip this tick
   end
   
   -- If player stopped walking, clear the walking state
@@ -419,22 +471,47 @@ local function shouldSkipExecution()
     walkState.isWalkingToWaypoint = false
     walkState.targetPos = nil
   end
+  walkState.lastVerifyTime = nil
   
   return false
 end
 
--- Mark that we're walking to a waypoint
+-- Mark that we're walking to a waypoint (with mid-walk tracking)
 CaveBot.setWalkingToWaypoint = function(targetPos)
   walkState.isWalkingToWaypoint = true
   walkState.targetPos = targetPos
   walkState.stuckCheckTime = now + walkState.STUCK_TIMEOUT
   walkState.lastPlayerPos = pos()
+  walkState.walkStartTime = now
+  walkState.lastVerifyTime = now
+  walkState.minDist = nil  -- Reset rolling minimum for new walk
+  -- Calculate expected duration based on distance
+  local currentPos = pos()
+  if currentPos and targetPos then
+    local dist = math.abs(currentPos.x - targetPos.x) + math.abs(currentPos.y - targetPos.y)
+    local stepDur = (PathStrategy and PathStrategy.rawStepDuration(false)) or 200
+    walkState.walkExpectedDuration = dist * stepDur
+    walkState.walkStartDist = dist
+  else
+    walkState.walkExpectedDuration = nil
+    walkState.walkStartDist = nil
+  end
+  -- Track walkTo success for instant-stuck detection
+  if WaypointEngine then
+    WaypointEngine.walkToFailCount = 0
+    WaypointEngine.lastMoveTime = now
+  end
 end
 
 -- Clear walking state
 CaveBot.clearWalkingState = function()
   walkState.isWalkingToWaypoint = false
   walkState.targetPos = nil
+  walkState.walkStartTime = nil
+  walkState.walkExpectedDuration = nil
+  walkState.walkStartDist = nil
+  walkState.minDist = nil
+  walkState.lastVerifyTime = nil
 end
 
 -- ============================================================================
@@ -445,7 +522,9 @@ local checkStartupWaypoint       -- Defined in STARTUP DETECTION section
 local invalidateWaypointCache    -- Defined in WAYPOINT CACHE section
 local resetStartupCheck          -- Defined in STARTUP DETECTION section
 local buildWaypointCache         -- Defined in WAYPOINT CACHE section
-local chebyshevDist              -- Defined in PURE UTILITY FUNCTIONS section
+local focusWaypointForRecovery   -- Defined in RECOVERY STRATEGIES section
+local resetWaypointEngine        -- Defined below runWaypointEngine
+local chebyshevDist = Directions.chebyshevDistance  -- SSoT: constants/directions.lua
 local waypointPositionCache = {} -- Waypoint position cache table
 local waypointCacheValid = false
 local waypointCacheFloors = {}
@@ -467,7 +546,7 @@ local startupCheckTime = nil   -- Set on first check to enforce 500ms delay
 -- WAYPOINT ENGINE STATE (pre-allocated, zero GC pressure)
 -- ============================================================================
 
-local WaypointEngine = {
+WaypointEngine = {
   -- Progress tracking (circular buffer - O(1) operations)
   progressBuffer = {},           -- Pre-allocated circular buffer
   progressHead = 1,              -- Current write position
@@ -487,12 +566,16 @@ local WaypointEngine = {
   stuckStartTime = 0,            -- When stuck state began
   recoveryStartTime = 0,         -- When recovery began
   
-  -- Thresholds (tuned for accuracy)
-  STUCK_THRESHOLD = 8,           -- Failures before stuck
-  STUCK_TIMEOUT = 10000,         -- Max time in stuck state before recovery
+  -- Thresholds (tuned for fast recovery)
+  STUCK_THRESHOLD = 4,           -- Failures before stuck (was 8)
+  STUCK_TIMEOUT = 4000,          -- Max time in stuck before recovery (was 10000)
   MOVEMENT_THRESHOLD = 3,        -- Min tiles to consider "progress"
-  PROGRESS_WINDOW = 15000,       -- Time window for progress check (15s)
-  RECOVERY_TIMEOUT = 25000,      -- Max recovery time before stop (increased for more strategies)
+  PROGRESS_WINDOW = 8000,        -- Time window for progress check (was 15000)
+  RECOVERY_TIMEOUT = 10000,      -- Max recovery time before stop (was 25000)
+  
+  -- Instant-stuck tracking
+  walkToFailCount = 0,           -- Consecutive walkTo false returns
+  lastMoveTime = 0,              -- Last time player actually moved
   
   -- Backoff for recovery attempts
   recoveryAttempt = 0,
@@ -500,7 +583,14 @@ local WaypointEngine = {
   
   -- Performance counters (optional, for debugging)
   tickCount = 0,
-  lastTickTime = 0
+  lastTickTime = 0,
+  
+  -- Waypoint blacklist: temporarily skip unreachable waypoints.
+  -- When stuck on waypoint N, blacklist it so advancement skips past it.
+  -- Without this, recovery finds N-1 (closest reachable), N-1 completes
+  -- instantly (player already there), advances back to N → infinite loop.
+  stuckWaypoints = {},           -- child widget → expiry timestamp
+  BLACKLIST_TTL = 45000          -- 45 seconds (survives one route circuit)
 }
 
 -- Pre-allocate progress buffer
@@ -535,6 +625,25 @@ local function getCurrentWaypointId()
   
   cachedWaypointId = ui.list:getChildIndex(focused)
   return cachedWaypointId
+end
+
+-- Check if a waypoint widget is temporarily blacklisted (stuck/unreachable)
+local function isWaypointBlacklisted(child)
+  if not child then return false end
+  local expiry = WaypointEngine.stuckWaypoints[child]
+  if not expiry then return false end
+  if expiry <= now then
+    WaypointEngine.stuckWaypoints[child] = nil
+    return false
+  end
+  return true
+end
+
+-- Clear the entire blacklist (e.g. on floor change or route reset)
+local function clearWaypointBlacklist()
+  for k in pairs(WaypointEngine.stuckWaypoints) do
+    WaypointEngine.stuckWaypoints[k] = nil
+  end
 end
 
 -- ============================================================================
@@ -638,6 +747,11 @@ local function transitionTo(newState)
   
   if newState == "STUCK" then
     WaypointEngine.stuckStartTime = now
+    -- Blacklist the current waypoint so advancement skips past it
+    local current = ui and ui.list and ui.list:getFocusedChild()
+    if current and current.action == "goto" then
+      WaypointEngine.stuckWaypoints[current] = now + WaypointEngine.BLACKLIST_TTL
+    end
   elseif newState == "RECOVERING" then
     WaypointEngine.recoveryStartTime = now
     WaypointEngine.recoveryAttempt = WaypointEngine.recoveryAttempt + 1
@@ -650,13 +764,17 @@ end
 
 local function recordSuccess()
   WaypointEngine.failureCount = 0
+  WaypointEngine.walkToFailCount = 0
   if WaypointEngine.state ~= "NORMAL" then
     transitionTo("NORMAL")
   end
 end
 
-local function recordFailure()
+local function recordFailure(isWalkFailure)
   WaypointEngine.failureCount = WaypointEngine.failureCount + 1
+  if isWalkFailure then
+    WaypointEngine.walkToFailCount = WaypointEngine.walkToFailCount + 1
+  end
 end
 
 -- ============================================================================
@@ -664,17 +782,15 @@ end
 -- Uses a tiered approach: fast local search → global search → skip strategies
 -- ============================================================================
 
--- Helper function to focus a waypoint (DRY: used in recovery and startup)
--- Focuses the waypoint BEFORE the target so next tick executes it
+-- Helper function to focus a waypoint for recovery
+-- Focuses the target waypoint directly and resets retries so it executes fresh.
+-- The old approach of focusing N-1 caused ping-pong loops: recovery finds N,
+-- focuses N-1, N-1 succeeds → advances to N → N unreachable → recovery → loop.
 -- @param targetChild widget The waypoint widget to focus
--- @param targetIndex number The index of the waypoint
-local function focusWaypointBefore(targetChild, targetIndex)
-  local prevChild = ui.list:getChildByIndex(targetIndex - 1)
-  if prevChild then
-    ui.list:focusChild(prevChild)
-  else
-    ui.list:focusChild(targetChild)
-  end
+-- @param targetIndex number The index of the waypoint (unused, kept for API compat)
+focusWaypointForRecovery = function(targetChild, targetIndex)
+  ui.list:focusChild(targetChild)
+  actionRetries = 0
 end
 
 local function executeRecovery()
@@ -682,21 +798,38 @@ local function executeRecovery()
   local playerPos = player:getPosition()
   local maxDist = storage.extras.gotoMaxDistance or 50
   
-  -- Strategy 1: Find nearest reachable waypoint (forward search - fastest)
+  -- Strategy 1: Try current waypoint with ignoreCreatures (maybe just blocked by monster)
   if attempt <= 1 then
-    if CaveBot.findBestWaypoint and CaveBot.findBestWaypoint(true) then
-      print("[CaveBot] Recovery: Found waypoint via forward search")
-      transitionTo("NORMAL")
-      return true
+    local current = ui and ui.list and ui.list:getFocusedChild()
+    if current and current.action == "goto" then
+      local posMatch = regexMatch(current.value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
+      if posMatch and posMatch[1] then
+        local destPos = {
+          x = tonumber(posMatch[1][2]),
+          y = tonumber(posMatch[1][3]),
+          z = tonumber(posMatch[1][4])
+        }
+        if destPos.z == playerPos.z then
+          local path = findPath(playerPos, destPos, maxDist, {
+            ignoreNonPathable = true,
+            ignoreCreatures = true
+          })
+          if path then
+            print("[CaveBot] Recovery: Current waypoint reachable (ignoring creatures)")
+            transitionTo("NORMAL")
+            return true
+          end
+        end
+      end
     end
     WaypointEngine.recoveryAttempt = 2
     return false
   end
   
-  -- Strategy 2: Search backwards for reachable waypoint
+  -- Strategy 2: Find nearest reachable waypoint (forward search)
   if attempt <= 2 then
-    if CaveBot.gotoFirstPreviousReachableWaypoint and CaveBot.gotoFirstPreviousReachableWaypoint() then
-      print("[CaveBot] Recovery: Found waypoint via backward search")
+    if CaveBot.findBestWaypoint and CaveBot.findBestWaypoint(true) then
+      print("[CaveBot] Recovery: Found waypoint via forward search")
       transitionTo("NORMAL")
       return true
     end
@@ -704,19 +837,18 @@ local function executeRecovery()
     return false
   end
   
-  -- Strategy 3: GLOBAL SEARCH - Find ANY reachable waypoint on current floor
-  -- This is the key improvement for relog scenarios
+  -- Strategy 3: ROUTE-AWARE GLOBAL SEARCH (uses orderDistance scoring)
   if attempt <= 3 and playerPos and findNearestGlobalWaypoint then
     local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
       maxCandidates = 15,
       preferCurrentFloor = true,
       searchAllFloors = false,
-      excludeCompletedFloorChange = true  -- Don't select recently completed floor-change waypoints
+      excludeCompletedFloorChange = true
     })
     
     if nearestChild then
-      print("[CaveBot] Recovery: Found waypoint via global search at index " .. nearestIndex)
-      focusWaypointBefore(nearestChild, nearestIndex)
+      print("[CaveBot] Recovery: Found waypoint via route-aware global search at index " .. nearestIndex)
+      focusWaypointForRecovery(nearestChild, nearestIndex)
       transitionTo("NORMAL")
       return true
     end
@@ -724,25 +856,38 @@ local function executeRecovery()
     return false
   end
   
-  -- Strategy 4: EXTENDED GLOBAL SEARCH with cross-floor support
-  if attempt <= 4 and playerPos and findNearestGlobalWaypoint then
+  -- Strategy 4: Search backwards for reachable waypoint
+  if attempt <= 4 then
+    if CaveBot.gotoFirstPreviousReachableWaypoint and CaveBot.gotoFirstPreviousReachableWaypoint() then
+      print("[CaveBot] Recovery: Found waypoint via backward search")
+      transitionTo("NORMAL")
+      return true
+    end
+    WaypointEngine.recoveryAttempt = 5
+    return false
+  end
+  
+  -- Strategy 5: EXTENDED GLOBAL SEARCH with cross-floor support
+  if attempt <= 5 and playerPos and findNearestGlobalWaypoint then
     local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist * 2, {
       maxCandidates = 25,
       preferCurrentFloor = true,
-      searchAllFloors = true,  -- Check adjacent floors
+      searchAllFloors = true,
       excludeCompletedFloorChange = true
     })
     
     if nearestChild then
       print("[CaveBot] Recovery: Found waypoint via extended global search at index " .. nearestIndex)
-      focusWaypointBefore(nearestChild, nearestIndex)
+      focusWaypointForRecovery(nearestChild, nearestIndex)
       transitionTo("NORMAL")
       return true
     end
+    WaypointEngine.recoveryAttempt = 6
+    return false
   end
   
-  -- Strategy 5: Skip current waypoint (last resort)
-  if attempt <= 5 then
+  -- Strategy 6: Skip current waypoint (last resort)
+  if attempt <= 6 then
     if ui and ui.list then
       local actionCount = ui.list:getChildCount()
       if actionCount > 1 then
@@ -757,33 +902,7 @@ local function executeRecovery()
             transitionTo("NORMAL")
             return true
           end
-          WaypointEngine.recoveryAttempt = 5
-          return false
         end
-      end
-    end
-  end
-  
-  -- Strategy 6: Skip multiple waypoints (exponential skip - emergency)
-  if attempt <= 6 then
-    if ui and ui.list then
-      local actionCount = ui.list:getChildCount()
-      local skipCount = math.min(5, math.floor(actionCount / 4))
-      if actionCount > skipCount then
-        local current = ui.list:getFocusedChild()
-        if current then
-          local currentIndex = ui.list:getChildIndex(current)
-          local nextIndex = ((currentIndex + skipCount - 1) % actionCount) + 1
-          local nextChild = ui.list:getChildByIndex(nextIndex)
-          if nextChild then
-            print("[CaveBot] Recovery: Skipping " .. skipCount .. " waypoints")
-            ui.list:focusChild(nextChild)
-            transitionTo("NORMAL")
-            return true
-          end
-        end
-        WaypointEngine.recoveryAttempt = 6
-        return false
       end
     end
   end
@@ -816,6 +935,11 @@ local function runWaypointEngine()
       isStuck = true
     end
     
+    -- Condition 3: Instant-stuck — walkTo returned false 3+ times AND no movement for 2s
+    if WaypointEngine.walkToFailCount >= 3 and (now - WaypointEngine.lastMoveTime) > 2000 then
+      isStuck = true
+    end
+    
     if isStuck then
       transitionTo("STUCK")
     end
@@ -826,19 +950,14 @@ local function runWaypointEngine()
     -- Check if we should transition to recovery
     local stuckDuration = now - WaypointEngine.stuckStartTime
     
-    -- Give some time for natural resolution
-    if stuckDuration < 3000 then
-      return false
-    end
-    
-    -- Check if player started moving (natural recovery)
+    -- Quick check: if player started moving, return to normal
     if hasRecentProgress() and WaypointEngine.failureCount < 3 then
       transitionTo("NORMAL")
       return false
     end
     
-    -- Timeout: start recovery
-    if stuckDuration >= WaypointEngine.STUCK_TIMEOUT then
+    -- Transition to RECOVERING after 1s (was 3s grace + 10s timeout)
+    if stuckDuration >= 1000 then
       transitionTo("RECOVERING")
     end
     
@@ -880,7 +999,7 @@ local function runWaypointEngine()
 end
 
 -- Reset engine state
-local function resetWaypointEngine()
+resetWaypointEngine = function()
   WaypointEngine.state = "NORMAL"
   WaypointEngine.failureCount = 0
   WaypointEngine.totalMovement = 0
@@ -890,6 +1009,8 @@ local function resetWaypointEngine()
   WaypointEngine.recoveryAttempt = 0
   WaypointEngine.progressSize = 0
   WaypointEngine.progressHead = 1
+  WaypointEngine.walkToFailCount = 0
+  WaypointEngine.lastMoveTime = now
   
   -- Clear caches
   cachedWaypointId = 0
@@ -985,6 +1106,9 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   local playerPos = player:getPosition()
   if playerPos then
     if lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
+      -- Floor changed — clear waypoint blacklist (entries were for the old floor)
+      clearWaypointBlacklist()
+      
       -- Check if this floor change was intended using multiple methods:
       -- 1. intendedFloorChange is still active (rare - usually cleared by walking.lua)
       -- 2. recentFloorChange matches this transition (most reliable)
@@ -1092,6 +1216,30 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   local currentAction = uiList:getFocusedChild() or uiList:getFirstChild()
   if not currentAction then return end
   
+  -- Fast skip: if current waypoint is blacklisted (unreachable), advance past it immediately
+  if isWaypointBlacklisted(currentAction) then
+    local actionCount2 = uiList:getChildCount()
+    local curIdx = uiList:getChildIndex(currentAction)
+    local nxtIdx = curIdx
+    local skipped = 0
+    repeat
+      nxtIdx = (nxtIdx % actionCount2) + 1
+      local nxtChild = uiList:getChildByIndex(nxtIdx)
+      skipped = skipped + 1
+      if nxtChild and not isWaypointBlacklisted(nxtChild) then
+        uiList:focusChild(nxtChild)
+        actionRetries = 0
+        return
+      end
+    until skipped >= actionCount2
+    -- All waypoints blacklisted — clear blacklist to allow recovery
+    warn("[CaveBot] All waypoints blacklisted — clearing blacklist")
+    clearWaypointBlacklist()
+    uiList:focusChild(uiList:getChildByIndex(1))
+    actionRetries = 0
+    return
+  end
+  
   -- Direct table access (O(1))
   local actionType = currentAction.action
   local actionDef = CaveBot.Actions[actionType]
@@ -1109,7 +1257,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if result == "retry" then
     actionRetries = actionRetries + 1
     if actionRetries > 20 then
-      recordFailure()  -- Many retries = likely stuck
+      recordFailure(actionType == "goto")  -- Many retries = likely stuck
     end
     return
   end
@@ -1118,7 +1266,18 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if result == true then
     recordSuccess()
   else
-    recordFailure()
+    recordFailure(actionType == "goto")
+    -- CRITICAL FIX: goto actions that return false should NOT advance to next waypoint.
+    -- This was the primary cause of the "loop standing still" bug — the bot would rapidly
+    -- cycle through all unreachable waypoints (1→2→…→N→1) at ~13/s doing nothing.
+    -- Instead, stay on the current waypoint and let WaypointEngine's stuck detection
+    -- handle recovery (recordFailure() → STUCK → RECOVERING → find nearest reachable).
+    -- Non-goto actions (depositor, buy, sell, etc.) still advance on false because
+    -- retrying failed NPC interactions immediately won't help.
+    if actionType == "goto" then
+      actionRetries = 0
+      return
+    end
   end
   
   -- Reset for next action
@@ -1144,6 +1303,15 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   
   local nextChild = uiList:getChildByIndex(nextIndex)
   if nextChild then
+    -- Skip blacklisted (stuck/unreachable) waypoints
+    if isWaypointBlacklisted(nextChild) then
+      local skipped = 0
+      while isWaypointBlacklisted(nextChild) and skipped < actionCount do
+        nextIndex = (nextIndex % actionCount) + 1
+        nextChild = uiList:getChildByIndex(nextIndex)
+        skipped = skipped + 1
+      end
+    end
     uiList:focusChild(nextChild)
   end
 end)
@@ -1343,6 +1511,14 @@ CaveBot.isRecovering = function()
   return WaypointEngine.state == "RECOVERING" or WaypointEngine.state == "STUCK"
 end
 
+-- Blacklist a waypoint widget so it is skipped during advancement and finder searches.
+-- Used by WaypointGuard (actions.lua) to mark unreachable waypoints BEFORE triggering
+-- recovery, eliminating the WP_N→WP_{N-1}→WP_N oscillation.
+CaveBot.blacklistWaypoint = function(child, ttl)
+  if not child then return end
+  WaypointEngine.stuckWaypoints[child] = now + (ttl or WaypointEngine.BLACKLIST_TTL)
+end
+
 --[[
   OPTIMIZED WAYPOINT FINDER (v2.0)
   
@@ -1378,21 +1554,10 @@ local function parseGotoPosition(text)
   }
 end
 
--- Calculate Chebyshev distance (max of dx, dy) - used for "within range" checks
--- @param p1 table Table with x, y fields (first position)
--- @param p2 table Table with x, y fields (second position)
--- @return number
-chebyshevDist = function(p1, p2)
-  return math.max(math.abs(p1.x - p2.x), math.abs(p1.y - p2.y))
-end
-
--- Calculate Manhattan distance (dx + dy) - used for path length estimation
--- @param p1 table Table with x, y fields (first position)
--- @param p2 table Table with x, y fields (second position)
--- @return number
-local function manhattanDist(p1, p2)
-  return math.abs(p1.x - p2.x) + math.abs(p1.y - p2.y)
-end
+-- Distance functions: delegate to SSoT (constants/directions.lua)
+-- chebyshevDist is already resolved at forward-declaration above.
+-- manhattanDist is only used locally in this section.
+local manhattanDist = Directions.manhattanDistance
 
 -- ============================================================================
 -- WAYPOINT CACHE (DRY: Single source of truth for waypoint positions)
@@ -1459,7 +1624,7 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
   buildWaypointCache()
   
   options = options or {}
-  local maxCandidates = options.maxCandidates or 20
+  local maxCandidates = options.maxCandidates or 8
   local preferCurrentFloor = options.preferCurrentFloor ~= false
   local searchAllFloors = options.searchAllFloors or false
   local collectRangeMultiplier = options.collectRangeMultiplier or 1
@@ -1471,6 +1636,11 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
   local collectionLimit = maxDist * collectRangeMultiplier
 
   for i, wp in pairs(waypointPositionCache) do
+    -- Skip blacklisted (stuck/unreachable) waypoints
+    if isWaypointBlacklisted(wp.child) then
+      goto continue
+    end
+    
     -- Skip recently completed floor-change waypoints to prevent loops
     if excludeCompletedFloorChange and CaveBot.wasFloorChangeWaypointCompleted then
       if CaveBot.wasFloorChangeWaypointCompleted({x = wp.x, y = wp.y, z = wp.z}) then
@@ -1513,10 +1683,31 @@ findNearestGlobalWaypoint = function(playerPos, maxDist, options)
     ::continue::
   end
   
-  -- Phase 2: Sort by distance (closest first)
+  -- Phase 2: Route-aware scoring — prefer waypoints that are both close AND near current route position
   if #candidates > 0 then
+    -- Get current waypoint index for order-distance calculation
+    local currentIdx = 0
+    local actionCount = ui and ui.list and ui.list:getChildCount() or 0
+    if actionCount > 0 then
+      local focused = ui.list:getFocusedChild()
+      if focused then
+        currentIdx = ui.list:getChildIndex(focused)
+      end
+    end
+
+    -- Score each candidate: distance + orderDistance * 0.3
+    for _, candidate in ipairs(candidates) do
+      local orderDist = 0
+      if currentIdx > 0 and actionCount > 0 then
+        local fwd = (candidate.index - currentIdx) % actionCount
+        local bwd = (currentIdx - candidate.index) % actionCount
+        orderDist = math.min(fwd, bwd)
+      end
+      candidate.score = candidate.distance + orderDist * 0.3
+    end
+
     table.sort(candidates, function(a, b)
-      return a.distance < b.distance
+      return a.score < b.score
     end)
     
     -- Phase 3: Check pathfinding for top candidates (tiered approach)
@@ -1627,7 +1818,7 @@ checkStartupWaypoint = function()
   
   if nearestChild then
     print("[CaveBot] Startup: Found nearest reachable waypoint at index " .. nearestIndex)
-    focusWaypointBefore(nearestChild, nearestIndex)
+    focusWaypointForRecovery(nearestChild, nearestIndex)
     startupWaypointFound = true
     return
   end
@@ -1642,7 +1833,7 @@ checkStartupWaypoint = function()
   
   if extendedChild then
     print("[CaveBot] Startup: Found waypoint at extended range, index " .. extendedIndex)
-    focusWaypointBefore(extendedChild, extendedIndex)
+    focusWaypointForRecovery(extendedChild, extendedIndex)
   else
     warn("[CaveBot] Startup: No reachable waypoint found. Bot may be stuck.")
   end
@@ -1692,7 +1883,7 @@ CaveBot.findBestWaypoint = function(searchForward)
   -- Phase 1: Fast distance check (no pathfinding) - uses pure chebyshevDist function
   for _, i in ipairs(searchOrder) do
     local waypoint = waypointPositionCache[i]
-    if waypoint and waypoint.z == playerZ then
+    if waypoint and waypoint.z == playerZ and not isWaypointBlacklisted(waypoint.child) then
       local dist = chebyshevDist(playerPos, waypoint)
       
       if dist <= maxDist then
@@ -1710,8 +1901,8 @@ CaveBot.findBestWaypoint = function(searchForward)
     return a.distance < b.distance
   end)
   
-  -- Phase 2: Check pathfinding for candidates (check up to 10 for better recovery)
-  local maxCandidates = math.min(10, #candidates)
+  -- Phase 2: Check pathfinding for candidates (capped at 5 to limit CPU per tick)
+  local maxCandidates = math.min(5, #candidates)
   for i = 1, maxCandidates do
     local candidate = candidates[i]
     local wp = candidate.waypoint
@@ -1725,13 +1916,9 @@ CaveBot.findBestWaypoint = function(searchForward)
     end
     
     if path then
-      -- Found a reachable waypoint
-      local prevChild = ui.list:getChildByIndex(candidate.index - 1)
-      if prevChild then
-        ui.list:focusChild(prevChild)
-      else
-        ui.list:focusChild(candidate.waypoint.child)
-      end
+      -- Found a reachable waypoint — focus it directly
+      ui.list:focusChild(candidate.waypoint.child)
+      actionRetries = 0
       return true
     end
   end
@@ -1773,64 +1960,15 @@ CaveBot.requestWaypointRecovery = function(reason)
   })
 
   if nearestChild then
-    focusWaypointBefore(nearestChild, nearestIndex)
+    focusWaypointForRecovery(nearestChild, nearestIndex)
     return true
   end
 
   return false
 end
 
--- Original function for backward compatibility (redirects to optimized version)
-CaveBot.gotoNextWaypointInRangeLegacy = function()
-  local currentAction = ui.list:getFocusedChild()
-  local index = ui.list:getChildIndex(currentAction)
-  local actions = ui.list:getChildren()
-
-  -- start searching from current index
-  for i, child in ipairs(actions) do
-    if i > index then
-      local text = child:getText()
-      if string.starts(text, "goto:") then
-        local re = regexMatch(text, [[(?:goto:)([^,]+),([^,]+),([^,]+)]])
-        local pos = {x = tonumber(re[1][2]), y = tonumber(re[1][3]), z = tonumber(re[1][4])}
-        
-        if posz() == pos.z then
-          local maxDist = storage.extras.gotoMaxDistance
-          if distanceFromPlayer(pos) <= maxDist then
-            if findPath(player:getPosition(), pos, maxDist, { ignoreNonPathable = true }) then
-              ui.list:focusChild(ui.list:getChildByIndex(i-1))
-              return true
-            end
-          end
-        end
-      end
-    end
-  end
-
-  -- if not found then damn go from start
-  for i, child in ipairs(actions) do
-    if i <= index then
-      local text = child:getText()
-      if string.starts(text, "goto:") then
-        local re = regexMatch(text, [[(?:goto:)([^,]+),([^,]+),([^,]+)]])
-        local pos = {x = tonumber(re[1][2]), y = tonumber(re[1][3]), z = tonumber(re[1][4])}
-
-        if posz() == pos.z then
-          local maxDist = storage.extras.gotoMaxDistance
-          if distanceFromPlayer(pos) <= maxDist then
-            if findPath(player:getPosition(), pos, maxDist, { ignoreNonPathable = true }) then
-              ui.list:focusChild(ui.list:getChildByIndex(i-1))
-              return true
-            end
-          end
-        end
-      end
-    end
-  end
-
-  -- not found
-  return false
-end
+-- Original legacy function removed (dead code, never called).
+-- findBestWaypoint() handles all forward/backward waypoint search.
 
 CaveBot.gotoFirstPreviousReachableWaypoint = function()
   local currentAction = ui.list:getFocusedChild()

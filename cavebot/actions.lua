@@ -9,19 +9,10 @@ local nextTile = nil
 
 local noPath = 0
 
--- Use canonical direction table from Directions module (DRY)
-local DIR_MOD_LOOKUP = (Directions and Directions.DIR_TO_OFFSET) or (PathUtils and PathUtils.DIR_TO_OFFSET) or {
-    [0] = { x = 0, y = -1 },   -- North
-    [1] = { x = 1, y = 0 },    -- East
-    [2] = { x = 0, y = 1 },    -- South
-    [3] = { x = -1, y = 0 },   -- West
-    [4] = { x = 1, y = -1 },   -- NorthEast
-    [5] = { x = 1, y = 1 },    -- SouthEast
-    [6] = { x = -1, y = 1 },   -- SouthWest
-    [7] = { x = -1, y = -1 }   -- NorthWest
-}
+-- Use canonical direction table from Directions module (DRY: SSoT is constants/directions.lua)
+local DIR_MOD_LOOKUP = Directions.DIR_TO_OFFSET
 
--- antistuck f() - optimized with lookup table
+-- Direction-offset helper using Directions module
 local nextPos = nil -- creature
 local nextPosF = nil -- furniture
 local function modPos(dir)
@@ -161,17 +152,13 @@ end
 
 local function pathfinder()
   if not storage.extras.pathfinding then return end
-  if noPath < 10 then return end
+  if noPath < 5 then return end
 
-  if not CaveBot.gotoNextWaypointInRange() then
-    if getConfigFromName and getConfigFromName() then
-      local profile = CaveBot.getCurrentProfile()
-      local config = getConfigFromName()
-      local newProfile = profile == '#Unibase' and config or '#Unibase'
-      
-      CaveBot.setCurrentProfile(newProfile)
-    end
-  end
+  -- Delegate to the optimized waypoint finder.
+  -- Profile switching was removed: it reloaded all waypoints from disk and rebuilt
+  -- the entire UI — too expensive without clear benefit. Recovery strategies in
+  -- WaypointEngine handle re-routing more precisely.
+  CaveBot.gotoNextWaypointInRange()
   noPath = 0
   return true
 end
@@ -214,6 +201,11 @@ local function shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist)
   end
 
   if WaypointGuard.cooldownUntil > now then
+    -- Renew blacklist on every encounter while still in cooldown
+    if CaveBot.blacklistWaypoint and CaveBot.actionList then
+      local current = CaveBot.actionList:getFocusedChild()
+      if current then CaveBot.blacklistWaypoint(current) end
+    end
     return true
   end
 
@@ -227,6 +219,16 @@ local function shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist)
 
   if dist2d >= WaypointGuard.EXTREME_DISTANCE or WaypointGuard.failures >= WaypointGuard.MAX_FAILURES then
     WaypointGuard.cooldownUntil = now + WaypointGuard.CHECK_INTERVAL
+    -- Blacklist this waypoint BEFORE recovery so that:
+    -- 1) Recovery finders skip it when searching for candidates
+    -- 2) After the recovery waypoint completes, advancement skips past it
+    -- Without this, recovery finds WP_{N-1}, it completes, advances back to WP_N → loop.
+    if CaveBot.blacklistWaypoint and CaveBot.actionList then
+      local current = CaveBot.actionList:getFocusedChild()
+      if current then
+        CaveBot.blacklistWaypoint(current)
+      end
+    end
     if CaveBot.requestWaypointRecovery then
       CaveBot.requestWaypointRecovery("guard")
     end
@@ -500,37 +502,11 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   if destPos.z ~= playerPos.z then
     if shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist) then
       noPath = 0
-      return true
-    end
-    local dist2D = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
-    local floorDiff = math.abs(destPos.z - playerPos.z)
-    
-    -- CASE 1: Check if we just completed a floor change TO our current floor
-    local recentChange = CaveBot.getRecentFloorChange and CaveBot.getRecentFloorChange()
-    if recentChange and recentChange.toZ == playerPos.z then
-      -- We recently changed TO this floor
-      -- Only skip if we're close horizontally AND this waypoint is for the floor we left
-      if recentChange.fromZ == destPos.z and dist2D <= 10 then
-        noPath = 0
-        return true
-      end
+      return "retry"  -- Don't signal success — let WaypointGuard handle recovery
     end
     
-    -- CASE 2: Check if we recently came FROM this floor
-    -- If the waypoint is on a floor we just LEFT, skip it
-    if recentChange and recentChange.fromZ == destPos.z then
-      -- This waypoint is for the floor we just left - skip if close
-      if dist2D <= 10 then
-        noPath = 0
-        return true
-      end
-    end
-    
-    -- REMOVED CASE 3: The aggressive 8-tile skip was causing back-and-forth issues
-    -- by skipping valid waypoints that the player needs to reach
-    -- Now we only skip based on actual floor change history, not proximity alone
-    
-    -- CASE 4: Standard floor mismatch - we need to find a path to this floor
+    -- Standard floor mismatch — we need to find a path to this floor
+    -- Reset noPath on floor change to prevent stale counter
     noPath = noPath + 1
     pathfinder()
     return false
@@ -544,7 +520,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   if (distX + distY) > maxDist then
     if shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist) then
       noPath = 0
-      return true
+      return "retry"  -- Don't signal success — let WaypointGuard handle recovery
     end
     noPath = noPath + 1
     pathfinder()
@@ -553,14 +529,11 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
 
   -- Check if destination is floor-change tile (stairs, ladder, rope spot, hole)
   -- When user explicitly adds such a waypoint, they INTEND to use it
+  -- Uses FloorItems module (SSoT: constants/floor_items.lua) for detection,
+  -- with minimap color for determining floor-change direction.
   local Client = getClient()
   local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(destPos) or (g_map and g_map.getMinimapColor(destPos)) or 0
-  local isFloorChange = (minimapColor >= 210 and minimapColor <= 213)
-  
-  -- Also check tile items for floor-change detection (minimap might miss some)
-  if not isFloorChange and CaveBot.isFloorChangeTile then
-    isFloorChange = CaveBot.isFloorChangeTile(destPos)
-  end
+  local isFloorChange = (FloorItems and FloorItems.isFloorChangeTile) and FloorItems.isFloorChangeTile(destPos) or false
   
   -- If destination is floor-change, use precision 0 and allow the floor change
   -- Also mark the intended floor change so we don't reset after using the ladder/stairs
@@ -632,8 +605,8 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return true
   end
 
-  -- Max retries
-  local maxRetries = CaveBot.Config.get("mapClick") and 8 or 40
+  -- Max retries (reduced for faster stuck detection)
+  local maxRetries = CaveBot.Config.get("mapClick") and 6 or 12
   if retries >= maxRetries then
     noPath = noPath + 1
     pathfinder()
@@ -698,7 +671,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false
   end
   
-  CaveBot.delay(50)  -- Minimal delay for fast retry
+  CaveBot.delay(30)  -- Fast retry cycle
   return "retry"
 end)
 

@@ -55,31 +55,14 @@ end
 -- DIRECTION CONSTANTS (Shared, no duplication)
 -- ============================================================================
 
-PathUtils.DIR_TO_OFFSET = {
-  [North] = {x = 0, y = -1},
-  [East] = {x = 1, y = 0},
-  [South] = {x = 0, y = 1},
-  [West] = {x = -1, y = 0},
-  [NorthEast] = {x = 1, y = -1},
-  [SouthEast] = {x = 1, y = 1},
-  [SouthWest] = {x = -1, y = 1},
-  [NorthWest] = {x = -1, y = -1}
-}
+-- Delegate to Directions module (DRY: SSoT is constants/directions.lua)
+PathUtils.DIR_TO_OFFSET = Directions.DIR_TO_OFFSET
 
-PathUtils.OFFSET_TO_DIR = {
-  ["0,-1"] = North,
-  ["1,0"] = East,
-  ["0,1"] = South,
-  ["-1,0"] = West,
-  ["1,-1"] = NorthEast,
-  ["1,1"] = SouthEast,
-  ["-1,1"] = SouthWest,
-  ["-1,-1"] = NorthWest
-}
+PathUtils.OFFSET_TO_DIR = Directions.OFFSET_TO_DIR
 
-PathUtils.CARDINAL_DIRS = {North, East, South, West}
-PathUtils.DIAGONAL_DIRS = {NorthEast, SouthEast, SouthWest, NorthWest}
-PathUtils.ALL_DIRS = {North, NorthEast, East, SouthEast, South, SouthWest, West, NorthWest}
+PathUtils.CARDINAL_DIRS = Directions.CARDINAL
+PathUtils.DIAGONAL_DIRS = Directions.DIAGONAL
+PathUtils.ALL_DIRS = Directions.ALL
 
 -- ============================================================================
 -- PATHFIND FLAGS (Native OTClientBR constants)
@@ -194,19 +177,25 @@ PathUtils.FIELD_ITEMS = (FloorItems and FloorItems.FIELDS) or {
   [2130] = true, [2131] = true,
 }
 
--- Floor-change tile cache
+-- Floor-change tile cache (per-entry TTL to avoid cold-cache burst)
 local floorChangeCache = {}
-local floorChangeCacheTime = 0
 local CACHE_TTL = 2000
+local CACHE_CLEANUP_INTERVAL = 5000
+local lastCacheCleanup = 0
 
--- Pure: Check if position is floor-change tile (cached)
+-- Pure: Check if position is floor-change tile (cached with per-entry TTL)
 function PathUtils.isFloorChangeTile(pos)
   if not pos then return false end
   
-  -- Cache cleanup (periodic, aligned with CACHE_TTL)
-  if now - floorChangeCacheTime > CACHE_TTL then
-    floorChangeCache = {}
-    floorChangeCacheTime = now
+  -- Periodic cleanup of expired entries (avoids unbounded growth)
+  if now - lastCacheCleanup > CACHE_CLEANUP_INTERVAL then
+    local cutoff = now - CACHE_TTL
+    for k, v in pairs(floorChangeCache) do
+      if v.time < cutoff then
+        floorChangeCache[k] = nil
+      end
+    end
+    lastCacheCleanup = now
   end
   
   local key = pos.x .. "," .. pos.y .. "," .. pos.z
@@ -317,26 +306,78 @@ end
 -- PATHFINDING (Native API with fallback)
 -- ============================================================================
 
+-- 1-entry LRU cache for findPath (avoids redundant A* on rapid retries)
+local _fpCache = { key = "", time = 0, result = nil }
+local FINDPATH_CACHE_TTL = 200
+
+-- Negative result cache: remembers unreachable destinations to avoid repeated A* waste.
+-- Key: "startX,startY,startZ>goalX,goalY,goalZ:flags", value: expiry timestamp.
+local _fpNegCache = {}
+local FINDPATH_NEG_TTL = 500   -- 500ms before retrying an unreachable destination
+local FINDPATH_NEG_MAX = 32    -- max entries to prevent unbounded growth
+local _fpNegCount = 0
+
 -- Find path using native g_map.findPath with flags
 function PathUtils.findPath(startPos, goalPos, maxDist, params)
   if not startPos or not goalPos then return nil end
   if startPos.z ~= goalPos.z then return nil end
   
-  local map = getMap()
-  if not map or not map.findPath then return nil end
-  
   maxDist = maxDist or 50
   local flags = PathUtils.paramsToFlags(params)
+  
+  -- 1-entry LRU: same start+goal+flags within TTL → reuse
+  local key = startPos.x .. "," .. startPos.y .. "," .. startPos.z .. ">"
+            .. goalPos.x .. "," .. goalPos.y .. "," .. goalPos.z .. ":" .. flags
+  if _fpCache.key == key and now - _fpCache.time < FINDPATH_CACHE_TTL then
+    return _fpCache.result
+  end
+
+  -- Negative cache: skip A* if we recently proved this dest unreachable
+  local negExpiry = _fpNegCache[key]
+  if negExpiry and now < negExpiry then
+    return nil
+  end
+  
+  local map = getMap()
+  if not map or not map.findPath then return nil end
   
   -- Native API call (returns {directions}, result)
   local directions, result = map.findPath(startPos, goalPos, maxDist, flags)
   
   -- Result codes: 0=OK, 1=SamePosition, 2=Impossible, 3=TooFar, 4=NoWay
+  local ret = nil
   if result == 0 and directions and #directions > 0 then
-    return directions
+    ret = directions
+    -- Clear negative cache on success
+    if _fpNegCache[key] then
+      _fpNegCache[key] = nil
+      _fpNegCount = _fpNegCount - 1
+    end
+  else
+    -- Cache negative result
+    if not _fpNegCache[key] then
+      _fpNegCount = _fpNegCount + 1
+      -- Evict oldest entries if over limit
+      if _fpNegCount > FINDPATH_NEG_MAX then
+        local oldest_key, oldest_time = nil, math.huge
+        for k, v in pairs(_fpNegCache) do
+          if v < oldest_time then
+            oldest_key, oldest_time = k, v
+          end
+        end
+        if oldest_key then
+          _fpNegCache[oldest_key] = nil
+          _fpNegCount = _fpNegCount - 1
+        end
+      end
+    end
+    _fpNegCache[key] = now + FINDPATH_NEG_TTL
   end
   
-  return nil
+  _fpCache.key = key
+  _fpCache.time = now
+  _fpCache.result = ret
+  return ret
 end
 
 -- Find all reachable tiles within distance (native findEveryPath)
@@ -458,21 +499,8 @@ function PathUtils.canWalk(dir)
 end
 
 -- ============================================================================
--- ANTI-ZIGZAG: Direction Smoothing
+-- DIRECTION UTILITIES
 -- ============================================================================
-
-local directionState = {
-  lastDirection = nil,
-  lastDirectionTime = 0,
-  directionChanges = 0,
-  lastPosition = nil,
-  stabilityScore = 0,
-}
-
--- Minimum time before allowing direction change (prevents zigzag)
-PathUtils.DIRECTION_CHANGE_DELAY = 150  -- ms
-PathUtils.MAX_DIRECTION_CHANGES = 3     -- max rapid changes before dampening
-PathUtils.DAMPING_MULTIPLIER = 2        -- extra delay when oscillating
 
 -- Pre-built lookup tables for direction checks (PERFORMANCE: avoids per-call allocation)
 local ADJACENT_DIRS = {
@@ -504,71 +532,6 @@ end
 function PathUtils.areOppositeDirections(dir1, dir2)
   if dir1 == nil or dir2 == nil then return false end
   return OPPOSITE_DIRS[dir1] == dir2
-end
-
--- Get smoothed direction (prevents zigzag)
-function PathUtils.getSmoothedDirection(newDir, forceChange)
-  if not newDir then return nil end
-  
-  local timeSinceChange = now - directionState.lastDirectionTime
-  local lastDir = directionState.lastDirection
-  
-  -- First direction or forced change
-  if not lastDir or forceChange then
-    directionState.lastDirection = newDir
-    directionState.lastDirectionTime = now
-    directionState.directionChanges = 0
-    return newDir
-  end
-  
-  -- Same direction - no change needed
-  if newDir == lastDir then
-    directionState.stabilityScore = math.min(10, directionState.stabilityScore + 1)
-    return newDir
-  end
-  
-  -- Check for opposite direction (zigzag)
-  local isOpposite = PathUtils.areOppositeDirections(newDir, lastDir)
-  
-  -- Calculate minimum delay based on oscillation history
-  local minDelay = PathUtils.DIRECTION_CHANGE_DELAY
-  if directionState.directionChanges >= PathUtils.MAX_DIRECTION_CHANGES then
-    minDelay = minDelay * PathUtils.DAMPING_MULTIPLIER
-  end
-  if isOpposite then
-    minDelay = minDelay * 1.5  -- Extra penalty for reversing
-  end
-  
-  -- Enforce minimum delay between direction changes
-  if timeSinceChange < minDelay then
-    return lastDir  -- Keep current direction (anti-zigzag)
-  end
-  
-  -- Allow direction change
-  if not PathUtils.areSimilarDirections(newDir, lastDir) then
-    directionState.directionChanges = directionState.directionChanges + 1
-    directionState.stabilityScore = 0
-  else
-    directionState.directionChanges = math.max(0, directionState.directionChanges - 1)
-  end
-  
-  directionState.lastDirection = newDir
-  directionState.lastDirectionTime = now
-  
-  return newDir
-end
-
--- Reset direction state (on target change, etc.)
-function PathUtils.resetDirectionState()
-  directionState.lastDirection = nil
-  directionState.lastDirectionTime = 0
-  directionState.directionChanges = 0
-  directionState.stabilityScore = 0
-end
-
--- Get direction stability score (higher = more stable walking)
-function PathUtils.getDirectionStability()
-  return directionState.stabilityScore
 end
 
 -- ============================================================================

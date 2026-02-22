@@ -211,6 +211,14 @@ function PathStrategy.findPathRelaxed(startPos, goalPos, opts)
   path = PathStrategy.findPath(startPos, goalPos, base)
   if path then return path, false end
 
+  -- Early exit: for far destinations (>30 tiles), attempts 3+4 are unlikely to help
+  -- and just waste CPU. They only matter for close-range blocked tiles.
+  local dx = math.abs(goalPos.x - startPos.x)
+  local dy = math.abs(goalPos.y - startPos.y)
+  if (dx + dy) > 30 then
+    return nil, false
+  end
+
   -- Attempt 3: allow unseen tiles
   base.allowUnseen = true
   path = PathStrategy.findPath(startPos, goalPos, base)
@@ -267,15 +275,16 @@ function PathStrategy.rawStepDuration(diagonal)
 end
 
 -- ============================================================================
--- DIRECTION ANALYSIS (anti-zigzag)
+-- DIRECTION GUARD (sole anti-zigzag system — replaces all others)
+-- 3-entry ring buffer, 150ms opposite rejection, dampening after 3 rapid changes
 -- ============================================================================
 
-local _dirState = {
-  last      = nil,
-  changes   = 0,
-  lastTs    = 0,
-  stability = 1.0,
-}
+local _dirRing = {nil, nil, nil}  -- 3 most recent directions
+local _dirRingHead = 1
+local _dirRingSize = 0
+local _dirLastTs = 0
+local _dirRapidChanges = 0
+local _dirDampenUntil = 0         -- timestamp: hold direction until this time
 
 function PathStrategy.isSimilar(d1, d2)
   if d1 == nil or d2 == nil then return true end
@@ -293,47 +302,69 @@ end
 -- @param forceChange bool  When true, bypass dampening (used near FC tiles)
 function PathStrategy.smoothDirection(dir, forceChange)
   if not dir then return dir end
-  if forceChange then
-    _dirState.last   = dir
-    _dirState.lastTs = tick()
-    _dirState.changes = 0
-    return dir
-  end
   local t = tick()
 
-  if _dirState.last then
-    if PathStrategy.isOpposite(_dirState.last, dir) then
-      -- Dampen opposite direction changes
-      if (t - _dirState.lastTs) < 200 then
-        return _dirState.last  -- hold previous
-      end
-    end
+  if forceChange then
+    -- Force: accept direction, reset state
+    _dirRing[_dirRingHead] = dir
+    _dirRingHead = (_dirRingHead % 3) + 1
+    _dirRingSize = math.min(_dirRingSize + 1, 3)
+    _dirLastTs = t
+    _dirRapidChanges = 0
+    _dirDampenUntil = 0
+    return dir
+  end
 
-    if not PathStrategy.isSimilar(_dirState.last, dir) then
-      _dirState.changes = _dirState.changes + 1
-      _dirState.stability = math.max(0, _dirState.stability - 0.15)
-    else
-      _dirState.changes = math.max(0, _dirState.changes - 1)
-      _dirState.stability = math.min(1.0, _dirState.stability + 0.05)
-    end
+  -- If dampening is active, hold the last accepted direction
+  if t < _dirDampenUntil then
+    local lastAccepted = _dirRing[((_dirRingHead - 2) % 3) + 1]
+    return lastAccepted or dir
+  end
 
-    -- If too many rapid changes, hold direction
-    if _dirState.changes >= 3 and (t - _dirState.lastTs) < 200 then
-      _dirState.changes = 0
-      return _dirState.last
+  local lastDir = _dirRingSize > 0 and _dirRing[((_dirRingHead - 2) % 3) + 1] or nil
+
+  -- Same direction — no change needed
+  if lastDir and dir == lastDir then
+    _dirRapidChanges = math.max(0, _dirRapidChanges - 1)
+    return dir
+  end
+
+  -- Opposite direction rejection: if last direction was set <150ms ago, reject
+  if lastDir and PathStrategy.isOpposite(lastDir, dir) then
+    if (t - _dirLastTs) < 150 then
+      return lastDir
     end
   end
 
-  _dirState.last   = dir
-  _dirState.lastTs = t
+  -- Track rapid direction changes
+  if lastDir and not PathStrategy.isSimilar(lastDir, dir) then
+    _dirRapidChanges = _dirRapidChanges + 1
+  else
+    _dirRapidChanges = math.max(0, _dirRapidChanges - 1)
+  end
+
+  -- If 3+ rapid changes, dampen for one step duration (~200ms)
+  if _dirRapidChanges >= 3 then
+    _dirRapidChanges = 0
+    _dirDampenUntil = t + 200
+    return lastDir or dir
+  end
+
+  -- Accept the new direction
+  _dirRing[_dirRingHead] = dir
+  _dirRingHead = (_dirRingHead % 3) + 1
+  _dirRingSize = math.min(_dirRingSize + 1, 3)
+  _dirLastTs = t
   return dir
 end
 
 function PathStrategy.resetDirectionState()
-  _dirState.last      = nil
-  _dirState.changes   = 0
-  _dirState.lastTs    = 0
-  _dirState.stability = 1.0
+  _dirRing = {nil, nil, nil}
+  _dirRingHead = 1
+  _dirRingSize = 0
+  _dirLastTs = 0
+  _dirRapidChanges = 0
+  _dirDampenUntil = 0
 end
 
 -- ============================================================================
