@@ -29,6 +29,7 @@ nExBot.paths = {
   config   = configName,
   base     = "/bot/" .. configName,
   core     = "/bot/" .. configName .. "/core",
+  cache    = "/bot/" .. configName .. "/_update_cache",
   private  = "/bot/" .. configName .. "/private",
 }
 
@@ -46,6 +47,73 @@ do
     versionStr = (ok and content) and content:match("^%s*(.-)%s*$")
   end
   nExBot.version = versionStr or "0.0.0"
+end
+
+-- ============================================================================
+-- UPDATE CACHE LAYER (mod-overlay bypass)
+-- ============================================================================
+-- When the bot is installed as a mod (mods/ or custom-mods/), the mod overlay
+-- has higher read priority than user-data. g_resources.writeFileContents always
+-- writes to user-data, so updated files are invisible (shadowed by the mod).
+-- The updater writes to _update_cache/ which doesn't exist in the mod, so reads
+-- always resolve to user-data. We detect this and transparently redirect loads.
+
+local _hasUpdateCache = false
+do
+  local okD, exists = pcall(g_resources.directoryExists, P.cache)
+  if okD and exists then
+    local okL, files = pcall(g_resources.listDirectoryFiles, P.cache, true, false)
+    local count = (okL and files) and #files or 0
+    if count > 0 then
+      _hasUpdateCache = true
+      info("[nExBot] Update cache active (" .. count .. " files) — redirecting loads.")
+    end
+  end
+end
+
+if _hasUpdateCache then
+  -- Redirect dofile: check cache first, fall through to original on miss/error
+  local _origDofile = dofile
+  dofile = function(path)
+    local rel = path:sub(1, 1) == "/" and path:sub(2) or path
+    local cached = P.cache .. "/" .. rel
+    local okE, exists = pcall(g_resources.fileExists, cached)
+    if okE and exists then
+      local okR, content = pcall(g_resources.readFileContents, cached)
+      if okR and content then
+        local chunk, err = load(content, "@" .. cached)
+        if chunk then
+          local okX, result = pcall(chunk)
+          if okX then return result end
+          warn("[nExBot] Cache exec error '" .. rel .. "': " .. tostring(result))
+        else
+          warn("[nExBot] Cache compile error '" .. rel .. "': " .. tostring(err))
+        end
+      end
+    end
+    return _origDofile(path)
+  end
+
+  -- Redirect g_ui.importStyle: check cache for paths under our bot prefix
+  local _origImportStyle = g_ui.importStyle
+  local _prefix = P.base .. "/"
+  g_ui.importStyle = function(path)
+    if type(path) == "string" and path:sub(1, #_prefix) == _prefix then
+      local rel = path:sub(#_prefix + 1)
+      local cached = P.cache .. "/" .. rel
+      local okE, exists = pcall(g_resources.fileExists, cached)
+      if okE and exists then
+        local okL, result = pcall(_origImportStyle, cached)
+        if okL then return result end
+        warn("[nExBot] Cache style error '" .. rel .. "': " .. tostring(result))
+      end
+    end
+    return _origImportStyle(path)
+  end
+  -- Sync global importStyle alias if it's a separate reference
+  if importStyle and importStyle ~= g_ui.importStyle then
+    importStyle = g_ui.importStyle
+  end
 end
 
 -- Suppress noisy debug prints by default

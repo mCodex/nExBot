@@ -129,7 +129,18 @@ local function ensureDir(relativePath)
   return ensureDirRecursive(P.base, relativePath)
 end
 
+local function ensureCacheDir(relativePath)
+  return ensureDirRecursive(P.cache, relativePath)
+end
 
+local function writeCacheFile(relativePath, content)
+  local dir = relativePath:match("(.+)/[^/]+$")
+  if dir and not ensureCacheDir(dir) then return false end
+  local fullPath = P.cache .. "/" .. relativePath
+  local ok, err = pcall(g_resources.writeFileContents, fullPath, content)
+  if not ok then warn("[Updater] Cache write failed: " .. relativePath .. " - " .. tostring(err)) end
+  return ok
+end
 
 -- ============================================================================
 -- HTTP LAYER — auto-detect available API
@@ -346,6 +357,21 @@ local function applyUpdate(callback, onProgress)
 
     info("[Updater] Downloading " .. #updateFiles .. " files ...")
 
+    -- Clear stale cache from previous partial updates
+    local okClear, oldFiles = pcall(g_resources.listDirectoryFiles, P.cache, true, false)
+    if okClear and oldFiles then
+      for _, f in ipairs(oldFiles) do pcall(g_resources.deleteFile, P.cache .. "/" .. f) end
+    end
+
+    -- Ensure cache root exists
+    pcall(g_resources.makeDir, P.cache)
+    local okCR, cacheRootOk = pcall(g_resources.directoryExists, P.cache)
+    local cacheEnabled = (okCR and cacheRootOk) or false
+    if not cacheEnabled then
+      warn("[Updater] Cache dir failed: " .. P.cache .. " — mod-overlay bypass won't work.")
+    end
+
+    local cacheCount = 0
     local idx = 0
     local function downloadNext()
       idx = idx + 1
@@ -364,7 +390,7 @@ local function applyUpdate(callback, onProgress)
         else
           _state.status = "done"
           info("[Updater] v" .. tostring(_state.remoteVer) .. " installed ("
-            .. #updateFiles .. " files). Restart bot to apply.")
+            .. #updateFiles .. " files, " .. cacheCount .. " cached). Restart bot to apply.")
           callback(true, nil)
         end
         return
@@ -374,10 +400,11 @@ local function applyUpdate(callback, onProgress)
       _state.progress = math.floor((idx / #updateFiles) * 100)
       if onProgress then onProgress(_state.progress, idx, #updateFiles) end
 
-      -- ensure parent dirs
+      -- ensure parent dirs (normal + cache)
       local dir = filePath:match("(.+)/[^/]+$")
       if dir then
         ensureDir(dir)
+        if cacheEnabled then ensureCacheDir(dir) end
       end
 
       downloadFile(filePath, function(content, dlErr)
@@ -386,6 +413,9 @@ local function applyUpdate(callback, onProgress)
           warn("[Updater] Failed: " .. filePath .. " - " .. tostring(dlErr))
         else
           writeFile(filePath, content)
+          if cacheEnabled and writeCacheFile(filePath, content) then
+            cacheCount = cacheCount + 1
+          end
         end
         schedule(DOWNLOAD_DELAY_MS, downloadNext)
       end)
