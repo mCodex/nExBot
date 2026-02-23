@@ -91,9 +91,6 @@ local function effectiveLocalVersion()
 end
 
 local function writeLocalVersion(versionStr)
-  -- Persist in storage only (this is authoritative).
-  -- NOT written to the version file: that file lives in user-data and would make
-  -- readFileContents return the NEW version, defeating cache detection in _Loader.lua.
   storage.updaterInstalledVersion = versionStr
   return true
 end
@@ -132,26 +129,7 @@ local function ensureDir(relativePath)
   return ensureDirRecursive(P.base, relativePath)
 end
 
--- Update cache: written to _update_cache/ which is never shadowed by mod overlays
 
-local function ensureCacheDir(relativePath)
-  return ensureDirRecursive(P.cache, relativePath)
-end
-
-local function writeCacheFile(relativePath, content)
-  -- ensure parent dirs exist before writing
-  local dir = relativePath:match("(.+)/[^/]+$")
-  if dir then
-    if not ensureCacheDir(dir) then
-      warn("[Updater] Cache dir creation failed for: " .. dir)
-      return false
-    end
-  end
-  local fullPath = P.cache .. "/" .. relativePath
-  local ok, err = pcall(g_resources.writeFileContents, fullPath, content)
-  if not ok then warn("[Updater] Cache write failed: " .. relativePath .. " - " .. tostring(err)) end
-  return ok
-end
 
 -- ============================================================================
 -- HTTP LAYER — auto-detect available API
@@ -368,24 +346,6 @@ local function applyUpdate(callback, onProgress)
 
     info("[Updater] Downloading " .. #updateFiles .. " files ...")
 
-    -- Clear stale cache from previous partial updates
-    local okClear, existingFiles = pcall(g_resources.listDirectoryFiles, P.cache, true, false)
-    if okClear and existingFiles then
-      for _, f in ipairs(existingFiles) do
-        pcall(g_resources.deleteFile, P.cache .. "/" .. f)
-      end
-    end
-
-    -- Ensure cache root directory exists (with verification)
-    pcall(g_resources.makeDir, P.cache)
-    local okCacheRoot, cacheRootExists = pcall(g_resources.directoryExists, P.cache)
-    local cacheEnabled = (okCacheRoot and cacheRootExists) or false
-    if not cacheEnabled then
-      warn("[Updater] Cache dir creation failed at: " .. P.cache
-        .. " — update will still apply to normal path but mod-overlay bypass won't work.")
-    end
-
-    local cacheWriteCount = 0
     local idx = 0
     local function downloadNext()
       idx = idx + 1
@@ -404,7 +364,7 @@ local function applyUpdate(callback, onProgress)
         else
           _state.status = "done"
           info("[Updater] v" .. tostring(_state.remoteVer) .. " installed ("
-            .. #updateFiles .. " files, " .. cacheWriteCount .. " cached). Restart bot to apply.")
+            .. #updateFiles .. " files). Restart bot to apply.")
           callback(true, nil)
         end
         return
@@ -414,11 +374,10 @@ local function applyUpdate(callback, onProgress)
       _state.progress = math.floor((idx / #updateFiles) * 100)
       if onProgress then onProgress(_state.progress, idx, #updateFiles) end
 
-      -- ensure parent dirs (both normal and cache)
+      -- ensure parent dirs
       local dir = filePath:match("(.+)/[^/]+$")
       if dir then
         ensureDir(dir)
-        if cacheEnabled then ensureCacheDir(dir) end
       end
 
       downloadFile(filePath, function(content, dlErr)
@@ -427,9 +386,6 @@ local function applyUpdate(callback, onProgress)
           warn("[Updater] Failed: " .. filePath .. " - " .. tostring(dlErr))
         else
           writeFile(filePath, content)
-          if cacheEnabled and writeCacheFile(filePath, content) then
-            cacheWriteCount = cacheWriteCount + 1
-          end
         end
         schedule(DOWNLOAD_DELAY_MS, downloadNext)
       end)

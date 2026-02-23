@@ -20,7 +20,7 @@ local function tryImportStyle()
   candidates[2] = "targetbot/monster_inspector.otui"
   -- Fully-qualified path using centralized paths (cache-aware)
   if nExBot and nExBot.paths then
-    candidates[#candidates + 1] = nExBot.resolveStylePath(nExBot.paths.base .. "/targetbot/monster_inspector.otui")
+    candidates[#candidates + 1] = nExBot.paths.base .. "/targetbot/monster_inspector.otui"
   elseif BotConfigName then
     candidates[#candidates + 1] = "/bot/" .. BotConfigName .. "/targetbot/monster_inspector.otui"
   else

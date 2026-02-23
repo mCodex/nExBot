@@ -29,7 +29,6 @@ nExBot.paths = {
   config   = configName,
   base     = "/bot/" .. configName,
   core     = "/bot/" .. configName .. "/core",
-  cache    = "/bot/" .. configName .. "/_update_cache",
   private  = "/bot/" .. configName .. "/private",
 }
 
@@ -48,91 +47,6 @@ do
   end
   nExBot.version = versionStr or "0.0.0"
 end
-
--- ============================================================================
--- UPDATE CACHE LAYER (mod-overlay bypass)
--- ============================================================================
--- When installed as a mod (e.g. otcr-mods/bot/nexbot), the mod overlay shadows
--- files written to the user-data directory. The updater writes downloaded files
--- to _update_cache/ which does NOT exist in the mod, so it's never shadowed.
--- We detect this situation and transparently redirect dofile/importStyle.
-
-local _hasUpdateCache = false
-
-if storage and storage.updaterInstalledVersion then
-  -- Check if cache directory exists with content (reliable regardless of VFS layer priority).
-  -- The version-file comparison is unreliable: writeLocalVersion writes to user-data,
-  -- and readFileContents may read from user-data too (not the mod), making them match.
-  local okD, dirExists = pcall(g_resources.directoryExists, P.cache)
-  if okD and dirExists then
-    local okL, cacheFiles = pcall(g_resources.listDirectoryFiles, P.cache, true, false)
-    local cacheCount = (okL and cacheFiles) and #cacheFiles or 0
-    if cacheCount > 0 then
-      _hasUpdateCache = true
-      info("[nExBot] Loading from update cache (" .. cacheCount .. " files, v"
-        .. tostring(storage.updaterInstalledVersion) .. ").")
-    end
-  end
-end
-
-if _hasUpdateCache then
-  local _origDofile = dofile
-  dofile = function(path)
-    local relPath = path:sub(1, 1) == "/" and path:sub(2) or path
-    local fullCachePath = P.cache .. "/" .. relPath
-    local okE, exists = pcall(g_resources.fileExists, fullCachePath)
-    if okE and exists then
-      -- Read + compile directly via VFS (bypasses sandbox dofile resolution
-      -- which may not see _update_cache/ paths and logs "ERROR: not found")
-      local okR, content = pcall(g_resources.readFileContents, fullCachePath)
-      if okR and content then
-        local chunk, compileErr = load(content, "@" .. fullCachePath)
-        if chunk then
-          local okExec, result = pcall(chunk)
-          if okExec then return result end
-          warn("[nExBot] Cache exec error for '" .. relPath .. "': " .. tostring(result))
-        else
-          warn("[nExBot] Cache compile error for '" .. relPath .. "': " .. tostring(compileErr))
-        end
-      else
-        warn("[nExBot] Cache read failed for '" .. relPath .. "': " .. tostring(content))
-      end
-      -- Fall through to original dofile on any cache failure
-    end
-    return _origDofile(path)
-  end
-
-  if importStyle then
-    local _origImportStyle = importStyle
-    importStyle = function(path)
-      local relPath = path:sub(1, 1) == "/" and path:sub(2) or path
-      local fullCachePath = P.cache .. "/" .. relPath
-      local okE, exists = pcall(g_resources.fileExists, fullCachePath)
-      if okE and exists then
-        -- g_ui.importStyle accepts full VFS paths directly (no sandbox resolution)
-        local okLoad, result = pcall(g_ui.importStyle, fullCachePath)
-        if okLoad then return result end
-        warn("[nExBot] Cache style load failed for '" .. relPath .. "': " .. tostring(result))
-      end
-      return _origImportStyle(path)
-    end
-  end
-end
-
---- Resolve a full VFS style path through the cache (for g_ui.importStyle).
---- Exposed globally so downstream modules can use it.
-local function resolveStylePath(fullVfsPath)
-  if not _hasUpdateCache then return fullVfsPath end
-  local botPrefix = P.base .. "/"
-  if fullVfsPath:sub(1, #botPrefix) == botPrefix then
-    local relPath = fullVfsPath:sub(#botPrefix + 1)
-    local cachePath = P.cache .. "/" .. relPath
-    local okE, exists = pcall(g_resources.fileExists, cachePath)
-    if okE and exists then return cachePath end
-  end
-  return fullVfsPath
-end
-nExBot.resolveStylePath = resolveStylePath
 
 -- Suppress noisy debug prints by default
 nExBot.showDebug = nExBot.showDebug or false
@@ -260,7 +174,7 @@ local function loadStyles()
   
   local failedStyles = {}
   for i = 1, #styleFiles do
-    local ok, err = pcall(function() g_ui.importStyle(resolveStylePath(styleFiles[i])) end)
+    local ok, err = pcall(function() g_ui.importStyle(styleFiles[i]) end)
     if not ok then
       failedStyles[#failedStyles + 1] = styleFiles[i] .. ": " .. tostring(err)
     end
