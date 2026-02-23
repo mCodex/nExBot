@@ -10,10 +10,17 @@ local settings = storage[panelName]
 -- basic elements
 -- Ensure style is loaded (fallback for batch loader)
 if g_ui and g_ui.importStyle then
-  pcall(function()
-    local stylePath = nExBot.paths.base .. "/core/extras.otui"
-    g_ui.importStyle(nExBot.resolveStylePath(stylePath))
-  end)
+  if nExBot and nExBot.paths and nExBot.paths.base and nExBot.resolveStylePath then
+    local ok, err = pcall(function()
+      local stylePath = nExBot.paths.base .. "/core/extras.otui"
+      g_ui.importStyle(nExBot.resolveStylePath(stylePath))
+    end)
+    if not ok then
+      warn("[nExBot] Failed to import extras style: " .. tostring(err))
+    end
+  else
+    warn("[nExBot] nExBot.paths not initialized — skipping extras style import.")
+  end
 end
 extrasWindow = UI.createWindow('ExtrasWindow')
 if not extrasWindow then

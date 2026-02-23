@@ -17,6 +17,14 @@
 ]]
 
 local Updater = {}
+
+if not nExBot or not nExBot.Shared or not nExBot.paths then
+  warn("[Updater] nExBot.Shared or nExBot.paths not available — updater disabled.")
+  nExBot = nExBot or {}
+  nExBot.Updater = Updater
+  return Updater
+end
+
 local Shared = nExBot.Shared
 local P = nExBot.paths
 
@@ -211,6 +219,8 @@ end
 local function openInBrowser(url)
   if g_platform and g_platform.openUrl then
     g_platform.openUrl(url)
+  else
+    warn("[Updater] Cannot open browser — g_platform.openUrl not available. Visit manually: " .. tostring(url))
   end
 end
 

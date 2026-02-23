@@ -12,10 +12,17 @@ local config = storage[panelName]
 
 -- Ensure style is loaded (batch loader uses full path, manual fallback for safety)
 if g_ui and g_ui.importStyle then
-  pcall(function()
-    local stylePath = nExBot.paths.base .. "/core/depositer_config.otui"
-    g_ui.importStyle(nExBot.resolveStylePath(stylePath))
-  end)
+  if nExBot and nExBot.paths and nExBot.paths.base and nExBot.resolveStylePath then
+    local ok, err = pcall(function()
+      local stylePath = nExBot.paths.base .. "/core/depositer_config.otui"
+      g_ui.importStyle(nExBot.resolveStylePath(stylePath))
+    end)
+    if not ok then
+      warn("[nExBot] Failed to import depositer_config style: " .. tostring(err))
+    end
+  else
+    warn("[nExBot] nExBot.paths not initialized — skipping depositer_config style import.")
+  end
 end
 
 local depositerPanel = UI.createWindow('DepositerPanel')

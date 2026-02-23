@@ -17,7 +17,13 @@ nExBot.loadTimes = loadTimes
 -- CENTRALIZED PATH RESOLUTION (single source of truth)
 -- ============================================================================
 
-local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
+local ok, configName = pcall(function()
+  return modules.game_bot.contentsPanel.config:getCurrentOption().text
+end)
+if not ok or not configName or configName == "" then
+  warn("[nExBot] Failed to resolve bot config name — cannot initialize.")
+  return
+end
 
 nExBot.paths = {
   config   = configName,
