@@ -90,7 +90,7 @@ Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress i
 - **Movement coordination** — intent-based voting resolves wave avoidance, keep-distance, AoE positioning, and chase
 
 ### CaveBot — Navigation
-- **Walking engine v3.4** — floor-change prevention, chunked walks, field handling, keyboard nudge fallback, distance-first recovery
+- **Walking engine v3.4** — floor-change prevention, chunked walks, field handling, keyboard nudge fallback, distance-first recovery with permanent blacklists
 - **15+ waypoint types** — goto, label, action, buy, sell, lure, standLure, depositor, travel, imbuing, tasker, withdraw
 - **50+ pre-built configs** — Asura, Banuta, Demons, Dragons, Hydras, Nagas, and more
 
@@ -129,7 +129,7 @@ _Loader.lua (entry point)
 | Pattern | Where |
 |---------|-------|
 | Event-Driven | EventBus, HealBot, TargetBot |
-| State Machine | AttackStateMachine, CaveBot WaypointEngine (NORMAL→RECOVERING→STOPPED) |
+| State Machine | AttackStateMachine, CaveBot WaypointEngine (NORMAL↔RECOVERING) |
 | Intent Voting | MovementCoordinator |
 | LRU Cache | Creature configs, pathfinding |
 | Object Pool | Position tables, path entries |

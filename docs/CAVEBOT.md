@@ -204,7 +204,7 @@ Paths are split into segments of **max 15 tiles** per autoWalk call. This keeps 
 
 ### Stuck Detection
 
-If the player hasn't moved for 3 seconds while walking to a waypoint, CaveBot triggers recovery — it cancels the current walk and retries with alternative pathfinding strategies.
+If a goto action accumulates 3 consecutive failures (`recordFailure()`), the WaypointEngine transitions to RECOVERING and runs a distance-first scan for the nearest reachable waypoint. The goto callback uses progressive escalation (ignoreCreatures after 1 retry, ignoreFields after 2, blocker attack after 2) before reaching maxRetries and returning `false`.
 
 ### Pathfinding Strategy
 
@@ -236,24 +236,32 @@ CaveBot processes waypoints sequentially. Each action's callback returns one of 
 
 ## Waypoint Recovery
 
-When the bot detects it's stuck (consecutive failures or no progress for 2+ seconds), it transitions through a simple state machine:
+When the bot detects it's stuck (3 consecutive goto failures), it enters recovery:
 
 ```text
-NORMAL → RECOVERING → (success) → NORMAL
-                   → (timeout) → STOPPED → backoff → NORMAL
+NORMAL → RECOVERING → (found reachable WP) → NORMAL
+                   → (no candidates)       → idle, retry every 1s
+                   → (5 min timeout)        → clear blacklists, retry
 ```
 
-### Recovery: Distance-First Scan
+### Recovery: Distance-First Scan (No Path Validation)
 
-Recovery uses a single **distance-first scan** — no multi-strategy escalation:
+Recovery uses a pure **distance sort** — no A\* path validation:
 
 | # | Pass | Description |
 |---|------|-------------|
-| 1 | Same-floor scan | Sort all goto WPs by chebyshev distance, path-validate top 20 |
-| 2 | Cross-floor scan | Check adjacent floors (±1 z), return closest by manhattan |
-| 3 | Skip waypoint | Last resort — advance to the next waypoint in the list |
+| 1 | Same-floor scan | Sort all goto WPs by Chebyshev distance, return nearest non-blacklisted |
+| 2 | Cross-floor scan | Check adjacent floors (±1 z), return closest by Manhattan distance |
 
-Blacklisted waypoints (stuck within the last 60s, adaptive up to 5 min) are filtered out before scanning. This prevents ping-pong loops where the bot keeps returning to the same failing waypoint.
+Path validation was removed because it's unreliable — the A\* pathfinder doesn't match real walkability (minimap data shows walkable corridors that are physically unreachable). Instead, the **goto callback + walkTo is the real validator**: when a WP fails, it gets blacklisted and the next nearest is tried.
+
+### Permanent Blacklists
+
+When recovery blacklists a waypoint, it uses a **permanent** blacklist (`math.huge`) that only clears when `recordSuccess()` fires (i.e., the bot successfully reaches a waypoint). This prevents the A↔B cycling bug where timed blacklists expired before the next WP finished failing.
+
+- **Recovery blacklists**: permanent (cleared on success)
+- **InstantFail blacklists** (wrong floor, too far): timed 120s TTL
+- **Safety valve**: after 5 minutes of continuous recovery with no progress, all blacklists are cleared automatically
 
 Recovery focuses the target waypoint directly and resets retries for a clean start.
 
@@ -261,17 +269,15 @@ Recovery focuses the target waypoint directly and resets retries for a clean sta
 
 ## Waypoint Guard
 
-The Waypoint Guard prevents excessive pathfinding on unreachable waypoints.
+The goto action detects unreachable waypoints early and signals instant failure:
 
-| Behavior | Details |
-|----------|--------|
-| **Checks** | Current focused waypoint (not the first one) |
-| **Rate** | Every 5 seconds (not every tick) |
-| **Trigger** | Player is on wrong floor or > 100 tiles away |
-| **Response** | Returns `"retry"`, pauses the `goto` action, requests WaypointEngine recovery |
-| **Recovery** | After 3 consecutive failures, triggers `requestWaypointRecovery()` to find a reachable waypoint |
+| Condition | Response |
+|-----------|----------|
+| Wrong floor (`destPos.z ~= playerPos.z`) | Returns `false` with `instantFail` — pumps 3 failures + timed blacklist (120s) |
+| Too far (`dist > maxDist`) | Returns `false` with `instantFail` — same fast-track recovery |
+| Max retries exceeded (`retries >= 4 or 8`) | Returns `false` — feeds `recordFailure()` for stuck detection |
 
-> The guard no longer returns `true` (success) when skipping unreachable waypoints. This prevents the rapid skip-all-waypoints cycle that caused the bot to stand still.
+Instant failures trigger the WaypointEngine's recovery within a single macro tick (3 failures = recovery threshold).
 
 ---
 
@@ -449,4 +455,4 @@ end
 
 ### Client freezes when far from waypoint
 
-This is already handled. The Waypoint Guard detects when you're > 100 tiles from the current waypoint and pauses the goto action while requesting recovery. Pathfinding is capped at 50 tiles and uses a negative-result cache to avoid repeating failed A* searches. If the bot can't find any reachable waypoint, it will log a warning.
+This is already handled. Large distances trigger an instant failure in the goto action, which fast-tracks recovery to find the nearest reachable waypoint by distance. Pathfinding is capped at 50 tiles. If the bot can't find any reachable waypoint, it idles in recovery mode and retries every second (with a 5-minute safety valve that clears all blacklists).
