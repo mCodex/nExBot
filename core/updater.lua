@@ -78,8 +78,30 @@ local function readLocalVersion()
   return ok and content and content:match("^%s*(.-)%s*$") or nil
 end
 
+--- Read version from storage (survives mod-overlay VFS issues)
+local function readStorageVersion()
+  return storage.updaterInstalledVersion
+end
+
+--- Best known local version: prefers storage (reliable) over file (may be shadowed by mod)
+local function effectiveLocalVersion()
+  return readStorageVersion() or readLocalVersion()
+end
+
 local function writeLocalVersion(versionStr)
+  -- Always persist in storage first (this is authoritative)
+  storage.updaterInstalledVersion = versionStr
+
+  -- Also try writing the version file (may fail silently for mod installs)
   local ok = pcall(g_resources.writeFileContents, BOT_BASE_PATH .. "/" .. VERSION_FILE, versionStr)
+  if ok then
+    -- Verify write-back: detect mod-overlay shadow
+    local readBack = readLocalVersion()
+    if readBack ~= versionStr then
+      warn("[Updater] Version file shadowed by mod overlay. "
+        .. "Move nExBot from mods/bot/ to bot/ for auto-updates to take full effect.")
+    end
+  end
   return ok
 end
 
@@ -92,6 +114,18 @@ end
 
 local function ensureDir(relativePath)
   pcall(g_resources.makeDir, BOT_BASE_PATH .. "/" .. relativePath)
+end
+
+-- Update cache: written to _update_cache/ which is never shadowed by mod overlays
+local CACHE_SUBDIR = "_update_cache"
+
+local function ensureCacheDir(relativePath)
+  pcall(g_resources.makeDir, BOT_BASE_PATH .. "/" .. CACHE_SUBDIR .. "/" .. relativePath)
+end
+
+local function writeCacheFile(relativePath, content)
+  local fullPath = BOT_BASE_PATH .. "/" .. CACHE_SUBDIR .. "/" .. relativePath
+  pcall(g_resources.writeFileContents, fullPath, content)
 end
 
 -- ============================================================================
@@ -252,7 +286,7 @@ local function checkForUpdate(callback)
   _state.isChecking = true
   _state.status = "checking"
 
-  local localStr = readLocalVersion()
+  local localStr = effectiveLocalVersion()
   _state.localVer = localStr
   if not localStr then
     _state.isChecking = false; _state.status = "error"
@@ -309,6 +343,9 @@ local function applyUpdate(callback, onProgress)
 
     info("[Updater] Downloading " .. #updateFiles .. " files ...")
 
+    -- Ensure cache root directory exists
+    pcall(g_resources.makeDir, BOT_BASE_PATH .. "/" .. CACHE_SUBDIR)
+
     local idx = 0
     local function downloadNext()
       idx = idx + 1
@@ -336,9 +373,12 @@ local function applyUpdate(callback, onProgress)
       _state.progress = math.floor((idx / #updateFiles) * 100)
       if onProgress then onProgress(_state.progress, idx, #updateFiles) end
 
-      -- ensure parent dir
+      -- ensure parent dirs (both normal and cache)
       local dir = filePath:match("(.+)/[^/]+$")
-      if dir then ensureDir(dir) end
+      if dir then
+        ensureDir(dir)
+        ensureCacheDir(dir)
+      end
 
       downloadFile(filePath, function(content, dlErr)
         if dlErr or not content then
@@ -346,6 +386,7 @@ local function applyUpdate(callback, onProgress)
           warn("[Updater] Failed: " .. filePath .. " - " .. tostring(dlErr))
         else
           writeFile(filePath, content)
+          writeCacheFile(filePath, content)
         end
         schedule(DOWNLOAD_DELAY_MS, downloadNext)
       end)
@@ -502,7 +543,7 @@ function Updater.getState()
   }
 end
 
-function Updater.getLocalVersion() return readLocalVersion() end
+function Updater.getLocalVersion() return effectiveLocalVersion() end
 
 --- Diagnostic: print detected HTTP backend to chat
 function Updater.probeHttp()

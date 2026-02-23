@@ -36,10 +36,82 @@ nExBot = nExBot or {}
 nExBot.loadTimes = loadTimes
 
 -- Read version from project root file (single source of truth)
+-- Prefer storage version (survives mod-overlay VFS shadowing)
 do
+  local versionStr = nil
+  if storage and storage.updaterInstalledVersion then
+    versionStr = storage.updaterInstalledVersion
+  end
+  if not versionStr then
+    local versionPath = "/bot/" .. configName .. "/version"
+    local ok, content = pcall(g_resources.readFileContents, versionPath)
+    versionStr = (ok and content) and content:match("^%s*(.-)%s*$")
+  end
+  nExBot.version = versionStr or "0.0.0"
+end
+
+-- ============================================================================
+-- UPDATE CACHE LAYER (mod-overlay bypass)
+-- ============================================================================
+-- When installed as a mod (e.g. otcr-mods/bot/nexbot), the mod overlay shadows
+-- files written to the user-data directory. The updater writes downloaded files
+-- to _update_cache/ which does NOT exist in the mod, so it's never shadowed.
+-- We detect this situation and transparently redirect dofile/importStyle.
+
+local FULL_CACHE_DIR = "/bot/" .. configName .. "/_update_cache"
+local CACHE_DIR = "/_update_cache"
+local _hasUpdateCache = false
+
+if storage and storage.updaterInstalledVersion then
   local versionPath = "/bot/" .. configName .. "/version"
-  local ok, content = pcall(g_resources.readFileContents, versionPath)
-  nExBot.version = (ok and content) and content:match("^%s*(.-)%s*$") or "0.0.0"
+  local okV, fileContent = pcall(g_resources.readFileContents, versionPath)
+  local fileVersion = (okV and fileContent) and fileContent:match("^%s*(.-)%s*$") or nil
+  if fileVersion ~= storage.updaterInstalledVersion then
+    local okD, dirExists = pcall(g_resources.directoryExists, FULL_CACHE_DIR)
+    _hasUpdateCache = (okD and dirExists) or false
+    if _hasUpdateCache then
+      info("[nExBot] Mod overlay detected - loading from update cache.")
+    end
+  end
+end
+
+if _hasUpdateCache then
+  local _origDofile = dofile
+  dofile = function(path)
+    local relPath = path:sub(1, 1) == "/" and path:sub(2) or path
+    local fullCachePath = FULL_CACHE_DIR .. "/" .. relPath
+    local okE, exists = pcall(g_resources.fileExists, fullCachePath)
+    if okE and exists then
+      return _origDofile(CACHE_DIR .. "/" .. relPath)
+    end
+    return _origDofile(path)
+  end
+
+  if importStyle then
+    local _origImportStyle = importStyle
+    importStyle = function(path)
+      local relPath = path:sub(1, 1) == "/" and path:sub(2) or path
+      local fullCachePath = FULL_CACHE_DIR .. "/" .. relPath
+      local okE, exists = pcall(g_resources.fileExists, fullCachePath)
+      if okE and exists then
+        return _origImportStyle(CACHE_DIR .. "/" .. relPath)
+      end
+      return _origImportStyle(path)
+    end
+  end
+end
+
+-- Helper: resolve a full VFS style path through the cache (for g_ui.importStyle)
+local function resolveStylePath(fullVfsPath)
+  if not _hasUpdateCache then return fullVfsPath end
+  local botPrefix = "/bot/" .. configName .. "/"
+  if fullVfsPath:sub(1, #botPrefix) == botPrefix then
+    local relPath = fullVfsPath:sub(#botPrefix + 1)
+    local cachePath = FULL_CACHE_DIR .. "/" .. relPath
+    local okE, exists = pcall(g_resources.fileExists, cachePath)
+    if okE and exists then return cachePath end
+  end
+  return fullVfsPath
 end
 
 -- Suppress noisy debug prints by default
@@ -168,7 +240,7 @@ local function loadStyles()
   
   local failedStyles = {}
   for i = 1, #styleFiles do
-    local ok, err = pcall(function() g_ui.importStyle(styleFiles[i]) end)
+    local ok, err = pcall(function() g_ui.importStyle(resolveStylePath(styleFiles[i])) end)
     if not ok then
       failedStyles[#failedStyles + 1] = styleFiles[i] .. ": " .. tostring(err)
     end
