@@ -30,7 +30,6 @@ nExBot.paths = {
   base     = "/bot/" .. configName,
   core     = "/bot/" .. configName .. "/core",
   cache    = "/bot/" .. configName .. "/_update_cache",
-  cacheRel = "/_update_cache",
   private  = "/bot/" .. configName .. "/private",
 }
 
@@ -86,9 +85,22 @@ if _hasUpdateCache then
     local fullCachePath = P.cache .. "/" .. relPath
     local okE, exists = pcall(g_resources.fileExists, fullCachePath)
     if okE and exists then
-      local okLoad, result = pcall(_origDofile, P.cacheRel .. "/" .. relPath)
-      if okLoad then return result end
-      warn("[nExBot] Cache load failed for '" .. relPath .. "', falling back to original.")
+      -- Read + compile directly via VFS (bypasses sandbox dofile resolution
+      -- which may not see _update_cache/ paths and logs "ERROR: not found")
+      local okR, content = pcall(g_resources.readFileContents, fullCachePath)
+      if okR and content then
+        local chunk, compileErr = load(content, "@" .. fullCachePath)
+        if chunk then
+          local okExec, result = pcall(chunk)
+          if okExec then return result end
+          warn("[nExBot] Cache exec error for '" .. relPath .. "': " .. tostring(result))
+        else
+          warn("[nExBot] Cache compile error for '" .. relPath .. "': " .. tostring(compileErr))
+        end
+      else
+        warn("[nExBot] Cache read failed for '" .. relPath .. "': " .. tostring(content))
+      end
+      -- Fall through to original dofile on any cache failure
     end
     return _origDofile(path)
   end
@@ -100,9 +112,10 @@ if _hasUpdateCache then
       local fullCachePath = P.cache .. "/" .. relPath
       local okE, exists = pcall(g_resources.fileExists, fullCachePath)
       if okE and exists then
-        local okLoad, result = pcall(_origImportStyle, P.cacheRel .. "/" .. relPath)
+        -- g_ui.importStyle accepts full VFS paths directly (no sandbox resolution)
+        local okLoad, result = pcall(g_ui.importStyle, fullCachePath)
         if okLoad then return result end
-        warn("[nExBot] Cache style load failed for '" .. relPath .. "', falling back to original.")
+        warn("[nExBot] Cache style load failed for '" .. relPath .. "': " .. tostring(result))
       end
       return _origImportStyle(path)
     end
