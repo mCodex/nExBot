@@ -69,6 +69,7 @@ end
 -- main loop, controlled by config - OPTIMIZED VERSION
 local actionRetries = 0
 local prevActionResult = true
+local lastDispatchedChild = nil  -- Track last WP to preserve PathCursor across retries
 
 -- Cached UI list reference (avoid repeated lookups)
 local uiList = nil
@@ -381,8 +382,8 @@ local function shouldSkipExecution()
       walkState.lastVerifyTime = now
     end
     
-    -- Allow mid-walk check every 300ms
-    if (now - walkState.lastVerifyTime) >= 300 then
+    -- Allow mid-walk check every 150ms (faster re-dispatch for smoother movement)
+    if (now - walkState.lastVerifyTime) >= 150 then
       walkState.lastVerifyTime = now
       
       -- HARD TIMEOUT: Absolute ceiling regardless of walkExpectedDuration
@@ -534,10 +535,11 @@ WaypointEngine = {
   FAILURE_THRESHOLD = 3,
 
   -- Waypoint blacklist: skip unreachable WPs during distance scan.
-  -- Recovery uses math.huge (permanent until recordSuccess clears).
-  -- InstantFail uses timed TTL (re-checked when conditions change).
+  -- Uses adaptive exponential decay TTL instead of permanent blacklists.
   stuckWaypoints = {},
-  BLACKLIST_TTL = 120000,        -- 2 min timed TTL (instantFail: wrong floor/too far)
+  stuckFailCounts = {},          -- per-WP failure count for exponential decay
+  BLACKLIST_BASE_TTL = 15000,    -- 15s base TTL
+  BLACKLIST_MAX_TTL  = 120000,   -- 2 min cap
 
   -- Recovery coordination
   recoveryJustFocused = false,   -- suppress actionRetries reset after recovery focus
@@ -567,12 +569,22 @@ end
 
 local function blacklistWaypoint(child)
   if not child then return end
-  WaypointEngine.stuckWaypoints[child] = now + WaypointEngine.BLACKLIST_TTL
+  -- Exponential decay: base_ttl * 2^(fail_count), capped at max_ttl
+  local failCount = (WaypointEngine.stuckFailCounts[child] or 0) + 1
+  WaypointEngine.stuckFailCounts[child] = failCount
+  local ttl = math.min(
+    WaypointEngine.BLACKLIST_BASE_TTL * math.pow(2, failCount - 1),
+    WaypointEngine.BLACKLIST_MAX_TTL
+  )
+  WaypointEngine.stuckWaypoints[child] = now + ttl
 end
 
 local function clearWaypointBlacklist()
   for k in pairs(WaypointEngine.stuckWaypoints) do
     WaypointEngine.stuckWaypoints[k] = nil
+  end
+  for k in pairs(WaypointEngine.stuckFailCounts) do
+    WaypointEngine.stuckFailCounts[k] = nil
   end
 end
 
@@ -583,12 +595,11 @@ end
 local function transitionTo(newState)
   WaypointEngine.state = newState
   if newState == "RECOVERING" then
-    -- Permanent blacklist: lasts until recordSuccess() clears it.
-    -- Timed TTL was too short (120s < ~2min WP failure cycle with maxRetries=8),
-    -- causing the previous WP's blacklist to expire mid-cycle → infinite A↔B loop.
+    -- Adaptive blacklist: exponential decay instead of permanent.
+    -- Prevents cascading exclusion of nearby valid WPs.
     local current = ui and ui.list and ui.list:getFocusedChild()
     if current and current.action == "goto" then
-      WaypointEngine.stuckWaypoints[current] = math.huge
+      blacklistWaypoint(current)
     end
     if WaypointEngine.recoveryStartedAt == 0 then
       WaypointEngine.recoveryStartedAt = now
@@ -697,6 +708,7 @@ resetWaypointEngine = function()
   WaypointEngine.recoveryJustFocused = false
   WaypointEngine.lastRecoverySearch = 0
   WaypointEngine.recoveryStartedAt = 0
+  lastDispatchedChild = nil
 end
 
 -- Cache TargetBot function references (avoid repeated table lookups)
@@ -929,8 +941,13 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     return
   end
   
-  -- Execute action (inline for performance)
-  safeResetWalking()
+  -- Only reset walking state when the destination waypoint changes.
+  -- Preserving the PathCursor across retries of the same WP avoids
+  -- redundant A* recomputation every 75ms tick and enables smooth walking.
+  if currentAction ~= lastDispatchedChild then
+    safeResetWalking()
+    lastDispatchedChild = currentAction
+  end
   local result, instantFail = actionDef.callback(currentAction.value, actionRetries, prevActionResult)
   
   -- Detect focus change during callback.
@@ -1217,18 +1234,25 @@ end
 -- WAYPOINT FINDER UTILITIES
 -- ============================================================================
 
--- Parse position from goto waypoint text
--- @param text string "goto:1234,5678,7"
+-- Parse position from any waypoint text that contains coordinates.
+-- Supports "goto:x,y,z", "stand:x,y,z", "lure:x,y,z", "use:x,y,z,..." etc.
+-- @param text string e.g. "goto:1234,5678,7" or "stand:1234,5678,7"
 -- @return table {x, y, z} or nil
+local function parseWaypointPosition(text)
+  if not text then return nil end
+  local re = regexMatch(text, [[(?:\w+:)([^,]+),([^,]+),([^,]+)]])
+  if not re or not re[1] then return nil end
+  local x = tonumber(re[1][2])
+  local y = tonumber(re[1][3])
+  local z = tonumber(re[1][4])
+  if not x or not y or not z then return nil end
+  return { x = x, y = y, z = z }
+end
+
+-- Legacy: parseGotoPosition for backward compatibility
 local function parseGotoPosition(text)
   if not text or not string.starts(text, "goto:") then return nil end
-  local re = regexMatch(text, [[(?:goto:)([^,]+),([^,]+),([^,]+)]])
-  if not re or not re[1] then return nil end
-  return {
-    x = tonumber(re[1][2]),
-    y = tonumber(re[1][3]),
-    z = tonumber(re[1][4])
-  }
+  return parseWaypointPosition(text)
 end
 
 -- Distance functions: delegate to SSoT (constants/directions.lua)
@@ -1260,16 +1284,16 @@ buildWaypointCache = function()
   
   for i, child in ipairs(actions) do
     local text = child:getText()
-    local pos = parseGotoPosition(text)
+    local pos = parseWaypointPosition(text)
     if pos then
       waypointPositionCache[i] = {
         x = pos.x,
         y = pos.y,
         z = pos.z,
         child = child,
-        index = i
+        index = i,
+        isGoto = (child.action == "goto"),
       }
-      -- Track which floors have waypoints (for cross-floor recovery)
       waypointCacheFloors[pos.z] = true
     end
   end
@@ -1278,14 +1302,13 @@ buildWaypointCache = function()
 end
 
 -- ============================================================================
--- WAYPOINT FINDER (KISS: distance sort, no path validation)
+-- WAYPOINT FINDER (distance sort + path validation on top candidates)
 --
--- Path validation is unreliable — the A* pathfinder doesn't match real
--- walkability (ignoreNonPathable routes through walls; PathStrategy.findPath
--- still passes WPs that canWalkDirection blocks).
--- Instead: sort by distance, return the nearest non-blacklisted WP.
--- The goto callback + walkTo is the real validator.
--- When a WP fails, it gets blacklisted and the next nearest is tried.
+-- Phase 1: Collect candidates by Chebyshev distance.
+-- Phase 2: Path-validate the top 5 closest (strict findPath, no ignoreNonPathable).
+--          This catches WPs behind walls without validating every single WP.
+-- Phase 3: Proximity guarantee — always validate the 3 closest WPs even if
+--          they exceed gotoMaxDistance, so very nearby WPs are never skipped.
 -- ============================================================================
 
 findReachableWaypoint = function(playerPos, options)
@@ -1305,7 +1328,7 @@ findReachableWaypoint = function(playerPos, options)
     if focused then currentIdx = ui.list:getChildIndex(focused) end
   end
 
-  -- Collect same-floor, non-blacklisted candidates within range
+  -- Collect same-floor, non-blacklisted candidates (prefer goto WPs for recovery)
   local candidates = {}
   for i, wp in pairs(waypointPositionCache) do
     if isWaypointBlacklisted(wp.child) then goto continue end
@@ -1313,16 +1336,70 @@ findReachableWaypoint = function(playerPos, options)
     if wp.z ~= playerZ then goto continue end
 
     local dist = chebyshevDist(playerPos, wp)
-    if dist > maxDist then goto continue end
+    -- Include if within maxDist OR if it's one of the very closest (proximity guarantee)
+    if dist > maxDist * 1.5 then goto continue end
 
-    candidates[#candidates + 1] = { index = i, dist = dist, child = wp.child }
+    candidates[#candidates + 1] = {
+      index = i, dist = dist, child = wp.child,
+      isGoto = wp.isGoto, withinRange = (dist <= maxDist)
+    }
     ::continue::
   end
 
-  -- Sort by distance, return nearest
-  if #candidates > 0 then
-    table.sort(candidates, function(a, b) return a.dist < b.dist end)
-    return candidates[1].child, candidates[1].index
+  if #candidates == 0 and not searchAllFloors then
+    return nil, nil
+  end
+
+  -- Sort by distance
+  table.sort(candidates, function(a, b) return a.dist < b.dist end)
+
+  -- Path-validate top candidates (max 5 strict A* calls, bounded cost)
+  -- This prevents selecting WPs behind walls during recovery.
+  local PATH_VALIDATE_COUNT = 5
+  local PROXIMITY_GUARANTEE = 3
+  local validated = {}
+
+  for rank, c in ipairs(candidates) do
+    if rank > maxCandidates then break end
+
+    -- Proximity guarantee: always validate the 3 closest regardless of maxDist
+    local shouldValidate = (rank <= PROXIMITY_GUARANTEE) or c.withinRange
+    if not shouldValidate then goto skip_candidate end
+
+    -- Path validation: use strict findPath (no ignoreNonPathable) for top candidates
+    if rank <= PATH_VALIDATE_COUNT and PathStrategy then
+      local path = PathStrategy.findPath(playerPos, c, {
+        maxSteps = math.min(math.floor(c.dist * 1.5) + 5, 50),
+      })
+      if path and #path > 0 then
+        validated[#validated + 1] = c
+      end
+      -- If strict fails, try with ignoreNonPathable as fallback
+      if not path or #path == 0 then
+        path = PathStrategy.findPath(playerPos, c, {
+          maxSteps = math.min(math.floor(c.dist * 1.5) + 5, 50),
+          ignoreNonPathable = true,
+        })
+        if path and #path > 0 then
+          validated[#validated + 1] = c
+        end
+      end
+    else
+      -- Beyond validation budget: accept by distance (legacy behavior)
+      if c.withinRange then
+        validated[#validated + 1] = c
+      end
+    end
+    ::skip_candidate::
+  end
+
+  -- Return the nearest validated candidate (prefer goto WPs)
+  if #validated > 0 then
+    -- Prefer goto WPs over other types for recovery (goto WPs are actionable)
+    for _, v in ipairs(validated) do
+      if v.isGoto then return v.child, v.index end
+    end
+    return validated[1].child, validated[1].index
   end
 
   -- Cross-floor fallback

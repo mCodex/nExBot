@@ -98,7 +98,7 @@ end
 
 -- OPTIMIZED: Use native API limits for best performance
 local MAX_PATHFIND_DIST = 50   -- OTClient A* limit is ~50-127 tiles
-local MAX_WALK_CHUNK = 40      -- Larger chunks = fewer path recalculations
+local MAX_WALK_CHUNK = 25      -- Balanced: smooth chunks with faster course correction in caves
 
 -- ============================================================================
 -- OTCLIENT API OPTIMIZATIONS (NEW: High-performance walking)
@@ -438,12 +438,9 @@ local PathCursor = {
   path = nil,
   idx = 1,
   ts = 0,
-  TTL = 800,  -- IMPROVED: Extended TTL for smoother continuous walking (was 500)
-  destPos = nil,  -- Track destination for path reuse
-  lastChunkEnd = nil,  -- Track where last chunk ended for continuity
-  smoothingActive = false,  -- Whether path smoothing is enabled
-  lastChunkDir = nil,
-  lastChunkTime = 0,
+  TTL = 800,
+  destPos = nil,
+  smoothingActive = false,
 }
 
 local function resetPathCursor()
@@ -451,10 +448,7 @@ local function resetPathCursor()
   PathCursor.idx = 1
   PathCursor.ts = 0
   PathCursor.destPos = nil
-  PathCursor.lastChunkEnd = nil
   PathCursor.smoothingActive = false
-  PathCursor.lastChunkDir = nil
-  PathCursor.lastChunkTime = 0
 end
 
 -- IMPROVED: Path smoothing function - removes unnecessary zig-zag movements
@@ -710,20 +704,6 @@ CaveBot.walkTo = function(dest, maxDist, params)
   -- IMPROVED: Reuse PathStrategy cursor cache if valid AND destination is the same
   local cacheValid = PathStrategy and PathStrategy.isCursorValid(dest)
 
-  -- IMPROVED: Extend cache TTL if player is making good progress toward destination
-  if not cacheValid and PathStrategy then
-    local cursor = PathStrategy.getCursor()
-    if cursor.chunkEnd and cursor.dest and posEquals(cursor.dest, dest) and cursor.path then
-      local progressDist = math.max(
-        math.abs(playerPos.x - cursor.chunkEnd.x),
-        math.abs(playerPos.y - cursor.chunkEnd.y)
-      )
-      if progressDist <= 2 and cursor.idx <= #cursor.path then
-        cacheValid = true
-      end
-    end
-  end
-
   if cacheValid then
     path = PathStrategy.getCursor().path
   else
@@ -765,7 +745,6 @@ CaveBot.walkTo = function(dest, maxDist, params)
       if smoothed and #smoothed > 0 and #smoothed <= #path then
         path = smoothed
         PathStrategy.getCursor().path = path
-        PathStrategy.getCursor().smoothed = true
       end
     else
       PathCursor.path = path
@@ -892,11 +871,12 @@ CaveBot.walkTo = function(dest, maxDist, params)
     prevDir = path[i]
   end
 
-  -- DECISION: keyboard step for short/complex paths, autoWalk for long straight paths
-  local useAutoWalk = stepsToWalk > 15 and dirChanges <= stepsToWalk * 0.4
+  -- DECISION: prefer autoWalk for smoother movement; keyboard only for very short/complex paths
+  local useAutoWalk = stepsToWalk > 5 and dirChanges <= stepsToWalk * 0.55
 
   if not useAutoWalk then
-    -- KEYBOARD STEPPING: Follow computed path exactly, 1 step per tick
+    -- KEYBOARD STEPPING with PIPELINING: dispatch up to 2 steps ahead for smoother movement.
+    -- Pipelining is disabled near FC tiles or on sharp turns (>90° direction change).
     local dir = path[curIdx]
     if not dir then
       if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
@@ -905,32 +885,61 @@ CaveBot.walkTo = function(dest, maxDist, params)
 
     -- Apply direction smoothing (sole anti-zigzag via PathStrategy)
     local smoothedDir = PathStrategy and PathStrategy.smoothDirection(dir) or dir
+    local walkDir = nil
 
     if canWalkDirection(smoothedDir) then
-      if PathStrategy then
-        PathStrategy.walkStep(smoothedDir)
-        PathStrategy.advanceCursor(1, PathStrategy.rawStepDuration(smoothedDir and smoothedDir >= 4))
-      else
-        walk(smoothedDir)
-        PathCursor.idx = PathCursor.idx + 1
-      end
-      resetStepBackAttempts()
-      return true
+      walkDir = smoothedDir
     elseif smoothedDir ~= dir and canWalkDirection(dir) then
-      -- Fallback to raw direction if smoothed direction is blocked
-      if PathStrategy then
-        PathStrategy.walkStep(dir)
-        PathStrategy.advanceCursor(1, PathStrategy.rawStepDuration(dir and dir >= 4))
-      else
-        walk(dir)
-        PathCursor.idx = PathCursor.idx + 1
-      end
-      resetStepBackAttempts()
-      return true
-    else
+      walkDir = dir
+    end
+
+    if not walkDir then
       if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
       return false
     end
+
+    -- Dispatch first step
+    if PathStrategy then
+      PathStrategy.walkStep(walkDir)
+      PathStrategy.advanceCursor(1, PathStrategy.rawStepDuration(walkDir and walkDir >= 4))
+    else
+      walk(walkDir)
+      PathCursor.idx = PathCursor.idx + 1
+    end
+    resetStepBackAttempts()
+
+    -- Pipeline second step: dispatch ahead if path has another step and it's safe
+    local nextIdx = curIdx + 1
+    if nextIdx <= #path and nextIdx <= curIdx + stepsToWalk - 1 then
+      local nextDir = path[nextIdx]
+      if nextDir then
+        local nextOff = DIR_TO_OFFSET and DIR_TO_OFFSET[nextDir]
+        local curOff = DIR_TO_OFFSET and DIR_TO_OFFSET[walkDir]
+        -- Only pipeline if direction change is ≤ 90° (similar or same)
+        local isSimilar = (nextDir == walkDir) or
+          (PathStrategy and PathStrategy.isSimilar(nextDir, walkDir))
+        -- Don't pipeline near floor-change tiles
+        local nextSafe = true
+        if nextOff and curOff then
+          local stepPos = applyOffset(playerPos, curOff)
+          local nextPos = applyOffset(stepPos, nextOff)
+          if isFloorChangeTile(nextPos) or isFloorChangeTile(stepPos) then
+            nextSafe = false
+          end
+        end
+        if isSimilar and nextSafe and canWalkDirection(nextDir) then
+          if PathStrategy then
+            PathStrategy.walkStep(nextDir)
+            PathStrategy.advanceCursor(1, PathStrategy.rawStepDuration(nextDir and nextDir >= 4))
+          else
+            walk(nextDir)
+            PathCursor.idx = PathCursor.idx + 1
+          end
+        end
+      end
+    end
+
+    return true
   end
 
   -- AUTOWALK: Long straight path — delegate to native pathfinder with FC verification

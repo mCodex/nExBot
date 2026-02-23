@@ -51,7 +51,9 @@ Private scripts run in the same environment as all other bot modules, so you hav
 | `storage` | Persistent per-character storage table |
 | `schedule(delay, fn)` | Run a function after `delay` ms |
 | `now` | Current timestamp in ms (updated each tick) |
-| `PathUtils`, `PathStrategy` | Shared pathfinding utilities |
+| `PathUtils` | Shared pathfinding: `findPath()`, `isFloorChangeTile()`, `isTileSafe()`, `getStepDuration()`, `chebyshevDistance()`, `posEquals()`, `getDirectionTo()`, `areSimilarDirections()`, direction constants (SSoT via `Directions`) |
+| `PathStrategy` | High-level pathfinding: `findPath()`, `findPathRelaxed()`, `stepDuration()` (with jitter), `smoothPath()`, `smoothDirection()`, PathCursor, `nativePathIsSafe()`, `autoWalk()`, `walkStep()`. Delegates to `PathUtils` for shared utilities. |
+| `Directions` | Direction constants SSoT: `DIR_TO_OFFSET`, `OPPOSITE`, `ADJACENT`, `OFFSET_TO_DIR`, plus helper functions |
 | `CaveBot`, `TargetBot` | Bot module APIs |
 
 > **Tip:** Any global that exists at startup time is available. Check the [Architecture](ARCHITECTURE.md) doc for the full module list.

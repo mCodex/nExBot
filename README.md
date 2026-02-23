@@ -90,7 +90,7 @@ Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress i
 - **Movement coordination** — intent-based voting resolves wave avoidance, keep-distance, AoE positioning, and chase
 
 ### CaveBot — Navigation
-- **Walking engine v3.4** — floor-change prevention, chunked walks, field handling, keyboard nudge fallback, distance-first recovery with permanent blacklists
+- **Walking engine v4.0** — smooth autoWalk pipelining (5+ tiles), step pipelining (2-step lookahead), PathCursor preservation, adaptive recovery with path validation and exponential-decay blacklists
 - **15+ waypoint types** — goto, label, action, buy, sell, lure, standLure, depositor, travel, imbuing, tasker, withdraw
 - **50+ pre-built configs** — Asura, Banuta, Demons, Dragons, Hydras, Nagas, and more
 
@@ -131,8 +131,11 @@ _Loader.lua (entry point)
 | Event-Driven | EventBus, HealBot, TargetBot |
 | State Machine | AttackStateMachine, CaveBot WaypointEngine (NORMAL↔RECOVERING) |
 | Intent Voting | MovementCoordinator |
-| LRU Cache | Creature configs, pathfinding |
-| Object Pool | Position tables, path entries |
+| LRU Cache | Creature configs, pathfinding (4-entry), FC tile cache |
+| PathCursor Preservation | Walking engine — cursor survives across ticks for same destination |
+| Step Pipelining | Keyboard walking — 2-step lookahead dispatch |
+| One-time Backend Detection | PathStrategy resolves pathfinder API once at init |
+| Adaptive Blacklist Decay | Recovery — exponential TTL replaces permanent blacklists |
 | EWMA | Monster tracking, cooldowns |
 | BFS Traversal | ContainerOpener, Looting |
 | Burst Detection | Z-change protection |

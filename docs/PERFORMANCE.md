@@ -62,11 +62,12 @@ TargetBot caches creature configurations with Least Recently Used eviction:
 
 ### Pathfinding Cache
 
-The reachability system caches pathfinding results per creature ID with TTL expiration:
+The pathfinding system uses a **4-entry LRU cache** with 200ms TTL:
 
-- Avoids repeated expensive pathfinding to the same creature
-- Cache invalidates when the creature moves significantly
-- **Impact:** Major reduction in pathfinding CPU during combat
+- Walking loop typically alternates 2-3 queries (recovery probe + goto path + FC safety check)
+- 4 entries cover most repeated queries without redundant A*
+- Each entry caches start+goal+flags → result
+- **Impact:** Major reduction in pathfinding CPU during combat and movement
 
 ### Negative Pathfinding Cache
 
@@ -79,10 +80,13 @@ When a destination is proven unreachable, the result is cached for 500ms:
 
 ### Pathfinding Relaxation Early Exit
 
-The multi-attempt pathfinding system (`findPathRelaxed`) uses progressive flag relaxation. For far destinations (>30 tiles), it exits early after 2 attempts instead of running all 4:
+The multi-attempt pathfinding system (`findPathRelaxed`) uses progressive flag relaxation. For far destinations (>30 tiles), it exits early after 3 attempts instead of running all 5:
 
-- Attempts 3–4 (unseen tiles, ignore fields) only help for close-range blocked tiles
-- **Impact:** 50% fewer A* calls for far unreachable destinations
+- Attempt 1: truly strict (no ignoreNonPathable)
+- Attempt 2: allow non-pathable tiles
+- Attempt 3: ignore creatures
+- Attempts 4-5 (unseen tiles, ignore fields) only help for close-range blocked tiles
+- **Impact:** 40% fewer A* calls for far unreachable destinations
 
 ---
 
@@ -93,15 +97,16 @@ The multi-attempt pathfinding system (`findPathRelaxed`) uses progressive flag r
 CaveBot uses a combined approach for movement:
 
 ```text
-1. findPath strict (visible tiles, respect creatures)
-2. findPath ignore creatures (if step 1 fails)
-3. findPath allow unseen tiles (if distance ≤ 30)
-4. findPath ignore fields (if distance ≤ 30)
-5. Short paths (≤15 tiles) → keyboard step-by-step
-6. Long straight paths (>15 tiles) → autoWalk with chunking
+1. findPath strict (no ignoreNonPathable — respects PZ, invisible walls)
+2. findPath allow non-pathable tiles (relaxes PZ borders)
+3. findPath ignore creatures (if step 2 fails)
+4. findPath allow unseen tiles (if distance ≤ 30)
+5. findPath ignore fields (if distance ≤ 30)
+6. Short paths (≤5 tiles) → keyboard step-by-step with 2-step pipelining
+7. Longer paths (>5 tiles, ≤55% dir changes) → autoWalk with chunking (max 25 tiles)
 ```
 
-Most walks complete with a single findPath + autoWalk dispatch.
+Most walks complete with a single findPath + autoWalk dispatch. The PathCursor is preserved across ticks for the same destination, eliminating redundant A* recomputation.
 
 ### Pathfinding Distance Limit
 
@@ -117,7 +122,7 @@ Pathfinding is capped at **50 tiles** maximum. Beyond that, autoWalk is used exc
 
 CaveBot's macro runs every 75 ms, but the Smart Execution System skips iterations when unnecessary:
 
-- Skip while player is actively walking (with 300ms mid-walk verification)
+- Skip while player is actively walking (with 150ms mid-walk verification)
 - Skip during delays (after using items)
 - Skip when TargetBot's Pull System is active
 - Skip during floor-change recovery
@@ -184,9 +189,17 @@ Affected parameters:
 | `CREATURE_CACHE_SIZE` | 50 | LRU creature cache max entries |
 | `NOPATH_THRESHOLD` | 5 | Goto failures before triggering pathfinder recovery |
 | `MAX_CANDIDATES_GLOBAL` | 8 | Max waypoints checked during global recovery search |
-| `MAX_CANDIDATES_BEST` | 5 | Max waypoints checked during forward/backward search |
+| `MAX_CANDIDATES_BEST` | 5 | Max waypoints path-validated during recovery |
 | `NEG_CACHE_TTL` | 500 ms | Negative pathfinding cache lifetime |
 | `NEG_CACHE_MAX` | 32 | Max negative cache entries |
+| `MAX_WALK_CHUNK` | 25 | Max tiles per autoWalk dispatch |
+| `AUTOWALK_THRESHOLD` | 5 tiles | Min path length to use autoWalk |
+| `DIR_CHANGE_TOLERANCE` | 55% | Max direction changes for autoWalk eligibility |
+| `VERIFY_INTERVAL` | 150 ms | Mid-walk verification interval |
+| `PIPELINING_DEPTH` | 2 | Steps dispatched ahead during keyboard walking |
+| `BLACKLIST_BASE_TTL` | 15000 ms | Base waypoint blacklist duration |
+| `BLACKLIST_MAX_TTL` | 120000 ms | Max waypoint blacklist duration |
+| `FINDPATH_LRU_SIZE` | 4 | Number of cached pathfinding results |
 
 > Only adjust these if you understand the performance trade-offs. Lower values = faster response but more CPU. Higher values = less CPU but slower response.
 

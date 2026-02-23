@@ -27,13 +27,24 @@
   - PathFindIgnoreCreatures = 16
 ]]
 
-local PathUtils = {}
+PathUtils = PathUtils or {}
+local PathUtils = PathUtils  -- local alias for speed
 
 -- ============================================================================
 -- CLIENT SERVICE ABSTRACTION (ACL Pattern)
+-- Resolved lazily so Phase 3 load order doesn't require nExBot.Shared yet
 -- ============================================================================
 
-local getClient = nExBot.Shared.getClient
+local _getClient  -- resolved once on first call
+
+local function getClient()
+  if _getClient then return _getClient() end
+  if nExBot and nExBot.Shared and nExBot.Shared.getClient then
+    _getClient = nExBot.Shared.getClient
+    return _getClient()
+  end
+  return nil
+end
 
 local function getGame()
   local Client = getClient()
@@ -184,6 +195,7 @@ local CACHE_CLEANUP_INTERVAL = 5000
 local lastCacheCleanup = 0
 
 -- Pure: Check if position is floor-change tile (cached with per-entry TTL)
+-- Uses integer key: x*100000+y*100+z — zero allocation vs string concat
 function PathUtils.isFloorChangeTile(pos)
   if not pos then return false end
   
@@ -198,7 +210,7 @@ function PathUtils.isFloorChangeTile(pos)
     lastCacheCleanup = now
   end
   
-  local key = pos.x .. "," .. pos.y .. "," .. pos.z
+  local key = pos.x * 100000 + pos.y * 100 + pos.z
   local cached = floorChangeCache[key]
   if cached and now - cached.time < CACHE_TTL then
     return cached.value
@@ -307,8 +319,12 @@ end
 -- ============================================================================
 
 -- 1-entry LRU cache for findPath (avoids redundant A* on rapid retries)
-local _fpCache = { key = "", time = 0, result = nil }
+-- 4-entry LRU cache for findPath: walking loop typically alternates 2-3 queries
+-- (recovery probe + goto path + FC safety check). 4 entries avoid redundant A*.
+local FINDPATH_LRU_SIZE = 4
 local FINDPATH_CACHE_TTL = 200
+local _fpLRU = {}       -- array of {key, time, result}, newest at [1]
+local _fpLRUCount = 0
 
 -- Negative result cache: remembers unreachable destinations to avoid repeated A* waste.
 -- Key: "startX,startY,startZ>goalX,goalY,goalZ:flags", value: expiry timestamp.
@@ -325,11 +341,19 @@ function PathUtils.findPath(startPos, goalPos, maxDist, params)
   maxDist = maxDist or 50
   local flags = PathUtils.paramsToFlags(params)
   
-  -- 1-entry LRU: same start+goal+flags within TTL → reuse
+  -- 4-entry LRU: same start+goal+flags within TTL → reuse
   local key = startPos.x .. "," .. startPos.y .. "," .. startPos.z .. ">"
             .. goalPos.x .. "," .. goalPos.y .. "," .. goalPos.z .. ":" .. flags
-  if _fpCache.key == key and now - _fpCache.time < FINDPATH_CACHE_TTL then
-    return _fpCache.result
+  for i = 1, _fpLRUCount do
+    local entry = _fpLRU[i]
+    if entry.key == key and now - entry.time < FINDPATH_CACHE_TTL then
+      -- Move to front (promote on hit)
+      if i > 1 then
+        for j = i, 2, -1 do _fpLRU[j] = _fpLRU[j - 1] end
+        _fpLRU[1] = entry
+      end
+      return entry.result
+    end
   end
 
   -- Negative cache: skip A* if we recently proved this dest unreachable
@@ -374,9 +398,15 @@ function PathUtils.findPath(startPos, goalPos, maxDist, params)
     _fpNegCache[key] = now + FINDPATH_NEG_TTL
   end
   
-  _fpCache.key = key
-  _fpCache.time = now
-  _fpCache.result = ret
+  -- Insert at front of LRU
+  local newEntry = {key = key, time = now, result = ret}
+  if _fpLRUCount < FINDPATH_LRU_SIZE then
+    _fpLRUCount = _fpLRUCount + 1
+    for j = _fpLRUCount, 2, -1 do _fpLRU[j] = _fpLRU[j - 1] end
+  else
+    for j = FINDPATH_LRU_SIZE, 2, -1 do _fpLRU[j] = _fpLRU[j - 1] end
+  end
+  _fpLRU[1] = newEntry
   return ret
 end
 
@@ -502,24 +532,9 @@ end
 -- DIRECTION UTILITIES
 -- ============================================================================
 
--- Pre-built lookup tables for direction checks (PERFORMANCE: avoids per-call allocation)
-local ADJACENT_DIRS = {
-  [North] = {[NorthEast] = true, [NorthWest] = true},
-  [East] = {[NorthEast] = true, [SouthEast] = true},
-  [South] = {[SouthEast] = true, [SouthWest] = true},
-  [West] = {[NorthWest] = true, [SouthWest] = true},
-  [NorthEast] = {[North] = true, [East] = true},
-  [SouthEast] = {[South] = true, [East] = true},
-  [SouthWest] = {[South] = true, [West] = true},
-  [NorthWest] = {[North] = true, [West] = true},
-}
-
-local OPPOSITE_DIRS = {
-  [North] = South, [South] = North,
-  [East] = West, [West] = East,
-  [NorthEast] = SouthWest, [SouthWest] = NorthEast,
-  [NorthWest] = SouthEast, [SouthEast] = NorthWest,
-}
+-- Pre-built lookup tables for direction checks (DRY: SSoT is constants/directions.lua)
+local ADJACENT_DIRS = Directions.ADJACENT
+local OPPOSITE_DIRS = Directions.OPPOSITE
 
 -- Check if two directions are similar (same or adjacent)
 function PathUtils.areSimilarDirections(dir1, dir2)
@@ -669,7 +684,5 @@ end
 -- MODULE EXPORT
 -- ============================================================================
 
--- Make PathUtils globally available
-PathUtils = PathUtils
-
+-- PathUtils is already global (declared at top of file)
 return PathUtils

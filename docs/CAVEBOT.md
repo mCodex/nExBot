@@ -172,9 +172,9 @@ Withdraw items from the depot, depot box, or inbox.
 
 ---
 
-## Walking Engine (v3.4)
+## Walking Engine (v4.0)
 
-The walking engine is the heart of CaveBot. It handles pathfinding, field avoidance, and floor-change safety.
+The walking engine is the heart of CaveBot. It handles pathfinding, field avoidance, floor-change safety, and humanized movement.
 
 ### Floor-Change Prevention
 
@@ -200,23 +200,35 @@ Enable **"Ignore fields"** in the CaveBot config panel to allow field crossing.
 
 ### Chunked Walking
 
-Paths are split into segments of **max 15 tiles** per autoWalk call. This keeps pathfinding fresh and prevents stale routes in dynamic environments.
+Paths are split into segments of **max 25 tiles** per autoWalk call. autoWalk kicks in for paths with **5+ tiles** where direction changes make up ≤55% of total steps. This covers most cave corridors while keeping pathfinding fresh.
+
+### Step Pipelining
+
+When using keyboard stepping (short paths or high-zigzag routes), the engine dispatches **2 steps ahead** to create smooth animation without pauses between steps. Pipelining is disabled when:
+- The next step's direction changes by more than 90°
+- A floor-change tile is within 2 steps
+- `canWalkDirection` fails for the lookahead step
+
+### PathCursor Preservation
+
+The PathStrategy cursor (cached A\* path) is preserved across ticks when the bot retries the same waypoint. Previously, `safeResetWalking()` destroyed the cursor every tick, forcing a redundant A\* recomputation. Now the cursor only resets when the destination waypoint changes.
 
 ### Stuck Detection
 
-If a goto action accumulates 3 consecutive failures (`recordFailure()`), the WaypointEngine transitions to RECOVERING and runs a distance-first scan for the nearest reachable waypoint. The goto callback uses progressive escalation (ignoreCreatures after 1 retry, ignoreFields after 2, blocker attack after 2) before reaching maxRetries and returning `false`.
+If a goto action accumulates 3 consecutive failures (`recordFailure()`), the WaypointEngine transitions to RECOVERING and runs a path-validated scan for the nearest reachable waypoint. The goto callback uses progressive escalation (ignoreCreatures after 1 retry, ignoreFields after 2, blocker attack after 2) before reaching maxRetries and returning `false`.
 
 ### Pathfinding Strategy
 
 ```text
-1. Try findPath with strict settings (visible tiles only)
-2. If that fails → findPath ignoring creatures
-3. If distance ≤ 30 → findPath allowing unseen tiles
-4. If distance ≤ 30 → findPath ignoring fields
-5. If distance > 30, only attempts 1–2 run (early exit saves CPU)
+1. Try findPath with strict settings (no ignoreNonPathable — respects PZ, invisible walls)
+2. If that fails → findPath with ignoreNonPathable (relaxes PZ borders)
+3. If that fails → findPath ignoring creatures
+4. If distance ≤ 30 → findPath allowing unseen tiles
+5. If distance ≤ 30 → findPath ignoring fields
+6. If distance > 30, only attempts 1–3 run (early exit saves CPU)
 ```
 
-> For destinations more than 30 tiles away, relaxed pathfinding attempts 3 and 4 are skipped because they rarely help at long-range and waste CPU with unnecessary A\* searches.
+> For destinations more than 30 tiles away, relaxed pathfinding attempts 4 and 5 are skipped because they rarely help at long-range and waste CPU with unnecessary A\* searches.
 
 ---
 
@@ -244,24 +256,33 @@ NORMAL → RECOVERING → (found reachable WP) → NORMAL
                    → (5 min timeout)        → clear blacklists, retry
 ```
 
-### Recovery: Distance-First Scan (No Path Validation)
+### Recovery: Path-Validated Scan
 
-Recovery uses a pure **distance sort** — no A\* path validation:
+Recovery collects all waypoints with known coordinates (not just `goto:` — also `stand`, `lure`, `use`, etc.), sorts by Chebyshev distance, and validates reachability:
 
-| # | Pass | Description |
-|---|------|-------------|
-| 1 | Same-floor scan | Sort all goto WPs by Chebyshev distance, return nearest non-blacklisted |
-| 2 | Cross-floor scan | Check adjacent floors (±1 z), return closest by Manhattan distance |
+| # | Phase | Description |
+|---|-------|-------------|
+| 1 | Collect | Gather all WPs within 1.5x `gotoMaxDistance`, sorted by distance |
+| 2 | Validate | Run `PathStrategy.findPath()` (strict, no ignoreNonPathable) on the top 5 candidates. Discard those with no valid path. |
+| 3 | Proximity guarantee | Always validate the 3 closest WPs by distance, regardless of `maxDist` cutoff |
 
-Path validation was removed because it's unreliable — the A\* pathfinder doesn't match real walkability (minimap data shows walkable corridors that are physically unreachable). Instead, the **goto callback + walkTo is the real validator**: when a WP fails, it gets blacklisted and the next nearest is tried.
+Goto-type waypoints are preferred during recovery since they have verified walkable positions. The expanded WP cache means any action with coordinate data can serve as a navigation anchor.
 
-### Permanent Blacklists
+### Adaptive Blacklists
 
-When recovery blacklists a waypoint, it uses a **permanent** blacklist (`math.huge`) that only clears when `recordSuccess()` fires (i.e., the bot successfully reaches a waypoint). This prevents the A↔B cycling bug where timed blacklists expired before the next WP finished failing.
+When recovery blacklists a waypoint, it uses **exponential decay** instead of permanent blacklists:
 
-- **Recovery blacklists**: permanent (cleared on success)
-- **InstantFail blacklists** (wrong floor, too far): timed 120s TTL
+```
+TTL = base_ttl * 2^(fail_count - 1)     capped at 120s
+```
+
+- **Base TTL**: 15 seconds
+- **Max TTL**: 120 seconds (2 minutes)
+- Each failure for the same WP doubles the blacklist duration
+- `recordSuccess()` clears all blacklists and failure counts
 - **Safety valve**: after 5 minutes of continuous recovery with no progress, all blacklists are cleared automatically
+
+This prevents the cascading exclusion bug where permanent blacklists eliminated nearby valid WPs that just had a temporary pathfinding failure.
 
 Recovery focuses the target waypoint directly and resets retries for a clean start.
 

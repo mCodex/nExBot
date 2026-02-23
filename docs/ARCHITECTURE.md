@@ -136,7 +136,7 @@ The `_Loader.lua` organizes initialization into phases:
 |-------|---------|
 | 1 | ACL + Client abstraction |
 | 2 | Constants (floor items, food, directions) |
-| 3 | Utils (shared, ring buffer, path utils) |
+| 3 | Utils (shared, ring buffer, path utils, path strategy) |
 | 4 | Core libraries (lib, items, configs, database) |
 | 5 | Architecture (EventBus, UnifiedStorage, UnifiedTick) |
 | 6 | Feature modules (HealBot, AttackBot, CaveBot, TargetBot, etc.) |
@@ -157,9 +157,12 @@ Each module is error-isolated — a failure in one module doesn't prevent others
 | **State Machine** | Deterministic attacks | AttackStateMachine |
 | **State Machine** | Stuck detection + recovery | CaveBot WaypointEngine (NORMAL↔RECOVERING) |
 | **Intent Voting** | Conflict-free movement | MovementCoordinator |
-| **LRU Cache** | Bounded memory | Creature configs, pathfinding |
+| **LRU Cache** | Bounded memory | Creature configs, pathfinding (4-entry) |
 | **Negative Cache** | Skip proven-unreachable paths | PathUtils findPath (500ms TTL) |
-| **Object Pool** | Reduce GC pressure | Path entries, position tables |
+| **PathCursor Preservation** | Avoid redundant A* per tick | Walking engine (cursor survives across ticks for same WP) |
+| **Step Pipelining** | Smooth keyboard walking | Walking engine (2-step lookahead dispatch) |
+| **One-time Backend Detection** | Zero per-call overhead | PathStrategy (resolves API once at init) |
+| **Adaptive Blacklist Decay** | Prevent cascading exclusion | CaveBot recovery (exponential TTL: 15s base, 120s cap) |
 | **EWMA** | Smooth statistics | Monster tracking, cooldowns |
 | **BFS Traversal** | Container opening/looting | ContainerOpener, Looting |
 | **Engagement Lock** | Anti-zigzag targeting | ScenarioManager |
