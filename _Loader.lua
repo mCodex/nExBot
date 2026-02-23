@@ -1,39 +1,34 @@
 --[[
   nExBot - Tibia Bot for OTClientV8 and OpenTibiaBR
-  Main Loader Script v2.0 (Restructured Architecture)
+  Main Loader Script
   
   This file loads all UI styles and scripts in the correct order.
   Core libraries must be loaded before dependent modules.
-  
-  Architecture v2.0:
-  - features/ - Feature modules (healing, targeting, cavebot, etc.)
-  - lib/      - Shared utility libraries (object_pool, player_utils, etc.)
-  - tools/    - Tool macros (fishing, auto_haste, etc.)
-  - core/     - Legacy core modules (backward compatible)
-  - private/  - User private scripts
-  
-  Optimization Best Practices Applied:
-  1. Lazy loading for non-critical modules
-  2. Deferred UI creation
-  3. Batch style loading
-  4. Error isolation per module
-  5. Startup timing metrics
-  6. Storage sanitization (sparse array prevention)
-  7. Client abstraction via ACL pattern
 ]]--
 
 local startTime = os.clock()
 local loadTimes = {}
 
-local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
-local CORE_PATH = "/bot/" .. configName .. "/core"
-local LIB_PATH = "/bot/" .. configName .. "/lib"
-local TOOLS_PATH = "/bot/" .. configName .. "/tools"
-local FEATURES_PATH = "/bot/" .. configName .. "/features"
-
 -- Initialize global nExBot namespace if not exists
 nExBot = nExBot or {}
 nExBot.loadTimes = loadTimes
+
+-- ============================================================================
+-- CENTRALIZED PATH RESOLUTION (single source of truth)
+-- ============================================================================
+
+local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
+
+nExBot.paths = {
+  config   = configName,
+  base     = "/bot/" .. configName,
+  core     = "/bot/" .. configName .. "/core",
+  cache    = "/bot/" .. configName .. "/_update_cache",
+  cacheRel = "/_update_cache",
+  private  = "/bot/" .. configName .. "/private",
+}
+
+local P = nExBot.paths  -- shorthand for this file
 
 -- Read version from project root file (single source of truth)
 -- Prefer storage version (survives mod-overlay VFS shadowing)
@@ -43,8 +38,7 @@ do
     versionStr = storage.updaterInstalledVersion
   end
   if not versionStr then
-    local versionPath = "/bot/" .. configName .. "/version"
-    local ok, content = pcall(g_resources.readFileContents, versionPath)
+    local ok, content = pcall(g_resources.readFileContents, P.base .. "/version")
     versionStr = (ok and content) and content:match("^%s*(.-)%s*$")
   end
   nExBot.version = versionStr or "0.0.0"
@@ -58,19 +52,23 @@ end
 -- to _update_cache/ which does NOT exist in the mod, so it's never shadowed.
 -- We detect this situation and transparently redirect dofile/importStyle.
 
-local FULL_CACHE_DIR = "/bot/" .. configName .. "/_update_cache"
-local CACHE_DIR = "/_update_cache"
 local _hasUpdateCache = false
 
 if storage and storage.updaterInstalledVersion then
-  local versionPath = "/bot/" .. configName .. "/version"
-  local okV, fileContent = pcall(g_resources.readFileContents, versionPath)
+  local okV, fileContent = pcall(g_resources.readFileContents, P.base .. "/version")
   local fileVersion = (okV and fileContent) and fileContent:match("^%s*(.-)%s*$") or nil
   if fileVersion ~= storage.updaterInstalledVersion then
-    local okD, dirExists = pcall(g_resources.directoryExists, FULL_CACHE_DIR)
+    local okD, dirExists = pcall(g_resources.directoryExists, P.cache)
     _hasUpdateCache = (okD and dirExists) or false
     if _hasUpdateCache then
-      info("[nExBot] Mod overlay detected - loading from update cache.")
+      -- Count cached files for diagnostics
+      local okL, cacheFiles = pcall(g_resources.listDirectoryFiles, P.cache, true, false)
+      local cacheCount = (okL and cacheFiles) and #cacheFiles or 0
+      info("[nExBot] Mod overlay detected - loading from update cache (" .. cacheCount .. " files).")
+    else
+      warn("[nExBot] Version mismatch (file='" .. tostring(fileVersion)
+        .. "' storage='" .. tostring(storage.updaterInstalledVersion)
+        .. "') but update cache not found at: " .. P.cache)
     end
   end
 end
@@ -79,10 +77,12 @@ if _hasUpdateCache then
   local _origDofile = dofile
   dofile = function(path)
     local relPath = path:sub(1, 1) == "/" and path:sub(2) or path
-    local fullCachePath = FULL_CACHE_DIR .. "/" .. relPath
+    local fullCachePath = P.cache .. "/" .. relPath
     local okE, exists = pcall(g_resources.fileExists, fullCachePath)
     if okE and exists then
-      return _origDofile(CACHE_DIR .. "/" .. relPath)
+      local okLoad, result = pcall(_origDofile, P.cacheRel .. "/" .. relPath)
+      if okLoad then return result end
+      warn("[nExBot] Cache load failed for '" .. relPath .. "', falling back to original.")
     end
     return _origDofile(path)
   end
@@ -91,28 +91,32 @@ if _hasUpdateCache then
     local _origImportStyle = importStyle
     importStyle = function(path)
       local relPath = path:sub(1, 1) == "/" and path:sub(2) or path
-      local fullCachePath = FULL_CACHE_DIR .. "/" .. relPath
+      local fullCachePath = P.cache .. "/" .. relPath
       local okE, exists = pcall(g_resources.fileExists, fullCachePath)
       if okE and exists then
-        return _origImportStyle(CACHE_DIR .. "/" .. relPath)
+        local okLoad, result = pcall(_origImportStyle, P.cacheRel .. "/" .. relPath)
+        if okLoad then return result end
+        warn("[nExBot] Cache style load failed for '" .. relPath .. "', falling back to original.")
       end
       return _origImportStyle(path)
     end
   end
 end
 
--- Helper: resolve a full VFS style path through the cache (for g_ui.importStyle)
+--- Resolve a full VFS style path through the cache (for g_ui.importStyle).
+--- Exposed globally so downstream modules can use it.
 local function resolveStylePath(fullVfsPath)
   if not _hasUpdateCache then return fullVfsPath end
-  local botPrefix = "/bot/" .. configName .. "/"
+  local botPrefix = P.base .. "/"
   if fullVfsPath:sub(1, #botPrefix) == botPrefix then
     local relPath = fullVfsPath:sub(#botPrefix + 1)
-    local cachePath = FULL_CACHE_DIR .. "/" .. relPath
+    local cachePath = P.cache .. "/" .. relPath
     local okE, exists = pcall(g_resources.fileExists, cachePath)
     if okE and exists then return cachePath end
   end
   return fullVfsPath
 end
+nExBot.resolveStylePath = resolveStylePath
 
 -- Suppress noisy debug prints by default
 nExBot.showDebug = nExBot.showDebug or false
@@ -223,7 +227,7 @@ local function loadStyles()
   local styleStart = os.clock()
   local styleFiles = {}
   
-  local configFiles = g_resources.listDirectoryFiles(CORE_PATH, true, false)
+  local configFiles = g_resources.listDirectoryFiles(P.core, true, false)
   for i = 1, #configFiles do
     local file = configFiles[i]
     local ext = file:split(".")
@@ -232,7 +236,7 @@ local function loadStyles()
       -- Ensure full path: if file doesn't start with '/' it's just a filename
       local fullPath = file
       if file:sub(1,1) ~= "/" then
-        fullPath = CORE_PATH .. "/" .. file
+        fullPath = P.core .. "/" .. file
       end
       styleFiles[#styleFiles + 1] = fullPath
     end
@@ -606,7 +610,6 @@ end
 -- PRIVATE SCRIPTS AUTO-LOADER
 -- ============================================================================
 
-local PRIVATE_PATH = "/bot/" .. configName .. "/private"
 local PRIVATE_DOFILE_PATH = "/private"
 
 local function collectLuaFiles(folderPath, dofileBase, collected)
@@ -645,7 +648,7 @@ end
 
 local function loadPrivateScripts()
     local status, items = pcall(function()
-        return g_resources.listDirectoryFiles(PRIVATE_PATH, false, false)
+        return g_resources.listDirectoryFiles(P.private, false, false)
     end)
     
     if not status or not items or #items == 0 then
@@ -653,7 +656,7 @@ local function loadPrivateScripts()
     end
     
     local privateStart = os.clock()
-    local luaFiles = collectLuaFiles(PRIVATE_PATH, PRIVATE_DOFILE_PATH)
+    local luaFiles = collectLuaFiles(P.private, PRIVATE_DOFILE_PATH)
     
     if #luaFiles == 0 then
         return

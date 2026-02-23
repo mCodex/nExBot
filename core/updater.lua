@@ -1,12 +1,11 @@
 --[[
-  nExBot Auto-Updater v2.0
+  nExBot Auto-Updater
   
   Checks GitHub for new versions and updates automatically.
-  Follows SRP: each function does one thing.
   
   Flow:
-    1. Probe for available HTTP API (HTTP / g_http / Client.get)
-    2. Read local version from /version file
+    1. Probe for available HTTP API (HTTP / g_http)
+    2. Read local version from /version file (or storage)
     3. Fetch remote version from GitHub raw content
     4. Compare using semver (via nExBot.Shared)
     5. If remote > local: download & apply update with retry + progress
@@ -18,24 +17,8 @@
 ]]
 
 local Updater = {}
-local Shared = nExBot and nExBot.Shared  -- semver, deepClone, etc.
-
--- Inline fallbacks if Shared wasn't loaded (defensive)
-if not Shared then
-  Shared = {}
-  function Shared.parseSemver(s)
-    if type(s) ~= "string" then return nil end
-    local ma, mi, pa = s:match("^%s*(%d+)%.(%d+)%.(%d+)%s*$")
-    return ma and { major = tonumber(ma), minor = tonumber(mi), patch = tonumber(pa) } or nil
-  end
-  function Shared.compareSemver(a, b)
-    if not a or not b then return 0 end
-    for _, k in ipairs({"major","minor","patch"}) do
-      if a[k] ~= b[k] then return a[k] < b[k] and -1 or 1 end
-    end
-    return 0
-  end
-end
+local Shared = nExBot.Shared
+local P = nExBot.paths
 
 -- ============================================================================
 -- CONSTANTS
@@ -70,11 +53,8 @@ local INCLUDE_EXT = { lua = true, otui = true, ui = true, cfg = true }
 -- FILE SYSTEM (SRP: only file I/O)
 -- ============================================================================
 
-local configName   = modules.game_bot.contentsPanel.config:getCurrentOption().text
-local BOT_BASE_PATH = "/bot/" .. configName
-
 local function readLocalVersion()
-  local ok, content = pcall(g_resources.readFileContents, BOT_BASE_PATH .. "/" .. VERSION_FILE)
+  local ok, content = pcall(g_resources.readFileContents, P.base .. "/" .. VERSION_FILE)
   return ok and content and content:match("^%s*(.-)%s*$") or nil
 end
 
@@ -106,22 +86,13 @@ local function writeLocalVersion(versionStr)
   -- Always persist in storage first (this is authoritative)
   storage.updaterInstalledVersion = versionStr
 
-  -- Also try writing the version file (may fail silently for mod installs)
-  local ok = pcall(g_resources.writeFileContents, BOT_BASE_PATH .. "/" .. VERSION_FILE, versionStr)
-  if ok then
-    -- Verify write-back: detect mod-overlay shadow
-    local readBack = readLocalVersion()
-    if readBack ~= versionStr then
-      warn("[Updater] Version file shadowed by mod overlay. "
-        .. "Move nExBot from mods/bot/ to bot/ for auto-updates to take full effect.")
-    end
-  end
-  -- Storage write is authoritative; file-write failure is non-fatal
+  -- Also try writing the version file (may be shadowed for mod installs, non-fatal)
+  pcall(g_resources.writeFileContents, P.base .. "/" .. VERSION_FILE, versionStr)
   return true
 end
 
 local function writeFile(relativePath, content)
-  local fullPath = BOT_BASE_PATH .. "/" .. relativePath
+  local fullPath = P.base .. "/" .. relativePath
   local ok, err = pcall(g_resources.writeFileContents, fullPath, content)
   if not ok then warn("[Updater] Write failed: " .. relativePath .. " - " .. tostring(err)) end
   return ok
@@ -137,7 +108,13 @@ local function ensureDirRecursive(basePath, relativePath)
     built = built .. "/" .. seg
     local ok, err = pcall(g_resources.makeDir, built)
     if not ok then
-      warn("[Updater] makeDir failed: " .. built .. " - " .. tostring(err))
+      warn("[Updater] makeDir threw: " .. built .. " - " .. tostring(err))
+      return false
+    end
+    -- Verify directory actually exists (makeDir may return false without throwing)
+    local okV, exists = pcall(g_resources.directoryExists, built)
+    if not (okV and exists) then
+      warn("[Updater] makeDir did not create: " .. built)
       return false
     end
   end
@@ -145,14 +122,13 @@ local function ensureDirRecursive(basePath, relativePath)
 end
 
 local function ensureDir(relativePath)
-  return ensureDirRecursive(BOT_BASE_PATH, relativePath)
+  return ensureDirRecursive(P.base, relativePath)
 end
 
 -- Update cache: written to _update_cache/ which is never shadowed by mod overlays
-local CACHE_SUBDIR = "_update_cache"
 
 local function ensureCacheDir(relativePath)
-  return ensureDirRecursive(BOT_BASE_PATH .. "/" .. CACHE_SUBDIR, relativePath)
+  return ensureDirRecursive(P.cache, relativePath)
 end
 
 local function writeCacheFile(relativePath, content)
@@ -164,7 +140,7 @@ local function writeCacheFile(relativePath, content)
       return false
     end
   end
-  local fullPath = BOT_BASE_PATH .. "/" .. CACHE_SUBDIR .. "/" .. relativePath
+  local fullPath = P.cache .. "/" .. relativePath
   local ok, err = pcall(g_resources.writeFileContents, fullPath, content)
   if not ok then warn("[Updater] Cache write failed: " .. relativePath .. " - " .. tostring(err)) end
   return ok
@@ -233,9 +209,7 @@ end
 
 --- Open URL in the user's browser (best-effort).
 local function openInBrowser(url)
-  if type(Client) == "table" and Client.openUrl then
-    Client.openUrl(url)
-  elseif g_platform and g_platform.openUrl then
+  if g_platform and g_platform.openUrl then
     g_platform.openUrl(url)
   end
 end
@@ -385,9 +359,24 @@ local function applyUpdate(callback, onProgress)
 
     info("[Updater] Downloading " .. #updateFiles .. " files ...")
 
-    -- Ensure cache root directory exists
-    pcall(g_resources.makeDir, BOT_BASE_PATH .. "/" .. CACHE_SUBDIR)
+    -- Clear stale cache from previous partial updates
+    local okClear, existingFiles = pcall(g_resources.listDirectoryFiles, P.cache, true, false)
+    if okClear and existingFiles then
+      for _, f in ipairs(existingFiles) do
+        pcall(g_resources.deleteFile, P.cache .. "/" .. f)
+      end
+    end
 
+    -- Ensure cache root directory exists (with verification)
+    pcall(g_resources.makeDir, P.cache)
+    local okCacheRoot, cacheRootExists = pcall(g_resources.directoryExists, P.cache)
+    local cacheEnabled = (okCacheRoot and cacheRootExists) or false
+    if not cacheEnabled then
+      warn("[Updater] Cache dir creation failed at: " .. P.cache
+        .. " — update will still apply to normal path but mod-overlay bypass won't work.")
+    end
+
+    local cacheWriteCount = 0
     local idx = 0
     local function downloadNext()
       idx = idx + 1
@@ -405,7 +394,8 @@ local function applyUpdate(callback, onProgress)
           callback(true, msg)
         else
           _state.status = "done"
-          info("[Updater] v" .. tostring(_state.remoteVer) .. " installed. Restart bot to apply.")
+          info("[Updater] v" .. tostring(_state.remoteVer) .. " installed ("
+            .. #updateFiles .. " files, " .. cacheWriteCount .. " cached). Restart bot to apply.")
           callback(true, nil)
         end
         return
@@ -419,7 +409,7 @@ local function applyUpdate(callback, onProgress)
       local dir = filePath:match("(.+)/[^/]+$")
       if dir then
         ensureDir(dir)
-        ensureCacheDir(dir)
+        if cacheEnabled then ensureCacheDir(dir) end
       end
 
       downloadFile(filePath, function(content, dlErr)
@@ -428,7 +418,9 @@ local function applyUpdate(callback, onProgress)
           warn("[Updater] Failed: " .. filePath .. " - " .. tostring(dlErr))
         else
           writeFile(filePath, content)
-          writeCacheFile(filePath, content)
+          if cacheEnabled and writeCacheFile(filePath, content) then
+            cacheWriteCount = cacheWriteCount + 1
+          end
         end
         schedule(DOWNLOAD_DELAY_MS, downloadNext)
       end)
@@ -443,7 +435,6 @@ end
 -- ============================================================================
 
 local _ui
-local _updateOnClick  -- forward-declared to allow re-binding
 
 local function resetCheckButton(text)
   if not _ui then return end
@@ -572,27 +563,6 @@ end
 
 function Updater.checkForUpdate(cb) return checkForUpdate(cb) end
 function Updater.applyUpdate(cb, onProgress) return applyUpdate(cb, onProgress) end
-
-function Updater.getState()
-  return {
-    status       = _state.status,
-    progress     = _state.progress,
-    localVersion = _state.localVer,
-    remoteVersion= _state.remoteVer,
-    totalFiles   = _state.totalFiles,
-    errorCount   = #_state.errors,
-    httpBackend  = _httpBackend,
-  }
-end
-
-function Updater.getLocalVersion() return effectiveLocalVersion() end
-
---- Diagnostic: print detected HTTP backend to chat
-function Updater.probeHttp()
-  local backend = detectHttpBackend()
-  info("[Updater] HTTP backend: " .. tostring(backend or "NONE"))
-  return backend
-end
 
 -- ============================================================================
 -- INITIALIZE

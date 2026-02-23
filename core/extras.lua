@@ -11,8 +11,8 @@ local settings = storage[panelName]
 -- Ensure style is loaded (fallback for batch loader)
 if g_ui and g_ui.importStyle then
   pcall(function()
-    local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
-    g_ui.importStyle("/bot/" .. configName .. "/core/extras.otui")
+    local stylePath = nExBot.paths.base .. "/core/extras.otui"
+    g_ui.importStyle(nExBot.resolveStylePath(stylePath))
   end)
 end
 extrasWindow = UI.createWindow('ExtrasWindow')

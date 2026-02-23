@@ -13,8 +13,8 @@ local config = storage[panelName]
 -- Ensure style is loaded (batch loader uses full path, manual fallback for safety)
 if g_ui and g_ui.importStyle then
   pcall(function()
-    local configName = modules.game_bot.contentsPanel.config:getCurrentOption().text
-    g_ui.importStyle("/bot/" .. configName .. "/core/depositer_config.otui")
+    local stylePath = nExBot.paths.base .. "/core/depositer_config.otui"
+    g_ui.importStyle(nExBot.resolveStylePath(stylePath))
   end)
 end
 
