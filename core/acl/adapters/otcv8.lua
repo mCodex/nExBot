@@ -131,6 +131,7 @@ function A.bot.getConfigName()
 end
 
 function A.bot.getConfigPath()
+  if nExBot and nExBot.paths then return nExBot.paths.base end
   local name = A.bot.getConfigName()
   return name and ("/bot/" .. name) or nil
 end
