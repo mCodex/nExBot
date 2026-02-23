@@ -1047,7 +1047,8 @@ function getContainerByItem(id, notFull)
     return d
 end
 
--- [[ ready to use getSpectators patterns ]] --\nsmallUeArea = [[
+-- [[ ready to use getSpectators patterns ]] --
+smallUeArea = [[
     0011100
     0111110
     1111111
