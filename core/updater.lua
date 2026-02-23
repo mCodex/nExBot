@@ -91,11 +91,10 @@ local function effectiveLocalVersion()
 end
 
 local function writeLocalVersion(versionStr)
-  -- Always persist in storage first (this is authoritative)
+  -- Persist in storage only (this is authoritative).
+  -- NOT written to the version file: that file lives in user-data and would make
+  -- readFileContents return the NEW version, defeating cache detection in _Loader.lua.
   storage.updaterInstalledVersion = versionStr
-
-  -- Also try writing the version file (may be shadowed for mod installs, non-fatal)
-  pcall(g_resources.writeFileContents, P.base .. "/" .. VERSION_FILE, versionStr)
   return true
 end
 

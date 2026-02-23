@@ -60,20 +60,17 @@ end
 local _hasUpdateCache = false
 
 if storage and storage.updaterInstalledVersion then
-  local okV, fileContent = pcall(g_resources.readFileContents, P.base .. "/version")
-  local fileVersion = (okV and fileContent) and fileContent:match("^%s*(.-)%s*$") or nil
-  if fileVersion ~= storage.updaterInstalledVersion then
-    local okD, dirExists = pcall(g_resources.directoryExists, P.cache)
-    _hasUpdateCache = (okD and dirExists) or false
-    if _hasUpdateCache then
-      -- Count cached files for diagnostics
-      local okL, cacheFiles = pcall(g_resources.listDirectoryFiles, P.cache, true, false)
-      local cacheCount = (okL and cacheFiles) and #cacheFiles or 0
-      info("[nExBot] Mod overlay detected - loading from update cache (" .. cacheCount .. " files).")
-    else
-      warn("[nExBot] Version mismatch (file='" .. tostring(fileVersion)
-        .. "' storage='" .. tostring(storage.updaterInstalledVersion)
-        .. "') but update cache not found at: " .. P.cache)
+  -- Check if cache directory exists with content (reliable regardless of VFS layer priority).
+  -- The version-file comparison is unreliable: writeLocalVersion writes to user-data,
+  -- and readFileContents may read from user-data too (not the mod), making them match.
+  local okD, dirExists = pcall(g_resources.directoryExists, P.cache)
+  if okD and dirExists then
+    local okL, cacheFiles = pcall(g_resources.listDirectoryFiles, P.cache, true, false)
+    local cacheCount = (okL and cacheFiles) and #cacheFiles or 0
+    if cacheCount > 0 then
+      _hasUpdateCache = true
+      info("[nExBot] Loading from update cache (" .. cacheCount .. " files, v"
+        .. tostring(storage.updaterInstalledVersion) .. ").")
     end
   end
 end
