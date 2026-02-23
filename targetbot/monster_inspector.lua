@@ -18,11 +18,12 @@ local function tryImportStyle()
   -- Common relative paths
   candidates[1] = "/targetbot/monster_inspector.otui"
   candidates[2] = "targetbot/monster_inspector.otui"
-  -- Try fully-qualified path using shared BotConfigName if available
-  if BotConfigName then
+  -- Fully-qualified path using centralized paths (cache-aware)
+  if nExBot and nExBot.paths then
+    candidates[#candidates + 1] = nExBot.resolveStylePath(nExBot.paths.base .. "/targetbot/monster_inspector.otui")
+  elseif BotConfigName then
     candidates[#candidates + 1] = "/bot/" .. BotConfigName .. "/targetbot/monster_inspector.otui"
   else
-    -- fallback to resolving via modules table if present
     local ok, cfg = pcall(function() return modules.game_bot.contentsPanel.config:getCurrentOption().text end)
     if ok and cfg then
       candidates[#candidates + 1] = "/bot/" .. cfg .. "/targetbot/monster_inspector.otui"
