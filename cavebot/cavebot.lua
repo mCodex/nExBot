@@ -644,6 +644,21 @@ for i = 1, WaypointEngine.PROGRESS_CAPACITY do
   WaypointEngine.progressBuffer[i] = {time = 0, x = 0, y = 0, z = 0, waypointId = 0}
 end
 
+-- Compute adaptive blacklist TTL for a waypoint widget.
+-- Purges stale counts every BLACKLIST_ADAPTIVE_WINDOW, then doubles on each hit.
+local function computeAdaptiveTTL(child)
+  if now - WaypointEngine.blacklistCountsResetTime > WaypointEngine.BLACKLIST_ADAPTIVE_WINDOW then
+    WaypointEngine.blacklistCounts = {}
+    WaypointEngine.blacklistCountsResetTime = now
+  end
+  local hits = (WaypointEngine.blacklistCounts[child] or 0) + 1
+  WaypointEngine.blacklistCounts[child] = hits
+  return math.min(
+    WaypointEngine.BLACKLIST_TTL * math.pow(2, hits - 1),
+    WaypointEngine.BLACKLIST_MAX_TTL
+  )
+end
+
 -- ============================================================================
 -- INLINE UTILITY FUNCTIONS (no function call overhead)
 -- ============================================================================
@@ -798,19 +813,7 @@ local function transitionTo(newState)
     -- gets blacklisted even during strategy escalation.
     local current = ui and ui.list and ui.list:getFocusedChild()
     if current and current.action == "goto" then
-      -- Adaptive TTL: doubles on repeated blacklisting (60s → 120s → 240s, cap 300s)
-      -- Purge stale counts every 5 minutes
-      if now - WaypointEngine.blacklistCountsResetTime > WaypointEngine.BLACKLIST_ADAPTIVE_WINDOW then
-        WaypointEngine.blacklistCounts = {}
-        WaypointEngine.blacklistCountsResetTime = now
-      end
-      local hits = (WaypointEngine.blacklistCounts[current] or 0) + 1
-      WaypointEngine.blacklistCounts[current] = hits
-      local ttl = math.min(
-        WaypointEngine.BLACKLIST_TTL * math.pow(2, hits - 1),
-        WaypointEngine.BLACKLIST_MAX_TTL
-      )
-      WaypointEngine.stuckWaypoints[current] = now + ttl
+      WaypointEngine.stuckWaypoints[current] = now + computeAdaptiveTTL(current)
     end
     WaypointEngine.recoveryAttempt = WaypointEngine.recoveryAttempt + 1
   elseif newState == "NORMAL" then
@@ -1068,6 +1071,8 @@ resetWaypointEngine = function()
   WaypointEngine.lastMoveTime = now
   WaypointEngine.lastCompletedGotoIndex = 0
   WaypointEngine.recoveryJustFocused = false
+  WaypointEngine.stoppedCount = 0
+  WaypointEngine.backoffUntil = 0
   
   -- Clear recently-visited ring buffer
   for ri = 1, WaypointEngine.RECENT_CAPACITY do
@@ -1486,8 +1491,6 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
     CaveBot.clearIntendedFloorChange()  -- Fallback to just clearing intended
   end
   resetWaypointEngine()  -- Reset waypoint engine state on config change
-  WaypointEngine.stoppedCount = 0
-  WaypointEngine.backoffUntil = 0
   if invalidateWaypointCache then invalidateWaypointCache() end  -- Clear waypoint position cache
   if resetStartupCheck then resetStartupCheck() end  -- Reset startup check to find nearest waypoint
   prevActionResult = true
@@ -1611,17 +1614,7 @@ end
 CaveBot.blacklistWaypoint = function(child, ttl)
   if not child then return end
   if not ttl then
-    -- Adaptive TTL: use blacklistCounts for escalation
-    if now - WaypointEngine.blacklistCountsResetTime > WaypointEngine.BLACKLIST_ADAPTIVE_WINDOW then
-      WaypointEngine.blacklistCounts = {}
-      WaypointEngine.blacklistCountsResetTime = now
-    end
-    local hits = (WaypointEngine.blacklistCounts[child] or 0) + 1
-    WaypointEngine.blacklistCounts[child] = hits
-    ttl = math.min(
-      WaypointEngine.BLACKLIST_TTL * math.pow(2, hits - 1),
-      WaypointEngine.BLACKLIST_MAX_TTL
-    )
+    ttl = computeAdaptiveTTL(child)
   end
   WaypointEngine.stuckWaypoints[child] = now + ttl
 end
@@ -1790,8 +1783,8 @@ findReachableWaypoint = function(playerPos, options)
     local fwd = (actionCount > 0 and lastGoto > 0) and ((i - lastGoto) % actionCount) or 0
     local isForward = (fwd > 0 and fwd <= actionCount / 2) or lastGoto == 0
 
-    if direction == "forward"  and not isForward then goto continue end
-    if direction == "backward" and isForward     then goto continue end
+    if lastGoto > 0 and direction == "forward"  and not isForward then goto continue end
+    if lastGoto > 0 and direction == "backward" and isForward     then goto continue end
 
     -- Score: forward = pure distance; backward = distance + strong penalty.
     -- Penalty 4.0 ensures backward WP at 3 tiles (3 + 1×4 = 7) loses to
