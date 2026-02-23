@@ -419,7 +419,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- If the waypoint is on a different Z level, signal failure immediately
   -- so WaypointEngine's stuck detection sees it and triggers recovery.
   if destPos.z ~= playerPos.z then
-    return false  -- Feeds recordFailure() → RECOVERING
+    return false, true  -- instantFail: pumps extra recordFailure
   end
 
   -- Distance calculations
@@ -428,7 +428,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   
   -- Too far — signal failure for stuck detection
   if (distX + distY) > maxDist then
-    return false  -- Feeds recordFailure() → RECOVERING
+    return false, true  -- instantFail: pumps extra recordFailure
   end
 
   -- Check if destination is floor-change tile (stairs, ladder, rope spot, hole)

@@ -1,15 +1,8 @@
 local cavebotMacro = nil
 local config = nil
 
--- Safe local fallback for TrimArray (some sandboxes / test clients don't expose the global)
-local TrimArray = TrimArray or (RingBuffer and RingBuffer.trimArray) or function(arr, maxSize)
-  if type(arr) ~= "table" or not maxSize or maxSize < 1 then return 0 end
-  local excess = #arr - maxSize
-  if excess <= 0 then return 0 end
-  for i = 1, maxSize do arr[i] = arr[i + excess] end
-  for i = maxSize + 1, #arr do arr[i] = nil end
-  return excess
-end
+-- TrimArray is set as a global by utils/ring_buffer.lua (Phase 3)
+local TrimArray = TrimArray
 
 -- Safe wrapper for CaveBot.resetWalking to prevent nil errors
 local function safeResetWalking()
@@ -509,10 +502,15 @@ CaveBot.setWalkingToWaypoint = function(targetPos)
   -- Calculate expected duration based on distance
   local currentPos = pos()
   if currentPos and targetPos then
-    local dist = math.abs(currentPos.x - targetPos.x) + math.abs(currentPos.y - targetPos.y)
+    local manhattan = math.abs(currentPos.x - targetPos.x) + math.abs(currentPos.y - targetPos.y)
     local stepDur = (PathStrategy and PathStrategy.rawStepDuration(false)) or 200
-    walkState.walkExpectedDuration = dist * stepDur
-    walkState.walkStartDist = dist
+    walkState.walkExpectedDuration = manhattan * stepDur
+    -- Record Chebyshev: the elapsed-progress check uses Chebyshev distance,
+    -- so walkStartDist must match to avoid false "no decrease" on diagonal moves.
+    walkState.walkStartDist = math.max(
+      math.abs(currentPos.x - targetPos.x),
+      math.abs(currentPos.y - targetPos.y)
+    )
   else
     walkState.walkExpectedDuration = nil
     walkState.walkStartDist = nil
@@ -601,7 +599,13 @@ WaypointEngine = {
   
   -- Backoff for recovery attempts
   recoveryAttempt = 0,
-  MAX_RECOVERY_ATTEMPTS = 4,     -- 4 strategies: forward, global, backward, skip
+  MAX_RECOVERY_ATTEMPTS = 5,     -- 5 strategies: forward, global, backward, relaxed-global, skip
+
+  -- Progressive backoff for STOPPED state
+  stoppedCount = 0,
+  backoffUntil = 0,
+  lastDiagTime = 0,
+  DIAG_INTERVAL = 10000,          -- Max 1 diagnostic log per 10s
   
   -- Performance counters (optional, for debugging)
   tickCount = 0,
@@ -819,6 +823,7 @@ end
 local function recordSuccess()
   WaypointEngine.failureCount = 0
   WaypointEngine.walkToFailCount = 0
+  WaypointEngine.stoppedCount = 0
   -- Track last completed goto index for TSP forward-bias scoring
   local focused = ui and ui.list and ui.list:getFocusedChild()
   if focused and focused.action == "goto" then
@@ -924,8 +929,23 @@ local function executeRecovery()
     return false
   end
 
-  -- Strategy 4: Skip current waypoint (last resort)
+  -- Strategy 4: Relaxed global search (ignore floor constraints, wider radius)
   if attempt <= 4 then
+    local child, idx = findReachableWaypoint(playerPos, {
+      direction = "global", maxCandidates = 20, searchAllFloors = true
+    })
+    if child then
+      print("[CaveBot] Recovery: Found waypoint via relaxed global search at index " .. idx)
+      focusWaypointForRecovery(child, idx)
+      transitionTo("NORMAL")
+      return true
+    end
+    WaypointEngine.recoveryAttempt = 5
+    return false
+  end
+
+  -- Strategy 5: Skip current waypoint (last resort)
+  if attempt <= 5 then
     if ui and ui.list then
       local actionCount = ui.list:getChildCount()
       if actionCount > 1 then
@@ -953,6 +973,11 @@ end
 -- ============================================================================
 
 local function runWaypointEngine()
+  -- Backoff guard: after STOPPED, wait before retrying
+  if WaypointEngine.backoffUntil > 0 and now < WaypointEngine.backoffUntil then
+    return true  -- Still in backoff period
+  end
+
   -- Record progress (rate-limited internally)
   recordProgress()
   
@@ -979,39 +1004,44 @@ local function runWaypointEngine()
     end
     
     if isStuck then
-      transitionTo("RECOVERING")  -- Skip the old STUCK wait state
+      transitionTo("RECOVERING")
+      return true  -- Consume this tick; recovery runs next tick
     end
     
     return false  -- No intervention needed
     
   elseif state == "RECOVERING" then
-    -- Check recovery timeout
-    local recoveryDuration = now - WaypointEngine.recoveryStartTime
-    
-    if recoveryDuration >= WaypointEngine.RECOVERY_TIMEOUT then
-      if WaypointEngine.recoveryAttempt >= WaypointEngine.MAX_RECOVERY_ATTEMPTS then
-        transitionTo("STOPPED")
-        return true
-      end
-    end
-    
     -- Execute recovery strategy
     if executeRecovery() then
-      return true  -- Recovery succeeded, skip this tick
+      return true  -- Recovery succeeded
     end
     
-    -- If all strategies exhausted
-    if WaypointEngine.recoveryAttempt >= WaypointEngine.MAX_RECOVERY_ATTEMPTS then
+    -- All strategies exhausted or timeout reached
+    if WaypointEngine.recoveryAttempt >= WaypointEngine.MAX_RECOVERY_ATTEMPTS
+       or (now - WaypointEngine.recoveryStartTime) >= WaypointEngine.RECOVERY_TIMEOUT then
       transitionTo("STOPPED")
     end
     
     return true  -- Recovery in progress
     
   elseif state == "STOPPED" then
-    -- Reset and try again (prevents permanent stops during hunts)
-    warn("[CaveBot] Recovery exhausted - resetting to try again")
+    WaypointEngine.stoppedCount = (WaypointEngine.stoppedCount or 0) + 1
+    -- Progressive backoff: 2s, 4s, 8s, 16s... capped at 30s
+    local backoff = math.min(2000 * (2 ^ (WaypointEngine.stoppedCount - 1)), 30000)
+    WaypointEngine.backoffUntil = now + backoff
+    
+    -- Diagnostic log (throttled)
+    if now - (WaypointEngine.lastDiagTime or 0) >= (WaypointEngine.DIAG_INTERVAL or 10000) then
+      WaypointEngine.lastDiagTime = now
+      local focused = ui and ui.list and ui.list:getFocusedChild()
+      local wpInfo = focused and (focused.action or "?") .. " #" .. tostring(ui.list:getChildIndex(focused)) or "none"
+      local pPos = player:getPosition()
+      local posStr = pPos and (pPos.x .. "," .. pPos.y .. "," .. pPos.z) or "?"
+      warn("[CaveBot] Stuck: wp=" .. wpInfo .. " pos=" .. posStr .. " stops=" .. WaypointEngine.stoppedCount .. " backoff=" .. backoff .. "ms")
+    end
+    
     resetWaypointEngine()
-    return false
+    return true  -- Consume tick during backoff
   end
   
   return false
@@ -1257,7 +1287,10 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
         return
       end
     until skipped >= actionCount2
-    -- All waypoints blacklisted — clear blacklist to allow recovery
+    -- All waypoints blacklisted — wait for backoff before clearing
+    if WaypointEngine.backoffUntil > 0 and now < WaypointEngine.backoffUntil then
+      return  -- Still in backoff, don't clear yet
+    end
     warn("[CaveBot] All waypoints blacklisted — clearing blacklist")
     clearWaypointBlacklist()
     uiList:focusChild(uiList:getChildByIndex(1))
@@ -1276,7 +1309,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   
   -- Execute action (inline for performance)
   safeResetWalking()
-  local result = actionDef.callback(currentAction.value, actionRetries, prevActionResult)
+  local result, instantFail = actionDef.callback(currentAction.value, actionRetries, prevActionResult)
   
   -- Detect focus change during callback.
   -- If recovery just changed focus (recoveryJustFocused), preserve the reset
@@ -1308,6 +1341,12 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     recordSuccess()
   else
     recordFailure(actionType == "goto")
+    -- If the callback signaled instant failure (wrong floor, too far), pump extra
+    -- failures so WaypointEngine triggers recovery faster.
+    if instantFail and actionType == "goto" then
+      recordFailure(true)
+      recordFailure(true)
+    end
     -- CRITICAL FIX: goto actions that return false should NOT advance to next waypoint.
     -- This was the primary cause of the "loop standing still" bug — the bot would rapidly
     -- cycle through all unreachable waypoints (1→2→…→N→1) at ~13/s doing nothing.
@@ -1435,6 +1474,8 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
     CaveBot.clearIntendedFloorChange()  -- Fallback to just clearing intended
   end
   resetWaypointEngine()  -- Reset waypoint engine state on config change
+  WaypointEngine.stoppedCount = 0
+  WaypointEngine.backoffUntil = 0
   if invalidateWaypointCache then invalidateWaypointCache() end  -- Clear waypoint position cache
   if resetStartupCheck then resetStartupCheck() end  -- Reset startup check to find nearest waypoint
   prevActionResult = true
@@ -1689,7 +1730,7 @@ findReachableWaypoint = function(playerPos, options)
 
   options = options or {}
   local direction       = options.direction or "global"
-  local maxDist         = math.min(options.maxDist or (storage.extras.gotoMaxDistance or 50), 50)
+  local maxDist         = options.maxDist or (storage.extras.gotoMaxDistance or 50)
   local maxCandidates   = options.maxCandidates or 10
   local excludeCurrent  = (options.excludeCurrent ~= false)
   local searchAllFloors = options.searchAllFloors or false

@@ -37,14 +37,9 @@
 MonsterAI = MonsterAI or {}
 MonsterAI.VERSION = "3.0"
 
--- Safe resolve ring_buffer utilities (may not be in global scope in all sandboxes)
-local BoundedPush = BoundedPush or (RingBuffer and RingBuffer.boundedPush) or function(arr, item, max)
-  arr[#arr + 1] = item
-  while #arr > (max or 50) do table.remove(arr, 1) end
-end
-local TrimArray = TrimArray or (RingBuffer and RingBuffer.trimArray) or function(arr, max)
-  while #arr > (max or 50) do table.remove(arr, 1) end
-end
+-- BoundedPush/TrimArray are set as globals by utils/ring_buffer.lua (Phase 3)
+local BoundedPush = BoundedPush
+local TrimArray = TrimArray
 
 --------------------------------------------------------------------------------
 -- CLIENTSERVICE HELPERS (shared aliases)
@@ -2385,7 +2380,6 @@ end
 
 -- Toggle to enable debug prints
 MonsterAI.DEBUG = MonsterAI.DEBUG or false
-local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
 if MonsterAI.DEBUG then print("[MonsterAI] Monster AI Analysis Module v" .. MonsterAI.VERSION .. " loaded; automatic collection=" .. tostring(MonsterAI.COLLECT_ENABLED) .. "; auto-tune=" .. tostring(MonsterAI.AUTO_TUNE_ENABLED)) end
 
 -- Load persisted per-character metrics (deferred until UnifiedStorage is ready)

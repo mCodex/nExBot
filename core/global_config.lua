@@ -47,14 +47,6 @@ local TILE_ACTIONS = {
   },
 }
 
--- Door IDs that can be opened
-local DOOR_IDS = {
-  closed = {},
-  open = {},
-  locked = {},
-  quest = {},
-}
-
 --------------------------------------------------------------------------------
 -- Public API
 --------------------------------------------------------------------------------
@@ -112,22 +104,20 @@ end
 -- @param itemId number: The item ID to check
 -- @return boolean
 function GlobalConfig.isClosedDoor(itemId)
-  -- Use DoorItems module if available, otherwise fall back to local
   if DoorItems then
     return DoorItems.isClosedDoor(itemId)
   end
-  return DOOR_IDS.closed[itemId] == true
+  return false
 end
 
 -- Check if an item ID is a locked door
 -- @param itemId number: The item ID to check  
 -- @return boolean
 function GlobalConfig.isLockedDoor(itemId)
-  -- Use DoorItems module if available, otherwise fall back to local
   if DoorItems then
     return DoorItems.isLockedDoor(itemId)
   end
-  return DOOR_IDS.locked[itemId] == true
+  return false
 end
 
 -- Check if an item ID is any kind of door
@@ -137,17 +127,7 @@ function GlobalConfig.isDoor(itemId)
   if DoorItems then
     return DoorItems.isDoor(itemId)
   end
-  return DOOR_IDS.closed[itemId] == true or DOOR_IDS.locked[itemId] == true or DOOR_IDS.open[itemId] == true
-end
-
--- Add a door ID to the closed doors list
-function GlobalConfig.addClosedDoor(itemId)
-  DOOR_IDS.closed[itemId] = true
-end
-
--- Add a door ID to the locked doors list
-function GlobalConfig.addLockedDoor(itemId)
-  DOOR_IDS.locked[itemId] = true
+  return false
 end
 
 --------------------------------------------------------------------------------
@@ -228,59 +208,3 @@ function GlobalConfig.openDoor(tile, keyId)
   
   return false
 end
-
---------------------------------------------------------------------------------
--- Door ID Population
--- This runs once on load to build the door database
---------------------------------------------------------------------------------
-
-local function populateDoorIds()
-  -- Common closed door IDs (from standard Tibia)
-  local closedDoors = {
-    -- Wooden doors
-    1209, 1210, 1211, 1212, 1213, 1214, 1215, 1216,
-    1217, 1218, 1219, 1220, 1221, 1222, 1223, 1224,
-    1225, 1226, 1227, 1228, 1229, 1230, 1231, 1232,
-    -- Stone doors
-    1233, 1234, 1235, 1236, 1237, 1238, 1239, 1240,
-    1241, 1242, 1243, 1244, 1245, 1246, 1247, 1248,
-    -- Gate of expertise
-    1249, 1250, 1251, 1252,
-    -- Vertical/Horizontal wooden
-    5082, 5083, 5084, 5085, 5098, 5099, 5100, 5101,
-    -- Additional common doors
-    5102, 5103, 5104, 5105, 5106, 5107, 5108, 5109,
-    5116, 5117, 5118, 5119, 5120, 5121, 5122, 5123,
-    5124, 5125, 5126, 5127, 5128, 5129, 5130, 5131,
-    5132, 5133, 5134, 5135, 5136, 5137, 5138, 5139,
-    5140, 5141, 5142, 5143, 5144, 5145, 5146, 5147,
-    -- Newer doors
-    6192, 6193, 6194, 6195, 6196, 6197, 6198, 6199,
-    6249, 6250, 6251, 6252, 6253, 6254, 6255, 6256,
-    6891, 6892, 6893, 6894, 6895, 6896, 6897, 6898,
-    6899, 6900, 6901, 6902, 6903, 6904, 6905, 6906,
-    7033, 7034, 7035, 7036, 7037, 7038, 7039, 7040,
-    7041, 7042, 7043, 7044, 7045, 7046, 7047, 7048,
-    8541, 8542, 8543, 8544, 8545, 8546, 8547, 8548,
-    9165, 9166, 9167, 9168, 9169, 9170, 9171, 9172,
-    9267, 9268, 9269, 9270, 9271, 9272, 9273, 9274,
-  }
-  
-  for _, id in ipairs(closedDoors) do
-    DOOR_IDS.closed[id] = true
-  end
-  
-  -- Locked doors (require key)
-  local lockedDoors = {
-    1209, 1210, 1217, 1218, 1225, 1226, 1233, 1234,
-    1241, 1242, 1249, 1250, 5082, 5083, 5098, 5099,
-    5116, 5117, 5124, 5125, 5132, 5133, 5140, 5141,
-  }
-  
-  for _, id in ipairs(lockedDoors) do
-    DOOR_IDS.locked[id] = true
-  end
-end
-
--- Initialize door IDs
-populateDoorIds()

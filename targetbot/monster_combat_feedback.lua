@@ -10,14 +10,9 @@
   Populates: MonsterAI.CombatFeedback
 ]]
 
--- Safe resolve ring_buffer utilities
-local BoundedPush = BoundedPush or (RingBuffer and RingBuffer.boundedPush) or function(arr, item, max)
-  arr[#arr + 1] = item
-  while #arr > (max or 50) do table.remove(arr, 1) end
-end
-local TrimArray = TrimArray or (RingBuffer and RingBuffer.trimArray) or function(arr, max)
-  while #arr > (max or 50) do table.remove(arr, 1) end
-end
+-- BoundedPush/TrimArray are set as globals by utils/ring_buffer.lua (Phase 3)
+local BoundedPush = BoundedPush
+local TrimArray = TrimArray
 
 local H = MonsterAI._helpers
 local nowMs = H.nowMs

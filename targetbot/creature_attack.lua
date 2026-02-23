@@ -282,8 +282,6 @@ end
 -- Use TargetCore if available (DRY - avoid duplicate implementations)
 local Core = TargetCore or {}
 local Geometry = Core.Geometry or {}
--- Spectator cache (safe require)
-local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
 
 -- Helper: check MovementCoordinator for movement allowance
 local zigzagState = { blockUntil = 0, cooldown = 250 }

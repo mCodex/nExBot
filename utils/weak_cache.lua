@@ -49,16 +49,6 @@ function WeakCache.createWeakValues()
   return t
 end
 
--- Create a table with both weak keys and values
--- Entry is removed when either key OR value is garbage collected
--- Perfect for: temporary associations, cross-references
--- @return table with weak keys+values metatable
-function WeakCache.createWeakBoth()
-  local t = {}
-  setmetatable(t, { __mode = "kv" })
-  return t
-end
-
 -- ============================================================================
 -- LRU CACHE (Least Recently Used)
 -- ============================================================================

@@ -15,107 +15,6 @@ nExBot.isUsing = false
 nExBot.customCooldowns = {}
 nExBot.lastLabel = ""
 
---------------------------------------------------------------------------------
--- OBJECT POOL - Memory-efficient table reuse
--- Reduces garbage collection pressure for frequently created/destroyed tables
---------------------------------------------------------------------------------
-local ObjectPool = {
-  pools = {},      -- {poolName -> {objects}}
-  maxSize = 100,   -- Max objects per pool
-  stats = {
-    hits = 0,
-    misses = 0,
-    returns = 0
-  }
-}
-
--- Get or create a table from pool
--- @param poolName: string identifier for the pool
--- @param initialData: optional table to copy values from
--- @return table
-function nExBot.acquireTable(poolName, initialData)
-  poolName = poolName or "default"
-  local pool = ObjectPool.pools[poolName]
-  
-  local obj
-  if pool and #pool > 0 then
-    obj = table.remove(pool)
-    ObjectPool.stats.hits = ObjectPool.stats.hits + 1
-  else
-    obj = {}
-    ObjectPool.stats.misses = ObjectPool.stats.misses + 1
-  end
-  
-  -- Copy initial data if provided
-  if initialData then
-    for k, v in pairs(initialData) do
-      obj[k] = v
-    end
-  end
-  
-  return obj
-end
-
--- Return a table to the pool for reuse
--- @param poolName: string identifier for the pool
--- @param obj: the table to return
-function nExBot.releaseTable(poolName, obj)
-  if not obj then return end
-  
-  poolName = poolName or "default"
-  local pool = ObjectPool.pools[poolName]
-  
-  if not pool then
-    pool = {}
-    ObjectPool.pools[poolName] = pool
-  end
-  
-  -- Clear the table for reuse
-  for k in pairs(obj) do
-    obj[k] = nil
-  end
-  
-  -- Only keep up to maxSize objects
-  if #pool < ObjectPool.maxSize then
-    pool[#pool + 1] = obj
-    ObjectPool.stats.returns = ObjectPool.stats.returns + 1
-  end
-end
-
--- Get pool statistics
-function nExBot.getPoolStats()
-  local totalPooled = 0
-  for _, pool in pairs(ObjectPool.pools) do
-    totalPooled = totalPooled + #pool
-  end
-  
-  return {
-    hits = ObjectPool.stats.hits,
-    misses = ObjectPool.stats.misses,
-    returns = ObjectPool.stats.returns,
-    totalPooled = totalPooled,
-    hitRate = ObjectPool.stats.hits / math.max(1, ObjectPool.stats.hits + ObjectPool.stats.misses)
-  }
-end
-
--- Alias for common position table acquisition
-function nExBot.acquirePos(x, y, z)
-  local p = nExBot.acquireTable("position")
-  p.x = x or 0
-  p.y = y or 0
-  p.z = z or 0
-  return p
-end
-
--- Release position table
-function nExBot.releasePos(p)
-  nExBot.releaseTable("position", p)
-end
-
---------------------------------------------------------------------------------
--- MEMOIZATION - (reserved for future use)
---------------------------------------------------------------------------------
-
 function logInfo(text)
     local timestamp = os.date("%H:%M:%S")
     text = tostring(text)
@@ -220,29 +119,6 @@ function dropItem(idOrObject)
     elseif g_game and g_game.move then
         g_game.move(idOrObject, pos(), idOrObject:getCount())
     end
-end
-
--- not perfect function to return whether character has utito tempo buff
--- known to be bugged if received debuff (ie. roshamuul)
--- TODO: simply a better version
--- returns boolean
-function isBuffed()
-    local var = false
-    if not hasPartyBuff() then return var end
-
-    local skillId = 0
-    for i = 1, 4 do
-        if player:getSkillBaseLevel(i) > player:getSkillBaseLevel(skillId) then
-            skillId = i
-        end
-    end
-
-    local premium = (player:getSkillLevel(skillId) - player:getSkillBaseLevel(skillId))
-    local base = player:getSkillBaseLevel(skillId)
-    if (premium / 100) * 305 > base then
-        var = true
-    end
-    return var
 end
 
 -- if using index as table element, this can be used to properly assign new idex to all values
@@ -1143,51 +1019,6 @@ function getCreaturesInArea(param1, param2, param3)
     end
 end
 
--- can be improved
--- TODO in future
--- uses getCreaturesInArea, specType
--- returns number
-function getBestTileByPatern(pattern, specType, maxDist, safe)
-    if not pattern or not specType then return end
-    if not maxDist then maxDist = 4 end
-
-    local bestTile = nil
-    local best = nil
-    local Client = getClient()
-    local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
-    for _, tile in pairs(tiles) do
-        if distanceFromPlayer(tile:getPosition()) <= maxDist then
-            local tilePos = tile:getPosition()
-            local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(tilePos) or (g_map and g_map.getMinimapColor(tilePos)) or 0
-            local stairs = (minimapColor >= 210 and minimapColor <= 213)
-            if tile:canShoot() and tile:isWalkable() then
-                if getCreaturesInArea(tilePos, pattern, specType) > 0 then
-                    if (not safe or
-                        getCreaturesInArea(tilePos, pattern, 3) == 0) then
-                        local candidate =
-                            {
-                                pos = tile,
-                                count = getCreaturesInArea(tilePos,
-                                                           pattern, specType)
-                            }
-                        if not best or best.count <= candidate.count then
-                            best = candidate
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    bestTile = best
-
-    if bestTile then
-        return bestTile
-    else
-        return false
-    end
-end
-
 -- returns container object based on name
 function getContainerByName(name, notFull)
     if type(name) ~= "string" then return nil end
@@ -1216,52 +1047,7 @@ function getContainerByItem(id, notFull)
     return d
 end
 
--- [[ ready to use getSpectators patterns ]] --
-LargeUeArea = [[
-    0000001000000
-    0000011100000
-    0000111110000
-    0001111111000
-    0011111111100
-    0111111111110
-    1111111111111
-    0111111111110
-    0011111111100
-    0001111111000
-    0000111110000
-    0000011100000
-    0000001000000
-]]
-
-NormalUeAreaMs = [[
-    00000100000
-    00011111000
-    00111111100
-    01111111110
-    01111111110
-    11111111111
-    01111111110
-    01111111110
-    00111111100
-    00001110000
-    00000100000
-]]
-
-NormalUeAreaEd = [[
-    00000100000
-    00001110000
-    00011111000
-    00111111100
-    01111111110
-    11111111111
-    01111111110
-    00111111100
-    00011111000
-    00001110000
-    00000100000
-]]
-
-smallUeArea = [[
+-- [[ ready to use getSpectators patterns ]] --\nsmallUeArea = [[
     0011100
     0111110
     1111111
