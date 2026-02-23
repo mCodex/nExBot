@@ -12,14 +12,9 @@ local Analytics = {}
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
 
--- Safe resolve ring_buffer utilities (may not be in global scope in all sandboxes)
-local BoundedPush = BoundedPush or (RingBuffer and RingBuffer.boundedPush) or function(arr, item, max)
-  arr[#arr + 1] = item
-  while #arr > (max or 50) do table.remove(arr, 1) end
-end
-local TrimArray = TrimArray or (RingBuffer and RingBuffer.trimArray) or function(arr, max)
-  while #arr > (max or 50) do table.remove(arr, 1) end
-end
+-- BoundedPush/TrimArray are set as globals by utils/ring_buffer.lua (Phase 3)
+local BoundedPush = BoundedPush
+local TrimArray = TrimArray
 
 -- ============================================================================
 -- PRIVATE STATE

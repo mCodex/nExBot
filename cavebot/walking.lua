@@ -1086,6 +1086,7 @@ end
 -- Expose utilities
 CaveBot.isFloorChangeTile = isFloorChangeTile
 CaveBot.isNearFloorChangeTile = isNearFloorChangeTile
+CaveBot.stopAutoWalk = stopAutoWalk
 CaveBot.getSafeAdjacentTiles = function(centerPos) return getSafeAdjacentTiles(centerPos, false) end
 
 -- Floor change detection on position change

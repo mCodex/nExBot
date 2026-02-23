@@ -798,16 +798,6 @@ function EventBus.emitConfigChange(moduleName, configName)
   EventBus.emit(moduleName .. ":configChanged", configName)
 end
 
--- Helper function to emit macro toggle events
-function EventBus.emitMacroToggle(macroName, enabled)
-  EventBus.emit("macro:toggled", macroName, enabled)
-end
-
--- Helper function to emit module toggle events
-function EventBus.emitModuleToggle(moduleName, enabled)
-  EventBus.emit("module:toggled", moduleName, enabled)
-end
-
 -- Helper function to emit setting change events
 function EventBus.emitSettingChange(path, value)
   EventBus.emit("setting:changed", path, value)

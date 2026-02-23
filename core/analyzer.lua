@@ -1309,14 +1309,14 @@ end
 local regex = "You lose ([0-9]*) hitpoints due to an attack by ([a-z]*) ([a-z A-z-]*)" 
 onTextMessage(function(mode, text)
   local value = getFirstNumberInText and getFirstNumberInText(text)
-    if mode == 21 then -- damage dealt
+    if mode == 21 and value then -- damage dealt
       totalDmg = totalDmg + value
         table.insert(dmgTable, {d = value, t = now})
         if value > storage.bestHit then
             storage.bestHit = value
         end
     end
-    if mode == 23 then -- healing
+    if mode == 23 and value then -- healing
       totalHeal = totalHeal + value
         table.insert(healTable, {d = value, t = now})
         if value > storage.bestHeal then

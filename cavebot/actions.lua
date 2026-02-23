@@ -7,8 +7,6 @@ local getClientVersion = nExBot.Shared.getClientVersion
 local oldTibia = getClientVersion() < 960
 local nextTile = nil
 
-local noPath = 0
-
 -- Use canonical direction table from Directions module (DRY: SSoT is constants/directions.lua)
 local DIR_MOD_LOOKUP = Directions.DIR_TO_OFFSET
 
@@ -150,92 +148,10 @@ local function pushPlayer(creature)
 
 end
 
-local function pathfinder()
-  if not storage.extras.pathfinding then return end
-  if noPath < 5 then return end
-
-  -- Delegate to the optimized waypoint finder.
-  -- Profile switching was removed: it reloaded all waypoints from disk and rebuilt
-  -- the entire UI — too expensive without clear benefit. Recovery strategies in
-  -- WaypointEngine handle re-routing more precisely.
-  CaveBot.gotoNextWaypointInRange()
-  noPath = 0
-  return true
-end
-
--- Waypoint guard to prevent heavy pathfinding on unreachable waypoints
-local WaypointGuard = CaveBot.WaypointGuard or {
-  CHECK_INTERVAL = 5000,
-  EXTREME_DISTANCE = 100,
-  MAX_FAILURES = 3,
-  lastKey = nil,
-  lastCheck = 0,
-  failures = 0,
-  lastSkip = false,
-  cooldownUntil = 0
-}
-CaveBot.WaypointGuard = WaypointGuard
-
-local function shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist)
-  if not destPos or not playerPos then return false end
-
-  local dist2d = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
-  local floorMismatch = destPos.z ~= playerPos.z
-
-  if floorMismatch and dist2d < WaypointGuard.EXTREME_DISTANCE then
-    dist2d = WaypointGuard.EXTREME_DISTANCE
-  end
-
-  if not floorMismatch and dist2d <= maxDist then
-    WaypointGuard.lastSkip = false
-    return false
-  end
-
-  local key = destPos.x .. "," .. destPos.y .. "," .. destPos.z
-  if WaypointGuard.lastKey ~= key then
-    WaypointGuard.lastKey = key
-    WaypointGuard.failures = 0
-    WaypointGuard.lastCheck = 0
-    WaypointGuard.lastSkip = false
-    WaypointGuard.cooldownUntil = 0
-  end
-
-  if WaypointGuard.cooldownUntil > now then
-    -- Renew blacklist on every encounter while still in cooldown
-    if CaveBot.blacklistWaypoint and CaveBot.actionList then
-      local current = CaveBot.actionList:getFocusedChild()
-      if current then CaveBot.blacklistWaypoint(current) end
-    end
-    return true
-  end
-
-  if (now - WaypointGuard.lastCheck) < WaypointGuard.CHECK_INTERVAL then
-    return WaypointGuard.lastSkip
-  end
-
-  WaypointGuard.lastCheck = now
-  WaypointGuard.failures = WaypointGuard.failures + 1
-  WaypointGuard.lastSkip = true
-
-  if dist2d >= WaypointGuard.EXTREME_DISTANCE or WaypointGuard.failures >= WaypointGuard.MAX_FAILURES then
-    WaypointGuard.cooldownUntil = now + WaypointGuard.CHECK_INTERVAL
-    -- Blacklist this waypoint BEFORE recovery so that:
-    -- 1) Recovery finders skip it when searching for candidates
-    -- 2) After the recovery waypoint completes, advancement skips past it
-    -- Without this, recovery finds WP_{N-1}, it completes, advances back to WP_N → loop.
-    if CaveBot.blacklistWaypoint and CaveBot.actionList then
-      local current = CaveBot.actionList:getFocusedChild()
-      if current then
-        CaveBot.blacklistWaypoint(current)
-      end
-    end
-    if CaveBot.requestWaypointRecovery then
-      CaveBot.requestWaypointRecovery("guard")
-    end
-  end
-
-  return true
-end
+-- Recovery is handled exclusively by WaypointEngine (SRP: single authority).
+-- The old pathfinder() function was removed because it competed with
+-- WaypointEngine by changing focus before stuck detection could trigger,
+-- resetting actionRetries and preventing smart recovery strategies.
 
 -- it adds an action widget to list
 CaveBot.addAction = function(action, value, focus)
@@ -253,6 +169,10 @@ CaveBot.addAction = function(action, value, focus)
   widget.value = value
   if raction.color then
     widget:setColor(raction.color)
+  end
+  -- Invalidate waypoint cache when editor adds a new action
+  if CaveBot.invalidateWaypointCache then
+    CaveBot.invalidateWaypointCache()
   end
   widget.onDoubleClick = function(cwidget) -- edit on double click
     if CaveBot.Editor then
@@ -462,15 +382,17 @@ end
 CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- ========== EARLY EXITS (no pathfinding) ==========
   
-  -- Skip if actively walking (but don't delay - just retry next tick)
+  -- Skip if actively walking — return "walking" so the main loop does NOT
+  -- increment actionRetries.  Only actual walkTo calls should count as retries;
+  -- inflating retries while walking caused the safety valve / maxRetries to
+  -- abort perfectly valid walks (any destination >7-8 tiles away).
   if player and player:isWalking() then
     -- Check if we've already arrived via EventBus
     if CaveBot.hasArrivedAtWaypoint and CaveBot.hasArrivedAtWaypoint() then
       CaveBot.clearWaypointTarget()
-      noPath = 0
       return true
     end
-    return "retry"  -- Quick retry, no delay
+    return "walking"  -- Don't count walking ticks as retries
   end
 
   -- Parse position
@@ -493,38 +415,23 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- This is the most reliable way to prevent re-executing a waypoint we just used
   if CaveBot.wasFloorChangeWaypointCompleted and CaveBot.wasFloorChangeWaypointCompleted(destPos) then
     -- This waypoint was already completed - skip it immediately
-    noPath = 0
     return true
   end
   
   -- MULTI-FLOOR WAYPOINT HANDLING
-  -- If the waypoint is on a different Z level, determine how to handle it
+  -- If the waypoint is on a different Z level, signal failure immediately
+  -- so WaypointEngine's stuck detection sees it and triggers recovery.
   if destPos.z ~= playerPos.z then
-    if shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist) then
-      noPath = 0
-      return "retry"  -- Don't signal success — let WaypointGuard handle recovery
-    end
-    
-    -- Standard floor mismatch — we need to find a path to this floor
-    -- Reset noPath on floor change to prevent stale counter
-    noPath = noPath + 1
-    pathfinder()
-    return false
+    return false, true  -- instantFail: pumps extra recordFailure
   end
 
   -- Distance calculations
   local distX = math.abs(destPos.x - playerPos.x)
   local distY = math.abs(destPos.y - playerPos.y)
   
-  -- Too far
+  -- Too far — signal failure for stuck detection
   if (distX + distY) > maxDist then
-    if shouldSkipUnreachableWaypoint(destPos, playerPos, maxDist) then
-      noPath = 0
-      return "retry"  -- Don't signal success — let WaypointGuard handle recovery
-    end
-    noPath = noPath + 1
-    pathfinder()
-    return false
+    return false, true  -- instantFail: pumps extra recordFailure
   end
 
   -- Check if destination is floor-change tile (stairs, ladder, rope spot, hole)
@@ -558,7 +465,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
       -- Check cooldown before allowing
       if CaveBot.canChangeFloor and not CaveBot.canChangeFloor() then
         -- Still in cooldown - skip this floor change waypoint
-        noPath = 0
         return true  -- Move to next waypoint
       end
     end
@@ -576,7 +482,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   
   -- Already at destination
   if distX <= precision and distY <= precision then
-    noPath = 0
     CaveBot.clearWaypointTarget()  -- Clear target on arrival
     -- If this was a floor-change tile and we're standing on it, wait for floor change
     if isFloorChange then
@@ -594,7 +499,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
         if CaveBot.markFloorChangeWaypointCompleted then
           CaveBot.markFloorChangeWaypointCompleted(destPos)
         end
-        noPath = 0
         return true
       end
       
@@ -605,11 +509,10 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return true
   end
 
-  -- Max retries (reduced for faster stuck detection)
-  local maxRetries = CaveBot.Config.get("mapClick") and 6 or 12
+  -- Max retries — lower thresholds for faster handoff to WaypointEngine recovery.
+  -- Progressive strategies still activate: attack blocker at retries>2, ignoreCreatures at retries>5.
+  local maxRetries = CaveBot.Config.get("mapClick") and 4 or 8
   if retries >= maxRetries then
-    noPath = noPath + 1
-    pathfinder()
     return false
   end
 
@@ -655,23 +558,15 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     if CaveBot.setWalkingToWaypoint then
       CaveBot.setWalkingToWaypoint(destPos)
     end
-    noPath = 0
     return "retry"  -- Continue checking for arrival
   end
   
-  -- Walk failed - clear walking state
+  -- Walk failed — clear walking state and retry with progressive strategies.
+  -- retries > 2 enables blocking monster attack; retries > 5 enables ignoreCreatures.
+  -- retries >= maxRetries returns false, feeding WaypointEngine's recordFailure().
   if CaveBot.clearWalkingState then
     CaveBot.clearWalkingState()
   end
-  
-  -- Walk failed
-  if retries >= maxRetries - 1 then
-    noPath = noPath + 1
-    pathfinder()
-    return false
-  end
-  
-  CaveBot.delay(30)  -- Fast retry cycle
   return "retry"
 end)
 

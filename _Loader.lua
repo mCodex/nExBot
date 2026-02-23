@@ -366,7 +366,6 @@ loadCategory("constants", {
   "constants/floor_items",
   "constants/food_items",
   "constants/directions",
-  "constants/attack_patterns",
 }, "/")
 
 -- ============================================================================
@@ -378,7 +377,6 @@ loadCategory("utils", {
   "utils/client_helper",
   "utils/safe_creature",
   "utils/weak_cache",
-  "utils/creature_events",
   "utils/vocation_utils",
   "utils/event_debouncer",
   "utils/path_utils",
@@ -638,16 +636,3 @@ if UnifiedTick and UnifiedTick.start then
     end
   end)
 end
-
--- Export nExBot API summary
-nExBot.API = {
-  Healing = nExBot.Healing,
-  Attacking = nExBot.Attacking,
-  Targeting = nExBot.Targeting,
-  CaveBot = nExBot.CaveBot,
-  Equipment = nExBot.Equipment,
-  Analyzer = nExBot.Analyzer,
-  SessionManager = nExBot.SessionManager,
-  LootTracker = nExBot.LootTracker,
-  BossTracker = nExBot.BossTracker,
-}

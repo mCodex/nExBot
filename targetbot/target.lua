@@ -243,8 +243,6 @@ end
 
 -- Use TargetBotCore if available (DRY principle)
 local Core = TargetCore or {}
--- Spectator cache to reduce expensive g_map.getSpectatorsInRange calls
-local SpectatorCache = SpectatorCache or (type(require) == 'function' and (function() local ok, mod = pcall(require, "utils.spectator_cache"); if ok then return mod end; return nil end)() or nil)
 
 -- Creature type constants for clarity
 local CREATURE_TYPE = {

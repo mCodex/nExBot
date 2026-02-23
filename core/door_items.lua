@@ -307,15 +307,6 @@ DoorItems = {
   end
 }
 
--- Register with event bus if available
-if nExBot and nExBot.EventBus then
-  nExBot.EventBus:emit("door_items:loaded", {
-    closedCount = #ClosedDoorIds,
-    lockedCount = #LockedDoorIds,
-    openCount = #OpenDoorIds
-  })
-end
-
 -- Export to global namespace
 nExBot = nExBot or {}
 nExBot.DoorItems = DoorItems
