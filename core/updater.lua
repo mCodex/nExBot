@@ -25,6 +25,12 @@ if not nExBot or not nExBot.Shared or not nExBot.paths then
   return Updater
 end
 
+if nExBot.isModInstall then
+  info("[Updater] Running from mod folder — auto-updates disabled.")
+  nExBot.Updater = Updater
+  return Updater
+end
+
 local Shared = nExBot.Shared
 local P = nExBot.paths
 
@@ -66,9 +72,8 @@ local function readLocalVersion()
   return ok and content and content:match("^%s*(.-)%s*$") or nil
 end
 
---- Read version from storage (survives mod-overlay VFS issues).
---- Trims and validates the stored value; returns nil (and clears storage)
---- if it is empty, whitespace-only, or not a valid semver.
+--- Read version from storage. Trims and validates; returns nil (and clears
+--- storage) if empty, whitespace-only, or not a valid semver.
 local function readStorageVersion()
   local raw = storage.updaterInstalledVersion
   if type(raw) ~= "string" then return nil end
@@ -85,13 +90,14 @@ local function readStorageVersion()
   return trimmed
 end
 
---- Best known local version: prefers storage (reliable) over file (may be shadowed by mod)
+--- Best known local version: prefers storage over file.
 local function effectiveLocalVersion()
   return readStorageVersion() or readLocalVersion()
 end
 
 local function writeLocalVersion(versionStr)
   storage.updaterInstalledVersion = versionStr
+  pcall(g_resources.writeFileContents, P.base .. "/" .. VERSION_FILE, versionStr)
   return true
 end
 
@@ -103,7 +109,6 @@ local function writeFile(relativePath, content)
 end
 
 --- Create all parent segments of relativePath under basePath iteratively.
---- Returns true if every segment succeeded, false + warns on first failure.
 local function ensureDirRecursive(basePath, relativePath)
   local segments = {}
   for seg in relativePath:gmatch("[^/]+") do segments[#segments + 1] = seg end
@@ -115,7 +120,6 @@ local function ensureDirRecursive(basePath, relativePath)
       warn("[Updater] makeDir threw: " .. built .. " - " .. tostring(err))
       return false
     end
-    -- Verify directory actually exists (makeDir may return false without throwing)
     local okV, exists = pcall(g_resources.directoryExists, built)
     if not (okV and exists) then
       warn("[Updater] makeDir did not create: " .. built)
@@ -127,19 +131,6 @@ end
 
 local function ensureDir(relativePath)
   return ensureDirRecursive(P.base, relativePath)
-end
-
-local function ensureCacheDir(relativePath)
-  return ensureDirRecursive(P.cache, relativePath)
-end
-
-local function writeCacheFile(relativePath, content)
-  local dir = relativePath:match("(.+)/[^/]+$")
-  if dir and not ensureCacheDir(dir) then return false end
-  local fullPath = P.cache .. "/" .. relativePath
-  local ok, err = pcall(g_resources.writeFileContents, fullPath, content)
-  if not ok then warn("[Updater] Cache write failed: " .. relativePath .. " - " .. tostring(err)) end
-  return ok
 end
 
 -- ============================================================================
@@ -357,26 +348,10 @@ local function applyUpdate(callback, onProgress)
 
     info("[Updater] Downloading " .. #updateFiles .. " files ...")
 
-    -- Clear stale cache from previous partial updates
-    local okClear, oldFiles = pcall(g_resources.listDirectoryFiles, P.cache, true, false)
-    if okClear and oldFiles then
-      for _, f in ipairs(oldFiles) do pcall(g_resources.deleteFile, P.cache .. "/" .. f) end
-    end
-
-    -- Ensure cache root exists
-    pcall(g_resources.makeDir, P.cache)
-    local okCR, cacheRootOk = pcall(g_resources.directoryExists, P.cache)
-    local cacheEnabled = (okCR and cacheRootOk) or false
-    if not cacheEnabled then
-      warn("[Updater] Cache dir failed: " .. P.cache .. " — mod-overlay bypass won't work.")
-    end
-
-    local cacheCount = 0
     local idx = 0
     local function downloadNext()
       idx = idx + 1
       if idx > #updateFiles then
-        -- finished
         if _state.remoteVer then writeLocalVersion(_state.remoteVer) end
         _state.isUpdating = false
         _state.progress   = 100
@@ -390,7 +365,7 @@ local function applyUpdate(callback, onProgress)
         else
           _state.status = "done"
           info("[Updater] v" .. tostring(_state.remoteVer) .. " installed ("
-            .. #updateFiles .. " files, " .. cacheCount .. " cached). Restart bot to apply.")
+            .. #updateFiles .. " files). Restart bot to apply.")
           callback(true, nil)
         end
         return
@@ -400,12 +375,8 @@ local function applyUpdate(callback, onProgress)
       _state.progress = math.floor((idx / #updateFiles) * 100)
       if onProgress then onProgress(_state.progress, idx, #updateFiles) end
 
-      -- ensure parent dirs (normal + cache)
       local dir = filePath:match("(.+)/[^/]+$")
-      if dir then
-        ensureDir(dir)
-        if cacheEnabled then ensureCacheDir(dir) end
-      end
+      if dir then ensureDir(dir) end
 
       downloadFile(filePath, function(content, dlErr)
         if dlErr or not content then
@@ -413,9 +384,6 @@ local function applyUpdate(callback, onProgress)
           warn("[Updater] Failed: " .. filePath .. " - " .. tostring(dlErr))
         else
           writeFile(filePath, content)
-          if cacheEnabled and writeCacheFile(filePath, content) then
-            cacheCount = cacheCount + 1
-          end
         end
         schedule(DOWNLOAD_DELAY_MS, downloadNext)
       end)
