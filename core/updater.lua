@@ -102,7 +102,8 @@ local function writeLocalVersion(versionStr)
         .. "Move nExBot from mods/bot/ to bot/ for auto-updates to take full effect.")
     end
   end
-  return ok
+  -- Storage write is authoritative; file-write failure is non-fatal
+  return true
 end
 
 local function writeFile(relativePath, content)
@@ -125,7 +126,8 @@ end
 
 local function writeCacheFile(relativePath, content)
   local fullPath = BOT_BASE_PATH .. "/" .. CACHE_SUBDIR .. "/" .. relativePath
-  pcall(g_resources.writeFileContents, fullPath, content)
+  local ok, err = pcall(g_resources.writeFileContents, fullPath, content)
+  if not ok then warn("[Updater] Cache write failed: " .. relativePath .. " - " .. tostring(err)) end
 end
 
 -- ============================================================================
