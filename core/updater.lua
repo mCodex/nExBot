@@ -78,9 +78,46 @@ local function readLocalVersion()
   return ok and content and content:match("^%s*(.-)%s*$") or nil
 end
 
+--- Read version from storage (survives mod-overlay VFS issues).
+--- Trims and validates the stored value; returns nil (and clears storage)
+--- if it is empty, whitespace-only, or not a valid semver.
+local function readStorageVersion()
+  local raw = storage.updaterInstalledVersion
+  if type(raw) ~= "string" then return nil end
+  local trimmed = raw:match("^%s*(.-)%s*$")
+  if not trimmed or trimmed == "" then
+    storage.updaterInstalledVersion = nil
+    return nil
+  end
+  if not Shared.parseSemver(trimmed) then
+    warn("[Updater] Invalid stored version '" .. trimmed .. "' — clearing.")
+    storage.updaterInstalledVersion = nil
+    return nil
+  end
+  return trimmed
+end
+
+--- Best known local version: prefers storage (reliable) over file (may be shadowed by mod)
+local function effectiveLocalVersion()
+  return readStorageVersion() or readLocalVersion()
+end
+
 local function writeLocalVersion(versionStr)
+  -- Always persist in storage first (this is authoritative)
+  storage.updaterInstalledVersion = versionStr
+
+  -- Also try writing the version file (may fail silently for mod installs)
   local ok = pcall(g_resources.writeFileContents, BOT_BASE_PATH .. "/" .. VERSION_FILE, versionStr)
-  return ok
+  if ok then
+    -- Verify write-back: detect mod-overlay shadow
+    local readBack = readLocalVersion()
+    if readBack ~= versionStr then
+      warn("[Updater] Version file shadowed by mod overlay. "
+        .. "Move nExBot from mods/bot/ to bot/ for auto-updates to take full effect.")
+    end
+  end
+  -- Storage write is authoritative; file-write failure is non-fatal
+  return true
 end
 
 local function writeFile(relativePath, content)
@@ -90,8 +127,47 @@ local function writeFile(relativePath, content)
   return ok
 end
 
+--- Create all parent segments of relativePath under basePath iteratively.
+--- Returns true if every segment succeeded, false + warns on first failure.
+local function ensureDirRecursive(basePath, relativePath)
+  local segments = {}
+  for seg in relativePath:gmatch("[^/]+") do segments[#segments + 1] = seg end
+  local built = basePath
+  for _, seg in ipairs(segments) do
+    built = built .. "/" .. seg
+    local ok, err = pcall(g_resources.makeDir, built)
+    if not ok then
+      warn("[Updater] makeDir failed: " .. built .. " - " .. tostring(err))
+      return false
+    end
+  end
+  return true
+end
+
 local function ensureDir(relativePath)
-  pcall(g_resources.makeDir, BOT_BASE_PATH .. "/" .. relativePath)
+  return ensureDirRecursive(BOT_BASE_PATH, relativePath)
+end
+
+-- Update cache: written to _update_cache/ which is never shadowed by mod overlays
+local CACHE_SUBDIR = "_update_cache"
+
+local function ensureCacheDir(relativePath)
+  return ensureDirRecursive(BOT_BASE_PATH .. "/" .. CACHE_SUBDIR, relativePath)
+end
+
+local function writeCacheFile(relativePath, content)
+  -- ensure parent dirs exist before writing
+  local dir = relativePath:match("(.+)/[^/]+$")
+  if dir then
+    if not ensureCacheDir(dir) then
+      warn("[Updater] Cache dir creation failed for: " .. dir)
+      return false
+    end
+  end
+  local fullPath = BOT_BASE_PATH .. "/" .. CACHE_SUBDIR .. "/" .. relativePath
+  local ok, err = pcall(g_resources.writeFileContents, fullPath, content)
+  if not ok then warn("[Updater] Cache write failed: " .. relativePath .. " - " .. tostring(err)) end
+  return ok
 end
 
 -- ============================================================================
@@ -252,7 +328,7 @@ local function checkForUpdate(callback)
   _state.isChecking = true
   _state.status = "checking"
 
-  local localStr = readLocalVersion()
+  local localStr = effectiveLocalVersion()
   _state.localVer = localStr
   if not localStr then
     _state.isChecking = false; _state.status = "error"
@@ -309,6 +385,9 @@ local function applyUpdate(callback, onProgress)
 
     info("[Updater] Downloading " .. #updateFiles .. " files ...")
 
+    -- Ensure cache root directory exists
+    pcall(g_resources.makeDir, BOT_BASE_PATH .. "/" .. CACHE_SUBDIR)
+
     local idx = 0
     local function downloadNext()
       idx = idx + 1
@@ -336,9 +415,12 @@ local function applyUpdate(callback, onProgress)
       _state.progress = math.floor((idx / #updateFiles) * 100)
       if onProgress then onProgress(_state.progress, idx, #updateFiles) end
 
-      -- ensure parent dir
+      -- ensure parent dirs (both normal and cache)
       local dir = filePath:match("(.+)/[^/]+$")
-      if dir then ensureDir(dir) end
+      if dir then
+        ensureDir(dir)
+        ensureCacheDir(dir)
+      end
 
       downloadFile(filePath, function(content, dlErr)
         if dlErr or not content then
@@ -346,6 +428,7 @@ local function applyUpdate(callback, onProgress)
           warn("[Updater] Failed: " .. filePath .. " - " .. tostring(dlErr))
         else
           writeFile(filePath, content)
+          writeCacheFile(filePath, content)
         end
         schedule(DOWNLOAD_DELAY_MS, downloadNext)
       end)
@@ -502,7 +585,7 @@ function Updater.getState()
   }
 end
 
-function Updater.getLocalVersion() return readLocalVersion() end
+function Updater.getLocalVersion() return effectiveLocalVersion() end
 
 --- Diagnostic: print detected HTTP backend to chat
 function Updater.probeHttp()

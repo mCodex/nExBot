@@ -118,6 +118,7 @@ storage.analyzers = storage.analyzers or {}
 storage.analyzers.trackedLoot = storage.analyzers.trackedLoot or {}
 storage.analyzers.trackedBoss = storage.analyzers.trackedBoss or {}
 storage.analyzers.outfits = storage.analyzers.outfits or {}
+storage.analyzers.customPrices = storage.analyzers.customPrices or {}
 
 local trackedLoot = storage.analyzers.trackedLoot
 
