@@ -172,7 +172,7 @@ Withdraw items from the depot, depot box, or inbox.
 
 ---
 
-## Walking Engine (v3.3)
+## Walking Engine (v3.4)
 
 The walking engine is the heart of CaveBot. It handles pathfinding, field avoidance, and floor-change safety.
 
@@ -236,25 +236,26 @@ CaveBot processes waypoints sequentially. Each action's callback returns one of 
 
 ## Waypoint Recovery
 
-When the bot detects it's stuck (multiple consecutive failures or no progress for 2+ seconds), it transitions through a state machine:
+When the bot detects it's stuck (consecutive failures or no progress for 2+ seconds), it transitions through a simple state machine:
 
 ```text
-NORMAL → STUCK → RECOVERING → (success) → NORMAL
-                            → (exhaust all strategies) → STOPPED → reset → NORMAL
+NORMAL → RECOVERING → (success) → NORMAL
+                   → (timeout) → STOPPED → backoff → NORMAL
 ```
 
-### Recovery Strategies (ordered by cost)
+### Recovery: Distance-First Scan
 
-| # | Strategy | Description |
-|---|----------|-------------|
-| 1 | Ignore creatures | Re-try current waypoint allowing creature pass-through |
-| 2 | Forward search | Find nearest reachable waypoint ahead in the route |
-| 3 | Global search | Route-aware search across all waypoints (max 8 candidates) |
-| 4 | Backward search | Check up to 100 previous waypoints |
-| 5 | Extended global | Larger radius, cross-floor (max 8 candidates) |
-| 6 | Skip waypoint | Last resort — move to the next waypoint |
+Recovery uses a single **distance-first scan** — no multi-strategy escalation:
 
-Recovery focuses the target waypoint directly and resets retries for a clean execution.
+| # | Pass | Description |
+|---|------|-------------|
+| 1 | Same-floor scan | Sort all goto WPs by chebyshev distance, path-validate top 20 |
+| 2 | Cross-floor scan | Check adjacent floors (±1 z), return closest by manhattan |
+| 3 | Skip waypoint | Last resort — advance to the next waypoint in the list |
+
+Blacklisted waypoints (stuck within the last 60s, adaptive up to 5 min) are filtered out before scanning. This prevents ping-pong loops where the bot keeps returning to the same failing waypoint.
+
+Recovery focuses the target waypoint directly and resets retries for a clean start.
 
 ---
 

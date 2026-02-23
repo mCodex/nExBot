@@ -1,12 +1,31 @@
 # nExBot
 
+![Version](https://img.shields.io/badge/version-3.3.5-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Lua](https://img.shields.io/badge/Lua-5.1-purple)
+
 **A high-performance automation bot for OTClientV8 (vBot) and OpenTibiaBR (OTCR) with AI-powered combat, real-time analytics, and intelligent navigation.**
+
+> [!NOTE]
+> nExBot runs on both **vBot (OTClientV8)** and **OTCR (OpenTibiaBR)** — the client is auto-detected at startup, no manual configuration needed.
+
+---
+
+## Table of Contents
+
+- [What is nExBot?](#what-is-nexbot)
+- [Quick Start](#quick-start)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
 ## What is nExBot?
 
-nExBot is a modular Tibia bot that automates hunting, healing, navigation, and analytics. It runs on both vBot (OTClientV8) and OTCR (OpenTibiaBR) — the client is auto-detected at startup, no configuration needed.
+nExBot is a modular Tibia bot that automates hunting, healing, navigation, and analytics.
 
 ### Core Modules
 
@@ -53,13 +72,16 @@ See the full [Installing guide](docs/INSTALLING.md) for step-by-step instruction
 3. **CaveBot** — Load a pre-built config or record waypoints (Cave tab → Show Editor).
 4. **AttackBot** — Set attack spell rotation (Main tab → AttackBot).
 
+> [!TIP]
+> Load a pre-built config from `cavebot_configs/` for the fastest setup — **50+ routes** are included for popular hunting spots.
+
 ### 4. Hunt
 
 Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress in **Hunt Analyzer**.
 
 ---
 
-## Highlights
+## Features
 
 ### TargetBot — AI Combat
 - **AttackStateMachine** — sole attack issuer, eliminates attack-once-then-stop bugs
@@ -68,7 +90,7 @@ Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress i
 - **Movement coordination** — intent-based voting resolves wave avoidance, keep-distance, AoE positioning, and chase
 
 ### CaveBot — Navigation
-- **Walking engine v3.2** — floor-change prevention, chunked walks, field handling, keyboard fallback
+- **Walking engine v3.4** — floor-change prevention, chunked walks, field handling, keyboard nudge fallback, distance-first recovery
 - **15+ waypoint types** — goto, label, action, buy, sell, lure, standLure, depositor, travel, imbuing, tasker, withdraw
 - **50+ pre-built configs** — Asura, Banuta, Demons, Dragons, Hydras, Nagas, and more
 
@@ -78,9 +100,9 @@ Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress i
 - **Condition handling** — auto-cure poison, paralyze, burn
 
 ### Client Abstraction (ACL)
-- Auto-detects vBot vs. OTCR at startup
-- Unified `ClientService` API for all game operations
-- OTCR-exclusive features (imbuing, stash, forge, prey, market) enabled automatically
+
+> [!IMPORTANT]
+> The ACL auto-detects vBot vs. OTCR at startup — all game operations use a unified `ClientService` API. OTCR-exclusive features (imbuing, stash, forge, prey, market) are enabled automatically.
 
 ---
 
@@ -107,7 +129,7 @@ _Loader.lua (entry point)
 | Pattern | Where |
 |---------|-------|
 | Event-Driven | EventBus, HealBot, TargetBot |
-| State Machine | AttackStateMachine |
+| State Machine | AttackStateMachine, CaveBot WaypointEngine (NORMAL→RECOVERING→STOPPED) |
 | Intent Voting | MovementCoordinator |
 | LRU Cache | Creature configs, pathfinding |
 | Object Pool | Position tables, path entries |
@@ -137,10 +159,13 @@ _Loader.lua (entry point)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. Small, focused PRs preferred. Follow existing Lua style (2-space indentation). Test on multiple servers. Update docs for notable changes.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+> [!WARNING]
+> Always test your changes on multiple servers before submitting a PR. Follow existing Lua style (2-space indentation) and update docs for notable changes.
 
 ---
 
 ## License
 
-MIT License
+[MIT License](LICENSE) — see LICENSE file for details.

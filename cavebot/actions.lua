@@ -409,14 +409,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   }
   local precision = tonumber(posMatch[1][5]) or 1
   local playerPos = player:getPosition()
-  local maxDist = storage.extras.gotoMaxDistance or 50  -- Realistic pathfinding limit
-  
-  -- EARLY CHECK: Was this exact floor-change waypoint just completed?
-  -- This is the most reliable way to prevent re-executing a waypoint we just used
-  if CaveBot.wasFloorChangeWaypointCompleted and CaveBot.wasFloorChangeWaypointCompleted(destPos) then
-    -- This waypoint was already completed - skip it immediately
-    return true
-  end
+  local maxDist = CaveBot.getMaxGotoDistance()
   
   -- MULTI-FLOOR WAYPOINT HANDLING
   -- If the waypoint is on a different Z level, signal failure immediately
@@ -425,12 +418,13 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false, true  -- instantFail: pumps extra recordFailure
   end
 
-  -- Distance calculations
+  -- Distance calculations (chebyshev matches findReachableWaypoint + OTClient diagonal movement)
   local distX = math.abs(destPos.x - playerPos.x)
   local distY = math.abs(destPos.y - playerPos.y)
+  local dist  = math.max(distX, distY)
   
   -- Too far — signal failure for stuck detection
-  if (distX + distY) > maxDist then
+  if dist > maxDist then
     return false, true  -- instantFail: pumps extra recordFailure
   end
 
@@ -495,10 +489,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
       -- Check if we've already changed floors (floor change completed)
       if playerPos.z == expectedFloorAfterChange then
         -- Floor change completed successfully!
-        -- Mark this waypoint as completed so we don't re-execute it
-        if CaveBot.markFloorChangeWaypointCompleted then
-          CaveBot.markFloorChangeWaypointCompleted(destPos)
-        end
         return true
       end
       
@@ -510,7 +500,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
 
   -- Max retries — lower thresholds for faster handoff to WaypointEngine recovery.
-  -- Progressive strategies still activate: attack blocker at retries>2, ignoreCreatures at retries>5.
+  -- Progressive: ignoreCreatures retries>1, blocker attack retries>2, ignoreFields retries>2.
   local maxRetries = CaveBot.Config.get("mapClick") and 4 or 8
   if retries >= maxRetries then
     return false
@@ -544,9 +534,13 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     allowFloorChange = isFloorChange  -- Allow if user explicitly added floor-change waypoint
   }
   
-  -- Use creature ignoring on higher retries
-  if retries > 5 then
+  -- Progressive escalation: ignoreCreatures early so mapClick (maxRetries=4)
+  -- actually benefits; ignoreFields slightly later to match findPathRelaxed.
+  if retries > 1 then
     walkParams.ignoreCreatures = true
+  end
+  if retries > 2 then
+    walkParams.ignoreFields = true
   end
   
   if CaveBot.walkTo(destPos, maxDist, walkParams) then
@@ -562,7 +556,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
   
   -- Walk failed — clear walking state and retry with progressive strategies.
-  -- retries > 2 enables blocking monster attack; retries > 5 enables ignoreCreatures.
+  -- retries > 1 ignoreCreatures; retries > 2 blocker attack + ignoreFields.
   -- retries >= maxRetries returns false, feeding WaypointEngine's recordFailure().
   if CaveBot.clearWalkingState then
     CaveBot.clearWalkingState()

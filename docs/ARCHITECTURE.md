@@ -155,7 +155,7 @@ Each module is error-isolated — a failure in one module doesn't prevent others
 |---------|---------|------------|
 | **Event-Driven** | Efficient reactivity | EventBus, HealBot, TargetBot |
 | **State Machine** | Deterministic attacks | AttackStateMachine |
-| **State Machine** | Stuck detection + recovery | CaveBot WaypointEngine (NORMAL→STUCK→RECOVERING→STOPPED) |
+| **State Machine** | Stuck detection + recovery | CaveBot WaypointEngine (NORMAL→RECOVERING→STOPPED) |
 | **Intent Voting** | Conflict-free movement | MovementCoordinator |
 | **LRU Cache** | Bounded memory | Creature configs, pathfinding |
 | **Negative Cache** | Skip proven-unreachable paths | PathUtils findPath (500ms TTL) |

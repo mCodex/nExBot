@@ -186,6 +186,60 @@ local function getDirectionTo(fromPos, toPos)
   return nil
 end
 
+-- Adjacent directions lookup: for each direction, the two "neighbouring" dirs.
+-- Used by tryKeyboardNudge to find alternate steps when the direct direction is blocked.
+local ADJACENT_DIRS = {
+  [North]     = {NorthWest,  NorthEast},
+  [NorthEast] = {North,      East},
+  [East]      = {NorthEast,  SouthEast},
+  [SouthEast] = {East,       South},
+  [South]     = {SouthEast,  SouthWest},
+  [SouthWest] = {South,      West},
+  [West]      = {SouthWest,  NorthWest},
+  [NorthWest] = {West,       North},
+}
+
+-- Keyboard-step nudge: when pathfinding fails, walk one step toward the
+-- destination using arrow-key movement.  Tries the direct direction first,
+-- then two adjacent directions.  Returns true if a step was taken.
+-- @param playerPos table {x,y,z}
+-- @param dest      table {x,y,z}
+-- @return boolean  true if a step was dispatched
+local function tryKeyboardNudge(playerPos, dest)
+  if not playerPos or not dest then return false end
+  if player:isWalking() then return false end
+
+  local dir = getDirectionTo(playerPos, dest)
+  if dir == nil then return false end
+
+  -- Build candidate list: direct → adjacent-left → adjacent-right
+  local candidates = { dir }
+  local adj = ADJACENT_DIRS[dir]
+  if adj then
+    candidates[2] = adj[1]
+    candidates[3] = adj[2]
+  end
+
+  for _, d in ipairs(candidates) do
+    if canWalkDirection(d) then
+      local off = DIR_TO_OFFSET and DIR_TO_OFFSET[d]
+      -- Extra guard: don't step onto a floor-change tile
+      if off then
+        local target = {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}
+        if not isFloorChangeTile(target) then
+          if PathStrategy then
+            PathStrategy.walkStep(d)
+          else
+            walk(d)
+          end
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
 -- ============================================================================
 -- DIRECTION UTILITIES (Use PathUtils where possible)
 -- ============================================================================
@@ -539,22 +593,8 @@ CaveBot.walkTo = function(dest, maxDist, params)
         CaveBot.clearIntendedFloorChange()
       end
     else
-      -- Unintended floor change - try to step back (with loop protection)
-      local shouldStepBack = true
-      if CaveBot.getRecentFloorChange then
-        local recent = CaveBot.getRecentFloorChange()
-        if recent and recent.toZ == lastWalkZ then
-          -- We'd be going back to a floor we just came from - loop detected
-          shouldStepBack = false
-        end
-      end
-      
-      if shouldStepBack then
-        stepBackToLastSafe(playerPos)
-      else
-        -- Accept the floor change to avoid loop
-        lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-      end
+      -- Unintended floor change — accept it and let WaypointEngine find rescue WPs.
+      lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
       
       lastWalkZ = playerPos.z
       return false
@@ -713,7 +753,9 @@ CaveBot.walkTo = function(dest, maxDist, params)
     end
 
     if not path or #path == 0 then
-      return false
+      -- Pathfinding failed — try a single keyboard step toward the destination.
+      -- This nudges the player into a new position where A* may succeed next tick.
+      return tryKeyboardNudge(playerPos, dest)
     end
 
     if PathStrategy then
@@ -739,23 +781,10 @@ CaveBot.walkTo = function(dest, maxDist, params)
     end
   end
 
-  -- Hard guard: if path crosses any floor-change tile, try a nearby alternate before aborting
-  if pathCrossesFloorChange(path, playerPos, #path) then
-    local altTile, altPath = findSafeAlternate(playerPos, dest, maxDist, {precision = precision, ignoreFields = ignoreFields})
-    if altTile and altPath and #altPath > 0 and not pathCrossesFloorChange(altPath, playerPos, #altPath) then
-      path = altPath
-      if PathStrategy then
-        PathStrategy.setCursor(altPath, dest)
-      else
-        PathCursor.path = altPath
-        PathCursor.idx = 1
-        PathCursor.ts = now
-      end
-    else
-      if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
-      return false
-    end
-  end
+  -- FC-aware walking: safeSteps counts walkable steps before the first
+  -- floor-change tile. walkTo walks only that prefix, so the player makes
+  -- partial progress instead of aborting the entire walk.
+  -- (The old hard guard returned false here, preventing any progress.)
 
   -- Safe-step counting via PathStrategy
   local cursorIdx = PathStrategy and PathStrategy.getCursor().idx or PathCursor.idx or 1
@@ -795,10 +824,10 @@ CaveBot.walkTo = function(dest, maxDist, params)
       if safeSteps > 0 then
         path = altPath
       else
-        return false
+        return tryKeyboardNudge(playerPos, dest)
       end
     else
-      return false
+      return tryKeyboardNudge(playerPos, dest)
     end
   end
   
@@ -812,7 +841,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
 
   if stepsToWalk <= 0 then
     if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
-    return false
+    return tryKeyboardNudge(playerPos, dest)
   end
 
   -- Track destination for path continuity
@@ -1119,12 +1148,6 @@ onPlayerPositionChange(function(newPos, oldPos)
       CaveBot.recordFloorChange(oldPos.z, newPos.z, nil)
     end
     
-    -- Mark the floor-change waypoint (the old position) as completed
-    -- This prevents re-execution of the same waypoint
-    if CaveBot.markFloorChangeWaypointCompleted then
-      CaveBot.markFloorChangeWaypointCompleted({x = oldPos.x, y = oldPos.y, z = oldPos.z})
-    end
-    
     -- Clear the intended flag now that floor change completed
     if CaveBot.clearIntendedFloorChange then
       CaveBot.clearIntendedFloorChange()
@@ -1133,59 +1156,11 @@ onPlayerPositionChange(function(newPos, oldPos)
     return  -- Done - no warning, no step-back
   end
 
-  -- ACCIDENTAL floor change - not triggered by a floor-change waypoint
-    -- Throttle unintended floor-change handling to avoid repeated step-back loops
-    local delay = getFloorChangeHandleDelay()
-    if now - floorChangeThrottle.lastUnintended < delay then
-      lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
-      resetStepBackAttempts()
-      resetFloorChangeCacheThrottled()
-      if CaveBot.recordFloorChange then
-        CaveBot.recordFloorChange(oldPos.z, newPos.z, nil)
-      end
-      return
-    end
-    floorChangeThrottle.lastUnintended = now
-
-  -- But it might still be from a recently completed floor change
-  -- (e.g., the intendedFloorChange was cleared but we're still processing)
-  
-  -- Check if this matches a recent floor change we recorded
-  local shouldStepBack = true
-  if CaveBot.getRecentFloorChange then
-    local recent = CaveBot.getRecentFloorChange()
-    if recent then
-      -- We have a recent floor change record
-      if recent.toZ == newPos.z then
-        -- We just changed TO this floor recently - this is probably intentional
-        -- Accept it without stepping back
-        shouldStepBack = false
-        lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
-        resetStepBackAttempts()
-        FloorChangeCache.tiles = {}
-        return  -- Done - treat as intentional
-      end
-      
-      if recent.toZ == oldPos.z then
-        -- We just came FROM that floor - stepping back would loop
-        shouldStepBack = false
-      end
-    end
-  end
-  
-  -- Also limit step-back attempts to prevent infinite loops
-  if stepBackAttempts >= MAX_STEP_BACK_ATTEMPTS then
-    shouldStepBack = false
-  end
-  
-  if shouldStepBack and lastSafePos and lastSafePos.z == oldPos.z then
-    -- Try to step back to the safe position on the previous floor
-    stepBackToLastSafe(newPos)
-  else
-    -- Accept the floor change (either to avoid loop or no safe pos)
-    lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
-    resetStepBackAttempts()
-  end
+  -- ACCIDENTAL floor change — accept it and let WaypointEngine handle recovery.
+  -- Step-back was removed: it fought rescue floor-change waypoints that users place
+  -- to handle accidental falls. The recovery system finds rescue WPs on the new floor.
+  lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
+  resetStepBackAttempts()
   
   -- Record this floor change for loop prevention
   if CaveBot.recordFloorChange then
