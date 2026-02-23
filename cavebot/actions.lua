@@ -382,14 +382,17 @@ end
 CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- ========== EARLY EXITS (no pathfinding) ==========
   
-  -- Skip if actively walking (but don't delay - just retry next tick)
+  -- Skip if actively walking — return "walking" so the main loop does NOT
+  -- increment actionRetries.  Only actual walkTo calls should count as retries;
+  -- inflating retries while walking caused the safety valve / maxRetries to
+  -- abort perfectly valid walks (any destination >7-8 tiles away).
   if player and player:isWalking() then
     -- Check if we've already arrived via EventBus
     if CaveBot.hasArrivedAtWaypoint and CaveBot.hasArrivedAtWaypoint() then
       CaveBot.clearWaypointTarget()
       return true
     end
-    return "retry"  -- Quick retry, no delay
+    return "walking"  -- Don't count walking ticks as retries
   end
 
   -- Parse position

@@ -793,30 +793,32 @@ local function transitionTo(newState)
   
   if newState == "RECOVERING" then
     WaypointEngine.recoveryStartTime = now
-    if WaypointEngine.recoveryAttempt == 0 then
-      -- First entry into recovery: blacklist the current waypoint with adaptive TTL
-      local current = ui and ui.list and ui.list:getFocusedChild()
-      if current and current.action == "goto" then
-        -- Adaptive TTL: doubles on repeated blacklisting (60s → 120s → 240s, cap 300s)
-        -- Purge stale counts every 5 minutes
-        if now - WaypointEngine.blacklistCountsResetTime > WaypointEngine.BLACKLIST_ADAPTIVE_WINDOW then
-          WaypointEngine.blacklistCounts = {}
-          WaypointEngine.blacklistCountsResetTime = now
-        end
-        local hits = (WaypointEngine.blacklistCounts[current] or 0) + 1
-        WaypointEngine.blacklistCounts[current] = hits
-        local ttl = math.min(
-          WaypointEngine.BLACKLIST_TTL * math.pow(2, hits - 1),
-          WaypointEngine.BLACKLIST_MAX_TTL
-        )
-        WaypointEngine.stuckWaypoints[current] = now + ttl
+    -- Always blacklist the current waypoint with adaptive TTL.
+    -- Previously guarded by recoveryAttempt==0. Removed so every failing WP
+    -- gets blacklisted even during strategy escalation.
+    local current = ui and ui.list and ui.list:getFocusedChild()
+    if current and current.action == "goto" then
+      -- Adaptive TTL: doubles on repeated blacklisting (60s → 120s → 240s, cap 300s)
+      -- Purge stale counts every 5 minutes
+      if now - WaypointEngine.blacklistCountsResetTime > WaypointEngine.BLACKLIST_ADAPTIVE_WINDOW then
+        WaypointEngine.blacklistCounts = {}
+        WaypointEngine.blacklistCountsResetTime = now
       end
+      local hits = (WaypointEngine.blacklistCounts[current] or 0) + 1
+      WaypointEngine.blacklistCounts[current] = hits
+      local ttl = math.min(
+        WaypointEngine.BLACKLIST_TTL * math.pow(2, hits - 1),
+        WaypointEngine.BLACKLIST_MAX_TTL
+      )
+      WaypointEngine.stuckWaypoints[current] = now + ttl
     end
     WaypointEngine.recoveryAttempt = WaypointEngine.recoveryAttempt + 1
   elseif newState == "NORMAL" then
     WaypointEngine.failureCount = 0
     WaypointEngine.totalMovement = 0
-    WaypointEngine.recoveryAttempt = 0
+    -- NOTE: recoveryAttempt is NOT reset here. Only recordSuccess() clears it.
+    -- This ensures strategy escalation (1→2→3→4→5→STOPPED) progresses when
+    -- recovery-found waypoints immediately fail their goto callbacks.
   end
 end
 
@@ -824,6 +826,7 @@ local function recordSuccess()
   WaypointEngine.failureCount = 0
   WaypointEngine.walkToFailCount = 0
   WaypointEngine.stoppedCount = 0
+  WaypointEngine.recoveryAttempt = 0  -- Reset strategy escalation on actual success
   -- Track last completed goto index for TSP forward-bias scoring
   local focused = ui and ui.list and ui.list:getFocusedChild()
   if focused and focused.action == "goto" then
@@ -863,6 +866,9 @@ end
 -- @param targetChild widget The waypoint widget to focus
 -- @param targetIndex number The index of the waypoint (unused, kept for API compat)
 focusWaypointForRecovery = function(targetChild, targetIndex)
+  -- Cancel any ongoing walk from the previous waypoint so the new WP's
+  -- goto callback starts with a clean slate (player not walking).
+  if CaveBot.stopAutoWalk then CaveBot.stopAutoWalk() end
   ui.list:focusChild(targetChild)
   actionRetries = 0
   WaypointEngine.recoveryJustFocused = true
@@ -1324,12 +1330,18 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   end
   
   -- Handle result
+  if result == "walking" then
+    -- Player is actively walking toward destination; don't count this tick
+    -- as a retry.  Only walkTo invocations should increment actionRetries.
+    return
+  end
+
   if result == "retry" then
     actionRetries = actionRetries + 1
     -- Safety valve: if action retries indefinitely, record as failure.
     -- Goto threshold aligned slightly above goto's own maxRetries (8)
     -- so WaypointEngine triggers recovery, not just the action itself.
-    local retryLimit = (actionType == "goto") and 10 or 8
+    local retryLimit = (actionType == "goto") and 16 or 8
     if actionRetries > retryLimit then
       recordFailure(actionType == "goto")
     end
