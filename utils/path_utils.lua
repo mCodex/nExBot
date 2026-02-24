@@ -195,7 +195,7 @@ local CACHE_CLEANUP_INTERVAL = 5000
 local lastCacheCleanup = 0
 
 -- Pure: Check if position is floor-change tile (cached with per-entry TTL)
--- Uses integer key: x*100000+y*100+z — zero allocation vs string concat
+-- Uses integer key: pos.x * 1048576 + pos.y * 16 + pos.z — zero allocation vs string concat
 function PathUtils.isFloorChangeTile(pos)
   if not pos then return false end
   

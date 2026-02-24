@@ -176,7 +176,9 @@ end
 -- DRY: Single source of truth for gotoMaxDistance with fallback.
 -- Used by goto callback, findReachableWaypoint, startup search, floor-change recovery.
 CaveBot.getMaxGotoDistance = function()
-  return (storage and storage.extras and storage.extras.gotoMaxDistance) or 50
+  local raw = storage and storage.extras and storage.extras.gotoMaxDistance
+  local n = tonumber(raw)
+  return (n and n > 0) and n or 50
 end
 
 -- Mark that we're intentionally changing floors (called from goto action)

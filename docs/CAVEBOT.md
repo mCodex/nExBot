@@ -272,7 +272,7 @@ Goto-type waypoints are preferred during recovery since they have verified walka
 
 When recovery blacklists a waypoint, it uses **exponential decay** instead of permanent blacklists:
 
-```
+```text
 TTL = base_ttl * 2^(fail_count - 1)     capped at 120s
 ```
 
