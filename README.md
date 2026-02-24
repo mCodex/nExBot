@@ -79,6 +79,13 @@ See the full [Installing guide](docs/INSTALLING.md) for step-by-step instruction
 
 Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress in **Hunt Analyzer**.
 
+### ⚠️ Note for OT Developers
+
+> [!CAUTION]
+> **Do NOT place nExBot inside a `mods/` folder or custom mod directory.** The auto-updater requires write access to the user-data `bot/` path — mod folders are read-only at runtime, so updates will fail silently.
+
+👉 See the [Installing guide — Auto-Updater section](docs/INSTALLING.md#%EF%B8%8F-auto-updater--custom-mod-folders-ot-developers) for the full explanation and correct folder setup.
+
 ---
 
 ## Features

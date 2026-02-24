@@ -126,6 +126,41 @@ Your per-character profiles are stored in `storage/` and will persist across upd
 
 ---
 
+## ⚠️ Auto-Updater &amp; Custom Mod Folders (OT Developers)
+
+> [!CAUTION]
+> **The auto-updater does NOT work if nExBot is placed inside a `mods/` folder or any custom mod directory.**
+
+nExBot's auto-updater writes to the **user-data `bot/` directory** (e.g. `~/.local/share/<client>/<server>/bot/nExBot/`). The Lua sandbox can only write files to user-data paths — mod folders are read-only at runtime.
+
+If you are an OT server developer distributing nExBot with your client:
+
+### ❌ What breaks the updater
+
+| Setup | Why it breaks |
+|-------|---------------|
+| 📦 Bundling nExBot inside `mods/` | Mod folders are read-only — cache writes fail silently |
+| 📦 Custom mod directory (e.g. `custom_mods/nExBot/`) | Same restriction — sandbox `g_resources` cannot write outside user-data |
+| 📦 Symlinking `bot/nExBot` → a mod folder | Symlinks resolve to the mod path — writes still fail |
+
+### ✅ Correct setup
+
+```text
+<user-data>/
+├── bot/
+│   └── nExBot/          ← ✅ auto-updater works here
+│       ├── _Loader.lua
+│       ├── core/
+│       └── ...
+└── mods/
+    └── nExBot/          ← ❌ updater CANNOT write here
+```
+
+> [!TIP]
+> 💡 If you **must** ship nExBot with your client distribution, place it in `bot/` inside the user-data directory — not in `mods/`. The auto-updater will then keep it up-to-date automatically.
+
+---
+
 ## Folder Structure
 
 After installation, the full directory tree looks like:
