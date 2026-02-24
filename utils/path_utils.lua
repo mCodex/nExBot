@@ -210,7 +210,7 @@ function PathUtils.isFloorChangeTile(pos)
     lastCacheCleanup = now
   end
   
-  local key = pos.x * 100000 + pos.y * 100 + pos.z
+  local key = pos.x * 1048576 + pos.y * 16 + pos.z
   local cached = floorChangeCache[key]
   if cached and now - cached.time < CACHE_TTL then
     return cached.value

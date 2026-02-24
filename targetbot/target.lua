@@ -74,11 +74,6 @@ local function validateCreature(creature)
     return { valid = false }
   end
   
-  -- Use PathUtils.validateCreature if available (optimized single pcall)
-  if PathUtils and PathUtils.validateCreature then
-    return PathUtils.validateCreature(creature)
-  end
-  
   -- Fallback: single pcall to get all properties at once
   local ok, result = pcall(function()
     return {

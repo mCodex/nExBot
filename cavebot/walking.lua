@@ -186,60 +186,6 @@ local function getDirectionTo(fromPos, toPos)
   return nil
 end
 
--- Adjacent directions lookup: for each direction, the two "neighbouring" dirs.
--- Used by tryKeyboardNudge to find alternate steps when the direct direction is blocked.
-local ADJACENT_DIRS = {
-  [North]     = {NorthWest,  NorthEast},
-  [NorthEast] = {North,      East},
-  [East]      = {NorthEast,  SouthEast},
-  [SouthEast] = {East,       South},
-  [South]     = {SouthEast,  SouthWest},
-  [SouthWest] = {South,      West},
-  [West]      = {SouthWest,  NorthWest},
-  [NorthWest] = {West,       North},
-}
-
--- Keyboard-step nudge: when pathfinding fails, walk one step toward the
--- destination using arrow-key movement.  Tries the direct direction first,
--- then two adjacent directions.  Returns true if a step was taken.
--- @param playerPos table {x,y,z}
--- @param dest      table {x,y,z}
--- @return boolean  true if a step was dispatched
-local function tryKeyboardNudge(playerPos, dest)
-  if not playerPos or not dest then return false end
-  if player:isWalking() then return false end
-
-  local dir = getDirectionTo(playerPos, dest)
-  if dir == nil then return false end
-
-  -- Build candidate list: direct → adjacent-left → adjacent-right
-  local candidates = { dir }
-  local adj = ADJACENT_DIRS[dir]
-  if adj then
-    candidates[2] = adj[1]
-    candidates[3] = adj[2]
-  end
-
-  for _, d in ipairs(candidates) do
-    if canWalkDirection(d) then
-      local off = DIR_TO_OFFSET and DIR_TO_OFFSET[d]
-      -- Extra guard: don't step onto a floor-change tile
-      if off then
-        local target = {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}
-        if not isFloorChangeTile(target) then
-          if PathStrategy then
-            PathStrategy.walkStep(d)
-          else
-            walk(d)
-          end
-          return true
-        end
-      end
-    end
-  end
-  return false
-end
-
 -- ============================================================================
 -- DIRECTION UTILITIES (Use PathUtils where possible)
 -- ============================================================================
@@ -291,6 +237,62 @@ local function isFloorChangeTileFast(tilePos)
     return PathUtils.isFloorChangeTileFast(tilePos)
   end
   return isFloorChangeTile(tilePos)
+end
+
+-- ============================================================================
+-- KEYBOARD NUDGE (fallback when pathfinding fails)
+-- ============================================================================
+
+-- Adjacent directions lookup derived from Directions.ADJACENT (DRY).
+-- Flattened to ordered arrays so tryKeyboardNudge can iterate left/right.
+local ADJACENT_DIRS = {}
+if Directions and Directions.ADJACENT then
+  for dir, neighbours in pairs(Directions.ADJACENT) do
+    local arr = {}
+    for nd, _ in pairs(neighbours) do arr[#arr + 1] = nd end
+    ADJACENT_DIRS[dir] = arr
+  end
+end
+
+-- Keyboard-step nudge: when pathfinding fails, walk one step toward the
+-- destination using arrow-key movement.  Tries the direct direction first,
+-- then two adjacent directions.  Returns true if a step was taken.
+-- @param playerPos table {x,y,z}
+-- @param dest      table {x,y,z}
+-- @return boolean  true if a step was dispatched
+local function tryKeyboardNudge(playerPos, dest)
+  if not playerPos or not dest then return false end
+  if player:isWalking() then return false end
+
+  local dir = getDirectionTo(playerPos, dest)
+  if dir == nil then return false end
+
+  -- Build candidate list: direct → adjacent-left → adjacent-right
+  local candidates = { dir }
+  local adj = ADJACENT_DIRS[dir]
+  if adj then
+    candidates[2] = adj[1]
+    candidates[3] = adj[2]
+  end
+
+  for _, d in ipairs(candidates) do
+    if canWalkDirection(d) then
+      local off = DIR_TO_OFFSET and DIR_TO_OFFSET[d]
+      -- Extra guard: don't step onto a floor-change tile
+      if off then
+        local target = {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}
+        if not isFloorChangeTile(target) then
+          if PathStrategy then
+            PathStrategy.walkStep(d)
+          else
+            walk(d)
+          end
+          return true
+        end
+      end
+    end
+  end
+  return false
 end
 
 -- ============================================================================

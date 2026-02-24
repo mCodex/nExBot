@@ -294,8 +294,8 @@ The goto action detects unreachable waypoints early and signals instant failure:
 
 | Condition | Response |
 |-----------|----------|
-| Wrong floor (`destPos.z ~= playerPos.z`) | Returns `false` with `instantFail` — pumps 3 failures + timed blacklist (120s) |
-| Too far (`dist > maxDist`) | Returns `false` with `instantFail` — same fast-track recovery |
+| Wrong floor (`destPos.z ~= playerPos.z`) | Returns `false` with `instantFail` — pumps 3 failures + exponential blacklist (base 15s, doubling per failure via `BLACKLIST_BASE_TTL * 2^(failCount-1)`, capped at 120s) |
+| Too far (`dist > maxDist`) | Returns `false` with `instantFail` — same exponential blacklist + fast-track recovery |
 | Max retries exceeded (`retries >= 4 or 8`) | Returns `false` — feeds `recordFailure()` for stuck detection |
 
 Instant failures trigger the WaypointEngine's recovery within a single macro tick (3 failures = recovery threshold).

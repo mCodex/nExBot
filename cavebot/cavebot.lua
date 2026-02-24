@@ -176,7 +176,7 @@ end
 -- DRY: Single source of truth for gotoMaxDistance with fallback.
 -- Used by goto callback, findReachableWaypoint, startup search, floor-change recovery.
 CaveBot.getMaxGotoDistance = function()
-  return storage.extras.gotoMaxDistance or 50
+  return (storage and storage.extras and storage.extras.gotoMaxDistance) or 50
 end
 
 -- Mark that we're intentionally changing floors (called from goto action)
@@ -1227,7 +1227,7 @@ end
 
 CaveBot.blacklistWaypoint = function(child, ttl)
   if not child then return end
-  WaypointEngine.stuckWaypoints[child] = now + (ttl or WaypointEngine.BLACKLIST_TTL)
+  WaypointEngine.stuckWaypoints[child] = now + (ttl or WaypointEngine.BLACKLIST_BASE_TTL)
 end
 
 -- ============================================================================
@@ -1341,6 +1341,7 @@ findReachableWaypoint = function(playerPos, options)
 
     candidates[#candidates + 1] = {
       index = i, dist = dist, child = wp.child,
+      x = wp.x, y = wp.y, z = wp.z,
       isGoto = wp.isGoto, withinRange = (dist <= maxDist)
     }
     ::continue::

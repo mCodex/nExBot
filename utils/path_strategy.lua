@@ -132,16 +132,20 @@ end
 -- ============================================================================
 
 --- Build native flags from human-readable option table.
--- Caches result on the opts table to avoid recomputation on same-reference calls.
+-- Module-level 1-entry cache to avoid recomputation without mutating caller opts.
+local _flagsCacheRef = nil   -- last opts table reference
+local _flagsCacheVal = 0     -- cached flags for that reference
+
 local function optsToFlags(opts)
-  if opts._cachedFlags then return opts._cachedFlags end
+  if opts == _flagsCacheRef then return _flagsCacheVal end
   local flags = 0
   if opts.allowUnseen       then flags = flags + PF_ALLOW_NOT_SEEN end
   if opts.allowCreatures    then flags = flags + PF_ALLOW_CREATURES end
   if opts.ignoreNonPathable then flags = flags + PF_ALLOW_NON_PATHABLE end
   if opts.ignoreNonWalkable then flags = flags + PF_ALLOW_NON_WALKABLE end
   if opts.ignoreCreatures   then flags = flags + PF_IGNORE_CREATURES end
-  opts._cachedFlags = flags
+  _flagsCacheRef = opts
+  _flagsCacheVal = flags
   return flags
 end
 
@@ -214,13 +218,13 @@ function PathStrategy.findPathRelaxed(startPos, goalPos, opts)
   if path then return path, false end
 
   -- Attempt 2: allow non-pathable tiles (relaxes PZ borders, etc.)
-  base._cachedFlags = nil
+  _flagsCacheRef = nil
   base.ignoreNonPathable = true
   path = PathStrategy.findPath(startPos, goalPos, base)
   if path then return path, false end
 
   -- Attempt 3: ignore creatures
-  base._cachedFlags = nil
+  _flagsCacheRef = nil
   base.ignoreCreatures = true
   path = PathStrategy.findPath(startPos, goalPos, base)
   if path then return path, false end
@@ -234,14 +238,14 @@ function PathStrategy.findPathRelaxed(startPos, goalPos, opts)
   end
 
   -- Attempt 4: allow unseen tiles
-  base._cachedFlags = nil
+  _flagsCacheRef = nil
   base.allowUnseen = true
   path = PathStrategy.findPath(startPos, goalPos, base)
   if path then return path, false end
 
   -- Attempt 5: ignore fields (relaxed)
   if not opts.ignoreFields then
-    base._cachedFlags = nil
+    _flagsCacheRef = nil
     base.ignoreFields = true
     path = PathStrategy.findPath(startPos, goalPos, base)
     if path then return path, true end
@@ -718,7 +722,9 @@ end
 -- Resolve on first external access via module metatable
 setmetatable(PathStrategy, {
   __index = function(t, k)
-    _resolveConvenience()
+    if not _convenienceResolved then
+      _resolveConvenience()
+    end
     return rawget(t, k)
   end
 })
