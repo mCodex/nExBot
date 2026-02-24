@@ -371,14 +371,14 @@ local function hasPlayerMoved()
 end
 
 -- Check if we should skip execution
--- Allows mid-walk verification every ~300ms to detect stuck/blocked states
+-- Allows mid-walk verification every ~150ms to detect stuck/blocked states
 local function shouldSkipExecution()
   -- Active delay from previous action
   if now < walkState.delayUntil then
     return true
   end
   
-  -- Player is actively walking — allow through every 300ms for mid-walk verification
+  -- Player is actively walking — allow through every 150ms for mid-walk verification
   if player:isWalking() then
     if not walkState.lastVerifyTime then
       walkState.lastVerifyTime = now
@@ -549,6 +549,15 @@ WaypointEngine = {
   recoveryStartedAt = 0,         -- when current recovery session began
   RECOVERY_IDLE_TIMEOUT = 300000,-- 5 min: clear blacklists if completely stuck
 
+  -- Drift detection: proactive refocus to nearest WP when player drifts too far
+  DRIFT_THRESHOLD_RATIO = 0.5,   -- refocus when dist > maxDist * ratio (default 25 tiles)
+  DRIFT_CHECK_INTERVAL  = 2000,  -- periodic check every 2s
+  DRIFT_HYSTERESIS      = 10,    -- nearest must be >=10 tiles closer to justify switch
+  REFOCUS_COOLDOWN      = 3000,  -- min 3s between refocuses
+  lastDriftCheck    = 0,
+  lastRefocusTime   = 0,
+  wasTargetBotBlocking = false,
+
   -- Performance: avoid redundant UI lookups
   tickCount = 0,
   lastTickTime = 0,
@@ -575,7 +584,7 @@ local function blacklistWaypoint(child)
   local failCount = (WaypointEngine.stuckFailCounts[child] or 0) + 1
   WaypointEngine.stuckFailCounts[child] = failCount
   local ttl = math.min(
-    WaypointEngine.BLACKLIST_BASE_TTL * math.pow(2, failCount - 1),
+    WaypointEngine.BLACKLIST_BASE_TTL * (2 ^ (failCount - 1)),
     WaypointEngine.BLACKLIST_MAX_TTL
   )
   WaypointEngine.stuckWaypoints[child] = now + ttl
@@ -637,6 +646,57 @@ focusWaypointForRecovery = function(targetChild, targetIndex)
   ui.list:focusChild(targetChild)
   actionRetries = 0
   WaypointEngine.recoveryJustFocused = true
+end
+
+-- ============================================================================
+-- DRIFT DETECTION: Proactive nearest-WP refocus
+-- When the player drifts far from the current WP (e.g. after chasing a monster),
+-- find and focus the nearest reachable WP instead of walking all the way back.
+-- ============================================================================
+
+local function maybeRefocusNearestWaypoint(playerPos)
+  if not playerPos then return false end
+  -- Only in NORMAL state (RECOVERING has its own finder)
+  if WaypointEngine.state ~= "NORMAL" then return false end
+  -- Don't interrupt mid-walk
+  if player:isWalking() then return false end
+  -- Cooldown
+  if (now - WaypointEngine.lastRefocusTime) < WaypointEngine.REFOCUS_COOLDOWN then return false end
+
+  -- Get current WP position from cache
+  buildWaypointCache()
+  local currentIdx = 0
+  if ui and ui.list then
+    local focused = ui.list:getFocusedChild()
+    if focused then currentIdx = ui.list:getChildIndex(focused) end
+  end
+  if currentIdx == 0 then return false end
+
+  local currentWp = waypointPositionCache[currentIdx]
+  if not currentWp then return false end
+  -- Skip if player is on a different floor (floor-change logic handles that)
+  if currentWp.z ~= playerPos.z then return false end
+
+  local currentDist = chebyshevDist(playerPos, currentWp)
+  local threshold = math.floor(CaveBot.getMaxGotoDistance() * WaypointEngine.DRIFT_THRESHOLD_RATIO)
+  if currentDist <= threshold then return false end
+
+  -- Player is far from current WP — find nearest reachable goto WP
+  local bestChild, bestIdx = findReachableWaypoint(playerPos, { excludeCurrent = true })
+  if not bestChild then return false end
+
+  local bestWp = waypointPositionCache[bestIdx]
+  if not bestWp then return false end
+  local bestDist = chebyshevDist(playerPos, bestWp)
+
+  -- Hysteresis: only switch if the nearest WP is meaningfully closer
+  if (currentDist - bestDist) < WaypointEngine.DRIFT_HYSTERESIS then return false end
+
+  -- Refocus to the nearer waypoint
+  print("[CaveBot] Drift detected (" .. currentDist .. " tiles from WP" .. currentIdx .. ") — refocusing to WP" .. bestIdx .. " (" .. bestDist .. " tiles)")
+  focusWaypointForRecovery(bestChild, bestIdx)
+  WaypointEngine.lastRefocusTime = now
+  return true
 end
 
 local function executeRecovery()
@@ -710,6 +770,9 @@ resetWaypointEngine = function()
   WaypointEngine.recoveryJustFocused = false
   WaypointEngine.lastRecoverySearch = 0
   WaypointEngine.recoveryStartedAt = 0
+  WaypointEngine.lastDriftCheck = 0
+  WaypointEngine.lastRefocusTime = 0
+  WaypointEngine.wasTargetBotBlocking = false
   lastDispatchedChild = nil
 end
 
@@ -866,15 +929,18 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   end
   
   -- Check TargetBot allows CaveBot action (cached function refs)
+  local targetBotBlocking = false
   if targetBotIsActive and targetBotIsActive() then
     if targetBotIsCaveBotAllowed and not targetBotIsCaveBotAllowed() then
       safeResetWalking()
+      WaypointEngine.wasTargetBotBlocking = true
       return
     end
     
     -- PULL SYSTEM PAUSE: If smartPull is active, pause waypoint walking
     if TargetBot.smartPullActive then
       safeResetWalking()
+      WaypointEngine.wasTargetBotBlocking = true
       return
     end
     
@@ -886,6 +952,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     if TargetBot.shouldWaitForMonsters and TargetBot.shouldWaitForMonsters() then
       -- There are monsters that need to be killed - pause cavebot
       safeResetWalking()
+      WaypointEngine.wasTargetBotBlocking = true
       return
     end
     
@@ -894,6 +961,29 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       -- Only pause if we're NOT allowed by TargetBot
       if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
         safeResetWalking()
+        WaypointEngine.wasTargetBotBlocking = true
+        return
+      end
+    end
+  end
+  
+  -- DRIFT DETECTION: Proactive nearest-WP refocus
+  -- Trigger 1: Combat just ended (TargetBot was blocking, now allows CaveBot)
+  if WaypointEngine.wasTargetBotBlocking then
+    WaypointEngine.wasTargetBotBlocking = false
+    local pp = pos()
+    if pp and maybeRefocusNearestWaypoint(pp) then
+      -- Refocused — let the next tick handle the new WP
+      return
+    end
+  end
+  
+  -- Trigger 2: Periodic drift check (every 2s, only when idle)
+  if (now - WaypointEngine.lastDriftCheck) >= WaypointEngine.DRIFT_CHECK_INTERVAL then
+    WaypointEngine.lastDriftCheck = now
+    if not player:isWalking() then
+      local pp = pos()
+      if pp and maybeRefocusNearestWaypoint(pp) then
         return
       end
     end
@@ -1229,7 +1319,12 @@ end
 
 CaveBot.blacklistWaypoint = function(child, ttl)
   if not child then return end
-  WaypointEngine.stuckWaypoints[child] = now + (ttl or WaypointEngine.BLACKLIST_BASE_TTL)
+  -- Delegate to internal blacklistWaypoint to preserve stuckFailCounts + exponential decay
+  blacklistWaypoint(child)
+  -- Allow caller to override TTL if explicitly provided
+  if ttl then
+    WaypointEngine.stuckWaypoints[child] = now + ttl
+  end
 end
 
 -- ============================================================================
@@ -1237,11 +1332,25 @@ end
 -- ============================================================================
 
 -- Parse position from any waypoint text that contains coordinates.
--- Supports "goto:x,y,z", "stand:x,y,z", "lure:x,y,z", "use:x,y,z,..." etc.
--- @param text string e.g. "goto:1234,5678,7" or "stand:1234,5678,7"
+-- Supports "goto:x,y,z[,precision]", "stand:x,y,z", "lure:x,y,z", "use:x,y,z", etc.
+-- Also handles "usewith:itemid,x,y,z" where the first value is an item ID.
+-- @param text string e.g. "goto:1234,5678,7" or "usewith:3003,1234,5678,7"
 -- @return table {x, y, z} or nil
 local function parseWaypointPosition(text)
   if not text then return nil end
+  -- Detect usewith prefix: format is "usewith:itemid,x,y,z" — skip itemid
+  local prefix = text:match("^(%w+):")
+  if prefix and prefix:lower() == "usewith" then
+    local re4 = regexMatch(text, [[(?:\w+:)([^,]+),([^,]+),([^,]+),([^,]+)]])
+    if re4 and re4[1] then
+      local x = tonumber(re4[1][3])
+      local y = tonumber(re4[1][4])
+      local z = tonumber(re4[1][5])
+      if x and y and z then return { x = x, y = y, z = z } end
+    end
+    return nil
+  end
+  -- Standard 3-value format: "prefix:x,y,z" (extra trailing values like precision are ignored)
   local re = regexMatch(text, [[(?:\w+:)([^,]+),([^,]+),([^,]+)]])
   if not re or not re[1] then return nil end
   local x = tonumber(re[1][2])
@@ -1259,8 +1368,6 @@ end
 
 -- Distance functions: delegate to SSoT (constants/directions.lua)
 -- chebyshevDist is already resolved at forward-declaration above.
--- manhattanDist is only used locally in this section.
-local manhattanDist = Directions.manhattanDistance
 
 -- ============================================================================
 -- WAYPOINT CACHE (DRY: Single source of truth for waypoint positions)
@@ -1412,7 +1519,7 @@ findReachableWaypoint = function(playerPos, options)
         local best, bestDist, bestIdx = nil, math.huge, 0
         for i, wp in pairs(waypointPositionCache) do
           if wp.z == floorZ and not isWaypointBlacklisted(wp.child) then
-            local d = manhattanDist(playerPos, wp)
+            local d = chebyshevDist(playerPos, wp)
             if d < bestDist then
               best, bestDist, bestIdx = wp.child, d, i
             end
