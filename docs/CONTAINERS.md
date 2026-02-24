@@ -1,10 +1,10 @@
-# Containers
+# 📦 Containers
 
 Automated container management, auto-opening, and quiver handling.
 
 ---
 
-## Overview
+## 📖 Overview
 
 The Containers module manages your backpacks and their contents automatically. It opens containers on login, organizes items between backpacks, and handles quiver ammunition for paladins.
 
@@ -19,7 +19,7 @@ Key capabilities:
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 1. Open the **Containers** panel from the Main tab.
 2. Assign roles to your container slots:
@@ -31,7 +31,7 @@ Key capabilities:
 
 ---
 
-## Container Roles
+## 🏷️ Container Roles
 
 ### Main Backpack
 
@@ -51,7 +51,7 @@ Holds your attack and utility runes. AttackBot pulls runes from here during comb
 
 ---
 
-## Auto-Open System
+## 🔓 Auto-Open System
 
 The Container Opener (v12) uses a sophisticated BFS queue system:
 
@@ -76,7 +76,7 @@ The queue uses slot-based keys (`containerId:absoluteSlotIndex`) for robust dedu
 
 ---
 
-## Quiver Management
+## 🏹 Quiver Management
 
 For Paladins, the quiver system handles ammunition automatically:
 
@@ -96,7 +96,7 @@ Quiver management is enabled by default — no toggle needed.
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
 | Setting | Description | Default |
 |---------|-------------|---------|
@@ -109,7 +109,7 @@ Quiver management is enabled by default — no toggle needed.
 
 ---
 
-## Setup Examples
+## 📐 Setup Examples
 
 ### Knight
 
@@ -141,7 +141,7 @@ Main BP: Jewelled Backpack
 
 ---
 
-## EventBus Integration
+## 🔗 EventBus Integration
 
 ```lua
 -- Subscribe to container events
@@ -154,7 +154,7 @@ The `onAddItem` handler queues new container items for opening, and `onContainer
 
 ---
 
-## Troubleshooting
+## ❓ Troubleshooting
 
 ### Containers not opening on login
 

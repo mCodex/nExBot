@@ -282,22 +282,10 @@ local liveMonsterState = {
 local function isTargetableMonster(creature)
   if not creature then return false end
   
-  -- Use PathUtils for optimized validation
-  if PathUtils and PathUtils.validateCreature then
-    local cv = PathUtils.validateCreature(creature)
-    if not cv.valid then return false end
-    if cv.isDead then return false end
-    if not cv.isMonster then return false end
-    if cv.healthPercent and cv.healthPercent <= 0 then return false end
-    
-    -- For old Tibia, all monsters are targetable
-    if liveMonsterState.oldTibia then return true end
-    
-    -- Check creature type
-    if cv.creatureType and cv.creatureType >= 3 then
-      return false  -- Summon
-    end
-    
+  -- Use PathUtils for optimized validation (single pcall, covers dead/monster/summon)
+  if PathUtils and PathUtils.isValidMonsterTarget then
+    if not PathUtils.isValidMonsterTarget(creature) then return false end
+    -- For old Tibia, all monsters are targetable (summon check already handled)
     return true
   end
   

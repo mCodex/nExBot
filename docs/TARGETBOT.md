@@ -1,10 +1,10 @@
-# TargetBot
+# 🎯 TargetBot
 
 AI-powered creature targeting, combat positioning, and behavior prediction.
 
 ---
 
-## Overview
+## 📖 Overview
 
 TargetBot is the combat brain of nExBot. It decides **what** to attack, **when** to switch targets, and **how** to position your character — all while learning monster behavior in real time through the Monster Insights AI system.
 
@@ -22,7 +22,7 @@ Key capabilities:
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 1. Open the **Target** tab.
 2. Click **+** to add a creature.
@@ -32,7 +32,7 @@ Key capabilities:
 
 ---
 
-## Target Selection
+## 🎯 Target Selection
 
 ### Pattern Matching
 
@@ -68,7 +68,7 @@ The creature with the highest score becomes the active target.
 
 ---
 
-## Attack State Machine
+## ⚙️ Attack State Machine
 
 All attacks in nExBot go through a single **AttackStateMachine** (ASM). No other module is allowed to call `g_game.attack()` directly — this eliminates the classic "attack once then stop" bug caused by competing attack issuers.
 
@@ -98,7 +98,7 @@ IDLE → ACQUIRING → CONFIRMING → ATTACKING → RECOVERING → IDLE
 
 ---
 
-## Monster Insights (AI System)
+## 🧠 Monster Insights (AI System)
 
 Monster Insights is a machine-learning subsystem made up of 12 specialized modules. It runs in the background, collecting data on every monster you encounter, and feeds its analysis into the targeting and movement systems.
 
@@ -152,7 +152,7 @@ Automatically adjusts the danger rating of monster types:
 
 ---
 
-## Movement Coordination
+## 🚶 Movement Coordination
 
 TargetBot uses an **intent-based voting system** for movement. Multiple subsystems can request movement, and the MovementCoordinator resolves conflicts:
 
@@ -183,7 +183,7 @@ Movement thresholds automatically scale based on nearby monster count:
 
 ---
 
-## Engagement Lock (Anti-Zigzag)
+## 🔒 Engagement Lock (Anti-Zigzag)
 
 The Scenario Manager prevents the bot from rapidly switching between targets:
 
@@ -205,7 +205,7 @@ The engagement lock adds a **+1000 priority bonus** to the current target, makin
 
 ---
 
-## Looting
+## 💰 Looting
 
 TargetBot includes an integrated looting system:
 
@@ -236,7 +236,7 @@ The looting system uses a **Loot Lock** protocol to prevent the Container Panel'
 
 ---
 
-## Creature Editor
+## ✏️ Creature Editor
 
 The creature editor lets you configure per-monster behavior:
 
@@ -254,7 +254,7 @@ The creature editor lets you configure per-monster behavior:
 
 ---
 
-## Reachability System
+## 📍 Reachability System
 
 TargetBot caches pathfinding results per creature to avoid repeated expensive calculations:
 
@@ -265,7 +265,7 @@ TargetBot caches pathfinding results per creature to avoid repeated expensive ca
 
 ---
 
-## Exeta Res (Challenge)
+## 📣 Exeta Res (Challenge)
 
 The Exeta Res module automatically casts `exeta res` (challenge) to attract monsters to you. Useful for knights who need to maintain aggro during team hunts:
 
@@ -275,7 +275,7 @@ The Exeta Res module automatically casts `exeta res` (challenge) to attract mons
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
 ### Creature Configs
 
@@ -305,7 +305,7 @@ Stored as JSON files in `targetbot_configs/`:
 
 ---
 
-## Monster Inspector
+## 🔍 Monster Inspector
 
 The Monster Inspector UI shows live data from Monster Insights:
 
@@ -319,7 +319,7 @@ Open it from the Target tab to see what the AI is learning about each monster ty
 
 ---
 
-## Debugging
+## 🐛 Debugging
 
 ```lua
 -- Print full stats summary
@@ -340,7 +340,7 @@ MonsterAI.DEBUG = true
 
 ---
 
-## Troubleshooting
+## ❓ Troubleshooting
 
 ### TargetBot not attacking
 

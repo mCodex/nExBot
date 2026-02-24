@@ -102,6 +102,21 @@ Directions.OPPOSITE = {
 }
 
 -- ============================================================================
+-- ADJACENT DIRECTIONS (for "similar direction" checks)
+-- ============================================================================
+
+Directions.ADJACENT = {
+  [_North]     = {[_NorthEast] = true, [_NorthWest] = true},
+  [_East]      = {[_NorthEast] = true, [_SouthEast] = true},
+  [_South]     = {[_SouthEast] = true, [_SouthWest] = true},
+  [_West]      = {[_NorthWest] = true, [_SouthWest] = true},
+  [_NorthEast] = {[_North] = true, [_East] = true},
+  [_SouthEast] = {[_East] = true, [_South] = true},
+  [_SouthWest] = {[_South] = true, [_West] = true},
+  [_NorthWest] = {[_West] = true, [_North] = true},
+}
+
+-- ============================================================================
 -- DIRECTION NAMES (for debugging)
 -- ============================================================================
 

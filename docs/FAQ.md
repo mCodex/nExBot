@@ -1,10 +1,10 @@
-# FAQ
+# ❓ FAQ
 
 Frequently asked questions and troubleshooting guide.
 
 ---
 
-## Installation
+## 💻 Installation
 
 ### Where do I install nExBot?
 
@@ -35,7 +35,7 @@ Yes. Copy the `nExBot` folder to each server's bot directory. Configs are per-se
 
 ---
 
-## HealBot
+## 💚 HealBot
 
 ### HealBot isn't healing me
 
@@ -71,7 +71,7 @@ Strongly recommended. Spells cost mana — when you run out, potions are your on
 
 ---
 
-## CaveBot
+## 🧭 CaveBot
 
 ### How do I create waypoints?
 
@@ -91,6 +91,12 @@ Or use the **Recorder** — click Record, walk your route, stop recording.
 - Is there a door or obstacle? Enable Auto Open Doors.
 - Field blocking the path? Enable "Ignore fields".
 
+### Bot walks tile-by-tile instead of smooth
+
+- autoWalk activates for paths of 5+ tiles with ≤55% direction changes. If your corridor has many tight turns, the bot uses keyboard stepping with 2-step pipelining instead.
+- Check that waypoints aren't all adjacent to floor-change tiles (pipelining is disabled near FC tiles).
+- For smoother movement, space waypoints 5-15 tiles apart — this is the sweet spot for autoWalk.
+
 ### Bot is stuck at a door
 
 - Enable **Auto Open Doors** in CaveBot config
@@ -99,7 +105,7 @@ Or use the **Recorder** — click Record, walk your route, stop recording.
 
 ### Waypoints too far apart
 
-Keep waypoints within 10–20 tiles of each other. If waypoints are > 50 tiles apart, CaveBot uses autoWalk (which may take longer paths). Add intermediate waypoints for better control.
+Keep waypoints within 10–20 tiles of each other. autoWalk kicks in for paths of 5+ tiles (with ≤55% direction changes), making movement smooth. For paths >50 tiles, pathfinding is capped and recovery may trigger. Add intermediate waypoints for better control.
 
 ### Can I save multiple routes?
 
@@ -107,7 +113,7 @@ Yes. Each route is saved as a `.cfg` file in `cavebot_configs/`. Load different 
 
 ---
 
-## TargetBot
+## 🎯 TargetBot
 
 ### How do I add monsters?
 
@@ -144,7 +150,7 @@ The Engagement Lock should prevent this. If switches are happening:
 
 ---
 
-## AttackBot
+## ⚔️ AttackBot
 
 ### Attacks not firing
 
@@ -164,7 +170,7 @@ Add a `Monsters ≥ 2` condition to area runes and separate AoE from single-targ
 
 ---
 
-## Containers
+## 📦 Containers
 
 ### Containers not opening on login
 
@@ -181,7 +187,7 @@ Add a `Monsters ≥ 2` condition to area runes and separate AoE from single-targ
 
 ---
 
-## Performance
+## ⚡ Performance
 
 ### Is nExBot fast?
 
@@ -201,13 +207,15 @@ Yes. Typical performance:
 
 ### Bot using too much CPU?
 
+- PathCursor preservation eliminates redundant A* calls per tick — fewer pathfinding operations overall
+- 4-entry LRU cache catches repeated pathfinding queries
 - Close heavy programs (browser, Discord)
 - Check for infinite loops in custom CaveBot actions
 - Enable `nExBot.printStartupProfile()` to find slow modules
 
 ---
 
-## Errors
+## 🚨 Errors
 
 ### "Error loading config"
 
@@ -234,7 +242,7 @@ A module failed to load or is outdated. Replace the affected file with the lates
 
 ---
 
-## Advanced
+## 🔧 Advanced
 
 ### Can I write custom scripts?
 

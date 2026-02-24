@@ -28,9 +28,15 @@ local PathStrategy = {}
 -- DEPENDENCIES (resolved lazily so load order is flexible)
 -- ============================================================================
 
-local PathUtils    = PathUtils           -- global from Phase 3
+local _PU           -- PathUtils, resolved once on first call
 local getClient    = nExBot and nExBot.Shared and nExBot.Shared.getClient
 local A            -- ACL adapter, resolved once at first call
+
+local function PU()
+  if _PU then return _PU end
+  _PU = PathUtils  -- global set by path_utils.lua
+  return _PU
+end
 
 local function acl()
   if A then return A end
@@ -62,7 +68,7 @@ local JITTER_MIN   = -25
 local JITTER_MAX   =  40
 local JITTER_DIAG  =  15         -- extra jitter for diagonal moves
 
--- Direction constants (must match OTClient globals)
+-- Direction constants
 local DIR_NORTH     = North     or 0
 local DIR_EAST      = East      or 1
 local DIR_SOUTH     = South     or 2
@@ -72,55 +78,41 @@ local DIR_SE        = SouthEast or 5
 local DIR_SW        = SouthWest or 6
 local DIR_NW        = NorthWest or 7
 
-local DIR_TO_OFFSET = {
-  [DIR_NORTH] = {x =  0, y = -1},
-  [DIR_EAST]  = {x =  1, y =  0},
-  [DIR_SOUTH] = {x =  0, y =  1},
-  [DIR_WEST]  = {x = -1, y =  0},
-  [DIR_NE]    = {x =  1, y = -1},
-  [DIR_SE]    = {x =  1, y =  1},
-  [DIR_SW]    = {x = -1, y =  1},
-  [DIR_NW]    = {x = -1, y = -1},
-}
-
--- Opposite direction LUT (for anti-zigzag)
-local OPPOSITE = {
-  [DIR_NORTH] = DIR_SOUTH, [DIR_SOUTH] = DIR_NORTH,
-  [DIR_EAST]  = DIR_WEST,  [DIR_WEST]  = DIR_EAST,
-  [DIR_NE]    = DIR_SW,    [DIR_SW]    = DIR_NE,
-  [DIR_SE]    = DIR_NW,    [DIR_NW]    = DIR_SE,
-}
-
--- Adjacent direction sets (for "similar" check)
-local SIMILAR = {
-  [DIR_NORTH] = {[DIR_NE]=true, [DIR_NW]=true},
-  [DIR_EAST]  = {[DIR_NE]=true, [DIR_SE]=true},
-  [DIR_SOUTH] = {[DIR_SE]=true, [DIR_SW]=true},
-  [DIR_WEST]  = {[DIR_NW]=true, [DIR_SW]=true},
-  [DIR_NE]    = {[DIR_NORTH]=true, [DIR_EAST]=true},
-  [DIR_SE]    = {[DIR_EAST]=true, [DIR_SOUTH]=true},
-  [DIR_SW]    = {[DIR_SOUTH]=true, [DIR_WEST]=true},
-  [DIR_NW]    = {[DIR_WEST]=true, [DIR_NORTH]=true},
-}
+-- Direction tables: resolved lazily from Directions / PathUtils globals
+-- (may not be set yet during Phase 3 file load)
+local DIR_TO_OFFSET, OPPOSITE, SIMILAR
+local function _ensureDirTables()
+  if DIR_TO_OFFSET then return end
+  local D = Directions
+  if D then
+    DIR_TO_OFFSET = D.DIR_TO_OFFSET
+    OPPOSITE      = D.OPPOSITE
+    SIMILAR       = D.ADJACENT
+  end
+end
 
 -- ============================================================================
 -- INTERNAL HELPERS
 -- ============================================================================
 
-local function posEq(a, b)
-  return a.x == b.x and a.y == b.y and a.z == b.z
+-- Lazy-resolved PathUtils helpers
+local _posEq, _chebyshev, _directionTo
+local function _ensureHelpers()
+  if _posEq then return end
+  local pu = PU()
+  if not pu then return end
+  _posEq      = pu.posEquals
+  _chebyshev  = pu.chebyshevDistance
+  _directionTo = pu.getDirectionTo
 end
 
 local function dirOffset(dir)
-  return DIR_TO_OFFSET[dir]
+  _ensureDirTables()
+  return DIR_TO_OFFSET and DIR_TO_OFFSET[dir]
 end
 
 local function applyOff(p, off)
   return {x = p.x + off.x, y = p.y + off.y, z = p.z}
-end
-
-local function chebyshev(a, b)
-  return math.max(math.abs(a.x - b.x), math.abs(a.y - b.y))
 end
 
 local function isDiagonal(dir)
@@ -136,22 +128,63 @@ local function jitter(diagonal)
 end
 
 -- ============================================================================
--- PATHFINDING — ACL-UNIFIED ENTRY POINT
+-- PATHFINDING — ACL-UNIFIED ENTRY POINT (one-time backend detection)
 -- ============================================================================
 
 --- Build native flags from human-readable option table.
+-- Module-level 1-entry cache to avoid recomputation without mutating caller opts.
+local _flagsCacheRef = nil   -- last opts table reference
+local _flagsCacheVal = 0     -- cached flags for that reference
+
 local function optsToFlags(opts)
+  if opts == _flagsCacheRef then return _flagsCacheVal end
   local flags = 0
   if opts.allowUnseen       then flags = flags + PF_ALLOW_NOT_SEEN end
   if opts.allowCreatures    then flags = flags + PF_ALLOW_CREATURES end
   if opts.ignoreNonPathable then flags = flags + PF_ALLOW_NON_PATHABLE end
   if opts.ignoreNonWalkable then flags = flags + PF_ALLOW_NON_WALKABLE end
   if opts.ignoreCreatures   then flags = flags + PF_IGNORE_CREATURES end
+  _flagsCacheRef = opts
+  _flagsCacheVal = flags
   return flags
 end
 
+-- Resolved once on first findPath call, then reused
+local _pathBackend = nil  -- function(startPos, goalPos, maxSteps, flags, opts) -> path|nil
+
+local function resolveBackend()
+  -- 1) ACL adapter (cross-client safe)
+  local adapter = acl()
+  if adapter and adapter.map and adapter.map.findPath then
+    return function(startPos, goalPos, maxSteps, flags, _opts)
+      local ok, result = pcall(adapter.map.findPath, startPos, goalPos, {
+        maxSteps = maxSteps, flags = flags,
+      })
+      if ok and result and #result > 0 then return result end
+      return nil
+    end
+  end
+  -- 2) Bare sandbox global (always available in OTClient)
+  if findPath then
+    return function(startPos, goalPos, maxSteps, _flags, opts)
+      local ok, result = pcall(findPath, startPos, goalPos, maxSteps, opts)
+      if ok and result and #result > 0 then return result end
+      return nil
+    end
+  end
+  -- 3) Raw g_map.findPath
+  if g_map and g_map.findPath then
+    return function(startPos, goalPos, maxSteps, flags, _opts)
+      local ok, result = pcall(g_map.findPath, startPos, goalPos, maxSteps, flags)
+      if ok and result and #result > 0 then return result end
+      return nil
+    end
+  end
+  -- No backend available (should never happen in OTClient)
+  return function() return nil end
+end
+
 --- Find a path from `startPos` to `goalPos`.
--- Tries native API through ACL first, then falls back to bare global.
 --
 -- @param startPos table {x,y,z}
 -- @param goalPos  table {x,y,z}
@@ -165,29 +198,8 @@ function PathStrategy.findPath(startPos, goalPos, opts)
   local maxSteps = math.min(opts.maxSteps or DEFAULT_MAX_STEPS, MAX_NATIVE_STEPS)
   local flags    = optsToFlags(opts)
 
-  -- 1) Try ACL adapter (cross-client safe)
-  local adapter = acl()
-  if adapter and adapter.map and adapter.map.findPath then
-    local ok, result = pcall(adapter.map.findPath, startPos, goalPos, {
-      maxSteps = maxSteps,
-      flags    = flags,
-    })
-    if ok and result and #result > 0 then return result end
-  end
-
-  -- 2) Bare sandbox global (always available in OTClient)
-  if findPath then
-    local ok, result = pcall(findPath, startPos, goalPos, maxSteps, opts)
-    if ok and result and #result > 0 then return result end
-  end
-
-  -- 3) Raw g_map.findPath
-  if g_map and g_map.findPath then
-    local ok, result = pcall(g_map.findPath, startPos, goalPos, maxSteps, flags)
-    if ok and result and #result > 0 then return result end
-  end
-
-  return nil
+  if not _pathBackend then _pathBackend = resolveBackend() end
+  return _pathBackend(startPos, goalPos, maxSteps, flags, opts)
 end
 
 --- Multi-attempt pathfinding with progressive relaxation.
@@ -196,22 +208,28 @@ function PathStrategy.findPathRelaxed(startPos, goalPos, opts)
   opts = opts or {}
   local base = {
     maxSteps          = opts.maxSteps or DEFAULT_MAX_STEPS,
-    ignoreNonPathable = true,
     ignoreCreatures   = opts.ignoreCreatures or false,
     ignoreFields      = opts.ignoreFields or false,
     precision         = opts.precision or 0,
   }
 
-  -- Attempt 1: strict (visible tiles only)
+  -- Attempt 1: truly strict (no ignoreNonPathable — respects PZ, invisible walls)
   local path = PathStrategy.findPath(startPos, goalPos, base)
   if path then return path, false end
 
-  -- Attempt 2: ignore creatures
+  -- Attempt 2: allow non-pathable tiles (relaxes PZ borders, etc.)
+  _flagsCacheRef = nil
+  base.ignoreNonPathable = true
+  path = PathStrategy.findPath(startPos, goalPos, base)
+  if path then return path, false end
+
+  -- Attempt 3: ignore creatures
+  _flagsCacheRef = nil
   base.ignoreCreatures = true
   path = PathStrategy.findPath(startPos, goalPos, base)
   if path then return path, false end
 
-  -- Early exit: for far destinations (>30 tiles), attempts 3+4 are unlikely to help
+  -- Early exit: for far destinations (>30 tiles), attempts 4+5 are unlikely to help
   -- and just waste CPU. They only matter for close-range blocked tiles.
   local dx = math.abs(goalPos.x - startPos.x)
   local dy = math.abs(goalPos.y - startPos.y)
@@ -219,13 +237,15 @@ function PathStrategy.findPathRelaxed(startPos, goalPos, opts)
     return nil, false
   end
 
-  -- Attempt 3: allow unseen tiles
+  -- Attempt 4: allow unseen tiles
+  _flagsCacheRef = nil
   base.allowUnseen = true
   path = PathStrategy.findPath(startPos, goalPos, base)
   if path then return path, false end
 
-  -- Attempt 4: ignore fields (relaxed)
+  -- Attempt 5: ignore fields (relaxed)
   if not opts.ignoreFields then
+    _flagsCacheRef = nil
     base.ignoreFields = true
     path = PathStrategy.findPath(startPos, goalPos, base)
     if path then return path, true end
@@ -235,43 +255,20 @@ function PathStrategy.findPathRelaxed(startPos, goalPos, opts)
 end
 
 -- ============================================================================
--- HUMANISED STEP TIMING
+-- HUMANISED STEP TIMING (DRY: raw duration from PathUtils, jitter added here)
 -- ============================================================================
-
-local _stepCache = { cardinal = 0, diagonal = 0, ts = 0 }
-local STEP_CACHE_TTL = 1000   -- 1 s
 
 --- Get humanised step duration (with jitter) for the local player.
 function PathStrategy.stepDuration(diagonal)
-  local t = tick()
-  if (t - _stepCache.ts) > STEP_CACHE_TTL then
-    local ok, p = pcall(function()
-      if player and player.getStepDuration then
-        return player
-      end
-    end)
-    if ok and p then
-      local cOk, c = pcall(p.getStepDuration, p, false)
-      local dOk, d = pcall(p.getStepDuration, p, true)
-      _stepCache.cardinal = cOk and c or 200
-      _stepCache.diagonal = dOk and d or 280
-    else
-      _stepCache.cardinal = 200
-      _stepCache.diagonal = 280
-    end
-    _stepCache.ts = t
-  end
-  local base = diagonal and _stepCache.diagonal or _stepCache.cardinal
+  local pu = PU()
+  local base = pu and pu.getStepDuration(diagonal) or (diagonal and 280 or 200)
   return math.max(50, base + jitter(diagonal))
 end
 
 --- Raw step duration (no jitter) for pure timing calculations.
 function PathStrategy.rawStepDuration(diagonal)
-  local t = tick()
-  if (t - _stepCache.ts) > STEP_CACHE_TTL then
-    PathStrategy.stepDuration(false) -- refresh cache
-  end
-  return diagonal and _stepCache.diagonal or _stepCache.cardinal
+  local pu = PU()
+  return pu and pu.getStepDuration(diagonal) or (diagonal and 280 or 200)
 end
 
 -- ============================================================================
@@ -286,15 +283,21 @@ local _dirLastTs = 0
 local _dirRapidChanges = 0
 local _dirDampenUntil = 0         -- timestamp: hold direction until this time
 
-function PathStrategy.isSimilar(d1, d2)
-  if d1 == nil or d2 == nil then return true end
-  if d1 == d2 then return true end
-  local s = SIMILAR[d1]
-  return s and s[d2] or false
+-- DRY: delegate to PathUtils (SSoT for direction relationship checks)
+-- Lazy wrappers since PathUtils may not be loaded yet at file scope
+function PathStrategy.isSimilar(a, b)
+  _ensureHelpers()
+  _ensureDirTables()
+  -- Fast inline check using SIMILAR table as fallback
+  if SIMILAR and SIMILAR[a] then return SIMILAR[a][b] == true end
+  local pu = PU()
+  return pu and pu.areSimilarDirections and pu.areSimilarDirections(a, b) or false
 end
-
-function PathStrategy.isOpposite(d1, d2)
-  return OPPOSITE[d1] == d2
+function PathStrategy.isOpposite(a, b)
+  _ensureDirTables()
+  if OPPOSITE then return OPPOSITE[a] == b end
+  local pu = PU()
+  return pu and pu.areOppositeDirections and pu.areOppositeDirections(a, b) or false
 end
 
 --- Update anti-zigzag state and return smoothed direction.
@@ -371,20 +374,19 @@ end
 -- PATH SMOOTHING — zigzag-to-diagonal conversion
 -- ============================================================================
 
+-- Lazy wrapper for directionTo
 local function directionTo(from, to)
+  _ensureHelpers()
+  if _directionTo then return _directionTo(from, to) end
+  -- Inline fallback: compute direction from offset
   local dx = to.x - from.x
   local dy = to.y - from.y
-  local nx = dx == 0 and 0 or (dx > 0 and 1 or -1)
-  local ny = dy == 0 and 0 or (dy > 0 and 1 or -1)
-  if nx ==  0 and ny == -1 then return DIR_NORTH end
-  if nx ==  1 and ny ==  0 then return DIR_EAST end
-  if nx ==  0 and ny ==  1 then return DIR_SOUTH end
-  if nx == -1 and ny ==  0 then return DIR_WEST end
-  if nx ==  1 and ny == -1 then return DIR_NE end
-  if nx ==  1 and ny ==  1 then return DIR_SE end
-  if nx == -1 and ny ==  1 then return DIR_SW end
-  if nx == -1 and ny == -1 then return DIR_NW end
-  return nil
+  if dx ~= 0 then dx = dx > 0 and 1 or -1 end
+  if dy ~= 0 then dy = dy > 0 and 1 or -1 end
+  _ensureDirTables()
+  local key = dx .. "," .. dy
+  local D = Directions
+  return D and D.OFFSET_TO_DIR and D.OFFSET_TO_DIR[key]
 end
 
 --- Smooth a direction-array path by converting 2-step L-shapes into diagonals
@@ -414,8 +416,9 @@ function PathStrategy.smoothPath(path, startPos)
         if diagDir then
           -- Validate diagonal tile is safe
           local safe = true
-          if PathUtils and PathUtils.isTileSafe then
-            safe = PathUtils.isTileSafe(diagPos, false)
+          local pu = PU()
+          if pu and pu.isTileSafe then
+            safe = pu.isTileSafe(diagPos, false)
           else
             local tile = g_map and g_map.getTile(diagPos)
             safe = tile and tile:isWalkable() or false
@@ -423,8 +426,8 @@ function PathStrategy.smoothPath(path, startPos)
           if safe then
             -- Also verify the diagonal doesn't cross a floor change
             local fcSafe = true
-            if PathUtils and PathUtils.isFloorChangeTile then
-              fcSafe = not PathUtils.isFloorChangeTile(diagPos)
+            if pu and pu.isFloorChangeTile then
+              fcSafe = not pu.isFloorChangeTile(diagPos)
             end
             if fcSafe then
               smoothed[#smoothed + 1] = diagDir
@@ -461,10 +464,6 @@ local Cursor = {
   ts        = 0,
   ttl       = 800,
   dest      = nil,
-  chunkEnd  = nil,
-  chunkDir  = nil,
-  chunkTs   = 0,
-  smoothed  = false,
 }
 
 function PathStrategy.setCursor(path, dest)
@@ -473,10 +472,6 @@ function PathStrategy.setCursor(path, dest)
   Cursor.ts       = tick()
   Cursor.ttl      = 800
   Cursor.dest     = dest
-  Cursor.chunkEnd = nil
-  Cursor.chunkDir = nil
-  Cursor.chunkTs  = 0
-  Cursor.smoothed = false
 end
 
 function PathStrategy.resetCursor()
@@ -484,10 +479,6 @@ function PathStrategy.resetCursor()
   Cursor.idx      = 1
   Cursor.ts       = 0
   Cursor.dest     = nil
-  Cursor.chunkEnd = nil
-  Cursor.chunkDir = nil
-  Cursor.chunkTs  = 0
-  Cursor.smoothed = false
 end
 
 function PathStrategy.getCursor()
@@ -500,7 +491,9 @@ function PathStrategy.isCursorValid(dest)
   if Cursor.idx > #Cursor.path then return false end
   if (tick() - Cursor.ts) >= Cursor.ttl then return false end
   if not Cursor.dest then return false end
-  return posEq(Cursor.dest, dest)
+  _ensureHelpers()
+  return _posEq and _posEq(Cursor.dest, dest) or
+    (Cursor.dest.x == dest.x and Cursor.dest.y == dest.y and Cursor.dest.z == dest.z)
 end
 
 --- Advance cursor index by n steps and refresh TTL.
@@ -518,7 +511,7 @@ local _isFC = nil -- lazy-init
 
 local function getIsFC()
   if not _isFC then
-    _isFC = (PathUtils and PathUtils.isFloorChangeTile) or function() return false end
+    _isFC = (PU() and PU().isFloorChangeTile) or function() return false end
   end
   return _isFC
 end
@@ -580,7 +573,8 @@ function PathStrategy.safeStepCount(path, startPos, fromIdx)
   fromIdx = fromIdx or 1
   local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
   local safe  = 0
-  local isFC  = PathUtils and PathUtils.isFloorChangeTile or function() return false end
+  local pu = PU()
+  local isFC  = (pu and pu.isFloorChangeTile) or function() return false end
 
   for i = 1, math.max(0, fromIdx - 1) do
     local off = dirOffset(path[i])
@@ -670,8 +664,9 @@ end
 
 --- Stop any ongoing autowalk.
 function PathStrategy.stopAutoWalk()
-  if PathUtils and PathUtils.stopAutoWalk then
-    return PathUtils.stopAutoWalk()
+  local pu = PU()
+  if pu and pu.stopAutoWalk then
+    return pu.stopAutoWalk()
   end
   if player and player.stopAutoWalk then
     pcall(player.stopAutoWalk, player)
@@ -695,18 +690,44 @@ function PathStrategy.isWalking()
 end
 
 -- ============================================================================
--- CONVENIENCE
+-- CONVENIENCE (DRY: lazy aliases to PathUtils / Directions SSoT)
+-- These are resolved on first access via __index so load order doesn't matter.
 -- ============================================================================
 
-PathStrategy.posEquals           = posEq
 PathStrategy.dirOffset           = dirOffset
 PathStrategy.applyOffset         = applyOff
-PathStrategy.chebyshevDistance    = chebyshev
-PathStrategy.directionTo         = directionTo
 PathStrategy.tick                = tick
-PathStrategy.DIR_TO_OFFSET       = DIR_TO_OFFSET
-PathStrategy.OPPOSITE            = OPPOSITE
-PathStrategy.SIMILAR             = SIMILAR
+
+-- Set lazy-resolved aliases after first real call
+local _convenienceResolved = false
+local function _resolveConvenience()
+  if _convenienceResolved then return end
+  _convenienceResolved = true
+  _ensureHelpers()
+  _ensureDirTables()
+  local pu = PU()
+  if pu then
+    PathStrategy.posEquals        = pu.posEquals
+    PathStrategy.chebyshevDistance = pu.chebyshevDistance
+    PathStrategy.directionTo      = pu.getDirectionTo
+    PathStrategy.DIR_TO_OFFSET    = pu.DIR_TO_OFFSET
+  end
+  local D = Directions
+  if D then
+    PathStrategy.OPPOSITE         = D.OPPOSITE
+    PathStrategy.SIMILAR          = D.ADJACENT
+  end
+end
+
+-- Resolve on first external access via module metatable
+setmetatable(PathStrategy, {
+  __index = function(t, k)
+    if not _convenienceResolved then
+      _resolveConvenience()
+    end
+    return rawget(t, k)
+  end
+})
 
 -- ============================================================================
 -- FULL RESET (call on CaveBot.resetWalking)
@@ -715,7 +736,6 @@ PathStrategy.SIMILAR             = SIMILAR
 function PathStrategy.fullReset()
   PathStrategy.resetCursor()
   PathStrategy.resetDirectionState()
-  _stepCache.ts = 0
 end
 
 -- ============================================================================

@@ -1,10 +1,10 @@
-# Installing nExBot
+# 📥 Installing nExBot
 
 Get nExBot up and running on your OTClient in minutes.
 
 ---
 
-## Requirements
+## 📋 Requirements
 
 - **OTClient** — either [OTClientV8](https://github.com/otcv8/otcv8-dev) or [OpenTibiaBR's OTCR](https://github.com/mehah/otclient)
 - A running Open Tibia server to connect to
@@ -12,7 +12,7 @@ Get nExBot up and running on your OTClient in minutes.
 
 ---
 
-## Installation on vBot (OTClientV8)
+## 🖥️ Installation on vBot (OTClientV8)
 
 ### 1. Locate your bot folder
 
@@ -25,7 +25,8 @@ Linux:    ~/.local/share/OTClientV8/<ServerName>/bot/
 
 Replace `<ServerName>` with the name of the server you play on (e.g. `Tibia Realms RPG`).
 
-> **Tip:** You can find the exact path by opening OTClientV8, pressing `Ctrl+B`, and noting the directory shown at the top of the Bot panel.
+> [!TIP]
+> You can find the exact path by opening OTClientV8, pressing `Ctrl+B`, and noting the directory shown at the top of the Bot panel.
 
 ### 2. Copy nExBot
 
@@ -52,7 +53,7 @@ You should see the Main, Cave, and Target tabs appear.
 
 ---
 
-## Installation on OpenTibiaBR (OTCR)
+## 🔧 Installation on OpenTibiaBR (OTCR)
 
 ### 1. Locate your bot folder
 
@@ -63,6 +64,7 @@ Windows:  %APPDATA%\otclientrc\<ServerName>\bot\
 Linux:    ~/.local/share/<otcr-data-dir>/<ServerName>/bot/
 ```
 
+> [!NOTE]
 > The exact folder name varies depending on how the server distributes OTCR. Look for a `.otcr` or similar hidden folder under your data directory. On some distributions the path is `~/.local/share/otcr-<servername>/`.
 
 ### 2. Copy nExBot
@@ -88,7 +90,7 @@ bot/
 
 ---
 
-## Verifying the Installation
+## ✅ Verifying the Installation
 
 After enabling, you should see:
 
@@ -101,7 +103,7 @@ If you see errors in the console, check the [FAQ](FAQ.md) troubleshooting sectio
 
 ---
 
-## Client Auto-Detection
+## 🔍 Client Auto-Detection
 
 nExBot automatically detects which client you are running — vBot or OTCR — through its **Anti-Corruption Layer (ACL)**. No manual configuration is needed.
 
@@ -114,7 +116,7 @@ Once detected, nExBot loads the appropriate adapter so that all features — inc
 
 ---
 
-## Updating nExBot
+## 🔄 Updating nExBot
 
 1. **Back up your configs** — copy the `cavebot_configs/`, `targetbot_configs/`, and `nExBot_configs/` folders somewhere safe.
 2. Delete the old `nExBot/` folder.
@@ -126,7 +128,42 @@ Your per-character profiles are stored in `storage/` and will persist across upd
 
 ---
 
-## Folder Structure
+## ⚠️ Auto-Updater &amp; Custom Mod Folders (OT Developers)
+
+> [!CAUTION]
+> **The auto-updater does NOT work if nExBot is placed inside a `mods/` folder or any custom mod directory.**
+
+nExBot's auto-updater writes to the **user-data `bot/` directory** (e.g. `~/.local/share/<client>/<server>/bot/nExBot/`). The Lua sandbox can only write files to user-data paths — mod folders are read-only at runtime.
+
+If you are an OT server developer distributing nExBot with your client:
+
+### ❌ What breaks the updater
+
+| Setup | Why it breaks |
+|-------|---------------|
+| 📦 Bundling nExBot inside `mods/` | Mod folders are read-only — cache writes fail silently |
+| 📦 Custom mod directory (e.g. `custom_mods/nExBot/`) | Same restriction — sandbox `g_resources` cannot write outside user-data |
+| 📦 Symlinking `bot/nExBot` → a mod folder | Symlinks resolve to the mod path — writes still fail |
+
+### ✅ Correct setup
+
+```text
+<user-data>/
+├── bot/
+│   └── nExBot/          ← ✅ auto-updater works here
+│       ├── _Loader.lua
+│       ├── core/
+│       └── ...
+└── mods/
+    └── nExBot/          ← ❌ updater CANNOT write here
+```
+
+> [!TIP]
+> 💡 If you **must** ship nExBot with your client distribution, place it in `bot/` inside the user-data directory — not in `mods/`. The auto-updater will then keep it up-to-date automatically.
+
+---
+
+## 📂 Folder Structure
 
 After installation, the full directory tree looks like:
 
@@ -150,7 +187,7 @@ nExBot/
 
 ---
 
-## Next Steps
+## 🚀 Next Steps
 
 Once nExBot is running:
 

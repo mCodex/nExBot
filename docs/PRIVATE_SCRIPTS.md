@@ -1,12 +1,13 @@
-# Private Scripts
+# 🔒 Private Scripts
 
 Run your own custom Lua scripts alongside nExBot without modifying any core files. Drop them into the `private/` folder and they are loaded automatically on startup.
 
+> [!CAUTION]
 > **⚠ Trusted scripts only:** Files in `private/` are executed via Lua's `dofile` with full access to the bot environment. Only use scripts you wrote yourself or obtained from a trusted source — never run unverified code.
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 1. Open the `private/` folder inside your nExBot directory:
 
@@ -25,7 +26,7 @@ That's it — no edits to `_Loader.lua` or any other file are needed.
 
 ---
 
-## How It Works
+## ⚙️ How It Works
 
 During startup, nExBot scans the `private/` folder **recursively** for every `.lua` file. Each file is executed via `dofile()` in alphabetical order (paths sorted lexicographically, subfolders included). Scripts inside subfolders are loaded as well. Because scripts run with full privileges, only place files from trusted sources in this folder.
 
@@ -37,7 +38,7 @@ If a script fails to load, nExBot prints a warning to the console but continues 
 
 ---
 
-## What You Can Use
+## 📦 What You Can Use
 
 Private scripts run in the same environment as all other bot modules, so you have access to:
 
@@ -51,14 +52,17 @@ Private scripts run in the same environment as all other bot modules, so you hav
 | `storage` | Persistent per-character storage table |
 | `schedule(delay, fn)` | Run a function after `delay` ms |
 | `now` | Current timestamp in ms (updated each tick) |
-| `PathUtils`, `PathStrategy` | Shared pathfinding utilities |
+| `PathUtils` | Shared pathfinding: `findPath()`, `isFloorChangeTile()`, `isTileSafe()`, `getStepDuration()`, `chebyshevDistance()`, `posEquals()`, `getDirectionTo()`, `areSimilarDirections()`, direction constants (SSoT via `Directions`) |
+| `PathStrategy` | High-level pathfinding: `findPath()`, `findPathRelaxed()`, `stepDuration()` (with jitter), `smoothPath()`, `smoothDirection()`, PathCursor, `nativePathIsSafe()`, `autoWalk()`, `walkStep()`. Delegates to `PathUtils` for shared utilities. |
+| `Directions` | Direction constants SSoT: `DIR_TO_OFFSET`, `OPPOSITE`, `ADJACENT`, `OFFSET_TO_DIR`, plus helper functions |
 | `CaveBot`, `TargetBot` | Bot module APIs |
 
+> [!TIP]
 > **Tip:** Any global that exists at startup time is available. Check the [Architecture](ARCHITECTURE.md) doc for the full module list.
 
 ---
 
-## Writing a Script
+## ✏️ Writing a Script
 
 A minimal private script looks like this:
 
@@ -124,7 +128,7 @@ addIcon("UseTool", {item = {id = TOOL_ID}, text = "Tool", switchable = true}, my
 
 ---
 
-## Subfolders
+## 📁 Subfolders
 
 You can organize scripts into subfolders — they are discovered recursively:
 
@@ -142,7 +146,7 @@ All `.lua` files across all subdirectories are loaded in sorted path order.
 
 ---
 
-## Tips & Best Practices
+## 💡 Tips & Best Practices
 
 - **Use `local`** for all variables and functions to avoid polluting the global namespace and conflicting with other scripts or core modules.
 - **Guard with `g_game.isOnline()`** at the top of your macro callback to prevent errors when logged out.
@@ -153,7 +157,7 @@ All `.lua` files across all subdirectories are loaded in sorted path order.
 
 ---
 
-## Troubleshooting
+## ❓ Troubleshooting
 
 | Problem | Solution |
 |---|---|

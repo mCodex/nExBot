@@ -1,10 +1,10 @@
-# AttackBot
+# ⚔️ AttackBot
 
 Automated offensive spell and rune casting with intelligent AoE optimization.
 
 ---
 
-## Overview
+## 📖 Overview
 
 AttackBot handles all your offensive abilities automatically. It casts attack spells, uses runes, optimizes AoE positioning, and manages cooldowns — so you can focus on navigation and survival.
 
@@ -20,7 +20,7 @@ Key capabilities:
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 1. Open the **Main** tab and click **AttackBot**.
 2. Click **Add** to create an attack rule.
@@ -29,7 +29,7 @@ Key capabilities:
 
 ---
 
-## Attack Types
+## 💥 Attack Types
 
 ### Single-Target Spells
 
@@ -73,7 +73,7 @@ Attack runes that don't require mana to use:
 
 ---
 
-## Attack Rules
+## 📋 Attack Rules
 
 Each attack rule consists of:
 
@@ -97,11 +97,12 @@ For each rule (by priority):
   6. → Execute attack
 ```
 
+> [!NOTE]
 > Safety checks (PvP protection, blacklisted players) are evaluated **last** for performance. Fast checks are done first to skip unnecessary work.
 
 ---
 
-## Example Configurations
+## 📝 Example Configurations
 
 ### Knight AoE Build
 
@@ -131,7 +132,7 @@ For each rule (by priority):
 
 ---
 
-## Performance Optimizations
+## ⚡ Performance Optimizations
 
 ### Entry Caching
 
@@ -147,7 +148,7 @@ Safety checks (PvP flags, player blacklists) are the most expensive part of the 
 
 ---
 
-## Safety Features
+## 🛡️ Safety Features
 
 | Feature | Description |
 |---------|-------------|
@@ -158,7 +159,7 @@ Safety checks (PvP flags, player blacklists) are the most expensive part of the 
 
 ---
 
-## Analytics Integration
+## 📊 Analytics Integration
 
 AttackBot reports detailed usage statistics to the Hunt Analyzer:
 
@@ -171,7 +172,7 @@ These metrics feed into the Hunt Analyzer's efficiency calculations (attacks per
 
 ---
 
-## Troubleshooting
+## ❓ Troubleshooting
 
 ### Attack not firing
 

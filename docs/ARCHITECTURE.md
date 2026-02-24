@@ -1,16 +1,16 @@
-# Architecture
+# 🏗️ Architecture
 
 Technical overview of nExBot's internal architecture and design patterns.
 
 ---
 
-## Overview
+## 📖 Overview
 
 nExBot is a modular, event-driven bot built in Lua for OTClient. It uses a layered architecture with clear separation between client abstraction, core systems, and feature modules.
 
 ---
 
-## System Architecture
+## 🧩 System Architecture
 
 ```text
 ┌──────────────────────────────────────────────────────┐
@@ -44,7 +44,7 @@ nExBot is a modular, event-driven bot built in Lua for OTClient. It uses a layer
 
 ---
 
-## Anti-Corruption Layer (ACL)
+## 🛡️ Anti-Corruption Layer (ACL)
 
 The ACL provides a unified API regardless of whether nExBot is running on vBot (OTClientV8) or OTCR (OpenTibiaBR).
 
@@ -81,7 +81,7 @@ Client.applyImbuement(slotId, imbuementId, useProtection)
 
 ---
 
-## EventBus
+## 📡 EventBus
 
 The centralized event dispatcher connects game callbacks to module handlers. All native OTClient callbacks are routed through EventBus so modules can subscribe without interfering with each other.
 
@@ -103,7 +103,7 @@ During floor transitions, hundreds of creature events fire in a single frame. Ev
 
 ---
 
-## Unified Tick System
+## ⏱️ Unified Tick System
 
 Instead of each module running its own `macro()` timer, `UnifiedTick` provides a single **50 ms master tick**. Modules register callbacks at their desired intervals:
 
@@ -117,7 +117,7 @@ This reduces timer overhead from 30+ separate timers to one.
 
 ---
 
-## Unified Storage
+## 💾 Unified Storage
 
 Per-character persistent storage using JSON serialization:
 
@@ -128,7 +128,7 @@ Per-character persistent storage using JSON serialization:
 
 ---
 
-## Loading Order
+## 📂 Loading Order
 
 The `_Loader.lua` organizes initialization into phases:
 
@@ -136,7 +136,7 @@ The `_Loader.lua` organizes initialization into phases:
 |-------|---------|
 | 1 | ACL + Client abstraction |
 | 2 | Constants (floor items, food, directions) |
-| 3 | Utils (shared, ring buffer, path utils) |
+| 3 | Utils (shared, ring buffer, path utils, path strategy) |
 | 4 | Core libraries (lib, items, configs, database) |
 | 5 | Architecture (EventBus, UnifiedStorage, UnifiedTick) |
 | 6 | Feature modules (HealBot, AttackBot, CaveBot, TargetBot, etc.) |
@@ -149,17 +149,20 @@ Each module is error-isolated — a failure in one module doesn't prevent others
 
 ---
 
-## Design Patterns
+## 📐 Design Patterns
 
 | Pattern | Purpose | Where Used |
 |---------|---------|------------|
 | **Event-Driven** | Efficient reactivity | EventBus, HealBot, TargetBot |
 | **State Machine** | Deterministic attacks | AttackStateMachine |
-| **State Machine** | Stuck detection + recovery | CaveBot WaypointEngine (NORMAL→STUCK→RECOVERING→STOPPED) |
+| **State Machine** | Stuck detection + recovery | CaveBot WaypointEngine (NORMAL↔RECOVERING) |
 | **Intent Voting** | Conflict-free movement | MovementCoordinator |
-| **LRU Cache** | Bounded memory | Creature configs, pathfinding |
+| **LRU Cache** | Bounded memory | Creature configs, pathfinding (4-entry) |
 | **Negative Cache** | Skip proven-unreachable paths | PathUtils findPath (500ms TTL) |
-| **Object Pool** | Reduce GC pressure | Path entries, position tables |
+| **PathCursor Preservation** | Avoid redundant A* per tick | Walking engine (cursor survives across ticks for same WP) |
+| **Step Pipelining** | Smooth keyboard walking | Walking engine (2-step lookahead dispatch) |
+| **One-time Backend Detection** | Zero per-call overhead | PathStrategy (resolves API once at init) |
+| **Adaptive Blacklist Decay** | Prevent cascading exclusion | CaveBot recovery (exponential TTL: 15s base, 120s cap) |
 | **EWMA** | Smooth statistics | Monster tracking, cooldowns |
 | **BFS Traversal** | Container opening/looting | ContainerOpener, Looting |
 | **Engagement Lock** | Anti-zigzag targeting | ScenarioManager |
@@ -169,7 +172,7 @@ Each module is error-isolated — a failure in one module doesn't prevent others
 
 ---
 
-## Module Communication
+## 🔗 Module Communication
 
 Modules communicate through three mechanisms:
 
@@ -181,7 +184,7 @@ Circular dependencies are avoided by loading modules in a strict phase order and
 
 ---
 
-## Error Handling
+## 🚨 Error Handling
 
 - Each module loads inside `pcall()` — failures are logged but don't crash the bot
 - Optional modules (marked in `OPTIONAL_MODULES`) fail silently if missing
@@ -190,6 +193,6 @@ Circular dependencies are avoided by loading modules in a strict phase order and
 
 ---
 
-## Private Scripts
+## 🔒 Private Scripts
 
 Users can place custom `.lua` files in a `private/` folder. These are auto-loaded after all core modules, giving them access to the full nExBot API. Private scripts are recursively discovered and sorted alphabetically.

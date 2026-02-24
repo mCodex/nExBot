@@ -1,10 +1,10 @@
-# Hunt Analyzer
+# 📊 Hunt Analyzer
 
 Real-time session analytics that track kills, damage, loot, supply usage, experience, and efficiency metrics.
 
 ---
 
-## Overview
+## 📖 Overview
 
 The Hunt Analyzer (`smart_hunt.lua`) is a passive analytics engine that records data from every hunt session. It collects kills, spell casts, potion usage, loot, and experience — then computes efficiency metrics, trends, and actionable insights.
 
@@ -21,7 +21,7 @@ Key capabilities:
 
 ---
 
-## Auto-Start
+## 🚀 Auto-Start
 
 The Hunt Analyzer automatically starts a new session when **either**:
 
@@ -32,7 +32,7 @@ This means TargetBot-only players (without CaveBot) also get full session tracki
 
 ---
 
-## Tracked Metrics
+## 📊 Tracked Metrics
 
 | Metric | Source | Description |
 |--------|--------|-------------|
@@ -49,7 +49,7 @@ This means TargetBot-only players (without CaveBot) also get full session tracki
 
 ---
 
-## Insights Engine
+## 🧠 Insights Engine
 
 The `buildInsights()` function computes derived analytics:
 
@@ -77,7 +77,7 @@ Each metric includes a trend indicator:
 
 ---
 
-## Hunt Score
+## 🏆 Hunt Score
 
 The Hunt Score is a composite 0–100 rating based on five weighted factors:
 
@@ -94,7 +94,7 @@ A score of 80+ indicates a well-optimized hunt.
 
 ---
 
-## Loot Tracking
+## 💰 Loot Tracking
 
 Integrated with `core/analyzer.lua`, the loot tracker records:
 
@@ -105,7 +105,7 @@ Integrated with `core/analyzer.lua`, the loot tracker records:
 
 ---
 
-## UI
+## 🖥️ UI
 
 Click **Hunt Analyzer** on the Main tab. The window displays:
 
@@ -121,7 +121,7 @@ If the UI fails to open (rare edge case), the summary is printed to the console 
 
 ---
 
-## API for Custom Scripts
+## 🔧 API for Custom Scripts
 
 ```lua
 -- Check if session is running
@@ -149,7 +149,7 @@ HuntAnalytics.trackAttackSpell("exori vis", manaCost)
 
 ---
 
-## Troubleshooting
+## ❓ Troubleshooting
 
 ### No data shown
 
