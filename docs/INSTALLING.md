@@ -1,10 +1,10 @@
-# Installing nExBot
+# 📥 Installing nExBot
 
 Get nExBot up and running on your OTClient in minutes.
 
 ---
 
-## Requirements
+## 📋 Requirements
 
 - **OTClient** — either [OTClientV8](https://github.com/otcv8/otcv8-dev) or [OpenTibiaBR's OTCR](https://github.com/mehah/otclient)
 - A running Open Tibia server to connect to
@@ -12,7 +12,7 @@ Get nExBot up and running on your OTClient in minutes.
 
 ---
 
-## Installation on vBot (OTClientV8)
+## 🖥️ Installation on vBot (OTClientV8)
 
 ### 1. Locate your bot folder
 
@@ -25,7 +25,8 @@ Linux:    ~/.local/share/OTClientV8/<ServerName>/bot/
 
 Replace `<ServerName>` with the name of the server you play on (e.g. `Tibia Realms RPG`).
 
-> **Tip:** You can find the exact path by opening OTClientV8, pressing `Ctrl+B`, and noting the directory shown at the top of the Bot panel.
+> [!TIP]
+> You can find the exact path by opening OTClientV8, pressing `Ctrl+B`, and noting the directory shown at the top of the Bot panel.
 
 ### 2. Copy nExBot
 
@@ -52,7 +53,7 @@ You should see the Main, Cave, and Target tabs appear.
 
 ---
 
-## Installation on OpenTibiaBR (OTCR)
+## 🔧 Installation on OpenTibiaBR (OTCR)
 
 ### 1. Locate your bot folder
 
@@ -63,6 +64,7 @@ Windows:  %APPDATA%\otclientrc\<ServerName>\bot\
 Linux:    ~/.local/share/<otcr-data-dir>/<ServerName>/bot/
 ```
 
+> [!NOTE]
 > The exact folder name varies depending on how the server distributes OTCR. Look for a `.otcr` or similar hidden folder under your data directory. On some distributions the path is `~/.local/share/otcr-<servername>/`.
 
 ### 2. Copy nExBot
@@ -88,7 +90,7 @@ bot/
 
 ---
 
-## Verifying the Installation
+## ✅ Verifying the Installation
 
 After enabling, you should see:
 
@@ -101,7 +103,7 @@ If you see errors in the console, check the [FAQ](FAQ.md) troubleshooting sectio
 
 ---
 
-## Client Auto-Detection
+## 🔍 Client Auto-Detection
 
 nExBot automatically detects which client you are running — vBot or OTCR — through its **Anti-Corruption Layer (ACL)**. No manual configuration is needed.
 
@@ -114,7 +116,7 @@ Once detected, nExBot loads the appropriate adapter so that all features — inc
 
 ---
 
-## Updating nExBot
+## 🔄 Updating nExBot
 
 1. **Back up your configs** — copy the `cavebot_configs/`, `targetbot_configs/`, and `nExBot_configs/` folders somewhere safe.
 2. Delete the old `nExBot/` folder.
@@ -161,7 +163,7 @@ If you are an OT server developer distributing nExBot with your client:
 
 ---
 
-## Folder Structure
+## 📂 Folder Structure
 
 After installation, the full directory tree looks like:
 
@@ -185,7 +187,7 @@ nExBot/
 
 ---
 
-## Next Steps
+## 🚀 Next Steps
 
 Once nExBot is running:
 

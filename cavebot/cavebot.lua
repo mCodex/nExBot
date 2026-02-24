@@ -310,7 +310,7 @@ local function tryCurrentWaypointReachable(playerPos, maxDist)
   }
   if destPos.z ~= playerPos.z then return false end
 
-  local dist2d = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
+  local dist2d = math.max(math.abs(destPos.x - playerPos.x), math.abs(destPos.y - playerPos.y))
   if dist2d > maxDist then return false end
 
   local path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true })

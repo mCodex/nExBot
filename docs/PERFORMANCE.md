@@ -1,16 +1,16 @@
-# Performance
+# ⚡ Performance
 
 Optimization guide for understanding and tuning nExBot's performance.
 
 ---
 
-## Overview
+## 📖 Overview
 
 nExBot is engineered for minimal CPU and memory impact. Every module uses caching, event-driven execution, and lazy evaluation to avoid unnecessary work. This page documents the optimizations in place and the tuning parameters available.
 
 ---
 
-## Architecture Optimizations
+## 🏗️ Architecture Optimizations
 
 ### Event-Driven Design
 
@@ -34,7 +34,7 @@ Floor transitions fire hundreds of creature appear/disappear events in a single 
 
 ---
 
-## Caching Systems
+## 💾 Caching Systems
 
 ### AttackBot Entry Cache
 
@@ -90,7 +90,7 @@ The multi-attempt pathfinding system (`findPathRelaxed`) uses progressive flag r
 
 ---
 
-## Walking Optimizations
+## 🚶 Walking Optimizations
 
 ### autoWalk + Pathfinding Strategy
 
@@ -130,7 +130,7 @@ CaveBot's macro runs every 75 ms, but the Smart Execution System skips iteration
 
 ---
 
-## Memory Management
+## 🧠 Memory Management
 
 ### Object Pooling
 
@@ -158,7 +158,7 @@ Next access   → Rebuild cache
 
 ---
 
-## Dynamic Scaling
+## 📈 Dynamic Scaling
 
 TargetBot movement thresholds automatically scale based on monster count:
 
@@ -177,7 +177,7 @@ Affected parameters:
 
 ---
 
-## Tuning Parameters
+## 🎛️ Tuning Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -201,11 +201,12 @@ Affected parameters:
 | `BLACKLIST_MAX_TTL` | 120000 ms | Max waypoint blacklist duration |
 | `FINDPATH_LRU_SIZE` | 4 | Number of cached pathfinding results |
 
+> [!WARNING]
 > Only adjust these if you understand the performance trade-offs. Lower values = faster response but more CPU. Higher values = less CPU but slower response.
 
 ---
 
-## Startup Performance
+## 🚀 Startup Performance
 
 nExBot tracks load times for every module. Total startup is typically under 1 second:
 
@@ -226,7 +227,7 @@ nExBot.printStartupProfile()
 
 ---
 
-## Benchmarks
+## 📊 Benchmarks
 
 | Component | Operation | Typical Speed |
 |-----------|-----------|---------------|
@@ -238,14 +239,14 @@ nExBot.printStartupProfile()
 
 ---
 
-## Signs of Good Performance
+## ✅ Signs of Good Performance
 
 - Client runs at 60 FPS during hunting
 - No freezing or stuttering during floor changes
 - Quick response to incoming damage
 - Smooth walking along waypoints
 
-## Signs of Problems
+## ⚠️ Signs of Problems
 
 - FPS drops during combat
 - Client freezes while walking (pathfinding too large)

@@ -4,7 +4,7 @@ The survival engine that keeps your character alive with ultra-fast spell and po
 
 ---
 
-## Overview
+## 📖 Overview
 
 HealBot is nExBot's automated healing system. It monitors your health and mana in real time and casts healing spells or uses potions the moment you need them — with a response time of around **75 ms**, far faster than any human can react.
 
@@ -20,7 +20,7 @@ Key capabilities:
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 1. Open the **Main** tab and click the **Healing** button.
 2. Add a healing spell — for example, `exura vita` at **50%** HP.
@@ -31,7 +31,7 @@ That's it. HealBot will keep you alive while you hunt.
 
 ---
 
-## How Healing Works
+## ⚙️ How Healing Works
 
 When your health changes, HealBot runs this evaluation:
 
@@ -50,7 +50,7 @@ Spells are checked first in **priority order** (lower number = higher priority).
 
 ---
 
-## Configuring Healing Spells
+## 🪄 Configuring Healing Spells
 
 ### Adding a Spell
 
@@ -76,7 +76,7 @@ A spell set to **50%** HP will cast whenever your current HP is at or below 50% 
 
 ---
 
-## Configuring Healing Potions
+## 🧪 Configuring Healing Potions
 
 ### Adding a Potion
 
@@ -101,7 +101,7 @@ HealBot finds potions anywhere — in backpacks, equipped containers, or on the 
 
 ---
 
-## Support Spells
+## 🛡️ Support Spells
 
 You can add non-healing spells to HealBot's rotation:
 
@@ -116,7 +116,7 @@ Support spells use the same threshold/priority system as healing spells.
 
 ---
 
-## Food Management
+## 🍗 Food Management
 
 HealBot includes an auto-eat feature:
 
@@ -127,7 +127,7 @@ HealBot includes an auto-eat feature:
 
 ---
 
-## Condition Handling
+## 🩹 Condition Handling
 
 HealBot works alongside the **Conditions** module to detect and cure harmful conditions:
 
@@ -143,7 +143,7 @@ The Conditions panel (separate from HealBot) lets you configure automatic cures 
 
 ---
 
-## Integration with Other Modules
+## 🔗 Integration with Other Modules
 
 ### CaveBot
 
@@ -163,7 +163,7 @@ The Conditions panel (separate from HealBot) lets you configure automatic cures 
 
 ---
 
-## Vocation Examples
+## 🧙 Vocation Examples
 
 ### Knight
 
@@ -194,7 +194,7 @@ Food:     Every 3 minutes
 
 ---
 
-## Troubleshooting
+## ❓ Troubleshooting
 
 ### HealBot not healing
 

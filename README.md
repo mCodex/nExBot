@@ -23,7 +23,7 @@
 
 ---
 
-## What is nExBot?
+## 🤖 What is nExBot?
 
 nExBot is a modular Tibia bot that automates hunting, healing, navigation, and analytics.
 
@@ -41,7 +41,7 @@ nExBot is a modular Tibia bot that automates hunting, healing, navigation, and a
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 ### 1. Install
 
@@ -88,32 +88,32 @@ Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress i
 
 ---
 
-## Features
+## ✨ Features
 
-### TargetBot — AI Combat
+### 🎯 TargetBot — AI Combat
 - **AttackStateMachine** — sole attack issuer, eliminates attack-once-then-stop bugs
 - **9-stage TBI priority** — distance, health, danger, wave prediction, adaptive weights
 - **Monster Insights** — 12 SRP modules that learn monster behavior in real-time
 - **Movement coordination** — intent-based voting resolves wave avoidance, keep-distance, AoE positioning, and chase
 
-### CaveBot — Navigation
+### 🧭 CaveBot — Navigation
 - **Walking engine v4.0** — smooth autoWalk pipelining (5+ tiles), step pipelining (2-step lookahead), PathCursor preservation, adaptive recovery with path validation and exponential-decay blacklists
 - **15+ waypoint types** — goto, label, action, buy, sell, lure, standLure, depositor, travel, imbuing, tasker, withdraw
 - **50+ pre-built configs** — Asura, Banuta, Demons, Dragons, Hydras, Nagas, and more
 
-### HealBot — Survival
+### 💚 HealBot — Survival
 - **75 ms response** — event-driven, cached health data, zero-allocation casting
 - **Cascading priority** — multiple spells and potions at different HP/MP thresholds
 - **Condition handling** — auto-cure poison, paralyze, burn
 
-### Client Abstraction (ACL)
+### 🔌 Client Abstraction (ACL)
 
 > [!IMPORTANT]
 > The ACL auto-detects vBot vs. OTCR at startup — all game operations use a unified `ClientService` API. OTCR-exclusive features (imbuing, stash, forge, prey, market) are enabled automatically.
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
 ```text
 _Loader.lua (entry point)
@@ -149,25 +149,25 @@ _Loader.lua (entry point)
 
 ---
 
-## Documentation
+## 📚 Documentation
 
 | Guide | Description |
 |-------|-------------|
-| [Installing](docs/INSTALLING.md) | Installation for vBot and OTCR |
-| [HealBot](docs/HEALBOT.md) | Healing spells, potions, conditions |
-| [AttackBot](docs/ATTACKBOT.md) | Attack spells, runes, AoE optimization |
-| [CaveBot](docs/CAVEBOT.md) | Navigation, waypoints, supply management |
-| [TargetBot](docs/TARGETBOT.md) | Combat AI, Monster Insights, movement |
-| [Containers](docs/CONTAINERS.md) | Container management, quiver system |
-| [Hunt Analyzer](docs/SMARTHUNT.md) | Session analytics and insights (SmartHunt) |
-| [Extras & Tools](docs/EXTRAS.md) | Safety, equipment, utilities |
-| [Architecture](docs/ARCHITECTURE.md) | Technical design and internals |
-| [Performance](docs/PERFORMANCE.md) | Optimization and tuning |
-| [FAQ](docs/FAQ.md) | Troubleshooting and common questions |
+| 📥 [Installing](docs/INSTALLING.md) | Installation for vBot and OTCR |
+| 💚 [HealBot](docs/HEALBOT.md) | Healing spells, potions, conditions |
+| ⚔️ [AttackBot](docs/ATTACKBOT.md) | Attack spells, runes, AoE optimization |
+| 🧭 [CaveBot](docs/CAVEBOT.md) | Navigation, waypoints, supply management |
+| 🎯 [TargetBot](docs/TARGETBOT.md) | Combat AI, Monster Insights, movement |
+| 📦 [Containers](docs/CONTAINERS.md) | Container management, quiver system |
+| 📊 [Hunt Analyzer](docs/SMARTHUNT.md) | Session analytics and insights (SmartHunt) |
+| 🛠️ [Extras & Tools](docs/EXTRAS.md) | Safety, equipment, utilities |
+| 🏗️ [Architecture](docs/ARCHITECTURE.md) | Technical design and internals |
+| ⚡ [Performance](docs/PERFORMANCE.md) | Optimization and tuning |
+| ❓ [FAQ](docs/FAQ.md) | Troubleshooting and common questions |
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
@@ -176,6 +176,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
-## License
+## 📄 License
 
 [MIT License](LICENSE) — see LICENSE file for details.

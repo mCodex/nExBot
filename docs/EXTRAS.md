@@ -1,16 +1,16 @@
-# Extras and Tools
+# 🛠️ Extras and Tools
 
 Additional utilities and quality-of-life features built into nExBot.
 
 ---
 
-## Overview
+## 📖 Overview
 
 Beyond the core HealBot, AttackBot, CaveBot, and TargetBot modules, nExBot includes a rich set of extra tools and utilities accessible from the **Extras** panel on the Main tab.
 
 ---
 
-## Safety Systems
+## 🛡️ Safety Systems
 
 ### Anti-RS (Rapid Skulling Protection)
 
@@ -43,7 +43,7 @@ Monitors nearby creatures and players on adjacent floors, providing awareness of
 
 ---
 
-## Equipment Management
+## 🧰 Equipment Management
 
 ### Equipper
 
@@ -64,7 +64,7 @@ Automatically drops configured items from your inventory. Useful for clearing ju
 
 ---
 
-## Push Max
+## 💥 Push Max
 
 Automated pushing system for team hunts:
 
@@ -74,7 +74,7 @@ Automated pushing system for team hunts:
 
 ---
 
-## Combo System
+## 🎮 Combo System
 
 Synchronized spell casting for team hunts:
 
@@ -85,13 +85,13 @@ Synchronized spell casting for team hunts:
 
 ---
 
-## Hold Target
+## 🔒 Hold Target
 
 Locks onto a specific creature and prevents target switching. Useful when you need to focus down a specific monster regardless of what else appears.
 
 ---
 
-## Supplies Panel
+## 🎒 Supplies Panel
 
 The Supplies panel provides an overview of your current supply status:
 
@@ -101,7 +101,7 @@ The Supplies panel provides an overview of your current supply status:
 
 ---
 
-## Depositor Config
+## 📦 Depositor Config
 
 Configure what happens when CaveBot reaches a depot:
 
@@ -113,7 +113,7 @@ Configure what happens when CaveBot reaches a depot:
 
 ---
 
-## NPC Talk
+## 💬 NPC Talk
 
 Automated NPC interaction:
 
@@ -124,13 +124,13 @@ Automated NPC interaction:
 
 ---
 
-## In-Game Editor
+## ✏️ In-Game Editor
 
 The in-game editor allows you to modify CaveBot waypoints and TargetBot configs directly within the client UI, without editing files manually.
 
 ---
 
-## Cavebot Control Panel
+## 🎮 Cavebot Control Panel
 
 A quick-access panel for controlling CaveBot without opening the full editor:
 
@@ -141,7 +141,7 @@ A quick-access panel for controlling CaveBot without opening the full editor:
 
 ---
 
-## OTCR-Exclusive Features
+## ✨ OTCR-Exclusive Features
 
 These features are available only when running on OpenTibiaBR's OTCR client:
 
@@ -176,7 +176,7 @@ Interact with OTCR's prey system through the adapter layer.
 
 ---
 
-## Per-Character Profiles
+## 👤 Per-Character Profiles
 
 nExBot saves separate profiles for each character:
 
@@ -208,6 +208,6 @@ When you switch characters, their last-used profiles are automatically restored.
 
 ---
 
-## Multi-Client Support
+## 🖼️ Multi-Client Support
 
 nExBot supports running multiple OTClient instances simultaneously. Each character's configurations are independent — there is no conflict between running bots.

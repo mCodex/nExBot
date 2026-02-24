@@ -1,10 +1,10 @@
-# CaveBot
+# 🧭 CaveBot
 
 Automated waypoint navigation, supply management, and hunting route automation.
 
 ---
 
-## Overview
+## 📖 Overview
 
 CaveBot is nExBot's navigation engine. It follows a list of waypoints to walk your character through hunting routes, open doors, use tools, refill supplies, deposit loot, and interact with NPCs — all automatically.
 
@@ -25,7 +25,7 @@ Key capabilities:
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 1. Open the **Cave** tab.
 2. Click **Show Editor** to open the waypoint editor.
@@ -37,7 +37,7 @@ Key capabilities:
 
 ---
 
-## Waypoint Types
+## 📍 Waypoint Types
 
 ### Movement
 
@@ -50,6 +50,7 @@ Walk to a specific coordinate.
 32000,32000,7,3      → Walk within 3 tiles of position
 ```
 
+> [!TIP]
 > Use the **precision** parameter (4th value) to avoid wasting time on exact positioning. A value of 2–3 is recommended for most waypoints.
 
 #### label
@@ -62,6 +63,7 @@ label:refill
 label:depot
 ```
 
+> [!NOTE]
 > Labels are case-sensitive. `Hunt` and `hunt` are different labels.
 
 #### gotolabel
@@ -172,7 +174,7 @@ Withdraw items from the depot, depot box, or inbox.
 
 ---
 
-## Walking Engine (v4.0)
+## 🦿 Walking Engine (v4.0)
 
 The walking engine is the heart of CaveBot. It handles pathfinding, field avoidance, floor-change safety, and humanized movement.
 
@@ -228,11 +230,12 @@ If a goto action accumulates 3 consecutive failures (`recordFailure()`), the Way
 6. If distance > 30, only attempts 1–3 run (early exit saves CPU)
 ```
 
+> [!NOTE]
 > For destinations more than 30 tiles away, relaxed pathfinding attempts 4 and 5 are skipped because they rarely help at long-range and waste CPU with unnecessary A\* searches.
 
 ---
 
-## Waypoint Advancement
+## ⏩ Waypoint Advancement
 
 CaveBot processes waypoints sequentially. Each action's callback returns one of three results:
 
@@ -242,11 +245,12 @@ CaveBot processes waypoints sequentially. Each action's callback returns one of 
 | `false` | Failure | For `goto`: stay on current waypoint, trigger stuck detection. For other actions: advance to next |
 | `"retry"` | In progress | Stay on same waypoint, increment retry counter |
 
+> [!NOTE]
 > **Why goto failures don't advance:** If `goto` returned `false` and the bot moved to the next waypoint, it would rapidly cycle through all unreachable waypoints (1→2→…→N→1) at ~13/s while the player stands still. Instead, the WaypointEngine's stuck detection kicks in and finds the nearest reachable waypoint via recovery strategies.
 
 ---
 
-## Waypoint Recovery
+## 🔄 Waypoint Recovery
 
 When the bot detects it's stuck (3 consecutive goto failures), it enters recovery:
 
@@ -288,7 +292,7 @@ Recovery focuses the target waypoint directly and resets retries for a clean sta
 
 ---
 
-## Waypoint Guard
+## 🛡️ Waypoint Guard
 
 The goto action detects unreachable waypoints early and signals instant failure:
 
@@ -296,13 +300,13 @@ The goto action detects unreachable waypoints early and signals instant failure:
 |-----------|----------|
 | Wrong floor (`destPos.z ~= playerPos.z`) | Returns `false` with `instantFail` — pumps 3 failures + exponential blacklist (base 15s, doubling per failure via `BLACKLIST_BASE_TTL * 2^(failCount-1)`, capped at 120s) |
 | Too far (`dist > maxDist`) | Returns `false` with `instantFail` — same exponential blacklist + fast-track recovery |
-| Max retries exceeded (`retries >= 16` for goto, `>= 8` otherwise) | Returns `false` — feeds `recordFailure()` for stuck detection |
+| Max retries exceeded (`retries > 16` for goto, `> 8` otherwise) | Returns `false` — feeds `recordFailure()` for stuck detection |
 
 Instant failures trigger the WaypointEngine's recovery within a single macro tick (3 failures = recovery threshold).
 
 ---
 
-## Supply Management
+## 🎒 Supply Management
 
 ### Supply Check
 
@@ -340,7 +344,7 @@ label:depot
 
 ---
 
-## Depositor
+## 📦 Depositor
 
 The Depositor module handles loot depositing at the depot. Configure it through the **Depositor Config** panel:
 
@@ -351,13 +355,13 @@ The Depositor module handles loot depositing at the depot. Configure it through 
 
 ---
 
-## Pull System Integration
+## 🔗 Pull System Integration
 
 When TargetBot's Lure/Pull system is active, CaveBot **pauses** waypoint execution so the player stays in place and fights. Navigation only resumes after the lure target count is satisfied or all nearby monsters are dead.
 
 ---
 
-## Recorder
+## 🎥 Recorder
 
 The CaveBot Recorder allows you to record waypoints by simply walking your route:
 
@@ -370,7 +374,7 @@ This is the fastest way to create a new route.
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
 ### Settings
 
@@ -398,7 +402,7 @@ nExBot ships with **50+ pre-built configs** for popular hunting spots:
 
 ---
 
-## Script Examples
+## 📝 Script Examples
 
 ### Basic Hunting Loop
 
@@ -453,7 +457,7 @@ end
 
 ---
 
-## Troubleshooting
+## ❓ Troubleshooting
 
 ### CaveBot stops moving
 

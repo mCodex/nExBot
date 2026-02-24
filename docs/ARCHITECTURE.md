@@ -1,16 +1,16 @@
-# Architecture
+# 🏗️ Architecture
 
 Technical overview of nExBot's internal architecture and design patterns.
 
 ---
 
-## Overview
+## 📖 Overview
 
 nExBot is a modular, event-driven bot built in Lua for OTClient. It uses a layered architecture with clear separation between client abstraction, core systems, and feature modules.
 
 ---
 
-## System Architecture
+## 🧩 System Architecture
 
 ```text
 ┌──────────────────────────────────────────────────────┐
@@ -44,7 +44,7 @@ nExBot is a modular, event-driven bot built in Lua for OTClient. It uses a layer
 
 ---
 
-## Anti-Corruption Layer (ACL)
+## 🛡️ Anti-Corruption Layer (ACL)
 
 The ACL provides a unified API regardless of whether nExBot is running on vBot (OTClientV8) or OTCR (OpenTibiaBR).
 
@@ -81,7 +81,7 @@ Client.applyImbuement(slotId, imbuementId, useProtection)
 
 ---
 
-## EventBus
+## 📡 EventBus
 
 The centralized event dispatcher connects game callbacks to module handlers. All native OTClient callbacks are routed through EventBus so modules can subscribe without interfering with each other.
 
@@ -103,7 +103,7 @@ During floor transitions, hundreds of creature events fire in a single frame. Ev
 
 ---
 
-## Unified Tick System
+## ⏱️ Unified Tick System
 
 Instead of each module running its own `macro()` timer, `UnifiedTick` provides a single **50 ms master tick**. Modules register callbacks at their desired intervals:
 
@@ -117,7 +117,7 @@ This reduces timer overhead from 30+ separate timers to one.
 
 ---
 
-## Unified Storage
+## 💾 Unified Storage
 
 Per-character persistent storage using JSON serialization:
 
@@ -128,7 +128,7 @@ Per-character persistent storage using JSON serialization:
 
 ---
 
-## Loading Order
+## 📂 Loading Order
 
 The `_Loader.lua` organizes initialization into phases:
 
@@ -149,7 +149,7 @@ Each module is error-isolated — a failure in one module doesn't prevent others
 
 ---
 
-## Design Patterns
+## 📐 Design Patterns
 
 | Pattern | Purpose | Where Used |
 |---------|---------|------------|
@@ -172,7 +172,7 @@ Each module is error-isolated — a failure in one module doesn't prevent others
 
 ---
 
-## Module Communication
+## 🔗 Module Communication
 
 Modules communicate through three mechanisms:
 
@@ -184,7 +184,7 @@ Circular dependencies are avoided by loading modules in a strict phase order and
 
 ---
 
-## Error Handling
+## 🚨 Error Handling
 
 - Each module loads inside `pcall()` — failures are logged but don't crash the bot
 - Optional modules (marked in `OPTIONAL_MODULES`) fail silently if missing
@@ -193,6 +193,6 @@ Circular dependencies are avoided by loading modules in a strict phase order and
 
 ---
 
-## Private Scripts
+## 🔒 Private Scripts
 
 Users can place custom `.lua` files in a `private/` folder. These are auto-loaded after all core modules, giving them access to the full nExBot API. Private scripts are recursively discovered and sorted alphabetically.
