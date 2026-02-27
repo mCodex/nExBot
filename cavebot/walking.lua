@@ -833,36 +833,41 @@ CaveBot.walkTo = function(dest, maxDist, params)
   end
 
   -- FIELD HANDLING: Use keyboard walking for paths with fields
+  -- FIELD HANDLING: keyboard-walk through field tiles (autoWalk avoids them)
+  -- Only intercept when the immediate next step IS a field tile; otherwise
+  -- fall through to normal walking so non-field paths aren't blocked.
   if ignoreFields then
-    local currentPos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-    for i = curIdx, #path do
-      local dir = path[i]
-      local offset = getDirectionOffset(dir)
-      if not offset then break end
-      local nextPos = applyOffset(currentPos, offset)
-      if not isFieldTile(nextPos) then
-        -- Advance cursor to reflect steps already walked
-        if PathStrategy then
-          PathStrategy.getCursor().idx = i
-        else
-          PathCursor.idx = i
+    local peekDir = path[curIdx]
+    local peekOff = peekDir and getDirectionOffset(peekDir)
+    if peekOff then
+      local peekPos = applyOffset({x = playerPos.x, y = playerPos.y, z = playerPos.z}, peekOff)
+      if isFieldTile(peekPos) then
+        local currentPos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+        local lastWalked = curIdx - 1
+        for i = curIdx, #path do
+          local dir = path[i]
+          local offset = getDirectionOffset(dir)
+          if not offset then break end
+          local nextPos = applyOffset(currentPos, offset)
+          if not isFieldTile(nextPos) then break end
+          walk(dir)
+          currentPos = nextPos
+          lastWalked = i
+          if posEquals(currentPos, dest) then
+            if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
+            return true
+          end
         end
-        break
-      end
-      walk(dir)
-      currentPos = nextPos
-      if posEquals(currentPos, dest) then
-        if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
+        -- Advance cursor past the walked field tiles only
+        if PathStrategy then
+          PathStrategy.getCursor().idx = lastWalked + 1
+        else
+          PathCursor.idx = lastWalked + 1
+        end
         return true
       end
     end
-    -- Advance cursor past all walked steps
-    if PathStrategy then
-      PathStrategy.getCursor().idx = #path + 1
-    else
-      PathCursor.idx = #path + 1
-    end
-    return true
+    -- Next step is NOT a field tile — fall through to normal walking
   end
 
   -- Determine path complexity (direction changes in remaining path)

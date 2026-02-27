@@ -564,7 +564,7 @@ local function shouldItemGoToContainer(itemId, containerEntry)
 end
 
 -- Refresh the container list UI
-local function refreshContainerList()
+refreshContainerList = function()
     if not setupWindow then return end
     
     local list = setupWindow.containerList
@@ -665,9 +665,18 @@ local function initSetupWindow()
     if setupWindow then return end
     
     local rootWidget = g_ui.getRootWidget()
-    if not rootWidget then return end
+    if not rootWidget then
+        warn("[Container Panel] rootWidget not available")
+        return
+    end
     
-    setupWindow = UI.createWindow('ContainerSetupWindow', rootWidget)
+    local ok, win = pcall(function() return UI.createWindow('ContainerSetupWindow', rootWidget) end)
+    if not ok or not win then
+        warn("[Container Panel] Failed to create setup window: " .. tostring(win))
+        return
+    end
+    
+    setupWindow = win
     setupWindow:hide()
     setupWindow:setHeight(config.windowHeight or 200)
     
@@ -1510,7 +1519,7 @@ containerUI.openAll.onClick = function(widget)
 end
 
 containerUI.setupBtn.onClick = function(widget)
-    initSetupWindow()
+    if not setupWindow then initSetupWindow() end
     if setupWindow then
         setupWindow:show()
         setupWindow:raise()

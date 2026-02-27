@@ -384,7 +384,7 @@ This is the fastest way to create a new route.
 | **Walk Delay** | Delay between steps | 100ms |
 | **Ping Compensation** | Added to all delays | 0ms |
 | **Auto Use Tools** | Use rope/shovel automatically | ON |
-| **Ignore Fields** | Allow walking through fields | OFF |
+| **Ignore Fields** | Allow walking through fields | ON |
 
 ### Saving and Loading Configs
 
