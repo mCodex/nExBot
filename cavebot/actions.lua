@@ -380,22 +380,7 @@ local function getBlockingMonster(playerPos, destPos, maxDist)
 end
 
 CaveBot.registerAction("goto", "green", function(value, retries, prev)
-  -- ========== EARLY EXITS (no pathfinding) ==========
-  
-  -- Skip if actively walking — return "walking" so the main loop does NOT
-  -- increment actionRetries.  Only actual walkTo calls should count as retries;
-  -- inflating retries while walking caused the safety valve / maxRetries to
-  -- abort perfectly valid walks (any destination >7-8 tiles away).
-  if player and player:isWalking() then
-    -- Check if we've already arrived via EventBus
-    if CaveBot.hasArrivedAtWaypoint and CaveBot.hasArrivedAtWaypoint() then
-      CaveBot.clearWaypointTarget()
-      return true
-    end
-    return "walking"  -- Don't count walking ticks as retries
-  end
-
-  -- Parse position
+  -- ========== PARSE POSITION ==========
   local posMatch = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+),?\\s*([0-9]?)")
   if not posMatch[1] then
     warn("Invalid cavebot goto value: " .. value)
@@ -410,105 +395,124 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   local precision = tonumber(posMatch[1][5]) or 1
   local playerPos = player:getPosition()
   local maxDist = CaveBot.getMaxGotoDistance()
-  
-  -- MULTI-FLOOR WAYPOINT HANDLING
-  -- If the waypoint is on a different Z level, signal failure immediately
-  -- so WaypointEngine's stuck detection sees it and triggers recovery.
+
+  -- ========== ENSURE NAVIGATOR ROUTE IS BUILT ==========
+  if WaypointNavigator and CaveBot.ensureNavigatorRoute then
+    CaveBot.ensureNavigatorRoute(playerPos.z)
+  end
+
+  -- ========== FLOOR CHECK ==========
   if destPos.z ~= playerPos.z then
-    return false, true  -- instantFail: pumps extra recordFailure
+    return false, true
   end
 
-  -- Distance calculations (chebyshev matches findReachableWaypoint + OTClient diagonal movement)
-  local distX = math.abs(destPos.x - playerPos.x)
-  local distY = math.abs(destPos.y - playerPos.y)
-  local dist  = math.max(distX, distY)
-  
-  -- Too far — signal failure for stuck detection
-  if dist > maxDist then
-    return false, true  -- instantFail: pumps extra recordFailure
+  -- ========== FORWARD PASS CHECK ==========
+  -- If the navigator confirms the player has already passed this WP on the route,
+  -- advance immediately. This handles smooth walk-through transitions where A* paths
+  -- carry the player past a WP before the goto action's arrival check fires.
+  if WaypointNavigator and WaypointNavigator.hasPassedWaypoint then
+    local currentAction = ui and ui.list and ui.list:getFocusedChild()
+    local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
+    if waypointIdx and WaypointNavigator.hasPassedWaypoint(playerPos, waypointIdx, destPos) then
+      CaveBot.clearWaypointTarget()
+      return true
+    end
   end
 
-  -- Check if destination is floor-change tile (stairs, ladder, rope spot, hole)
-  -- When user explicitly adds such a waypoint, they INTEND to use it
-  -- Uses FloorItems module (SSoT: constants/floor_items.lua) for detection,
-  -- with minimap color for determining floor-change direction.
+  -- ========== FLOOR-CHANGE TILE DETECTION ==========
   local Client = getClient()
   local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(destPos) or (g_map and g_map.getMinimapColor(destPos)) or 0
   local isFloorChange = (FloorItems and FloorItems.isFloorChangeTile) and FloorItems.isFloorChangeTile(destPos) or false
-  
-  -- If destination is floor-change, use precision 0 and allow the floor change
-  -- Also mark the intended floor change so we don't reset after using the ladder/stairs
+
   local expectedFloorAfterChange = nil
-  if isFloorChange then 
+  if isFloorChange then
     precision = 0
-    -- Determine expected floor after using this tile
-    -- Going up: z decreases, Going down: z increases
-    -- Minimap colors: 210=ladder up, 211=rope up, 212=stairs down, 213=hole down
     if minimapColor == 210 or minimapColor == 211 then
-      expectedFloorAfterChange = destPos.z - 1  -- Ladder/rope up
+      expectedFloorAfterChange = destPos.z - 1
     elseif minimapColor == 212 or minimapColor == 213 then
-      expectedFloorAfterChange = destPos.z + 1  -- Stairs/hole down
-    else
-      -- Unknown minimap color: don't assume direction
-      expectedFloorAfterChange = nil
+      expectedFloorAfterChange = destPos.z + 1
     end
-    
-    -- LOOP PREVENTION: Check if this floor change would create a loop
+
     if CaveBot.wouldFloorChangeLoop and CaveBot.wouldFloorChangeLoop(expectedFloorAfterChange) then
-      -- We would be going back to a floor we just left - likely a loop
-      -- Check cooldown before allowing
       if CaveBot.canChangeFloor and not CaveBot.canChangeFloor() then
-        -- Still in cooldown - skip this floor change waypoint
-        return true  -- Move to next waypoint
+        return true
       end
     end
-    
-    -- Get current waypoint index to track which waypoint initiated this
+
     local currentAction = ui and ui.list and ui.list:getFocusedChild()
     local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
-    
-    -- CRITICAL: Set intended floor change BEFORE we start walking
-    -- This ensures the floor change is marked as intentional before it happens
     if CaveBot.setIntendedFloorChange then
       CaveBot.setIntendedFloorChange(expectedFloorAfterChange, waypointIdx)
     end
   end
-  
-  -- Already at destination
+
+  -- ========== ARRIVAL PRECISION ==========
+  -- For non-floor-change WPs, widen arrival precision to 3 tiles (Chebyshev).
+  -- This creates smooth transitions: the bot advances to the next WP before
+  -- fully stopping at the current one, so A* paths chain naturally.
+  -- Floor-change WPs keep precision=0 (must step on the exact tile).
+  -- Walk precision (for A*) is always 1 — the player walks close to the target.
+  if not isFloorChange and precision > 0 then
+    precision = math.max(precision, 3)
+  end
+
+  -- ========== DISTANCE CALCULATIONS ==========
+  local distX = math.abs(destPos.x - playerPos.x)
+  local distY = math.abs(destPos.y - playerPos.y)
+  local dist  = math.max(distX, distY)
+
+  -- ========== ARRIVAL CHECK ==========
   if distX <= precision and distY <= precision then
-    CaveBot.clearWaypointTarget()  -- Clear target on arrival
-    -- If this was a floor-change tile and we're standing on it, wait for floor change
+    CaveBot.clearWaypointTarget()
     if isFloorChange then
-      -- Ensure intended floor change is set
       if expectedFloorAfterChange and CaveBot.setIntendedFloorChange then
         local currentAction = ui and ui.list and ui.list:getFocusedChild()
         local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
         CaveBot.setIntendedFloorChange(expectedFloorAfterChange, waypointIdx)
       end
-      
-      -- Check if we've already changed floors (floor change completed)
       if playerPos.z == expectedFloorAfterChange then
-        -- Floor change completed successfully!
         return true
       end
-      
-      -- Still on the same floor - wait for floor change to occur
-      CaveBot.delay(50)  -- Minimal delay for fast floor-change response
+      CaveBot.delay(50)
       return "retry"
     end
     return true
   end
 
-  -- Max retries — lower thresholds for faster handoff to WaypointEngine recovery.
-  -- Progressive: ignoreCreatures retries>1, blocker attack retries>2, ignoreFields retries>2.
+  -- ========== CURRENTLY WALKING ==========
+  if player and player:isWalking() then
+    -- Check instant arrival via EventBus
+    if CaveBot.hasArrivedAtWaypoint and CaveBot.hasArrivedAtWaypoint() then
+      CaveBot.clearWaypointTarget()
+      return true
+    end
+    -- Don't count walking ticks as retries
+    return "walking"
+  end
+
+  -- ========== TOO FAR ==========
+  if dist > maxDist then
+    -- If navigator knows the correct next WP and it's closer, advance
+    if WaypointNavigator and WaypointNavigator.isRouteBuilt and WaypointNavigator.isRouteBuilt() then
+      local nextWpIdx, nextWpPos = WaypointNavigator.getNextWaypoint(playerPos)
+      if nextWpIdx and nextWpPos then
+        local nextDist = math.max(math.abs(nextWpPos.x - playerPos.x), math.abs(nextWpPos.y - playerPos.y))
+        if nextDist < dist then
+          CaveBot.clearWaypointTarget()
+          return true
+        end
+      end
+    end
+    return false, true
+  end
+
+  -- ========== MAX RETRIES ==========
   local maxRetries = CaveBot.Config.get("mapClick") and 4 or 8
   if retries >= maxRetries then
     return false
   end
 
-  -- ========== WALKING (single attempt per retry) ==========
-  
-  -- Check for blocking monster first (only on retry > 2)
+  -- ========== BLOCKING MONSTER (retry > 2) ==========
   if retries > 2 then
     local blocker = getBlockingMonster(playerPos, destPos, maxDist)
     if blocker then
@@ -522,42 +526,40 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
       else
         g_game.setChaseMode(1)
       end
-      CaveBot.delay(100)  -- Reduced delay for faster recovery
+      CaveBot.delay(100)
       return "retry"
     end
   end
-  
-  -- Attempt to walk
+
+  -- ========== WALK PARAMETERS ==========
   local walkParams = {
     ignoreNonPathable = true,
-    precision = precision,
-    allowFloorChange = isFloorChange  -- Allow if user explicitly added floor-change waypoint
+    precision = isFloorChange and 0 or 1,
+    allowFloorChange = isFloorChange
   }
-  
-  -- Progressive escalation: ignoreCreatures early so mapClick (maxRetries=4)
-  -- actually benefits; ignoreFields slightly later to match findPathRelaxed.
   if retries > 1 then
     walkParams.ignoreCreatures = true
   end
   if retries > 2 then
     walkParams.ignoreFields = true
   end
-  
+
+  -- ========== ATTEMPT WALK ==========
+  -- Walk directly to destPos. The A* pathfinder computes optimal smooth paths
+  -- around obstacles. No lookahead target needed — smooth movement comes from
+  -- the widened arrival precision (player advances to next WP before stopping).
   if CaveBot.walkTo(destPos, maxDist, walkParams) then
-    -- Set waypoint target for EventBus instant arrival detection
     if CaveBot.setCurrentWaypointTarget then
       CaveBot.setCurrentWaypointTarget(destPos, precision)
     end
-    -- Mark that we're walking to this waypoint (reduces unnecessary re-execution)
     if CaveBot.setWalkingToWaypoint then
       CaveBot.setWalkingToWaypoint(destPos)
     end
-    return "retry"  -- Continue checking for arrival
+    CaveBot.delay(100)
+    return "walking"
   end
-  
-  -- Walk failed — clear walking state and retry with progressive strategies.
-  -- retries > 1 ignoreCreatures; retries > 2 blocker attack + ignoreFields.
-  -- retries >= maxRetries returns false, feeding WaypointEngine's recordFailure().
+
+  -- Walk failed — retry with progressive escalation
   if CaveBot.clearWalkingState then
     CaveBot.clearWalkingState()
   end
