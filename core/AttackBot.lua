@@ -936,7 +936,7 @@ end
         maxHp = maxHp,
         cooldown = cooldown,
         itemId = itemId,
-        spell = spell,
+        spell = showItem and nil or spell,
         enabled = true,
         category = category,
         patternCategory = patternCategory,
@@ -1574,7 +1574,8 @@ local function evaluateEntry(entry, context, cache)
   -- Cooldown check
   local cdMs = toCooldownMs(entry.cooldown)
   if context.settings.Cooldown then
-    if entry.spell then
+    -- Categories 1, 4, 5 are spell-based; categories 2, 3 are rune-based
+    if entry.category == 1 or entry.category == 4 or entry.category == 5 then
       local state = getSpellState(getSpellKey(entry))
       if state and nowMs() < state.nextReadyAt then return false end
     else
@@ -1717,7 +1718,8 @@ end
 
 -- Pure function: Execute attack action
 local function executeAttack(entry, context)
-  if entry.spell then
+  -- Categories 1 (targeted spell), 4 (empowerment), 5 (absolute) are spell-based
+  if entry.category == 1 or entry.category == 4 or entry.category == 5 then
     return attemptSpellCast(entry, context)
   end
 
