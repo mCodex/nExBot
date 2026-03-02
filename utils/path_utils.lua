@@ -188,32 +188,32 @@ PathUtils.FIELD_ITEMS = (FloorItems and FloorItems.FIELDS) or {
   [2130] = true, [2131] = true,
 }
 
--- Floor-change tile cache (per-entry TTL to avoid cold-cache burst)
+-- Floor-change tile cache (lazy eviction — no periodic O(n) cleanup)
 local floorChangeCache = {}
+local floorChangeCacheSize = 0
 local CACHE_TTL = 2000
-local CACHE_CLEANUP_INTERVAL = 5000
-local lastCacheCleanup = 0
+local CACHE_MAX_SIZE = 200  -- Safety valve: clear entire cache if too large
 
--- Pure: Check if position is floor-change tile (cached with per-entry TTL)
+-- Pure: Check if position is floor-change tile (cached with lazy per-entry TTL)
 -- Uses integer key: pos.x * 1048576 + pos.y * 16 + pos.z — zero allocation vs string concat
 function PathUtils.isFloorChangeTile(pos)
   if not pos then return false end
   
-  -- Periodic cleanup of expired entries (avoids unbounded growth)
-  if now - lastCacheCleanup > CACHE_CLEANUP_INTERVAL then
-    local cutoff = now - CACHE_TTL
-    for k, v in pairs(floorChangeCache) do
-      if v.time < cutoff then
-        floorChangeCache[k] = nil
-      end
-    end
-    lastCacheCleanup = now
+  -- Safety valve: prevent unbounded growth
+  if floorChangeCacheSize > CACHE_MAX_SIZE then
+    floorChangeCache = {}
+    floorChangeCacheSize = 0
   end
   
   local key = pos.x * 1048576 + pos.y * 16 + pos.z
   local cached = floorChangeCache[key]
-  if cached and now - cached.time < CACHE_TTL then
-    return cached.value
+  if cached then
+    if now - cached.time < CACHE_TTL then
+      return cached.value
+    end
+    -- Lazy evict expired entry
+    floorChangeCache[key] = nil
+    floorChangeCacheSize = floorChangeCacheSize - 1
   end
   
   -- Fast path: minimap color
@@ -221,6 +221,7 @@ function PathUtils.isFloorChangeTile(pos)
   local color = map and map.getMinimapColor and map.getMinimapColor(pos) or 0
   if PathUtils.FLOOR_CHANGE_COLORS[color] then
     floorChangeCache[key] = {value = true, time = now}
+    floorChangeCacheSize = floorChangeCacheSize + 1
     return true
   end
   
@@ -240,6 +241,7 @@ function PathUtils.isFloorChangeTile(pos)
   end
   
   floorChangeCache[key] = {value = result, time = now}
+  floorChangeCacheSize = floorChangeCacheSize + 1
   return result
 end
 
@@ -500,25 +502,23 @@ function PathUtils.getStepDuration(diagonal)
   
   local speed = player.getSpeed and player:getSpeed() or 220
   
-  -- Cache hit
-  if speed == stepDurationCache.speed and now - stepDurationCache.time < 1000 then
+  -- Cache hit: keyed on speed value only (speed changes are rare events)
+  if speed == stepDurationCache.speed then
     return diagonal and stepDurationCache.diagonal or stepDurationCache.cardinal
   end
   
-  -- Calculate using native API
-  local dir = diagonal and NorthEast or North
-  local duration = player.getStepDuration and player:getStepDuration(false, dir) or 150
+  -- Speed changed — recompute both cardinal and diagonal
+  local cardinalDir = North or 0
+  local diagonalDir = NorthEast or 4
+  local cardinalDur = player.getStepDuration and player:getStepDuration(false, cardinalDir) or 150
+  local diagonalDur = player.getStepDuration and player:getStepDuration(false, diagonalDir) or 150
   
   -- Update cache
   stepDurationCache.speed = speed
-  stepDurationCache.time = now
-  if diagonal then
-    stepDurationCache.diagonal = duration
-  else
-    stepDurationCache.cardinal = duration
-  end
+  stepDurationCache.cardinal = cardinalDur
+  stepDurationCache.diagonal = diagonalDur
   
-  return duration
+  return diagonal and diagonalDur or cardinalDur
 end
 
 -- Check if player can walk in direction (native API)
@@ -553,19 +553,10 @@ end
 -- POSITION UTILITIES
 -- ============================================================================
 
--- Get direction from one position to another
-function PathUtils.getDirectionTo(fromPos, toPos)
-  if not fromPos or not toPos then return nil end
-  
-  local dx = toPos.x - fromPos.x
-  local dy = toPos.y - fromPos.y
-  
-  local nx = dx == 0 and 0 or (dx > 0 and 1 or -1)
-  local ny = dy == 0 and 0 or (dy > 0 and 1 or -1)
-  
-  local key = nx .. "," .. ny
-  return PathUtils.OFFSET_TO_DIR[key]
-end
+-- Delegate to Directions module (SSoT — DRY)
+PathUtils.getDirectionTo = Directions.getDirectionTo
+PathUtils.chebyshevDistance = Directions.chebyshevDistance
+PathUtils.manhattanDistance = Directions.manhattanDistance
 
 -- Apply direction offset to position
 function PathUtils.applyDirection(pos, dir)
@@ -573,18 +564,6 @@ function PathUtils.applyDirection(pos, dir)
   local offset = PathUtils.DIR_TO_OFFSET[dir]
   if not offset then return nil end
   return {x = pos.x + offset.x, y = pos.y + offset.y, z = pos.z}
-end
-
--- Calculate Chebyshev distance (diagonal allowed)
-function PathUtils.chebyshevDistance(pos1, pos2)
-  if not pos1 or not pos2 then return 999 end
-  return math.max(math.abs(pos1.x - pos2.x), math.abs(pos1.y - pos2.y))
-end
-
--- Calculate Manhattan distance (no diagonal)
-function PathUtils.manhattanDistance(pos1, pos2)
-  if not pos1 or not pos2 then return 999 end
-  return math.abs(pos1.x - pos2.x) + math.abs(pos1.y - pos2.y)
 end
 
 -- Check if positions are equal

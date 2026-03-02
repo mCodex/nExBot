@@ -379,6 +379,55 @@ local function getBlockingMonster(playerPos, destPos, maxDist)
   return nil
 end
 
+-- Get Chebyshev distance to the next goto waypoint in the list
+-- Used for adaptive arrival precision (prevents zone overlap on close WPs)
+local nextGotoDistCache = {}
+local nextGotoDistCacheCount = 0
+local function getDistanceToNextGoto(currentIdx)
+  if nextGotoDistCache[currentIdx] then return nextGotoDistCache[currentIdx] end
+  if not ui or not ui.list then return 50 end
+  local children = ui.list:getChildren()
+  if not children then return 50 end
+  for i = currentIdx + 1, #children do
+    local child = children[i]
+    if child then
+      local actionType = child.actionType or child:getText()
+      if type(actionType) == "string" and actionType:find("goto") then
+        local val = child.value or child:getText()
+        if val then
+          local m = regexMatch(val, "([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
+          if m and m[1] then
+            local nextPos = {x = tonumber(m[1][2]), y = tonumber(m[1][3]), z = tonumber(m[1][4])}
+            if nextPos.x and nextPos.y then
+              -- Chebyshev from current WP to next goto WP
+              local currentAction = children[currentIdx]
+              if currentAction then
+                local cv = currentAction.value or currentAction:getText()
+                if cv then
+                  local cm = regexMatch(cv, "([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
+                  if cm and cm[1] then
+                    local curPos = {x = tonumber(cm[1][2]), y = tonumber(cm[1][3])}
+                    if curPos.x and curPos.y then
+                      local d = math.max(math.abs(nextPos.x - curPos.x), math.abs(nextPos.y - curPos.y))
+                      -- Cache with size limit
+                      if nextGotoDistCacheCount < 200 then
+                        nextGotoDistCache[currentIdx] = d
+                        nextGotoDistCacheCount = nextGotoDistCacheCount + 1
+                      end
+                      return d
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  return 50  -- Default: no next goto found, use wide precision
+end
+
 CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- ========== PARSE POSITION ==========
   local posMatch = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+),?\\s*([0-9]?)")
@@ -447,13 +496,17 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
 
   -- ========== ARRIVAL PRECISION ==========
-  -- For non-floor-change WPs, widen arrival precision to 3 tiles (Chebyshev).
-  -- This creates smooth transitions: the bot advances to the next WP before
-  -- fully stopping at the current one, so A* paths chain naturally.
+  -- Adaptive: scale precision by distance to next goto WP to prevent zone overlap.
   -- Floor-change WPs keep precision=0 (must step on the exact tile).
-  -- Walk precision (for A*) is always 1 — the player walks close to the target.
   if not isFloorChange and precision > 0 then
-    precision = math.max(precision, 3)
+    local currentAction = ui and ui.list and ui.list:getFocusedChild()
+    local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
+    if waypointIdx then
+      local nextDist = getDistanceToNextGoto(waypointIdx)
+      precision = math.max(1, math.min(3, math.floor(nextDist / 2.5)))
+    else
+      precision = math.max(precision, 3)
+    end
   end
 
   -- ========== DISTANCE CALCULATIONS ==========
@@ -532,9 +585,11 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
 
   -- ========== WALK PARAMETERS ==========
+  -- Walk precision matches arrival precision minus 1: A* stops at the zone
+  -- boundary rather than overshooting to the center.
   local walkParams = {
     ignoreNonPathable = true,
-    precision = isFloorChange and 0 or 1,
+    precision = isFloorChange and 0 or math.max(0, precision - 1),
     allowFloorChange = isFloorChange
   }
   if retries > 1 then
@@ -548,14 +603,24 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Walk directly to destPos. The A* pathfinder computes optimal smooth paths
   -- around obstacles. No lookahead target needed — smooth movement comes from
   -- the widened arrival precision (player advances to next WP before stopping).
-  if CaveBot.walkTo(destPos, maxDist, walkParams) then
+  local walkResult = CaveBot.walkTo(destPos, maxDist, walkParams)
+  if walkResult == "nudge" then
+    -- Nudge only — count as retry so progressive strategies activate
+    if CaveBot.setCurrentWaypointTarget then
+      CaveBot.setCurrentWaypointTarget(destPos, precision)
+    end
+    local walkDelay = dist <= 3 and 0 or dist <= 8 and 25 or dist <= 15 and 50 or 75
+    if walkDelay > 0 then CaveBot.delay(walkDelay) end
+    return "retry"
+  elseif walkResult then
     if CaveBot.setCurrentWaypointTarget then
       CaveBot.setCurrentWaypointTarget(destPos, precision)
     end
     if CaveBot.setWalkingToWaypoint then
       CaveBot.setWalkingToWaypoint(destPos)
     end
-    CaveBot.delay(100)
+    local walkDelay = dist <= 3 and 0 or dist <= 8 and 25 or dist <= 15 and 50 or 75
+    if walkDelay > 0 then CaveBot.delay(walkDelay) end
     return "walking"
   end
 

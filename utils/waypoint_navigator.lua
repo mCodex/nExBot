@@ -40,11 +40,13 @@ WaypointNavigator = WaypointNavigator or {}
 
 -- Route: ordered list of segments between consecutive goto waypoints
 local route = {
-  segments = {},       -- Array of {fromPos, toPos, fromIdx, toIdx, length, dirX, dirY}
+  segments = {},       -- Array of {fromPos, toPos, fromIdx, toIdx, length, dirX, dirY, cumulativeDist}
   gotoIndices = {},    -- Ordered array of waypoint list indices that are 'goto' type
   built = false,
   floor = nil,
   waypointCount = 0,   -- For invalidation check
+  totalLength = 0,     -- Sum of all segment lengths (precomputed)
+  wpCumDist = {},      -- wpCumDist[toIdx] = cumulative distance at segment end (O(1) lookup)
 }
 
 -- Corridor configuration
@@ -75,6 +77,7 @@ local tracking = {
   inCorridor = true,      -- Whether player is currently inside the corridor
   corridorExitTime = 0,   -- When player first left the corridor
   consecutiveOutside = 0, -- Ticks outside corridor (prevent false triggers from lag)
+  softBoundaryStart = nil, -- Wall-clock timestamp for soft boundary grace period
 }
 
 -- Timing reference (use sandbox global or os.clock fallback)
@@ -147,12 +150,14 @@ function WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
   route.built = false
   route.floor = playerFloor
   route.waypointCount = count
+  route.totalLength = 0
+  route.wpCumDist = {}
 
   -- Collect goto waypoints on this floor, sorted by index
   local gotos = {}
   for idx, wp in pairs(waypointPositionCache) do
     if wp.isGoto and wp.z == playerFloor then
-      gotos[#gotos + 1] = { idx = idx, x = wp.x, y = wp.y, z = wp.z }
+      gotos[#gotos + 1] = { idx = idx, pos = wp }
     end
   end
 
@@ -179,24 +184,26 @@ function WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
     maxSegmentLength = CaveBot.getMaxGotoDistance() * 2
   end
 
-  -- Build segments between consecutive gotos
+  -- Build segments between consecutive gotos (reference waypointPositionCache directly)
   for i = 1, #gotos - 1 do
     local from = gotos[i]
     local to = gotos[i + 1]
-    local dx = to.x - from.x
-    local dy = to.y - from.y
+    local dx = to.pos.x - from.pos.x
+    local dy = to.pos.y - from.pos.y
     local length = math.sqrt(dx * dx + dy * dy)
 
-    -- Skip excessively long segments (wrap-around or cross-map jumps)
     if length <= maxSegmentLength then
       route.segments[#route.segments + 1] = {
-        fromPos = { x = from.x, y = from.y, z = from.z },
-        toPos = { x = to.x, y = to.y, z = to.z },
+        fromPos = from.pos,   -- reference, not copy
+        toPos = to.pos,       -- reference, not copy
         fromIdx = from.idx,
         toIdx = to.idx,
         length = length,
         dirX = length > 0 and dx / length or 0,
         dirY = length > 0 and dy / length or 0,
+        cumulativeDist = 0,  -- filled below
+        midX = (from.pos.x + to.pos.x) * 0.5,  -- for spatial pruning
+        midY = (from.pos.y + to.pos.y) * 0.5,
       }
     end
   end
@@ -204,20 +211,32 @@ function WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
   -- Wrap-around segment (last -> first) if close enough
   local last = gotos[#gotos]
   local first = gotos[1]
-  local wrapDx = first.x - last.x
-  local wrapDy = first.y - last.y
+  local wrapDx = first.pos.x - last.pos.x
+  local wrapDy = first.pos.y - last.pos.y
   local wrapLength = math.sqrt(wrapDx * wrapDx + wrapDy * wrapDy)
   if wrapLength <= maxSegmentLength and wrapLength > 0 then
     route.segments[#route.segments + 1] = {
-      fromPos = { x = last.x, y = last.y, z = last.z },
-      toPos = { x = first.x, y = first.y, z = first.z },
+      fromPos = last.pos,
+      toPos = first.pos,
       fromIdx = last.idx,
       toIdx = first.idx,
       length = wrapLength,
       dirX = wrapDx / wrapLength,
       dirY = wrapDy / wrapLength,
+      cumulativeDist = 0,
+      midX = (last.pos.x + first.pos.x) * 0.5,
+      midY = (last.pos.y + first.pos.y) * 0.5,
     }
   end
+
+  -- Precompute cumulative distances for O(1) lookups
+  local cumDist = 0
+  for i, seg in ipairs(route.segments) do
+    seg.cumulativeDist = cumDist
+    cumDist = cumDist + seg.length
+    route.wpCumDist[seg.toIdx] = cumDist  -- end of segment = cumDist after adding length
+  end
+  route.totalLength = cumDist
 
   route.built = true
 end
@@ -227,8 +246,9 @@ end
 -- ============================================================================
 
 --- Project player position onto the nearest segment.
--- Finds the segment with the shortest perpendicular distance, with bias toward
--- the current/forward segment to prevent backward jumps.
+-- Phase 1: bounding-box filter to skip far-away segments (Chebyshev, no sqrt).
+-- Phase 2: squared-distance ranking to avoid sqrt in inner loop.
+-- Only sqrt the winner for the final result.
 -- @param playerPos table {x, y, z}
 -- @return segmentIndex, projectedPoint {x,y}, distFromRoute, progress (0-1)
 function WaypointNavigator.projectOntoRoute(playerPos)
@@ -238,45 +258,52 @@ function WaypointNavigator.projectOntoRoute(playerPos)
 
   local bestSegIdx = 0
   local bestProjX, bestProjY = 0, 0
-  local bestDist = math.huge
-  local bestRealDist = math.huge
+  local bestSqDist = math.huge
+  local bestRealSqDist = math.huge
   local bestT = 0
 
   local px, py = playerPos.x, playerPos.y
   local curSeg = tracking.segmentIndex
+  local PRUNE_RADIUS = 30  -- Chebyshev distance for spatial pruning
 
   for i, seg in ipairs(route.segments) do
-    local projX, projY, t, dist = projectPointOnSegment(
-      px, py,
-      seg.fromPos.x, seg.fromPos.y,
-      seg.toPos.x, seg.toPos.y
-    )
+    -- Spatial pruning: skip segments whose midpoint is too far (Chebyshev, no sqrt)
+    local halfLen = seg.length * 0.5 + PRUNE_RADIUS
+    if math.abs(px - seg.midX) <= halfLen and math.abs(py - seg.midY) <= halfLen then
+      local projX, projY, t, dist = projectPointOnSegment(
+        px, py,
+        seg.fromPos.x, seg.fromPos.y,
+        seg.toPos.x, seg.toPos.y
+      )
 
-    -- Bias toward current segment: give it a small distance bonus (2 tiles)
-    -- This prevents oscillation between adjacent segments when near their junction
-    local effectiveDist = dist
-    if i == curSeg then
-      effectiveDist = effectiveDist - 2
-    -- Forward bias: slightly prefer the next segment when at a junction
-    elseif curSeg > 0 and i == curSeg + 1 then
-      effectiveDist = effectiveDist - 1
-    -- Backward penalty: discourage jumping to previous segments
-    elseif curSeg > 0 and i < curSeg then
-      effectiveDist = effectiveDist + 3
-    end
+      -- Use squared distance for ranking (avoid sqrt in inner loop)
+      local sqDist = dist * dist  -- dist already computed by projectPointOnSegment
 
-    if effectiveDist < bestDist then
-      bestDist = effectiveDist
-      bestRealDist = dist
-      bestSegIdx = i
-      bestProjX = projX
-      bestProjY = projY
-      bestT = t
+      -- Bias toward current segment: reduce effective distance
+      local effectiveSqDist = sqDist
+      if i == curSeg then
+        effectiveSqDist = effectiveSqDist - 4  -- equivalent to -2 tiles bias (squared)
+      elseif curSeg > 0 and i == curSeg + 1 then
+        effectiveSqDist = effectiveSqDist - 1  -- forward bias
+      elseif curSeg > 0 and i < curSeg then
+        effectiveSqDist = effectiveSqDist + 9  -- backward penalty (+3 squared)
+      end
+
+      if effectiveSqDist < bestSqDist then
+        bestSqDist = effectiveSqDist
+        bestRealSqDist = sqDist
+        bestSegIdx = i
+        bestProjX = projX
+        bestProjY = projY
+        bestT = t
+      end
     end
   end
 
   if bestSegIdx > 0 then
-    return bestSegIdx, { x = bestProjX, y = bestProjY }, bestRealDist, bestT
+    -- Only sqrt the winner
+    local bestDist = math.sqrt(bestRealSqDist)
+    return bestSegIdx, { x = bestProjX, y = bestProjY }, bestDist, bestT
   end
 
   return 0, nil, math.huge, 0
@@ -287,8 +314,8 @@ end
 -- ============================================================================
 
 --- Get the correct next waypoint for the player to walk to.
--- Always returns the END waypoint of the projected segment (forward only).
--- If player is >85% through current segment, advances to next segment.
+-- Uses distance-based advance: advances when <4 tiles from segment end,
+-- regardless of segment length (consistent behavior).
 -- @param playerPos table {x, y, z}
 -- @return waypointIndex (or nil), waypointPos (or nil)
 function WaypointNavigator.getNextWaypoint(playerPos)
@@ -307,8 +334,9 @@ function WaypointNavigator.getNextWaypoint(playerPos)
 
   local seg = route.segments[segIdx]
 
-  -- If player is near the end of the segment (>85% progress), advance to next
-  if progress > 0.85 and segIdx < #route.segments then
+  -- Distance-based advance: advance when <4 tiles from segment end
+  local remainingDist = (1 - progress) * seg.length
+  if remainingDist < 4 and segIdx < #route.segments then
     local nextSeg = route.segments[segIdx + 1]
     return nextSeg.toIdx, nextSeg.toPos
   end
@@ -322,14 +350,8 @@ end
 -- ============================================================================
 
 --- Compute a Pure Pursuit lookahead target on the route.
--- Projects the player onto the route, then walks forward `lookahead` tiles
--- along the route from that projection. Returns a tile-rounded position.
---
--- This creates smooth, human-like movement:
--- - Player between WP#5 and WP#6 (4 tiles from WP#6, lookahead=12)
---   → target lands 8 tiles past WP#6 on WP#6→WP#7 segment
---   → A* pathfinds to that point, creating a smooth arc through WP#6
---   → No stop-and-go at each waypoint
+-- Uses precomputed cumulative distances and binary search for O(log n)
+-- segment lookup instead of linear scan.
 --
 -- @param playerPos table {x, y, z}
 -- @return targetPos {x,y,z} (tile-rounded) or nil, segmentIndex
@@ -345,42 +367,55 @@ function WaypointNavigator.getLookaheadTarget(playerPos)
   local baseSeg = route.segments[segIdx]
   local baseFloor = baseSeg.fromPos.z
 
-  -- Remaining distance on current segment from projection point to segment end
-  local rx = baseSeg.toPos.x - projPoint.x
-  local ry = baseSeg.toPos.y - projPoint.y
-  local rem = math.sqrt(rx * rx + ry * ry)
+  -- Player's cumulative distance on route (precomputed base + progress)
+  local playerCumDist = baseSeg.cumulativeDist + t * baseSeg.length
+  local targetCumDist = playerCumDist + lookahead
 
   -- Case 1: Lookahead fits within current segment
-  if rem >= lookahead then
-    local f = lookahead / math.max(rem, 0.01)
+  if targetCumDist <= baseSeg.cumulativeDist + baseSeg.length then
+    local f = (targetCumDist - baseSeg.cumulativeDist) / math.max(baseSeg.length, 0.01)
     return {
-      x = math.floor(projPoint.x + f * rx + 0.5),
-      y = math.floor(projPoint.y + f * ry + 0.5),
+      x = math.floor(baseSeg.fromPos.x + f * (baseSeg.toPos.x - baseSeg.fromPos.x) + 0.5),
+      y = math.floor(baseSeg.fromPos.y + f * (baseSeg.toPos.y - baseSeg.fromPos.y) + 0.5),
       z = baseFloor,
     }, segIdx
   end
 
-  -- Case 2: Walk through subsequent segments until lookahead is exhausted
-  local left = lookahead - rem
-  for j = segIdx + 1, #route.segments do
-    local seg = route.segments[j]
-    -- Stop at floor boundaries (floor changes handled by existing floor-change system)
-    if seg.fromPos.z ~= baseFloor then break end
-
-    local sx = seg.toPos.x - seg.fromPos.x
-    local sy = seg.toPos.y - seg.fromPos.y
-    local sLen = math.sqrt(sx * sx + sy * sy)
-
-    if sLen >= left then
-      -- Lookahead lands within this segment
-      local f = left / math.max(sLen, 0.01)
-      return {
-        x = math.floor(seg.fromPos.x + f * sx + 0.5),
-        y = math.floor(seg.fromPos.y + f * sy + 0.5),
-        z = baseFloor,
-      }, j
+  -- Case 2: Binary search for segment containing targetCumDist
+  local lo, hi = segIdx + 1, #route.segments
+  while lo < hi do
+    local mid = math.floor((lo + hi) / 2)
+    local seg = route.segments[mid]
+    if seg.cumulativeDist + seg.length < targetCumDist then
+      lo = mid + 1
+    else
+      hi = mid
     end
-    left = left - sLen
+  end
+
+  -- Interpolate within winning segment
+  if lo <= #route.segments then
+    local seg = route.segments[lo]
+    -- Stop at floor boundaries
+    if seg.fromPos.z ~= baseFloor then
+      -- Return last point on same floor
+      local prevSeg = route.segments[lo - 1] or baseSeg
+      return {
+        x = prevSeg.toPos.x,
+        y = prevSeg.toPos.y,
+        z = baseFloor,
+      }, lo - 1
+    end
+
+    local segStart = seg.cumulativeDist
+    local localDist = targetCumDist - segStart
+    local f = localDist / math.max(seg.length, 0.01)
+    f = math.min(f, 1)  -- clamp to segment end
+    return {
+      x = math.floor(seg.fromPos.x + f * (seg.toPos.x - seg.fromPos.x) + 0.5),
+      y = math.floor(seg.fromPos.y + f * (seg.toPos.y - seg.fromPos.y) + 0.5),
+      z = baseFloor,
+    }, lo
   end
 
   -- Case 3: Past end of route — target the last waypoint position
@@ -412,15 +447,8 @@ function WaypointNavigator.getGotoIndices()
 end
 
 --- Check if the player has passed a waypoint based on route projection.
--- When Pure Pursuit is active, the player may walk past a waypoint without
--- stepping within `precision` tiles of it (corner-cutting). This function
--- uses two complementary strategies:
--- 1. Segment index matching: if the WP's position matches a segment endpoint,
---    check if the player's projection is past that segment.
--- 2. Position-based: project the WP position onto the route and compare the
---    player's route-distance against the WP's route-distance. This handles
---    cases where the UI list index doesn't match any segment index (e.g.,
---    non-goto actions between gotos).
+-- Fast path: O(1) via precomputed wpCumDist for goto endpoints.
+-- Slow path: position-based projection for non-goto WPs.
 --
 -- @param playerPos table {x, y, z}
 -- @param waypointIdx number  The waypoint list index to check against
@@ -434,20 +462,27 @@ function WaypointNavigator.hasPassedWaypoint(playerPos, waypointIdx, waypointPos
   local segIdx, _, _, progress = WaypointNavigator.projectOntoRoute(playerPos)
   if segIdx == 0 then return false end
 
-  -- Strategy 1: Direct segment index matching (fast path)
+  -- O(1) fast path: check precomputed cumulative distance for goto endpoints
+  local wpCumDist = route.wpCumDist[waypointIdx]
+  if wpCumDist then
+    local seg = route.segments[segIdx]
+    local playerCumDist = seg.cumulativeDist + progress * seg.length
+    if playerCumDist > wpCumDist + 2 then
+      return true
+    end
+    -- Player is before or at the WP on the route
+    return false
+  end
+
+  -- Strategy 1: Direct segment index matching (for indices not in wpCumDist)
   if waypointIdx then
-    -- Check if this index is the endpoint of any segment
     for i, seg in ipairs(route.segments) do
       if seg.toIdx == waypointIdx then
-        -- Player past this segment entirely
         if segIdx > i then return true end
-        -- Player on same segment and near the end (lowered threshold for short segments)
         if segIdx == i and progress > 0.75 then return true end
-        -- Player on a LATER segment in wrap-around routes
         return false
       end
     end
-    -- Check if it's the start of a segment (first waypoint in route)
     for i, seg in ipairs(route.segments) do
       if seg.fromIdx == waypointIdx then
         if segIdx > i then return true end
@@ -458,24 +493,19 @@ function WaypointNavigator.hasPassedWaypoint(playerPos, waypointIdx, waypointPos
   end
 
   -- Strategy 2: Position-based comparison (handles non-goto or mismatched indices)
-  -- Project the waypoint position onto the route and compare cumulative distances.
   if waypointPos and waypointPos.z == playerPos.z then
-    -- Compute cumulative route distance for the player
-    local playerCumDist = 0
-    for i = 1, segIdx - 1 do
-      playerCumDist = playerCumDist + route.segments[i].length
-    end
-    playerCumDist = playerCumDist + progress * route.segments[segIdx].length
+    local seg = route.segments[segIdx]
+    local playerCumDist = seg.cumulativeDist + progress * seg.length
 
     -- Project waypoint position onto the route
     local wpBestSeg = 0
     local wpBestT = 0
     local wpBestDist = math.huge
-    for i, seg in ipairs(route.segments) do
+    for i, s in ipairs(route.segments) do
       local _, _, t, dist = projectPointOnSegment(
         waypointPos.x, waypointPos.y,
-        seg.fromPos.x, seg.fromPos.y,
-        seg.toPos.x, seg.toPos.y
+        s.fromPos.x, s.fromPos.y,
+        s.toPos.x, s.toPos.y
       )
       if dist < wpBestDist then
         wpBestDist = dist
@@ -485,15 +515,9 @@ function WaypointNavigator.hasPassedWaypoint(playerPos, waypointIdx, waypointPos
     end
 
     if wpBestSeg > 0 and wpBestDist <= 3 then
-      -- WP is close to the route — compute its cumulative distance
-      local wpCumDist = 0
-      for i = 1, wpBestSeg - 1 do
-        wpCumDist = wpCumDist + route.segments[i].length
-      end
-      wpCumDist = wpCumDist + wpBestT * route.segments[wpBestSeg].length
-
-      -- Player has passed the WP if they are at least 2 tiles ahead on the route
-      if playerCumDist > wpCumDist + 2 then
+      local wpSeg = route.segments[wpBestSeg]
+      local wpCumDistCalc = wpSeg.cumulativeDist + wpBestT * wpSeg.length
+      if playerCumDist > wpCumDistCalc + 2 then
         return true
       end
     end
@@ -547,14 +571,17 @@ function WaypointNavigator.checkCorridor(playerPos)
     tracking.inCorridor = true
     tracking.consecutiveOutside = 0
     tracking.corridorExitTime = 0
+    tracking.softBoundaryStart = nil
     return "inside", distFromRoute, nil
 
   elseif distFromRoute <= corridor.softWidth then
-    -- Soft boundary: player drifting, grace period before correction
-    tracking.consecutiveOutside = tracking.consecutiveOutside + 1
+    -- Soft boundary: wall-clock grace period (400ms) before correction
+    local currentNow = getNow()
+    if not tracking.softBoundaryStart then
+      tracking.softBoundaryStart = currentNow
+    end
 
-    -- Require 3 consecutive ticks outside to confirm (prevents lag false positives)
-    if tracking.consecutiveOutside >= 3 then
+    if currentNow - tracking.softBoundaryStart > 400 then
       local seg = route.segments[segIdx]
       return "soft_boundary", distFromRoute, {
         segmentIndex = segIdx,
@@ -568,7 +595,7 @@ function WaypointNavigator.checkCorridor(playerPos)
   else
     -- Outside corridor: immediate recovery needed
     tracking.inCorridor = false
-    tracking.consecutiveOutside = tracking.consecutiveOutside + 1
+    tracking.softBoundaryStart = nil
     local currentNow = getNow()
     if tracking.corridorExitTime == 0 then
       tracking.corridorExitTime = currentNow
@@ -658,6 +685,8 @@ function WaypointNavigator.invalidate()
   route.segments = {}
   route.gotoIndices = {}
   route.waypointCount = 0
+  route.totalLength = 0
+  route.wpCumDist = {}
 
   tracking.segmentIndex = 0
   tracking.progress = 0
@@ -665,6 +694,7 @@ function WaypointNavigator.invalidate()
   tracking.inCorridor = true
   tracking.corridorExitTime = 0
   tracking.consecutiveOutside = 0
+  tracking.softBoundaryStart = nil
 end
 
 -- ============================================================================

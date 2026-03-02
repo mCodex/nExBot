@@ -385,7 +385,11 @@ local function shouldSkipExecution()
     end
     
     -- Allow mid-walk check every 150ms (faster re-dispatch for smoother movement)
-    if (now - walkState.lastVerifyTime) >= 150 then
+    -- Scale verification interval: shorter for close WPs (faster response)
+    local verifyInterval = (walkState.walkStartDist or 20) <= 5 and 75
+                        or (walkState.walkStartDist or 20) <= 15 and 100
+                        or 150
+    if (now - walkState.lastVerifyTime) >= verifyInterval then
       walkState.lastVerifyTime = now
       
       -- HARD TIMEOUT: Absolute ceiling regardless of walkExpectedDuration
@@ -401,6 +405,7 @@ local function shouldSkipExecution()
           if player.stopAutoWalk then
             pcall(player.stopAutoWalk, player)
           end
+          if PathStrategy and PathStrategy.resetCursor then PathStrategy.resetCursor() end
           walkState.isWalkingToWaypoint = false
           walkState.targetPos = nil
           return false  -- Don't skip — let macro handle it
@@ -421,24 +426,27 @@ local function shouldSkipExecution()
           if not walkState.minDist or curDist < walkState.minDist then
             walkState.minDist = curDist
           end
-          -- Only stop if we've regressed well beyond the best distance seen
-          local tolerance = 3
+          -- Scale regression tolerance: generous for U-shaped cave corridors
+          local tolerance = math.max(3, math.floor((walkState.walkStartDist or 20) * 0.6))
           if walkState.minDist and curDist > walkState.minDist + tolerance then
             -- Getting farther from closest point — stop and recompute
             if player.stopAutoWalk then
               pcall(player.stopAutoWalk, player)
             end
+            if PathStrategy and PathStrategy.resetCursor then PathStrategy.resetCursor() end
             walkState.isWalkingToWaypoint = false
             walkState.targetPos = nil
             return false
           end
           -- Elapsed-progress check: if walking > 3s with zero distance decrease, stuck
-          if walkState.walkStartTime and walkState.walkStartDist then
+          -- Disabled for short walks (≤8 tiles) — the no-progress timer handles those
+          if walkState.walkStartTime and walkState.walkStartDist and (walkState.walkStartDist or 99) > 8 then
             local elapsed = now - walkState.walkStartTime
             if elapsed > 3000 and curDist >= walkState.walkStartDist then
               if player.stopAutoWalk then
                 pcall(player.stopAutoWalk, player)
               end
+              if PathStrategy and PathStrategy.resetCursor then PathStrategy.resetCursor() end
               walkState.isWalkingToWaypoint = false
               walkState.targetPos = nil
               return false
