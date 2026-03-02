@@ -1172,6 +1172,10 @@ local globalCastBackoffUntil = 0
 local GLOBAL_CAST_BACKOFF = 250
 local FAILED_CAST_BACKOFF = 350
 
+local function isSpellCategory(category)
+  return category == 1 or category == 4 or category == 5
+end
+
 local function getSpellKey(entry)
   return (entry and entry.spell or ""):lower()
 end
@@ -1575,7 +1579,7 @@ local function evaluateEntry(entry, context, cache)
   local cdMs = toCooldownMs(entry.cooldown)
   if context.settings.Cooldown then
     -- Categories 1, 4, 5 are spell-based; categories 2, 3 are rune-based
-    if entry.category == 1 or entry.category == 4 or entry.category == 5 then
+    if isSpellCategory(entry.category) then
       local state = getSpellState(getSpellKey(entry))
       if state and nowMs() < state.nextReadyAt then return false end
     else
@@ -1719,7 +1723,7 @@ end
 -- Pure function: Execute attack action
 local function executeAttack(entry, context)
   -- Categories 1 (targeted spell), 4 (empowerment), 5 (absolute) are spell-based
-  if entry.category == 1 or entry.category == 4 or entry.category == 5 then
+  if isSpellCategory(entry.category) then
     return attemptSpellCast(entry, context)
   end
 
@@ -1820,7 +1824,7 @@ function attackBotMain()
       end
       if should then
         local attempted = executeAttack(entry, context)
-        if entry.spell and attempted then return end
+        if isSpellCategory(entry.category) and attempted then return end
         if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then break end
         if modules.game_cooldown.isGroupCooldownIconActive(1) then break end
       end
