@@ -174,7 +174,9 @@ CaveBot.addAction = function(action, value, focus)
   if CaveBot.invalidateWaypointCache then
     CaveBot.invalidateWaypointCache()
   end
-  invalidateGotoDistCache()
+  if CaveBot.invalidateGotoDistCache then
+    CaveBot.invalidateGotoDistCache()
+  end
   widget.onDoubleClick = function(cwidget) -- edit on double click
     if CaveBot.Editor then
       schedule(20, function() -- schedule to have correct focus
@@ -210,7 +212,9 @@ CaveBot.editAction = function(widget, action, value)
   if raction.color then
     widget:setColor(raction.color)
   end
-  invalidateGotoDistCache()
+  if CaveBot.invalidateGotoDistCache then
+    CaveBot.invalidateGotoDistCache()
+  end
   return widget
 end
 
