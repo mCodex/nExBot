@@ -58,9 +58,6 @@ local friendSpells = {
   { name = "exura sio",      key = "exura sio",      hp = 80, mpCost = 100, cd = 1100, prio = 3 },
 }
 
--- Emergency fallback spell (last resort when HP critical)
-local emergencySpell = { name = "exura vita", key = "exura_vita_emergency", cd = 1500, mpCost = 40 }
-
 -- Event debounce (25ms for burst damage protection)
 local lastEventHeal = 0
 local EVENT_DEBOUNCE_MS = 25
@@ -240,10 +237,6 @@ local function useItemSafe(itemId)
   return false
 end
 
-local function canUseItem()
-  return potionReady()
-end
-
 -- ============================================================================
 -- LIST MANAGEMENT
 -- ============================================================================
@@ -304,10 +297,6 @@ function HealEngine.setCustomSpells(spellList)
   -- Clear pending flag
   HealEngine._pendingSpells = nil
 end
-
--- Emergency fallback spell (used when configured spells fail and HP critical)
--- Last line of defense against player death
-local fallbackSpell = { name = "exura vita", key = "exura_vita_emergency", cd = 1500, mpCost = 40 }
 
 -- Set custom potion list (from HealBot configuration)  
 function HealEngine.setCustomPotions(potionList)
@@ -386,10 +375,9 @@ function HealEngine.planSelf(snap)
   local mp = snap.mp or getMpPercent()
   local inPz = snap.inPz
   if inPz == nil then inPz = getInPz() end
-  local emergency = false -- Emergency disabled by user request
 
-  logDebug(string.format("planSelf: hp=%.1f mp=%.1f spells=%d potions=%d emergency=%s inPz=%s", 
-    hp, mp, #selfSpells, #selfPotions, tostring(emergency), tostring(inPz)))
+  logDebug(string.format("planSelf: hp=%.1f mp=%.1f spells=%d potions=%d inPz=%s", 
+    hp, mp, #selfSpells, #selfPotions, tostring(inPz)))
 
   -- Pick up any pending spells/potions queued by HealBot
   if HealEngine._pendingSpells and type(HealEngine._pendingSpells) == "table" and #selfSpells == 0 then
@@ -505,18 +493,6 @@ function HealEngine.planSelf(snap)
     if #rejectReasons > 0 then
       logDebug('[HealEngine] No eligible spells. Reasons: ' .. table.concat(rejectReasons, ' | '))
     end
-    
-    -- EMERGENCY FALLBACK: disabled per user request
-    -- This block would cast a fallback spell when HP critically low. It has been disabled.
-    -- if (emergency or hp <= 15) and fallbackSpell and healingGroupReady() and ready(fallbackSpell.key, fallbackSpell.cd) then
-    --   local fallbackManaCost = fallbackSpell.mpCost or 40
-    --   if currentMana >= fallbackManaCost then
-    --     logCritical(string.format('EMERGENCY FALLBACK: casting %s (HP=%.1f%%, mana=%d)', fallbackSpell.name, hp, currentMana))
-    --     return { kind = "spell", name = fallbackSpell.name, key = fallbackSpell.key, cd = fallbackSpell.cd, mana = fallbackManaCost }
-    --   else
-    --     logCritical(string.format('EMERGENCY FALLBACK FAILED: not enough mana for %s (need %d, have %d)', fallbackSpell.name, fallbackManaCost, currentMana))
-    --   end
-    -- end
   end
 
 
@@ -691,11 +667,14 @@ function HealEngine.execute(action)
   if not action then return false end
   
   if action.kind == "spell" then
-    -- Cast the spell
-    if say then
+    -- Cast the spell (prefer cast() for proper cooldown integration, fallback to say())
+    local cdMs = action.cd or 1100
+    if cast then
+      cast(action.name, cdMs)
+    elseif say then
       say(action.name)
     else
-      logWarn("execute: 'say' function not available!")
+      logWarn("execute: neither cast() nor say() available!")
       return false
     end
     
@@ -759,7 +738,6 @@ do
       mp = mpNow,
       currentMana = currentMana,
       inPz = getInPz(),
-      emergency = false -- Emergency disabled by user request
     }
 
     local action = HealEngine.planSelf(snap)

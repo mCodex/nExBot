@@ -190,62 +190,27 @@ local function applyHealEngineToggles()
   local isOn = not not currentSettings.enabled
   local hasSpells = currentSettings.spellTable and #currentSettings.spellTable > 0
   local hasItems = currentSettings.itemTable and #currentSettings.itemTable > 0
-  
-  -- Enable/disable the healing features
+
   HealEngine.configure({
     selfSpells = isOn and hasSpells,
     potions = isOn and hasItems,
-    friendHeals = false -- Friend healing only enabled by FriendHealer
+    friendHeals = false
   })
-  
-  -- Pass the custom configured spells and potions to the engine (converted to engine format)
-  -- Always push converted lists to the engine and log engine status immediately
+
+  -- Sync spell list to engine
   if HealEngine.setCustomSpells then
-    local convertedSpells = {}
-    if type(convertSpellsToEngineFormat) == 'function' then
-      local okConv, res = pcall(convertSpellsToEngineFormat, currentSettings.spellTable)
-      if okConv and type(res) == 'table' then
-        convertedSpells = res
-      else
-        convertedSpells = {}
-      end
-    end
-    -- Attempt to call engine API safely
-    if HealEngine.setCustomSpells then
-      local ok, err = pcall(HealEngine.setCustomSpells, convertedSpells)
-      if not ok then
-        HealEngine._pendingSpells = convertedSpells
-        nExBot_LastConvertedSpells = convertedSpells
-      else
-        nExBot_LastConvertedSpells = convertedSpells
-      end
-    else
-      HealEngine._pendingSpells = convertedSpells
-      nExBot_LastConvertedSpells = convertedSpells
-    end
+    local convertedSpells = convertSpellsToEngineFormat(currentSettings.spellTable)
+    local ok = pcall(HealEngine.setCustomSpells, convertedSpells)
+    if not ok then HealEngine._pendingSpells = convertedSpells end
+    nExBot_LastConvertedSpells = convertedSpells
   end
+
+  -- Sync potion list to engine
   if HealEngine.setCustomPotions then
-    local converted = {}
-    if type(convertPotionsToEngineFormat) == 'function' then
-      local okConv, res = pcall(convertPotionsToEngineFormat, currentSettings.itemTable)
-      if okConv and type(res) == 'table' then
-        converted = res
-      else
-        converted = {}
-      end
-    end
-    if HealEngine.setCustomPotions then
-      local ok, err = pcall(HealEngine.setCustomPotions, converted)
-      if not ok then
-        HealEngine._pendingPotions = converted
-        nExBot_LastConvertedPotions = converted
-      else
-        nExBot_LastConvertedPotions = converted
-      end
-    else
-      HealEngine._pendingPotions = converted
-      nExBot_LastConvertedPotions = converted
-    end
+    local convertedPotions = convertPotionsToEngineFormat(currentSettings.itemTable)
+    local ok = pcall(HealEngine.setCustomPotions, convertedPotions)
+    if not ok then HealEngine._pendingPotions = convertedPotions end
+    nExBot_LastConvertedPotions = convertedPotions
   end
 end
 

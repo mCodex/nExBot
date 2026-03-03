@@ -1,7 +1,12 @@
 local HealContext = dofile("/core/heal_context.lua")
 
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
-local SafeCall = SafeCall or require("core.safe_call")
+-- SafeCall is loaded globally in Phase 4 by _Loader.lua; pcall-guarded fallback for safety.
+local SafeCall = SafeCall
+if not SafeCall then
+  local ok, mod = pcall(dofile, "/core/safe_call.lua")
+  SafeCall = ok and mod or {}
+end
 
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
@@ -1494,37 +1499,6 @@ local DIR_NORTH, DIR_EAST, DIR_SOUTH, DIR_WEST = 0, 1, 2, 3
 -- Cache client version check (doesn't change at runtime)
 local isOldClient = getClientVersion() < 960
 
--- Cache for attack table children (invalidated when entries change)
-local cachedAttackEntries = nil
-local cachedEntriesCount = 0
-local lastEntryCacheTime = 0
-local ENTRY_CACHE_TTL = 300  -- Refresh every 300ms for fresher lists
-
--- Monster count cache to avoid recounting for similar patterns
-local monsterCountCache = { ts = 0, values = {} }
-local MONSTER_CACHE_TTL = 80  -- Slightly tighter TTL for responsiveness
-
-local function resetMonsterCache()
-  monsterCountCache.ts = now
-  monsterCountCache.values = {}
-end
-
-local function getMonsterCountCached(category, posOrCreature, pattern, minHp, maxHp, safePattern, monsters)
-  if now - (monsterCountCache.ts or 0) > MONSTER_CACHE_TTL then
-    resetMonsterCache()
-  end
-
-  local key = category .. "_" .. minHp .. "_" .. maxHp .. "_" .. tostring(pattern)
-  local cached = monsterCountCache.values[key]
-  if cached ~= nil then
-    return cached
-  end
-
-  local count = getMonstersInArea(category, posOrCreature, pattern, minHp, maxHp, safePattern, monsters)
-  monsterCountCache.values[key] = count
-  return count
-end
-
 -- Use UnifiedTick if available for reduced macro overhead
 local attackMacro
 if UnifiedTick and UnifiedTick.register then
@@ -1564,10 +1538,6 @@ local function cacheKeyForArea(category, posOrCreature, pattern, minHp, maxHp, s
   return table.concat({tostring(category), p, tostring(pattern or "nil"), tostring(minHp), tostring(maxHp), tostring(safePattern), namesKey}, "|")
 end
 
-local function cacheKeyForPattern(pattern)
-  return tostring(pattern)
-end
-
 -- Pure evaluator using caching and vBot semantics
 local function evaluateEntry(entry, context, cache)
   if not entry.enabled then return false end
@@ -1592,9 +1562,8 @@ local function evaluateEntry(entry, context, cache)
   local targetHp = context.target:getHealthPercent()
   local targetDist = distanceFromPlayer(context.target:getPosition())
 
-  -- Safety checks (early exit)
-  if context.settings.BlackListSafe and isBlackListedPlayerInRange(context.settings.AntiRsRange) then return false end
-  if context.settings.Kills and killsToRs() <= context.settings.KillsAmount then return false end
+  -- Safety checks (context-wide, already computed once per tick)
+  if context.blacklisted or context.killsBlocked then return false end
 
   -- PVP mode: disallow area runes in pvp situations
   if context.settings.pvpMode and entry.category == 2 and targetHp >= entry.minHp and targetHp <= entry.maxHp and context.target:canShoot() then
@@ -1608,7 +1577,8 @@ local function evaluateEntry(entry, context, cache)
   if entry.category == 2 then
     -- Area rune: use pattern-based search
     local pat = getPattern(entry.patternCategory, entry.pattern, context.settings.PvpSafe)
-    local pKey = cacheKeyForPattern(entry.patternCategory..":"..entry.pattern..":"..tostring(context.settings.PvpSafe))
+    local monstersKey = entry.monsters == true and "any" or (type(entry.monsters) == "table" and table.concat(entry.monsters, ",") or "")
+    local pKey = entry.patternCategory..":"..entry.pattern..":"..tostring(context.settings.PvpSafe)..":"..entry.minHp..":"..entry.maxHp..":"..monstersKey
     local data = cache.bestTileByPattern[pKey]
     if not data then
       data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
@@ -1713,13 +1683,6 @@ local function evaluateEntry(entry, context, cache)
   return true
 end
 
--- Replace previous shouldExecuteEntry reference with evaluateEntry where used
-local function shouldExecuteEntry(entry, context)
-  local cache = context._attackCache or newAttackCache()
-  context._attackCache = cache
-  return evaluateEntry(entry, context, cache)
-end
-
 -- Pure function: Execute attack action
 local function executeAttack(entry, context)
   -- Categories 1 (targeted spell), 4 (empowerment), 5 (absolute) are spell-based
@@ -1738,7 +1701,8 @@ local function executeAttack(entry, context)
   elseif entry.category == 2 then
     -- Area runes - prefer cached best tile when available
     local pat = spellPatterns[entry.patternCategory][entry.pattern][context.settings.PvpSafe and 2 or 1]
-    local pKey = cacheKeyForPattern(entry.patternCategory..":"..entry.pattern..":"..tostring(context.settings.PvpSafe))
+    local monstersKey = entry.monsters == true and "any" or (type(entry.monsters) == "table" and table.concat(entry.monsters, ",") or "")
+    local pKey = entry.patternCategory..":"..entry.pattern..":"..tostring(context.settings.PvpSafe)..":"..entry.minHp..":"..entry.maxHp..":"..monstersKey
     local data = context and context._attackCache and context._attackCache.bestTileByPattern and context._attackCache.bestTileByPattern[pKey]
     if not data then
       data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
@@ -1756,48 +1720,47 @@ local function executeAttack(entry, context)
   return true
 end
 
--- Main simplified attack function
+-- Main attack function — AAA pattern (Arrange → Act → Assert)
 function attackBotMain()
-  -- Safety checks
+  -- ========== ARRANGE: Gather world state and pre-check context ==========
+
+  -- Global guards (cannot attack at all)
   if not currentSettings or not currentSettings.enabled then return end
   if not panel or not panel.entryList then return end
   if not target() then return end
   if SafeCall.isInPz() then return end
-
   if isGlobalBackoffActive() then return end
-  
-  -- Cooldown gating
   if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then return end
   if modules.game_cooldown.isGroupCooldownIconActive(1) then return end
-  
-  -- Healing priority checks disabled per user request (do not block attacks on critical/danger)
-  -- if HealContext and HealContext.isCritical and HealContext.isCritical() then return end
-  -- if HealContext and HealContext.isDanger and HealContext.isDanger() then return end
   if BotCore and BotCore.Priority and not BotCore.Priority.canAttack() then return end
-  
-  -- Training dummy check
   if currentSettings.Training and target():getName():lower():find("training") then return end
-  
-  -- Build context and per-tick cache
+
+  -- Build context snapshot (computed ONCE per tick, shared across all entries)
   local context = {
     target = target(),
     mana = manapercent(),
-    settings = currentSettings
+    settings = currentSettings,
+    -- Pre-compute context-wide safety flags (avoids per-entry recalc)
+    blacklisted = currentSettings.BlackListSafe and isBlackListedPlayerInRange(currentSettings.AntiRsRange),
+    killsBlocked = currentSettings.Kills and killsToRs() <= currentSettings.KillsAmount,
+    _attackCache = newAttackCache(),
   }
-  context._attackCache = newAttackCache()
 
-  -- Get entries
-  local entries = panel.entryList:getChildren()
+  -- Early-exit if context-wide safety blocks all attacks
+  if context.blacklisted or context.killsBlocked then return end
 
+  -- Resource availability cache (items/spells checked once per item/spell key)
   local availableItems = {}
   local canCastCaller = SafeCall.getCachedCaller("canCast")
+  local entries = panel.entryList:getChildren()
 
-  -- Execute valid entries (priority order)
+  -- ========== ACT: Find highest-priority valid entry and execute ==========
+
   for _, child in ipairs(entries) do
     local entry = child.params
     if not entry then goto continue end
 
-    -- Resource availability check (item present or spell castable)
+    -- Resource check (item in inventory / spell castable)
     local available = false
     if entry.itemId and entry.itemId > 100 then
       if availableItems[entry.itemId] == nil then
@@ -1814,20 +1777,15 @@ function attackBotMain()
       available = ok
     end
 
-    if not available then
-    else
-      if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then break end
-      if modules.game_cooldown.isGroupCooldownIconActive(1) then break end
+    if not available then goto continue end
 
-      local should = shouldExecuteEntry(entry, context)
-      if not should then
-      end
-      if should then
-        local attempted = executeAttack(entry, context)
-        if isSpellCategory(entry.category) and attempted then return end
-        if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then break end
-        if modules.game_cooldown.isGroupCooldownIconActive(1) then break end
-      end
+    -- ========== ASSERT: Verify cooldowns still clear before evaluation ==========
+    if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then break end
+    if modules.game_cooldown.isGroupCooldownIconActive(1) then break end
+
+    if evaluateEntry(entry, context, context._attackCache) then
+      local attempted = executeAttack(entry, context)
+      if attempted then return end  -- One action per tick (spell or rune)
     end
     ::continue::
   end
