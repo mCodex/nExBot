@@ -391,9 +391,20 @@ end
 
 local function recordSuccess()
   WaypointEngine.failureCount = 0
-  -- Player made progress — clear all blacklists.
-  -- From the new position, previously-unreachable WPs may now be reachable.
-  clearWaypointBlacklist()
+  -- Clear blacklists for same-floor WPs only.
+  -- Cross-floor WPs stay blacklisted to prevent cycling:
+  -- arrive→advance→Z-mismatch→instantFail→recovery→arrive→repeat
+  local pz = pos()
+  local playerFloor = pz and pz.z
+  for child, expiry in pairs(WaypointEngine.stuckWaypoints) do
+    -- Clear if: same floor, OR no position info (non-goto), OR no player pos
+    local childIdx = ui.list:getChildIndex(child)
+    local wp = waypointPositionCache[childIdx]
+    if not playerFloor or not wp or wp.z == playerFloor then
+      WaypointEngine.stuckWaypoints[child] = nil
+      WaypointEngine.stuckFailCounts[child] = nil
+    end
+  end
   WaypointEngine.recoveryStartedAt = 0
   if WaypointEngine.state ~= "NORMAL" then
     transitionTo("NORMAL")
@@ -621,6 +632,7 @@ resetWaypointEngine = function()
   WaypointEngine.lastDriftCheck = 0
   WaypointEngine.lastRefocusTime = 0
   WaypointEngine.wasTargetBotBlocking = false
+  WaypointEngine.postCombatUntil = 0
   lastDispatchedChild = nil
 end
 
@@ -818,7 +830,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       CaveBot.ensureNavigatorRoute(playerPos.z)
       local status, dist, recovery = WaypointNavigator.checkCorridor(playerPos)
       local inPostCombat = now < WaypointEngine.postCombatUntil
-      local breached = inPostCombat and status ~= "inside" or status == "outside"
+      local breached = (inPostCombat and status ~= "inside") or (status == "outside")
 
       if breached and recovery then
         local wp = waypointPositionCache[recovery.nextWpIdx]
@@ -853,7 +865,28 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   -- Get current action (single call pattern)
   local currentAction = uiList:getFocusedChild() or uiList:getFirstChild()
   if not currentAction then return end
-  
+
+  -- Z-MISMATCH GUARD: If focused WP is a goto on a different floor than player,
+  -- scan forward to the next same-floor goto (wraps around to WP1).
+  -- Prevents rapid cycling: arrive→advance→Z-mismatch→instantFail→recovery→arrive→...
+  if playerPos and currentAction.action == "goto" then
+    buildWaypointCache()
+    local focusedIdx = uiList:getChildIndex(currentAction)
+    local cachedWp = waypointPositionCache[focusedIdx]
+    if cachedWp and cachedWp.z ~= playerPos.z then
+      local scanIdx = focusedIdx
+      for _ = 1, actionCount do
+        scanIdx = (scanIdx % actionCount) + 1
+        local wp = waypointPositionCache[scanIdx]
+        if wp and wp.isGoto and wp.z == playerPos.z then
+          focusWaypointForRecovery(wp.child, scanIdx)
+          break
+        end
+      end
+      return
+    end
+  end
+
   -- Fast skip: if current waypoint is blacklisted (unreachable), advance past it immediately
   if isWaypointBlacklisted(currentAction) then
     local actionCount2 = uiList:getChildCount()

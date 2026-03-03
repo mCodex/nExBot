@@ -3,6 +3,7 @@ local config = nil
 lastAction = 0
 local cavebotAllowance = 0
 local lureEnabled = true
+local recalculateBestTarget  -- forward declaration: defined at ~L2054, used by EventBus closures above it
 
 -- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
 local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
@@ -2051,7 +2052,7 @@ end
 -- Recalculate best target from cache
 -- IMPROVED: Uses live creature detection for accuracy
 -- FIXED: Only count creatures with valid reachable paths
-local function recalculateBestTarget()
+recalculateBestTarget = function()
   local pos = player:getPosition()
   if not pos then return end
 

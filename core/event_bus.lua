@@ -40,6 +40,7 @@ local _zLastLog = 0
 local _zLastKnown = nil
 local _burstFrame = 0
 local _burstCount = 0
+local _zGen = 0  -- generation token: prevents stale safety-valve from clearing a newer lock
 
 -- Ultra-fast guard: single boolean check (used by all external modules)
 function zChanging()
@@ -50,7 +51,10 @@ end
 local function _zActivate()
   if _zBlocked then return end
   _zBlocked = true
+  _zGen = _zGen + 1
+  local myGen = _zGen
   schedule(_zCooldown, function()
+    if _zGen ~= myGen then return end  -- superseded by a newer activation
     _zBlocked = false
     local ok, p = pcall(pos)
     if ok and p then _zLastKnown = p.z end
@@ -58,7 +62,7 @@ local function _zActivate()
   end)
   -- Safety valve: guarantee clear within 500ms even if primary schedule fails
   schedule(500, function()
-    if _zBlocked then
+    if _zBlocked and _zGen == myGen then
       _zBlocked = false
       EventBus.emit("player:z_change_settled")
     end
