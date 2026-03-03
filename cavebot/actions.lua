@@ -7,6 +7,9 @@ local getClientVersion = nExBot.Shared.getClientVersion
 local oldTibia = getClientVersion() < 960
 local nextTile = nil
 
+-- Throttle table for unknown floor-change minimap color warnings (once per tile+color)
+local warnedUnknownFloor = {}
+
 -- Use canonical direction table from Directions module (DRY: SSoT is constants/directions.lua)
 local DIR_MOD_LOOKUP = Directions.DIR_TO_OFFSET
 
@@ -500,7 +503,11 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     -- default to destPos.z so downstream logic always has a value
     if expectedFloorAfterChange == nil then
       expectedFloorAfterChange = destPos.z
-      warn("[CaveBot] Floor-change tile at " .. destPos.x .. "," .. destPos.y .. "," .. destPos.z .. " has unknown minimap color " .. tostring(minimapColor) .. "; defaulting expectedFloor to " .. destPos.z)
+      local warnKey = destPos.x .. "," .. destPos.y .. "," .. destPos.z .. ":" .. tostring(minimapColor)
+      if not warnedUnknownFloor[warnKey] then
+        warnedUnknownFloor[warnKey] = true
+        warn("[CaveBot] Floor-change tile at " .. destPos.x .. "," .. destPos.y .. "," .. destPos.z .. " has unknown minimap color " .. tostring(minimapColor) .. "; defaulting expectedFloor to " .. destPos.z)
+      end
     end
 
     if CaveBot.wouldFloorChangeLoop and CaveBot.wouldFloorChangeLoop(expectedFloorAfterChange) then
