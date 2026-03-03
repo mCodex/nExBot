@@ -254,15 +254,7 @@ local function castLev(levType, dirIdx)
   end
   lastLevCast = now
   _levHandledStep = now
-
-  -- Notify CaveBot of intended floor change (prevents step-back)
-  if CaveBot and CaveBot.setIntendedFloorChange then
-    local p = player and player:getPosition()
-    if p then
-      local targetZ = levType == "up" and (p.z - 1) or (p.z + 1)
-      pcall(CaveBot.setIntendedFloorChange, targetZ)
-    end
-  end
+  -- Z-change is handled universally by cavebot.lua main loop Z-handler
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════

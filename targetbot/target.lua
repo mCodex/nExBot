@@ -3,6 +3,7 @@ local config = nil
 lastAction = 0
 local cavebotAllowance = 0
 local lureEnabled = true
+local recalculateBestTarget  -- forward declaration: defined at ~L2054, used by EventBus closures above it
 
 -- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
 local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
@@ -379,6 +380,19 @@ if EventBus then
     -- Player movement changes proximity; trigger recalculation
     debouncedInvalidateAndRecalc()
   end, 10)
+
+  -- Z-CHANGE: Clear stale caches so TargetBot retargets on new floor instantly
+  EventBus.on("player:z_change_settled", function()
+    if tbOff() then return end
+    if MonsterAI and MonsterAI.Reachability then
+      MonsterAI.Reachability.clearCache()
+      MonsterAI.Reachability.blockedCreatures = {}
+    end
+    invalidateCache()
+    if recalculateBestTarget then
+      recalculateBestTarget()
+    end
+  end, 5)
 
   EventBus.on("combat:target", function(creature, oldCreature)
     if tbOff() then return end
@@ -2038,7 +2052,7 @@ end
 -- Recalculate best target from cache
 -- IMPROVED: Uses live creature detection for accuracy
 -- FIXED: Only count creatures with valid reachable paths
-local function recalculateBestTarget()
+recalculateBestTarget = function()
   local pos = player:getPosition()
   if not pos then return end
 

@@ -1364,6 +1364,18 @@ end
 
 -- Register EventBus handlers
 if EventBus then
+  -- Z-CHANGE: Refresh live counts and scan on new floor
+  EventBus.on("player:z_change_settled", function()
+    if TargetBot and TargetBot.isOn and not TargetBot.isOn() then return end
+    liveMonsterState.lastUpdate = 0
+    if EventTargeting.refreshLiveCount then
+      EventTargeting.refreshLiveCount()
+    end
+    if EventTargeting.scanVisibleMonsters then
+      EventTargeting.scanVisibleMonsters()
+    end
+  end, 5)
+
   -- Monster appeared - queue for processing
   -- IMPROVED: Instant high-priority monster detection and target switching
   EventBus.on("monster:appear", function(creature)
@@ -1698,6 +1710,9 @@ local function scanVisibleMonsters()
     print("[EventTargeting] Full scan queued " .. processedCount .. " creatures (fallback)")
   end
 end
+
+-- Expose for z_change_settled handler (defined above EventBus registration)
+EventTargeting.scanVisibleMonsters = scanVisibleMonsters
 
 -- Fast macro for processing queued creatures and combat checks
 -- PERFORMANCE: Runs at 100ms (EventBus handles real-time creature detection)

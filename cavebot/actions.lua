@@ -509,18 +509,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
         warn("[CaveBot] Floor-change tile at " .. destPos.x .. "," .. destPos.y .. "," .. destPos.z .. " has unknown minimap color " .. tostring(minimapColor) .. "; defaulting expectedFloor to " .. destPos.z)
       end
     end
-
-    if CaveBot.wouldFloorChangeLoop and CaveBot.wouldFloorChangeLoop(expectedFloorAfterChange) then
-      if CaveBot.canChangeFloor and not CaveBot.canChangeFloor() then
-        return true
-      end
-    end
-
-    local currentAction = ui and ui.list and ui.list:getFocusedChild()
-    local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
-    if CaveBot.setIntendedFloorChange then
-      CaveBot.setIntendedFloorChange(expectedFloorAfterChange, waypointIdx)
-    end
   end
 
   -- ========== ARRIVAL PRECISION ==========
@@ -546,11 +534,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   if distX <= precision and distY <= precision then
     CaveBot.clearWaypointTarget()
     if isFloorChange then
-      if expectedFloorAfterChange and CaveBot.setIntendedFloorChange then
-        local currentAction = ui and ui.list and ui.list:getFocusedChild()
-        local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
-        CaveBot.setIntendedFloorChange(expectedFloorAfterChange, waypointIdx)
-      end
       if playerPos.z == expectedFloorAfterChange then
         return true
       end
