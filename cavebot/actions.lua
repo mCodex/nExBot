@@ -384,7 +384,11 @@ end
 local nextGotoDistCache = {}
 local nextGotoDistCacheCount = 0
 local function getDistanceToNextGoto(currentIdx)
-  if nextGotoDistCache[currentIdx] then return nextGotoDistCache[currentIdx] end
+  -- Build composite key from index + action value for cache stability
+  local currentAction = ui and ui.list and ui.list:getChildren() and ui.list:getChildren()[currentIdx]
+  local actionVal = currentAction and (currentAction.value or currentAction:getText()) or ""
+  local cacheKey = currentIdx .. ":" .. tostring(actionVal)
+  if nextGotoDistCache[cacheKey] then return nextGotoDistCache[cacheKey] end
   if not ui or not ui.list then return 50 end
   local children = ui.list:getChildren()
   if not children then return 50 end
@@ -392,7 +396,7 @@ local function getDistanceToNextGoto(currentIdx)
     local child = children[i]
     if child then
       local actionType = child.actionType or child:getText()
-      if type(actionType) == "string" and actionType:find("goto") then
+      if type(actionType) == "string" and actionType:match("^goto$") then
         local val = child.value or child:getText()
         if val then
           local m = regexMatch(val, "([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
@@ -411,7 +415,7 @@ local function getDistanceToNextGoto(currentIdx)
                       local d = math.max(math.abs(nextPos.x - curPos.x), math.abs(nextPos.y - curPos.y))
                       -- Cache with size limit
                       if nextGotoDistCacheCount < 200 then
-                        nextGotoDistCache[currentIdx] = d
+                        nextGotoDistCache[cacheKey] = d
                         nextGotoDistCacheCount = nextGotoDistCacheCount + 1
                       end
                       return d
@@ -480,6 +484,12 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
       expectedFloorAfterChange = destPos.z - 1
     elseif minimapColor == 212 or minimapColor == 213 then
       expectedFloorAfterChange = destPos.z + 1
+    end
+    -- Fallback: if minimap color didn't match known floor-change colors,
+    -- default to destPos.z so downstream logic always has a value
+    if expectedFloorAfterChange == nil then
+      expectedFloorAfterChange = destPos.z
+      warn("[CaveBot] Floor-change tile at " .. destPos.x .. "," .. destPos.y .. "," .. destPos.z .. " has unknown minimap color " .. tostring(minimapColor) .. "; defaulting expectedFloor to " .. destPos.z)
     end
 
     if CaveBot.wouldFloorChangeLoop and CaveBot.wouldFloorChangeLoop(expectedFloorAfterChange) then

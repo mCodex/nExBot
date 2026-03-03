@@ -244,18 +244,20 @@ CaveBot.Recorder.getConfig = function()
     maxStraightDist = config.maxStraightDist,
     minRecordDist = config.minRecordDist,
     collinearTolerance = config.collinearTolerance,
+    turnConfirmSteps = config.turnConfirmSteps,
   }
 end
 
 --- Update recorder configuration.
 CaveBot.Recorder.setConfig = function(opts)
-  if opts.maxStraightDist and opts.maxStraightDist > 0 then
-    config.maxStraightDist = opts.maxStraightDist
-  end
-  if opts.minRecordDist and opts.minRecordDist > 0 then
-    config.minRecordDist = opts.minRecordDist
-  end
-  if opts.collinearTolerance and opts.collinearTolerance > 0 then
-    config.collinearTolerance = opts.collinearTolerance
-  end
+  if type(opts) ~= "table" then return end
+  local v
+  v = tonumber(opts.maxStraightDist)
+  if v and v > 0 then config.maxStraightDist = v end
+  v = tonumber(opts.minRecordDist)
+  if v and v > 0 then config.minRecordDist = v end
+  v = tonumber(opts.collinearTolerance)
+  if v and v > 0 then config.collinearTolerance = v end
+  v = tonumber(opts.turnConfirmSteps)
+  if v and v >= 0 then config.turnConfirmSteps = math.floor(v) end
 end

@@ -511,10 +511,18 @@ local function smoothPath(path, startPos)
                 local Client = getClient()
                 local tile = (Client and Client.getTile) and Client.getTile(diagPos) or (g_map and g_map.getTile(diagPos))
                 if tile and tile:isWalkable() then
-                  smoothed[#smoothed + 1] = diag
-                  curPos = diagPos
-                  i = i + 2
-                  goto continue_smooth
+                  -- Validate cardinal legs (diagonal requires both to be walkable)
+                  local off2 = getDirectionOffset(dir2)
+                  local leg1 = nextPos  -- curPos + dir
+                  local leg2 = off2 and applyOffset(curPos, off2)
+                  local lt1 = leg1 and ((Client and Client.getTile) and Client.getTile(leg1) or (g_map and g_map.getTile(leg1)))
+                  local lt2 = leg2 and ((Client and Client.getTile) and Client.getTile(leg2) or (g_map and g_map.getTile(leg2)))
+                  if (lt1 and lt1:isWalkable()) and (lt2 and lt2:isWalkable()) then
+                    smoothed[#smoothed + 1] = diag
+                    curPos = diagPos
+                    i = i + 2
+                    goto continue_smooth
+                  end
                 end
               end
             end
@@ -535,11 +543,18 @@ local function smoothPath(path, startPos)
               local Client = getClient()
               local tile = (Client and Client.getTile) and Client.getTile(diagPos) or (g_map and g_map.getTile(diagPos))
               if tile and tile:isWalkable() and not isFloorChangeTile(diagPos) then
-                smoothed[#smoothed + 1] = diagonalDir
-                smoothed[#smoothed + 1] = dir
-                curPos = applyOffset(diagPos, offset)
-                i = i + 3
-                goto continue_smooth
+                -- Validate cardinal legs (diagonal requires both to be walkable)
+                local legA = nextPos  -- curPos + dir (A direction)
+                local legB = applyOffset(curPos, offset2)  -- curPos + dir2 (B direction)
+                local ltA = (Client and Client.getTile) and Client.getTile(legA) or (g_map and g_map.getTile(legA))
+                local ltB = (Client and Client.getTile) and Client.getTile(legB) or (g_map and g_map.getTile(legB))
+                if (ltA and ltA:isWalkable()) and (ltB and ltB:isWalkable()) then
+                  smoothed[#smoothed + 1] = diagonalDir
+                  smoothed[#smoothed + 1] = dir
+                  curPos = applyOffset(diagPos, offset)
+                  i = i + 3
+                  goto continue_smooth
+                end
               end
             end
           end

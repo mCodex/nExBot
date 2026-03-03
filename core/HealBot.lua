@@ -201,7 +201,8 @@ local function applyHealEngineToggles()
   if HealEngine.setCustomSpells then
     local convertedSpells = convertSpellsToEngineFormat(currentSettings.spellTable)
     local ok = pcall(HealEngine.setCustomSpells, convertedSpells)
-    if not ok then HealEngine._pendingSpells = convertedSpells end
+    if not ok then HealEngine._pendingSpells = convertedSpells
+    else HealEngine._pendingSpells = nil end
     nExBot_LastConvertedSpells = convertedSpells
   end
 
@@ -209,7 +210,8 @@ local function applyHealEngineToggles()
   if HealEngine.setCustomPotions then
     local convertedPotions = convertPotionsToEngineFormat(currentSettings.itemTable)
     local ok = pcall(HealEngine.setCustomPotions, convertedPotions)
-    if not ok then HealEngine._pendingPotions = convertedPotions end
+    if not ok then HealEngine._pendingPotions = convertedPotions
+    else HealEngine._pendingPotions = nil end
     nExBot_LastConvertedPotions = convertedPotions
   end
 end

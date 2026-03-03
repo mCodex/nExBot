@@ -1538,6 +1538,12 @@ local function cacheKeyForArea(category, posOrCreature, pattern, minHp, maxHp, s
   return table.concat({tostring(category), p, tostring(pattern or "nil"), tostring(minHp), tostring(maxHp), tostring(safePattern), namesKey}, "|")
 end
 
+-- Build a stable cache key for area-rune pattern lookups (used by evaluateEntry + executeAttack)
+local function buildPatternKey(entry, pvpSafe)
+  local monstersKey = entry.monsters == true and "any" or (type(entry.monsters) == "table" and table.concat(entry.monsters, ",") or "")
+  return entry.patternCategory..":"..entry.pattern..":"..tostring(pvpSafe)..":"..entry.minHp..":"..entry.maxHp..":"..monstersKey
+end
+
 -- Pure evaluator using caching and vBot semantics
 local function evaluateEntry(entry, context, cache)
   if not entry.enabled then return false end
@@ -1577,8 +1583,7 @@ local function evaluateEntry(entry, context, cache)
   if entry.category == 2 then
     -- Area rune: use pattern-based search
     local pat = getPattern(entry.patternCategory, entry.pattern, context.settings.PvpSafe)
-    local monstersKey = entry.monsters == true and "any" or (type(entry.monsters) == "table" and table.concat(entry.monsters, ",") or "")
-    local pKey = entry.patternCategory..":"..entry.pattern..":"..tostring(context.settings.PvpSafe)..":"..entry.minHp..":"..entry.maxHp..":"..monstersKey
+    local pKey = buildPatternKey(entry, context.settings.PvpSafe)
     local data = cache.bestTileByPattern[pKey]
     if not data then
       data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
@@ -1632,7 +1637,8 @@ local function evaluateEntry(entry, context, cache)
         -- require no players nearby if PvP safe is enabled
         local players = SafeCall.getPlayers and SafeCall.getPlayers(2) or {}
         local playersNearby = (#players > 0)
-        if bestSide >= entry.count and (not context.settings.PvpSafe or not playersNearby) then
+        local sweepMatch = entry.orMore and bestSide >= entry.count or bestSide == entry.count
+        if sweepMatch and (not context.settings.PvpSafe or not playersNearby) then
           -- store best sweep direction for executeAttack to use (rotation)
           cache.bestSweepDir = bestDir
           cache.bestSweepSide = bestSide
@@ -1690,19 +1696,23 @@ local function executeAttack(entry, context)
     return attemptSpellCast(entry, context)
   end
 
-  -- Mark action as used for cooldown tracking
-  stamp(entry.key or tostring(entry.itemId or entry.spell))
-  recordAttackAction(entry.category, entry.itemId > 100 and entry.itemId or entry.spell)
+  local stampKey = entry.key or tostring(entry.itemId or entry.spell)
+  local actionId = entry.itemId > 100 and entry.itemId or entry.spell
 
   if entry.category == 3 then
     -- Targeted runes
     local okTargeted = useRuneOnTarget(entry.itemId, context.target)
-    if okTargeted and context and context._attackCache then context._attackCache.rotationAttempts = 0 end
+    if okTargeted then
+      stamp(stampKey)
+      recordAttackAction(entry.category, actionId)
+      if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
+      return true
+    end
+    return false
   elseif entry.category == 2 then
     -- Area runes - prefer cached best tile when available
     local pat = spellPatterns[entry.patternCategory][entry.pattern][context.settings.PvpSafe and 2 or 1]
-    local monstersKey = entry.monsters == true and "any" or (type(entry.monsters) == "table" and table.concat(entry.monsters, ",") or "")
-    local pKey = entry.patternCategory..":"..entry.pattern..":"..tostring(context.settings.PvpSafe)..":"..entry.minHp..":"..entry.maxHp..":"..monstersKey
+    local pKey = buildPatternKey(entry, context.settings.PvpSafe)
     local data = context and context._attackCache and context._attackCache.bestTileByPattern and context._attackCache.bestTileByPattern[pKey]
     if not data then
       data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
@@ -1712,9 +1722,15 @@ local function executeAttack(entry, context)
       local tile = (Client and Client.getTile) and Client.getTile(data.pos) or (g_map and g_map.getTile(data.pos))
       if tile then
         local okArea = useRuneOnTarget(entry.itemId, tile:getTopUseThing())
-        if okArea and context and context._attackCache then context._attackCache.rotationAttempts = 0 end
+        if okArea then
+          stamp(stampKey)
+          recordAttackAction(entry.category, actionId)
+          if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
+          return true
+        end
       end
     end
+    return false
   end
 
   return true

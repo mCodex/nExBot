@@ -667,6 +667,10 @@ function HealEngine.execute(action)
   if not action then return false end
   
   if action.kind == "spell" then
+    if type(action.name) ~= "string" then
+      logWarn("execute: action.name is not a string: " .. tostring(action.name))
+      return false
+    end
     -- Cast the spell (prefer cast() for proper cooldown integration, fallback to say())
     local cdMs = action.cd or 1100
     if cast then

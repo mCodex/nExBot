@@ -691,8 +691,10 @@ local function maybeRefocusNearestWaypoint(playerPos)
           return true
         end
       end
+      -- Navigator detected drift but couldn't find a good WP; fall through to legacy
+    else
+      return false  -- not drifted according to navigator
     end
-    return false
   end
 
   -- FALLBACK: Legacy distance-based drift detection
@@ -1097,7 +1099,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       WaypointNavigator.buildRoute(waypointPositionCache, playerPos.z)
       local status, dist, recovery = WaypointNavigator.checkCorridor(playerPos)
 
-      if status == "outside" and recovery and dist > 15 then
+      if status == "outside" and recovery then
         local wp = waypointPositionCache[recovery.nextWpIdx]
         if wp and wp.child and not isWaypointBlacklisted(wp.child) then
           print("[CaveBot] Corridor breach: " .. math.floor(dist) .. " tiles off-route, refocusing WP" .. recovery.nextWpIdx)
@@ -1186,9 +1188,9 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   end
   
   -- Handle result
-  if result == "walking" then
-    -- Player is actively walking toward destination; don't count this tick
-    -- as a retry.  Only walkTo invocations should increment actionRetries.
+  if result == "walking" or result == "nudge" then
+    -- Player is actively walking/nudging toward destination; don't count
+    -- this tick as a retry.  Only walkTo invocations should increment actionRetries.
     return
   end
 
@@ -1585,6 +1587,15 @@ findReachableWaypoint = function(playerPos, options)
   if WaypointNavigator and not options.forceDistanceBased then
     WaypointNavigator.buildRoute(waypointPositionCache, playerZ)
     local wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    if wpIdx then
+      -- Respect excludeCurrent: skip if navigator returned the currently focused WP
+      if excludeCurrent and ui and ui.list then
+        local focused = ui.list:getFocusedChild()
+        if focused and ui.list:getChildIndex(focused) == wpIdx then
+          wpIdx = nil
+        end
+      end
+    end
     if wpIdx then
       local wp = waypointPositionCache[wpIdx]
       if wp and wp.child and not isWaypointBlacklisted(wp.child) then

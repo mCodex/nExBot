@@ -592,8 +592,20 @@ function WaypointNavigator.checkCorridor(playerPos)
     end
     return "inside", distFromRoute, nil  -- Still in grace period
 
+  elseif distFromRoute <= corridor.hardWidth then
+    -- Between soft and hard boundary: soft_boundary without grace period
+    tracking.inCorridor = false
+    tracking.softBoundaryStart = nil
+    local seg = route.segments[segIdx]
+    return "soft_boundary", distFromRoute, {
+      segmentIndex = segIdx,
+      nextWpIdx = seg.toIdx,
+      nextWpPos = seg.toPos,
+      projectedPoint = projPoint,
+    }
+
   else
-    -- Outside corridor: immediate recovery needed
+    -- Outside hard boundary: immediate recovery needed
     tracking.inCorridor = false
     tracking.softBoundaryStart = nil
     local currentNow = getNow()
