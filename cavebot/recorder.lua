@@ -99,9 +99,10 @@ local function addPosition(pos)
   -- Only skip if the segment from prevRecorded through lastPos to pos
   -- is nearly straight (meaning the "turn" was actually noise).
   if prevRecorded and lastPos and isCollinear(prevRecorded, lastPos, pos) then
-    -- The last waypoint was a false turn. We can't un-record it (it's already
-    -- in the UI list), but this situation is rare with the direction-change
-    -- algorithm. Just continue normally.
+    -- Path is still straight — skip the intermediate waypoint
+    lastPos = pos
+    stepsSinceLast = 0
+    return
   end
 
   CaveBot.addAction("goto", pos.x .. "," .. pos.y .. "," .. pos.z, true)
@@ -138,11 +139,9 @@ local function setup()
     if newPos.z ~= oldPos.z or math.abs(oldPos.x - newPos.x) > 1 or math.abs(oldPos.y - newPos.y) > 1 then
       -- Record the pre-floor-change position with precision=0
       addStairs(oldPos)
-      -- Anchor on the new floor: record newPos immediately so the route
-      -- has a starting point on this floor (fixes the gap that v1 had)
-      if newPos.z ~= oldPos.z then
-        addPosition(newPos)
-      end
+      -- Anchor destination: record newPos so the route has a starting point
+      -- on the new floor (floor change) or after the jump (same-floor teleport)
+      addPosition(newPos)
       prevStepPos = newPos
       prevDirection = nil
       pendingCorner = nil
