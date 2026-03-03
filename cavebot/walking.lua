@@ -638,27 +638,11 @@ CaveBot.walkTo = function(dest, maxDist, params)
   end
   
   -- Check for floor mismatch since last walk call
-  -- This catches floor changes that happened between walkTo calls
+  -- Z-change is handled universally by cavebot.lua main loop Z-handler
   if lastWalkZ and playerPos.z ~= lastWalkZ then
-    -- Check if this floor change was intended (via intendedFloorChange system)
-    local wasIntentional = CaveBot.isFloorChangeIntended and CaveBot.isFloorChangeIntended(playerPos.z)
-    
-    if wasIntentional then
-      -- Intentional floor change - update tracking, continue normally
-      lastWalkZ = playerPos.z
-      lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-      resetStepBackAttempts()
-      -- Clear the intended flag since we've completed the floor change
-      if CaveBot.clearIntendedFloorChange then
-        CaveBot.clearIntendedFloorChange()
-      end
-    else
-      -- Unintended floor change — accept it and let WaypointEngine find rescue WPs.
-      lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-      
-      lastWalkZ = playerPos.z
-      return false
-    end
+    lastWalkZ = playerPos.z
+    lastSafePos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+    return false  -- Let main loop Z-handler take over
   end
   
   params = params or {}
@@ -674,9 +658,6 @@ CaveBot.walkTo = function(dest, maxDist, params)
   
   maxDist = math.min(maxDist or 20, MAX_PATHFIND_DIST)
   
-  -- IMPORTANT: Do NOT set expectedFloor here!
-  -- Floor change tracking is handled ONLY by intendedFloorChange in cavebot.lua
-  -- The goto action sets intendedFloorChange when walking to a floor-change waypoint
   lastWalkZ = playerPos.z
   
   -- Distance check
@@ -1164,17 +1145,11 @@ CaveBot.resetWalking = function()
   end
   resetPathCursor()
   resetStepBackAttempts()
-
-  -- Note: We intentionally do NOT clear intendedFloorChange here
-  -- as it should persist across walking resets during floor transitions
 end
 
 -- Full reset including floor change tracking (used on config change/hard reset)
 CaveBot.fullResetWalking = function()
   CaveBot.resetWalking()
-  if CaveBot.clearIntendedFloorChange then
-    CaveBot.clearIntendedFloorChange()
-  end
   lastSafePos = nil
   stepBackAttempts = 0  -- Ensure full reset clears this too
 end
@@ -1236,41 +1211,12 @@ onPlayerPositionChange(function(newPos, oldPos)
   end
   
   -- FLOOR CHANGE DETECTED
-  -- Check if this was intentional (via intendedFloorChange system set by goto action)
-  local wasIntentional = CaveBot.isFloorChangeIntended and CaveBot.isFloorChangeIntended(newPos.z)
-  
-  if wasIntentional then
-    -- INTENTIONAL floor change - accept it completely
-    lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
-    expectedFloor = nil  -- Clear any stale expectedFloor
-    resetFloorChangeCacheThrottled()  -- Clear cache for new floor
-    resetStepBackAttempts()
-    
-    -- Record this floor change for loop prevention
-    if CaveBot.recordFloorChange then
-      CaveBot.recordFloorChange(oldPos.z, newPos.z, nil)
-    end
-    
-    -- Clear the intended flag now that floor change completed
-    if CaveBot.clearIntendedFloorChange then
-      CaveBot.clearIntendedFloorChange()
-    end
-    
-    return  -- Done - no warning, no step-back
-  end
-
-  -- ACCIDENTAL floor change — accept it and let WaypointEngine handle recovery.
-  -- Step-back was removed: it fought rescue floor-change waypoints that users place
-  -- to handle accidental falls. The recovery system finds rescue WPs on the new floor.
+  -- All Z changes handled uniformly: accept new position, clear cache,
+  -- let the cavebot.lua main loop Z-handler do the rescue refocus.
   lastSafePos = {x = newPos.x, y = newPos.y, z = newPos.z}
+  expectedFloor = nil
   resetStepBackAttempts()
-  
-  -- Record this floor change for loop prevention
-  if CaveBot.recordFloorChange then
-    CaveBot.recordFloorChange(oldPos.z, newPos.z, nil)
-  end
-  
-  resetFloorChangeCacheThrottled()  -- Clear cache on any floor change
+  resetFloorChangeCacheThrottled()
 end)
 
 -- Safeguard: ensure module closes cleanly

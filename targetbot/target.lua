@@ -380,6 +380,19 @@ if EventBus then
     debouncedInvalidateAndRecalc()
   end, 10)
 
+  -- Z-CHANGE: Clear stale caches so TargetBot retargets on new floor instantly
+  EventBus.on("player:z_change_settled", function()
+    if tbOff() then return end
+    if MonsterAI and MonsterAI.Reachability then
+      MonsterAI.Reachability.clearCache()
+      MonsterAI.Reachability.blockedCreatures = {}
+    end
+    invalidateCache()
+    if recalculateBestTarget then
+      recalculateBestTarget()
+    end
+  end, 5)
+
   EventBus.on("combat:target", function(creature, oldCreature)
     if tbOff() then return end
     debouncedInvalidateAndRecalc()

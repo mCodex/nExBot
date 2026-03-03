@@ -75,184 +75,12 @@ local lastDispatchedChild = nil  -- Track last WP to preserve PathCursor across 
 local uiList = nil
 local lastPlayerFloor = nil
 
--- FLOOR CHANGE TRACKING: Prevent looping when waypoints span multiple Z levels
--- When a floor-change waypoint is being executed, we set this to the expected floor
--- so that when the floor actually changes, we know it was intentional
-local intendedFloorChange = {
-  active = false,          -- True when executing a floor-change waypoint
-  expectedFloor = nil,     -- The Z level we expect to end up on after the floor change
-  sourceFloor = nil,       -- The Z level we started from
-  waypointIndex = nil,     -- The waypoint index that triggered the floor change
-  timestamp = 0,           -- When the floor change was initiated
-  TIMEOUT = 5000           -- Max time to wait for floor change to complete
-}
-
--- FLOOR CHANGE LOOP PREVENTION: Track recent floor changes to prevent up/down loops
-local floorChangeHistory = {
-  changes = {},            -- Circular buffer of recent floor changes: {time, fromZ, toZ, waypointIdx}
-  maxSize = 6,             -- Track last 6 floor changes
-  cooldownTime = 3000,     -- Minimum time (ms) before allowing another floor change to same floor
-  loopThreshold = 4,       -- Number of changes to detect a loop pattern
-  lastChangeTime = 0,      -- Last floor change timestamp
-  lastFloorFrom = nil,     -- Last floor we changed FROM
-  lastFloorTo = nil,       -- Last floor we changed TO
-  completedFloorChange = nil  -- Track that a floor change was just completed {time, toZ, fromZ}
-}
-
--- Check if a floor change would create a loop (going back to a floor we just left)
--- Only counts arrivals (toZ), not departures — a single round-trip is expected
--- for rescue waypoints. Threshold 3 and 5s window avoid false positives.
-local function wouldCreateFloorLoop(targetZ)
-  if #floorChangeHistory.changes < 3 then return false end
-
-  local recentTime = now - 5000  -- Look at last 5 seconds
-  local arrivals = 0
-
-  for i = #floorChangeHistory.changes, 1, -1 do
-    local change = floorChangeHistory.changes[i]
-    if change.time < recentTime then break end
-    if change.toZ == targetZ then
-      arrivals = arrivals + 1
-    end
-  end
-
-  return arrivals >= 3
-end
-
--- Record a floor change
-local function recordFloorChange(fromZ, toZ, waypointIdx)
-  local change = {time = now, fromZ = fromZ, toZ = toZ, waypointIdx = waypointIdx}
-  floorChangeHistory.changes[#floorChangeHistory.changes + 1] = change
-  
-  -- Trim to max size (using TrimArray for O(1) amortized)
-  TrimArray(floorChangeHistory.changes, floorChangeHistory.maxSize)
-  
-  floorChangeHistory.lastChangeTime = now
-  floorChangeHistory.lastFloorFrom = fromZ
-  floorChangeHistory.lastFloorTo = toZ
-  floorChangeHistory.completedFloorChange = {time = now, toZ = toZ, fromZ = fromZ}
-end
-
--- Check if enough time has passed since last floor change
-local function canChangeFloorNow()
-  return (now - floorChangeHistory.lastChangeTime) >= floorChangeHistory.cooldownTime
-end
-
--- Get recent floor change info (for step-back avoidance in walking.lua)
-CaveBot.getRecentFloorChange = function()
-  if floorChangeHistory.completedFloorChange then
-    local elapsed = now - floorChangeHistory.completedFloorChange.time
-    if elapsed < 3000 then  -- 3 seconds: short enough to not block rescue WPs
-      return floorChangeHistory.completedFloorChange
-    end
-  end
-  return nil
-end
-
--- Check if we would loop by going to target floor
-CaveBot.wouldFloorChangeLoop = function(targetZ)
-  return wouldCreateFloorLoop(targetZ)
-end
-
--- Record a completed floor change (called from walking.lua)
-CaveBot.recordFloorChange = function(fromZ, toZ, waypointIdx)
-  recordFloorChange(fromZ, toZ, waypointIdx)
-end
-
--- Check if floor change is allowed (cooldown check)
-CaveBot.canChangeFloor = function()
-  return canChangeFloorNow()
-end
-
--- Clear floor change history (on config change)
-local function clearFloorChangeHistory()
-  floorChangeHistory.changes = {}
-  floorChangeHistory.lastChangeTime = 0
-  floorChangeHistory.lastFloorFrom = nil
-  floorChangeHistory.lastFloorTo = nil
-  floorChangeHistory.completedFloorChange = nil
-end
-
 -- DRY: Single source of truth for gotoMaxDistance with fallback.
--- Used by goto callback, findReachableWaypoint, startup search, floor-change recovery.
+-- Used by goto callback, findReachableWaypoint, startup search, Z-change recovery.
 CaveBot.getMaxGotoDistance = function()
   local raw = storage and storage.extras and storage.extras.gotoMaxDistance
   local n = tonumber(raw)
   return (n and n > 0) and n or 50
-end
-
--- Mark that we're intentionally changing floors (called from goto action)
-CaveBot.setIntendedFloorChange = function(expectedZ, waypointIndex)
-  intendedFloorChange.active = true
-  intendedFloorChange.expectedFloor = expectedZ
-  intendedFloorChange.sourceFloor = posz()
-  intendedFloorChange.waypointIndex = waypointIndex
-  intendedFloorChange.timestamp = now
-end
-
--- Clear the intended floor change tracking
-CaveBot.clearIntendedFloorChange = function()
-  intendedFloorChange.active = false
-  intendedFloorChange.expectedFloor = nil
-  intendedFloorChange.sourceFloor = nil
-  intendedFloorChange.waypointIndex = nil
-  intendedFloorChange.timestamp = 0
-end
-
--- Full clear including history (for config changes)
-CaveBot.clearAllFloorChangeTracking = function()
-  CaveBot.clearIntendedFloorChange()
-  clearFloorChangeHistory()
-end
-
--- Check if a floor change was intended (used by walking.lua to prevent step-back)
--- This is the AUTHORITATIVE check for whether a floor change should be allowed
-CaveBot.isFloorChangeIntended = function(newFloor)
-  if not intendedFloorChange.active then 
-    return false 
-  end
-  
-  -- Check timeout
-  if now - intendedFloorChange.timestamp > intendedFloorChange.TIMEOUT then
-    CaveBot.clearIntendedFloorChange()
-    return false
-  end
-  
-  local expectedZ = intendedFloorChange.expectedFloor
-  local sourceZ = intendedFloorChange.sourceFloor
-  if not expectedZ or not sourceZ then 
-    return false 
-  end
-  
-  -- EXACT MATCH: If we ended up exactly where expected, it's definitely intentional
-  if newFloor == expectedZ then
-    return true
-  end
-  
-  -- DIRECTION CHECK: If we moved in the right direction, allow it
-  -- This handles cases where floor change might go to adjacent floor
-  local movingUp = newFloor < sourceZ
-  local expectedUp = expectedZ < sourceZ
-  local movedInRightDirection = (movingUp == expectedUp)
-  
-  -- Only allow if we moved AND we're within 1 floor of expected
-  if movedInRightDirection and math.abs(newFloor - expectedZ) <= 1 then
-    return true
-  end
-  
-  return false
-end
-
--- Get the current intended floor change state (for debugging/checks)
-CaveBot.getIntendedFloorChange = function()
-  if not intendedFloorChange.active then return nil end
-  return {
-    expectedFloor = intendedFloorChange.expectedFloor,
-    sourceFloor = intendedFloorChange.sourceFloor,
-    waypointIndex = intendedFloorChange.waypointIndex,
-    timestamp = intendedFloorChange.timestamp,
-    age = now - intendedFloorChange.timestamp
-  }
 end
 
 --[[
@@ -274,78 +102,6 @@ local walkState = {
   stuckCheckTime = 0,           -- When to check if stuck
   STUCK_TIMEOUT = 3000          -- Consider stuck after 3 seconds of no movement
 }
-
--- Floor-change recovery throttle (reduce heavy scans on manual z-changes)
-local FLOOR_CHANGE_RECOVERY_DEFAULT = 200  -- ms, internal safe default
-local floorChangeRecovery = {
-  scheduled = false,
-  pendingZ = nil,
-  pendingFrom = nil,
-  lastRun = 0
-}
-
-local function getFloorChangeRecoveryDelay()
-  local delay = FLOOR_CHANGE_RECOVERY_DEFAULT
-  if storage and storage.cavebot and storage.cavebot.walking then
-    local v = tonumber(storage.cavebot.walking.floorChangeDelay)
-    if v and v >= 0 then
-      delay = v
-    end
-  end
-  return delay
-end
-
-local function tryCurrentWaypointReachable(playerPos, maxDist)
-  if not ui or not ui.list or not playerPos then return false end
-  local current = ui.list:getFocusedChild() or ui.list:getFirstChild()
-  if not current or current.action ~= "goto" then return false end
-
-  local posMatch = regexMatch(current.value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
-  if not posMatch or not posMatch[1] or not posMatch[1][2] or not posMatch[1][3] or not posMatch[1][4] then return false end
-
-  local destPos = {
-    x = tonumber(posMatch[1][2]),
-    y = tonumber(posMatch[1][3]),
-    z = tonumber(posMatch[1][4])
-  }
-  if destPos.z ~= playerPos.z then return false end
-
-  local dist2d = math.max(math.abs(destPos.x - playerPos.x), math.abs(destPos.y - playerPos.y))
-  if dist2d > maxDist then return false end
-
-  local path = findPath(playerPos, destPos, maxDist, { ignoreNonPathable = true })
-  return path ~= nil
-end
-
-local function scheduleFloorChangeRecovery()
-  local delay = getFloorChangeRecoveryDelay()
-  if floorChangeRecovery.scheduled then return end
-
-  floorChangeRecovery.scheduled = true
-  schedule(delay, function()
-    floorChangeRecovery.scheduled = false
-    if now - floorChangeRecovery.lastRun < delay then return end
-    floorChangeRecovery.lastRun = now
-
-    local pp = player and player:getPosition()
-    if not pp then return end
-    if floorChangeRecovery.pendingZ and pp.z ~= floorChangeRecovery.pendingZ then return end
-
-    local maxDist = CaveBot.getMaxGotoDistance()
-    if tryCurrentWaypointReachable(pp, maxDist) then return end
-
-    if findNearestGlobalWaypoint then
-      local child, idx = findNearestGlobalWaypoint(pp, maxDist, {
-        maxCandidates = 6,
-        preferCurrentFloor = true,
-        searchAllFloors = false
-      })
-      if child then
-        focusWaypointForRecovery(child, idx)
-      end
-    end
-  end)
-end
 
 -- Forward-declare for hasPlayerMoved (full definition below in WAYPOINT ENGINE section)
 local WaypointEngine
@@ -517,6 +273,7 @@ local checkStartupWaypoint       -- Defined in STARTUP DETECTION section
 local invalidateWaypointCache    -- Defined in WAYPOINT CACHE section
 local resetStartupCheck          -- Defined in STARTUP DETECTION section
 local buildWaypointCache         -- Defined in WAYPOINT CACHE section
+local findNearestSameFloorGoto   -- Defined after buildWaypointCache
 local focusWaypointForRecovery   -- Defined in RECOVERY STRATEGIES section
 local resetWaypointEngine        -- Defined below runWaypointEngine
 local chebyshevDist = Directions.chebyshevDistance  -- SSoT: constants/directions.lua
@@ -560,13 +317,14 @@ WaypointEngine = {
   -- Drift detection: proactive refocus to nearest WP when player drifts too far
   -- NOTE: Corridor enforcement (WaypointNavigator) is now the primary drift detector.
   -- These thresholds serve as fallback when the navigator is unavailable.
-  DRIFT_THRESHOLD_RATIO = 0.40,  -- refocus when dist > maxDist * ratio (~20 tiles for maxDist=50)
-  DRIFT_CHECK_INTERVAL  = 2000,  -- periodic check every 2s (was 750ms — too aggressive)
+  DRIFT_THRESHOLD_RATIO = 0.20,  -- refocus when dist > maxDist * ratio (~10 tiles for maxDist=50)
+  DRIFT_CHECK_INTERVAL  = 1000,  -- periodic check every 1s
   DRIFT_HYSTERESIS      = 5,     -- nearest must be >=5 tiles closer to justify switch
-  REFOCUS_COOLDOWN      = 2000,  -- min 2s between refocuses (prevents walk-cancel loops)
+  REFOCUS_COOLDOWN      = 1500,  -- min 1.5s between refocuses (prevents walk-cancel loops)
   lastDriftCheck    = 0,
   lastRefocusTime   = 0,
   wasTargetBotBlocking = false,
+  postCombatUntil      = 0,      -- tighter corridor check for 3s after combat ends
 
   -- Performance: avoid redundant UI lookups
   tickCount = 0,
@@ -934,73 +692,36 @@ if EventBus then
 end
 
 cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
+  -- Z-LEVEL CHANGE: Must run BEFORE shouldSkipExecution so stale delays
+  -- from the old floor can't block rescue. All Z changes handled identically
+  -- (no intended/accidental distinction).
+  local playerPos = player and player:getPosition()
+  if playerPos and lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
+    -- Clear ALL stale state from old floor
+    walkState.delayUntil = 0
+    cavebotMacro.delay = nil
+    clearWaypointBlacklist()
+    safeResetWalking()
+    resetWaypointEngine()
+    -- Focus nearest same-Z goto WP (pure distance, no path validation)
+    local child, idx = findNearestSameFloorGoto(playerPos, playerPos.z, CaveBot.getMaxGotoDistance())
+    if child then
+      print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): focusing WP" .. idx)
+      focusWaypointForRecovery(child, idx)
+    end
+    lastPlayerFloor = playerPos.z
+    return  -- Consume this tick for the Z transition
+  end
+  if playerPos then lastPlayerFloor = playerPos.z end
+
   -- SMART EXECUTION: Skip if we shouldn't execute this tick
   if shouldSkipExecution() then return end
-  
+
   -- Update player position tracking
   hasPlayerMoved()
 
-  -- Z-change guard: skip heavy processing during manual floor transitions
-  if zChanging() then
-    local pp = player and player:getPosition()
-    local intended = CaveBot.isFloorChangeIntended and pp and CaveBot.isFloorChangeIntended(pp.z)
-    if not intended then
-      if pp then lastPlayerFloor = pp.z end
-      return
-    end
-  end
-
-  -- Guard against unintended floor changes: realign to nearest waypoint on current floor
-  -- BUT: If the floor change was intended (from a floor-change waypoint), don't reset!
-  local playerPos = player:getPosition()
-  if playerPos then
-    if lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
-      -- Check if this floor change was intended using multiple methods:
-      -- 1. intendedFloorChange is still active (rare - usually cleared by walking.lua)
-      -- 2. recentFloorChange matches this transition (most reliable)
-      local wasIntended = false
-      
-      -- Method 1: Check intendedFloorChange (might still be active)
-      if CaveBot.isFloorChangeIntended and CaveBot.isFloorChangeIntended(playerPos.z) then
-        wasIntended = true
-        CaveBot.clearIntendedFloorChange()
-      end
-      
-      -- Method 2: Check recentFloorChange (more reliable - persists for 8 seconds)
-      if not wasIntended and CaveBot.getRecentFloorChange then
-        local recent = CaveBot.getRecentFloorChange()
-        if recent and recent.toZ == playerPos.z and recent.fromZ == lastPlayerFloor then
-          -- This matches our floor transition - it was intended
-          wasIntended = true
-        end
-      end
-      
-      if wasIntended then
-        -- Intended floor change - just reset walking, don't search for waypoints
-        -- DON'T clear blacklist here — blacklisted waypoints should survive intended transitions
-        safeResetWalking()
-        -- Do NOT call resetWaypointEngine or findNearestGlobalWaypoint!
-      else
-        -- Unintended floor change - clear blacklist (stale for old floor) and recover
-        clearWaypointBlacklist()
-        safeResetWalking()
-        resetWaypointEngine()
-        floorChangeRecovery.pendingZ = playerPos.z
-        floorChangeRecovery.pendingFrom = lastPlayerFloor
-
-        -- Manual z-change: skip heavy recovery scans when not walking to a waypoint
-        if walkState and walkState.isWalkingToWaypoint and player and player:isWalking() then
-          scheduleFloorChangeRecovery()
-        else
-          if walkState then
-            walkState.isWalkingToWaypoint = false
-            walkState.targetPos = nil
-          end
-        end
-      end
-    end
-    lastPlayerFloor = playerPos.z
-  end
+  -- Z-change guard: skip heavy processing during floor transitions
+  if zChanging() then return end
   
   -- STARTUP DETECTION: Find nearest waypoint on relog/load
   -- Note: checkStartupWaypoint is defined later in file, check if available
@@ -1034,16 +755,16 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       return
     end
     
-    -- ═══════════════════════════════════════════════════════════════════════════
-    -- IMPROVED MONSTER DETECTION (v3.0)
-    -- Check for targetable monsters on screen BEFORE proceeding to next waypoint
-    -- This prevents the bot from leaving monsters behind
-    -- ═══════════════════════════════════════════════════════════════════════════
+    -- MONSTER DETECTION: Pause for targetable monsters on screen
+    -- Defer to TargetBot's cavebotAllowance: when TargetBot has evaluated all
+    -- monsters and explicitly allowed CaveBot (e.g., all targets unreachable),
+    -- respect that decision instead of blocking based on passive monster detection.
     if TargetBot.shouldWaitForMonsters and TargetBot.shouldWaitForMonsters() then
-      -- There are monsters that need to be killed - pause cavebot
-      safeResetWalking()
-      WaypointEngine.wasTargetBotBlocking = true
-      return
+      if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
+        safeResetWalking()
+        WaypointEngine.wasTargetBotBlocking = true
+        return
+      end
     end
     
     -- BACKUP CHECK: If EventTargeting reports combat active, also pause
@@ -1062,6 +783,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if WaypointEngine.wasTargetBotBlocking then
     WaypointEngine.wasTargetBotBlocking = false
     WaypointEngine.lastRefocusTime = 0  -- Bypass cooldown for post-combat
+    WaypointEngine.postCombatUntil = now + 3000  -- 3s aggressive corridor window
     -- Immediate corridor check for fast return-to-track
     if WaypointNavigator then
       local pp = pos()
@@ -1087,16 +809,18 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   end
 
   -- Trigger 2: Corridor enforcement (checked every tick when not walking/in-combat)
-  -- Only trigger on "outside" (hard boundary = 15 tiles from route) to avoid
-  -- interfering with normal A* detours around obstacles within the corridor.
+  -- During post-combat window (3s): "margin" triggers too (catch 6-15 tile drift from chase).
+  -- Otherwise: only hard "outside" (15+ tiles) to avoid interfering with normal A* detours.
   if WaypointNavigator and playerPos and not player:isWalking() then
     -- Guard: skip if the current goto action was just dispatched recently
     -- (prevents canceling a walk between A* pathfinder steps)
     if (now - WaypointEngine.lastRefocusTime) >= WaypointEngine.REFOCUS_COOLDOWN then
       CaveBot.ensureNavigatorRoute(playerPos.z)
       local status, dist, recovery = WaypointNavigator.checkCorridor(playerPos)
+      local inPostCombat = now < WaypointEngine.postCombatUntil
+      local breached = inPostCombat and status ~= "inside" or status == "outside"
 
-      if status == "outside" and recovery then
+      if breached and recovery then
         local wp = waypointPositionCache[recovery.nextWpIdx]
         if wp and wp.child and not isWaypointBlacklisted(wp.child) then
           print("[CaveBot] Corridor breach: " .. math.floor(dist) .. " tiles off-route, refocusing WP" .. recovery.nextWpIdx)
@@ -1332,12 +1056,6 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
   else
     safeResetWalking()
   end
-  -- Clear all floor change tracking including history
-  if CaveBot.clearAllFloorChangeTracking then
-    CaveBot.clearAllFloorChangeTracking()
-  else
-    CaveBot.clearIntendedFloorChange()  -- Fallback to just clearing intended
-  end
   resetWaypointEngine()  -- Reset waypoint engine state on config change
   if invalidateWaypointCache then invalidateWaypointCache() end  -- Clear waypoint position cache
   if resetStartupCheck then resetStartupCheck() end  -- Reset startup check to find nearest waypoint
@@ -1555,6 +1273,23 @@ buildWaypointCache = function()
   end
   
   waypointCacheValid = true
+end
+
+-- Lightweight distance-only search for the nearest goto WP on a given floor.
+-- No path validation — the goto callback's walkTo handles pathfinding.
+-- Used for immediate rescue WP focus after accidental floor changes.
+findNearestSameFloorGoto = function(pp, floorZ, maxDist)
+  buildWaypointCache()
+  local bestChild, bestIdx, bestDist = nil, nil, math.huge
+  for i, wp in pairs(waypointPositionCache) do
+    if wp.isGoto and wp.z == floorZ then
+      local d = math.max(math.abs(pp.x - wp.x), math.abs(pp.y - wp.y))
+      if d <= maxDist and d < bestDist then
+        bestChild, bestIdx, bestDist = wp.child, i, d
+      end
+    end
+  end
+  return bestChild, bestIdx
 end
 
 -- ============================================================================

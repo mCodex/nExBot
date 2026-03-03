@@ -56,6 +56,13 @@ local function _zActivate()
     if ok and p then _zLastKnown = p.z end
     EventBus.emit("player:z_change_settled")
   end)
+  -- Safety valve: guarantee clear within 500ms even if primary schedule fails
+  schedule(500, function()
+    if _zBlocked then
+      _zBlocked = false
+      EventBus.emit("player:z_change_settled")
+    end
+  end)
 end
 
 -- Burst detector: counts creature appear/disappear events per frame.
