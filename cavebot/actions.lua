@@ -170,10 +170,11 @@ CaveBot.addAction = function(action, value, focus)
   if raction.color then
     widget:setColor(raction.color)
   end
-  -- Invalidate waypoint cache when editor adds a new action
+  -- Invalidate caches when editor adds a new action
   if CaveBot.invalidateWaypointCache then
     CaveBot.invalidateWaypointCache()
   end
+  invalidateGotoDistCache()
   widget.onDoubleClick = function(cwidget) -- edit on double click
     if CaveBot.Editor then
       schedule(20, function() -- schedule to have correct focus
@@ -209,6 +210,7 @@ CaveBot.editAction = function(widget, action, value)
   if raction.color then
     widget:setColor(raction.color)
   end
+  invalidateGotoDistCache()
   return widget
 end
 
@@ -383,6 +385,11 @@ end
 -- Used for adaptive arrival precision (prevents zone overlap on close WPs)
 local nextGotoDistCache = {}
 local nextGotoDistCacheCount = 0
+local function invalidateGotoDistCache()
+  nextGotoDistCache = {}
+  nextGotoDistCacheCount = 0
+end
+CaveBot.invalidateGotoDistCache = invalidateGotoDistCache
 local function getDistanceToNextGoto(currentIdx)
   -- Build composite key from index + action value for cache stability
   local currentAction = ui and ui.list and ui.list:getChildren() and ui.list:getChildren()[currentIdx]

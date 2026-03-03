@@ -479,6 +479,20 @@ do
   CARDINAL_PAIR_TO_DIAGONAL[N * 8 + W] = NW
 end
 
+-- Helper: check that both cardinal leg tiles of a diagonal move are walkable and not floor-change
+local function areDiagonalLegsTraversable(curPos, dir1, dir2)
+  local off1 = getDirectionOffset(dir1)
+  local off2 = getDirectionOffset(dir2)
+  if not off1 or not off2 then return false end
+  local leg1 = applyOffset(curPos, off1)
+  local leg2 = applyOffset(curPos, off2)
+  local Client = getClient()
+  local lt1 = (Client and Client.getTile) and Client.getTile(leg1) or (g_map and g_map.getTile(leg1))
+  local lt2 = (Client and Client.getTile) and Client.getTile(leg2) or (g_map and g_map.getTile(leg2))
+  return (lt1 and lt1:isWalkable() and not isFloorChangeTile(leg1))
+     and (lt2 and lt2:isWalkable() and not isFloorChangeTile(leg2))
+end
+
 -- IMPROVED: Path smoothing function - removes unnecessary zig-zag movements
 -- Two-pass: (1) L-shape to diagonal, (2) A→B→A zig-zag to diagonal
 local function smoothPath(path, startPos)
@@ -510,19 +524,11 @@ local function smoothPath(path, startPos)
               if not isFloorChangeTile(diagPos) then
                 local Client = getClient()
                 local tile = (Client and Client.getTile) and Client.getTile(diagPos) or (g_map and g_map.getTile(diagPos))
-                if tile and tile:isWalkable() then
-                  -- Validate cardinal legs (diagonal requires both to be walkable)
-                  local off2 = getDirectionOffset(dir2)
-                  local leg1 = nextPos  -- curPos + dir
-                  local leg2 = off2 and applyOffset(curPos, off2)
-                  local lt1 = leg1 and ((Client and Client.getTile) and Client.getTile(leg1) or (g_map and g_map.getTile(leg1)))
-                  local lt2 = leg2 and ((Client and Client.getTile) and Client.getTile(leg2) or (g_map and g_map.getTile(leg2)))
-                  if (lt1 and lt1:isWalkable() and not isFloorChangeTile(leg1)) and (lt2 and lt2:isWalkable() and not isFloorChangeTile(leg2)) then
+                if tile and tile:isWalkable() and areDiagonalLegsTraversable(curPos, dir, dir2) then
                     smoothed[#smoothed + 1] = diag
                     curPos = diagPos
                     i = i + 2
                     goto continue_smooth
-                  end
                 end
               end
             end
@@ -542,19 +548,13 @@ local function smoothPath(path, startPos)
             if diagonalDir then
               local Client = getClient()
               local tile = (Client and Client.getTile) and Client.getTile(diagPos) or (g_map and g_map.getTile(diagPos))
-              if tile and tile:isWalkable() and not isFloorChangeTile(diagPos) then
-                -- Validate cardinal legs (diagonal requires both to be walkable)
-                local legA = nextPos  -- curPos + dir (A direction)
-                local legB = applyOffset(curPos, offset2)  -- curPos + dir2 (B direction)
-                local ltA = (Client and Client.getTile) and Client.getTile(legA) or (g_map and g_map.getTile(legA))
-                local ltB = (Client and Client.getTile) and Client.getTile(legB) or (g_map and g_map.getTile(legB))
-                if (ltA and ltA:isWalkable() and not isFloorChangeTile(legA)) and (ltB and ltB:isWalkable() and not isFloorChangeTile(legB)) then
+              if tile and tile:isWalkable() and not isFloorChangeTile(diagPos)
+                 and areDiagonalLegsTraversable(curPos, dir, dir2) then
                   smoothed[#smoothed + 1] = diagonalDir
                   smoothed[#smoothed + 1] = dir
                   curPos = applyOffset(diagPos, offset)
                   i = i + 3
                   goto continue_smooth
-                end
               end
             end
           end

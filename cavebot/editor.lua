@@ -57,6 +57,7 @@ CaveBot.Editor.setup = function()
     if index < 2 then return end
     CaveBot.actionList:moveChildToIndex(action, index - 1)
     CaveBot.actionList:ensureChildVisible(action)
+    if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
     CaveBot.save()
   end)
   registerAction("edit", function()
@@ -71,12 +72,14 @@ CaveBot.Editor.setup = function()
     if index >= CaveBot.actionList:getChildCount() then return end
     CaveBot.actionList:moveChildToIndex(action, index + 1)
     CaveBot.actionList:ensureChildVisible(action)
+    if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
     CaveBot.save()
   end)
   registerAction("remove", function()
     local action = CaveBot.actionList:getFocusedChild()
     if not action then return end
     action:destroy()
+    if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
     CaveBot.save()
   end)
     

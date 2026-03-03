@@ -675,8 +675,7 @@ local function maybeRefocusNearestWaypoint(playerPos)
 
   -- PRIMARY: Corridor + segment-aware drift detection
   if WaypointNavigator then
-    buildWaypointCache()
-    WaypointNavigator.buildRoute(waypointPositionCache, playerPos.z)
+    CaveBot.ensureNavigatorRoute(playerPos.z)
     local isDrifted, driftDist = WaypointNavigator.checkDrift(playerPos,
       math.floor(CaveBot.getMaxGotoDistance() * WaypointEngine.DRIFT_THRESHOLD_RATIO))
 
@@ -754,8 +753,7 @@ local function executeRecovery()
 
   -- PRIMARY: Segment-aware forward-only recovery via WaypointNavigator
   if WaypointNavigator then
-    buildWaypointCache()
-    WaypointNavigator.buildRoute(waypointPositionCache, playerPos.z)
+    CaveBot.ensureNavigatorRoute(playerPos.z)
     local wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
     if wpIdx then
       local wp = waypointPositionCache[wpIdx]
@@ -801,7 +799,7 @@ local function executeRecovery()
           transitionTo("NORMAL")
           return true
         end
-        print("[CaveBot] Recovery (segment-aware): focusing forward WP" .. wpIdx)
+        -- print("[CaveBot] Recovery (segment-aware): focusing forward WP" .. wpIdx)
         focusWaypointForRecovery(wp.child, wpIdx)
         transitionTo("NORMAL")
         return true
@@ -1068,8 +1066,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     if WaypointNavigator then
       local pp = pos()
       if pp then
-        buildWaypointCache()
-        WaypointNavigator.buildRoute(waypointPositionCache, pp.z)
+        CaveBot.ensureNavigatorRoute(pp.z)
         local status, dist, recovery = WaypointNavigator.checkCorridor(pp)
         if status ~= "inside" and recovery then
           local wp = waypointPositionCache[recovery.nextWpIdx]
@@ -1096,8 +1093,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     -- Guard: skip if the current goto action was just dispatched recently
     -- (prevents canceling a walk between A* pathfinder steps)
     if (now - WaypointEngine.lastRefocusTime) >= WaypointEngine.REFOCUS_COOLDOWN then
-      buildWaypointCache()
-      WaypointNavigator.buildRoute(waypointPositionCache, playerPos.z)
+      CaveBot.ensureNavigatorRoute(playerPos.z)
       local status, dist, recovery = WaypointNavigator.checkCorridor(playerPos)
 
       if status == "outside" and recovery then

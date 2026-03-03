@@ -249,6 +249,8 @@ CaveBot.Recorder.enable = function()
   stepsSinceLast = 0
   pendingCorner = nil
   prevRecorded = nil
+  pendingTurnDir = nil
+  pendingTurnCount = 0
 end
 
 CaveBot.Recorder.disable = function()
