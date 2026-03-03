@@ -874,16 +874,19 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     local focusedIdx = uiList:getChildIndex(currentAction)
     local cachedWp = waypointPositionCache[focusedIdx]
     if cachedWp and cachedWp.z ~= playerPos.z then
+      local found = false
       local scanIdx = focusedIdx
       for _ = 1, actionCount do
         scanIdx = (scanIdx % actionCount) + 1
         local wp = waypointPositionCache[scanIdx]
         if wp and wp.isGoto and wp.z == playerPos.z then
           focusWaypointForRecovery(wp.child, scanIdx)
+          found = true
           break
         end
       end
-      return
+      if found then return end
+      -- No same-floor goto exists; fall through to normal failure/recovery
     end
   end
 
