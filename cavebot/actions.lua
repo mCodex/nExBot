@@ -395,7 +395,7 @@ local function getDistanceToNextGoto(currentIdx)
   for i = currentIdx + 1, #children do
     local child = children[i]
     if child then
-      local actionType = child.actionType or child:getText()
+      local actionType = child.action or child:getText()
       if type(actionType) == "string" and actionType:match("^goto$") then
         local val = child.value or child:getText()
         if val then

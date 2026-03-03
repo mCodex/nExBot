@@ -517,7 +517,7 @@ local function smoothPath(path, startPos)
                   local leg2 = off2 and applyOffset(curPos, off2)
                   local lt1 = leg1 and ((Client and Client.getTile) and Client.getTile(leg1) or (g_map and g_map.getTile(leg1)))
                   local lt2 = leg2 and ((Client and Client.getTile) and Client.getTile(leg2) or (g_map and g_map.getTile(leg2)))
-                  if (lt1 and lt1:isWalkable()) and (lt2 and lt2:isWalkable()) then
+                  if (lt1 and lt1:isWalkable() and not isFloorChangeTile(leg1)) and (lt2 and lt2:isWalkable() and not isFloorChangeTile(leg2)) then
                     smoothed[#smoothed + 1] = diag
                     curPos = diagPos
                     i = i + 2
@@ -548,7 +548,7 @@ local function smoothPath(path, startPos)
                 local legB = applyOffset(curPos, offset2)  -- curPos + dir2 (B direction)
                 local ltA = (Client and Client.getTile) and Client.getTile(legA) or (g_map and g_map.getTile(legA))
                 local ltB = (Client and Client.getTile) and Client.getTile(legB) or (g_map and g_map.getTile(legB))
-                if (ltA and ltA:isWalkable()) and (ltB and ltB:isWalkable()) then
+                if (ltA and ltA:isWalkable() and not isFloorChangeTile(legA)) and (ltB and ltB:isWalkable() and not isFloorChangeTile(legB)) then
                   smoothed[#smoothed + 1] = diagonalDir
                   smoothed[#smoothed + 1] = dir
                   curPos = applyOffset(diagPos, offset)

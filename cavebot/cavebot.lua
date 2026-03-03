@@ -692,9 +692,10 @@ local function maybeRefocusNearestWaypoint(playerPos)
         end
       end
       -- Navigator detected drift but couldn't find a good WP; fall through to legacy
-    else
-      return false  -- not drifted according to navigator
+    elseif WaypointNavigator.isRouteBuilt() then
+      return false  -- route is usable and player is not drifted
     end
+    -- No usable route (< 2 goto WPs on this floor); fall through to legacy
   end
 
   -- FALLBACK: Legacy distance-based drift detection

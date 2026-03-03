@@ -31,6 +31,8 @@ local prevStepPos = nil       -- position on the previous step (for direction tr
 local prevDirection = nil     -- direction of the previous step (dx, dy normalized)
 local stepsSinceLast = 0      -- steps since last recorded waypoint
 local pendingCorner = nil     -- position to record when a turn is confirmed
+local pendingTurnDir = nil    -- direction of the pending turn {x, y}
+local pendingTurnCount = 0    -- steps taken in pending direction (for turnConfirmSteps)
 
 -- ============================================================================
 -- CONFIGURATION
@@ -126,6 +128,9 @@ local function setup()
       addPosition(oldPos)
       prevStepPos = newPos
       prevDirection = nil
+      pendingCorner = nil
+      pendingTurnDir = nil
+      pendingTurnCount = 0
       return
     end
 
@@ -140,6 +145,9 @@ local function setup()
       end
       prevStepPos = newPos
       prevDirection = nil
+      pendingCorner = nil
+      pendingTurnDir = nil
+      pendingTurnCount = 0
       return
     end
 
@@ -154,20 +162,40 @@ local function setup()
       local dirChanged = (curDirX ~= prevDirection.x or curDirY ~= prevDirection.y)
 
       if dirChanged then
-        -- DIRECTION CHANGED: Record the position BEFORE the turn (oldPos),
-        -- but only if we're far enough from the last recorded waypoint
-        if distFromLast >= config.minRecordDist then
-          addPosition(oldPos)
-        elseif euclideanDist(lastPos, oldPos) >= config.minRecordDist then
-          -- The turn happened close to the last WP but oldPos is far enough
-          addPosition(oldPos)
+        if pendingTurnDir and pendingTurnDir.x == curDirX and pendingTurnDir.y == curDirY then
+          -- Continuing in the same pending direction; increment counter
+          pendingTurnCount = pendingTurnCount + 1
+        else
+          -- New direction change: start a new pending turn
+          pendingCorner = oldPos
+          pendingTurnDir = { x = curDirX, y = curDirY }
+          pendingTurnCount = 1
         end
-        -- Update direction to the new one
-        prevDirection = { x = curDirX, y = curDirY }
-      elseif distFromLast >= config.maxStraightDist then
-        -- STRAIGHT PATH: Max distance threshold reached, record a waypoint
-        -- to maintain reasonable segment lengths for the corridor system
-        addPosition(newPos)
+
+        -- Confirm the turn once we've taken enough consistent steps
+        if pendingTurnCount >= config.turnConfirmSteps and pendingCorner then
+          local cornerDist = euclideanDist(lastPos, pendingCorner)
+          if cornerDist >= config.minRecordDist then
+            addPosition(pendingCorner)
+          end
+          prevDirection = { x = pendingTurnDir.x, y = pendingTurnDir.y }
+          pendingCorner = nil
+          pendingTurnDir = nil
+          pendingTurnCount = 0
+        end
+      else
+        -- Direction unchanged: clear any pending turn (it was jitter)
+        if pendingTurnDir then
+          pendingCorner = nil
+          pendingTurnDir = nil
+          pendingTurnCount = 0
+        end
+
+        if distFromLast >= config.maxStraightDist then
+          -- STRAIGHT PATH: Max distance threshold reached, record a waypoint
+          -- to maintain reasonable segment lengths for the corridor system
+          addPosition(newPos)
+        end
       end
     else
       -- No previous direction yet (after first step or floor change)
