@@ -8,7 +8,7 @@ Get nExBot up and running on your OTClient in minutes.
 
 - **OTClient** — either [OTClientV8](https://github.com/otcv8/otcv8-dev) or [OpenTibiaBR's OTCR](https://github.com/mehah/otclient)
 - A running Open Tibia server to connect to
-- The latest nExBot release (download from [GitHub](https://github.com/nicao-bot/nExBot) or the Discord server)
+- The latest nExBot release (download from [GitHub](https://github.com/mcodex/nExBot) or the Discord server)
 
 ---
 

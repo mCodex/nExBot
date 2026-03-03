@@ -462,7 +462,7 @@ local Cursor = {
   path      = nil,
   idx       = 1,
   ts        = 0,
-  ttl       = 800,
+  ttl       = 1200,
   dest      = nil,
 }
 
@@ -470,7 +470,7 @@ function PathStrategy.setCursor(path, dest)
   Cursor.path     = path
   Cursor.idx      = 1
   Cursor.ts       = tick()
-  Cursor.ttl      = 800
+  Cursor.ttl      = 1200
   Cursor.dest     = dest
 end
 
@@ -500,7 +500,7 @@ end
 function PathStrategy.advanceCursor(steps, stepDur)
   Cursor.idx = math.min(Cursor.idx + steps, (Cursor.path and #Cursor.path or 0) + 1)
   Cursor.ts  = tick()
-  Cursor.ttl = math.max(800, steps * (stepDur or 200) * 0.85)
+  Cursor.ttl = math.max(1200, math.min(3000, steps * (stepDur or 200) * 1.2))
 end
 
 -- ============================================================================

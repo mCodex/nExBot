@@ -96,9 +96,12 @@ local function resetFloorChangeCacheThrottled()
   end
 end
 
+-- Nudge anti-oscillation: avoid repeating same direction
+local lastNudgeDir = nil
+local lastNudgeTime = 0
+
 -- OPTIMIZED: Use native API limits for best performance
 local MAX_PATHFIND_DIST = 50   -- OTClient A* limit is ~50-127 tiles
-local MAX_WALK_CHUNK = 25      -- Balanced: smooth chunks with faster course correction in caves
 
 -- ============================================================================
 -- OTCLIENT API OPTIMIZATIONS (NEW: High-performance walking)
@@ -259,7 +262,7 @@ end
 -- then two adjacent directions.  Returns true if a step was taken.
 -- @param playerPos table {x,y,z}
 -- @param dest      table {x,y,z}
--- @return boolean  true if a step was dispatched
+-- @return "nudge" if a step was dispatched, false otherwise
 local function tryKeyboardNudge(playerPos, dest)
   if not playerPos or not dest then return false end
   if player:isWalking() then return false end
@@ -275,6 +278,11 @@ local function tryKeyboardNudge(playerPos, dest)
     candidates[3] = adj[2]
   end
 
+  -- Anti-oscillation: if same direction was nudged recently, try adjacent first
+  if dir == lastNudgeDir and now - lastNudgeTime < 500 and adj then
+    candidates = { adj[1], adj[2], dir }
+  end
+
   for _, d in ipairs(candidates) do
     if canWalkDirection(d) then
       local off = DIR_TO_OFFSET and DIR_TO_OFFSET[d]
@@ -287,7 +295,9 @@ local function tryKeyboardNudge(playerPos, dest)
           else
             walk(d)
           end
-          return true
+          lastNudgeDir = d
+          lastNudgeTime = now
+          return "nudge"
         end
       end
     end
@@ -453,14 +463,45 @@ local function resetPathCursor()
   PathCursor.smoothingActive = false
 end
 
+-- L-shape → diagonal lookup for path smoothing (two cardinals → one diagonal)
+-- Uses OTClient direction constants. Both orderings map to the same diagonal.
+local CARDINAL_PAIR_TO_DIAGONAL = {}
+do
+  local N, E, S, W = North or 0, East or 1, South or 2, West or 3
+  local NE, SE, SW, NW = NorthEast or 4, SouthEast or 5, SouthWest or 6, NorthWest or 7
+  CARDINAL_PAIR_TO_DIAGONAL[N * 8 + E] = NE
+  CARDINAL_PAIR_TO_DIAGONAL[E * 8 + N] = NE
+  CARDINAL_PAIR_TO_DIAGONAL[E * 8 + S] = SE
+  CARDINAL_PAIR_TO_DIAGONAL[S * 8 + E] = SE
+  CARDINAL_PAIR_TO_DIAGONAL[S * 8 + W] = SW
+  CARDINAL_PAIR_TO_DIAGONAL[W * 8 + S] = SW
+  CARDINAL_PAIR_TO_DIAGONAL[W * 8 + N] = NW
+  CARDINAL_PAIR_TO_DIAGONAL[N * 8 + W] = NW
+end
+
+-- Helper: check that both cardinal leg tiles of a diagonal move are walkable and not floor-change
+local function areDiagonalLegsTraversable(curPos, dir1, dir2)
+  local off1 = getDirectionOffset(dir1)
+  local off2 = getDirectionOffset(dir2)
+  if not off1 or not off2 then return false end
+  local leg1 = applyOffset(curPos, off1)
+  local leg2 = applyOffset(curPos, off2)
+  local Client = getClient()
+  local lt1 = (Client and Client.getTile) and Client.getTile(leg1) or (g_map and g_map.getTile(leg1))
+  local lt2 = (Client and Client.getTile) and Client.getTile(leg2) or (g_map and g_map.getTile(leg2))
+  return (lt1 and lt1:isWalkable() and not isFloorChangeTile(leg1))
+     and (lt2 and lt2:isWalkable() and not isFloorChangeTile(leg2))
+end
+
 -- IMPROVED: Path smoothing function - removes unnecessary zig-zag movements
--- Analyzes path and simplifies redundant direction changes
+-- Two-pass: (1) L-shape to diagonal, (2) A→B→A zig-zag to diagonal
 local function smoothPath(path, startPos)
-  if not path or #path < 3 then return path end
+  if not path or #path < 2 then return path end
   
   local smoothed = {}
-  local pos = {x = startPos.x, y = startPos.y, z = startPos.z}
+  local curPos = {x = startPos.x, y = startPos.y, z = startPos.z}
   local i = 1
+  local isCardinal = Directions and Directions.isCardinal or function(d) return d ~= nil and d <= 3 end
   
   while i <= #path do
     local dir = path[i]
@@ -468,38 +509,61 @@ local function smoothPath(path, startPos)
     if not offset then 
       i = i + 1
     else
-      -- Look ahead to see if we can simplify the path
-      local nextPos = applyOffset(pos, offset)
+      local nextPos = applyOffset(curPos, offset)
 
-      -- Check for zig-zag patterns and convert to diagonals when safe
-      if i + 2 <= #path then
+      -- Pass 1: L-shape — two consecutive cardinals → one diagonal
+      -- e.g., North + East → NorthEast (if diagonal tile is walkable)
+      if i + 1 <= #path then
         local dir2 = path[i + 1]
-        local dir3 = path[i + 2]
-        if dir == dir3 and dir ~= dir2 then
-          local offset2 = getDirectionOffset(dir2)
-          if offset2 then
-            -- Compute diagonal target (pos + dir + dir2)
-            local diagPos = applyOffset(pos, {x = offset.x + offset2.x, y = offset.y + offset2.y})
-            local diagonalDir = getDirectionTo(pos, diagPos)
-            if diagonalDir then
-              local Client = getClient()
-              local tile = (Client and Client.getTile) and Client.getTile(diagPos) or (g_map and g_map.getTile(diagPos))
-              if tile and tile:isWalkable() and not isFloorChangeTile(diagPos) then
-                smoothed[#smoothed + 1] = diagonalDir
-                -- Continue with the last direction in the pattern to reach the same end
-                smoothed[#smoothed + 1] = dir
-                pos = applyOffset(diagPos, offset)
-                i = i + 3
-                goto continue_smooth
+        if isCardinal(dir) and isCardinal(dir2) and dir ~= dir2 then
+          local diag = CARDINAL_PAIR_TO_DIAGONAL[dir * 8 + dir2]
+          if diag then
+            local diagOff = DIR_TO_OFFSET and DIR_TO_OFFSET[diag]
+            if diagOff then
+              local diagPos = applyOffset(curPos, diagOff)
+              if not isFloorChangeTile(diagPos) then
+                local Client = getClient()
+                local tile = (Client and Client.getTile) and Client.getTile(diagPos) or (g_map and g_map.getTile(diagPos))
+                if tile and tile:isWalkable() and areDiagonalLegsTraversable(curPos, dir, dir2) then
+                    smoothed[#smoothed + 1] = diag
+                    curPos = diagPos
+                    i = i + 2
+                    goto continue_smooth
+                end
               end
             end
           end
         end
       end
 
-      -- Add direction to smoothed path
+      -- Pass 2: A→B→A zig-zag → diagonal + A (3 steps → 2 steps)
+      if i + 2 <= #path then
+        local dir2 = path[i + 1]
+        local dir3 = path[i + 2]
+        if dir == dir3 and dir ~= dir2 then
+          local offset2 = getDirectionOffset(dir2)
+          if offset2 then
+            local diagPos = applyOffset(curPos, {x = offset.x + offset2.x, y = offset.y + offset2.y})
+            local diagonalDir = getDirectionTo(curPos, diagPos)
+            if diagonalDir then
+              local Client = getClient()
+              local tile = (Client and Client.getTile) and Client.getTile(diagPos) or (g_map and g_map.getTile(diagPos))
+              if tile and tile:isWalkable() and not isFloorChangeTile(diagPos)
+                 and areDiagonalLegsTraversable(curPos, dir, dir2) then
+                  smoothed[#smoothed + 1] = diagonalDir
+                  smoothed[#smoothed + 1] = dir
+                  curPos = applyOffset(diagPos, offset)
+                  i = i + 3
+                  goto continue_smooth
+              end
+            end
+          end
+        end
+      end
+
+      -- No pattern matched — keep original direction
       smoothed[#smoothed + 1] = dir
-      pos = nextPos
+      curPos = nextPos
       i = i + 1
       ::continue_smooth::
     end
@@ -618,10 +682,16 @@ CaveBot.walkTo = function(dest, maxDist, params)
   -- Distance check
   local distX = math.abs(dest.x - playerPos.x)
   local distY = math.abs(dest.y - playerPos.y)
+  local totalDist = math.max(distX, distY)
   
   -- Already at destination
   if distX <= precision and distY <= precision and dest.z == playerPos.z then
     return true
+  end
+  
+  -- Reset anti-zigzag dampening for short walks (quick direction changes needed)
+  if totalDist <= 5 and PathStrategy and PathStrategy.resetDirectionState then
+    PathStrategy.resetDirectionState()
   end
   
   -- Floor mismatch
@@ -850,6 +920,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
           if not offset then break end
           local nextPos = applyOffset(currentPos, offset)
           if not isFieldTile(nextPos) then break end
+          if isFloorChangeTile(nextPos) then break end
           walk(dir)
           currentPos = nextPos
           lastWalked = i
@@ -877,9 +948,25 @@ CaveBot.walkTo = function(dest, maxDist, params)
     if prevDir and path[i] ~= prevDir then dirChanges = dirChanges + 1 end
     prevDir = path[i]
   end
+  local complexity = stepsToWalk > 0 and (dirChanges / stepsToWalk) or 0
 
-  -- DECISION: prefer autoWalk for smoother movement; keyboard only for very short/complex paths
-  local useAutoWalk = stepsToWalk > 5 and dirChanges <= stepsToWalk * 0.55
+  -- ADAPTIVE CHUNK SIZING: scale by path complexity
+  local adaptiveChunk = complexity < 0.15 and 40    -- straight corridor
+                     or complexity < 0.35 and 25    -- moderate turns
+                     or complexity < 0.55 and 15    -- complex
+                     or 8                           -- very complex
+  adaptiveChunk = math.min(adaptiveChunk, safeSteps, stepsToWalk)
+
+  -- DISTANCE-AWARE DISPATCH: prefer autoWalk for smoother movement
+  local useAutoWalk = false
+  if stepsToWalk > 15 then
+    useAutoWalk = complexity <= 0.60   -- long: allow more complex paths via autoWalk
+  elseif stepsToWalk > 8 then
+    useAutoWalk = complexity <= 0.45   -- medium: tighter threshold
+  elseif stepsToWalk > 5 then
+    useAutoWalk = complexity <= 0.30   -- short: prefer keyboard for accuracy
+  end
+  -- stepsToWalk ≤ 5: always keyboard
 
   if not useAutoWalk then
     -- KEYBOARD STEPPING with PIPELINING: dispatch up to 2 steps ahead for smoother movement.
@@ -950,7 +1037,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
   end
 
   -- AUTOWALK: Long straight path — delegate to native pathfinder with FC verification
-  local chunkSteps = math.min(stepsToWalk, MAX_WALK_CHUNK)
+  local chunkSteps = math.min(stepsToWalk, adaptiveChunk)
   local chunkDest = PathStrategy
     and PathStrategy.chunkDestination(path, playerPos, curIdx, chunkSteps)
     or playerPos

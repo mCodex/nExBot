@@ -401,6 +401,7 @@ loadCategory("utils", {
   "utils/event_debouncer",
   "utils/path_utils",
   "utils/path_strategy",
+  "utils/waypoint_navigator",
 }, "/")
 
 -- ============================================================================
