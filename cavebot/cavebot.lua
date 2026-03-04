@@ -461,7 +461,10 @@ local function maybeRefocusNearestWaypoint(playerPos)
     end
 
     if isDrifted then
-      local wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+      local wpIdx, wpPos
+      if type(WaypointNavigator.getNextWaypoint) == 'function' then
+        wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+      end
       if wpIdx then
         local wp = waypointPositionCache[wpIdx]
         if wp and wp.child and not isWaypointBlacklisted(wp.child) then
@@ -535,7 +538,10 @@ local function executeRecovery()
   -- PRIMARY: Segment-aware forward-only recovery via WaypointNavigator
   if WaypointNavigator and type(CaveBot.ensureNavigatorRoute) == 'function' then
     CaveBot.ensureNavigatorRoute(playerPos.z)
-    local wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    local wpIdx, wpPos
+    if type(WaypointNavigator.getNextWaypoint) == 'function' then
+      wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    end
     if wpIdx then
       local wp = waypointPositionCache[wpIdx]
       -- If navigator's suggestion is blacklisted, walk forward through gotoIndices
@@ -816,8 +822,11 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       local pp = pos()
       if pp then
         CaveBot.ensureNavigatorRoute(pp.z)
-        local status, dist, recovery = WaypointNavigator.checkCorridor(pp)
-        if status ~= "inside" and recovery then
+        local status, dist, recovery
+        if type(WaypointNavigator.checkCorridor) == 'function' then
+          status, dist, recovery = WaypointNavigator.checkCorridor(pp)
+        end
+        if status and status ~= "inside" and recovery then
           local wp = waypointPositionCache[recovery.nextWpIdx]
           if wp and wp.child and not isWaypointBlacklisted(wp.child) then
             print("[CaveBot] Post-combat corridor recovery: " .. math.floor(dist) .. " tiles off-route, refocusing WP" .. recovery.nextWpIdx)
@@ -843,9 +852,12 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     -- (prevents canceling a walk between A* pathfinder steps)
     if (now - WaypointEngine.lastRefocusTime) >= WaypointEngine.REFOCUS_COOLDOWN and type(CaveBot.ensureNavigatorRoute) == 'function' then
       CaveBot.ensureNavigatorRoute(playerPos.z)
-      local status, dist, recovery = WaypointNavigator.checkCorridor(playerPos)
+      local status, dist, recovery
+      if type(WaypointNavigator.checkCorridor) == 'function' then
+        status, dist, recovery = WaypointNavigator.checkCorridor(playerPos)
+      end
       local inPostCombat = now < WaypointEngine.postCombatUntil
-      local breached = (inPostCombat and status ~= "inside") or (status == "outside")
+      local breached = status and ((inPostCombat and status ~= "inside") or (status == "outside"))
 
       if breached and recovery then
         local wp = waypointPositionCache[recovery.nextWpIdx]
@@ -1295,7 +1307,7 @@ CaveBot.invalidateWaypointCache = invalidateWaypointCache
 -- Exposed so actions.lua can call it before getLookaheadTarget / hasPassedWaypoint.
 CaveBot.ensureNavigatorRoute = function(playerFloor)
   buildWaypointCache()
-  if WaypointNavigator and playerFloor then
+  if WaypointNavigator and playerFloor and type(WaypointNavigator.buildRoute) == 'function' then
     WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
   end
 end
