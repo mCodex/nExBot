@@ -1436,7 +1436,7 @@ findReachableWaypoint = function(playerPos, options)
 
     -- Path validation: use strict findPath (no ignoreNonPathable) for top candidates
     local ps = getPS()
-    if rank <= PATH_VALIDATE_COUNT and ps then
+    if rank <= PATH_VALIDATE_COUNT and ps and ps.findPath then
       local path = ps.findPath(playerPos, c, {
         maxSteps = math.min(math.floor(c.dist * 1.5) + 5, 50),
       })

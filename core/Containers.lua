@@ -679,7 +679,7 @@ local function initSetupWindow()
     setupWindow = win
     
     -- Set height BEFORE hide to avoid geometry callback saving 0
-    local h = config.windowHeight
+    local h = tonumber(config.windowHeight)
     if not h or h < 150 then h = 220 end
     setupWindow:setHeight(h)
     
