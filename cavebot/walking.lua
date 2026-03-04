@@ -970,7 +970,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
 
     if not walkDir then
       if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
-      return false
+      return tryKeyboardNudge(playerPos, dest)
     end
 
     -- Dispatch first step
@@ -1072,7 +1072,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
       return true
     end
     if PathStrategy then PathStrategy.resetCursor() else resetPathCursor() end
-    return false
+    return tryKeyboardNudge(playerPos, dest)
   end
 
   -- Dispatch autoWalk
