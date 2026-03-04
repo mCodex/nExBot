@@ -743,4 +743,5 @@ end
 -- ============================================================================
 
 if _G then _G.PathStrategy = PathStrategy end
+if nExBot then nExBot.PathStrategy = PathStrategy end
 return PathStrategy

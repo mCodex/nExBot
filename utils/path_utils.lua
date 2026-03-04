@@ -305,7 +305,9 @@ end
 function PathUtils.tileHasCreature(pos)
   local tile = PathUtils.getTile(pos)
   if not tile then return false end
-  return tile.hasCreature and tile:hasCreature() or tile:getCreatureCount() > 0
+  if tile.hasCreature then return tile:hasCreature() end
+  if tile.getCreatureCount then return tile:getCreatureCount() > 0 end
+  return false
 end
 
 -- Check if tile is safe (walkable, no floor change, no field)
