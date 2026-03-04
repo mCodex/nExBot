@@ -677,15 +677,20 @@ local function initSetupWindow()
     end
     
     setupWindow = win
-    setupWindow:hide()
-    setupWindow:setHeight(config.windowHeight or 200)
+    
+    -- Set height BEFORE hide to avoid geometry callback saving 0
+    local h = tonumber(config.windowHeight)
+    if not h or h < 150 then h = 220 end
+    setupWindow:setHeight(h)
     
     -- Save window height on resize
     setupWindow.onGeometryChange = function(widget, old, new)
-        if old.height > 0 and new.height ~= old.height then
+        if new.height >= 150 and old.height > 0 and new.height ~= old.height then
             config.windowHeight = new.height
         end
     end
+    
+    setupWindow:hide()
     
     -- Close button
     setupWindow.closeBtn.onClick = function()

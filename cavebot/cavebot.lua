@@ -4,6 +4,11 @@ local config = nil
 -- TrimArray is set as a global by utils/ring_buffer.lua (Phase 3)
 local TrimArray = TrimArray
 
+-- Lazy PathStrategy resolver (sandbox doesn't have _G, so use nExBot namespace)
+local function getPS()
+  return (nExBot and nExBot.PathStrategy) or PathStrategy
+end
+
 -- Safe wrapper for CaveBot.resetWalking to prevent nil errors
 local function safeResetWalking()
   if CaveBot and CaveBot.resetWalking then
@@ -161,7 +166,8 @@ local function shouldSkipExecution()
           if player.stopAutoWalk then
             pcall(player.stopAutoWalk, player)
           end
-          if PathStrategy and PathStrategy.resetCursor then PathStrategy.resetCursor() end
+          local ps = getPS()
+          if ps and ps.resetCursor then ps.resetCursor() end
           walkState.isWalkingToWaypoint = false
           walkState.targetPos = nil
           return false  -- Don't skip — let macro handle it
@@ -189,7 +195,8 @@ local function shouldSkipExecution()
             if player.stopAutoWalk then
               pcall(player.stopAutoWalk, player)
             end
-            if PathStrategy and PathStrategy.resetCursor then PathStrategy.resetCursor() end
+            local ps = getPS()
+            if ps and ps.resetCursor then ps.resetCursor() end
             walkState.isWalkingToWaypoint = false
             walkState.targetPos = nil
             return false
@@ -202,7 +209,8 @@ local function shouldSkipExecution()
               if player.stopAutoWalk then
                 pcall(player.stopAutoWalk, player)
               end
-              if PathStrategy and PathStrategy.resetCursor then PathStrategy.resetCursor() end
+              local ps = getPS()
+              if ps and ps.resetCursor then ps.resetCursor() end
               walkState.isWalkingToWaypoint = false
               walkState.targetPos = nil
               return false
@@ -238,7 +246,8 @@ CaveBot.setWalkingToWaypoint = function(targetPos)
   local currentPos = pos()
   if currentPos and targetPos then
     local manhattan = math.abs(currentPos.x - targetPos.x) + math.abs(currentPos.y - targetPos.y)
-    local stepDur = (PathStrategy and PathStrategy.rawStepDuration(false)) or 200
+    local ps = getPS()
+    local stepDur = (ps and ps.rawStepDuration and ps.rawStepDuration(false)) or 200
     walkState.walkExpectedDuration = manhattan * stepDur
     -- Record Chebyshev: the elapsed-progress check uses Chebyshev distance,
     -- so walkStartDist must match to avoid false "no decrease" on diagonal moves.
@@ -443,13 +452,19 @@ local function maybeRefocusNearestWaypoint(playerPos)
   if (now - WaypointEngine.lastRefocusTime) < WaypointEngine.REFOCUS_COOLDOWN then return false end
 
   -- PRIMARY: Corridor + segment-aware drift detection
-  if WaypointNavigator then
+  if WaypointNavigator and type(CaveBot.ensureNavigatorRoute) == 'function' then
     CaveBot.ensureNavigatorRoute(playerPos.z)
-    local isDrifted, driftDist = WaypointNavigator.checkDrift(playerPos,
-      math.floor(CaveBot.getMaxGotoDistance() * WaypointEngine.DRIFT_THRESHOLD_RATIO))
+    local isDrifted, driftDist
+    if type(WaypointNavigator.checkDrift) == 'function' then
+      isDrifted, driftDist = WaypointNavigator.checkDrift(playerPos,
+        math.floor(CaveBot.getMaxGotoDistance() * WaypointEngine.DRIFT_THRESHOLD_RATIO))
+    end
 
     if isDrifted then
-      local wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+      local wpIdx, wpPos
+      if type(WaypointNavigator.getNextWaypoint) == 'function' then
+        wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+      end
       if wpIdx then
         local wp = waypointPositionCache[wpIdx]
         if wp and wp.child and not isWaypointBlacklisted(wp.child) then
@@ -460,7 +475,7 @@ local function maybeRefocusNearestWaypoint(playerPos)
         end
       end
       -- Navigator detected drift but couldn't find a good WP; fall through to legacy
-    elseif WaypointNavigator.isRouteBuilt() then
+    elseif type(WaypointNavigator.isRouteBuilt) == 'function' and WaypointNavigator.isRouteBuilt() then
       return false  -- route is usable and player is not drifted
     end
     -- No usable route (< 2 goto WPs on this floor); fall through to legacy
@@ -521,9 +536,12 @@ local function executeRecovery()
   end
 
   -- PRIMARY: Segment-aware forward-only recovery via WaypointNavigator
-  if WaypointNavigator then
+  if WaypointNavigator and type(CaveBot.ensureNavigatorRoute) == 'function' then
     CaveBot.ensureNavigatorRoute(playerPos.z)
-    local wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    local wpIdx, wpPos
+    if type(WaypointNavigator.getNextWaypoint) == 'function' then
+      wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    end
     if wpIdx then
       local wp = waypointPositionCache[wpIdx]
       -- If navigator's suggestion is blacklisted, walk forward through gotoIndices
@@ -704,6 +722,9 @@ if EventBus then
 end
 
 cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
+  -- Guard: forward-declared functions may not be assigned yet during reload
+  if not buildWaypointCache then return end
+
   -- Z-LEVEL CHANGE: Must run BEFORE shouldSkipExecution so stale delays
   -- from the old floor can't block rescue. All Z changes handled identically
   -- (no intended/accidental distinction).
@@ -797,12 +818,15 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     WaypointEngine.lastRefocusTime = 0  -- Bypass cooldown for post-combat
     WaypointEngine.postCombatUntil = now + 3000  -- 3s aggressive corridor window
     -- Immediate corridor check for fast return-to-track
-    if WaypointNavigator then
+    if WaypointNavigator and type(CaveBot.ensureNavigatorRoute) == 'function' then
       local pp = pos()
       if pp then
         CaveBot.ensureNavigatorRoute(pp.z)
-        local status, dist, recovery = WaypointNavigator.checkCorridor(pp)
-        if status ~= "inside" and recovery then
+        local status, dist, recovery
+        if type(WaypointNavigator.checkCorridor) == 'function' then
+          status, dist, recovery = WaypointNavigator.checkCorridor(pp)
+        end
+        if status and status ~= "inside" and recovery then
           local wp = waypointPositionCache[recovery.nextWpIdx]
           if wp and wp.child and not isWaypointBlacklisted(wp.child) then
             print("[CaveBot] Post-combat corridor recovery: " .. math.floor(dist) .. " tiles off-route, refocusing WP" .. recovery.nextWpIdx)
@@ -826,11 +850,14 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if WaypointNavigator and playerPos and not player:isWalking() then
     -- Guard: skip if the current goto action was just dispatched recently
     -- (prevents canceling a walk between A* pathfinder steps)
-    if (now - WaypointEngine.lastRefocusTime) >= WaypointEngine.REFOCUS_COOLDOWN then
+    if (now - WaypointEngine.lastRefocusTime) >= WaypointEngine.REFOCUS_COOLDOWN and type(CaveBot.ensureNavigatorRoute) == 'function' then
       CaveBot.ensureNavigatorRoute(playerPos.z)
-      local status, dist, recovery = WaypointNavigator.checkCorridor(playerPos)
+      local status, dist, recovery
+      if type(WaypointNavigator.checkCorridor) == 'function' then
+        status, dist, recovery = WaypointNavigator.checkCorridor(playerPos)
+      end
       local inPostCombat = now < WaypointEngine.postCombatUntil
-      local breached = (inPostCombat and status ~= "inside") or (status == "outside")
+      local breached = status and ((inPostCombat and status ~= "inside") or (status == "outside"))
 
       if breached and recovery then
         local wp = waypointPositionCache[recovery.nextWpIdx]
@@ -1280,7 +1307,7 @@ CaveBot.invalidateWaypointCache = invalidateWaypointCache
 -- Exposed so actions.lua can call it before getLookaheadTarget / hasPassedWaypoint.
 CaveBot.ensureNavigatorRoute = function(playerFloor)
   buildWaypointCache()
-  if WaypointNavigator and playerFloor then
+  if WaypointNavigator and playerFloor and type(WaypointNavigator.buildRoute) == 'function' then
     WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
   end
 end
@@ -1353,8 +1380,13 @@ findReachableWaypoint = function(playerPos, options)
   -- This ensures the bot always picks the correct NEXT waypoint in sequence,
   -- not just the nearest by distance (which causes sequence skipping).
   if WaypointNavigator and not options.forceDistanceBased then
-    WaypointNavigator.buildRoute(waypointPositionCache, playerZ)
-    local wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    if type(WaypointNavigator.buildRoute) == 'function' then
+      WaypointNavigator.buildRoute(waypointPositionCache, playerZ)
+    end
+    local wpIdx, wpPos
+    if type(WaypointNavigator.getNextWaypoint) == 'function' then
+      wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    end
     if wpIdx then
       -- Respect excludeCurrent: skip if navigator returned the currently focused WP
       if excludeCurrent and ui and ui.list then
@@ -1423,8 +1455,9 @@ findReachableWaypoint = function(playerPos, options)
     if not shouldValidate then goto skip_candidate end
 
     -- Path validation: use strict findPath (no ignoreNonPathable) for top candidates
-    if rank <= PATH_VALIDATE_COUNT and PathStrategy then
-      local path = PathStrategy.findPath(playerPos, c, {
+    local ps = getPS()
+    if rank <= PATH_VALIDATE_COUNT and ps and ps.findPath then
+      local path = ps.findPath(playerPos, c, {
         maxSteps = math.min(math.floor(c.dist * 1.5) + 5, 50),
       })
       if path and #path > 0 then
@@ -1432,7 +1465,7 @@ findReachableWaypoint = function(playerPos, options)
       end
       -- If strict fails, try with ignoreNonPathable as fallback
       if not path or #path == 0 then
-        path = PathStrategy.findPath(playerPos, c, {
+        path = ps.findPath(playerPos, c, {
           maxSteps = math.min(math.floor(c.dist * 1.5) + 5, 50),
           ignoreNonPathable = true,
         })
