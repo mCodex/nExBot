@@ -452,10 +452,13 @@ local function maybeRefocusNearestWaypoint(playerPos)
   if (now - WaypointEngine.lastRefocusTime) < WaypointEngine.REFOCUS_COOLDOWN then return false end
 
   -- PRIMARY: Corridor + segment-aware drift detection
-  if WaypointNavigator and CaveBot.ensureNavigatorRoute then
+  if WaypointNavigator and type(CaveBot.ensureNavigatorRoute) == 'function' then
     CaveBot.ensureNavigatorRoute(playerPos.z)
-    local isDrifted, driftDist = WaypointNavigator.checkDrift(playerPos,
-      math.floor(CaveBot.getMaxGotoDistance() * WaypointEngine.DRIFT_THRESHOLD_RATIO))
+    local isDrifted, driftDist
+    if type(WaypointNavigator.checkDrift) == 'function' then
+      isDrifted, driftDist = WaypointNavigator.checkDrift(playerPos,
+        math.floor(CaveBot.getMaxGotoDistance() * WaypointEngine.DRIFT_THRESHOLD_RATIO))
+    end
 
     if isDrifted then
       local wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
@@ -469,7 +472,7 @@ local function maybeRefocusNearestWaypoint(playerPos)
         end
       end
       -- Navigator detected drift but couldn't find a good WP; fall through to legacy
-    elseif WaypointNavigator.isRouteBuilt() then
+    elseif type(WaypointNavigator.isRouteBuilt) == 'function' and WaypointNavigator.isRouteBuilt() then
       return false  -- route is usable and player is not drifted
     end
     -- No usable route (< 2 goto WPs on this floor); fall through to legacy
@@ -530,7 +533,7 @@ local function executeRecovery()
   end
 
   -- PRIMARY: Segment-aware forward-only recovery via WaypointNavigator
-  if WaypointNavigator and CaveBot.ensureNavigatorRoute then
+  if WaypointNavigator and type(CaveBot.ensureNavigatorRoute) == 'function' then
     CaveBot.ensureNavigatorRoute(playerPos.z)
     local wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
     if wpIdx then
@@ -809,7 +812,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     WaypointEngine.lastRefocusTime = 0  -- Bypass cooldown for post-combat
     WaypointEngine.postCombatUntil = now + 3000  -- 3s aggressive corridor window
     -- Immediate corridor check for fast return-to-track
-    if WaypointNavigator and CaveBot.ensureNavigatorRoute then
+    if WaypointNavigator and type(CaveBot.ensureNavigatorRoute) == 'function' then
       local pp = pos()
       if pp then
         CaveBot.ensureNavigatorRoute(pp.z)
@@ -838,7 +841,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if WaypointNavigator and playerPos and not player:isWalking() then
     -- Guard: skip if the current goto action was just dispatched recently
     -- (prevents canceling a walk between A* pathfinder steps)
-    if (now - WaypointEngine.lastRefocusTime) >= WaypointEngine.REFOCUS_COOLDOWN and CaveBot.ensureNavigatorRoute then
+    if (now - WaypointEngine.lastRefocusTime) >= WaypointEngine.REFOCUS_COOLDOWN and type(CaveBot.ensureNavigatorRoute) == 'function' then
       CaveBot.ensureNavigatorRoute(playerPos.z)
       local status, dist, recovery = WaypointNavigator.checkCorridor(playerPos)
       local inPostCombat = now < WaypointEngine.postCombatUntil
