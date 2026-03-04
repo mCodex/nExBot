@@ -166,8 +166,8 @@ local function shouldSkipExecution()
           if player.stopAutoWalk then
             pcall(player.stopAutoWalk, player)
           end
-          if PathStrategy and PathStrategy.resetCursor then PathStrategy.resetCursor()
-          elseif getPS() and getPS().resetCursor then getPS().resetCursor() end
+          local ps = getPS()
+          if ps and ps.resetCursor then ps.resetCursor() end
           walkState.isWalkingToWaypoint = false
           walkState.targetPos = nil
           return false  -- Don't skip — let macro handle it
@@ -195,8 +195,8 @@ local function shouldSkipExecution()
             if player.stopAutoWalk then
               pcall(player.stopAutoWalk, player)
             end
-            if PathStrategy and PathStrategy.resetCursor then PathStrategy.resetCursor()
-            elseif getPS() and getPS().resetCursor then getPS().resetCursor() end
+            local ps = getPS()
+            if ps and ps.resetCursor then ps.resetCursor() end
             walkState.isWalkingToWaypoint = false
             walkState.targetPos = nil
             return false
@@ -209,8 +209,8 @@ local function shouldSkipExecution()
               if player.stopAutoWalk then
                 pcall(player.stopAutoWalk, player)
               end
-              if PathStrategy and PathStrategy.resetCursor then PathStrategy.resetCursor()
-              elseif getPS() and getPS().resetCursor then getPS().resetCursor() end
+              local ps = getPS()
+              if ps and ps.resetCursor then ps.resetCursor() end
               walkState.isWalkingToWaypoint = false
               walkState.targetPos = nil
               return false
