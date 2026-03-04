@@ -1380,8 +1380,13 @@ findReachableWaypoint = function(playerPos, options)
   -- This ensures the bot always picks the correct NEXT waypoint in sequence,
   -- not just the nearest by distance (which causes sequence skipping).
   if WaypointNavigator and not options.forceDistanceBased then
-    WaypointNavigator.buildRoute(waypointPositionCache, playerZ)
-    local wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    if type(WaypointNavigator.buildRoute) == 'function' then
+      WaypointNavigator.buildRoute(waypointPositionCache, playerZ)
+    end
+    local wpIdx, wpPos
+    if type(WaypointNavigator.getNextWaypoint) == 'function' then
+      wpIdx, wpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    end
     if wpIdx then
       -- Respect excludeCurrent: skip if navigator returned the currently focused WP
       if excludeCurrent and ui and ui.list then
