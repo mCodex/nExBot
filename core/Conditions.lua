@@ -28,7 +28,7 @@ Panel
   if not HealBotConfig[panelName] then
     HealBotConfig[panelName] = {
       enabled = false,
-      curePosion = false,
+      curePoison = false,
       poisonCost = 20,
       cureCurse = false,
       curseCost = 80,
