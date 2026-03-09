@@ -1,9 +1,3 @@
-SettingCheckBox < CheckBox
-  text-wrap: true
-  text-auto-resize: true
-  margin-top: 3
-  font: verdana-11px-rounded
-
 SpellSourceBoxPopupMenu < ComboBoxPopupMenu
 SpellSourceBoxPopupMenuButton < ComboBoxPopupMenuButton
 SpellSourceBox < NxComboBox
@@ -22,81 +16,20 @@ SpellConditionBox < NxComboBox
     self:addOption("Above")
     self:addOption("Equal To")
 
-SpellEntry < Label
-  background-color: alpha
-  text-offset: 18 1
-  focusable: true
-  height: 16
-  font: verdana-11px-rounded
+SpellEntry < NxListEntryCheckable
 
-  CheckBox
-    id: enabled
-    anchors.left: parent.left
-    anchors.verticalCenter: parent.verticalCenter
-    width: 15
-    height: 15
-    margin-top: 2
-    margin-left: 3
-
-  $focus:
-    background-color: #3be4d033
-
-  NxButton
-    id: remove
-    !text: tr('x')
-    anchors.right: parent.right
-    margin-right: 15
-    text-offset: 1 0
-    width: 15
-    height: 15
-
-ItemEntry < Label
-  background-color: alpha
-  text-offset: 40 1
-  focusable: true
-  height: 16
-  font: verdana-11px-rounded
-
-  CheckBox
-    id: enabled
-    anchors.left: parent.left
-    anchors.verticalCenter: parent.verticalCenter
-    width: 15
-    height: 15
-    margin-top: 2
-    margin-left: 3
-
-  UIItem
-    id: id
-    anchors.left: prev.right
-    margin-left: 3
-    anchors.verticalCenter: parent.verticalCenter
-    size: 15 15
-    focusable: false
-
-  $focus:
-    background-color: #3be4d033
-
-  NxButton
-    id: remove
-    !text: tr('x')
-    anchors.right: parent.right
-    margin-right: 15
-    text-offset: 1 0
-    width: 15
-    height: 15
+ItemEntry < NxListEntryCheckable
 
 SpellHealing < NxPanel
   size: 490 130
 
-  Label
+  NxLabel
     id: title
     anchors.verticalCenter: parent.top
     anchors.left: parent.left
     margin-left: 5
     text: Spell Healing
     color: #46e6a6
-    font: verdana-11px-rounded
 
   SpellSourceBox
     id: spellSource
@@ -106,68 +39,61 @@ SpellHealing < NxPanel
     width: 125
     font: verdana-11px-rounded
 
-  Label
+  NxLabel
     id: whenSpell
     anchors.left: spellList.right
     anchors.verticalCenter: prev.verticalCenter
     text: When
     margin-left: 7
-    font: verdana-11px-rounded
 
-  Label
+  NxLabel
     id: isSpell
     anchors.left: spellList.right
     anchors.top: whenSpell.bottom
     text: Is
     margin-top: 9
     margin-left: 7
-    font: verdana-11px-rounded
 
   SpellConditionBox
     id: spellCondition
     anchors.left: spellSource.left
-    anchors.top: spellSource.bottom   
+    anchors.top: spellSource.bottom
     marin-top: 15
     width: 80
     font: verdana-11px-rounded
 
-  TextEdit
+  NxTextInput
     id: spellValue
     anchors.left: spellCondition.right
     anchors.top: spellCondition.top
     anchors.bottom: spellCondition.bottom
     anchors.right: spellSource.right
-    font: verdana-11px-rounded
 
-  Label
+  NxLabel
     id: castSpell
     anchors.left: isSpell.left
     anchors.top: isSpell.bottom
-    text: Cast  
+    text: Cast
     margin-top: 9
-    font: verdana-11px-rounded
 
-  TextEdit
+  NxTextInput
     id: spellFormula
     anchors.left: spellCondition.left
     anchors.top: spellCondition.bottom
     anchors.right: spellValue.right
-    font: verdana-11px-rounded
 
-  Label
+  NxLabel
     id: manaSpell
     anchors.left: castSpell.left
     anchors.top: castSpell.bottom
     text: Mana Cost:
     margin-top: 8
-    font: verdana-11px-rounded
 
-  TextEdit
+  NxTextInput
     id: manaCost
     anchors.left: spellFormula.left
     anchors.top: spellFormula.bottom
     width: 40
-    font: verdana-11px-rounded
 
   TextList
     id: spellList
@@ -176,7 +102,7 @@ SpellHealing < NxPanel
     anchors.top: parent.top
     padding: 1
     padding-top: 2
-    width: 270  
+    width: 270
     margin-bottom: 7
     margin-left: 7
     margin-top: 10
@@ -219,14 +145,13 @@ SpellHealing < NxPanel
 ItemHealing < NxPanel
   size: 490 120
 
-  Label
+  NxLabel
     id: title
     anchors.verticalCenter: parent.top
     anchors.left: parent.left
     margin-left: 5
     text: Item Healing
     color: #ff4b81
-    font: verdana-11px-rounded
 
   SpellSourceBox
     id: itemSource
@@ -236,48 +161,44 @@ ItemHealing < NxPanel
     width: 128
     font: verdana-11px-rounded
 
-  Label
+  NxLabel
     id: whenItem
     anchors.left: itemList.right
     anchors.verticalCenter: prev.verticalCenter
     text: When
     margin-left: 7
-    font: verdana-11px-rounded
 
-  Label
+  NxLabel
     id: isItem
     anchors.left: itemList.right
     anchors.top: whenItem.bottom
     text: Is
     margin-top: 9
     margin-left: 7
-    font: verdana-11px-rounded
 
   SpellConditionBox
     id: itemCondition
     anchors.left: itemSource.left
-    anchors.top: itemSource.bottom   
+    anchors.top: itemSource.bottom
     marin-top: 15
     width: 80
     font: verdana-11px-rounded
 
-  TextEdit
+  NxTextInput
     id: itemValue
     anchors.left: itemCondition.right
     anchors.top: itemCondition.top
     anchors.bottom: itemCondition.bottom
     width: 49
-    font: verdana-11px-rounded
 
-  Label
+  NxLabel
     id: useItem
     anchors.left: isItem.left
     anchors.top: isItem.bottom
-    text: Use  
+    text: Use
     margin-top: 15
-    font: verdana-11px-rounded
 
-  BotItem
+  NxItem
     id: itemId
     anchors.left: itemCondition.left
     anchors.top: itemCondition.bottom
@@ -289,7 +210,7 @@ ItemHealing < NxPanel
     anchors.top: parent.top
     padding: 1
     padding-top: 2
-    width: 270  
+    width: 270
     margin-top: 10
     margin-bottom: 7
     margin-left: 8
@@ -348,45 +269,40 @@ HealBotSettingsPanel < Panel
   size: 500 267
   padding-top: 8
 
-  FlatPanel
+  NxSection
     id: list
     anchors.fill: parent
     margin-right: 240
     padding-left: 6
     padding-right: 6
     padding-top: 6
-    layout:
-      type: verticalBox
 
     Label
+      id: sectionTitle
       text: Additional Settings
-      text-align: center
-      font: verdana-11px-rounded
-      
-    HorizontalSeparator
 
-    SettingCheckBox
+    NxCheckBox
       id: Cooldown
       text: Check spell cooldowns
       margin-top: 10
 
-    SettingCheckBox
+    NxCheckBox
       id: Visible
       text: Items must be visible (recommended)
 
-    SettingCheckBox
+    NxCheckBox
       id: Delay
       text: Don't use items when interacting
 
-    SettingCheckBox
+    NxCheckBox
       id: Interval
       text: Additional delay when looting corpses
 
-    SettingCheckBox
+    NxCheckBox
       id: Conditions
       text: Also check conditions from RL Tibia
 
-    SettingCheckBox
+    NxCheckBox
       id: MessageDelay
       text: Cooldown based on "Aaaah..." message
 
@@ -396,7 +312,7 @@ HealBotSettingsPanel < Panel
     anchors.left: prev.right
     margin-left: 8
 
-  FlatPanel
+  NxPanel
     id: profiles
     anchors.fill: parent
     anchors.left: prev.left
@@ -404,29 +320,27 @@ HealBotSettingsPanel < Panel
     margin-right: 8
     padding: 8
 
-    Label
+    NxLabel
       text: Profile Settings
       text-align: center
       anchors.top: parent.top
       anchors.left: parent.left
       anchors.right: parent.right
-      font: verdana-11px-rounded
 
     HorizontalSeparator
       anchors.top: prev.bottom
       anchors.left: parent.left
       anchors.right: parent.right
 
-    Label
+    NxLabel
       anchors.top: prev.bottom
       margin-top: 30
       anchors.left: parent.left
       anchors.right: parent.right
       text-align: center
-      font: verdana-11px-rounded
       text: Profile Name:
 
-    TextEdit
+    NxTextInput
       id: Name
       anchors.top: prev.bottom
       margin-top: 3
@@ -446,14 +360,13 @@ HealWindow < NxWindow
   size: 520 360
   @onEscape: self:hide()
 
-  Label
+  NxLabel
     id: title
     anchors.left: parent.left
     anchors.top: parent.top
     margin-left: 2
     !text: tr('More important methods come first (Example: Exura gran above Exura)')
     text-align: left
-    font: verdana-11px-rounded
     color: #a4aece
 
   HealerPanel
@@ -472,7 +385,7 @@ HealWindow < NxWindow
     anchors.right: parent.right
     anchors.left: parent.left
     anchors.bottom: closeButton.top
-    margin-bottom: 8    
+    margin-bottom: 8
 
   NxButton
     id: closeButton
