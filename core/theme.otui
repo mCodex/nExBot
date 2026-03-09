@@ -463,7 +463,7 @@ NxNavNextButton < NextButton
 -- Labeled bar widget used to display the current category/source/range selection
 NxCategoryBar < Panel
   image-source: /images/ui/panel_flat
-  image-border: 5  -- 15px height requires smaller border to avoid clipping (NxPanel uses 6)
+  image-border: 5
   padding: 1
   height: 15
 
