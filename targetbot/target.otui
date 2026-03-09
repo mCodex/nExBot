@@ -1,4 +1,4 @@
-TargetBotEntry < Label
+TargetBotEntry < NxLabel
   background-color: alpha
   text-offset: 4 0
   focusable: true
@@ -14,7 +14,7 @@ TargetBotDualLabel < Panel
   margin-left: 4
   margin-right: 4
 
-  Label
+  NxLabel
     id: left
     anchors.top: parent.top
     anchors.left: parent.left
@@ -22,7 +22,7 @@ TargetBotDualLabel < Panel
     font: verdana-11px-rounded
     color: #f5f7ff
 
-  Label
+  NxLabel
     id: right
     anchors.top: parent.top
     anchors.right: parent.right

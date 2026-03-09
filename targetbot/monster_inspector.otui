@@ -25,7 +25,7 @@ MonsterInspectorWindow < NxWindow
     margin-right: 4
     vertical-scrollbar: contentScroll
 
-    Label
+    NxLabel
       id: textContent
       anchors.top: parent.top
       anchors.left: parent.left

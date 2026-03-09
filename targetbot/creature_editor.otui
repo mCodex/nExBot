@@ -2,7 +2,7 @@ TargetBotCreatureEditorScrollBar < Panel
   height: 28
   margin-top: 4
 
-  Label
+  NxLabel
     id: text
     anchors.left: parent.left
     anchors.right: parent.right
@@ -10,7 +10,7 @@ TargetBotCreatureEditorScrollBar < Panel
     text-align: center
     font: verdana-11px-rounded
     color: #f5f7ff
-    
+
   HorizontalScrollBar
     id: scroll
     anchors.left: parent.left
@@ -25,7 +25,7 @@ TargetBotCreatureEditorTextEdit < Panel
   height: 40
   margin-top: 8
 
-  Label
+  NxLabel
     id: text
     anchors.left: parent.left
     anchors.right: parent.right
@@ -33,8 +33,8 @@ TargetBotCreatureEditorTextEdit < Panel
     text-align: center
     font: verdana-11px-rounded
     color: #f5f7ff
-    
-  TextEdit
+
+  NxTextInput
     id: textEdit
     anchors.left: parent.left
     anchors.right: parent.right
@@ -50,14 +50,14 @@ TargetBotCreatureEditorItem < Panel
   margin-left: 24
   margin-right: 24
 
-  Label
+  NxLabel
     id: text
     anchors.left: parent.left
     anchors.verticalCenter: next.verticalCenter
     font: verdana-11px-rounded
     color: #f5f7ff
 
-  BotItem
+  NxItem
     id: item
     anchors.top: parent.top
     anchors.right: parent.right
@@ -75,7 +75,7 @@ TargetBotCreatureEditorWindow < NxWindow
   $mobile:
     height: 300
 
-  Label
+  NxLabel
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: parent.top
@@ -83,8 +83,8 @@ TargetBotCreatureEditorWindow < NxWindow
     font: verdana-11px-rounded
     color: #a4aece
     !text: tr('You can use *, ? and ! on the target name for wildcards and negation.')
-  
-  Label
+
+  NxLabel
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: prev.bottom
@@ -92,8 +92,8 @@ TargetBotCreatureEditorWindow < NxWindow
     font: verdana-11px-rounded
     color: #a4aece
     !text: tr('For example, to target all creatures except "Rat", you can use "*, !Rat" as target name.')
-  
-  Label
+
+  NxLabel
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: prev.bottom
@@ -101,8 +101,8 @@ TargetBotCreatureEditorWindow < NxWindow
     font: verdana-11px-rounded
     color: #a4aece
     !text: tr('You can also enter multiple targets, separate them by ,')
-  
-  Label
+
+  NxLabel
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: prev.bottom
@@ -111,7 +111,7 @@ TargetBotCreatureEditorWindow < NxWindow
     color: #a4aece
     !text: tr('For example, to target "Rat" and "Goblin", you can use "Rat, Goblin" as target name.')
 
-  TextEdit
+  NxTextInput
     id: name
     anchors.top: prev.bottom
     anchors.left: parent.left
@@ -119,7 +119,7 @@ TargetBotCreatureEditorWindow < NxWindow
     margin-left: 90
     margin-top: 4
 
-  Label
+  NxLabel
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: parent.left
     text: Target name:
