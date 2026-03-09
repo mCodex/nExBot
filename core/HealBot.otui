@@ -58,7 +58,7 @@ SpellHealing < NxPanel
     id: spellCondition
     anchors.left: spellSource.left
     anchors.top: spellSource.bottom
-    marin-top: 15
+    margin-top: 15
     width: 80
     font: verdana-11px-rounded
 
@@ -180,7 +180,7 @@ ItemHealing < NxPanel
     id: itemCondition
     anchors.left: itemSource.left
     anchors.top: itemSource.bottom
-    marin-top: 15
+    margin-top: 15
     width: 80
     font: verdana-11px-rounded
 
@@ -277,7 +277,7 @@ HealBotSettingsPanel < Panel
     padding-right: 6
     padding-top: 6
 
-    Label
+    NxLabel
       id: sectionTitle
       text: Additional Settings
 
