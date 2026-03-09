@@ -1,5 +1,5 @@
 CategoryCheckBox < NxCheckBox
-  font: verdana-11px-rounded 
+  font: verdana-11px-rounded
   margin-top: 3
 
   $checked:
@@ -45,7 +45,7 @@ ToolTipLabel < UIWidget
   font: verdana-11px-rounded
   color: #f5f7ff
   height: 14
-  text-align: center 
+  text-align: center
 
 HealerPlayerEntry < NxLabel
   background-color: alpha
@@ -57,11 +57,10 @@ HealerPlayerEntry < NxLabel
 
   $focus:
     background-color: #3be4d033
-  
+
   NxButton
     id: remove
     anchors.right: parent.right
-    margin-right: 2
     anchors.verticalCenter: parent.verticalCenter
     size: 15 15
     margin-right: 15

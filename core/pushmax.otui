@@ -3,7 +3,7 @@ PushMaxWindow < NxWindow
   size: 200 240
   @onEscape: self:hide()
 
-  BotLabel
+  NxLabel
     id: delayText
     anchors.top: parent.top
     anchors.left: parent.left

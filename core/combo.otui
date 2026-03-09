@@ -326,7 +326,7 @@ ComboWindow < NxWindow
     margin-top: 7
 
   NxLabel
-    id: title
+    id: triggersTitle
     anchors.top: parent.top
     anchors.left: parent.left
     margin-left: 10
@@ -340,7 +340,7 @@ ComboWindow < NxWindow
     margin-top: 15
 
   NxLabel
-    id: title
+    id: actionsTitle
     anchors.top: parent.top
     anchors.left: parent.left
     margin-left: 10
@@ -355,7 +355,7 @@ ComboWindow < NxWindow
     margin-left: 10
 
   NxLabel
-    id: title
+    id: serverTitle
     anchors.top: parent.top
     anchors.left: server.left
     margin-left: 3
