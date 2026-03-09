@@ -709,8 +709,8 @@ if ui.title then
   end
 end
   
-if ui.settings then
-  ui.settings.onClick = function(widget)
+if ui.setup then
+  ui.setup.onClick = function(widget)
     mainWindow:show()
     mainWindow:raise()
     mainWindow:focus()

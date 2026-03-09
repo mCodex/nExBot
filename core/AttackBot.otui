@@ -19,7 +19,7 @@ AttackBotBotPanel < Panel
     !text: tr('AttackBot')
 
   NxButton
-    id: settings
+    id: setup
     anchors.top: prev.top
     anchors.left: prev.right
     anchors.right: parent.right

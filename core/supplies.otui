@@ -8,7 +8,7 @@ SupplySpinBox < NxSpinBox
 ItemPanel < Panel
   height: 38
 
-  BotItem
+  NxItem
     id: id
     anchors.left: parent.left
     anchors.bottom: parent.bottom
@@ -29,33 +29,30 @@ ItemPanel < Panel
     anchors.bottom: parent.bottom
     width: 50
 
-  UIWidget
+  NxLabel
     anchors.left: min.left
     anchors.bottom: min.top
     width: 75
     text-align: center
     font: verdana-11px-rounded
-    color: #f5f7ff
     text: Min
     tooltip: Amount of given supplies for bot to leave the spawn.
 
-  UIWidget
+  NxLabel
     anchors.left: max.left
     anchors.bottom: max.top
     width: 75
     text-align: center
     font: verdana-11px-rounded
-    color: #f5f7ff
     text: Max
     tooltip: Amount of given supplies to purchase
 
-  UIWidget
+  NxLabel
     anchors.left: avg.left
     anchors.bottom: avg.top
     width: 55
     text-align: center
     font: verdana-11px-rounded
-    color: #f5f7ff
     text: AVG
     !tooltip: ("This is average consumption of supplies by round to help calculate the amount to purchase\n (info provided by CaveBot Stats)")
 
