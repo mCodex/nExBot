@@ -182,10 +182,6 @@ NxSwitch < BotSwitch
   $!on:
     color: #a4aece
 
-  $focus:
-    border-width: 1
-    border-color: #3be4d0
-
 NxCheckBox < CheckBox
   font: verdana-11px-rounded
   margin-top: 4
@@ -452,14 +448,22 @@ NxNavPrevButton < PreviousButton
   background: #0d1120
   height: 15
 
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
 NxNavNextButton < NextButton
   background: #0d1120
   height: 15
 
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
 -- Labeled bar widget used to display the current category/source/range selection
 NxCategoryBar < Panel
   image-source: /images/ui/panel_flat
-  image-border: 5
+  image-border: 5  -- 15px height requires smaller border to avoid clipping (NxPanel uses 6)
   padding: 1
   height: 15
 
