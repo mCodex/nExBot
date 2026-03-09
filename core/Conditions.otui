@@ -3,377 +3,145 @@ UturaComboBoxPopupMenuButton < ComboBoxPopupMenuButton
 UturaComboBox < NxComboBox
   @onSetup: |
     self:addOption("Utura")
-    self:addOption("Utura Gran")    
+    self:addOption("Utura Gran")
 
 CureConditions < NxPanel
   id: Cure
   padding: 3
-  size: 200 195
+  size: 200 230
 
-  Label
-    id: poisonLabel
+  NxHeading
+    id: cureHeading
     anchors.top: parent.top
     anchors.left: parent.left
-    margin-top: 10
+    margin-top: 6
     margin-left: 5
-    text: Poison
-    color: #3be4d0
-    font: verdana-11px-rounded
+    text: Cure Conditions
 
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 40
-    text: Mana:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: PoisonCost
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    width: 40
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: CurePoison
-    anchors.verticalCenter: prev.verticalCenter
+  NxConditionRow
+    id: poison
+    anchors.top: cureHeading.bottom
+    anchors.left: parent.left
     anchors.right: parent.right
-    margin-right: 10
+    @onSetup: self.name:setText("Poison")
 
-  Label
-    id: curseLabel
-    anchors.left: poisonLabel.left
-    anchors.top: poisonLabel.bottom
-    margin-top: 10
-    text: Curse
-    color: #3be4d0
-    font: verdana-11px-rounded
-
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 44
-    text: Mana:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: CurseCost
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    width: 40
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: CureCurse
-    anchors.verticalCenter: prev.verticalCenter
+  NxConditionRow
+    id: curse
+    anchors.top: prev.bottom
+    anchors.left: parent.left
     anchors.right: parent.right
-    margin-right: 10
+    @onSetup: self.name:setText("Curse")
 
-  Label
-    id: bleedLabel
-    anchors.left: curseLabel.left
-    anchors.top: curseLabel.bottom
-    margin-top: 10
-    text: Bleed
-    color: #3be4d0
-    font: verdana-11px-rounded
-
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 46
-    text: Mana:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: BleedCost
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    width: 40
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: CureBleed
-    anchors.verticalCenter: prev.verticalCenter
+  NxConditionRow
+    id: bleed
+    anchors.top: prev.bottom
+    anchors.left: parent.left
     anchors.right: parent.right
-    margin-right: 10
+    @onSetup: self.name:setText("Bleed")
 
-  Label
-    id: burnLabel
-    anchors.left: bleedLabel.left
-    anchors.top: bleedLabel.bottom
-    margin-top: 10
-    text: Burn
-    color: #3be4d0
-    font: verdana-11px-rounded
-
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 50
-    text: Mana:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: BurnCost
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    width: 40
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: CureBurn
-    anchors.verticalCenter: prev.verticalCenter
+  NxConditionRow
+    id: burn
+    anchors.top: prev.bottom
+    anchors.left: parent.left
     anchors.right: parent.right
-    margin-right: 10
+    @onSetup: self.name:setText("Burn")
 
-  Label
-    id: electrifyLabel
-    anchors.left: burnLabel.left
-    anchors.top: burnLabel.bottom
-    margin-top: 10
-    text: Electrify
-    color: #3be4d0
-    font: verdana-11px-rounded
-
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 33
-    text: Mana:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: ElectrifyCost
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    width: 40
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: CureElectrify
-    anchors.verticalCenter: prev.verticalCenter
+  NxConditionRow
+    id: electrify
+    anchors.top: prev.bottom
+    anchors.left: parent.left
     anchors.right: parent.right
-    margin-right: 10
+    @onSetup: self.name:setText("Electrify")
 
-  Label
-    id: paralyseLabel
-    anchors.left: electrifyLabel.left
-    anchors.top: electrifyLabel.bottom
-    margin-top: 10
-    text: Paralyse
-    color: #3be4d0
-    font: verdana-11px-rounded
-
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 26
-    text: Mana:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: ParalyseCost
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    width: 40
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: CureParalyse
-    anchors.verticalCenter: prev.verticalCenter
+  NxConditionRow
+    id: paralyse
+    anchors.top: prev.bottom
+    anchors.left: parent.left
     anchors.right: parent.right
-    margin-right: 10
+    @onSetup: self.name:setText("Paralyse")
 
-  Label
-    anchors.left: paralyseLabel.left
-    anchors.top: paralyseLabel.bottom
-    margin-top: 10
-    margin-left: 12
-    text: Spell:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: ParalyseSpell
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 10
-    width: 100
-    font: verdana-11px-rounded
+  NxConditionSpellRow
+    id: paralyseSpell
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    @onSetup: self.name:setText("Spell:")
 
 HoldConditions < NxPanel
   id: Hold
   padding: 3
-  size: 200 210
+  size: 200 250
 
-  Label
-    id: hasteLabel
+  NxHeading
+    id: holdHeading
     anchors.top: parent.top
     anchors.left: parent.left
-    margin-top: 10
+    margin-top: 6
     margin-left: 5
-    text: Haste
-    color: #3be4d0
-    font: verdana-11px-rounded
+    text: Hold Conditions
 
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 44
-    text: Mana:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: HasteCost
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    width: 40
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: HoldHaste
-    anchors.verticalCenter: prev.verticalCenter
+  NxConditionRow
+    id: haste
+    anchors.top: holdHeading.bottom
+    anchors.left: parent.left
     anchors.right: parent.right
-    margin-right: 10
+    @onSetup: self.name:setText("Haste")
+
+  NxConditionSpellRow
+    id: hasteSpell
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    @onSetup: self.name:setText("Spell:")
+
+  NxConditionRow
+    id: utana
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    @onSetup: self.name:setText("Utana Vid")
+
+  NxConditionRow
+    id: utamo
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    @onSetup: self.name:setText("Utamo Vita")
+
+  NxConditionRow
+    id: utura
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    @onSetup: self.name:setText("Recovery")
 
   Label
-    anchors.left: hasteLabel.left
-    anchors.top: hasteLabel.bottom
-    margin-top: 10
-    margin-left: 12
-    text: Spell:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: HasteSpell
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 10
-    width: 100
-    font: verdana-11px-rounded
-
-  Label
-    id: utanaLabel
-    anchors.left: hasteLabel.left
+    id: uturaSpellLabel
+    anchors.left: parent.left
     anchors.top: prev.bottom
     margin-top: 10
-    text: Utana Vid
-    color: #3be4d0
-    font: verdana-11px-rounded
-
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 21
-    text: Mana:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: UtanaCost
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    width: 40
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: HoldUtana
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.right: parent.right
-    margin-right: 10
-
-  Label
-    id: utamoLabel
-    anchors.left: utanaLabel.left
-    anchors.top: utanaLabel.bottom
-    margin-top: 10
-    text: Utamo Vita
-    color: #3be4d0
-    font: verdana-11px-rounded
-
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 12
-    text: Mana:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: UtamoCost
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    width: 40
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: HoldUtamo
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.right: parent.right
-    margin-right: 10
-
-  Label
-    id: recoveryLabel
-    anchors.left: utamoLabel.left
-    anchors.top: utamoLabel.bottom
-    margin-top: 10
-    text: Recovery
-    color: #3be4d0
-    font: verdana-11px-rounded
-
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 20
-    text: Mana:
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: UturaCost
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    width: 40
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: HoldUtura
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.right: parent.right
-    margin-right: 10
-
-  Label
-    anchors.left: recoveryLabel.left
-    anchors.top: recoveryLabel.bottom
-    margin-top: 10
-    margin-left: 12
+    margin-left: 17
     text: Spell:
     font: verdana-11px-rounded
 
   UturaComboBox
     id: UturaType
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
+    anchors.verticalCenter: uturaSpellLabel.verticalCenter
+    anchors.left: uturaSpellLabel.right
     margin-left: 10
     width: 100
 
   CheckBox
     id: IgnoreInPz
-    anchors.left: recoveryLabel.left
-    anchors.top: prev.bottom
+    anchors.left: parent.left
+    anchors.top: uturaSpellLabel.bottom
     margin-top: 12
+    margin-left: 5
     font: verdana-11px-rounded
 
   Label
     anchors.verticalCenter: IgnoreInPz.verticalCenter
-    anchors.left: prev.right
+    anchors.left: IgnoreInPz.right
     margin-top: 3
     margin-left: 5
     text: Don't Cast in Protection Zones
@@ -386,8 +154,8 @@ HoldConditions < NxPanel
     margin-top: 8
 
   Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
+    anchors.verticalCenter: StopHaste.verticalCenter
+    anchors.left: StopHaste.right
     margin-top: 3
     margin-left: 5
     text: Stop Haste if TargetBot Is Active
@@ -404,34 +172,18 @@ ConditionsWindow < NxWindow
     anchors.left: parent.left
     margin-top: 7
 
-  Label
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text: Cure Conditions 
-    color: #88e3dd
-    margin-left: 10
-    font: verdana-11px-rounded
-
   HoldConditions
     id: Hold
     anchors.top: parent.top
     anchors.right: parent.right
     margin-top: 7
 
-  Label
-    anchors.top: parent.top
-    anchors.right: parent.right
-    text: Hold Conditions 
-    color: #88e3dd
-    margin-right: 100
-    font: verdana-11px-rounded
-
   HorizontalSeparator
     id: separator
     anchors.right: parent.right
     anchors.left: parent.left
     anchors.bottom: closeButton.top
-    margin-bottom: 8    
+    margin-bottom: 8
 
   NxButtonSm
     id: closeButton

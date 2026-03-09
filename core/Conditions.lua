@@ -86,63 +86,63 @@ Panel
     end
 
     -- text edits
-    conditionsWindow.Cure.PoisonCost:setText(config.poisonCost)
-    conditionsWindow.Cure.PoisonCost.onTextChange = function(widget, text)
+    conditionsWindow.Cure.poison.cost:setText(config.poisonCost)
+    conditionsWindow.Cure.poison.cost.onTextChange = function(widget, text)
       config.poisonCost = tonumber(text)
     end
 
-    conditionsWindow.Cure.CurseCost:setText(config.curseCost)
-    conditionsWindow.Cure.CurseCost.onTextChange = function(widget, text)
+    conditionsWindow.Cure.curse.cost:setText(config.curseCost)
+    conditionsWindow.Cure.curse.cost.onTextChange = function(widget, text)
       config.curseCost = tonumber(text)
     end
 
-    conditionsWindow.Cure.BleedCost:setText(config.bleedCost)
-    conditionsWindow.Cure.BleedCost.onTextChange = function(widget, text)
+    conditionsWindow.Cure.bleed.cost:setText(config.bleedCost)
+    conditionsWindow.Cure.bleed.cost.onTextChange = function(widget, text)
       config.bleedCost = tonumber(text)
     end
 
-    conditionsWindow.Cure.BurnCost:setText(config.burnCost)
-    conditionsWindow.Cure.BurnCost.onTextChange = function(widget, text)
+    conditionsWindow.Cure.burn.cost:setText(config.burnCost)
+    conditionsWindow.Cure.burn.cost.onTextChange = function(widget, text)
       config.burnCost = tonumber(text)
     end
 
-    conditionsWindow.Cure.ElectrifyCost:setText(config.electrifyCost)
-    conditionsWindow.Cure.ElectrifyCost.onTextChange = function(widget, text)
+    conditionsWindow.Cure.electrify.cost:setText(config.electrifyCost)
+    conditionsWindow.Cure.electrify.cost.onTextChange = function(widget, text)
       config.electrifyCost = tonumber(text)
     end
 
-    conditionsWindow.Cure.ParalyseCost:setText(config.paralyseCost)
-    conditionsWindow.Cure.ParalyseCost.onTextChange = function(widget, text)
+    conditionsWindow.Cure.paralyse.cost:setText(config.paralyseCost)
+    conditionsWindow.Cure.paralyse.cost.onTextChange = function(widget, text)
       config.paralyseCost = tonumber(text)
     end
 
-    conditionsWindow.Cure.ParalyseSpell:setText(config.paralyseSpell)
-    conditionsWindow.Cure.ParalyseSpell.onTextChange = function(widget, text)
+    conditionsWindow.Cure.paralyseSpell.spell:setText(config.paralyseSpell)
+    conditionsWindow.Cure.paralyseSpell.spell.onTextChange = function(widget, text)
       config.paralyseSpell = text
     end
 
-    conditionsWindow.Hold.HasteSpell:setText(config.hasteSpell)
-    conditionsWindow.Hold.HasteSpell.onTextChange = function(widget, text)
+    conditionsWindow.Hold.hasteSpell.spell:setText(config.hasteSpell)
+    conditionsWindow.Hold.hasteSpell.spell.onTextChange = function(widget, text)
       config.hasteSpell = text
-    end 
-    
-    conditionsWindow.Hold.HasteCost:setText(config.hasteCost)
-    conditionsWindow.Hold.HasteCost.onTextChange = function(widget, text)
+    end
+
+    conditionsWindow.Hold.haste.cost:setText(config.hasteCost)
+    conditionsWindow.Hold.haste.cost.onTextChange = function(widget, text)
       config.hasteCost = tonumber(text)
     end
-    
-    conditionsWindow.Hold.UtamoCost:setText(config.utamoCost)
-    conditionsWindow.Hold.UtamoCost.onTextChange = function(widget, text)
-      config.utamoCost = tonumber(text)
-    end   
-    
-    conditionsWindow.Hold.UtanaCost:setText(config.utanaCost)
-    conditionsWindow.Hold.UtanaCost.onTextChange = function(widget, text)
-      config.utanaCost = tonumber(text)
-    end 
 
-    conditionsWindow.Hold.UturaCost:setText(config.uturaCost)
-    conditionsWindow.Hold.UturaCost.onTextChange = function(widget, text)
+    conditionsWindow.Hold.utamo.cost:setText(config.utamoCost)
+    conditionsWindow.Hold.utamo.cost.onTextChange = function(widget, text)
+      config.utamoCost = tonumber(text)
+    end
+
+    conditionsWindow.Hold.utana.cost:setText(config.utanaCost)
+    conditionsWindow.Hold.utana.cost.onTextChange = function(widget, text)
+      config.utanaCost = tonumber(text)
+    end
+
+    conditionsWindow.Hold.utura.cost:setText(config.uturaCost)
+    conditionsWindow.Hold.utura.cost.onTextChange = function(widget, text)
       config.uturaCost = tonumber(text)
     end
 
@@ -153,62 +153,62 @@ Panel
     end
 
     -- checkboxes
-    conditionsWindow.Cure.CurePoison:setChecked(config.curePoison)
-    conditionsWindow.Cure.CurePoison.onClick = function(widget)
+    conditionsWindow.Cure.poison.toggle:setChecked(config.curePoison)
+    conditionsWindow.Cure.poison.toggle.onClick = function(widget)
       config.curePoison = not config.curePoison
       widget:setChecked(config.curePoison)
     end
-    
-    conditionsWindow.Cure.CureCurse:setChecked(config.cureCurse)
-    conditionsWindow.Cure.CureCurse.onClick = function(widget)
+
+    conditionsWindow.Cure.curse.toggle:setChecked(config.cureCurse)
+    conditionsWindow.Cure.curse.toggle.onClick = function(widget)
       config.cureCurse = not config.cureCurse
       widget:setChecked(config.cureCurse)
     end
 
-    conditionsWindow.Cure.CureBleed:setChecked(config.cureBleed)
-    conditionsWindow.Cure.CureBleed.onClick = function(widget)
+    conditionsWindow.Cure.bleed.toggle:setChecked(config.cureBleed)
+    conditionsWindow.Cure.bleed.toggle.onClick = function(widget)
       config.cureBleed = not config.cureBleed
       widget:setChecked(config.cureBleed)
     end
 
-    conditionsWindow.Cure.CureBurn:setChecked(config.cureBurn)
-    conditionsWindow.Cure.CureBurn.onClick = function(widget)
+    conditionsWindow.Cure.burn.toggle:setChecked(config.cureBurn)
+    conditionsWindow.Cure.burn.toggle.onClick = function(widget)
       config.cureBurn = not config.cureBurn
       widget:setChecked(config.cureBurn)
     end
 
-    conditionsWindow.Cure.CureElectrify:setChecked(config.cureElectrify)
-    conditionsWindow.Cure.CureElectrify.onClick = function(widget)
+    conditionsWindow.Cure.electrify.toggle:setChecked(config.cureElectrify)
+    conditionsWindow.Cure.electrify.toggle.onClick = function(widget)
       config.cureElectrify = not config.cureElectrify
       widget:setChecked(config.cureElectrify)
     end
 
-    conditionsWindow.Cure.CureParalyse:setChecked(config.cureParalyse)
-    conditionsWindow.Cure.CureParalyse.onClick = function(widget)
+    conditionsWindow.Cure.paralyse.toggle:setChecked(config.cureParalyse)
+    conditionsWindow.Cure.paralyse.toggle.onClick = function(widget)
       config.cureParalyse = not config.cureParalyse
       widget:setChecked(config.cureParalyse)
     end
 
-    conditionsWindow.Hold.HoldHaste:setChecked(config.holdHaste)
-    conditionsWindow.Hold.HoldHaste.onClick = function(widget)
+    conditionsWindow.Hold.haste.toggle:setChecked(config.holdHaste)
+    conditionsWindow.Hold.haste.toggle.onClick = function(widget)
       config.holdHaste = not config.holdHaste
       widget:setChecked(config.holdHaste)
     end
 
-    conditionsWindow.Hold.HoldUtamo:setChecked(config.holdUtamo)
-    conditionsWindow.Hold.HoldUtamo.onClick = function(widget)
+    conditionsWindow.Hold.utamo.toggle:setChecked(config.holdUtamo)
+    conditionsWindow.Hold.utamo.toggle.onClick = function(widget)
       config.holdUtamo = not config.holdUtamo
       widget:setChecked(config.holdUtamo)
     end
 
-    conditionsWindow.Hold.HoldUtana:setChecked(config.holdUtana)
-    conditionsWindow.Hold.HoldUtana.onClick = function(widget)
+    conditionsWindow.Hold.utana.toggle:setChecked(config.holdUtana)
+    conditionsWindow.Hold.utana.toggle.onClick = function(widget)
       config.holdUtana = not config.holdUtana
       widget:setChecked(config.holdUtana)
     end
 
-    conditionsWindow.Hold.HoldUtura:setChecked(config.holdUtura)
-    conditionsWindow.Hold.HoldUtura.onClick = function(widget)
+    conditionsWindow.Hold.utura.toggle:setChecked(config.holdUtura)
+    conditionsWindow.Hold.utura.toggle.onClick = function(widget)
       config.holdUtura = not config.holdUtura
       widget:setChecked(config.holdUtura)
     end
