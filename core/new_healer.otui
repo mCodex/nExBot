@@ -43,7 +43,7 @@ HealItem < Panel
 
 ToolTipLabel < UIWidget
   font: verdana-11px-rounded
-  color: #dfdfdf
+  color: #f5f7ff
   height: 14
   text-align: center 
 
@@ -56,9 +56,9 @@ HealerPlayerEntry < Label
   text-align: left
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
   
-  Button
+  NxButton
     id: remove
     anchors.right: parent.right
     margin-right: 2
@@ -77,7 +77,7 @@ PriorityEntry < ToolTipLabel
   text-align: left
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
 
   CheckBox
     id: enabled
@@ -87,7 +87,7 @@ PriorityEntry < ToolTipLabel
     margin-top: 2
     margin-left: 3 
 
-  Button
+  NxButton
     id: remove
     anchors.right: parent.right
     margin-right: 2
@@ -97,7 +97,7 @@ PriorityEntry < ToolTipLabel
     tooltip: Remove spell
     visible: false
   
-  Button
+  NxButton
     id: increment
     anchors.right: remove.left
     margin-right: 2
@@ -106,7 +106,7 @@ PriorityEntry < ToolTipLabel
     text: +
     tooltip: Increase Priority
 
-  Button
+  NxButton
     id: decrement
     anchors.right: prev.left
     margin-right: 2
@@ -140,7 +140,7 @@ TargetSettings < Panel
     margin-left: 5
     anchors.verticalCenter: prev.verticalCenter
 
-Groups < FlatPanel
+Groups < NxPanel
   size: 150 90
   padding: 3
   padding-top: 5
@@ -181,7 +181,7 @@ Groups < FlatPanel
       id: guild
       text: Guild Members
   
-Vocations < FlatPanel
+Vocations < NxPanel
   size: 100 105
   padding: 3
   padding-top: 5
@@ -256,7 +256,7 @@ Priority < Panel
     fit-children: true
     padding-top: 1
 
-  Button
+  NxButton
     id: addSpellButton
     anchors.left: parent.left
     anchors.right: parent.right
@@ -266,7 +266,7 @@ Priority < Panel
     text: + Add Custom Spell
     tooltip: Add a new custom healing spell
 
-AddPlayer < FlatPanel
+AddPlayer < NxPanel
   padding: 5
 
   Label
@@ -313,7 +313,7 @@ AddPlayer < FlatPanel
     text-align: center
     text: friend name
 
-  Button
+  NxButton
     id: add
     anchors.left: health.left
     anchors.right: parent.right
@@ -389,7 +389,7 @@ Conditions < Panel
       cell-spacing: 5
       num-columns: 2
 
-FriendHealer < MainWindow
+FriendHealer < NxWindow
   !text: tr('Friend Healer')
   size: 512 390
   padding-top: 30
@@ -424,7 +424,7 @@ FriendHealer < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NxButton
     id: closeButton
     !text: tr('Close')
     font: cipsoftFont

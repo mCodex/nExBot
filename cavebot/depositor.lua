@@ -35,7 +35,7 @@ end
 local description = getClientVersion() > 960 and "No - just deposit \n Yes - also reopen loot containers" or "currently not supported, will be added in near future"
 
 CaveBot.Extensions.Depositor.setup = function()
-	CaveBot.registerAction("depositor", "#002FFF", function(value, retries)
+	CaveBot.registerAction("depositor", "#6ba3ff", function(value, retries)
 		-- version check, TODO old tibia
 		if getClientVersion() < 960 then
 			resetCache()

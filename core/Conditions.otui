@@ -1,29 +1,26 @@
 UturaComboBoxPopupMenu < ComboBoxPopupMenu
 UturaComboBoxPopupMenuButton < ComboBoxPopupMenuButton
-UturaComboBox < ComboBox
+UturaComboBox < NxComboBox
   @onSetup: |
     self:addOption("Utura")
     self:addOption("Utura Gran")    
 
-CureConditions < Panel
+CureConditions < NxPanel
   id: Cure
-  image-source: /images/ui/panel_flat
-  image-border: 6
   padding: 3
-  size: 200 190
+  size: 200 195
 
   Label
-    id: label1
+    id: poisonLabel
     anchors.top: parent.top
     anchors.left: parent.left
     margin-top: 10
     margin-left: 5
     text: Poison
-    color: #ffaa00
+    color: #3be4d0
     font: verdana-11px-rounded
 
   Label
-    id: label11
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 40
@@ -45,16 +42,15 @@ CureConditions < Panel
     margin-right: 10
 
   Label
-    id: label2
-    anchors.left: label1.left
-    anchors.top: label1.bottom
+    id: curseLabel
+    anchors.left: poisonLabel.left
+    anchors.top: poisonLabel.bottom
     margin-top: 10
     text: Curse
-    color: #ffaa00
+    color: #3be4d0
     font: verdana-11px-rounded
 
   Label
-    id: label22
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 44
@@ -76,16 +72,15 @@ CureConditions < Panel
     margin-right: 10
 
   Label
-    id: label3
-    anchors.left: label2.left
-    anchors.top: label2.bottom
+    id: bleedLabel
+    anchors.left: curseLabel.left
+    anchors.top: curseLabel.bottom
     margin-top: 10
     text: Bleed
-    color: #ffaa00
-  font: verdana-11px-rounded
+    color: #3be4d0
+    font: verdana-11px-rounded
 
   Label
-    id: label33
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 46
@@ -104,19 +99,18 @@ CureConditions < Panel
     id: CureBleed
     anchors.verticalCenter: prev.verticalCenter
     anchors.right: parent.right
-    margin-right: 10  
+    margin-right: 10
 
   Label
-    id: label4
-    anchors.left: label3.left
-    anchors.top: label3.bottom
+    id: burnLabel
+    anchors.left: bleedLabel.left
+    anchors.top: bleedLabel.bottom
     margin-top: 10
     text: Burn
-    color: #ffaa00
+    color: #3be4d0
     font: verdana-11px-rounded
 
   Label
-    id: label44
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 50
@@ -138,16 +132,15 @@ CureConditions < Panel
     margin-right: 10
 
   Label
-    id: label5
-    anchors.left: label4.left
-    anchors.top: label4.bottom
+    id: electrifyLabel
+    anchors.left: burnLabel.left
+    anchors.top: burnLabel.bottom
     margin-top: 10
-    text: Electify
-    color: #ffaa00
+    text: Electrify
+    color: #3be4d0
     font: verdana-11px-rounded
 
   Label
-    id: label55
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 33
@@ -169,16 +162,15 @@ CureConditions < Panel
     margin-right: 10
 
   Label
-    id: label6
-    anchors.left: label5.left
-    anchors.top: label5.bottom
+    id: paralyseLabel
+    anchors.left: electrifyLabel.left
+    anchors.top: electrifyLabel.bottom
     margin-top: 10
     text: Paralyse
-    color: #ffaa00
-    font: verdana-11px-rounded  
+    color: #3be4d0
+    font: verdana-11px-rounded
 
   Label
-    id: label66
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 26
@@ -200,9 +192,8 @@ CureConditions < Panel
     margin-right: 10
 
   Label
-    id: label7
-    anchors.left: label6.left
-    anchors.top: label6.bottom
+    anchors.left: paralyseLabel.left
+    anchors.top: paralyseLabel.bottom
     margin-top: 10
     margin-left: 12
     text: Spell:
@@ -213,28 +204,25 @@ CureConditions < Panel
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 10
-    width: 100 
+    width: 100
     font: verdana-11px-rounded
 
-HoldConditions < Panel
+HoldConditions < NxPanel
   id: Hold
-  image-source: /images/ui/panel_flat
-  image-border: 6
   padding: 3
-  size: 200 190
+  size: 200 210
 
   Label
-    id: label1
+    id: hasteLabel
     anchors.top: parent.top
     anchors.left: parent.left
     margin-top: 10
     margin-left: 5
     text: Haste
-    color: #ffaa00
-    font: verdana-11px-rounded  
+    color: #3be4d0
+    font: verdana-11px-rounded
 
   Label
-    id: label11
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 44
@@ -256,9 +244,8 @@ HoldConditions < Panel
     margin-right: 10
 
   Label
-    id: label2
-    anchors.left: label1.left
-    anchors.top: label1.bottom
+    anchors.left: hasteLabel.left
+    anchors.top: hasteLabel.bottom
     margin-top: 10
     margin-left: 12
     text: Spell:
@@ -273,16 +260,15 @@ HoldConditions < Panel
     font: verdana-11px-rounded
 
   Label
-    id: label3
-    anchors.left: label1.left
-    anchors.top: label2.bottom
+    id: utanaLabel
+    anchors.left: hasteLabel.left
+    anchors.top: prev.bottom
     margin-top: 10
     text: Utana Vid
-    color: #ffaa00
+    color: #3be4d0
     font: verdana-11px-rounded
 
   Label
-    id: label33
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 21
@@ -304,16 +290,15 @@ HoldConditions < Panel
     margin-right: 10
 
   Label
-    id: label4
-    anchors.left: label3.left
-    anchors.top: label3.bottom
+    id: utamoLabel
+    anchors.left: utanaLabel.left
+    anchors.top: utanaLabel.bottom
     margin-top: 10
     text: Utamo Vita
-    color: #ffaa00
+    color: #3be4d0
     font: verdana-11px-rounded
 
   Label
-    id: label44
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 12
@@ -332,19 +317,18 @@ HoldConditions < Panel
     id: HoldUtamo
     anchors.verticalCenter: prev.verticalCenter
     anchors.right: parent.right
-    margin-right: 10  
+    margin-right: 10
 
   Label
-    id: label5
-    anchors.left: label4.left
-    anchors.top: label4.bottom
+    id: recoveryLabel
+    anchors.left: utamoLabel.left
+    anchors.top: utamoLabel.bottom
     margin-top: 10
     text: Recovery
-    color: #ffaa00 
-    font: verdana-11px-rounded 
+    color: #3be4d0
+    font: verdana-11px-rounded
 
   Label
-    id: label55
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 20
@@ -366,9 +350,8 @@ HoldConditions < Panel
     margin-right: 10
 
   Label
-    id: label6
-    anchors.left: label5.left
-    anchors.top: label5.bottom
+    anchors.left: recoveryLabel.left
+    anchors.top: recoveryLabel.bottom
     margin-top: 10
     margin-left: 12
     text: Spell:
@@ -380,13 +363,13 @@ HoldConditions < Panel
     anchors.left: prev.right
     margin-left: 10
     width: 100
-    font: verdana-11px-rounded
 
   CheckBox
     id: IgnoreInPz
-    anchors.left: label5.left
-    anchors.top: label6.bottom
+    anchors.left: recoveryLabel.left
+    anchors.top: prev.bottom
     margin-top: 12
+    font: verdana-11px-rounded
 
   Label
     anchors.verticalCenter: IgnoreInPz.verticalCenter
@@ -401,7 +384,7 @@ HoldConditions < Panel
     anchors.horizontalCenter: IgnoreInPz.horizontalCenter
     anchors.top: IgnoreInPz.bottom
     margin-top: 8
-  
+
   Label
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -410,7 +393,7 @@ HoldConditions < Panel
     text: Stop Haste if TargetBot Is Active
     font: cipsoftFont
 
-ConditionsWindow < MainWindow
+ConditionsWindow < NxWindow
   !text: tr('Condition Manager')
   size: 445 280
   @onEscape: self:hide()
@@ -422,7 +405,6 @@ ConditionsWindow < MainWindow
     margin-top: 7
 
   Label
-    id: label
     anchors.top: parent.top
     anchors.left: parent.left
     text: Cure Conditions 
@@ -437,13 +419,12 @@ ConditionsWindow < MainWindow
     margin-top: 7
 
   Label
-    id: label
     anchors.top: parent.top
     anchors.right: parent.right
     text: Hold Conditions 
     color: #88e3dd
     margin-right: 100
-    font: verdana-11px-rounded    
+    font: verdana-11px-rounded
 
   HorizontalSeparator
     id: separator
@@ -452,12 +433,8 @@ ConditionsWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NxButtonSm
     id: closeButton
     !text: tr('Close')
-    font: cipsoftFont
     anchors.right: parent.right
     anchors.bottom: parent.bottom
-    size: 45 21
-    margin-top: 15
-    margin-right: 5    

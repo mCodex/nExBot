@@ -389,14 +389,15 @@ end)
 
 local autoLevitateUI = setupUI([[
 Panel
-  height: 19
+  height: 20
 
-  BotSwitch
+  NxSwitch
     id: autoLevitateToggle
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
     text-align: center
+    margin-top: 0
     !text: tr('Auto Levitate')
     tooltip: Event-driven auto-levitate: triggers on movement and key presses for instant response
 ]])
@@ -594,14 +595,15 @@ end
 
 local autoRandomOutfitUI = setupUI([[
 Panel
-  height: 19
+  height: 20
 
-  BotSwitch
+  NxSwitch
     id: title
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
     text-align: center
+    margin-top: 0
     !text: tr('Auto Random Outfit Colors')
 ]])
 
@@ -795,14 +797,15 @@ end)
 -- Fishing UI Switch (same pattern as Dropper)
 local fishingUI = setupUI([[
 Panel
-  height: 19
+  height: 20
 
-  BotSwitch
+  NxSwitch
     id: title
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
     text-align: center
+    margin-top: 0
     !text: tr('Fishing')
 ]])
 
@@ -1883,14 +1886,15 @@ end)
 -- Follow while attacking toggle
 local followWhileAttackingUI = setupUI([[
 Panel
-  height: 19
+  height: 20
 
-  BotSwitch
+  NxSwitch
     id: followWhileAttackingToggle
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
     text-align: center
+    margin-top: 0
     !text: tr('Follow While Attacking')
     tooltip: Keep following player even when attacking monsters with TargetBot
 ]])
@@ -1904,14 +1908,15 @@ end
 
 local followToggleUI = setupUI([[
 Panel
-  height: 19
+  height: 20
 
-  BotSwitch
+  NxSwitch
     id: followPlayerToggle
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
     text-align: center
+    margin-top: 0
     !text: tr('Follow')
 ]])
 

@@ -37,7 +37,7 @@ end
 CaveBot.Extensions.SupplyCheck.setup = function()
   CaveBot.registerAction(
     "supplyCheck",
-    "#db5a5a",
+    "#ff8f6b",
     function(value)
       local data = string.split(value, ",")
       local round = 0

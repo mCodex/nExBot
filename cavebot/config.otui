@@ -7,41 +7,45 @@ CaveBotConfigPanel < Panel
     fit-children: true
   
   HorizontalSeparator
-    margin-top: 5
+    margin-top: 4
 
   Label
     text-align: center
     text: CaveBot Config
-    margin-top: 5
+    margin-top: 4
+    font: verdana-11px-rounded
+    color: #3be4d0
 
 CaveBotConfigNumberValuePanel < Panel
-  height: 20
-  margin-top: 5
+  height: 24
+  margin-top: 4
   
   BotTextEdit
     id: value
     anchors.right: parent.right
     anchors.top: parent.top
     anchors.bottom: parent.bottom
-    margin-right: 5
+    margin-right: 4
     width: 50
 
   Label
     id: title
     anchors.left: parent.left
     anchors.verticalCenter: prev.verticalCenter
-    margin-left: 5
+    margin-left: 4
+    font: verdana-11px-rounded
+    color: #f5f7ff
 
 CaveBotConfigBooleanValuePanel < Panel
-  height: 20
-  margin-top: 5
+  height: 24
+  margin-top: 4
   
-  BotSwitch
+  NxSwitch
     id: value
     anchors.right: parent.right
     anchors.top: parent.top
     anchors.bottom: parent.bottom
-    margin-right: 5
+    margin-right: 4
     width: 50
     
     $on:
@@ -54,4 +58,6 @@ CaveBotConfigBooleanValuePanel < Panel
     id: title
     anchors.left: parent.left
     anchors.verticalCenter: prev.verticalCenter
-    margin-left: 5
+    margin-left: 4
+    font: verdana-11px-rounded
+    color: #f5f7ff

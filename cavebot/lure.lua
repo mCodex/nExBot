@@ -3,7 +3,7 @@ CaveBot.Extensions.Lure = {}
 CaveBot.Extensions.Lure.setup = function()
   -- This action toggles TargetBot on/off for pulling/luring scenarios
   -- Renamed internally but kept for backward compatibility with existing configs
-  CaveBot.registerAction("lure", "#FF0090", function(value, retries)
+  CaveBot.registerAction("lure", "#ff6b9d", function(value, retries)
     value = value:lower()
     if value == "start" then
         TargetBot.setOff()

@@ -1,4 +1,4 @@
-CaveBotEditorButton < Button
+CaveBotEditorButton < NxButton
 
 
 CaveBotEditorPanel < Panel
@@ -12,14 +12,16 @@ CaveBotEditorPanel < Panel
     id: pos
     text-align: center
     text: -
+    font: verdana-11px-rounded
+    color: #a4aece
     
   Panel
     id: buttons
-    margin-top: 2
+    margin-top: 4
     layout:
       type: grid
       cell-size: 86 20
-      cell-spacing: 1
+      cell-spacing: 2
       flow: true
       fit-children: true
 
@@ -28,17 +30,19 @@ CaveBotEditorPanel < Panel
     text-align: center
     text-auto-resize: true
     text-wrap: true
-    margin-top: 3
-    margin-left: 2
-    margin-right: 2
+    margin-top: 4
+    margin-left: 4
+    margin-right: 4
+    font: verdana-11px-rounded
+    color: #a4aece
 
-  BotSwitch
+  NxSwitch
     id: autoRecording
     text: Auto Recording
-    margin-top: 3
+    margin-top: 4
 
-  BotButton
-    margin-top: 3
-    margin-bottom: 3
+  NxButton
+    margin-top: 4
+    margin-bottom: 4
     text: Documentation
     @onClick: g_platform.openUrl("https://www.nexbot.cc/docs")

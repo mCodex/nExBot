@@ -4,23 +4,24 @@ setDefaultTab("Main")
 local panelName = "pushmax"
 local ui = setupUI([[
 Panel
-  height: 19
+  height: 20
 
-  BotSwitch
+  NxSwitch
     id: title
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
     width: 130
+    margin-top: 0
     !text: tr('PUSHMAX')
 
-  Button
+  NxButton
     id: push
-    anchors.top: prev.top
+    anchors.top: parent.top
     anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 3
-    height: 17
+    margin-left: 4
+    height: 20
     text: Setup
 
 ]])

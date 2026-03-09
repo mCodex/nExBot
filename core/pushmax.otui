@@ -1,4 +1,4 @@
-PushMaxWindow < MainWindow
+PushMaxWindow < NxWindow
   !text: tr('Pushmax Settings')
   size: 200 240
   @onEscape: self:hide()
@@ -74,7 +74,7 @@ PushMaxWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NxButton
     id: closeButton
     !text: tr('Close')
     font: cipsoftFont

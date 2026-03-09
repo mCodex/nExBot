@@ -3,7 +3,7 @@ CaveBot.Extensions.OpenDoors = {}
 local getClient = nExBot.Shared.getClient
 
 CaveBot.Extensions.OpenDoors.setup = function()
-  CaveBot.registerAction("OpenDoors", "#00FFFF", function(value, retries)
+  CaveBot.registerAction("OpenDoors", "#6be8e0", function(value, retries)
     local pos = string.split(value, ",")
     local key = nil
     if #pos == 4 then

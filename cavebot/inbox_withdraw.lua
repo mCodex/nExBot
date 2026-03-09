@@ -3,7 +3,7 @@ CaveBot.Extensions.InWithdraw = {}
 local getClient = nExBot.Shared.getClient
 
 CaveBot.Extensions.InWithdraw.setup = function()
-	CaveBot.registerAction("inwithdraw", "#002FFF", function(value, retries)
+	CaveBot.registerAction("inwithdraw", "#6ba3ff", function(value, retries)
 		local data = string.split(value, ",")
 		local withdrawId
 		local amount

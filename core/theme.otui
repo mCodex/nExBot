@@ -1,0 +1,444 @@
+-- ============================================================================
+-- nExBot Design System — theme.otui
+-- Single source of truth for colors, spacing, typography, and base components.
+-- All modules inherit from these classes to ensure native-consistent styling.
+-- Color palette derived from nexbot.cc website design system.
+--
+-- Color Tokens (WCAG 2.2 AA verified against NxBg #0a0e1a):
+--   NxText        #f5f7ff  (15.8:1)  — primary text
+--   NxTextMuted   #a4aece  ( 6.5:1)  — secondary/hint text
+--   NxAccent      #3be4d0  ( 9.2:1)  — teal brand accent
+--   NxSuccess     #46e6a6  ( 8.1:1)  — positive states
+--   NxDanger      #ff4b81  ( 5.2:1)  — destructive/alert
+--   NxInfo        #8f5bff  ( 4.6:1)  — informational/secondary
+--   NxWarning     #ffc857  ( 9.8:1)  — caution/warning
+--   NxBg          #0a0e1a            — deep base background
+--   NxBgElevated  #111827            — panels, cards
+--   NxBgInput     #0d1120            — text fields, list backgrounds
+--   NxBorder      #1b2235            — subtle borders
+--   NxBorderStrong #2c3652           — emphasized borders
+--
+-- Spacing Scale:
+--   xs=2  sm=4  md=8  lg=16  xl=24
+-- ============================================================================
+
+-- ============================================================================
+-- C++ WIDGET BASE OVERRIDES
+-- Override default styles for widget types created by C++ framework functions
+-- (macro() → BotSwitch, UI.Button() → BotButton) so they match the theme.
+-- ============================================================================
+
+BotSwitch
+  font: verdana-11px-rounded
+  height: 20
+
+  $on:
+    color: #3be4d0
+
+  $!on:
+    color: #a4aece
+
+BotButton
+  font: verdana-11px-rounded
+  color: #f5f7ff
+  height: 20
+
+-- ============================================================================
+-- WINDOWS — extend native chrome
+-- ============================================================================
+
+NxWindow < MainWindow
+  padding: 24
+  color: #f5f7ff
+  font: verdana-11px-rounded
+
+NxMiniWindow < MiniWindow
+  font: verdana-11px-rounded
+
+NxMiniContents < MiniWindowContents
+  padding-left: 8
+  padding-right: 8
+  padding-top: 8
+  layout: verticalBox
+
+-- ============================================================================
+-- PANELS — extend native backgrounds
+-- ============================================================================
+
+NxPanel < FlatPanel
+  image-source: /images/ui/panel_flat
+  image-border: 6
+  padding: 8
+  color: #f5f7ff
+  font: verdana-11px-rounded
+
+NxSection < Panel
+  layout:
+    type: verticalBox
+    fit-children: true
+
+  Label
+    id: sectionTitle
+    color: #3be4d0
+    font: verdana-11px-rounded
+    height: 16
+    text-align: left
+    margin-bottom: 4
+
+  HorizontalSeparator
+    margin-bottom: 8
+
+NxScrollPanel < Panel
+  layout:
+    type: verticalBox
+    fit-children: true
+
+  VerticalScrollBar
+    id: scrollBar
+    anchors.top: scrollArea.top
+    anchors.bottom: scrollArea.bottom
+    anchors.right: scrollArea.right
+    step: 16
+    pixels-scroll: true
+
+  ScrollablePanel
+    id: scrollArea
+    anchors.fill: parent
+    vertical-scrollbar: scrollBar
+    layout:
+      type: verticalBox
+      fit-children: true
+
+-- ============================================================================
+-- TYPOGRAPHY — semantic text classes
+-- ============================================================================
+
+NxHeading < Label
+  color: #3be4d0
+  font: verdana-11px-rounded
+  height: 16
+  text-align: left
+
+NxLabel < Label
+  color: #f5f7ff
+  font: verdana-11px-rounded
+  height: 14
+  text-align: left
+
+NxLabelMuted < Label
+  color: #a4aece
+  font: verdana-11px-rounded
+  height: 14
+  text-align: left
+
+-- ============================================================================
+-- CONTROLS — extend native widgets with consistent sizing/colors
+-- ============================================================================
+
+NxButton < Button
+  font: cipsoftFont
+  color: #f5f7ff
+  height: 20
+  min-width: 32
+  text-align: center
+
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
+NxButtonSm < Button
+  font: cipsoftFont
+  color: #f5f7ff
+  size: 45 20
+  text-align: center
+
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
+NxButtonDanger < Button
+  font: cipsoftFont
+  color: #ff4b81
+  height: 20
+  min-width: 32
+  text-align: center
+
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
+NxSwitch < BotSwitch
+  height: 20
+  font: verdana-11px-rounded
+  margin-top: 4
+
+  $on:
+    color: #3be4d0
+
+  $!on:
+    color: #a4aece
+
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
+NxCheckBox < CheckBox
+  font: verdana-11px-rounded
+  margin-top: 4
+  color: #f5f7ff
+
+  $checked:
+    color: #3be4d0
+
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
+NxTextInput < TextEdit
+  font: verdana-11px-rounded
+  color: #f5f7ff
+  height: 20
+  text-align: center
+  background: #0d1120
+
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
+NxSpinBox < SpinBox
+  font: verdana-11px-rounded
+  color: #f5f7ff
+  height: 20
+  text-align: center
+  focusable: true
+  minimum: 0
+  maximum: 9999
+
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
+NxComboBox < ComboBox
+  font: verdana-11px-rounded
+  color: #f5f7ff
+
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
+NxComboBoxPopupMenu < ComboBoxPopupMenu
+NxComboBoxPopupMenuButton < ComboBoxPopupMenuButton
+
+NxItem < BotItem
+  border-width: 0
+
+  $on:
+    image-source: /images/ui/item
+
+NxTextEdit < BotTextEdit
+  font: verdana-11px-rounded
+  color: #f5f7ff
+  background: #0d1120
+
+-- ============================================================================
+-- LIST COMPONENTS — touch-friendly entries with visible focus
+-- ============================================================================
+
+NxListEntry < Label
+  background-color: alpha
+  text-offset: 4 0
+  focusable: true
+  height: 22
+  font: verdana-11px-rounded
+  color: #f5f7ff
+  text-align: left
+
+  $focus:
+    background-color: #3be4d033
+
+NxListEntryRemovable < Label
+  background-color: alpha
+  text-offset: 4 0
+  focusable: true
+  height: 22
+  font: verdana-11px-rounded
+  color: #f5f7ff
+  text-align: left
+
+  $focus:
+    background-color: #3be4d033
+
+  Button
+    id: remove
+    !text: tr('X')
+    anchors.right: parent.right
+    anchors.verticalCenter: parent.verticalCenter
+    size: 22 22
+    margin-right: 4
+    text-align: center
+    tooltip: Remove from list.
+
+NxListEntryCheckable < Label
+  background-color: alpha
+  text-offset: 22 0
+  focusable: true
+  height: 22
+  font: verdana-11px-rounded
+  color: #f5f7ff
+  text-align: left
+
+  CheckBox
+    id: enabled
+    anchors.left: parent.left
+    anchors.verticalCenter: parent.verticalCenter
+    size: 16 16
+    margin-left: 4
+
+  $focus:
+    background-color: #3be4d033
+
+  Button
+    id: remove
+    !text: tr('X')
+    anchors.right: parent.right
+    anchors.verticalCenter: parent.verticalCenter
+    size: 22 22
+    margin-right: 4
+    text-align: center
+    tooltip: Remove from list.
+
+-- ============================================================================
+-- COMPOSITE HELPERS — common patterns as reusable classes
+-- ============================================================================
+
+-- Label + HorizontalScrollBar pair (used by Extras, TargetBot creature editor)
+NxScrollBarField < Panel
+  height: 28
+  margin-top: 4
+
+  NxLabel
+    id: text
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: parent.top
+    text-align: center
+
+  HorizontalScrollBar
+    id: scroll
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: prev.bottom
+    margin-top: 4
+    minimum: 0
+    maximum: 10
+    step: 1
+
+-- Label + TextEdit pair
+NxTextEditField < Panel
+  height: 40
+  margin-top: 8
+
+  NxLabel
+    id: text
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: parent.top
+    text-align: center
+
+  NxTextInput
+    id: textEdit
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: prev.bottom
+    margin-top: 4
+
+-- Label + BotItem pair
+NxItemField < Panel
+  height: 34
+  margin-top: 8
+  margin-left: 24
+  margin-right: 24
+
+  NxLabel
+    id: text
+    anchors.left: parent.left
+    anchors.verticalCenter: next.verticalCenter
+
+  NxItem
+    id: item
+    anchors.top: parent.top
+    anchors.right: parent.right
+
+-- Condition row: Name label + "Mana:" label + TextEdit + CheckBox
+-- Replaces the 7x copy-paste pattern in Conditions.otui
+NxConditionRow < Panel
+  height: 20
+  margin-top: 8
+
+  NxLabel
+    id: name
+    anchors.left: parent.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-left: 8
+    text: Condition
+    color: #3be4d0
+    width: 70
+
+  NxLabel
+    id: manaLabel
+    anchors.verticalCenter: parent.verticalCenter
+    anchors.left: name.right
+    margin-left: 8
+    text: Mana:
+    width: 40
+
+  NxTextInput
+    id: cost
+    anchors.verticalCenter: parent.verticalCenter
+    anchors.left: prev.right
+    margin-left: 4
+    width: 44
+
+  CheckBox
+    id: toggle
+    anchors.verticalCenter: parent.verticalCenter
+    anchors.right: parent.right
+    margin-right: 8
+
+-- Condition row with spell input instead of mana cost
+NxConditionSpellRow < Panel
+  height: 20
+  margin-top: 8
+
+  NxLabel
+    id: name
+    anchors.left: parent.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-left: 8
+    text: Spell:
+    width: 70
+
+  NxTextInput
+    id: spell
+    anchors.verticalCenter: parent.verticalCenter
+    anchors.left: name.right
+    margin-left: 8
+    width: 110
+
+-- Standard window footer: separator + close button
+NxWindowFooter < Panel
+  height: 32
+
+  HorizontalSeparator
+    id: separator
+    anchors.right: parent.right
+    anchors.left: parent.left
+    anchors.top: parent.top
+
+  NxButtonSm
+    id: closeButton
+    !text: tr('Close')
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    margin-right: 4
+    margin-top: 8

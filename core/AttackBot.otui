@@ -32,9 +32,9 @@ AttackEntry < UIWidget
     image-source: /images/game/dangerous
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
 
-  Button
+  NxButton
     id: remove
     !text: tr('x')
     anchors.right: parent.right
@@ -45,7 +45,7 @@ AttackEntry < UIWidget
 AttackBotBotPanel < Panel
   height: 38
 
-  BotSwitch
+  NxSwitch
     id: title
     anchors.top: parent.top
     anchors.left: parent.left
@@ -53,7 +53,7 @@ AttackBotBotPanel < Panel
     width: 130
     !text: tr('AttackBot')
 
-  Button
+  NxButton
     id: settings
     anchors.top: prev.top
     anchors.left: prev.right
@@ -62,7 +62,7 @@ AttackBotBotPanel < Panel
     height: 17
     text: Setup
 
-  Button
+  NxButton
     id: 1
     anchors.top: prev.bottom
     anchors.left: parent.left
@@ -71,7 +71,7 @@ AttackBotBotPanel < Panel
     margin-top: 4
     size: 17 17
 
-  Button
+  NxButton
     id: 2
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -79,7 +79,7 @@ AttackBotBotPanel < Panel
     margin-left: 4
     size: 17 17
     
-  Button
+  NxButton
     id: 3
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -87,7 +87,7 @@ AttackBotBotPanel < Panel
     margin-left: 4
     size: 17 17
 
-  Button
+  NxButton
     id: 4
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -95,7 +95,7 @@ AttackBotBotPanel < Panel
     margin-left: 4
     size: 17 17 
     
-  Button
+  NxButton
     id: 5
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -360,7 +360,7 @@ AttackBotPanel < Panel
     editable: true
     focusable: true
 
-  Button
+  NxButton
     id: up
     anchors.right: parent.right
     anchors.top: entryList.bottom
@@ -371,7 +371,7 @@ AttackBotPanel < Panel
     margin-top: 7
     margin-right: 8
 
-  Button
+  NxButton
     id: down
     anchors.right: prev.left
     anchors.verticalCenter: prev.verticalCenter
@@ -381,7 +381,7 @@ AttackBotPanel < Panel
     text-align: center
     font: cipsoftFont
   
-  Button
+  NxButton
     id: addEntry
     anchors.right: parent.right
     anchors.bottom: parent.bottom
@@ -442,7 +442,7 @@ SettingsPanel < Panel
     margin-left: 20
     margin-right: 20
 
-  Button
+  NxButton
     id: resetSettings
     anchors.right: parent.right
     anchors.bottom: parent.bottom
@@ -549,7 +549,7 @@ SettingsPanel < Panel
     focusable: true 
     margin-left: 5
 
-AttackBotWindow < MainWindow
+AttackBotWindow < NxWindow
   size: 535 300
   padding: 15
   text: AttackBot v2
@@ -565,7 +565,7 @@ AttackBotWindow < MainWindow
     !text: tr('More important methods come first (Example: Exori gran above Exori)')
     text-align: left
     font: verdana-11px-rounded
-    color: #aeaeae  
+    color: #a4aece
 
   SettingsPanel
     id: settingsPanel
@@ -580,7 +580,7 @@ AttackBotWindow < MainWindow
     anchors.left: prev.left
     margin-left: 3
     text: Settings
-    color: #fe4400
+    color: #ff4b81
     font: verdana-11px-rounded
 
   AttackBotPanel
@@ -597,7 +597,7 @@ AttackBotWindow < MainWindow
     anchors.left: prev.left
     margin-left: 3
     text: Spell Shooter
-    color: #fe4400
+    color: #ff4b81
     font: verdana-11px-rounded
     visible: false    
 
@@ -607,7 +607,7 @@ AttackBotWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 10
 
-  Button
+  NxButton
     id: closeButton
     anchors.right: parent.right
     anchors.bottom: parent.bottom
@@ -615,7 +615,7 @@ AttackBotWindow < MainWindow
     text: Close
     font: cipsoftFont
 
-  Button
+  NxButton
     id: settings
     anchors.left: parent.left
     anchors.verticalCenter: prev.verticalCenter

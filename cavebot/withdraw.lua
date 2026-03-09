@@ -3,7 +3,7 @@ CaveBot.Extensions.Withdraw = {}
 local getClient = nExBot.Shared.getClient
 
 CaveBot.Extensions.Withdraw.setup = function()
-	CaveBot.registerAction("withdraw", "#002FFF", function(value, retries)
+	CaveBot.registerAction("withdraw", "#6ba3ff", function(value, retries)
 		-- validation
 		local data = string.split(value, ",")
 		if #data ~= 3 then

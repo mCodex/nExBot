@@ -1,10 +1,13 @@
 CaveBotAction < Label
   background-color: alpha
-  text-offset: 2 0
+  text-offset: 4 0
   focusable: true
+  font: verdana-11px-rounded
+  color: #f5f7ff
+  height: 22
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
 
 
 CaveBotPanel < Panel
@@ -21,19 +24,19 @@ CaveBotPanel < Panel
     margin-bottom: 2
 
   HorizontalSeparator
-    margin-top: 2
-    margin-bottom: 5
+    margin-top: 4
+    margin-bottom: 4
     
   Panel
     id: listPanel
     height: 100
-    margin-top: 2
+    margin-top: 4
 
     TextList
       id: list
       anchors.fill: parent
       vertical-scrollbar: listScrollbar
-      margin-right: 15
+      margin-right: 16
       focusable: false
       auto-focus: first
       
@@ -43,11 +46,11 @@ CaveBotPanel < Panel
       anchors.bottom: parent.bottom
       anchors.right: parent.right
       pixels-scroll: true
-      step: 10
+      step: 16
     
-  BotSwitch
+  NxSwitch
     id: showEditor
-    margin-top: 2
+    margin-top: 4
     
     $on:
       text: Hide waypoints editor
@@ -55,9 +58,9 @@ CaveBotPanel < Panel
     $!on:
       text: Show waypoints editor
 
-  BotSwitch
+  NxSwitch
     id: showConfig
-    margin-top: 2
+    margin-top: 4
     
     $on:
       text: Hide config

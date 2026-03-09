@@ -176,7 +176,7 @@ local refreshContainerList
 UI.Separator()
 local containerUI = setupUI([[
 Panel
-  height: 110
+  height: 128
 
   Label
     text-align: center
@@ -186,83 +186,83 @@ Panel
     anchors.top: parent.top
     font: verdana-11px-rounded
 
-  BotSwitch
+  NxSwitch
     id: openAll
     !text: tr('Auto Open')
     anchors.top: prev.bottom
     anchors.left: parent.left
     width: 90
-    margin-top: 3
+    margin-top: 4
     text-align: center
     font: verdana-11px-rounded
 
-  Button
+  NxButton
     id: setupBtn
     !text: tr('Setup')
     anchors.top: prev.top
     anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 2
-    height: 17
+    margin-left: 4
+    height: 20
     font: verdana-11px-rounded
 
-  Button
+  NxButton
     id: reopenAll
     !text: tr('Reopen All')
     anchors.top: prev.bottom
     anchors.left: parent.left
     anchors.right: parent.right
     margin-top: 2
-    height: 17
+    height: 20
     font: verdana-11px-rounded
 
-  Button
+  NxButton
     id: closeAll
     !text: tr('Close All')
     anchors.top: prev.bottom
     anchors.left: parent.left
     anchors.right: parent.right
     margin-top: 2
-    height: 17
+    height: 20
     font: verdana-11px-rounded
 
-  Button
+  NxButton
     id: minimizeAll
     !text: tr('Minimize All')
     anchors.top: prev.bottom
     anchors.left: parent.left
     width: 90
     margin-top: 2
-    height: 17
+    height: 20
     font: verdana-11px-rounded
 
-  Button
+  NxButton
     id: maximizeAll
     !text: tr('Maximize All')
     anchors.top: prev.top
     anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 2
-    height: 17
+    margin-left: 4
+    height: 20
     font: verdana-11px-rounded
 
-  BotSwitch
+  NxSwitch
     id: purseSwitch
     anchors.top: minimizeAll.bottom
     anchors.left: parent.left
     width: 90
-    margin-top: 3
+    margin-top: 4
     text-align: center
     !text: tr('Open Purse')
     font: verdana-11px-rounded
 
-  BotSwitch
+  NxSwitch
     id: autoMinSwitch
     anchors.top: minimizeAll.bottom
     anchors.left: prev.right
     anchors.right: parent.right
-    margin-top: 3
-    margin-left: 2
+    margin-top: 4
+    margin-left: 4
     text-align: center
     !text: tr('Auto Min')
     font: verdana-11px-rounded
@@ -330,7 +330,7 @@ ContainerEntry < Label
     margin-left: 2
 
   $focus:
-    background-color: #00000066
+    background-color: #3be4d033
 
   Button
     id: minimize
@@ -340,6 +340,8 @@ ContainerEntry < Label
     margin-right: 2
     width: 16
     height: 16
+    font: cipsoftFont
+    color: #f5f7ff
 
   Button
     id: nested
@@ -349,6 +351,8 @@ ContainerEntry < Label
     margin-right: 2
     width: 16
     height: 16
+    font: cipsoftFont
+    color: #f5f7ff
 
   Button
     id: remove
@@ -358,6 +362,8 @@ ContainerEntry < Label
     margin-right: 20
     width: 16
     height: 16
+    font: cipsoftFont
+    color: #f5f7ff
 
 ContainerSetupWindow < MainWindow
   !text: tr('Container Setup')
@@ -425,7 +431,7 @@ ContainerSetupWindow < MainWindow
     anchors.top: lblContainer.top
     margin-top: -3
 
-  Button
+  NxButton
     id: addContainer
     anchors.left: containerId.right
     anchors.top: containerId.top
@@ -505,7 +511,7 @@ ContainerSetupWindow < MainWindow
     margin-left: 10
     font: verdana-11px-rounded
 
-  Button
+  NxButtonSm
     id: closeBtn
     !text: tr('Close')
     font: verdana-11px-rounded

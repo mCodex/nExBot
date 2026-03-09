@@ -2,7 +2,7 @@ CaveBot.Extensions.SellAll = {}
 
 local sellAllCap = 0
 CaveBot.Extensions.SellAll.setup = function()
-  CaveBot.registerAction("SellAll", "#C300FF", function(value, retries)
+  CaveBot.registerAction("SellAll", "#b78aff", function(value, retries)
     local val = string.split(value, ",")
     local wait
 

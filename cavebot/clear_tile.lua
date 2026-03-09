@@ -3,7 +3,7 @@ CaveBot.Extensions.ClearTile = {}
 local getClient = nExBot.Shared.getClient
 
 CaveBot.Extensions.ClearTile.setup = function()
-  CaveBot.registerAction("ClearTile", "#00FFFF", function(value, retries)
+  CaveBot.registerAction("ClearTile", "#6be8e0", function(value, retries)
     local data = string.split(value, ",")
     local pos = {x=tonumber(data[1]), y=tonumber(data[2]), z=tonumber(data[3])}
     local doors = false

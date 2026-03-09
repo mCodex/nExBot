@@ -26,7 +26,7 @@ local resetRetries = false
 CaveBot.Extensions.StandLure.setup = function()
     CaveBot.registerAction(
         "rushlure",
-        "#FF0090",
+        "#ff6b9d",
         function(value, retries)
             local nextPos = nil
             local data = string.split(value, ",")

@@ -6,7 +6,7 @@ SettingCheckBox < CheckBox
 
 SpellSourceBoxPopupMenu < ComboBoxPopupMenu
 SpellSourceBoxPopupMenuButton < ComboBoxPopupMenuButton
-SpellSourceBox < ComboBox
+SpellSourceBox < NxComboBox
   @onSetup: |
     self:addOption("Current Mana")
     self:addOption("Current Health")
@@ -16,7 +16,7 @@ SpellSourceBox < ComboBox
 
 SpellConditionBoxPopupMenu < ComboBoxPopupMenu
 SpellConditionBoxPopupMenuButton < ComboBoxPopupMenuButton
-SpellConditionBox < ComboBox
+SpellConditionBox < NxComboBox
   @onSetup: |
     self:addOption("Below")
     self:addOption("Above")
@@ -39,16 +39,16 @@ SpellEntry < Label
     margin-left: 3
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
 
-  Button
+  NxButton
     id: remove
     !text: tr('x')
     anchors.right: parent.right
     margin-right: 15
     text-offset: 1 0
     width: 15
-    height: 15   
+    height: 15
 
 ItemEntry < Label
   background-color: alpha
@@ -75,18 +75,18 @@ ItemEntry < Label
     focusable: false
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
 
-  Button
+  NxButton
     id: remove
     !text: tr('x')
     anchors.right: parent.right
     margin-right: 15
     text-offset: 1 0
     width: 15
-    height: 15               
+    height: 15
 
-SpellHealing < FlatPanel
+SpellHealing < NxPanel
   size: 490 130
 
   Label
@@ -95,7 +95,7 @@ SpellHealing < FlatPanel
     anchors.left: parent.left
     margin-left: 5
     text: Spell Healing
-    color: #269e26
+    color: #46e6a6
     font: verdana-11px-rounded
 
   SpellSourceBox
@@ -120,7 +120,7 @@ SpellHealing < FlatPanel
     anchors.top: whenSpell.bottom
     text: Is
     margin-top: 9
-    margin-left: 7 
+    margin-left: 7
     font: verdana-11px-rounded
 
   SpellConditionBox
@@ -166,7 +166,7 @@ SpellHealing < FlatPanel
     id: manaCost
     anchors.left: spellFormula.left
     anchors.top: spellFormula.bottom
-    width: 40 
+    width: 40
     font: verdana-11px-rounded
 
   TextList
@@ -190,7 +190,7 @@ SpellHealing < FlatPanel
     step: 14
     pixels-scroll: true
 
-  Button
+  NxButton
     id: addSpell
     anchors.right: spellFormula.right
     anchors.bottom: spellList.bottom
@@ -198,7 +198,7 @@ SpellHealing < FlatPanel
     size: 40 17
     font: cipsoftFont
 
-  Button
+  NxButton
     id: MoveUp
     anchors.right: prev.left
     anchors.bottom: prev.bottom
@@ -207,16 +207,16 @@ SpellHealing < FlatPanel
     size: 55 17
     font: cipsoftFont
 
-  Button
+  NxButton
     id: MoveDown
     anchors.right: prev.left
     anchors.bottom: prev.bottom
     margin-right: 5
     text: Move Down
     size: 55 17
-    font: cipsoftFont  
+    font: cipsoftFont
 
-ItemHealing < FlatPanel
+ItemHealing < NxPanel
   size: 490 120
 
   Label
@@ -225,7 +225,7 @@ ItemHealing < FlatPanel
     anchors.left: parent.left
     margin-left: 5
     text: Item Healing
-    color: #ff4513
+    color: #ff4b81
     font: verdana-11px-rounded
 
   SpellSourceBox
@@ -250,7 +250,7 @@ ItemHealing < FlatPanel
     anchors.top: whenItem.bottom
     text: Is
     margin-top: 9
-    margin-left: 7 
+    margin-left: 7
     font: verdana-11px-rounded
 
   SpellConditionBox
@@ -303,7 +303,7 @@ ItemHealing < FlatPanel
     step: 14
     pixels-scroll: true
 
-  Button
+  NxButton
     id: addItem
     anchors.right: itemValue.right
     anchors.bottom: itemList.bottom
@@ -311,7 +311,7 @@ ItemHealing < FlatPanel
     size: 40 17
     font: cipsoftFont
 
-  Button
+  NxButton
     id: MoveUp
     anchors.right: prev.left
     anchors.bottom: prev.bottom
@@ -320,7 +320,7 @@ ItemHealing < FlatPanel
     size: 55 17
     font: cipsoftFont
 
-  Button
+  NxButton
     id: MoveDown
     anchors.right: prev.left
     anchors.bottom: prev.bottom
@@ -431,17 +431,17 @@ HealBotSettingsPanel < Panel
       anchors.top: prev.bottom
       margin-top: 3
       anchors.left: parent.left
-      anchors.right: parent.right     
+      anchors.right: parent.right
 
-    Button
+    NxButton
       id: ResetSettings
       anchors.bottom: parent.bottom
       anchors.horizontalCenter: parent.horizontalCenter
       text: Reset Current Profile
       text-auto-resize: true
-      color: #ff4513
+      color: #ff4b81
 
-HealWindow < MainWindow
+HealWindow < NxWindow
   !text: tr('Self Healer')
   size: 520 360
   @onEscape: self:hide()
@@ -454,7 +454,7 @@ HealWindow < MainWindow
     !text: tr('More important methods come first (Example: Exura gran above Exura)')
     text-align: left
     font: verdana-11px-rounded
-    color: #aeaeae  
+    color: #a4aece
 
   HealerPanel
     id: healer
@@ -474,7 +474,7 @@ HealWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NxButton
     id: closeButton
     !text: tr('Close')
     font: cipsoftFont
@@ -483,10 +483,9 @@ HealWindow < MainWindow
     size: 45 21
     margin-right: 5
 
-  Button
+  NxButton
     id: settingsButton
     !text: tr('Settings')
     font: cipsoftFont
     anchors.left: parent.left
     anchors.bottom: parent.bottom
-    size: 45 21

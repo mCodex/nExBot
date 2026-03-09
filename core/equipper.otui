@@ -4,7 +4,7 @@ SlotBotItem < BotItem
     image-source: /images/ui/item
   $checked:
     border-width: 1
-    border-color: #FF0000
+    border-color: #ff4b81
 
 BossLabel < UIWidget
   background-color: alpha
@@ -15,9 +15,9 @@ BossLabel < UIWidget
   text-align: left
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
 
-  Button
+  NxButton
     id: remove
     !text: tr('X')
     anchors.right: parent.right
@@ -75,9 +75,9 @@ Rule < UIWidget
     tooltip: Entry enabled/disabled
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
 
-  Button
+  NxButton
     id: remove
     text: X
     anchors.right: parent.right
@@ -88,7 +88,7 @@ Rule < UIWidget
     tooltip: Remove entry
     anchors.verticalCenter: parent.verticalCenter
 
-  Button
+  NxButton
     id: visible
     text: V
     anchors.right: prev.left
@@ -146,7 +146,7 @@ ConditionPanel < Panel
 
 
 
-ListPanel < FlatPanel
+ListPanel < NxPanel
   size: 270 300
   padding-left: 10
   padding-right: 10
@@ -158,7 +158,7 @@ ListPanel < FlatPanel
     anchors.left: parent.left
     text: Rules List
     font: verdana-11px-rounded
-    color: #FABD02
+    color: #3be4d0
 
   Label
     id: mainLabel
@@ -170,7 +170,7 @@ ListPanel < FlatPanel
     !text: tr('More important methods come first.')
     text-align: left
     font: verdana-11px-rounded
-    color: #aeaeae  
+    color: #a4aece
 
   TextList
     id: list
@@ -188,7 +188,7 @@ ListPanel < FlatPanel
     step: 14
     pixels-scroll: true
 
-  Button
+  NxButton
     id: up
     anchors.right: parent.right
     anchors.top: list.bottom
@@ -199,7 +199,7 @@ ListPanel < FlatPanel
     margin-top: 5
     tooltip: Increase priority of selected rule.
 
-  Button
+  NxButton
     id: down
     anchors.right: prev.left
     anchors.verticalCenter: prev.verticalCenter
@@ -210,7 +210,7 @@ ListPanel < FlatPanel
     font: cipsoftFont
     tooltip: Decrease priority of selected rule.
 
-InputPanel < FlatPanel
+InputPanel < NxPanel
   size: 270 300
   padding-left: 10
   padding-right: 10
@@ -222,7 +222,7 @@ InputPanel < FlatPanel
     anchors.left: parent.left
     text: Condition Panel
     font: verdana-11px-rounded
-    color: #FF0000
+    color: #ff4b81
 
   Label
     id: mainLabel
@@ -233,7 +233,7 @@ InputPanel < FlatPanel
     text: Equip selected items when:
     text-align: center
     font: verdana-11px-rounded
-    color: #aeaeae
+    color: #a4aece
 
   HorizontalSeparator
     anchors.left: parent.left
@@ -272,14 +272,14 @@ InputPanel < FlatPanel
     anchors.right: parent.right
     anchors.top: prev.bottom
 
-  BotButton
+  NxButton
     id: add
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.bottom: parent.bottom
     margin-bottom: 10
     text: Add Rule
 
-EQPanel < FlatPanel
+EQPanel < NxPanel
   size: 160 230
   padding-left: 10
   padding-right: 10
@@ -291,7 +291,7 @@ EQPanel < FlatPanel
     anchors.left: parent.left
     text: Equipment Setup
     font: verdana-11px-rounded
-    color: #03C04A
+    color: #46e6a6
 
   SlotBotItem
     id: head
@@ -382,7 +382,7 @@ EQPanel < FlatPanel
     anchors.top: prev.bottom
     margin-top: 5
 
-  BotButton
+  NxButton
     id: cloneEq
     anchors.top: feet.bottom
     anchors.left: parent.left
@@ -392,7 +392,7 @@ EQPanel < FlatPanel
     font: verdana-11px-rounded
     tooltip: Copy currently equipped and non-equipped items.
 
-  BotButton
+  NxButton
     id: default
     anchors.top: prev.bottom
     anchors.left: parent.left
@@ -402,7 +402,7 @@ EQPanel < FlatPanel
     font: verdana-11px-rounded
     tooltip: Reset all fields to the blank state
 
-Profile < FlatPanel
+Profile < NxPanel
   size: 160 35
 
   Label
@@ -420,7 +420,7 @@ Profile < FlatPanel
     anchors.bottom: parent.bottom
     margin: 5
 
-BossList < FlatPanel
+BossList < NxPanel
   padding-left: 10
   padding-right: 10
   padding-bottom: 10
@@ -431,7 +431,7 @@ BossList < FlatPanel
     anchors.left: parent.left
     text: Boss List
     font: verdana-11px-rounded
-    color: #FABD02
+    color: #3be4d0
 
   TextList
     id: list
@@ -456,7 +456,7 @@ BossList < FlatPanel
     margin-top: 4
     anchors.right: next.left
 
-  Button
+  NxButton
     id: add
     anchors.right: list.right
     anchors.top: list.bottom
@@ -467,7 +467,7 @@ BossList < FlatPanel
     font: verdana-11px-rounded
     tooltip: Creature with given name will be considered as boss.
 
-EquipWindow < MainWindow
+EquipWindow < NxWindow
   size: 750 350
   text: Equipment Manager
   @onEscape: self:hide()
@@ -522,7 +522,7 @@ EquipWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NxButton
     id: closeButton
     !text: tr('Close')
     font: cipsoftFont
@@ -530,7 +530,7 @@ EquipWindow < MainWindow
     anchors.bottom: parent.bottom
     size: 45 21  
 
-  Button
+  NxButton
     id: bossList
     !text: tr('Boss list')
     font: cipsoftFont

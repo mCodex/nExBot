@@ -1,4 +1,4 @@
-MonsterInspectorWindow < MainWindow
+MonsterInspectorWindow < NxWindow
   text: Monster Insights
   width: 520
   height: 480
@@ -9,8 +9,8 @@ MonsterInspectorWindow < MainWindow
     anchors.top: parent.top
     anchors.bottom: buttons.top
     anchors.right: parent.right
-    margin-top: 5
-    margin-bottom: 10
+    margin-top: 4
+    margin-bottom: 8
     step: 24
     pixels-scroll: true
 
@@ -20,9 +20,9 @@ MonsterInspectorWindow < MainWindow
     anchors.left: parent.left
     anchors.right: contentScroll.left
     anchors.bottom: buttons.top
-    margin-top: 5
-    margin-bottom: 10
-    margin-right: 5
+    margin-top: 4
+    margin-bottom: 8
+    margin-right: 4
     vertical-scrollbar: contentScroll
 
     Label
@@ -33,6 +33,7 @@ MonsterInspectorWindow < MainWindow
       text-wrap: true
       text-auto-resize: true
       font: verdana-11px-monochrome
+      color: #f5f7ff
 
   Panel
     id: buttons
@@ -41,24 +42,27 @@ MonsterInspectorWindow < MainWindow
     anchors.right: parent.right
     height: 30
 
-    Button
+    NxButton
       id: refresh
       text: Refresh
+      !tooltip: tr('Refresh monster data')
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
       width: 80
 
-    Button
+    NxButton
       id: clear
       text: Clear Patterns
+      !tooltip: tr('Clear all learned patterns')
       anchors.left: refresh.right
       anchors.verticalCenter: parent.verticalCenter
       width: 120
-      margin-left: 6
+      margin-left: 8
 
-    Button
+    NxButton
       id: close
       text: Close
+      !tooltip: tr('Close this window')
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
       width: 80

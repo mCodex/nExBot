@@ -24,7 +24,7 @@ local function reset()
 end
 
 CaveBot.Extensions.Imbuing.setup = function()
-  CaveBot.registerAction("imbuing", "red", function(value, retries)
+  CaveBot.registerAction("imbuing", "#ff4b81", function(value, retries)
     local data = string.split(value, ",")
     local ids = {}
 

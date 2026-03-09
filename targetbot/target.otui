@@ -1,14 +1,17 @@
 TargetBotEntry < Label
   background-color: alpha
-  text-offset: 2 0
+  text-offset: 4 0
   focusable: true
+  font: verdana-11px-rounded
+  color: #f5f7ff
+  height: 22
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
 
 TargetBotDualLabel < Panel
   height: 18
-  margin-left: 3
+  margin-left: 4
   margin-right: 4
 
   Label
@@ -16,12 +19,16 @@ TargetBotDualLabel < Panel
     anchors.top: parent.top
     anchors.left: parent.left
     text-auto-resize: true
+    font: verdana-11px-rounded
+    color: #f5f7ff
 
   Label
     id: right
     anchors.top: parent.top
     anchors.right: parent.right
     text-auto-resize: true
+    font: verdana-11px-rounded
+    color: #a4aece
 
 TargetBotPanel < Panel
   layout:
@@ -29,8 +36,8 @@ TargetBotPanel < Panel
     fit-children: true
 
   HorizontalSeparator
-    margin-top: 2
-    margin-bottom: 5
+    margin-top: 4
+    margin-bottom: 4
 
   TargetBotDualLabel
     id: status
@@ -49,7 +56,7 @@ TargetBotPanel < Panel
       id: list
       anchors.fill: parent
       vertical-scrollbar: listScrollbar
-      margin-right: 15
+      margin-right: 16
       focusable: false
       auto-focus: first
       
@@ -59,10 +66,11 @@ TargetBotPanel < Panel
       anchors.bottom: parent.bottom
       anchors.right: parent.right
       pixels-scroll: true
-      step: 10
+      step: 16
       
-  BotSwitch
+  NxSwitch
     id: configButton
+    margin-top: 4
     @onClick: |
       self:setOn(not self:isOn())
       self:getParent().listPanel:setHeight(self:isOn() and 100 or 40)
@@ -83,31 +91,34 @@ TargetBotPanel < Panel
 
     Panel
       id: buttons
-      height: 20
-      margin-top: 2
+      height: 24
+      margin-top: 4
 
-      Button
+      NxButton
         id: add
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         text: Add
         width: 56
+        tooltip: Add new creature target
 
-      Button
+      NxButton
         id: edit
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
         text: Edit
         width: 56
+        tooltip: Edit selected creature target
 
-      Button
+      NxButton
         id: remove
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: parent.right
         text: Remove
         width: 56
+        tooltip: Remove selected creature target
     
 

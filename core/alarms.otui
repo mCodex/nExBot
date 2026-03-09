@@ -60,13 +60,13 @@ AlarmCheckBoxAndTextEdit < Panel
     margin-top: 1
     margin-bottom: 1
 
-AlarmsWindow < MainWindow
+AlarmsWindow < NxWindow
   !text: tr('Alarms')
   size: 330 400
   padding: 15
   @onEscape: self:hide()
 
-  FlatPanel
+  NxPanel
     id: list
     anchors.fill: parent
     anchors.bottom: settingsList.top
@@ -76,7 +76,7 @@ AlarmsWindow < MainWindow
     padding: 10
     padding-top: 5
 
-  FlatPanel
+  NxPanel
     id: settingsList
     anchors.left: parent.left
     anchors.right: parent.right
@@ -96,7 +96,7 @@ AlarmsWindow < MainWindow
     width: 200
     text: Alarms Settings
     font: verdana-11px-rounded
-    color: #9f5031
+    color: #3be4d0
 
   Label
     anchors.verticalCenter: list.top
@@ -105,7 +105,7 @@ AlarmsWindow < MainWindow
     width: 200
     text: Active Alarms
     font: verdana-11px-rounded
-    color: #9f5031
+    color: #3be4d0
 
   HorizontalSeparator
     id: separator
@@ -124,7 +124,7 @@ AlarmsWindow < MainWindow
     margin-right: 3
     background: #ffffff88  
 
-  Button
+  NxButton
     id: closeButton
     !text: tr('Close')
     font: cipsoftFont

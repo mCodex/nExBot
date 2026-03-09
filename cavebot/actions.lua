@@ -240,7 +240,7 @@ CaveBot.registerAction = function(action, color, callback)
   }
 end
 
-CaveBot.registerAction("label", "yellow", function(value, retries, prev)
+CaveBot.registerAction("label", "#ffc857", function(value, retries, prev)
   nExBot.lastLabel = value
   
   -- SmartHunt: Track waypoint entry for route optimization
@@ -251,11 +251,11 @@ CaveBot.registerAction("label", "yellow", function(value, retries, prev)
   return true
 end)
 
-CaveBot.registerAction("gotolabel", "#FFFF55", function(value, retries, prev)
+CaveBot.registerAction("gotolabel", "#ffc857", function(value, retries, prev)
   return CaveBot.gotoLabel(value) 
 end)
 
-CaveBot.registerAction("delay", "#AAAAAA", function(value, retries, prev)
+CaveBot.registerAction("delay", "#8893b3", function(value, retries, prev)
   if retries == 0 then
     local data = string.split(value, ",")
     local val = tonumber(data[1]:trim())
@@ -281,7 +281,7 @@ CaveBot.registerAction("delay", "#AAAAAA", function(value, retries, prev)
   return true
 end)
 
-CaveBot.registerAction("follow", "#FF8400", function(value, retries, prev)
+CaveBot.registerAction("follow", "#46e6a6", function(value, retries, prev)
   local c = getCreatureByName(value)
   if not c then
     print("CaveBot[follow]: can't find creature to follow")
@@ -304,7 +304,7 @@ CaveBot.registerAction("follow", "#FF8400", function(value, retries, prev)
   end
 end)
 
-CaveBot.registerAction("function", "red", function(value, retries, prev)
+CaveBot.registerAction("function", "#ff4b81", function(value, retries, prev)
   local prefix = "local retries = " .. retries .. "\nlocal prev = " .. tostring(prev) .. "\nlocal delay = CaveBot.delay\nlocal gotoLabel = CaveBot.gotoLabel\n"
   prefix = prefix .. "local macro = function() warn('Macros inside cavebot functions are not allowed') end\n"
   for extension, callbacks in pairs(CaveBot.Extensions) do
@@ -446,7 +446,7 @@ local function getDistanceToNextGoto(currentIdx)
   return 50  -- Default: no next goto found, use wide precision
 end
 
-CaveBot.registerAction("goto", "green", function(value, retries, prev)
+CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   -- ========== PARSE POSITION ==========
   local posMatch = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+),?\\s*([0-9]?)")
   if not posMatch[1] then
@@ -642,7 +642,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   return "retry"
 end)
 
-CaveBot.registerAction("use", "#FFB272", function(value, retries, prev)
+CaveBot.registerAction("use", "#3be4d0", function(value, retries, prev)
   local pos = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
   if not pos[1] then
     local itemid = tonumber(value)
@@ -680,7 +680,7 @@ CaveBot.registerAction("use", "#FFB272", function(value, retries, prev)
   return true
 end)
 
-CaveBot.registerAction("usewith", "#EEB292", function(value, retries, prev)
+CaveBot.registerAction("usewith", "#3be4d0", function(value, retries, prev)
   local pos = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
   if not pos[1] then
     if not itemid then
@@ -718,11 +718,11 @@ CaveBot.registerAction("usewith", "#EEB292", function(value, retries, prev)
   return true
 end)
 
-CaveBot.registerAction("say", "#FF55FF", function(value, retries, prev)
+CaveBot.registerAction("say", "#c49bff", function(value, retries, prev)
   say(value)
   return true
 end)
-CaveBot.registerAction("npcsay", "#FF55FF", function(value, retries, prev)
+CaveBot.registerAction("npcsay", "#c49bff", function(value, retries, prev)
   NPC.say(value)
   return true
 end)

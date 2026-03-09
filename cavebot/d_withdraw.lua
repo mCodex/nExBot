@@ -3,7 +3,7 @@ CaveBot.Extensions.DWithdraw = {}
 local getClient = nExBot.Shared.getClient
 
 CaveBot.Extensions.DWithdraw.setup = function()
-	CaveBot.registerAction("dpwithdraw", "#002FFF", function(value, retries)
+	CaveBot.registerAction("dpwithdraw", "#6ba3ff", function(value, retries)
 		local capLimit
 		local data = string.split(value, ",")
 		if retries > 600 then

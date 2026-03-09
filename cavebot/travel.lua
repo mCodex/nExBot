@@ -1,7 +1,7 @@
 CaveBot.Extensions.Travel = {}
 
 CaveBot.Extensions.Travel.setup = function()
-  CaveBot.registerAction("Travel", "#db5a5a", function(value, retries)
+  CaveBot.registerAction("Travel", "#ff8f6b", function(value, retries)
    local data = string.split(value, ",")
     if #data < 2 then
      warn("CaveBot[Travel]: incorrect travel value!")

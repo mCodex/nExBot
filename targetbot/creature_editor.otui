@@ -1,6 +1,6 @@
 TargetBotCreatureEditorScrollBar < Panel
   height: 28
-  margin-top: 3
+  margin-top: 4
 
   Label
     id: text
@@ -8,20 +8,22 @@ TargetBotCreatureEditorScrollBar < Panel
     anchors.right: parent.right
     anchors.top: parent.top
     text-align: center
+    font: verdana-11px-rounded
+    color: #f5f7ff
     
   HorizontalScrollBar
     id: scroll
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: prev.bottom
-    margin-top: 3
+    margin-top: 4
     minimum: 0
     maximum: 10
     step: 1
 
 TargetBotCreatureEditorTextEdit < Panel
   height: 40
-  margin-top: 7
+  margin-top: 8
 
   Label
     id: text
@@ -29,27 +31,31 @@ TargetBotCreatureEditorTextEdit < Panel
     anchors.right: parent.right
     anchors.top: parent.top
     text-align: center
+    font: verdana-11px-rounded
+    color: #f5f7ff
     
   TextEdit
     id: textEdit
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: prev.bottom
-    margin-top: 5
+    margin-top: 4
     minimum: 0
     maximum: 10
     step: 1
 
 TargetBotCreatureEditorItem < Panel
   height: 34
-  margin-top: 7
-  margin-left: 25
-  margin-right: 25
+  margin-top: 8
+  margin-left: 24
+  margin-right: 24
 
   Label
     id: text
     anchors.left: parent.left
     anchors.verticalCenter: next.verticalCenter
+    font: verdana-11px-rounded
+    color: #f5f7ff
 
   BotItem
     id: item
@@ -57,11 +63,11 @@ TargetBotCreatureEditorItem < Panel
     anchors.right: parent.right
 
 
-TargetBotCreatureEditorCheckBox < BotSwitch
+TargetBotCreatureEditorCheckBox < NxSwitch
   height: 20
-  margin-top: 7
+  margin-top: 8
 
-TargetBotCreatureEditorWindow < MainWindow
+TargetBotCreatureEditorWindow < NxWindow
   text: TargetBot creature editor
   width: 600
   height: 425
@@ -74,6 +80,8 @@ TargetBotCreatureEditorWindow < MainWindow
     anchors.right: parent.right
     anchors.top: parent.top
     text-align: center
+    font: verdana-11px-rounded
+    color: #a4aece
     !text: tr('You can use *, ? and ! on the target name for wildcards and negation.')
   
   Label
@@ -81,6 +89,8 @@ TargetBotCreatureEditorWindow < MainWindow
     anchors.right: parent.right
     anchors.top: prev.bottom
     text-align: center
+    font: verdana-11px-rounded
+    color: #a4aece
     !text: tr('For example, to target all creatures except "Rat", you can use "*, !Rat" as target name.')
   
   Label
@@ -88,6 +98,8 @@ TargetBotCreatureEditorWindow < MainWindow
     anchors.right: parent.right
     anchors.top: prev.bottom
     text-align: center
+    font: verdana-11px-rounded
+    color: #a4aece
     !text: tr('You can also enter multiple targets, separate them by ,')
   
   Label
@@ -95,6 +107,8 @@ TargetBotCreatureEditorWindow < MainWindow
     anchors.right: parent.right
     anchors.top: prev.bottom
     text-align: center
+    font: verdana-11px-rounded
+    color: #a4aece
     !text: tr('For example, to target "Rat" and "Goblin", you can use "Rat, Goblin" as target name.')
 
   TextEdit
@@ -103,12 +117,14 @@ TargetBotCreatureEditorWindow < MainWindow
     anchors.left: parent.left
     anchors.right: parent.right
     margin-left: 90
-    margin-top: 5
+    margin-top: 4
 
   Label
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: parent.left
     text: Target name:
+    font: verdana-11px-rounded
+    color: #f5f7ff
 
   VerticalScrollBar
     id: contentScroll
@@ -118,8 +134,8 @@ TargetBotCreatureEditorWindow < MainWindow
     step: 28
     pixels-scroll: true
     margin-right: -10
-    margin-top: 5
-    margin-bottom: 5
+    margin-top: 4
+    margin-bottom: 4
 
   ScrollablePanel
     id: content
@@ -128,7 +144,7 @@ TargetBotCreatureEditorWindow < MainWindow
     anchors.right: parent.right
     anchors.bottom: help.top
     vertical-scrollbar: contentScroll
-    margin-bottom: 10
+    margin-bottom: 8
       
     Panel
       id: left
@@ -154,25 +170,28 @@ TargetBotCreatureEditorWindow < MainWindow
         type: verticalBox
         fit-children: true
   
-  Button
+  NxButton
     id: help
     !text: tr('Help & Tutorials')
+    !tooltip: tr('Open documentation in your browser')
     anchors.bottom: parent.bottom
     anchors.left: parent.left
     width: 150
     @onClick: g_platform.openUrl("https://nexbot.cc/docs")
 
-  Button
+  NxButton
     id: ok
     !text: tr('Ok')
+    !tooltip: tr('Save creature settings')
     anchors.bottom: parent.bottom
     anchors.right: next.left
-    margin-right: 10
+    margin-right: 8
     width: 60
 
-  Button
+  NxButton
     id: cancel
     !text: tr('Cancel')
+    !tooltip: tr('Discard changes')
     anchors.bottom: parent.bottom
     anchors.right: parent.right
     width: 60

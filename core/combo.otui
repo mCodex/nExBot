@@ -28,7 +28,7 @@ ComboTrigger < Panel
     text: On Say
     margin-top: 8
     margin-left: 5
-    color: #ffaa00
+    color: #3be4d0
 
   Label
     id: leaderLabel
@@ -75,7 +75,7 @@ ComboTrigger < Panel
     anchors.top: triggerLabel1.bottom
     text: On Shoot
     margin-top: 5
-    color: #ffaa00  
+    color: #3be4d0
 
   Label
     id: leaderLabel1
@@ -107,7 +107,7 @@ ComboTrigger < Panel
     anchors.top: triggerLabel2.bottom
     text: On Cast
     margin-top: 5
-    color: #ffaa00  
+    color: #3be4d0
 
   Label
     id: leaderLabel2
@@ -148,7 +148,7 @@ ComboActions < Panel
     margin-top: 5
     margin-left: 3
     height: 15
-    color: #ffaa00    
+    color: #3be4d0
 
   FollowComboBox
     id: followLeader
@@ -172,7 +172,7 @@ ComboActions < Panel
     anchors.top: label1.bottom
     margin-top: 5
     text: Attack:
-    color: #ffaa00
+    color: #3be4d0
 
   AttackComboBox
     id: attackLeaderTarget
@@ -196,7 +196,7 @@ ComboActions < Panel
     anchors.top: label2.bottom
     margin-top: 5
     text: Spell:
-    color: #ffaa00
+    color: #3be4d0
 
   TextEdit
     id: attackSpell
@@ -221,7 +221,7 @@ ComboActions < Panel
     anchors.top: label3.bottom
     margin-top: 15
     text: Attack Item:
-    color: #ffaa00
+    color: #3be4d0
 
   BotItem
     id: attackItem
@@ -235,7 +235,7 @@ ComboActions < Panel
     anchors.verticalCenter: prev.verticalCenter
     margin-left: 5
 
-  BotSwitch
+  NxSwitch
     id: commandsToggle
     anchors.left: prev.right
     anchors.top: attackItem.top
@@ -259,7 +259,7 @@ BotServer < Panel
     anchors.top: parent.top
     text: Leader:
     height: 15
-    color: #ffaa00 
+    color: #3be4d0
     margin-left: 3
     margin-top: 5 
 
@@ -273,7 +273,7 @@ BotServer < Panel
     height: 15
     font: cipsoftFont
 
-  Button
+  NxButton
     id: partyButton
     anchors.left: labelX.left
     anchors.top: botServerLeader.bottom
@@ -283,7 +283,7 @@ BotServer < Panel
     text-wrap: true
     multiline: true
 
-  BotSwitch
+  NxSwitch
     id: botServerToggle
     anchors.left: prev.right
     anchors.top: botServerLeader.bottom
@@ -294,7 +294,7 @@ BotServer < Panel
     margin-top: 5
     text: Server Enabled
 
-  BotSwitch
+  NxSwitch
     id: targetServerLeaderToggle
     anchors.left: partyButton.left
     anchors.top: partyButton.bottom
@@ -303,7 +303,7 @@ BotServer < Panel
     height: 30
     text: Leader Targets
 
-  BotSwitch
+  NxSwitch
     id: Triggers
     anchors.left: prev.right
     anchors.top: partyButton.bottom
@@ -314,7 +314,7 @@ BotServer < Panel
     margin-right: 3
     text: Triggers  
 
-ComboWindow < MainWindow
+ComboWindow < NxWindow
   !text: tr('Combo Options')
   size: 500 280
   @onEscape: self:hide()
@@ -331,7 +331,7 @@ ComboWindow < MainWindow
     anchors.left: parent.left
     margin-left: 10
     text: Combo Trigger
-    color: #ff7700
+    color: #3be4d0
 
   ComboActions    
     id: actions
@@ -346,7 +346,7 @@ ComboWindow < MainWindow
     margin-left: 10
     margin-top: 85
     text: Combo Actions
-    color: #ff7700   
+    color: #3be4d0
 
   BotServer    
     id: server
@@ -361,7 +361,7 @@ ComboWindow < MainWindow
     margin-left: 3
     margin-top: 85
     text: BotServer
-    color: #ff7700
+    color: #3be4d0
 
   HorizontalSeparator
     id: separator
@@ -370,7 +370,7 @@ ComboWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NxButton
     id: closeButton
     !text: tr('Close')
     font: cipsoftFont
@@ -380,7 +380,7 @@ ComboWindow < MainWindow
     margin-top: 15
     margin-right: 5
 
-  Button
+  NxButton
     id: toolsButton
     !text: tr('Help')
     font: cipsoftFont

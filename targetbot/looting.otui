@@ -4,71 +4,79 @@ TargetBotLootingPanel < Panel
     fit-children: true
 
   HorizontalSeparator
-    margin-top: 5
+    margin-top: 8
 
   Label
-    margin-top: 5
+    margin-top: 8
     text: Items to loot
-    text-align: center    
+    text-align: center
+    font: verdana-11px-rounded
+    color: #3be4d0
 
   BotContainer
     id: items
-    margin-top: 3
+    margin-top: 4
   
-  BotSwitch
+  NxSwitch
     id: everyItem
     !text: tr("Loot every item")
-    margin-top: 2
+    margin-top: 4
 
-  BotSwitch
+  NxSwitch
     id: eatFromCorpses
     !text: tr("Eat food from corpses")
-    margin-top: 2
+    margin-top: 4
 
   Label
-    margin-top: 5
+    margin-top: 8
     text: Containers for loot
     text-align: center
+    font: verdana-11px-rounded
+    color: #3be4d0
 
   BotContainer
     id: containers
-    margin-top: 3
+    margin-top: 4
     height: 45
   
   Panel
     id: maxDangerPanel
-    height: 20
-    margin-top: 5
+    height: 24
+    margin-top: 8
     
     BotTextEdit
       id: value
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.bottom: parent.bottom
-      margin-right: 6
+      margin-right: 8
       width: 80
 
     Label
       anchors.left: parent.left
       anchors.verticalCenter: prev.verticalCenter
       text: Max. danger:
-      margin-left: 5
+      margin-left: 4
+      font: verdana-11px-rounded
+      color: #f5f7ff
 
   Panel
     id: minCapacityPanel
-    height: 20
-    margin-top: 3
+    height: 24
+    margin-top: 4
     
     BotTextEdit
       id: value
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.bottom: parent.bottom
-      margin-right: 6
+      margin-right: 8
       width: 80
 
     Label
       anchors.left: parent.left
       anchors.verticalCenter: prev.verticalCenter
       text: Min. capacity:
-      margin-left: 5
+      margin-left: 4
+      font: verdana-11px-rounded
+      color: #f5f7ff

@@ -223,26 +223,27 @@ setDefaultTab("HP")
 -- healPanelName already defined at top of file
 local ui = setupUI([[
 Panel
-  height: 38
+  height: 42
 
-  BotSwitch
+  NxSwitch
     id: title
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
     width: 130
+    margin-top: 0
     !text: tr('HealBot')
 
-  Button
+  NxButton
     id: settings
-    anchors.top: prev.top
+    anchors.top: parent.top
     anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 3
-    height: 17
+    margin-left: 4
+    height: 20
     text: Setup
 
-  Button
+  NxButtonSm
     id: 1
     anchors.top: prev.bottom
     anchors.left: parent.left
@@ -251,7 +252,7 @@ Panel
     margin-top: 4
     size: 17 17
 
-  Button
+  NxButtonSm
     id: 2
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -259,7 +260,7 @@ Panel
     margin-left: 4
     size: 17 17
     
-  Button
+  NxButtonSm
     id: 3
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -267,7 +268,7 @@ Panel
     margin-left: 4
     size: 17 17
 
-  Button
+  NxButtonSm
     id: 4
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -275,7 +276,7 @@ Panel
     margin-left: 4
     size: 17 17 
     
-  Button
+  NxButtonSm
     id: 5
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -292,7 +293,7 @@ Panel
     margin-left: 4
     height: 17
     text: Profile #1
-    background: #292A2A
+    background: #2a2a30
 ]])
 ui:setId(healPanelName)
 
