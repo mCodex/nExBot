@@ -1,4 +1,4 @@
-CategoryCheckBox < CheckBox
+CategoryCheckBox < NxCheckBox
   font: verdana-11px-rounded 
   margin-top: 3
 
@@ -27,7 +27,7 @@ HealScroll < Panel
 
 HealItem < Panel
 
-  BotItem
+  NxItem
     id: item
     anchors.left: parent.left
     anchors.verticalCenter: parent.verticalCenter
@@ -47,7 +47,7 @@ ToolTipLabel < UIWidget
   height: 14
   text-align: center 
 
-HealerPlayerEntry < Label
+HealerPlayerEntry < NxLabel
   background-color: alpha
   text-offset: 5 1
   focusable: true
@@ -79,13 +79,13 @@ PriorityEntry < ToolTipLabel
   $focus:
     background-color: #3be4d033
 
-  CheckBox
+  NxCheckBox
     id: enabled
     anchors.left: parent.left
     anchors.verticalCenter: parent.verticalCenter
     size: 15 15
     margin-top: 2
-    margin-left: 3 
+    margin-left: 3
 
   NxButton
     id: remove
@@ -121,10 +121,10 @@ TargetSettings < Panel
   image-source: /images/ui/window
   image-border: 6
 
-  Label
+  NxLabel
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.top: parent.top
-    font: verdana-11px-rounded 
+    font: verdana-11px-rounded
     text: Heal Target Settings
 
   Groups
@@ -269,11 +269,11 @@ Priority < Panel
 AddPlayer < NxPanel
   padding: 5
 
-  Label
+  NxLabel
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
-    font: verdana-11px-rounded 
+    font: verdana-11px-rounded
     text: Add Player to Custom List
     text-align: center
     text-wrap: true
@@ -284,7 +284,7 @@ AddPlayer < NxPanel
     anchors.right: parent.right
     margin-top: 2
 
-  SpinBox
+  NxSpinBox
     id: health
     anchors.left: parent.left
     anchors.top: prev.bottom
@@ -296,20 +296,20 @@ AddPlayer < NxPanel
     focusable: true
     text-align: center
 
-  Label
+  NxLabel
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 3
-    font: verdana-11px-rounded 
+    font: verdana-11px-rounded
     text: %HP - heal if below
 
-  TextEdit
+  NxTextInput
     id: name
     anchors.top: health.bottom
     margin-top: 5
     anchors.left: health.left
     anchors.right: parent.right
-    font: verdana-11px-rounded 
+    font: verdana-11px-rounded
     text-align: center
     text: friend name
 
@@ -371,10 +371,10 @@ Conditions < Panel
   image-source: /images/ui/window
   image-border: 6
 
-  Label
+  NxLabel
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.top: parent.top
-    font: verdana-11px-rounded 
+    font: verdana-11px-rounded
     text: Player Conditions
 
   Panel

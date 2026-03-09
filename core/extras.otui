@@ -13,14 +13,14 @@ ExtrasWindow < NxWindow
   size: 440 360
   padding: 25
 
-  Label
+  NxLabel
     anchors.left: parent.left
     anchors.right: parent.horizontalCenter
     anchors.top: parent.top
     text-align: center
     text: < CaveBot >
 
-  Label
+  NxLabel
     anchors.left: parent.horizontalCenter
     anchors.right: parent.right
     anchors.top: parent.top

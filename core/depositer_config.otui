@@ -1,7 +1,7 @@
 StashItem < Panel
   height: 40
 
-  BotItem
+  NxItem
     id: item
     anchors.top: parent.top
     margin-top: 2

@@ -2,7 +2,7 @@ AlarmCheckBox < Panel
   height: 20
   margin-top: 2
 
-  CheckBox
+  NxCheckBox
     id: tick
     anchors.fill: parent
     margin-top: 4
@@ -14,7 +14,7 @@ AlarmCheckBoxAndSpinBox < Panel
   height: 20
   margin-top: 2
 
-  CheckBox
+  NxCheckBox
     id: tick
     anchors.fill: parent
     anchors.right: next.left
@@ -23,7 +23,7 @@ AlarmCheckBoxAndSpinBox < Panel
     text: Player Attack
     text-offset: 17 -3
 
-  SpinBox
+  NxSpinBox
     id: value
     anchors.top: parent.top
     margin-top: 1
@@ -41,7 +41,7 @@ AlarmCheckBoxAndTextEdit < Panel
   height: 20
   margin-top: 2
 
-  CheckBox
+  NxCheckBox
     id: tick
     anchors.fill: parent
     anchors.right: next.left
@@ -50,7 +50,7 @@ AlarmCheckBoxAndTextEdit < Panel
     text: Creature Name
     text-offset: 17 -3
 
-  BotTextEdit
+  NxTextInput
     id: text
     anchors.right: parent.right
     anchors.top: parent.top
@@ -89,7 +89,7 @@ AlarmsWindow < NxWindow
       type: verticalBox
       fit-children: true
 
-  Label
+  NxLabel
     anchors.verticalCenter: settingsList.top
     anchors.left: settingsList.left
     margin-left: 5
@@ -98,7 +98,7 @@ AlarmsWindow < NxWindow
     font: verdana-11px-rounded
     color: #3be4d0
 
-  Label
+  NxLabel
     anchors.verticalCenter: list.top
     anchors.left: list.left
     margin-left: 5
