@@ -436,118 +436,25 @@ loadCategory("core", {
 })
 
 -- ============================================================================
--- PHASE 5: C++ WIDGET STYLING HOOKS
+-- UI.Button STYLING HOOK
 -- ============================================================================
--- macro() creates BotSwitch widgets and UI.Button() creates BotButton widgets.
--- These C++-created widgets use hardcoded defaults. We apply NxSwitch/NxButton
--- OTUI styles to override the C++ state-based rendering.
-do
-  local accent = "#3be4d0"
-  local muted  = "#a4aece"
-  local text   = "#f5f7ff"
-  local font   = "verdana-11px-rounded"
-
-  -- All known macro keys from BotDB.registerMacro calls in the codebase
-  local macroKeys = {
-    "exetaLowHp", "exetaIfPlayer", "exetaAmpRes",
-    "autoHaste", "autoMount", "antiRs",
-    "holdTarget", "depotWithdraw",
-    "castFood", "eatFood", "manaTraining",
-    "quiverManager", "exchangeMoney", "autoTradeMsg",
-  }
-
-  -- Probe available methods on the widget and apply the best approach
-  local function styleMacro(m)
-    if not m or not m.button then return end
-    local btn = m.button
-    -- Probe: dump all available methods for diagnostics (first call only)
-    if not nExBot._btnMethodsProbed then
-      nExBot._btnMethodsProbed = true
-      local methods = {}
-      -- Check known OTClient widget methods
-      local probes = {
-        "setStyle", "applyStyle", "setStyleClass", "updateStyle",
-        "setFont", "setColor", "setBackgroundColor", "setOpacity",
-        "setHeight", "setWidth", "setOn", "setOff", "isOn",
-        "getStyleName", "getClassName", "getStyle",
-        "setImageColor", "setIconColor", "setTextColor",
-      }
-      for _, name in ipairs(probes) do
-        local has = (btn[name] ~= nil)
-        methods[#methods + 1] = name .. "=" .. tostring(has)
-      end
-      warn("[nExBot PHASE 5] BotSwitch methods: " .. table.concat(methods, ", "))
+-- Wraps UI.Button() so every button created via the bot API gets the
+-- verdana-11px-rounded font and NxText color automatically.
+-- ============================================================================
+if UI and UI.Button then
+  local _origBtn = UI.Button
+  local function newBtn(...)
+    local btn = _origBtn(...)
+    if btn then
+      pcall(function() btn:setFont("verdana-11px-rounded") end)
+      pcall(function() btn:setColor("#f5f7ff") end)
     end
-    -- Try setStyle("NxSwitch") first — applies full OTUI style incl. $on/$!on
-    local ok1 = pcall(function() btn:setStyle("NxSwitch") end)
-    if ok1 then return end -- success, no need for manual fallback
-    -- Fallback: manual font + color
-    pcall(function() btn:setFont(font) end)
-    pcall(function() btn:setColor(m:isOn() and accent or muted) end)
+    return btn
   end
-
-  -- Style all macros + wrap onSwitch for future toggles
-  local function styleAllMacros()
-    if not BotDB or not BotDB.getMacro then
-      warn("[nExBot PHASE 5] BotDB.getMacro not available")
-      return
-    end
-    local count = 0
-    local missing = {}
-    for _, key in ipairs(macroKeys) do
-      local m = BotDB.getMacro(key)
-      if m then
-        styleMacro(m)
-        -- Wrap onSwitch to re-apply style on toggle
-        local prev = m.onSwitch
-        m.onSwitch = function(ref)
-          if prev then prev(ref) end
-          pcall(function()
-            if ref and ref.button then
-              -- setStyle persists across state changes, but setColor doesn't
-              local okS = pcall(function() ref.button:setStyle("NxSwitch") end)
-              if not okS then
-                ref.button:setColor(ref:isOn() and accent or muted)
-              end
-            end
-          end)
-        end
-        count = count + 1
-      else
-        missing[#missing + 1] = key
-      end
-    end
-    warn("[nExBot PHASE 5] Styled " .. count .. "/" .. #macroKeys .. " macros")
-    if #missing > 0 then
-      warn("[nExBot PHASE 5] Missing: " .. table.concat(missing, ", "))
-    end
-  end
-
-  -- Run after all modules have loaded (PHASE 9-11 complete)
-  schedule(3000, styleAllMacros)
-
-  -- ── UI.Button (BotButton) styling ─────────────────────────────────────
-  if UI and UI.Button then
-    local _origBtn = UI.Button
-    local newBtn = function(...)
-      local btn = _origBtn(...)
-      if btn then
-        -- Try setStyle("NxButton") first
-        local ok = pcall(function() btn:setStyle("NxButton") end)
-        if not ok then
-          pcall(function() btn:setFont(font) end)
-          pcall(function() btn:setColor(text) end)
-        end
-      end
-      return btn
-    end
-    local ok = pcall(function()
-      if rawset then rawset(UI, "Button", newBtn) end
-    end)
-    if not ok then
-      UI.Button = newBtn
-    end
-  end
+  local ok = pcall(function()
+    if rawset then rawset(UI, "Button", newBtn) end
+  end)
+  if not ok then UI.Button = newBtn end
 end
 
 -- ============================================================================

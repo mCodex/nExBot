@@ -421,6 +421,32 @@ function BotDB.registerMacro(macroRef, key, onEnable)
   
   -- Track registered macro for programmatic access
   _registeredMacros[key] = macroRef
+
+  -- Apply Nx design system styling to the macro's BotSwitch button.
+  -- Applied synchronously at registration time — avoids the deferred
+  -- schedule() / false-positive pcall bug that left buttons unstyled.
+  local btn = macroRef and macroRef.button
+  if btn then
+    local accent = "#3be4d0"
+    local muted  = "#a4aece"
+    local font   = "verdana-11px-rounded"
+
+    pcall(function() btn:setFont(font) end)
+
+    local function applyMacroColor()
+      pcall(function()
+        btn:setColor(macroRef:isOn() and accent or muted)
+      end)
+    end
+    applyMacroColor()
+
+    -- Re-apply color on every toggle so on/off states stay correct
+    local prevSwitch = macroRef.onSwitch
+    macroRef.onSwitch = function(ref)
+      if prevSwitch then prevSwitch(ref) end
+      applyMacroColor()
+    end
+  end
 end
 
 -- Get registered macro by key
