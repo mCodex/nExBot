@@ -38,6 +38,10 @@ BotSwitch
   $!on:
     color: #a4aece
 
+  $focus:
+    border-width: 1
+    border-color: #3be4d0
+
 BotButton
   font: verdana-11px-rounded
   color: #f5f7ff
@@ -442,3 +446,27 @@ NxWindowFooter < Panel
     anchors.bottom: parent.bottom
     margin-right: 4
     margin-top: 8
+
+-- Navigation prev/next buttons (e.g. cycle AttackBot categories)
+NxNavPrevButton < PreviousButton
+  background: #0d1120
+  height: 15
+
+NxNavNextButton < NextButton
+  background: #0d1120
+  height: 15
+
+-- Labeled bar widget used to display the current category/source/range selection
+NxCategoryBar < Panel
+  image-source: /images/ui/panel_flat
+  image-border: 5
+  padding: 1
+  height: 15
+
+  Label
+    id: description
+    anchors.fill: parent
+    text-align: center
+    font: verdana-11px-rounded
+    color: #f5f7ff
+    background: #0d1120
