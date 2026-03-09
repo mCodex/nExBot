@@ -1,25 +1,4 @@
-ProfileLabel < UIWidget
-  background-color: alpha
-  text-offset: 3 1
-  focusable: true
-  height: 16
-  font: verdana-11px-rounded
-  text-align: left
-
-  $focus:
-    background-color: #3be4d033
-
-  NxButton
-    id: remove
-    !text: tr('X')
-    anchors.right: parent.right
-    anchors.verticalCenter: parent.verticalCenter
-    width: 14
-    height: 14
-    margin-right: 3
-    text-align: center
-    text-offset: 0 1
-    tooltip: Remove profile from the list.
+ProfileLabel < NxListEntryRemovable
 
 SupplySpinBox < NxSpinBox
   margin-left: 3
@@ -38,7 +17,7 @@ ItemPanel < Panel
     id: min
     anchors.left: prev.right
     anchors.bottom: parent.bottom
-  
+
   SupplySpinBox
     id: max
     anchors.left: prev.right
@@ -48,7 +27,7 @@ ItemPanel < Panel
     id: avg
     anchors.left: prev.right
     anchors.bottom: parent.bottom
-    width: 50    
+    width: 50
 
   UIWidget
     anchors.left: min.left
@@ -95,7 +74,7 @@ SuppliesWindow < NxWindow
     margin-left: 10
     visible: false
 
-  Label
+  NxLabel
     anchors.left: sep.right
     anchors.right: parent.right
     anchors.top: parent.top
@@ -118,7 +97,7 @@ SuppliesWindow < NxWindow
     margin-top: 5
     margin-left: 10
     text: No Soft
-    tooltip: Go refill if there's no more active soft boots.     
+    tooltip: Go refill if there's no more active soft boots.
 
   NxSwitch
     id: capSwitch
@@ -132,7 +111,7 @@ SuppliesWindow < NxWindow
     text: Cap Below:
     tooltip: Go refill if capacity is below set value.
 
-  BotTextEdit
+  NxTextInput
     id: capValue
     size: 40 20
     anchors.left: prev.right
@@ -152,7 +131,7 @@ SuppliesWindow < NxWindow
     text: Stamina:
     tooltip: Go refill if stamina is below set value. (in minutes)
 
-  BotTextEdit
+  NxTextInput
     id: staminaValue
     size: 40 20
     anchors.left: prev.right
@@ -178,7 +157,7 @@ SuppliesWindow < NxWindow
     anchors.right: prev.right
     anchors.bottom: bottomSep.top
     margin-bottom: 25
-  
+
   NxButtonSm
     id: newProfile
     anchors.left: prev.left
@@ -220,7 +199,7 @@ SuppliesWindow < NxWindow
     anchors.right: parent.right
     anchors.bottom: parent.bottom
     size: 45 21
-    margin-top: 15   
+    margin-top: 15
     tooltip: Close supplies window and save settings.
     @onClick: self:getParent():hide()
 
@@ -240,20 +219,3 @@ SuppliesWindow < NxWindow
     text: -
     width: 50
     tooltip: Decrease all max supplies amount by average
-
-  NxButton
-    id: increment
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.right: items.right
-    text: +
-    width: 50
-    tooltip: increase all max supplies amount by average
-
-  NxButton
-    id: decrement
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.right: prev.left
-    margin-right: 3
-    text: -
-    width: 50
-    tooltip: decrease all max supplies amount by average
