@@ -1,5 +1,5 @@
-SpellSourceBoxPopupMenu < ComboBoxPopupMenu
-SpellSourceBoxPopupMenuButton < ComboBoxPopupMenuButton
+SpellSourceBoxPopupMenu < NxComboBoxPopupMenu
+SpellSourceBoxPopupMenuButton < NxComboBoxPopupMenuButton
 SpellSourceBox < NxComboBox
   @onSetup: |
     self:addOption("Current Mana")
@@ -8,8 +8,8 @@ SpellSourceBox < NxComboBox
     self:addOption("Health Percent")
     self:addOption("Burst Damage")
 
-SpellConditionBoxPopupMenu < ComboBoxPopupMenu
-SpellConditionBoxPopupMenuButton < ComboBoxPopupMenuButton
+SpellConditionBoxPopupMenu < NxComboBoxPopupMenu
+SpellConditionBoxPopupMenuButton < NxComboBoxPopupMenuButton
 SpellConditionBox < NxComboBox
   @onSetup: |
     self:addOption("Below")

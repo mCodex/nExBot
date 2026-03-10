@@ -29,9 +29,9 @@ BossLabel < UIWidget
     text-offset: 0 1
     tooltip: Remove profile from the list.
 
-ConditionBoxPopupMenu < ComboBoxPopupMenu
-ConditionBoxPopupMenuButton < ComboBoxPopupMenuButton
-ConditionBox < ComboBox
+ConditionBoxPopupMenu < NxComboBoxPopupMenu
+ConditionBoxPopupMenuButton < NxComboBoxPopupMenuButton
+ConditionBox < NxComboBox
   @onSetup: |
     self:addOption("-")
     self:addOption("and")

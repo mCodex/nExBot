@@ -1,5 +1,5 @@
-UturaComboBoxPopupMenu < ComboBoxPopupMenu
-UturaComboBoxPopupMenuButton < ComboBoxPopupMenuButton
+UturaComboBoxPopupMenu < NxComboBoxPopupMenu
+UturaComboBoxPopupMenuButton < NxComboBoxPopupMenuButton
 UturaComboBox < NxComboBox
   @onSetup: |
     self:addOption("Utura")

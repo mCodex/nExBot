@@ -1,13 +1,13 @@
-AttackComboBoxPopupMenu < ComboBoxPopupMenu
-AttackComboBoxPopupMenuButton < ComboBoxPopupMenuButton
-AttackComboBox < ComboBox
+AttackComboBoxPopupMenu < NxComboBoxPopupMenu
+AttackComboBoxPopupMenuButton < NxComboBoxPopupMenuButton
+AttackComboBox < NxComboBox
   @onSetup: |
     self:addOption("LEADER TARGET")
     self:addOption("COMMAND TARGET")    
 
-FollowComboBoxPopupMenu < ComboBoxPopupMenu
-FollowComboBoxPopupMenuButton < ComboBoxPopupMenuButton
-FollowComboBox < ComboBox
+FollowComboBoxPopupMenu < NxComboBoxPopupMenu
+FollowComboBoxPopupMenuButton < NxComboBoxPopupMenuButton
+FollowComboBox < NxComboBox
   @onSetup: |
     self:addOption("LEADER TARGET")
     self:addOption("SERVER LEADER TARGET")    

@@ -318,13 +318,33 @@ NxSpinBox < SpinBox
 NxComboBox < ComboBox
   font: verdana-11px-rounded
   color: #f5f7ff
+  text-align: left
+  text-offset: 6 0
+  padding-right: 16
+  height: 22
+
+  $hover:
+    color: #3be4d0
 
   $focus:
     border-width: 1
     border-color: #3be4d0
 
 NxComboBoxPopupMenu < ComboBoxPopupMenu
+  background-color: #0b0f1e
+  border-width: 1
+  border-color: #19203a
+
 NxComboBoxPopupMenuButton < ComboBoxPopupMenuButton
+  font: verdana-11px-rounded
+  text-align: left
+  text-offset: 4 0
+  color: #f5f7ff
+  height: 22
+  
+  $hover:
+    background-color: #3be4d044
+    color: #ffffff
 
 NxItem < BotItem
   border-width: 0
@@ -617,3 +637,6 @@ NxBotSection < Panel
   margin-top: 4
   image-source: /images/ui/panel_flat
   image-border: 5
+BotComboBox < NxComboBox
+BotComboBoxPopupMenu < NxComboBoxPopupMenu
+BotComboBoxPopupMenuButton < NxComboBoxPopupMenuButton
