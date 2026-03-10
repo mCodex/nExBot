@@ -70,6 +70,7 @@ WindowSettingsWindow < NxWindow
     !text: tr('Close')
     anchors.right: parent.right
     anchors.bottom: parent.bottom
+    margin-top: 20
     size: 45 21
 ]])
 
