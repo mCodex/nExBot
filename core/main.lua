@@ -31,7 +31,7 @@ WindowSettingsWindow < NxWindow
     text-wrap: true
     text-auto-resize: true
     text: Configure the left panel dimensions below. These settings will override the default client layout and persist automatically.
-    margin-top: 5
+    margin-top: 15
 
   Label
     text: Panel Width:
