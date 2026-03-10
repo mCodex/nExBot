@@ -28,25 +28,49 @@
 -- (macro() → BotSwitch, UI.Button() → BotButton) so they match the theme.
 -- ============================================================================
 
-BotSwitch
-  font: verdana-11px-rounded
+BotSwitch < CheckBox
   height: 20
+  font: verdana-11px-rounded
+  text-align: center
+  image-source: ~
+  background-color: #0b0f1e
+  
+  $hover !disabled:
+    background-color: #1b2235
 
   $on:
     color: #3be4d0
+    background-color: #3be4d01a
+    border-width: 1
+    border-color: #3be4d088
 
   $!on:
     color: #a4aece
-
-  $focus:
+    background-color: #1b2235
     border-width: 1
-    border-color: #3be4d0
-
-BotButton
+    border-color: #050712
+BotButton < UIButton
   font: verdana-11px-rounded
   color: #f5f7ff
   height: 20
+  text-align: center
+  image-source: ~
+  background-color: #1b2235
+  border-width: 1
+  border-color: #050712
+  
+  $hover !disabled:
+    background-color: #2c3652
+    color: #3be4d0
 
+  $pressed !disabled:
+    background-color: #3be4d033
+    border-color: #3be4d088
+    color: #3be4d0
+
+  $disabled:
+    color: #dfdfdf88
+    background-color: #0b0f1e
 -- ============================================================================
 -- WINDOWS — extend native chrome
 -- ============================================================================
@@ -163,16 +187,6 @@ NxButton < UIButton
     color: #dfdfdf88
     background-color: #0b0f1e
 
-
-  $pressed !disabled:
-    image-color: #3be4d099
-    color: #3be4d0
-
-  $disabled:
-    color: #dfdfdf88
-    image-color: #dfdfdf88
-
-
 NxNavPrevButton < PreviousButton
   background: #0b0f1e
   height: 15
@@ -184,8 +198,7 @@ NxNavNextButton < NextButton
   width: 15
 
 NxCategoryBar < Panel
-  image-source: /images/ui/panel_flat
-  image-border: 5
+  background-color: #0b0f1e
   padding: 1
   NxLabel
     id: label
@@ -194,29 +207,56 @@ NxCategoryBar < Panel
     text-align: center
     border-color: #3be4d0
 
-NxButtonSm < Button
-  font: cipsoftFont
+NxButtonSm < UIButton
+  font: verdana-11px-rounded
   color: #f5f7ff
-  size: 45 20
+  height: 18
+  min-width: 25
   text-align: center
+  image-source: ~
+  background-color: #1b2235
+  border-width: 1
+  border-color: #050712
+  
+  $hover !disabled:
+    background-color: #2c3652
+    color: #3be4d0
 
-  $focus:
-    border-width: 1
-    border-color: #3be4d0
+  $pressed !disabled:
+    background-color: #3be4d033
+    border-color: #3be4d088
+    color: #3be4d0
 
-NxButtonDanger < Button
-  font: cipsoftFont
+  $disabled:
+    color: #dfdfdf88
+    background-color: #0b0f1e
+
+NxButtonDanger < UIButton
+  font: verdana-11px-rounded
   color: #ff4b81
   height: 20
   min-width: 32
   text-align: center
+  image-source: ~
+  background-color: #1b2235
+  border-width: 1
+  border-color: #050712
+  
+  $hover !disabled:
+    background-color: #441a27
+    color: #ff4b81
 
-  $focus:
-    border-width: 1
-    border-color: #3be4d0
+  $pressed !disabled:
+    background-color: #ff4b8133
+    border-color: #ff4b8188
+    color: #ff4b81
+
+  $disabled:
+    color: #dfdfdf88
+    background-color: #0b0f1e
 
 NxSwitch < CheckBox
-  height: 22
+  height: 20
   font: verdana-11px-rounded
   text-align: center
   image-source: ~
@@ -236,27 +276,6 @@ NxSwitch < CheckBox
     background-color: #1b2235
     border-width: 1
     border-color: #050712
-
-
-  text-align: center
-  image-source: /images/ui/button
-  image-clip: 0 0 22 22
-  image-border: 3
-  
-  $on:
-    color: #3be4d0
-    image-color: #3be4d033
-
-  $!on:
-    color: #a4aece
-    image-color: #ffffff33
-
-
-  $on:
-    color: #3be4d0
-
-  $!on:
-    color: #a4aece
 
 NxCheckBox < CheckBox
   font: verdana-11px-rounded
