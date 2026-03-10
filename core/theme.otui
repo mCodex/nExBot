@@ -192,9 +192,22 @@ NxButtonDanger < Button
     border-color: #3be4d0
 
 NxSwitch < BotSwitch
-  height: 20
+  height: 22
   font: verdana-11px-rounded
-  margin-top: 4
+  margin-top: 5
+  text-align: center
+  image-source: /images/ui/button
+  image-clip: 0 0 22 22
+  image-border: 3
+  
+  $on:
+    color: #3be4d0
+    image-color: #3be4d033
+
+  $!on:
+    color: #a4aece
+    image-color: #ffffff33
+
 
   $on:
     color: #3be4d0
@@ -531,3 +544,9 @@ NxFormRow < Panel
   layout:
     type: horizontalBox
     spacing: 8
+
+NxBotSection < Panel
+  padding: 4
+  margin-top: 4
+  image-source: /images/ui/panel_flat
+  image-border: 4
