@@ -10,7 +10,7 @@ CaveBotAction < NxLabel
     background-color: #3be4d033
 
 
-CaveBotPanel < Panel
+CaveBotPanel < NxBotSection
   layout:
     type: verticalBox
     fit-children: true

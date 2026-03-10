@@ -30,7 +30,7 @@ TargetBotDualLabel < Panel
     font: verdana-11px-rounded
     color: #a4aece
 
-TargetBotPanel < Panel
+TargetBotPanel < NxBotSection
   layout:
     type: verticalBox
     fit-children: true

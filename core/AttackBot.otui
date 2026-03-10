@@ -8,7 +8,7 @@ AttackEntry < NxListEntryCheckable
     margin-left: 2
     image-source: /images/game/dangerous
 
-AttackBotBotPanel < Panel
+AttackBotBotPanel < NxBotSection
   height: 38
 
   NxSwitch

@@ -142,9 +142,25 @@ NxLabelMuted < Label
 NxButton < Button
   font: cipsoftFont
   color: #f5f7ff
-  height: 20
+  height: 22
   min-width: 32
   text-align: center
+  image-source: /images/ui/button
+  image-clip: 0 0 22 22
+  image-border: 3
+  
+  $hover !disabled:
+    image-color: #3be4d055
+    color: #3be4d0
+
+  $pressed !disabled:
+    image-color: #3be4d099
+    color: #3be4d0
+
+  $disabled:
+    color: #dfdfdf88
+    image-color: #dfdfdf88
+
 
   $focus:
     border-width: 1

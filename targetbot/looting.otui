@@ -1,4 +1,4 @@
-TargetBotLootingPanel < Panel
+TargetBotLootingPanel < NxBotSection
   layout:
     type: verticalBox
     fit-children: true
