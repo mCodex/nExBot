@@ -162,9 +162,6 @@ NxButton < Button
     image-color: #dfdfdf88
 
 
-  $focus:
-    border-width: 1
-
 NxNavPrevButton < PreviousButton
   background: #0b0f1e
   height: 15
