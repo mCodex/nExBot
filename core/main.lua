@@ -20,7 +20,7 @@ end
 g_ui.loadUIFromString([[
 WindowSettingsWindow < NxWindow
   !text: tr('Window Settings')
-  size: 260 170
+  size: 300 190
   padding: 15
 
   Label
@@ -31,16 +31,16 @@ WindowSettingsWindow < NxWindow
     text-wrap: true
     text-auto-resize: true
     text: Configure the left panel dimensions below. These settings will override the default client layout and persist automatically.
-    margin-top: 20
+    margin-top: 5
 
   Label
     text: Panel Width:
     font: verdana-11px-rounded
     anchors.top: prev.bottom
     anchors.left: parent.left
-    margin-top: 15
+    margin-top: 20
     margin-right: 15
-    width: 80
+    width: 90
 
   NxTextInput
     id: widthInput
@@ -54,9 +54,9 @@ WindowSettingsWindow < NxWindow
     font: verdana-11px-rounded
     anchors.top: prev.bottom
     anchors.left: parent.left
-    margin-top: 12
+    margin-top: 15
     margin-right: 15
-    width: 80
+    width: 90
 
   NxTextInput
     id: heightInput
@@ -70,7 +70,6 @@ WindowSettingsWindow < NxWindow
     !text: tr('Close')
     anchors.right: parent.right
     anchors.bottom: parent.bottom
-    margin-top: 20
     size: 45 21
 ]])
 
