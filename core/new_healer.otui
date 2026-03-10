@@ -114,11 +114,9 @@ PriorityEntry < ToolTipLabel
     text: -
     tooltip: Decrease Priority
 
-TargetSettings < Panel
-  size: 280 140
+TargetSettings < NxBotSection
+  size: 310 160
   padding: 3
-  image-source: /images/ui/window
-  image-border: 6
 
   NxLabel
     anchors.horizontalCenter: parent.horizontalCenter
@@ -140,7 +138,7 @@ TargetSettings < Panel
     anchors.verticalCenter: prev.verticalCenter
 
 Groups < NxPanel
-  size: 150 90
+  size: 160 108
   padding: 3
   padding-top: 5
 
@@ -181,7 +179,7 @@ Groups < NxPanel
       text: Guild Members
   
 Vocations < NxPanel
-  size: 100 105
+  size: 115 105
   padding: 3
   padding-top: 5
 
@@ -230,12 +228,10 @@ Vocations < NxPanel
       id: monks
       text: Monks
 
-Priority < Panel
-  size: 190 155
+Priority < NxBotSection
+  size: 215 170
   padding: 6
   padding-top: 3
-  image-source: /images/ui/window
-  image-border: 6
 
   ToolTipLabel
     id: title
@@ -336,12 +332,10 @@ PlayerList < Panel
     step: 14
     pixels-scroll: true
 
-CustomList < Panel
-  size: 190 140
+CustomList < NxBotSection
+  size: 215 160
   padding: 6
   padding-top: 3
-  image-source: /images/ui/window
-  image-border: 6
 
   ToolTipLabel
     anchors.horizontalCenter: parent.horizontalCenter
@@ -362,11 +356,9 @@ CustomList < Panel
     id: playerList
     anchors.fill: prev
 
-Conditions < Panel
-  size: 280 170
+Conditions < NxBotSection
+  size: 310 170
   padding: 3
-  image-source: /images/ui/window
-  image-border: 6
 
   NxLabel
     anchors.horizontalCenter: parent.horizontalCenter
@@ -382,13 +374,13 @@ Conditions < Panel
     padding-top: 3
     layout: 
       type: grid
-      cell-size: 128 31
+      cell-size: 142 31
       cell-spacing: 5
       num-columns: 2
 
 FriendHealer < NxWindow
   !text: tr('Friend Healer')
-  size: 512 390
+  size: 560 410
   padding-top: 30
   @onEscape: self:hide()
 
