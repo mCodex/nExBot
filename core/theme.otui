@@ -546,7 +546,10 @@ NxFormRow < Panel
     spacing: 8
 
 NxBotSection < Panel
-  padding: 4
+  padding-top: 5
+  padding-bottom: 5
+  padding-left: 6
+  padding-right: 6
   margin-top: 4
   image-source: /images/ui/panel_flat
-  image-border: 4
+  image-border: 5
