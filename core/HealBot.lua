@@ -223,7 +223,8 @@ setDefaultTab("HP")
 -- healPanelName already defined at top of file
 local ui = setupUI([[
 Panel
-  height: 42
+  height: 38
+  margin-top: 4
 
   NxSwitch
     id: title
@@ -231,19 +232,18 @@ Panel
     anchors.left: parent.left
     text-align: center
     width: 130
-    margin-top: 0
     !text: tr('HealBot')
 
   NxButton
     id: settings
-    anchors.top: parent.top
+    anchors.top: prev.top
     anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 4
-    height: 20
+    margin-left: 3
+    height: 17
     text: Setup
 
-  NxButtonSm
+  NxButton
     id: 1
     anchors.top: prev.bottom
     anchors.left: parent.left
@@ -252,15 +252,15 @@ Panel
     margin-top: 4
     size: 17 17
 
-  NxButtonSm
+  NxButton
     id: 2
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     text: 2
     margin-left: 4
     size: 17 17
-    
-  NxButtonSm
+
+  NxButton
     id: 3
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -268,23 +268,23 @@ Panel
     margin-left: 4
     size: 17 17
 
-  NxButtonSm
+  NxButton
     id: 4
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     text: 4
     margin-left: 4
-    size: 17 17 
-    
-  NxButtonSm
+    size: 17 17
+
+  NxButton
     id: 5
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     text: 5
     margin-left: 4
     size: 17 17
-    
-  Label
+
+  NxLabel
     id: name
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -293,7 +293,6 @@ Panel
     margin-left: 4
     height: 17
     text: Profile #1
-    background: #2a2a30
 ]])
 ui:setId(healPanelName)
 
@@ -920,5 +919,3 @@ local function validateStartup()
 end
 
 validateStartup()
-
-UI.Separator()

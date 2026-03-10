@@ -17,6 +17,7 @@ end
 local ui = setupUI([[
 Panel
   height: 20
+  margin-top: 4
 
   NxSwitch
     id: switch
@@ -24,7 +25,6 @@ Panel
     anchors.left: parent.left
     text-align: center
     width: 130
-    margin-top: 0
     !text: tr('EQ Manager')
 
   NxButton

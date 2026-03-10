@@ -165,6 +165,20 @@ end
 -- Only for non-knight vocations
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- Food Management heading
+setupUI([[
+Panel
+  height: 16
+  margin-top: 10
+
+  NxHeading
+    id: heading
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    !text: tr('Food')
+]])
+
 local castFoodEnabled = false
 
 if canUseFoodSpell() then
@@ -227,8 +241,6 @@ Panel
     castFoodEnabled = true
     castFoodUI.title:setOn(true)
   end
-
-  UI.Separator()
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -394,8 +406,6 @@ end
 
 -- Setup event listener for reactive eating
 setupRegenEventListener()
-
-UI.Separator()
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- EXPORTS (For other modules to use)

@@ -26,6 +26,7 @@ end
 setupUI([[
 Panel
   height: 16
+  margin-top: 10
 
   NxHeading
     id: heading
