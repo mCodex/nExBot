@@ -89,32 +89,32 @@ PriorityEntry < UIWidget
     margin-left: 3
 
   NxButton
-    id: remove
-    anchors.right: parent.right
-    margin-right: 18
+    id: decrement
+    anchors.left: parent.left
+    margin-left: 140
     anchors.verticalCenter: parent.verticalCenter
     size: 14 14
-    text: X
-    tooltip: Remove spell
-    visible: false
-  
+    text: -
+    tooltip: Decrease Priority
+
   NxButton
     id: increment
-    anchors.right: remove.left
-    margin-right: 2
+    anchors.left: prev.right
+    margin-left: 2
     anchors.verticalCenter: parent.verticalCenter
     size: 14 14
     text: +
     tooltip: Increase Priority
 
   NxButton
-    id: decrement
-    anchors.right: prev.left
-    margin-right: 2
+    id: remove
+    anchors.left: prev.right
+    margin-left: 2
     anchors.verticalCenter: parent.verticalCenter
     size: 14 14
-    text: -
-    tooltip: Decrease Priority
+    text: X
+    tooltip: Remove spell
+    visible: false
 
   NxLabel
     id: spellName
