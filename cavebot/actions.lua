@@ -649,7 +649,7 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
       CaveBot.setCurrentWaypointTarget(destPos, precision)
     end
     if CaveBot.setWalkingToWaypoint then
-      CaveBot.setWalkingToWaypoint(destPos)
+      CaveBot.setWalkingToWaypoint(walkTarget)
     end
     local walkDelay = dist <= 3 and 0 or dist <= 8 and 25 or dist <= 15 and 50 or 75
     if walkDelay > 0 then CaveBot.delay(walkDelay) end
