@@ -8,7 +8,7 @@ CaveBotEditorPanel < Panel
     type: verticalBox
     fit-children: true
   
-  Label
+  NxLabel
     id: pos
     text-align: center
     text: -
@@ -25,7 +25,7 @@ CaveBotEditorPanel < Panel
       flow: true
       fit-children: true
 
-  Label
+  NxLabel
     text: Double click on action from action list to edit it
     text-align: center
     text-auto-resize: true

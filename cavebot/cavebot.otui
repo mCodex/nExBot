@@ -1,4 +1,4 @@
-CaveBotAction < Label
+CaveBotAction < NxLabel
   background-color: alpha
   text-offset: 4 0
   focusable: true
