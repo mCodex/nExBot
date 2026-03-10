@@ -105,7 +105,7 @@ end)
 
 local exchangeMoneyUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title
@@ -425,7 +425,7 @@ end)
 
 local autoLevitateUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: autoLevitateToggle
@@ -535,7 +535,7 @@ end)
 
 local autoHasteUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title
@@ -610,7 +610,7 @@ end)
 
 local autoMountUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title
@@ -702,7 +702,7 @@ end
 
 local autoRandomOutfitUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title
@@ -904,7 +904,7 @@ end)
 -- Fishing UI Switch (same pattern as Dropper)
 local fishingUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title
@@ -1993,7 +1993,7 @@ end)
 -- Follow while attacking toggle
 local followWhileAttackingUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: followWhileAttackingToggle
@@ -2015,7 +2015,7 @@ end
 
 local followToggleUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: followPlayerToggle
@@ -2146,7 +2146,7 @@ end)
 
 local manaTrainingUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title

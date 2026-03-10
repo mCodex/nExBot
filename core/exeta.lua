@@ -6,7 +6,7 @@ if voc == 1 or voc == 11 then
 
     local exetaLowHpUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title
@@ -93,7 +93,7 @@ NxBotSection
 
     local exetaIfPlayerUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title
@@ -131,7 +131,7 @@ NxBotSection
 
     local exetaAmpUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title

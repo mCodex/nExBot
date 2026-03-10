@@ -63,7 +63,7 @@ end
 
 local holdTargetUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title

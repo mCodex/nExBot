@@ -209,7 +209,7 @@ if canUseFoodSpell() then
 
   local castFoodUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title
@@ -361,7 +361,7 @@ end
 
 local eatFoodUI = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title
