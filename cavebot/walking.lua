@@ -255,7 +255,7 @@ end
 -- DISPATCH: KEYBOARD STEP vs AUTOWALK
 -- ============================================================================
 
-local KEYBOARD_THRESHOLD = 12
+local KEYBOARD_THRESHOLD = 3
 
 --- Walk a single keyboard step along the path. Returns true on success.
 local function keyboardStep(path, playerPos, curIdx)

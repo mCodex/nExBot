@@ -610,11 +610,26 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
     walkParams.ignoreFields = true
   end
 
+  -- ========== RESOLVE WALK TARGET ==========
+  -- Use Pure Pursuit lookahead when the route is built: walk to a point 10 tiles
+  -- ahead on the route instead of the exact waypoint position. This carries the
+  -- player through waypoints without stopping — arrival is detected by the
+  -- hasPassedWaypoint() check above (fires every 150ms during walk).
+  -- Floor-change waypoints bypass lookahead: they require exact tile precision.
+  local walkTarget = destPos
+  if not isFloorChange
+      and WaypointNavigator
+      and type(WaypointNavigator.isRouteBuilt) == "function"
+      and WaypointNavigator.isRouteBuilt()
+      and type(WaypointNavigator.getLookaheadTarget) == "function" then
+    local lookahead = WaypointNavigator.getLookaheadTarget(playerPos)
+    if lookahead and lookahead.z == playerPos.z then
+      walkTarget = lookahead
+    end
+  end
+
   -- ========== ATTEMPT WALK ==========
-  -- Walk directly to destPos. The A* pathfinder computes optimal smooth paths
-  -- around obstacles. No lookahead target needed — smooth movement comes from
-  -- the widened arrival precision (player advances to next WP before stopping).
-  local walkResult = CaveBot.walkTo(destPos, maxDist, walkParams)
+  local walkResult = CaveBot.walkTo(walkTarget, maxDist, walkParams)
   if walkResult == "nudge" then
     -- Nudge only — count as retry so progressive strategies activate
     if CaveBot.setCurrentWaypointTarget then
