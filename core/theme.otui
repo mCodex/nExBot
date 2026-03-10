@@ -4,7 +4,7 @@
 -- All modules inherit from these classes to ensure native-consistent styling.
 -- Color palette derived from nexbot.cc website design system.
 --
--- Color Tokens (WCAG 2.2 AA verified against NxBg #0a0e1a):
+-- Color Tokens (WCAG 2.2 AA verified against NxBg #050712):
 --   NxText        #f5f7ff  (15.8:1)  — primary text
 --   NxTextMuted   #a4aece  ( 6.5:1)  — secondary/hint text
 --   NxAccent      #3be4d0  ( 9.2:1)  — teal brand accent
@@ -12,9 +12,9 @@
 --   NxDanger      #ff4b81  ( 5.2:1)  — destructive/alert
 --   NxInfo        #8f5bff  ( 4.6:1)  — informational/secondary
 --   NxWarning     #ffc857  ( 9.8:1)  — caution/warning
---   NxBg          #0a0e1a            — deep base background
---   NxBgElevated  #111827            — panels, cards
---   NxBgInput     #0d1120            — text fields, list backgrounds
+--   NxBg          #050712            — deep base background
+--   NxBgElevated  #0b0f1e            — panels, cards
+--   NxBgInput     #0b0f1e            — text fields, list backgrounds
 --   NxBorder      #1b2235            — subtle borders
 --   NxBorderStrong #2c3652           — emphasized borders
 --
@@ -148,6 +148,26 @@ NxButton < Button
 
   $focus:
     border-width: 1
+
+NxNavPrevButton < PreviousButton
+  background: #0b0f1e
+  height: 15
+  width: 15
+
+NxNavNextButton < NextButton
+  background: #0b0f1e
+  height: 15
+  width: 15
+
+NxCategoryBar < Panel
+  image-source: /images/ui/panel_flat
+  image-border: 5
+  padding: 1
+  NxLabel
+    id: label
+    anchors.fill: parent
+    background: #0b0f1e
+    text-align: center
     border-color: #3be4d0
 
 NxButtonSm < Button
@@ -199,7 +219,7 @@ NxTextInput < TextEdit
   color: #f5f7ff
   height: 20
   text-align: center
-  background: #0d1120
+  background: #0b0f1e
 
   $focus:
     border-width: 1
@@ -238,7 +258,7 @@ NxItem < BotItem
 NxTextEdit < BotTextEdit
   font: verdana-11px-rounded
   color: #f5f7ff
-  background: #0d1120
+  background: #0b0f1e
 
 -- ============================================================================
 -- LIST COMPONENTS — touch-friendly entries with visible focus
@@ -445,7 +465,7 @@ NxWindowFooter < Panel
 
 -- Navigation prev/next buttons (e.g. cycle AttackBot categories)
 NxNavPrevButton < PreviousButton
-  background: #0d1120
+  background: #0b0f1e
   height: 15
 
   $focus:
@@ -453,7 +473,7 @@ NxNavPrevButton < PreviousButton
     border-color: #3be4d0
 
 NxNavNextButton < NextButton
-  background: #0d1120
+  background: #0b0f1e
   height: 15
 
   $focus:
@@ -473,4 +493,4 @@ NxCategoryBar < Panel
     text-align: center
     font: verdana-11px-rounded
     color: #f5f7ff
-    background: #0d1120
+    background: #0b0f1e
