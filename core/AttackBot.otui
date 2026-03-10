@@ -468,7 +468,7 @@ SettingsPanel < Panel
 AttackBotWindow < NxWindow
   size: 535 300
   padding: 15
-  text: AttackBot v2
+  text: AttackBot
   @onEscape: self:hide()
 
   NxLabel
