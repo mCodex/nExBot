@@ -77,7 +77,7 @@ TrackerItem < Panel
     id: drops
     anchors.top: prev.bottom
     margin-top: 3
-    anchors.bottom: Item.bottom
+    anchors.bottom: item.bottom
     anchors.left: prev.left
     anchors.right: parent.right    
     font: verdana-11px-rounded

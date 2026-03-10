@@ -110,21 +110,47 @@ local function executeAntiRsProtection()
   end)
 end
 
--- Create the macro (empty function - logic is in event handler)
--- Use UnifiedTick if available for consistency, but this is effectively a no-op
-local antiRsMacro
-if UnifiedTick and UnifiedTick.register then
-  -- No actual handler needed - logic is event-driven via onTextMessage
-  -- Just create dummy macro for UI toggle compatibility
-  antiRsMacro = macro(50, "AntiRS & Msg", function() end)
-else
-  antiRsMacro = macro(50, "AntiRS & Msg", function() end)
+-- AntiRS toggle — event-driven via onTextMessage, no macro handler needed
+local antiRsEnabled = false
+
+local antiRsUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('AntiRS & Msg')
+]])
+
+antiRsUI.title.onClick = function(widget)
+  antiRsEnabled = not antiRsEnabled
+  widget:setOn(antiRsEnabled)
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("macros.antiRs", antiRsEnabled)
+  else
+    BotDB.set("macros.antiRs", antiRsEnabled)
+  end
 end
-BotDB.registerMacro(antiRsMacro, "antiRs")
+
+local savedAntiRsState = (function()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    return CharacterDB.get("macros.antiRs") == true
+  end
+  return BotDB.get("macros.antiRs") == true
+end)()
+if savedAntiRsState then
+  antiRsEnabled = true
+  antiRsUI.title:setOn(true)
+end
 
 -- Listen for murder warning messages
 onTextMessage(function(mode, text)
-  if not antiRsMacro.isOn() then return end
+  if not antiRsEnabled then return end
   if not text then return end
   
   -- Check for murder warning message

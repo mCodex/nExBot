@@ -88,8 +88,10 @@ end
 local lastExchangeTime = 0
 local EXCHANGE_COOLDOWN = 500  -- 500ms between exchanges for reliability
 
--- Main macro with persistence
-local exchangeMoneyMacro = macro(200, "Exchange Money", function()
+-- Main macro with NxSwitch toggle
+local exchangeMoneyEnabled = false
+local exchangeMoneyMacro = macro(200, function()
+  if not exchangeMoneyEnabled then return end
   -- Cooldown check
   if (now - lastExchangeTime) < EXCHANGE_COOLDOWN then return end
   
@@ -100,7 +102,41 @@ local exchangeMoneyMacro = macro(200, "Exchange Money", function()
     lastExchangeTime = now
   end
 end)
-BotDB.registerMacro(exchangeMoneyMacro, "exchangeMoney")
+
+local exchangeMoneyUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Exchange Money')
+]])
+
+exchangeMoneyUI.title.onClick = function(widget)
+  exchangeMoneyEnabled = not exchangeMoneyEnabled
+  widget:setOn(exchangeMoneyEnabled)
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("macros.exchangeMoney", exchangeMoneyEnabled)
+  else
+    BotDB.set("macros.exchangeMoney", exchangeMoneyEnabled)
+  end
+end
+
+local savedExchangeMoneyState = (function()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    return CharacterDB.get("macros.exchangeMoney") == true
+  end
+  return BotDB.get("macros.exchangeMoney") == true
+end)()
+if savedExchangeMoneyState then
+  exchangeMoneyEnabled = true
+  exchangeMoneyUI.title:setOn(true)
+end
 
 UI.Separator()
 
@@ -474,7 +510,9 @@ local function resolveHasteSpell(vocation, currentMana)
   return nil
 end
 
-local autoHasteMacro = macro(500, "Auto Haste", function()
+local autoHasteEnabled = false
+local autoHasteMacro = macro(500, function()
+  if not autoHasteEnabled then return end
   if not player then return end
   
   -- Cast cooldown
@@ -494,18 +532,53 @@ local autoHasteMacro = macro(500, "Auto Haste", function()
   say(haste.spell)
   lastHasteCast = now
 end)
-BotDB.registerMacro(autoHasteMacro, "autoHaste")
+
+local autoHasteUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Auto Haste')
+]])
+
+autoHasteUI.title.onClick = function(widget)
+  autoHasteEnabled = not autoHasteEnabled
+  widget:setOn(autoHasteEnabled)
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("macros.autoHaste", autoHasteEnabled)
+  else
+    BotDB.set("macros.autoHaste", autoHasteEnabled)
+  end
+end
+
+local savedAutoHasteState = (function()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    return CharacterDB.get("macros.autoHaste") == true
+  end
+  return BotDB.get("macros.autoHaste") == true
+end)()
+if savedAutoHasteState then
+  autoHasteEnabled = true
+  autoHasteUI.title:setOn(true)
+end
 
 -- Auto Mount ----------------------------------------------------------------
 -- Automatically mounts player when outside of PZ
 -- Uses the player's default mount from client settings
 -- Does NOT attempt to mount in PZ (saves CPU/memory)
--- State persisted via BotDB.registerMacro
 
 local lastMountAttempt = 0
 local MOUNT_COOLDOWN = 2000 -- Don't spam mount attempts
 
-local autoMountMacro = macro(500, "Auto Mount", function()
+local autoMountEnabled = false
+local autoMountMacro = macro(500, function()
+  if not autoMountEnabled then return end
   if not player then return end
   
   -- Skip if in protection zone - saves CPU/memory
@@ -534,7 +607,41 @@ local autoMountMacro = macro(500, "Auto Mount", function()
     lastMountAttempt = now
   end
 end)
-BotDB.registerMacro(autoMountMacro, "autoMount")
+
+local autoMountUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Auto Mount')
+]])
+
+autoMountUI.title.onClick = function(widget)
+  autoMountEnabled = not autoMountEnabled
+  widget:setOn(autoMountEnabled)
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("macros.autoMount", autoMountEnabled)
+  else
+    BotDB.set("macros.autoMount", autoMountEnabled)
+  end
+end
+
+local savedAutoMountState = (function()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    return CharacterDB.get("macros.autoMount") == true
+  end
+  return BotDB.get("macros.autoMount") == true
+end)()
+if savedAutoMountState then
+  autoMountEnabled = true
+  autoMountUI.title:setOn(true)
+end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- AUTO RANDOM OUTFIT COLORS - Ultra-fast automatic color cycling
@@ -2017,11 +2124,13 @@ UI.TextEdit(tostring(manaTraining.minManaPercent or 80), function(widget, text)
   saveManaTrainingSettings()
 end)
 
--- Mana Training macro with built-in toggle (like Hold Target)
+-- Mana Training macro with NxSwitch toggle
 local lastTrainCast = 0
 local TRAIN_COOLDOWN = 1000
 
-local manaTrainingMacro = macro(500, "Mana Training", function()
+local manaTrainingEnabled = false
+local manaTrainingMacro = macro(500, function()
+  if not manaTrainingEnabled then return end
   if not player then return end
   if (now - lastTrainCast) < TRAIN_COOLDOWN then return end
 
@@ -2034,6 +2143,40 @@ local manaTrainingMacro = macro(500, "Mana Training", function()
   say(spell)
   lastTrainCast = now
 end)
-BotDB.registerMacro(manaTrainingMacro, "manaTraining")
+
+local manaTrainingUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Mana Training')
+]])
+
+manaTrainingUI.title.onClick = function(widget)
+  manaTrainingEnabled = not manaTrainingEnabled
+  widget:setOn(manaTrainingEnabled)
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("macros.manaTraining", manaTrainingEnabled)
+  else
+    BotDB.set("macros.manaTraining", manaTrainingEnabled)
+  end
+end
+
+local savedManaTrainingState = (function()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    return CharacterDB.get("macros.manaTraining") == true
+  end
+  return BotDB.get("macros.manaTraining") == true
+end)()
+if savedManaTrainingState then
+  manaTrainingEnabled = true
+  manaTrainingUI.title:setOn(true)
+end
 
 UI.Separator()

@@ -269,17 +269,29 @@ HealBotSettingsPanel < Panel
   size: 500 267
   padding-top: 8
 
-  NxSection
+  Panel
     id: list
-    anchors.fill: parent
+    anchors.left: parent.left
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
     margin-right: 240
     padding-left: 6
     padding-right: 6
     padding-top: 6
+    layout:
+      type: verticalBox
 
     NxLabel
       id: sectionTitle
       text: Additional Settings
+      color: #3be4d0
+      font: verdana-11px-rounded
+      height: 16
+      text-align: left
+      margin-bottom: 4
+
+    HorizontalSeparator
+      margin-bottom: 8
 
     NxCheckBox
       id: Cooldown

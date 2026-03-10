@@ -165,10 +165,11 @@ end
 -- Only for non-knight vocations
 -- ═══════════════════════════════════════════════════════════════════════════
 
-local castFoodMacro = nil
+local castFoodEnabled = false
 
 if canUseFoodSpell() then
-  castFoodMacro = macro(CONFIG.CAST_FOOD_INTERVAL, "Cast Food", function()
+  local castFoodMacro = macro(CONFIG.CAST_FOOD_INTERVAL, function()
+    if not castFoodEnabled then return end
     -- Check regeneration time (in deciseconds)
     local regenTime = getRegenTime()
     
@@ -191,22 +192,42 @@ if canUseFoodSpell() then
     
     State.lastCastFood = now
   end)
-  
-  -- Add tooltip
-  if castFoodMacro and castFoodMacro.button then
-    castFoodMacro.button:setTooltip(
-      "Automatically casts 'Exevo Pan' to create food.\n" ..
-      "Runs every 2 minutes when regeneration < 60 seconds.\n" ..
-      "Requires 50 mana and support spell cooldown.\n" ..
-      "Not available for Knights."
-    )
+
+  local castFoodUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Cast Food')
+]])
+
+  castFoodUI.title.onClick = function(widget)
+    castFoodEnabled = not castFoodEnabled
+    widget:setOn(castFoodEnabled)
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+      CharacterDB.set("macros.castFood", castFoodEnabled)
+    else
+      BotDB.set("macros.castFood", castFoodEnabled)
+    end
   end
-  
-  -- Register with BotDB for persistence
-  if BotDB and BotDB.registerMacro then
-    BotDB.registerMacro(castFoodMacro, "castFood")
+
+  local savedCastFoodState = (function()
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+      return CharacterDB.get("macros.castFood") == true
+    end
+    return BotDB.get("macros.castFood") == true
+  end)()
+  if savedCastFoodState then
+    castFoodEnabled = true
+    castFoodUI.title:setOn(true)
   end
-  
+
   UI.Separator()
 end
 
@@ -306,8 +327,8 @@ local function eatFoodHandler()
   tryEat()
 end
 
--- Main eat food macro - use UnifiedTick if available
-local eatFoodMacro
+-- Main eat food - use UnifiedTick if available
+local eatFoodEnabled = false
 if UnifiedTick and UnifiedTick.register then
   -- Register with UnifiedTick for consolidated tick management
   UnifiedTick.register("eat_food", {
@@ -316,33 +337,59 @@ if UnifiedTick and UnifiedTick.register then
     handler = eatFoodHandler,
     group = "tools"
   })
-  -- Create dummy macro for UI toggle compatibility
-  eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function() end)
-  eatFoodMacro:setOn(true)
-  eatFoodMacro.onSwitch = function(m)
-    UnifiedTick.setEnabled("eat_food", m:isOn())
-  end
+  -- Start disabled; state restored below
+  UnifiedTick.setEnabled("eat_food", false)
 else
-  -- Fallback to standalone macro
-  eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", eatFoodHandler)
-end
-
--- Add tooltip
-if eatFoodMacro and eatFoodMacro.button then
-  eatFoodMacro.button:setTooltip(
-    "Automatically eats food when regeneration < 40 seconds.\n" ..
-    "Runs every 500ms and eats one piece at a time.\n" ..
-    "Searches all open containers for supported food items.\n" ..
-    "Uses EventBus for optimized performance.\n" ..
-    "10 second cooldown between eats to prevent spam."
-  )
-end
-
--- Register with BotDB for persistence, eat immediately on enable
-if BotDB and BotDB.registerMacro then
-  BotDB.registerMacro(eatFoodMacro, "eatFood", function()
-    schedule(100, tryEat)
+  -- Fallback: nameless macro guarded by enabled flag
+  macro(CONFIG.EAT_FOOD_INTERVAL, function()
+    if not eatFoodEnabled then return end
+    eatFoodHandler()
   end)
+end
+
+local eatFoodUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Eat Food')
+]])
+
+eatFoodUI.title.onClick = function(widget)
+  eatFoodEnabled = not eatFoodEnabled
+  widget:setOn(eatFoodEnabled)
+  if UnifiedTick then
+    UnifiedTick.setEnabled("eat_food", eatFoodEnabled)
+  end
+  if eatFoodEnabled then
+    schedule(100, tryEat)
+  end
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("macros.eatFood", eatFoodEnabled)
+  else
+    BotDB.set("macros.eatFood", eatFoodEnabled)
+  end
+end
+
+local savedEatFoodState = (function()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    return CharacterDB.get("macros.eatFood") == true
+  end
+  return BotDB.get("macros.eatFood") == true
+end)()
+if savedEatFoodState then
+  eatFoodEnabled = true
+  eatFoodUI.title:setOn(true)
+  if UnifiedTick then
+    UnifiedTick.setEnabled("eat_food", true)
+  end
+  schedule(100, tryEat)
 end
 
 -- Setup event listener for reactive eating

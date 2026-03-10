@@ -42,7 +42,7 @@ local function holdTargetHandler()
 end
 
 -- Use UnifiedTick if available, fallback to standalone macro
-local holdTargetMacro
+local holdTargetEnabled = false
 if UnifiedTick and UnifiedTick.register then
     -- Register with UnifiedTick for consolidated tick management
     UnifiedTick.register("hold_target", {
@@ -51,15 +51,53 @@ if UnifiedTick and UnifiedTick.register then
         handler = holdTargetHandler,
         group = "targeting"
     })
-    -- Create a dummy macro for UI toggle compatibility
-    holdTargetMacro = macro(100, "Hold Target", function() end)
-    holdTargetMacro:setOn(true)
-    -- Sync macro toggle with UnifiedTick handler
-    holdTargetMacro.onSwitch = function(m)
-        UnifiedTick.setEnabled("hold_target", m:isOn())
-    end
+    -- Start disabled; state restored below
+    UnifiedTick.setEnabled("hold_target", false)
 else
-    -- Fallback to standalone macro if UnifiedTick not available
-    holdTargetMacro = macro(100, "Hold Target", holdTargetHandler)
+    -- Fallback: nameless macro guarded by enabled flag
+    macro(100, function()
+        if not holdTargetEnabled then return end
+        holdTargetHandler()
+    end)
 end
-BotDB.registerMacro(holdTargetMacro, "holdTarget") 
+
+local holdTargetUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Hold Target')
+]])
+
+holdTargetUI.title.onClick = function(widget)
+    holdTargetEnabled = not holdTargetEnabled
+    widget:setOn(holdTargetEnabled)
+    if UnifiedTick then
+        UnifiedTick.setEnabled("hold_target", holdTargetEnabled)
+    end
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        CharacterDB.set("macros.holdTarget", holdTargetEnabled)
+    else
+        BotDB.set("macros.holdTarget", holdTargetEnabled)
+    end
+end
+
+local savedHoldTargetState = (function()
+    if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        return CharacterDB.get("macros.holdTarget") == true
+    end
+    return BotDB.get("macros.holdTarget") == true
+end)()
+if savedHoldTargetState then
+    holdTargetEnabled = true
+    holdTargetUI.title:setOn(true)
+    if UnifiedTick then
+        UnifiedTick.setEnabled("hold_target", true)
+    end
+end 

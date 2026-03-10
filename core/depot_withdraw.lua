@@ -77,7 +77,7 @@ end
 end
 
 -- Use UnifiedTick if available, fallback to standalone macro
-local depotWithdrawMacro
+local depotWithdrawEnabled = false
 if UnifiedTick and UnifiedTick.register then
   UnifiedTick.register("depot_withdraw", {
     interval = 50,
@@ -85,13 +85,53 @@ if UnifiedTick and UnifiedTick.register then
     handler = depotWithdrawHandler,
     group = "tools"
   })
-  -- Create dummy macro for UI toggle and BotDB compatibility
-  depotWithdrawMacro = macro(50, "Depot Withdraw", function() end)
-  depotWithdrawMacro:setOn(true)
-  depotWithdrawMacro.onSwitch = function(m)
-    UnifiedTick.setEnabled("depot_withdraw", m:isOn())
-  end
+  -- Start disabled; state restored below
+  UnifiedTick.setEnabled("depot_withdraw", false)
 else
-  depotWithdrawMacro = macro(50, "Depot Withdraw", depotWithdrawHandler)
+  -- Fallback: nameless macro guarded by enabled flag
+  macro(50, function()
+    if not depotWithdrawEnabled then return end
+    depotWithdrawHandler()
+  end)
 end
-BotDB.registerMacro(depotWithdrawMacro, "depotWithdraw")
+
+local depotWithdrawUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Depot Withdraw')
+]])
+
+depotWithdrawUI.title.onClick = function(widget)
+  depotWithdrawEnabled = not depotWithdrawEnabled
+  widget:setOn(depotWithdrawEnabled)
+  if UnifiedTick then
+    UnifiedTick.setEnabled("depot_withdraw", depotWithdrawEnabled)
+  end
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("macros.depotWithdraw", depotWithdrawEnabled)
+  else
+    BotDB.set("macros.depotWithdraw", depotWithdrawEnabled)
+  end
+end
+
+local savedDepotWithdrawState = (function()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    return CharacterDB.get("macros.depotWithdraw") == true
+  end
+  return BotDB.get("macros.depotWithdraw") == true
+end)()
+if savedDepotWithdrawState then
+  depotWithdrawEnabled = true
+  depotWithdrawUI.title:setOn(true)
+  if UnifiedTick then
+    UnifiedTick.setEnabled("depot_withdraw", true)
+  end
+end

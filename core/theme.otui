@@ -93,21 +93,21 @@ NxSection < Panel
     margin-bottom: 8
 
 NxScrollPanel < Panel
-  layout:
-    type: verticalBox
-    fit-children: true
 
   VerticalScrollBar
     id: scrollBar
-    anchors.top: scrollArea.top
-    anchors.bottom: scrollArea.bottom
-    anchors.right: scrollArea.right
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
     step: 16
     pixels-scroll: true
 
   ScrollablePanel
     id: scrollArea
-    anchors.fill: parent
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    anchors.right: scrollBar.left
     vertical-scrollbar: scrollBar
     layout:
       type: verticalBox

@@ -2,9 +2,43 @@ local voc = player:getVocation()
 if voc == 1 or voc == 11 then
     setDefaultTab("Cave")
     UI.Separator()
-    local exetaLowHpMacro = macro(100000, "Exeta when low hp", function() end)
-    BotDB.registerMacro(exetaLowHpMacro, "exetaLowHp")
-    
+    local exetaLowHpEnabled = false
+
+    local exetaLowHpUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Exeta when low hp')
+]])
+
+    exetaLowHpUI.title.onClick = function(widget)
+      exetaLowHpEnabled = not exetaLowHpEnabled
+      widget:setOn(exetaLowHpEnabled)
+      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        CharacterDB.set("macros.exetaLowHp", exetaLowHpEnabled)
+      else
+        BotDB.set("macros.exetaLowHp", exetaLowHpEnabled)
+      end
+    end
+
+    local savedExetaLowHpState = (function()
+      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        return CharacterDB.get("macros.exetaLowHp") == true
+      end
+      return BotDB.get("macros.exetaLowHp") == true
+    end)()
+    if savedExetaLowHpState then
+      exetaLowHpEnabled = true
+      exetaLowHpUI.title:setOn(true)
+    end
+
     local lastCast = now
 
     -- Telemetry for Exeta
@@ -16,7 +50,7 @@ if voc == 1 or voc == 11 then
     -- Use EventBus health event to trigger exeta on nearby low-HP creatures
     if EventBus then
       EventBus.on("creature:health", function(creature, healthPercent)
-        if not exetaLowHpMacro:isOn() then return end
+        if not exetaLowHpEnabled then return end
         if healthPercent > 15 then return end 
         if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
         if not TargetBot or not TargetBot.isOff or TargetBot.isOff() then return end
@@ -33,7 +67,7 @@ if voc == 1 or voc == 11 then
     else
       -- Fallback: native callback (existing behavior)
       onCreatureHealthPercentChange(function(creature, healthPercent)
-        if not exetaLowHpMacro:isOn() then return end
+        if not exetaLowHpEnabled then return end
         if healthPercent > 15 then return end 
         if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
         if not TargetBot or not TargetBot.isOff or TargetBot.isOff() then return end
@@ -55,12 +89,80 @@ if voc == 1 or voc == 11 then
     exetaStats.playerTriggeredCasts = exetaStats.playerTriggeredCasts or 0
     exetaStats.ampCasts = exetaStats.ampCasts or 0
 
-    local exetaIfPlayerMacro = macro(100000, "Exeta If Player", function() end)
-    BotDB.registerMacro(exetaIfPlayerMacro, "exetaIfPlayer")
+    local exetaIfPlayerEnabled = false
+
+    local exetaIfPlayerUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Exeta If Player')
+]])
+
+    exetaIfPlayerUI.title.onClick = function(widget)
+      exetaIfPlayerEnabled = not exetaIfPlayerEnabled
+      widget:setOn(exetaIfPlayerEnabled)
+      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        CharacterDB.set("macros.exetaIfPlayer", exetaIfPlayerEnabled)
+      else
+        BotDB.set("macros.exetaIfPlayer", exetaIfPlayerEnabled)
+      end
+    end
+
+    local savedExetaIfPlayerState = (function()
+      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        return CharacterDB.get("macros.exetaIfPlayer") == true
+      end
+      return BotDB.get("macros.exetaIfPlayer") == true
+    end)()
+    if savedExetaIfPlayerState then
+      exetaIfPlayerEnabled = true
+      exetaIfPlayerUI.title:setOn(true)
+    end
 
     -- "Amp" (ranged attacker) macro: cast when a distant creature is attacking you
-    local exetaAmpMacro = macro(100000, "Exeta Amp Res", function() end)
-    BotDB.registerMacro(exetaAmpMacro, "exetaAmpRes")
+    local exetaAmpEnabled = false
+
+    local exetaAmpUI = setupUI([[
+Panel
+  height: 20
+
+  NxSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    text-align: center
+    margin-top: 0
+    !text: tr('Exeta Amp Res')
+]])
+
+    exetaAmpUI.title.onClick = function(widget)
+      exetaAmpEnabled = not exetaAmpEnabled
+      widget:setOn(exetaAmpEnabled)
+      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        CharacterDB.set("macros.exetaAmpRes", exetaAmpEnabled)
+      else
+        BotDB.set("macros.exetaAmpRes", exetaAmpEnabled)
+      end
+    end
+
+    local savedExetaAmpState = (function()
+      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        return CharacterDB.get("macros.exetaAmpRes") == true
+      end
+      return BotDB.get("macros.exetaAmpRes") == true
+    end)()
+    if savedExetaAmpState then
+      exetaAmpEnabled = true
+      exetaAmpUI.title:setOn(true)
+    end
 
     -- Robust safe_unpack helper (handles missing table.unpack/unpack)
     local function safe_unpack(tbl)
@@ -90,7 +192,7 @@ if voc == 1 or voc == 11 then
     end
 
     local function checkAndCastExeta()
-      if not exetaIfPlayerMacro:isOn() then return end
+      if not exetaIfPlayerEnabled then return end
       if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
       if (now - lastExetaPlayer) < 6000 then return end
       if modules.game_cooldown.isGroupCooldownIconActive(3) then return end
@@ -173,7 +275,7 @@ if voc == 1 or voc == 11 then
         [6] = {x = -1, y = 1},  -- SW
         [7] = {x = -1, y = -1}, -- NW
       }
-      
+
       -- Helper: Check if a monster is facing the local player (i.e., attacking us)
       local function isMonsterFacingPlayer(creature)
         if not creature then return false end
@@ -217,7 +319,7 @@ if voc == 1 or voc == 11 then
       
       -- Helper: Try to cast exeta amp res
       local function tryExetaAmp(reason)
-        if not exetaAmpMacro:isOn() then return false end
+        if not exetaAmpEnabled then return false end
         if (now - lastExetaAmp) < 6000 then return false end
         if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return false end
         if modules.game_cooldown.isGroupCooldownIconActive(3) then return false end
@@ -236,7 +338,7 @@ if voc == 1 or voc == 11 then
       
       -- Main check: Find distant monsters NOT attacking/facing the local player
       local function checkDistantNotAttackingMe()
-        if not exetaAmpMacro:isOn() then return end
+        if not exetaAmpEnabled then return end
         if (now - lastExetaAmp) < 6000 then return end
         
         -- Get nearby monsters from cache or fallback to map scan
@@ -274,7 +376,7 @@ if voc == 1 or voc == 11 then
       
       -- Trigger check when monsters appear
       EventBus.on("monster:appear", function(creature)
-        if not exetaAmpMacro:isOn() then return end
+        if not exetaAmpEnabled then return end
         if isDistantMonster(creature) then
           debouncedAmpCheck()
         end
@@ -282,7 +384,7 @@ if voc == 1 or voc == 11 then
       
       -- Trigger check when monsters move (may become distant)
       EventBus.on("creature:move", function(creature, oldPos)
-        if not exetaAmpMacro:isOn() then return end
+        if not exetaAmpEnabled then return end
         if not creature or not creature:isMonster() then return end
         if isDistantMonster(creature) then
           debouncedAmpCheck()
@@ -291,7 +393,7 @@ if voc == 1 or voc == 11 then
       
       -- Trigger check when monster turns (may start attacking party member)
       EventBus.on("creature:turn", function(creature, newDir, oldDir)
-        if not exetaAmpMacro:isOn() then return end
+        if not exetaAmpEnabled then return end
         if not creature or not creature:isMonster() then return end
         -- If monster turned AWAY from us while distant, it's attacking someone else
         if isDistantMonster(creature) and not isMonsterFacingPlayer(creature) then
@@ -301,20 +403,20 @@ if voc == 1 or voc == 11 then
       
       -- Trigger check when player moves (distances change)
       EventBus.on("player:move", function(newPos, oldPos)
-        if not exetaAmpMacro:isOn() then return end
+        if not exetaAmpEnabled then return end
         debouncedAmpCheck()
       end, 25)
       
       -- Trigger check when we change target (our target ID changes)
       EventBus.on("targetbot/target_acquired", function(creature)
-        if not exetaAmpMacro:isOn() then return end
+        if not exetaAmpEnabled then return end
         -- Re-check since our target changed
         debouncedAmpCheck()
       end, 20)
       
       -- Trigger check when target dies (we may have untargeted distant monsters)
       EventBus.on("monster:disappear", function(creature)
-        if not exetaAmpMacro:isOn() then return end
+        if not exetaAmpEnabled then return end
         debouncedAmpCheck()
       end, 25)
 
@@ -358,8 +460,8 @@ if voc == 1 or voc == 11 then
       end
       
       -- Simple polling macro to check for distant monsters not attacking local player
-      macro(500, "ExetaAmpFallback", function()
-        if not exetaAmpMacro:isOn() then return end
+      macro(500, function()
+        if not exetaAmpEnabled then return end
         if (now - lastExetaAmp) < 6000 then return end
         if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
         if modules.game_cooldown.isGroupCooldownIconActive(3) then return end

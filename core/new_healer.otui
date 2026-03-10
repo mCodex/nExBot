@@ -252,7 +252,6 @@ Priority < Panel
     anchors.right: parent.right
     anchors.bottom: addSpellButton.top
     margin-bottom: 3
-    fit-children: true
     padding-top: 1
 
   NxButton
@@ -326,7 +325,6 @@ PlayerList < Panel
   TextList
     id: list
     anchors.fill: parent
-    fit-children: true
     padding-top: 2
     vertical-scrollbar: listScrollBar
 
