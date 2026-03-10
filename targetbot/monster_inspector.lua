@@ -1,9 +1,10 @@
--- Monster Insights UI
+-- Monster Insights UI — v3.0 (Tabbed)
+-- Tabs: 1=Live Monsters  2=Patterns  3=Combat Stats  4=Scenario
 
--- Toggleable debug for this module (set MONSTER_INSPECTOR_DEBUG = true in console to enable)
 MONSTER_INSPECTOR_DEBUG = (type(MONSTER_INSPECTOR_DEBUG) == "boolean" and MONSTER_INSPECTOR_DEBUG) or false
 
--- Safe wrapper for UnifiedStorage.get that checks isReady() first
+-- ── Helpers ──────────────────────────────────────────────────────────────────
+
 local function safeUnifiedGet(key, default)
   if not UnifiedStorage or not UnifiedStorage.get then return default end
   if not UnifiedStorage.isReady or not UnifiedStorage.isReady() then return default end
@@ -12,793 +13,530 @@ local function safeUnifiedGet(key, default)
   return default
 end
 
--- Import the style first (try multiple paths to be robust across environments)
-local function tryImportStyle()
-  local candidates = {}
-  -- Common relative paths
-  candidates[1] = "/targetbot/monster_inspector.otui"
-  candidates[2] = "targetbot/monster_inspector.otui"
-  -- Fully-qualified path using centralized paths (cache-aware)
-  if nExBot and nExBot.paths then
-    candidates[#candidates + 1] = nExBot.paths.base .. "/targetbot/monster_inspector.otui"
-  elseif BotConfigName then
-    candidates[#candidates + 1] = "/bot/" .. BotConfigName .. "/targetbot/monster_inspector.otui"
-  else
-    local ok, cfg = pcall(function() return modules.game_bot.contentsPanel.config:getCurrentOption().text end)
-    if ok and cfg then
-      candidates[#candidates + 1] = "/bot/" .. cfg .. "/targetbot/monster_inspector.otui"
-    end
-  end
-
-  for i = 1, #candidates do
-    local path = candidates[i]
-    if g_resources and g_resources.fileExists and g_resources.fileExists(path) then
-      pcall(function() g_ui.importStyle(path) end)
-  
-      return true
-    end
-  end
-
-  -- Last resort: try the default import and let underlying API log the reason
-  pcall(function() g_ui.importStyle("/targetbot/monster_inspector.otui") end)
-  warn("[MonsterInspector] Failed to locate '/targetbot/monster_inspector.otui' via tested paths. UI may be missing or path differs from expected.")
-  return false
-end
-tryImportStyle()
--- Create window from style and keep it hidden by default. Provide a helper to (re)create on demand.
-local function createWindowIfMissing()
-  if MonsterInspectorWindow and MonsterInspectorWindow:isVisible() then return MonsterInspectorWindow end
-
-  -- Try import and create window
-  tryImportStyle()
-  local ok, win = pcall(function() return UI.createWindow("MonsterInspectorWindow") end)
-  if not ok or not win then
-    warn("[MonsterInspector] Failed to create MonsterInspectorWindow - style may be missing or invalid")
-    MonsterInspectorWindow = nil
-    return nil
-  end
-
-  MonsterInspectorWindow = win
-  -- Ensure it's hidden initially
-  pcall(function() MonsterInspectorWindow:hide() end)
-
-
-  -- Rebind buttons and visibility handlers (same logic as below)
-  -- Setup actual buttons if present - use direct property access (OTClient pattern)
-  local function bindButtons()
-    local buttonsPanel = win.buttons
-    if not buttonsPanel then
-      pcall(function() buttonsPanel = win:getChildById("buttons") end)
-    end
-    
-    if not buttonsPanel then
-      if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Buttons panel not found during window creation") end
-      return
-    end
-    
-    local refreshBtn = buttonsPanel.refresh
-    local exportBtn = buttonsPanel.export  -- Note: export button may not exist in current OTUI
-    local clearBtn = buttonsPanel.clear
-    local closeBtn = buttonsPanel.close
-
-    if refreshBtn then refreshBtn.onClick = function() refreshPatterns() end end
-    if exportBtn then exportBtn.onClick = function() exportPatterns() end end
-    if clearBtn then clearBtn.onClick = function() clearPatterns() end end
-    if closeBtn then closeBtn.onClick = function() win:hide() end end
-
-    win.onVisibilityChange = function(widget, visible)
-      if visible then
-        updateWidgetRefs()
-        refreshPatterns()
-      end
-    end
-  end
-  pcall(bindButtons)
-
-  -- Initialize content
-  pcall(function() updateWidgetRefs() end)
-  pcall(function() refreshPatterns() end)
-
-  return MonsterInspectorWindow
+-- Merge in-memory patterns (primary) with stored patterns (secondary/cross-session)
+local function getPatterns()
+  local mem    = (MonsterAI and MonsterAI.Patterns and MonsterAI.Patterns.knownMonsters) or {}
+  local stored = safeUnifiedGet("targetbot.monsterPatterns", {})
+  local merged = {}
+  for k, v in pairs(stored) do merged[k] = v end
+  for k, v in pairs(mem)    do merged[k] = v end  -- memory wins on conflict
+  return merged
 end
 
--- Ensure window exists at load time if possible
-createWindowIfMissing()
-
--- Ensure global namespace for inspector exists to avoid nil indexing during early calls
-nExBot = nExBot or {}
-nExBot.MonsterInspector = nExBot.MonsterInspector or {}
-
-local patternList, dmgLabel, waveLabel, areaLabel = nil, nil, nil, nil
-
--- Robust recursive lookup for widgets (tries direct property, getChildById, and recursive search)
-local function findChildRecursive(parent, id)
-  if not parent or not id then return nil end
-  local ok, child = pcall(function() return parent[id] end)
-  if ok and child then return child end
-  ok, child = pcall(function() return parent:getChildById(id) end)
-  if ok and child then return child end
-  -- Depth-first search of children
-  ok, child = pcall(function()
-    local children = parent.getChildren and parent:getChildren() or {}
-    for i = 1, #children do
-      local found = findChildRecursive(children[i], id)
-      if found then return found end
-    end
-    return nil
-  end)
-  if ok and child then return child end
-  return nil
-end
-
-local function updateWidgetRefs()
-  -- Robustly bind important widgets (content -> textContent) using recursive lookup
-  if not MonsterInspectorWindow then
-    patternList, dmgLabel, waveLabel, areaLabel = nil, nil, nil, nil
-    -- MonsterInspectorWindow missing (silent)
-    return
-  end
-
-  -- Try direct properties first (common when otui sets ids as fields)
-  local content = nil
-  local ok, cont = pcall(function() return MonsterInspectorWindow.content end)
-  if ok and cont then content = cont end
-
-  -- Fallback to recursive search
-  if not content then content = findChildRecursive(MonsterInspectorWindow, 'content') end
-
-  -- Find the textual content label
-  local textContent = nil
-  if content then
-    local ok2, tc = pcall(function() return content.textContent end)
-    if ok2 and tc then textContent = tc end
-    if not textContent then textContent = findChildRecursive(content, 'textContent') end
-  else
-    -- As a last resort, search the entire window for the label
-    textContent = findChildRecursive(MonsterInspectorWindow, 'textContent')
-  end
-
-  if textContent then
-    patternList = textContent
-    -- Ensure window references are set so other code can access them directly
-    if content and (not MonsterInspectorWindow.content) then MonsterInspectorWindow.content = content end
-    if MonsterInspectorWindow.content and (not MonsterInspectorWindow.content.textContent) then MonsterInspectorWindow.content.textContent = textContent end
-
-  else
-    patternList = nil
-    warn("[MonsterInspector] Failed to bind textContent widget; UI may not be loaded or style import failed")
-  end
-end
-
-
-
--- Populate refs now (also called again on visibility change)
-updateWidgetRefs()
-
-local refreshInProgress = false
-local lastRefreshMs = 0
-local MIN_REFRESH_MS = 2500 -- floor: never rebuild more often than this (ms)
-
--- Helper function to check if table is empty (since 'next' is not available)
 local function isTableEmpty(tbl)
   if not tbl then return true end
-  for _ in pairs(tbl) do
-    return false
-  end
+  for _ in pairs(tbl) do return false end
   return true
 end
 
 local function fmtTime(ms)
-  if not ms or (type(ms) == 'number' and ms <= 0) then return "-" end
-  return os.date('%Y-%m-%d %H:%M:%S', math.floor(ms / 1000))
+  if not ms or (type(ms) == "number" and ms <= 0) then return "-" end
+  return os.date("%Y-%m-%d %H:%M:%S", math.floor(ms / 1000))
 end
 
--- Build a compact human-friendly string for a single pattern
-local function formatPatternLine(name, p)
-  local cooldown = p and p.waveCooldown and string.format("%dms", math.floor(p.waveCooldown)) or "-"
-  local variance = p and p.waveVariance and string.format("%.1f", p.waveVariance) or "-"
-  local conf = p and p.confidence and string.format("%.2f", p.confidence) or "-"
-  local last = p and p.lastSeen and fmtTime(p.lastSeen) or "-"
-  return string.format("%s — cd:%s  var:%s  conf:%s  last:%s", name, cooldown, variance, conf, last)
+-- ── Style constants ───────────────────────────────────────────────────────────
+
+local COLOR_ACTIVE    = "#3be4d0"
+local COLOR_INACTIVE  = "#a4aece"
+local BG_ACTIVE       = "#3be4d01a"
+local BG_INACTIVE     = "#1b2235"
+local BORDER_ACTIVE   = "#3be4d088"
+local BORDER_INACTIVE = "#050712"
+
+-- ── Module state ──────────────────────────────────────────────────────────────
+
+nExBot = nExBot or {}
+nExBot.MonsterInspector = nExBot.MonsterInspector or {}
+
+local activeTab         = 1
+local tabPanels         = {}   -- [1..4] ScrollablePanel widgets
+local tabBtns           = {}   -- [1..4] NxButton widgets
+local refreshInProgress = false
+local lastRefreshMs     = 0
+local MIN_REFRESH_MS    = 2500
+
+-- ── Style import ──────────────────────────────────────────────────────────────
+
+local function tryImportStyle()
+  local candidates = {
+    "/targetbot/monster_inspector.otui",
+    "targetbot/monster_inspector.otui",
+  }
+  if nExBot and nExBot.paths then
+    candidates[#candidates + 1] = nExBot.paths.base .. "/targetbot/monster_inspector.otui"
+  elseif BotConfigName then
+    candidates[#candidates + 1] = "/bot/" .. BotConfigName .. "/targetbot/monster_inspector.otui"
+  end
+  for i = 1, #candidates do
+    local path = candidates[i]
+    if g_resources and g_resources.fileExists and g_resources.fileExists(path) then
+      pcall(function() g_ui.importStyle(path) end)
+      return true
+    end
+  end
+  pcall(function() g_ui.importStyle("/targetbot/monster_inspector.otui") end)
+  return false
+end
+tryImportStyle()
+
+-- ── Widget binding ────────────────────────────────────────────────────────────
+
+local function findChild(parent, id)
+  if not parent or not id then return nil end
+  local ok, w = pcall(function() return parent[id] end)
+  if ok and w then return w end
+  ok, w = pcall(function() return parent:getChildById(id) end)
+  if ok and w then return w end
+  return nil
 end
 
--- Build a textual summary (smart_hunt style) for quick rendering in a scrollable content label
-local function buildSummary()
+local function updateWidgetRefs()
+  if not MonsterInspectorWindow then
+    tabPanels = {}; tabBtns = {}; return
+  end
+  local tabBar = findChild(MonsterInspectorWindow, "tabBar")
+  for i = 1, 4 do
+    tabBtns[i]   = tabBar and findChild(tabBar, "tab" .. i .. "btn") or nil
+    tabPanels[i] = findChild(MonsterInspectorWindow, "tab" .. i) or nil
+  end
+end
+
+-- ── Tab switching ─────────────────────────────────────────────────────────────
+
+local function applyTabStyle(idx, isActive)
+  local btn = tabBtns[idx]
+  if not btn then return end
+  pcall(function()
+    btn:setColor(isActive and COLOR_ACTIVE or COLOR_INACTIVE)
+    btn:setBackgroundColor(isActive and BG_ACTIVE or BG_INACTIVE)
+    btn:setBorderColor(isActive and BORDER_ACTIVE or BORDER_INACTIVE)
+  end)
+end
+
+local function switchTab(idx)
+  activeTab = idx
+  for i = 1, 4 do
+    local panel = tabPanels[i]
+    if panel then
+      pcall(function()
+        if i == idx then panel:show() else panel:hide() end
+      end)
+    end
+    applyTabStyle(i, i == idx)
+    -- Show/hide matching scrollbar
+    if MonsterInspectorWindow then
+      local sb = findChild(MonsterInspectorWindow, "tab" .. i .. "Scroll")
+      if sb then
+        pcall(function()
+          if i == idx then sb:show() else sb:hide() end
+        end)
+      end
+    end
+  end
+end
+
+-- ── Tab content builders ──────────────────────────────────────────────────────
+
+local function buildLiveTab()
   local lines = {}
-  local stats = (MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.stats) or { waveAttacksObserved = 0, areaAttacksObserved = 0, totalDamageReceived = 0 }
-  
-  -- Header with version
-  table.insert(lines, string.format("Monster AI v%s", MonsterAI and MonsterAI.VERSION or "?"))
-  table.insert(lines, string.format("Stats: Damage=%s  Waves=%s  Area=%s", stats.totalDamageReceived or 0, stats.waveAttacksObserved or 0, stats.areaAttacksObserved or 0))
-  
-  -- Session stats (new in v2.0)
-  if MonsterAI and MonsterAI.Telemetry and MonsterAI.Telemetry.session then
-    local session = MonsterAI.Telemetry.session
-    local sessionDuration = ((now or 0) - (session.startTime or 0)) / 1000
-    table.insert(lines, string.format("Session: Kills=%d  Deaths=%d  Duration=%.0fs  Tracked=%d",
-      session.killCount or 0,
-      session.deathCount or 0,
-      sessionDuration,
-      session.totalMonstersTracked or 0
-    ))
-  end
-  
-  -- Metrics Aggregator Summary (NEW in v2.2)
-  if MonsterAI and MonsterAI.Metrics and MonsterAI.Metrics.getSummary then
-    local summary = MonsterAI.Metrics.getSummary()
-    
-    -- Combat metrics
-    if summary.combat then
-      local c = summary.combat
-      table.insert(lines, string.format("Combat: DPS Received=%.1f  KDR=%.1f",
-        c.dpsReceived or 0,
-        c.kdr or 0
-      ))
-    end
-    
-    -- Performance metrics
-    if summary.performance and summary.performance.cyclesSaved > 0 then
-      local p = summary.performance
-      table.insert(lines, string.format("Performance: Cycles=%d  Saved=%d  Mode=%s",
-        p.updateCycles or 0,
-        p.cyclesSaved or 0,
-        (p.volume or "normal"):upper()
-      ))
-    end
-  end
-  
-  -- Real-time prediction stats
-  if MonsterAI and MonsterAI.getPredictionStats then
-    local predStats = MonsterAI.getPredictionStats()
-    table.insert(lines, string.format("Predictions: Events=%d  Correct=%d  Missed=%d  Accuracy=%.1f%%",
-      predStats.eventsProcessed or 0,
-      predStats.predictionsCorrect or 0,
-      predStats.predictionsMissed or 0,
-      (predStats.accuracy or 0) * 100
-    ))
-    
-    -- WavePredictor stats if available
-    if predStats.wavePredictor then
-      local wp = predStats.wavePredictor
-      table.insert(lines, string.format("WavePredictor: Total=%d  Correct=%d  FalsePos=%d  Acc=%.1f%%",
-        wp.total or 0,
-        wp.correct or 0,
-        wp.falsePositive or 0,
-        (wp.accuracy or 0) * 100
-      ))
-    end
-  end
-  
-  -- Real-time threat status
-  if MonsterAI and MonsterAI.getImmediateThreat then
-    local threat = MonsterAI.getImmediateThreat()
-    local threatStatus = threat.immediateThreat and "DANGER!" or "Safe"
-    table.insert(lines, string.format("Threat: %s  Level=%.1f  HighThreat=%d",
-      threatStatus,
-      threat.totalThreat or 0,
-      threat.highThreatCount or 0
-    ))
-  end
-  
-  -- Auto-Tuner Status (new in v2.0)
-  if MonsterAI and MonsterAI.AutoTuner then
-    local autoTuneStatus = MonsterAI.AUTO_TUNE_ENABLED and "ON" or "OFF"
-    local adjustments = MonsterAI.RealTime and MonsterAI.RealTime.metrics and MonsterAI.RealTime.metrics.autoTuneAdjustments or 0
-    local pendingSuggestions = 0
-    if MonsterAI.AutoTuner.suggestions then
-      for _ in pairs(MonsterAI.AutoTuner.suggestions) do pendingSuggestions = pendingSuggestions + 1 end
-    end
-    table.insert(lines, string.format("AutoTuner: %s  Adjustments=%d  Pending=%d", 
-      autoTuneStatus, adjustments, pendingSuggestions))
-  end
-  
-  -- Classification Stats (new in v2.0)
-  if MonsterAI and MonsterAI.Classifier and MonsterAI.Classifier.cache then
-    local classifiedCount = 0
-    for _ in pairs(MonsterAI.Classifier.cache) do classifiedCount = classifiedCount + 1 end
-    table.insert(lines, string.format("Classifications: %d monster types analyzed", classifiedCount))
-  end
-  
-  -- Telemetry Stats (new in v2.0)
-  if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.metrics then
-    local telemetrySamples = MonsterAI.RealTime.metrics.telemetrySamples or 0
-    table.insert(lines, string.format("Telemetry: %d samples collected", telemetrySamples))
-  end
-  
-  -- Combat Feedback Stats (NEW in v2.0 - 30% accuracy improvement)
-  if MonsterAI and MonsterAI.CombatFeedback then
-    local cf = MonsterAI.CombatFeedback
-    if cf.getStats then
-      local cfStats = cf.getStats()
-      local accuracy = cfStats.accuracy or 0
-      local predictions = cfStats.totalPredictions or 0
-      local hits = cfStats.hits or 0
-      local misses = cfStats.misses or 0
-      local adaptiveWeights = cfStats.adaptiveWeightsCount or 0
-      
-      table.insert(lines, string.format("CombatFeedback: Predictions=%d  Hits=%d  Misses=%d  Acc=%.1f%%  Weights=%d",
-        predictions, hits, misses, accuracy * 100, adaptiveWeights))
-    end
-  end
-  
-  -- Spell Tracker Stats (NEW in v2.2 - Monster spell analysis)
-  if MonsterAI and MonsterAI.SpellTracker then
-    local st = MonsterAI.SpellTracker
-    local stats = st.getStats and st.getStats() or {}
-    local reactivity = st.analyzeReactivity and st.analyzeReactivity() or {}
-    
-    table.insert(lines, string.format("SpellTracker: Total=%d  /min=%.1f  Types=%d",
-      stats.totalSpellsCast or 0,
-      stats.spellsPerMinute or 0,
-      stats.uniqueMissileTypes or 0
-    ))
-    
-    -- Reactivity analysis
-    local reactivityStatus = "Normal"
-    if reactivity.spellBurstDetected then
-      reactivityStatus = "BURST!"
-    elseif reactivity.highVolumeThreshold then
-      reactivityStatus = "High Volume"
-    elseif reactivity.lowVolumeThreshold then
-      reactivityStatus = "Low Volume"
-    end
-    
-    table.insert(lines, string.format("  Reactivity: %s  Active=%d  AvgInterval=%dms",
-      reactivityStatus,
-      reactivity.activeMonsterCount or 0,
-      math.floor(reactivity.avgTimeBetweenSpells or 0)
-    ))
-    
-    -- Show top spell casters
-    local topCasters = {}
-    if st.monsterSpells then
-      for id, data in pairs(st.monsterSpells) do
-        if data.totalSpellsCast and data.totalSpellsCast > 0 then
-          table.insert(topCasters, {
-            name = data.name or "Unknown",
-            spells = data.totalSpellsCast,
-            cooldown = data.ewmaSpellCooldown,
-            frequency = data.castFrequency or 0
-          })
-        end
-      end
-      table.sort(topCasters, function(a, b) return a.spells > b.spells end)
-    end
-    
-    if #topCasters > 0 then
-      table.insert(lines, "  Top Casters:")
-      for i = 1, math.min(3, #topCasters) do
-        local c = topCasters[i]
-        local cdStr = c.cooldown and string.format("%dms", math.floor(c.cooldown)) or "-"
-        table.insert(lines, string.format("    %s: %d spells  cd=%s  freq=%d/min",
-          c.name:sub(1, 15), c.spells, cdStr, c.frequency))
-      end
-    end
-  end
-  
-  -- Scenario Manager Stats (NEW in v2.1 - Anti-Zigzag)
-  if MonsterAI and MonsterAI.Scenario then
-    local scn = MonsterAI.Scenario
-    local scnStats = scn.getStats and scn.getStats() or {}
-    
-    local scenarioType = scnStats.currentScenario or "unknown"
-    local monsterCount = scnStats.monsterCount or 0
-    local isZigzag = scnStats.isZigzagging and "YES!" or "No"
-    local switches = scnStats.consecutiveSwitches or 0
-    local clusterType = scnStats.clusterType or "none"
-    
-    -- Scenario type with description
-    local scenarioDesc = ""
-    if scnStats.config and scnStats.config.description then
-      scenarioDesc = " (" .. scnStats.config.description .. ")"
-    end
-    
-    table.insert(lines, string.format("Scenario: %s%s", scenarioType:upper(), scenarioDesc))
-    table.insert(lines, string.format("  Monsters: %d  Cluster: %s  Zigzag: %s  Switches: %d",
-      monsterCount, clusterType, isZigzag, switches))
-    
-    -- Target lock info
-    if scnStats.targetLockId then
-      local lockData = MonsterAI.Tracker and MonsterAI.Tracker.monsters[scnStats.targetLockId]
-      local lockName = lockData and lockData.name or "Unknown"
-      local lockHealth = lockData and lockData.creature and lockData.creature:getHealthPercent() or 0
-      table.insert(lines, string.format("  Target Lock: %s (%d%% HP)", lockName, lockHealth))
-    end
-    
-    -- Anti-zigzag status
-    local cfg = scnStats.config or {}
-    if cfg.switchCooldownMs then
-      table.insert(lines, string.format("  Anti-Zigzag: Cooldown=%dms  Stickiness=%d  MaxSwitches/min=%s",
-        cfg.switchCooldownMs,
-        cfg.targetStickiness or 0,
-        cfg.maxSwitchesPerMinute and tostring(cfg.maxSwitchesPerMinute) or "∞"))
-    end
-  end
-  
-  -- Volume Adaptation Stats (NEW in v2.2 - Dynamic reactivity)
-  if MonsterAI and MonsterAI.VolumeAdaptation then
-    local va = MonsterAI.VolumeAdaptation
-    local vaStats = va.getStats and va.getStats() or {}
-    local params = vaStats.params or {}
-    local metrics = vaStats.metrics or {}
-    
-    local volumeDisplay = (vaStats.currentVolume or "normal"):upper()
-    local desc = params.description or ""
-    
-    table.insert(lines, string.format("VolumeAdaptation: %s", volumeDisplay))
-    if desc ~= "" then
-      table.insert(lines, string.format("  Mode: %s", desc))
-    end
-    table.insert(lines, string.format("  Telemetry=%dms  CacheTTL=%dms  EWMA=%.2f",
-      params.telemetryInterval or 200,
-      params.threatCacheTTL or 100,
-      params.ewmaAlpha or 0.25
-    ))
-    table.insert(lines, string.format("  Avg Monsters=%.1f  Peak=%d  Adaptations=%d  Saved=%d",
-      metrics.avgMonsterCount or 0,
-      metrics.peakMonsterCount or 0,
-      metrics.volumeChanges or 0,
-      metrics.adaptationsSaved or 0
-    ))
-  end
-  
-  -- Reachability Stats (NEW in v2.1 - Prevents "Creature not reachable")
-  if MonsterAI and MonsterAI.Reachability then
-    local reach = MonsterAI.Reachability
-    local reachStats = reach.getStats and reach.getStats() or {}
-    
-    local blockedCount = reachStats.blockedCount or 0
-    local checksPerformed = reachStats.checksPerformed or 0
-    local cacheHits = reachStats.cacheHits or 0
-    local reachableCount = reachStats.reachable or 0
-    local blockedTotal = reachStats.blocked or 0
-    
-    local hitRate = checksPerformed > 0 and (cacheHits / (checksPerformed + cacheHits)) * 100 or 0
-    
-    table.insert(lines, string.format("Reachability: Checks=%d  CacheHit=%.0f%%  Blocked=%d  Reachable=%d",
-      checksPerformed, hitRate, blockedTotal, reachableCount))
-    
-    -- Show blocked reasons breakdown
-    if reachStats.byReason then
-      local reasons = reachStats.byReason
-      if (reasons.no_path or 0) > 0 or (reasons.blocked_tile or 0) > 0 then
-        table.insert(lines, string.format("  Blocked: NoPath=%d  Tile=%d  Elevation=%d  TooFar=%d",
-          reasons.no_path or 0,
-          reasons.blocked_tile or 0,
-          reasons.elevation or 0,
-          reasons.too_far or 0))
-      end
-    end
-    
-    -- Show currently blocked creatures
-    if blockedCount > 0 then
-      table.insert(lines, string.format("  Currently Blocked: %d creatures (cooldown active)", blockedCount))
-    end
-  end
-  
-  -- TargetBot Integration Stats (NEW in v2.0)
-  if MonsterAI and MonsterAI.TargetBot then
-    local tbi = MonsterAI.TargetBot
-    local tbiStats = tbi.getStats and tbi.getStats() or {}
-    
-    local status = "Active"
-    if tbiStats.feedbackActive and tbiStats.trackerActive and tbiStats.realTimeActive then
-      status = "Full Integration"
-    elseif tbiStats.trackerActive then
-      status = "Partial Integration"
-    end
-    
-    table.insert(lines, string.format("TargetBot Integration: %s", status))
-    
-    -- Show danger level
-    if tbi.getDangerLevel then
-      local dangerLevel, threats = tbi.getDangerLevel()
-      local threatCount = #threats
-      table.insert(lines, string.format("  Danger Level: %.1f/10  Active Threats: %d", dangerLevel, threatCount))
-      
-      -- List top 3 threats
-      for i = 1, math.min(3, threatCount) do
-        local t = threats[i]
-        local imminentStr = t.imminent and " [IMMINENT]" or ""
-        table.insert(lines, string.format("    %d. %s (level %.1f)%s", i, t.name, t.level, imminentStr))
-      end
-    end
-  end
-  
+  local live  = (MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters) or {}
+  local count = 0
+  for _ in pairs(live) do count = count + 1 end
+
+  table.insert(lines, string.format("Live Tracker — %d creature(s)", count))
   table.insert(lines, "")
-  
-  -- Show Classifications section (new in v2.0)
-  if MonsterAI and MonsterAI.Classifier and MonsterAI.Classifier.cache then
-    local classCount = 0
-    for _ in pairs(MonsterAI.Classifier.cache) do classCount = classCount + 1 end
-    
-    if classCount > 0 then
-      table.insert(lines, "Classifications:")
-      table.insert(lines, string.format("  %-18s %6s %6s %8s %6s %6s", "name", "danger", "conf", "type", "dist", "cd"))
-      
-      -- Sort by confidence
-      local classItems = {}
-      for name, c in pairs(MonsterAI.Classifier.cache) do
-        table.insert(classItems, {name = name, class = c})
-      end
-      table.sort(classItems, function(a, b) return (a.class.confidence or 0) > (b.class.confidence or 0) end)
-      
-      for i = 1, math.min(#classItems, 10) do
-        local item = classItems[i]
-        local c = item.class
-        local typeStr = ""
-        if c.isRanged then typeStr = "Ranged"
-        elseif c.isMelee then typeStr = "Melee" end
-        if c.isWaveAttacker then typeStr = typeStr .. "+Wave" end
-        if c.isFast then typeStr = typeStr .. "+Fast" end
-        
-        table.insert(lines, string.format("  %-18s %6d %6.2f %8s %6d %6s",
-          item.name:sub(1, 18),
-          c.estimatedDanger or 0,
-          c.confidence or 0,
-          typeStr:sub(1, 8),
-          c.preferredDistance or 0,
-          c.attackCooldown and string.format("%dms", math.floor(c.attackCooldown)) or "-"
-        ))
-      end
-      table.insert(lines, "")
-    end
+
+  if count == 0 then
+    table.insert(lines, "  No creatures currently tracked.")
+    table.insert(lines, "  (Tracker populates during combat)")
+    return table.concat(lines, "\n")
   end
-  
-  -- Show Pending Suggestions (new in v2.0)
-  if MonsterAI and MonsterAI.AutoTuner and MonsterAI.AutoTuner.suggestions then
-    local hasSignificantSuggestions = false
-    for name, s in pairs(MonsterAI.AutoTuner.suggestions) do
-      if math.abs((s.suggestedDanger or 0) - (s.currentDanger or 0)) >= 1 then
-        hasSignificantSuggestions = true
-        break
-      end
+
+  table.insert(lines, string.format("  %-18s %6s %5s %7s %6s %7s %5s %6s",
+    "Name", "Samps", "Conf", "CD(ms)", "DPS", "Missiles", "Speed", "Facing"))
+  table.insert(lines, string.rep("-", 76))
+
+  local tbl = {}
+  for id, d in pairs(live) do
+    local facing = false
+    if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.directions then
+      local rt = MonsterAI.RealTime.directions[id]
+      facing = rt and rt.facingPlayerSince ~= nil
     end
-    
-    if hasSignificantSuggestions then
-      table.insert(lines, "Danger Suggestions:")
-      for name, s in pairs(MonsterAI.AutoTuner.suggestions) do
-        local change = (s.suggestedDanger or 0) - (s.currentDanger or 0)
-        if math.abs(change) >= 1 then
-          local changeStr = change > 0 and "+" .. tostring(change) or tostring(change)
-          table.insert(lines, string.format("  %s: %d -> %d (%s) [%.0f%% conf]",
-            name,
-            s.currentDanger or 0,
-            s.suggestedDanger or 0,
-            changeStr,
-            (s.confidence or 0) * 100
-          ))
-          if s.reasons and #s.reasons > 0 then
-            table.insert(lines, "    Reasons: " .. table.concat(s.reasons, ", "))
-          end
-        end
-      end
-      table.insert(lines, "")
+    local dps = 0
+    if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.getDPS then
+      local ok, val = pcall(MonsterAI.Tracker.getDPS, id)
+      if ok and val then dps = val end
     end
+    table.insert(tbl, {
+      name     = d.name or "unknown",
+      samples  = d.samples and #d.samples or 0,
+      conf     = d.confidence or 0,
+      cd       = d.ewmaCooldown or d.predictedWaveCooldown,
+      dps      = dps,
+      missiles = d.missileCount or 0,
+      speed    = d.avgSpeed or 0,
+      facing   = facing,
+    })
   end
-  
-  table.insert(lines, "Patterns:")
-  local patterns = safeUnifiedGet("targetbot.monsterPatterns", {})
+  table.sort(tbl, function(a, b) return (a.conf or 0) > (b.conf or 0) end)
 
-  if isTableEmpty(patterns) then
-    -- If no persisted patterns, try to show live tracking info (useful while hunting)
-    local live = (MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters) or {}
-    local liveCount = 0
-    for _ in pairs(live) do liveCount = liveCount + 1 end
+  for i = 1, math.min(#tbl, 20) do
+    local e    = tbl[i]
+    local confs  = string.format("%.2f", e.conf)
+    local cdStr  = (type(e.cd) == "number" and string.format("%d", math.floor(e.cd))) or "-"
+    local faceStr= e.facing and "YES" or "no"
+    table.insert(lines, string.format("  %-18s %6d %5s %7s %6.1f %7d %5.2f %6s",
+      e.name:sub(1, 18), e.samples, confs, cdStr, e.dps or 0, e.missiles, e.speed, faceStr))
+  end
 
-    if liveCount == 0 then
-      table.insert(lines, "  None")
-    else
-      table.insert(lines, string.format("  (Live tracking: %d monsters)", liveCount))
-      -- Header (columns) - added facing column
-      table.insert(lines, string.format("  %-18s %6s %5s %6s %6s %7s %6s %6s", "name","samps","conf","cd","dps","missiles","spd","facing"))
-
-      -- show up to 20 tracked monsters sorted by confidence (descending)
-      local tbl = {}
-      for id, d in pairs(live) do
-        local name = d.name or "unknown"
-        local samples = d.samples and #d.samples or 0
-        local conf = d.confidence or 0
-        local cooldown = d.ewmaCooldown or d.predictedWaveCooldown or "-"
-        -- Check if facing player from RealTime data
-        local facing = false
-        if MonsterAI and MonsterAI.RealTime and MonsterAI.RealTime.directions[id] then
-          local rt = MonsterAI.RealTime.directions[id]
-          facing = rt.facingPlayerSince ~= nil
-        end
-        table.insert(tbl, { id = id, name = name, samples = samples, conf = conf, cooldown = cooldown, facing = facing })
-      end
-      table.sort(tbl, function(a, b) return (a.conf or 0) > (b.conf or 0) end)
-      for i = 1, math.min(#tbl, 20) do
-        local e = tbl[i]
-        local confs = e.conf and string.format("%.2f", e.conf) or "-"
-        local cd = (type(e.cooldown) == 'number' and string.format("%dms", math.floor(e.cooldown))) or tostring(e.cooldown)
-        local d = MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters and MonsterAI.Tracker.monsters[e.id] or {}
-        local dps = MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.getDPS and MonsterAI.Tracker.getDPS(e.id) or 0
-        local missiles = d.missileCount or 0
-        local spd = d.avgSpeed or 0
-        local facingStr = e.facing and "YES" or "no"
-        table.insert(lines, string.format("  %-18s %6d %5s %6s %6.2f %7d %6.2f %6s", e.name, e.samples, confs, cd, (dps or 0), missiles, spd, facingStr))
-      end
-      table.insert(lines, "  (Note: live tracker data and patterns persist after observed attacks)")
-    end
-  else
-    for name, p in pairs(patterns) do
-      local cooldown = p and p.waveCooldown and string.format("%dms", math.floor(p.waveCooldown)) or "-"
-      local variance = p and p.waveVariance and string.format("%.1f", p.waveVariance) or "-"
-      local conf = p and p.confidence and string.format("%.2f", p.confidence) or "-"
-      local last = p and p.lastSeen and fmtTime(p.lastSeen) or "-"
-      table.insert(lines, string.format("  %s  cd:%s  var:%s  conf:%s  last:%s", name, cooldown, variance, conf, last))
-    end
+  if #tbl > 20 then
+    table.insert(lines, string.format("  ... and %d more", #tbl - 20))
   end
   return table.concat(lines, "\n")
 end
 
-function refreshPatterns()
-  if not MonsterInspectorWindow or not MonsterInspectorWindow:isVisible() then return end
+local function buildPatternsTab()
+  local lines    = {}
+  local patterns = getPatterns()
+  local count    = 0
+  for _ in pairs(patterns) do count = count + 1 end
 
-  -- Ensure we have the latest widget refs; try again if not bound
-  if not MonsterInspectorWindow.content or not MonsterInspectorWindow.content.textContent then
-    updateWidgetRefs()
+  table.insert(lines, string.format("Learned Patterns — %d monster type(s)", count))
+  table.insert(lines, "")
+
+  if count == 0 then
+    table.insert(lines, "  No patterns yet.")
+    table.insert(lines, "  Patterns are learned after observing 2+ wave attacks")
+    table.insert(lines, "  from the same monster type.")
+    return table.concat(lines, "\n")
   end
 
-  if not MonsterInspectorWindow.content or not MonsterInspectorWindow.content.textContent then
-    warn("[MonsterInspector] refreshPatterns: textContent widget missing after updateWidgetRefs; aborting refresh.")
-    -- Diagnostic dump to help root-cause: storage and tracker stats
-    local count = 0
-    local patterns = safeUnifiedGet("targetbot.monsterPatterns", {})
-    for _ in pairs(patterns) do count = count + 1 end
-    print(string.format("[MonsterInspector][DIAG] monsterPatterns count=%d", count))
-    if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.stats then
-      local s = MonsterAI.Tracker.stats
-      print(string.format("[MonsterInspector][DIAG] MonsterAI stats: damage=%d waves=%d area=%d", s.totalDamageReceived or 0, s.waveAttacksObserved or 0, s.areaAttacksObserved or 0))
+  table.insert(lines, string.format("  %-20s %8s %6s %5s  %s",
+    "Name", "CD(ms)", "Var", "Conf", "Last Seen"))
+  table.insert(lines, string.rep("-", 68))
+
+  local sorted = {}
+  for name, p in pairs(patterns) do
+    table.insert(sorted, { name = name, p = p })
+  end
+  table.sort(sorted, function(a, b)
+    return (a.p.confidence or 0) > (b.p.confidence or 0)
+  end)
+
+  for _, item in ipairs(sorted) do
+    local p    = item.p
+    local cd   = p.waveCooldown and string.format("%d", math.floor(p.waveCooldown)) or "-"
+    local var  = p.waveVariance and string.format("%.1f", p.waveVariance) or "-"
+    local conf = p.confidence   and string.format("%.2f", p.confidence)   or "-"
+    local last = p.lastSeen     and fmtTime(p.lastSeen) or "-"
+    table.insert(lines, string.format("  %-20s %8s %6s %5s  %s",
+      item.name:sub(1, 20), cd, var, conf, last))
+  end
+
+  return table.concat(lines, "\n")
+end
+
+local function buildStatsTab()
+  local lines = {}
+  local stats = (MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.stats)
+    or { waveAttacksObserved = 0, areaAttacksObserved = 0, totalDamageReceived = 0 }
+
+  table.insert(lines, string.format("Monster AI  v%s", MonsterAI and MonsterAI.VERSION or "?"))
+  table.insert(lines, "")
+
+  if MonsterAI and MonsterAI.Telemetry and MonsterAI.Telemetry.session then
+    local s   = MonsterAI.Telemetry.session
+    local dur = ((now or 0) - (s.startTime or 0)) / 1000
+    table.insert(lines, "── Session ─────────────────────────────────────")
+    table.insert(lines, string.format("  Kills: %d   Deaths: %d   Duration: %.0fs   Tracked: %d",
+      s.killCount or 0, s.deathCount or 0, dur, s.totalMonstersTracked or 0))
+  end
+
+  table.insert(lines, "")
+  table.insert(lines, "── Combat ──────────────────────────────────────")
+  table.insert(lines, string.format("  Damage Received: %d   Waves: %d   Area: %d",
+    stats.totalDamageReceived or 0, stats.waveAttacksObserved or 0, stats.areaAttacksObserved or 0))
+
+  if MonsterAI and MonsterAI.Metrics and MonsterAI.Metrics.getSummary then
+    local ok, s = pcall(MonsterAI.Metrics.getSummary)
+    if ok and s and s.combat then
+      table.insert(lines, string.format("  DPS Received: %.1f   KDR: %.2f",
+        s.combat.dpsReceived or 0, s.combat.kdr or 0))
     end
-    return
   end
 
+  if MonsterAI and MonsterAI.getPredictionStats then
+    local ok, ps = pcall(MonsterAI.getPredictionStats)
+    if ok and ps then
+      table.insert(lines, "")
+      table.insert(lines, "── Predictions ─────────────────────────────────")
+      table.insert(lines, string.format("  Events: %d   Correct: %d   Missed: %d   Acc: %.1f%%",
+        ps.eventsProcessed or 0, ps.predictionsCorrect or 0,
+        ps.predictionsMissed or 0, (ps.accuracy or 0) * 100))
+      if ps.wavePredictor then
+        local wp = ps.wavePredictor
+        table.insert(lines, string.format("  WavePredictor: Total=%d  Correct=%d  FalsePos=%d  Acc=%.1f%%",
+          wp.total or 0, wp.correct or 0, wp.falsePositive or 0, (wp.accuracy or 0) * 100))
+      end
+    end
+  end
+
+  if MonsterAI and MonsterAI.SpellTracker then
+    local st  = MonsterAI.SpellTracker
+    local ok, sts = pcall(function() return st.getStats and st.getStats() or {} end)
+    sts = ok and sts or {}
+    table.insert(lines, "")
+    table.insert(lines, "── SpellTracker ─────────────────────────────────")
+    table.insert(lines, string.format("  Total: %d   /min: %.1f   Types: %d",
+      sts.totalSpellsCast or 0, sts.spellsPerMinute or 0, sts.uniqueMissileTypes or 0))
+
+    local casters = {}
+    if st.monsterSpells then
+      for _, d in pairs(st.monsterSpells) do
+        if (d.totalSpellsCast or 0) > 0 then
+          table.insert(casters, { name = d.name or "?", spells = d.totalSpellsCast,
+            cd = d.ewmaSpellCooldown })
+        end
+      end
+      table.sort(casters, function(a, b) return a.spells > b.spells end)
+    end
+    if #casters > 0 then
+      table.insert(lines, "  Top casters:")
+      for i = 1, math.min(5, #casters) do
+        local c   = casters[i]
+        local cdStr = c.cd and string.format("%dms", math.floor(c.cd)) or "-"
+        table.insert(lines, string.format("    %-18s %d spells   cd=%s",
+          c.name:sub(1, 18), c.spells, cdStr))
+      end
+    end
+  end
+
+  if MonsterAI and MonsterAI.getImmediateThreat then
+    local ok, t = pcall(MonsterAI.getImmediateThreat)
+    if ok and t then
+      table.insert(lines, "")
+      table.insert(lines, "── Threat ───────────────────────────────────────")
+      table.insert(lines, string.format("  Status: %s   Level: %.1f   High-Threat: %d",
+        t.immediateThreat and "DANGER!" or "Safe",
+        t.totalThreat or 0, t.highThreatCount or 0))
+    end
+  end
+
+  return table.concat(lines, "\n")
+end
+
+local function buildScenarioTab()
+  local lines = {}
+
+  if MonsterAI and MonsterAI.Scenario then
+    local ok, sc = pcall(function()
+      return MonsterAI.Scenario.getStats and MonsterAI.Scenario.getStats() or {}
+    end)
+    sc = ok and sc or {}
+    local cfg = sc.config or {}
+    table.insert(lines, "── Scenario ─────────────────────────────────────")
+    local desc = cfg.description and (" (" .. cfg.description .. ")") or ""
+    table.insert(lines, string.format("  Type: %s%s",
+      (sc.currentScenario or "unknown"):upper(), desc))
+    table.insert(lines, string.format("  Monsters: %d   Cluster: %s   Zigzag: %s   Switches: %d",
+      sc.monsterCount or 0,
+      sc.clusterType or "none",
+      sc.isZigzagging and "YES!" or "No",
+      sc.consecutiveSwitches or 0))
+    if sc.targetLockId then
+      local ld    = MonsterAI.Tracker and MonsterAI.Tracker.monsters and MonsterAI.Tracker.monsters[sc.targetLockId]
+      local lname = ld and ld.name or "Unknown"
+      table.insert(lines, string.format("  Target Lock: %s", lname))
+    end
+    if cfg.switchCooldownMs then
+      table.insert(lines, string.format("  Anti-Zigzag: Cooldown=%dms   Stickiness=%d",
+        cfg.switchCooldownMs, cfg.targetStickiness or 0))
+    end
+  end
+
+  if MonsterAI and MonsterAI.Reachability then
+    local ok, rs = pcall(function()
+      return MonsterAI.Reachability.getStats and MonsterAI.Reachability.getStats() or {}
+    end)
+    rs = ok and rs or {}
+    table.insert(lines, "")
+    table.insert(lines, "── Reachability ─────────────────────────────────")
+    local hitRate = (rs.checksPerformed or 0) > 0
+      and (rs.cacheHits or 0) / ((rs.checksPerformed or 0) + (rs.cacheHits or 0)) * 100 or 0
+    table.insert(lines, string.format("  Checks: %d   Cache Hit: %.0f%%   Blocked: %d   Reachable: %d",
+      rs.checksPerformed or 0, hitRate, rs.blocked or 0, rs.reachable or 0))
+    if rs.byReason then
+      local r = rs.byReason
+      if (r.no_path or 0) > 0 or (r.blocked_tile or 0) > 0 then
+        table.insert(lines, string.format("  NoPath: %d   Tile: %d   Elevation: %d   TooFar: %d",
+          r.no_path or 0, r.blocked_tile or 0, r.elevation or 0, r.too_far or 0))
+      end
+    end
+  end
+
+  if MonsterAI and MonsterAI.TargetBot and MonsterAI.TargetBot.getDangerLevel then
+    local ok, danger, threats = pcall(MonsterAI.TargetBot.getDangerLevel)
+    if ok and danger then
+      threats = threats or {}
+      table.insert(lines, "")
+      table.insert(lines, "── Danger ───────────────────────────────────────")
+      table.insert(lines, string.format("  Level: %.1f/10   Active Threats: %d", danger, #threats))
+      for i = 1, math.min(5, #threats) do
+        local t = threats[i]
+        table.insert(lines, string.format("    %d. %s (%.1f)%s",
+          i, t.name, t.level, t.imminent and " [IMMINENT]" or ""))
+      end
+    end
+  end
+
+  if isTableEmpty(lines) then
+    table.insert(lines, "  No scenario data available.")
+  end
+
+  return table.concat(lines, "\n")
+end
+
+-- ── Builders dispatch ─────────────────────────────────────────────────────────
+
+local BUILDERS = {
+  buildLiveTab,
+  buildPatternsTab,
+  buildStatsTab,
+  buildScenarioTab,
+}
+
+-- ── Refresh ───────────────────────────────────────────────────────────────────
+
+local function refreshActiveTab()
+  if not MonsterInspectorWindow or not MonsterInspectorWindow:isVisible() then return end
   if refreshInProgress then return end
-
-  -- Throttle frequent calls
-  if now and (now - lastRefreshMs) < MIN_REFRESH_MS then
-    return
-  end
+  if now and (now - lastRefreshMs) < MIN_REFRESH_MS then return end
 
   refreshInProgress = true
-  lastRefreshMs = now
+  if now then lastRefreshMs = now end
 
-  -- Set the content text (simplified like Hunt Analyzer)
-  MonsterInspectorWindow.content.textContent:setText(buildSummary())
+  local panel = tabPanels[activeTab]
+  if panel then
+    local textLabel = findChild(panel, "text")
+    if textLabel then
+      local ok, txt = pcall(BUILDERS[activeTab])
+      pcall(function() textLabel:setText(ok and txt or ("Error: " .. tostring(txt))) end)
+    end
+  end
 
   refreshInProgress = false
 end
 
--- Export all patterns to clipboard as CSV-like text
-local function exportPatterns()
-  local lines = {}
-  table.insert(lines, "name,cooldown_ms,variance,confidence,last_seen")
-  local patterns = safeUnifiedGet("targetbot.monsterPatterns", {})
-  for name, p in pairs(patterns) do
-    local cd = p.waveCooldown and tostring(math.floor(p.waveCooldown)) or ""
-    local var = p.waveVariance and tostring(p.waveVariance) or ""
-    local conf = p.confidence and tostring(p.confidence) or ""
-    local last = p.lastSeen and tostring(math.floor(p.lastSeen / 1000)) or ""
-    table.insert(lines, string.format('%s,%s,%s,%s,%s', name, cd, var, conf, last))
-  end
-  local out = table.concat(lines, "\n")
-  if g_window and g_window.setClipboardText then
-    g_window.setClipboardText(out)
-    print("[MonsterInspector] Patterns exported to clipboard")
-  end
+-- Public alias kept for backward compatibility with external callers
+function refreshPatterns()
+  refreshActiveTab()
 end
 
--- Clear persisted patterns and in-memory knownMonsters
-local function clearPatterns()
-  if UnifiedStorage then
-    UnifiedStorage.set("targetbot.monsterPatterns", {})
-  end
-  if MonsterAI and MonsterAI.Patterns and MonsterAI.Patterns.knownMonsters then
-    MonsterAI.Patterns.knownMonsters = {}
-  end
-  refreshPatterns()
-  print("[MonsterInspector] Cleared stored monster patterns")
-end
+-- ── Window lifecycle ──────────────────────────────────────────────────────────
 
--- Buttons - use direct property access (standard OTClient pattern)
-local function bindInspectorButtons()
-  if not MonsterInspectorWindow then return end
-  
-  -- Access buttons panel directly as property (standard OTClient widget hierarchy)
-  local buttonsPanel = MonsterInspectorWindow.buttons
-  
-  if not buttonsPanel then
-    -- Fallback: try getChildById if direct access fails
-    pcall(function() buttonsPanel = MonsterInspectorWindow:getChildById("buttons") end)
-  end
-  
-  if not buttonsPanel then
-    warn("[MonsterInspector] Could not find buttons panel - window may not be fully loaded")
-    return
-  end
-  
-  -- Access buttons directly as properties (OTClient creates child widgets as properties)
-  local refreshBtn = buttonsPanel.refresh
-  local clearBtn = buttonsPanel.clear
-  local closeBtn = buttonsPanel.close
-  
-  -- Fallback to getChildById if direct access returns nil
-  if not refreshBtn then
-    pcall(function() refreshBtn = buttonsPanel:getChildById("refresh") end)
-  end
-  if not clearBtn then
-    pcall(function() clearBtn = buttonsPanel:getChildById("clear") end)
-  end
-  if not closeBtn then
-    pcall(function() closeBtn = buttonsPanel:getChildById("close") end)
-  end
-  
-  -- Bind click handlers
+local function bindButtons(win)
+  if not win then return end
+  local buttons = findChild(win, "buttons")
+  if not buttons then return end
+
+  local refreshBtn = findChild(buttons, "refresh")
+  local clearBtn   = findChild(buttons, "clear")
+  local closeBtn   = findChild(buttons, "close")
+
   if refreshBtn then
-    refreshBtn.onClick = function() 
-      if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Refresh button clicked") end
-      refreshPatterns() 
+    refreshBtn.onClick = function()
+      refreshInProgress = false
+      refreshActiveTab()
     end
-    if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Bound refresh button") end
-  else
-    warn("[MonsterInspector] Could not find refresh button")
   end
-  
+
   if clearBtn then
     clearBtn.onClick = function()
-      if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Clear button clicked") end
-      clearPatterns()
+      if UnifiedStorage then UnifiedStorage.set("targetbot.monsterPatterns", {}) end
+      if MonsterAI and MonsterAI.Patterns then MonsterAI.Patterns.knownMonsters = {} end
+      refreshInProgress = false
+      refreshActiveTab()
+      print("[MonsterInspector] Cleared stored monster patterns")
     end
-    if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Bound clear button") end
-  else
-    warn("[MonsterInspector] Could not find clear button")
-  end
-  
-  if closeBtn then
-    closeBtn.onClick = function() MonsterInspectorWindow:hide() end
-    if MONSTER_INSPECTOR_DEBUG then print("[MonsterInspector] Bound close button") end
-  else
-    warn("[MonsterInspector] Could not find close button")
   end
 
-  -- Auto-refresh while visible (guarded to avoid duplicate schedule chains)
-  MonsterInspectorWindow.onVisibilityChange = function(widget, visible)
-    if visible then
-      -- re-resolve widgets in case UI was reloaded or nested
-      updateWidgetRefs()
-      -- Rebind buttons when window becomes visible (in case they weren't bound initially)
-      if not buttonsPanel or not buttonsPanel.refresh then
-        bindInspectorButtons()
+  if closeBtn then
+    closeBtn.onClick = function() win:hide() end
+  end
+
+  local tabBar = findChild(win, "tabBar")
+  if tabBar then
+    for i = 1, 4 do
+      local btn = findChild(tabBar, "tab" .. i .. "btn")
+      if btn then
+        local idx = i
+        btn.onClick = function()
+          switchTab(idx)
+          refreshInProgress = false
+          refreshActiveTab()
+        end
       end
-      refreshPatterns()
+    end
+  end
+
+  win.onVisibilityChange = function(widget, visible)
+    if visible then
+      updateWidgetRefs()
+      switchTab(activeTab)
+      refreshInProgress = false
+      refreshActiveTab()
     end
   end
 end
 
--- Bind buttons on load
-bindInspectorButtons()
+local function createWindowIfMissing()
+  if MonsterInspectorWindow and MonsterInspectorWindow:isVisible() then
+    return MonsterInspectorWindow
+  end
+  tryImportStyle()
+  local ok, win = pcall(function() return UI.createWindow("MonsterInspectorWindow") end)
+  if not ok or not win then
+    warn("[MonsterInspector] Failed to create MonsterInspectorWindow")
+    MonsterInspectorWindow = nil
+    return nil
+  end
+  MonsterInspectorWindow = win
+  pcall(function() MonsterInspectorWindow:hide() end)
+  pcall(function() updateWidgetRefs() end)
+  pcall(function() bindButtons(win) end)
+  pcall(function() switchTab(1) end)
+  return MonsterInspectorWindow
+end
 
--- Initialize (load current data)
-refreshPatterns()
+createWindowIfMissing()
+updateWidgetRefs()
+if MonsterInspectorWindow then
+  pcall(function() bindButtons(MonsterInspectorWindow) end)
+end
 
-nExBot.MonsterInspector = {
-  refresh = refreshPatterns,
-  clear = clearPatterns,
-  rebindButtons = bindInspectorButtons
-}
+-- ── Public API ────────────────────────────────────────────────────────────────
 
--- Convenience helpers to show/toggle the inspector from console or other modules
+nExBot.MonsterInspector.refresh         = refreshActiveTab
+nExBot.MonsterInspector.rebindButtons   = function() bindButtons(MonsterInspectorWindow) end
+nExBot.MonsterInspector.refreshPatterns = refreshPatterns
+
+nExBot.MonsterInspector.clear = function()
+  if UnifiedStorage then UnifiedStorage.set("targetbot.monsterPatterns", {}) end
+  if MonsterAI and MonsterAI.Patterns then MonsterAI.Patterns.knownMonsters = {} end
+  refreshInProgress = false
+  refreshActiveTab()
+end
+
 nExBot.MonsterInspector.showWindow = function()
   if not MonsterInspectorWindow then createWindowIfMissing() end
   if MonsterInspectorWindow then
     MonsterInspectorWindow:show()
     updateWidgetRefs()
-    -- Trigger one MonsterAI tick so the inspector has data immediately on open
+    switchTab(activeTab)
     if MonsterAI and MonsterAI.updateAll then pcall(MonsterAI.updateAll) end
-    refreshPatterns()
+    refreshInProgress = false
+    refreshActiveTab()
   end
 end
 
@@ -808,25 +546,16 @@ nExBot.MonsterInspector.toggleWindow = function()
     if MonsterInspectorWindow:isVisible() then
       MonsterInspectorWindow:hide()
     else
-      MonsterInspectorWindow:show()
-      updateWidgetRefs()
-      if MonsterAI and MonsterAI.updateAll then pcall(MonsterAI.updateAll) end
-      refreshPatterns()
+      nExBot.MonsterInspector.showWindow()
     end
   end
 end
 
--- Push-based auto-refresh: subscribe to MonsterAI state changes.
--- refreshPatterns() is already guarded by MIN_REFRESH_MS so it won't flood.
+-- EventBus: auto-refresh on MonsterAI state changes
 if EventBus and EventBus.on then
   EventBus.on("monsterai:state_updated", function()
     if MonsterInspectorWindow and MonsterInspectorWindow:isVisible() then
-      refreshPatterns()
+      refreshActiveTab()
     end
   end, 0)
 end
-
--- Expose refreshPatterns function
-nExBot.MonsterInspector.refreshPatterns = refreshPatterns
-
-

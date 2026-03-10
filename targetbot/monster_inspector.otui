@@ -1,12 +1,55 @@
 MonsterInspectorWindow < NxWindow
   text: Monster Insights
-  width: 520
-  height: 480
+  width: 560
+  height: 500
   @onEscape: self:hide()
 
-  VerticalScrollBar
-    id: contentScroll
+  Panel
+    id: tabBar
     anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    height: 26
+    background-color: #0b0f1e
+
+    NxButton
+      id: tab1btn
+      text: Live Monsters
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.bottom: parent.bottom
+      width: 130
+
+    NxButton
+      id: tab2btn
+      text: Patterns
+      anchors.top: parent.top
+      anchors.left: tab1btn.right
+      anchors.bottom: parent.bottom
+      width: 110
+      margin-left: 2
+
+    NxButton
+      id: tab3btn
+      text: Combat Stats
+      anchors.top: parent.top
+      anchors.left: tab2btn.right
+      anchors.bottom: parent.bottom
+      width: 100
+      margin-left: 2
+
+    NxButton
+      id: tab4btn
+      text: Scenario
+      anchors.top: parent.top
+      anchors.left: tab3btn.right
+      anchors.bottom: parent.bottom
+      width: 100
+      margin-left: 2
+
+  VerticalScrollBar
+    id: tab1Scroll
+    anchors.top: tabBar.bottom
     anchors.bottom: buttons.top
     anchors.right: parent.right
     margin-top: 4
@@ -15,18 +58,111 @@ MonsterInspectorWindow < NxWindow
     pixels-scroll: true
 
   ScrollablePanel
-    id: content
-    anchors.top: parent.top
+    id: tab1
+    anchors.top: tabBar.bottom
     anchors.left: parent.left
-    anchors.right: contentScroll.left
+    anchors.right: tab1Scroll.left
     anchors.bottom: buttons.top
     margin-top: 4
     margin-bottom: 8
     margin-right: 4
-    vertical-scrollbar: contentScroll
+    vertical-scrollbar: tab1Scroll
 
     NxLabel
-      id: textContent
+      id: text
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      text-wrap: true
+      text-auto-resize: true
+      font: verdana-11px-monochrome
+      color: #f5f7ff
+
+  VerticalScrollBar
+    id: tab2Scroll
+    anchors.top: tabBar.bottom
+    anchors.bottom: buttons.top
+    anchors.right: parent.right
+    margin-top: 4
+    margin-bottom: 8
+    step: 24
+    pixels-scroll: true
+
+  ScrollablePanel
+    id: tab2
+    anchors.top: tabBar.bottom
+    anchors.left: parent.left
+    anchors.right: tab2Scroll.left
+    anchors.bottom: buttons.top
+    margin-top: 4
+    margin-bottom: 8
+    margin-right: 4
+    vertical-scrollbar: tab2Scroll
+
+    NxLabel
+      id: text
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      text-wrap: true
+      text-auto-resize: true
+      font: verdana-11px-monochrome
+      color: #f5f7ff
+
+  VerticalScrollBar
+    id: tab3Scroll
+    anchors.top: tabBar.bottom
+    anchors.bottom: buttons.top
+    anchors.right: parent.right
+    margin-top: 4
+    margin-bottom: 8
+    step: 24
+    pixels-scroll: true
+
+  ScrollablePanel
+    id: tab3
+    anchors.top: tabBar.bottom
+    anchors.left: parent.left
+    anchors.right: tab3Scroll.left
+    anchors.bottom: buttons.top
+    margin-top: 4
+    margin-bottom: 8
+    margin-right: 4
+    vertical-scrollbar: tab3Scroll
+
+    NxLabel
+      id: text
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      text-wrap: true
+      text-auto-resize: true
+      font: verdana-11px-monochrome
+      color: #f5f7ff
+
+  VerticalScrollBar
+    id: tab4Scroll
+    anchors.top: tabBar.bottom
+    anchors.bottom: buttons.top
+    anchors.right: parent.right
+    margin-top: 4
+    margin-bottom: 8
+    step: 24
+    pixels-scroll: true
+
+  ScrollablePanel
+    id: tab4
+    anchors.top: tabBar.bottom
+    anchors.left: parent.left
+    anchors.right: tab4Scroll.left
+    anchors.bottom: buttons.top
+    margin-top: 4
+    margin-bottom: 8
+    margin-right: 4
+    vertical-scrollbar: tab4Scroll
+
+    NxLabel
+      id: text
       anchors.top: parent.top
       anchors.left: parent.left
       anchors.right: parent.right
@@ -45,7 +181,6 @@ MonsterInspectorWindow < NxWindow
     NxButton
       id: refresh
       text: Refresh
-      !tooltip: tr('Refresh monster data')
       anchors.left: parent.left
       anchors.verticalCenter: parent.verticalCenter
       width: 80
@@ -53,7 +188,6 @@ MonsterInspectorWindow < NxWindow
     NxButton
       id: clear
       text: Clear Patterns
-      !tooltip: tr('Clear all learned patterns')
       anchors.left: refresh.right
       anchors.verticalCenter: parent.verticalCenter
       width: 120
@@ -62,7 +196,6 @@ MonsterInspectorWindow < NxWindow
     NxButton
       id: close
       text: Close
-      !tooltip: tr('Close this window')
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
       width: 80
