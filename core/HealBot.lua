@@ -223,8 +223,8 @@ setDefaultTab("HP")
 -- healPanelName already defined at top of file
 local ui = setupUI([[
 NxBotSection
-  height: 46
-  margin-top: 4
+  height: 52
+  margin-top: 6
 
   NxSwitch
     id: title
@@ -240,16 +240,16 @@ NxBotSection
     anchors.top: prev.top
     anchors.right: parent.right
     width: 46
-    height: 17
+    height: 20
     text: Setup
 
   NxButton
     id: 1
-    anchors.top: prev.bottom
+    anchors.top: title.bottom
     anchors.left: parent.left
     text: 1
     margin-right: 2
-    margin-top: 4
+    margin-top: 6
     size: 17 17
 
   NxButton
