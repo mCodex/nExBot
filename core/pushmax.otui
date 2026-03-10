@@ -67,7 +67,7 @@ PushMaxWindow < NxWindow
     margin-top: 5
     text-align: center
 
-  HorizontalSeparator
+  NxSeparator
     id: separator
     anchors.right: parent.right
     anchors.left: parent.left

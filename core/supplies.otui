@@ -80,7 +80,7 @@ SuppliesWindow < NxWindow
     text-align: center
     text: Additional Conditions:
 
-  HorizontalSeparator
+  NxSeparator
     anchors.top: prev.bottom
     anchors.left: prev.left
     anchors.right: prev.right
@@ -182,7 +182,7 @@ SuppliesWindow < NxWindow
     vertical-scrollbar: itemsScrollBar
     layout: verticalBox
 
-  HorizontalSeparator
+  NxSeparator
     id: bottomSep
     anchors.left: parent.left
     anchors.right: parent.right

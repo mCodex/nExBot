@@ -81,7 +81,7 @@ DepositerPanel < NxWindow
     margin-right: 3
     background: #ffffff88
 
-  HorizontalSeparator
+  NxSeparator
     id: sep
     anchors.right: parent.right
     anchors.left: parent.left

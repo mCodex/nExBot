@@ -115,7 +115,7 @@ HoldConditions < NxPanel
     anchors.right: parent.right
     @onSetup: self.name:setText("Recovery")
 
-  Label
+  NxLabel
     id: uturaSpellLabel
     anchors.left: parent.left
     anchors.top: prev.bottom
@@ -178,7 +178,7 @@ ConditionsWindow < NxWindow
     anchors.right: parent.right
     margin-top: 7
 
-  HorizontalSeparator
+  NxSeparator
     id: separator
     anchors.right: parent.right
     anchors.left: parent.left

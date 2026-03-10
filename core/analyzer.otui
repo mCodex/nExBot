@@ -9,7 +9,7 @@ BossCreaturePanel < Panel
     old-scaling: true
     margin-left: 3
 
-  Label
+  NxLabel
     id: name
     anchors.left: creature.right
     margin: 1
@@ -22,7 +22,7 @@ BossCreaturePanel < Panel
     color: #f5f7ff
     text: Duke Krule
 
-  Label
+  NxLabel
     id: cooldown
     anchors.left: creature.right
     margin: 1
@@ -93,7 +93,7 @@ DualLabel < Label
   text-align: left
   width: 50
 
-  Label
+  NxLabel
     id: value
     anchors.right: parent.right
     margin-right: 4
@@ -217,7 +217,7 @@ AnalyzerLootItem < UIItem
   virtual: true
   background-color: alpha 
 
-  Label
+  NxLabel
     id: count
     font: verdana-11px-rounded
     color: white
@@ -457,13 +457,13 @@ FeaturesWindow < NxWindow
     text: Add
     font: verdana-11px-rounded    
 
-  HorizontalSeparator
+  NxSeparator
     anchors.left: ID.right
     margin-left: 5
     anchors.right: CustomPrices.right
     anchors.verticalCenter: ID.top
 
-  HorizontalSeparator
+  NxSeparator
     id: secondSeparator
     anchors.left: ID.right
     margin-left: 5
@@ -479,7 +479,7 @@ FeaturesWindow < NxWindow
     text: Rarity Frames
     font: verdana-11px-rounded   
 
-  HorizontalSeparator
+  NxSeparator
     anchors.right: parent.right
     anchors.left: parent.left
     anchors.bottom: closeButton.top

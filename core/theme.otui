@@ -494,3 +494,40 @@ NxCategoryBar < Panel
     font: verdana-11px-rounded
     color: #f5f7ff
     background: #0b0f1e
+
+-- ============================================================================
+-- MODERN UX CONTAINERS (Cards, Sections, Separators)
+-- ============================================================================
+
+NxSeparator < HorizontalSeparator
+  height: 1
+  background-color: #1b2235
+  margin-top: 8
+  margin-bottom: 8
+
+NxCard < Panel
+  image-source: /images/ui/panel_flat
+  image-border: 6
+  padding: 12
+  background-color: #0b0f1e
+  border-width: 1
+  border-color: #1b2235
+
+NxCardTitle < NxLabel
+  font: verdana-11px-rounded
+  color: #3be4d0
+  text-align: left
+  height: 16
+  margin-bottom: 8
+
+NxCardSubtitle < NxLabel
+  color: #a4aece
+  font: verdana-11px-rounded
+  height: 14
+  margin-bottom: 12
+
+NxFormRow < Panel
+  height: 24
+  layout:
+    type: horizontalBox
+    spacing: 8

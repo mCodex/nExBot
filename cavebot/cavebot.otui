@@ -23,7 +23,7 @@ CaveBotPanel < Panel
     margin-top: 2
     margin-bottom: 2
 
-  HorizontalSeparator
+  NxSeparator
     margin-top: 4
     margin-bottom: 4
     

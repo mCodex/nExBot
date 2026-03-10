@@ -232,7 +232,7 @@ InputPanel < NxPanel
     font: verdana-11px-rounded
     color: #a4aece
 
-  HorizontalSeparator
+  NxSeparator
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: prev.bottom
@@ -245,7 +245,7 @@ InputPanel < NxPanel
     anchors.top: mainLabel.bottom
     margin-top: 15
 
-  HorizontalSeparator
+  NxSeparator
     anchors.verticalCenter: next.verticalCenter
     anchors.left: parent.left
     anchors.right: parent.right
@@ -264,7 +264,7 @@ InputPanel < NxPanel
     anchors.top: prev.bottom
     margin-top: 10
 
-  HorizontalSeparator
+  NxSeparator
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: prev.bottom
@@ -512,7 +512,7 @@ EquipWindow < NxWindow
     margin-bottom: 5
     margin-left: 5
 
-  HorizontalSeparator
+  NxSeparator
     id: bottomSep
     anchors.right: parent.right
     anchors.left: parent.left

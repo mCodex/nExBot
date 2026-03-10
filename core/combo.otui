@@ -363,7 +363,7 @@ ComboWindow < NxWindow
     text: BotServer
     color: #3be4d0
 
-  HorizontalSeparator
+  NxSeparator
     id: separator
     anchors.right: parent.right
     anchors.left: parent.left

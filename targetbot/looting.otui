@@ -3,7 +3,7 @@ TargetBotLootingPanel < Panel
     type: verticalBox
     fit-children: true
 
-  HorizontalSeparator
+  NxSeparator
     margin-top: 8
 
   NxLabel

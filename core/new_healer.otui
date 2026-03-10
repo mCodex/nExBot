@@ -151,7 +151,7 @@ Groups < NxPanel
     text: Groups
     tooltip: Players added in custom list will always be in scope
 
-  HorizontalSeparator
+  NxSeparator
     anchors.top: prev.bottom
     margin-top: 2
     anchors.left: parent.left
@@ -192,7 +192,7 @@ Vocations < NxPanel
     font: verdana-11px-rounded 
     text: Vocations
 
-  HorizontalSeparator
+  NxSeparator
     anchors.top: prev.bottom
     margin-top: 2
     anchors.left: parent.left
@@ -276,7 +276,7 @@ AddPlayer < NxPanel
     text-align: center
     text-wrap: true
 
-  HorizontalSeparator
+  NxSeparator
     anchors.top: prev.bottom
     anchors.left: parent.left
     anchors.right: parent.right
@@ -414,7 +414,7 @@ FriendHealer < NxWindow
     margin-top: 10
     anchors.left: priority.left
 
-  HorizontalSeparator
+  NxSeparator
     id: separator
     anchors.right: parent.right
     anchors.left: parent.left

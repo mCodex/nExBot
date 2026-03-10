@@ -35,7 +35,7 @@ TargetBotPanel < Panel
     type: verticalBox
     fit-children: true
 
-  HorizontalSeparator
+  NxSeparator
     margin-top: 4
     margin-bottom: 4
 

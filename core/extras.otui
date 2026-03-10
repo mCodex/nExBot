@@ -77,7 +77,7 @@ ExtrasWindow < NxWindow
       anchors.bottom: parent.bottom
       anchors.left: parent.horizontalCenter
 
-  HorizontalSeparator
+  NxSeparator
     id: separator
     anchors.right: parent.right
     anchors.left: parent.left
