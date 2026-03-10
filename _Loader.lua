@@ -511,6 +511,7 @@ loadCategory("tools_legacy", {
 loadCategory("analytics", {
   "analyzer",
   "smart_hunt",
+  "hunt_context",
   "spy_level",
   "supplies",
   "depositer_config",

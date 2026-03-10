@@ -175,13 +175,9 @@ end
 -- Populate refs now (also called again on visibility change)
 updateWidgetRefs()
 
-local refreshTimerActive = false
 local refreshInProgress = false
-local lastPatternsChecksum = nil
 local lastRefreshMs = 0
-local MIN_REFRESH_MS = 2500 -- don't refresh more often than this (ms)
-local lastLabelUpdateMs = 0
-local MIN_LABEL_UPDATE_MS = 1000 -- don't update labels more often than this (ms)
+local MIN_REFRESH_MS = 2500 -- floor: never rebuild more often than this (ms)
 
 -- Helper function to check if table is empty (since 'next' is not available)
 local function isTableEmpty(tbl)
@@ -796,48 +792,38 @@ nExBot.MonsterInspector = {
 
 -- Convenience helpers to show/toggle the inspector from console or other modules
 nExBot.MonsterInspector.showWindow = function()
-  if not MonsterInspectorWindow then
-    createWindowIfMissing()
-  end
+  if not MonsterInspectorWindow then createWindowIfMissing() end
   if MonsterInspectorWindow then
     MonsterInspectorWindow:show()
     updateWidgetRefs()
-
-    -- Ensure tracker runs to populate initial samples (no console required)
-    if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end
+    -- Trigger one MonsterAI tick so the inspector has data immediately on open
+    if MonsterAI and MonsterAI.updateAll then pcall(MonsterAI.updateAll) end
     refreshPatterns()
-
-    -- If storage is empty, retry after a short delay to let updater collect samples
-    local patterns = safeUnifiedGet("targetbot.monsterPatterns", {})
-    local hasPatterns = patterns and next(patterns) ~= nil
-    if not hasPatterns then
-      schedule(500, function()
-        if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end
-        refreshPatterns()
-      end)
-    end
   end
 end
 
 nExBot.MonsterInspector.toggleWindow = function()
-  if not MonsterInspectorWindow then
-    createWindowIfMissing()
-  end
+  if not MonsterInspectorWindow then createWindowIfMissing() end
   if MonsterInspectorWindow then
     if MonsterInspectorWindow:isVisible() then
       MonsterInspectorWindow:hide()
     else
       MonsterInspectorWindow:show()
       updateWidgetRefs()
-      if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end
+      if MonsterAI and MonsterAI.updateAll then pcall(MonsterAI.updateAll) end
       refreshPatterns()
-      -- Retry shortly if no patterns yet
-      local patterns2 = safeUnifiedGet("targetbot.monsterPatterns", {})
-      if not (patterns2 and next(patterns2) ~= nil) then
-        schedule(500, function() if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end; refreshPatterns() end)
-      end
     end
   end
+end
+
+-- Push-based auto-refresh: subscribe to MonsterAI state changes.
+-- refreshPatterns() is already guarded by MIN_REFRESH_MS so it won't flood.
+if EventBus and EventBus.on then
+  EventBus.on("monsterai:state_updated", function()
+    if MonsterInspectorWindow and MonsterInspectorWindow:isVisible() then
+      refreshPatterns()
+    end
+  end, 0)
 end
 
 -- Expose refreshPatterns function

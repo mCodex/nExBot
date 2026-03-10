@@ -558,6 +558,50 @@ local function mobilityScore(creature, config)
   return s
 end
 
+-- 8. Hunt context score (HuntContext bridge — reads lazy-cached signal, O(1))
+-- Contributes at most +60 so it never overrides config.priority tier differences.
+local function huntScore(creature, hp)
+  if not (HuntContext and HuntContext.getSignal) then return 0 end
+  local ok, sig = pcall(HuntContext.getSignal)
+  if not ok or not sig then return 0 end
+
+  local s = 0
+
+  -- Low survivability → prioritize wave-casting threats to eliminate them faster
+  if sig.survivability < 0.4 then
+    local name = cName(creature)
+    if MonsterAI and MonsterAI.Classifier and MonsterAI.Classifier.get then
+      local cl = MonsterAI.Classifier.get(name)
+      if cl and (cl.isWaveAttacker or cl.isWaveCaster) then
+        s = s + 15
+      end
+    end
+  end
+
+  -- High mana stress → prefer the closest target to minimize time-to-kill
+  if sig.manaStress > 0.7 then
+    local p = cPos(creature)
+    local pp = getPlayer() and cPos(getPlayer())
+    if p and pp then
+      local d = math.max(math.abs(p.x - pp.x), math.abs(p.y - pp.y))
+      if d <= 2 then s = s + 10 end
+    end
+  end
+
+  -- Low hunt efficiency → push near-dead targets to ensure kills complete
+  if sig.efficiency < 0.6 and hp <= 25 then
+    s = s + 8
+  end
+
+  -- High composite threat bias → flat additive pressure proportional to danger
+  if sig.threatBias > 0.6 then
+    s = s + math.floor(sig.threatBias * 12)
+  end
+
+  -- Hard cap: hunt signal never overrides config.priority tier differences (1000 per tier)
+  return math.min(s, 60)
+end
+
 -- ============================================================================
 -- MAIN ENTRY POINT
 -- ============================================================================
@@ -590,7 +634,7 @@ function PriorityEngine.calculate(creature, config, path)
     return 0
   end
 
-  -- Aggregate all sub-scores
+  -- Aggregate all sub-scores (single source of truth)
   local total = baseScore(config)
               + healthScore(hp, config)
               + distanceScore(pathLen)
@@ -598,6 +642,7 @@ function PriorityEngine.calculate(creature, config, path)
               + threatScore(creature)
               + scenarioScore(creature, hp)
               + mobilityScore(creature, config)
+              + huntScore(creature, hp)
 
   -- Ensure non-negative
   return math.max(0, total)

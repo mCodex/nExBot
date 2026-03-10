@@ -987,6 +987,11 @@ local function calculateMetrics()
   return metrics
 end
 
+-- Expose metrics to external modules (e.g. HuntContext for PriorityEngine bridge)
+function Analytics.getMetrics()
+  return calculateMetrics()
+end
+
 -- ============================================================================
 -- INSIGHTS ANALYSIS
 -- ============================================================================
