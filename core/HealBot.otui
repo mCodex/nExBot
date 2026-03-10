@@ -392,13 +392,6 @@ HealWindow < NxWindow
     anchors.left: parent.left
     visible: false
 
-  HorizontalSeparator
-    id: separator
-    anchors.right: parent.right
-    anchors.left: parent.left
-    anchors.bottom: closeButton.top
-    margin-bottom: 8
-
   NxButton
     id: closeButton
     !text: tr('Close')
@@ -414,3 +407,10 @@ HealWindow < NxWindow
     font: cipsoftFont
     anchors.left: parent.left
     anchors.bottom: parent.bottom
+
+  HorizontalSeparator
+    id: separator
+    anchors.right: parent.right
+    anchors.left: parent.left
+    anchors.bottom: closeButton.top
+    margin-bottom: 8

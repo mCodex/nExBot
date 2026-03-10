@@ -108,13 +108,6 @@ AttackBotPanel < Panel
     anchors.top: entryList.bottom
     margin-top: 8
 
-  NxNavNextButton
-    id: nextCategory
-    anchors.left: category.right
-    anchors.top: entryList.bottom
-    margin-top: 8
-    margin-left: 2
-
   NxCategoryBar
     id: category
     anchors.top: entryList.bottom
@@ -123,18 +116,18 @@ AttackBotPanel < Panel
     margin-left: 3
     width: 315
 
+  NxNavNextButton
+    id: nextCategory
+    anchors.left: category.right
+    anchors.top: entryList.bottom
+    margin-top: 8
+    margin-left: 2
+
   NxNavPrevButton
     id: previousSource
     anchors.left: entryList.left
     anchors.top: category.bottom
     margin-top: 8
-
-  NxNavNextButton
-    id: nextSource
-    anchors.left: source.right
-    anchors.top: category.bottom
-    margin-top: 8
-    margin-left: 2
 
   NxCategoryBar
     id: source
@@ -144,17 +137,18 @@ AttackBotPanel < Panel
     margin-left: 3
     width: 105
 
+  NxNavNextButton
+    id: nextSource
+    anchors.left: source.right
+    anchors.top: category.bottom
+    margin-top: 8
+    margin-left: 2
+
   NxNavPrevButton
     id: previousRange
     anchors.left: nextSource.right
     anchors.verticalCenter: nextSource.verticalCenter
     margin-left: 8
-
-  NxNavNextButton
-    id: nextRange
-    anchors.left: range.right
-    anchors.verticalCenter: range.verticalCenter
-    margin-left: 2
 
   NxCategoryBar
     id: range
@@ -162,6 +156,12 @@ AttackBotPanel < Panel
     anchors.verticalCenter: previousRange.verticalCenter
     margin-left: 3
     width: 323
+
+  NxNavNextButton
+    id: nextRange
+    anchors.left: range.right
+    anchors.verticalCenter: range.verticalCenter
+    margin-left: 2
 
   NxTextInput
     id: monsters
@@ -181,7 +181,7 @@ AttackBotPanel < Panel
     text: Mana%:
     font: verdana-11px-rounded
 
-  NxNxSpinBox
+  NxSpinBox
     id: manaPercent
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -200,7 +200,7 @@ AttackBotPanel < Panel
     text: Creatures:
     font: verdana-11px-rounded
 
-  NxNxSpinBox
+  NxSpinBox
     id: creatures
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -212,7 +212,7 @@ AttackBotPanel < Panel
     editable: true
     focusable: true
 
-  NxNxCheckBox
+  NxCheckBox
     id: orMore
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -226,7 +226,7 @@ AttackBotPanel < Panel
     text: HP:
     font: verdana-11px-rounded
 
-  NxNxSpinBox
+  NxSpinBox
     id: minHp
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -245,7 +245,7 @@ AttackBotPanel < Panel
     text: -
     font: verdana-11px-rounded
 
-  NxNxSpinBox
+  NxSpinBox
     id: maxHp
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -264,7 +264,7 @@ AttackBotPanel < Panel
     text: CD (s):
     font: verdana-11px-rounded
 
-  NxNxSpinBox
+  NxSpinBox
     id: cooldown
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
@@ -365,7 +365,7 @@ SettingsPanel < Panel
     text-align: center
     text: Reset Settings
 
-  NxNxCheckBox
+  NxCheckBox
     id: IgnoreMana
     anchors.top: parent.top
     anchors.left: parent.left
@@ -373,7 +373,7 @@ SettingsPanel < Panel
     width: 200
     text: Check RL Tibia conditions
 
-  NxNxCheckBox
+  NxCheckBox
     id: Kills
     anchors.top: prev.bottom
     anchors.left: prev.left
@@ -384,7 +384,7 @@ SettingsPanel < Panel
     text-wrap: true
     text-align: left
 
-  NxNxSpinBox
+  NxSpinBox
     id: KillsAmount
     anchors.top: prev.top
     anchors.bottom: prev.bottom
@@ -396,7 +396,7 @@ SettingsPanel < Panel
     focusable: true
     margin-left: 5
 
-  NxNxCheckBox
+  NxCheckBox
     id: Rotate
     anchors.top: Kills.bottom
     anchors.left: Kills.left
@@ -404,7 +404,7 @@ SettingsPanel < Panel
     width: 220
     text: Turn to side with most monsters
 
-  NxNxCheckBox
+  NxCheckBox
     id: Cooldown
     anchors.top: prev.bottom
     anchors.left: prev.left
@@ -412,7 +412,7 @@ SettingsPanel < Panel
     width: 220
     text: Check spell cooldowns
 
-  NxNxCheckBox
+  NxCheckBox
     id: Visible
     anchors.top: prev.bottom
     anchors.left: prev.left
@@ -420,7 +420,7 @@ SettingsPanel < Panel
     width: 245
     text: Items must be visible (recommended)
 
-  NxNxCheckBox
+  NxCheckBox
     id: PvpMode
     anchors.top: prev.bottom
     anchors.left: prev.left
@@ -428,7 +428,7 @@ SettingsPanel < Panel
     width: 245
     text: PVP mode
 
-  NxNxCheckBox
+  NxCheckBox
     id: PvpSafe
     anchors.top: prev.bottom
     anchors.left: prev.left
@@ -436,7 +436,7 @@ SettingsPanel < Panel
     width: 245
     text: PVP safe
 
-  NxNxCheckBox
+  NxCheckBox
     id: Training
     anchors.top: prev.bottom
     anchors.left: prev.left
@@ -444,7 +444,7 @@ SettingsPanel < Panel
     width: 245
     text: Stop when attacking trainers
 
-  NxNxCheckBox
+  NxCheckBox
     id: BlackListSafe
     anchors.top: prev.bottom
     anchors.left: prev.left
@@ -453,7 +453,7 @@ SettingsPanel < Panel
     height: 18
     text: Stop if Anti-RS player in range
 
-  NxNxSpinBox
+  NxSpinBox
     id: AntiRsRange
     anchors.top: prev.top
     anchors.bottom: prev.bottom
@@ -517,12 +517,6 @@ AttackBotWindow < NxWindow
     font: verdana-11px-rounded
     visible: false
 
-  HorizontalSeparator
-    anchors.left: parent.left
-    anchors.right: parent.right
-    anchors.bottom: closeButton.top
-    margin-bottom: 10
-
   NxButton
     id: closeButton
     anchors.right: parent.right
@@ -538,3 +532,9 @@ AttackBotWindow < NxWindow
     size: 50 21
     font: cipsoftFont
     text: Settings
+
+  HorizontalSeparator
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: closeButton.top
+    margin-bottom: 10
