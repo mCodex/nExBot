@@ -91,7 +91,7 @@ PriorityEntry < UIWidget
   NxButton
     id: remove
     anchors.right: parent.right
-    margin-right: 2
+    margin-right: 18
     anchors.verticalCenter: parent.verticalCenter
     size: 14 14
     text: X
