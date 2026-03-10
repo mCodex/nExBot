@@ -175,7 +175,7 @@ local refreshContainerList
 
 UI.Separator()
 local containerUI = setupUI([[
-Panel
+NxBotSection
   height: 128
 
   Label

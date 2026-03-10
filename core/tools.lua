@@ -104,8 +104,8 @@ local exchangeMoneyMacro = macro(200, function()
 end)
 
 local exchangeMoneyUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title
@@ -424,8 +424,8 @@ end)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 local autoLevitateUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: autoLevitateToggle
@@ -534,8 +534,8 @@ local autoHasteMacro = macro(500, function()
 end)
 
 local autoHasteUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title
@@ -609,8 +609,8 @@ local autoMountMacro = macro(500, function()
 end)
 
 local autoMountUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title
@@ -701,8 +701,8 @@ local function autoRandomOutfitLoop()
 end
 
 local autoRandomOutfitUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title
@@ -903,8 +903,8 @@ end)
 
 -- Fishing UI Switch (same pattern as Dropper)
 local fishingUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title
@@ -1992,8 +1992,8 @@ end)
 
 -- Follow while attacking toggle
 local followWhileAttackingUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: followWhileAttackingToggle
@@ -2014,8 +2014,8 @@ followWhileAttackingUI.followWhileAttackingToggle.onClick = function(widget)
 end
 
 local followToggleUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: followPlayerToggle
@@ -2145,8 +2145,8 @@ local manaTrainingMacro = macro(500, function()
 end)
 
 local manaTrainingUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title

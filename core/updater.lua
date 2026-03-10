@@ -456,8 +456,8 @@ local function createUpdaterUI()
   setDefaultTab("Main")
 
   _ui = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: autoCheck
@@ -474,7 +474,7 @@ Panel
     anchors.left: prev.right
     anchors.right: parent.right
     margin-left: 4
-    height: 20
+    height: 28
     text: Check
 ]])
   _ui:setId("nExBotUpdater")

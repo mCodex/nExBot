@@ -24,8 +24,8 @@ end
 
 -- script by kondrah, refactored with NxSwitch UI
 setupUI([[
-Panel
-  height: 16
+NxBotSection
+  height: 24
   margin-top: 10
 
   NxHeading

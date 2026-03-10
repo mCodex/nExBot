@@ -114,8 +114,8 @@ end
 local antiRsEnabled = false
 
 local antiRsUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title

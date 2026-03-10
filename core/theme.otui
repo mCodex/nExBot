@@ -194,7 +194,7 @@ NxButtonDanger < Button
 NxSwitch < BotSwitch
   height: 22
   font: verdana-11px-rounded
-  margin-top: 5
+
   text-align: center
   image-source: /images/ui/button
   image-clip: 0 0 22 22

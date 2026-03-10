@@ -167,8 +167,8 @@ end
 
 -- Food Management heading
 setupUI([[
-Panel
-  height: 16
+NxBotSection
+  height: 24
   margin-top: 10
 
   NxHeading
@@ -208,8 +208,8 @@ if canUseFoodSpell() then
   end)
 
   local castFoodUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title
@@ -360,8 +360,8 @@ else
 end
 
 local eatFoodUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title

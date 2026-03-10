@@ -222,8 +222,8 @@ local blue = "#7ef9ff"
 setDefaultTab("HP")
 -- healPanelName already defined at top of file
 local ui = setupUI([[
-Panel
-  height: 38
+NxBotSection
+  height: 46
   margin-top: 4
 
   NxSwitch

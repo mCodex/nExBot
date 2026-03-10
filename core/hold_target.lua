@@ -62,8 +62,8 @@ else
 end
 
 local holdTargetUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title

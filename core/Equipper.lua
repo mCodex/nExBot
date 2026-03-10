@@ -15,8 +15,8 @@ end
 -- ============================================================================
 
 local ui = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
   margin-top: 4
 
   NxSwitch
@@ -33,7 +33,7 @@ Panel
     anchors.left: prev.right
     anchors.right: parent.right
     margin-left: 4
-    height: 20
+    height: 28
     text: Setup
 ]])
 ui:setId(panelName)

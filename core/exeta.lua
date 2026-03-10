@@ -5,8 +5,8 @@ if voc == 1 or voc == 11 then
     local exetaLowHpEnabled = false
 
     local exetaLowHpUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title
@@ -92,8 +92,8 @@ Panel
     local exetaIfPlayerEnabled = false
 
     local exetaIfPlayerUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title
@@ -130,8 +130,8 @@ Panel
     local exetaAmpEnabled = false
 
     local exetaAmpUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title

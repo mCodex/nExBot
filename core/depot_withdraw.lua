@@ -96,8 +96,8 @@ else
 end
 
 local depotWithdrawUI = setupUI([[
-Panel
-  height: 20
+NxBotSection
+  height: 28
 
   NxSwitch
     id: title
