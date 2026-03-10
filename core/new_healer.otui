@@ -67,16 +67,18 @@ HealerPlayerEntry < NxLabel
     text: X
     tooltip: Remove player from the list
 
-PriorityEntry < ToolTipLabel
+PriorityEntry < UIWidget
   background-color: alpha
-  text-offset: 18 1
   focusable: true
   height: 16
-  font: verdana-11px-rounded
-  text-align: left
 
   $focus:
     background-color: #3be4d033
+
+  @onSetup: |
+    self.setText = function(self, text) self.spellName:setText(text) end
+    self.getText = function(self) return self.spellName:getText() end
+    self.setTooltip = function(self, text) self.spellName:setTooltip(text) end
 
   NxCheckBox
     id: enabled
@@ -113,6 +115,17 @@ PriorityEntry < ToolTipLabel
     size: 14 14
     text: -
     tooltip: Decrease Priority
+
+  NxLabel
+    id: spellName
+    phantom: true
+    anchors.left: enabled.right
+    anchors.right: decrement.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-left: 5
+    margin-right: 3
+    font: verdana-11px-rounded
+    text-align: left
 
 TargetSettings < NxBotSection
   size: 310 160
