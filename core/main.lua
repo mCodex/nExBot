@@ -17,79 +17,112 @@ if not storage.window_settings then
   storage.window_settings = {}
 end
 
-local windowSection = setupUI([[
-NxBotSection
-  height: 50
-  
-  ToolTipLabel
-    text-align: center
-    text: Window Settings (Left Panel)
-    font: verdana-11px-rounded
-    color: #3be4d0
+g_ui.loadUIFromString([[
+WindowSettingsWindow < NxWindow
+  !text: tr('Window Settings')
+  size: 260 170
+  padding: 15
+
+  Label
+    id: descLabel
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
+    text-wrap: true
+    text-auto-resize: true
+    text: Configure the left panel dimensions below. These settings will override the default client layout and persist automatically.
+    margin-top: 5
 
   Label
-    text: Width:
+    text: Panel Width:
     font: verdana-11px-rounded
     anchors.top: prev.bottom
     anchors.left: parent.left
-    margin-top: 8
-    width: 40
+    margin-top: 15
+    width: 80
 
   NxTextInput
     id: widthInput
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
-    width: 40
-    margin-left: 2
+    anchors.right: parent.right
+    margin-left: 5
     
   Label
-    text: Height:
+    text: Panel Height:
     font: verdana-11px-rounded
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 10
-    width: 45
+    anchors.top: prev.bottom
+    anchors.left: parent.left
+    margin-top: 12
+    width: 80
 
   NxTextInput
     id: heightInput
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
-    width: 40
-    margin-left: 2
+    anchors.right: parent.right
+    margin-left: 5
+
+  NxButton
+    id: closeButton
+    !text: tr('Close')
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    size: 45 21
 ]])
 
-if windowSection then
-  local leftPanel = modules.game_interface and modules.game_interface.getLeftPanel and modules.game_interface.getLeftPanel()
-  
-  local storedW = storage.window_settings.leftWidth or (leftPanel and leftPanel:getWidth()) or 260
-  local storedH = storage.window_settings.leftHeight or (leftPanel and leftPanel:getHeight()) or 600
-  
-  if leftPanel then
-    if storage.window_settings.leftWidth then leftPanel:setWidth(storage.window_settings.leftWidth) end
-    if storage.window_settings.leftHeight then leftPanel:setHeight(storage.window_settings.leftHeight) end
-  end
+local windowSettingsWindow = nil
 
-  windowSection.widthInput:setText(tostring(storedW))
-  windowSection.heightInput:setText(tostring(storedH))
-
-  windowSection.widthInput.onTextChange = function(widget, text)
-    local val = tonumber(text)
-    if val and val > 0 then
-      storage.window_settings.leftWidth = val
-      if leftPanel then leftPanel:setWidth(val) end
+local function showWindowSettings()
+  if not windowSettingsWindow then
+    windowSettingsWindow = UI.createWindow('WindowSettingsWindow')
+    if not windowSettingsWindow then return end
+    
+    windowSettingsWindow:hide()
+    
+    windowSettingsWindow.closeButton.onClick = function(widget)
+      windowSettingsWindow:hide()
+    end
+    
+    local leftPanel = modules.game_interface and modules.game_interface.getLeftPanel and modules.game_interface.getLeftPanel()
+    
+    local storedW = storage.window_settings.leftWidth or (leftPanel and leftPanel:getWidth()) or 260
+    local storedH = storage.window_settings.leftHeight or (leftPanel and leftPanel:getHeight()) or 600
+    
+    windowSettingsWindow.widthInput:setText(tostring(storedW))
+    windowSettingsWindow.heightInput:setText(tostring(storedH))
+    
+    windowSettingsWindow.widthInput.onTextChange = function(widget, text)
+      local val = tonumber(text)
+      if val and val > 0 then
+        storage.window_settings.leftWidth = val
+        if leftPanel then leftPanel:setWidth(val) end
+      end
+    end
+    
+    windowSettingsWindow.heightInput.onTextChange = function(widget, text)
+      local val = tonumber(text)
+      if val and val > 0 then
+        storage.window_settings.leftHeight = val
+        if leftPanel then leftPanel:setHeight(val) end
+      end
     end
   end
-
-  windowSection.heightInput.onTextChange = function(widget, text)
-    local val = tonumber(text)
-    if val and val > 0 then
-      storage.window_settings.leftHeight = val
-      if leftPanel then leftPanel:setHeight(val) end
-    end
-  end
+  
+  windowSettingsWindow:show()
+  windowSettingsWindow:raise()
+  windowSettingsWindow:focus()
 end
 
+UI.Button("Window Settings", function()
+  showWindowSettings()
+end)
+
 UI.Separator()
+
+-- Apply settings to panel on load if available
+local leftPanel = modules.game_interface and modules.game_interface.getLeftPanel and modules.game_interface.getLeftPanel()
+if leftPanel then
+  if storage.window_settings.leftWidth then leftPanel:setWidth(storage.window_settings.leftWidth) end
+  if storage.window_settings.leftHeight then leftPanel:setHeight(storage.window_settings.leftHeight) end
+end
