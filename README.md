@@ -1,6 +1,6 @@
 # nExBot
 
-![Version](https://img.shields.io/badge/version-3.4.0-blue)
+![Version](https://img.shields.io/badge/version-4.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Lua](https://img.shields.io/badge/Lua-5.1-purple)
 
