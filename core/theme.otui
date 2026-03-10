@@ -139,19 +139,30 @@ NxLabelMuted < Label
 -- CONTROLS — extend native widgets with consistent sizing/colors
 -- ============================================================================
 
-NxButton < Button
-  font: cipsoftFont
+NxButton < UIButton
+  font: verdana-11px-rounded
   color: #f5f7ff
   height: 22
   min-width: 32
   text-align: center
-  image-source: /images/ui/button
-  image-clip: 0 0 22 22
-  image-border: 3
+  image-source: ~
+  background-color: #1b2235
+  border-width: 1
+  border-color: #050712
   
   $hover !disabled:
-    image-color: #3be4d055
+    background-color: #2c3652
     color: #3be4d0
+
+  $pressed !disabled:
+    background-color: #3be4d033
+    border-color: #3be4d088
+    color: #3be4d0
+
+  $disabled:
+    color: #dfdfdf88
+    background-color: #0b0f1e
+
 
   $pressed !disabled:
     image-color: #3be4d099
@@ -204,9 +215,28 @@ NxButtonDanger < Button
     border-width: 1
     border-color: #3be4d0
 
-NxSwitch < BotSwitch
+NxSwitch < CheckBox
   height: 22
   font: verdana-11px-rounded
+  text-align: center
+  image-source: ~
+  background-color: #0b0f1e
+  
+  $hover !disabled:
+    background-color: #1b2235
+
+  $on:
+    color: #3be4d0
+    background-color: #3be4d01a
+    border-width: 1
+    border-color: #3be4d088
+
+  $!on:
+    color: #a4aece
+    background-color: #1b2235
+    border-width: 1
+    border-color: #050712
+
 
   text-align: center
   image-source: /images/ui/button
