@@ -287,7 +287,7 @@ NxListEntryCheckable < Label
   color: #f5f7ff
   text-align: left
 
-  CheckBox
+  NxCheckBox
     id: enabled
     anchors.left: parent.left
     anchors.verticalCenter: parent.verticalCenter
@@ -399,7 +399,7 @@ NxConditionRow < Panel
     margin-left: 4
     width: 44
 
-  CheckBox
+  NxCheckBox
     id: toggle
     anchors.verticalCenter: parent.verticalCenter
     anchors.right: parent.right

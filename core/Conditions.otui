@@ -131,7 +131,7 @@ HoldConditions < NxPanel
     margin-left: 10
     width: 100
 
-  CheckBox
+  NxCheckBox
     id: IgnoreInPz
     anchors.left: parent.left
     anchors.top: uturaSpellLabel.bottom
@@ -139,7 +139,7 @@ HoldConditions < NxPanel
     margin-left: 5
     font: verdana-11px-rounded
 
-  Label
+  NxLabel
     anchors.verticalCenter: IgnoreInPz.verticalCenter
     anchors.left: IgnoreInPz.right
     margin-top: 3
@@ -147,13 +147,13 @@ HoldConditions < NxPanel
     text: Don't Cast in Protection Zones
     font: cipsoftFont
 
-  CheckBox
+  NxCheckBox
     id: StopHaste
     anchors.horizontalCenter: IgnoreInPz.horizontalCenter
     anchors.top: IgnoreInPz.bottom
     margin-top: 8
 
-  Label
+  NxLabel
     anchors.verticalCenter: StopHaste.verticalCenter
     anchors.left: StopHaste.right
     margin-top: 3

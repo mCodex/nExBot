@@ -53,7 +53,7 @@ SearchPanel < TextEdit
 TrackerItem < Panel
   height: 40
 
-  BotItem
+  NxItem
     id: item
     anchors.top: parent.top
     margin-top: 2
@@ -430,13 +430,13 @@ FeaturesWindow < NxWindow
     step: 14
     pixels-scroll: true
 
-  BotItem
+  NxItem
     id: ID
     anchors.left: CustomPrices.left
     anchors.top: CustomPrices.bottom
     margin-top: 5
 
-  SpinBox
+  NxSpinBox
     id: NewPrice
     anchors.left: prev.right
     margin-left: 5
