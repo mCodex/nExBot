@@ -119,7 +119,7 @@ end
 
 local topSection = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxButton
     id: settingsBtn
@@ -128,7 +128,7 @@ NxBotSection
     anchors.left: parent.left
     anchors.right: parent.horizontalCenter
     margin-right: 2
-    height: 22
+    height: 20
 
   NxButton
     id: docsBtn
@@ -137,7 +137,7 @@ NxBotSection
     anchors.left: parent.horizontalCenter
     anchors.right: parent.right
     margin-left: 2
-    height: 22
+    height: 20
 ]])
 
 topSection.settingsBtn.onClick = function()

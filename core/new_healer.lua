@@ -16,7 +16,7 @@ setDefaultTab("Main")
 local panelName = "newHealer"
 local ui = setupUI([[
 NxBotSection
-  height: 28
+  height: 30
 
   NxSwitch
     id: title
@@ -33,7 +33,7 @@ NxBotSection
     anchors.top: parent.top
     anchors.right: parent.right
     width: 46
-    height: 28
+    height: 20
     text: Setup
       
 ]])
