@@ -10,16 +10,16 @@ NxBotSection
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
-    width: 130
+    anchors.right: parent.right
+    margin-right: 50
     margin-top: 0
     !text: tr('Alarms')
 
   NxButton
     id: alerts
     anchors.top: parent.top
-    anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 4
+    width: 46
     height: 28
     text: Edit
 

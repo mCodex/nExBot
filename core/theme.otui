@@ -30,6 +30,7 @@
 
 BotSwitch < CheckBox
   height: 20
+  text-offset: 0 0
   font: verdana-11px-rounded
   text-align: center
   image-source: ~
@@ -257,6 +258,7 @@ NxButtonDanger < UIButton
 
 NxSwitch < CheckBox
   height: 20
+  text-offset: 0 0
   font: verdana-11px-rounded
   text-align: center
   image-source: ~

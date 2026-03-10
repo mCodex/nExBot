@@ -117,7 +117,30 @@ local addScrollBar = function(id, title, min, max, defaultValue, dest, tooltip)
   widget.scroll.onValueChange(widget.scroll, widget.scroll:getValue())
 end
 
-UI.Button("nExBot Settings and Scripts", function()
+local topSection = setupUI([[
+NxBotSection
+  height: 28
+
+  NxButton
+    id: settingsBtn
+    text: Bot Settings
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.horizontalCenter
+    margin-right: 2
+    height: 22
+
+  NxButton
+    id: docsBtn
+    text: Docs
+    anchors.top: parent.top
+    anchors.left: parent.horizontalCenter
+    anchors.right: parent.right
+    margin-left: 2
+    height: 22
+]])
+
+topSection.settingsBtn.onClick = function()
   if not extrasWindow then
     warn("[nExBot] extrasWindow is nil — attempting to recreate")
     local ok, w = pcall(UI.createWindow, 'ExtrasWindow')
@@ -132,15 +155,12 @@ UI.Button("nExBot Settings and Scripts", function()
   extrasWindow:show()
   extrasWindow:raise()
   extrasWindow:focus()
-end)
-
--- Documentation Button - Opens docs
-local docBtn = UI.Button("Documentation", function()
-  g_platform.openUrl("https://nexbot.cc/docs")
-end)
-if docBtn then
-  docBtn:setTooltip("Opens nExBot documentation.\nContains guides for CaveBot, TargetBot, HealBot, and more.")
 end
+
+topSection.docsBtn.onClick = function()
+  g_platform.openUrl("https://nexbot.cc/docs")
+end
+topSection.docsBtn:setTooltip("Opens nExBot documentation.\nContains guides for CaveBot, TargetBot, HealBot, and more.")
 
 UI.Separator()
 

@@ -24,15 +24,15 @@ NxBotSection
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
-    width: 130
+    anchors.right: parent.right
+    margin-right: 50
     !text: tr('EQ Manager')
 
   NxButton
     id: setup
     anchors.top: parent.top
-    anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 4
+    width: 46
     height: 28
     text: Setup
 ]])

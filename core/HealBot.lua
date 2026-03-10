@@ -231,15 +231,15 @@ NxBotSection
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
-    width: 130
+    anchors.right: parent.right
+    margin-right: 50
     !text: tr('HealBot')
 
   NxButton
     id: settings
     anchors.top: prev.top
-    anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 3
+    width: 46
     height: 17
     text: Setup
 

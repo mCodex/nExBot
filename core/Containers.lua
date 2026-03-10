@@ -191,7 +191,8 @@ NxBotSection
     !text: tr('Auto Open')
     anchors.top: prev.bottom
     anchors.left: parent.left
-    width: 90
+    anchors.right: parent.horizontalCenter
+    margin-right: 2
     margin-top: 4
     text-align: center
     font: verdana-11px-rounded
@@ -200,9 +201,9 @@ NxBotSection
     id: setupBtn
     !text: tr('Setup')
     anchors.top: prev.top
-    anchors.left: prev.right
+    anchors.left: parent.horizontalCenter
     anchors.right: parent.right
-    margin-left: 4
+    margin-left: 2
     height: 20
     font: verdana-11px-rounded
 
@@ -231,7 +232,8 @@ NxBotSection
     !text: tr('Minimize All')
     anchors.top: prev.bottom
     anchors.left: parent.left
-    width: 90
+    anchors.right: parent.horizontalCenter
+    margin-right: 2
     margin-top: 2
     height: 20
     font: verdana-11px-rounded
@@ -240,9 +242,9 @@ NxBotSection
     id: maximizeAll
     !text: tr('Maximize All')
     anchors.top: prev.top
-    anchors.left: prev.right
+    anchors.left: parent.horizontalCenter
     anchors.right: parent.right
-    margin-left: 4
+    margin-left: 2
     height: 20
     font: verdana-11px-rounded
 
@@ -250,7 +252,8 @@ NxBotSection
     id: purseSwitch
     anchors.top: minimizeAll.bottom
     anchors.left: parent.left
-    width: 90
+    anchors.right: parent.horizontalCenter
+    margin-right: 2
     margin-top: 4
     text-align: center
     !text: tr('Open Purse')
