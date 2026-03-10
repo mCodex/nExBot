@@ -616,8 +616,14 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   -- player through waypoints without stopping — arrival is detected by the
   -- hasPassedWaypoint() check above (fires every 150ms during walk).
   -- Floor-change waypoints bypass lookahead: they require exact tile precision.
+  -- Use Pure Pursuit lookahead only on clean (retry=0) attempts.
+  -- The lookahead is a geometric interpolation and may land on impassable tiles;
+  -- when blocked (retries > 0) fall back to destPos so progressive escalation
+  -- (ignoreCreatures, ignoreFields, attack blocker) works against a guaranteed-
+  -- walkable recorded position.
   local walkTarget = destPos
-  if not isFloorChange
+  if retries == 0
+      and not isFloorChange
       and WaypointNavigator
       and type(WaypointNavigator.isRouteBuilt) == "function"
       and WaypointNavigator.isRouteBuilt()
