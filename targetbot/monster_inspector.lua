@@ -144,7 +144,7 @@ local function buildLiveTab()
   local count = 0
   for _ in pairs(live) do count = count + 1 end
 
-  table.insert(lines, string.format("Live Tracker — %d creature(s)", count))
+  table.insert(lines, string.format("Live Tracker - %d creature(s)", count))
   table.insert(lines, "")
 
   if count == 0 then
@@ -168,7 +168,7 @@ local function buildLiveTab()
       end)
     end
     if #nearby > 0 then
-      table.insert(lines, string.format("  %d nearby (TargetBot off — enable for full tracking):", #nearby))
+      table.insert(lines, string.format("  %d nearby (TargetBot off - enable for full tracking):", #nearby))
       table.insert(lines, "")
       local seen = {}
       for _, name in ipairs(nearby) do
@@ -237,7 +237,7 @@ local function buildPatternsTab()
   local count    = 0
   for _ in pairs(patterns) do count = count + 1 end
 
-  table.insert(lines, string.format("Learned Patterns — %d monster type(s)", count))
+  table.insert(lines, string.format("Learned Patterns - %d monster type(s)", count))
   table.insert(lines, "")
 
   if count == 0 then
