@@ -353,15 +353,19 @@ CaveBot.walkTo = function(dest, maxDist, params)
     local manhattan = distX + distY
 
     if manhattan <= 3 then
-      -- Close: precise keyboard steps
+      -- Close: precise keyboard steps.  Prefer the raw pathfinder direction
+      -- (precision=0 must land on the exact tile); fall back to smoothed only
+      -- when the raw direction is blocked (creature, pushable).
       local fcPath = PS().findPath(playerPos, dest, {ignoreNonPathable = true, precision = 0})
       if fcPath and #fcPath > 0 then
         local dir = fcPath[1]
-        local smoothed = PS().smoothDirection(dir, true) or dir
-        if canWalkDirection(smoothed) then
-          PS().walkStep(smoothed)
-        elseif canWalkDirection(dir) then
+        if canWalkDirection(dir) then
           PS().walkStep(dir)
+        else
+          local smoothed = PS().smoothDirection(dir, true) or dir
+          if smoothed ~= dir and canWalkDirection(smoothed) then
+            PS().walkStep(smoothed)
+          end
         end
       end
       return true
