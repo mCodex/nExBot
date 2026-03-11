@@ -242,8 +242,17 @@ local function buildPatternsTab()
 
   if count == 0 then
     table.insert(lines, "  No patterns yet.")
-    table.insert(lines, "  Patterns are learned after observing 2+ wave attacks")
-    table.insert(lines, "  from the same monster type.")
+    table.insert(lines, "")
+    -- Diagnostic hints
+    local trackerCount = 0
+    if MonsterAI and MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+      for _ in pairs(MonsterAI.Tracker.monsters) do trackerCount = trackerCount + 1 end
+    end
+    local tbOn = TargetBot and TargetBot.isOn and TargetBot.isOn()
+    table.insert(lines, string.format("  Tracker: %d monster(s)   TargetBot: %s",
+      trackerCount, tbOn and "ON" or "OFF"))
+    table.insert(lines, "  Patterns are learned from missile attacks after 2+")
+    table.insert(lines, "  observations per monster type.")
     return table.concat(lines, "\n")
   end
 
@@ -283,13 +292,13 @@ local function buildStatsTab()
   if MonsterAI and MonsterAI.Telemetry and MonsterAI.Telemetry.session then
     local s   = MonsterAI.Telemetry.session
     local dur = ((now or 0) - (s.startTime or 0)) / 1000
-    table.insert(lines, "── Session ─────────────────────────────────────")
+    table.insert(lines, "-- Session " .. string.rep("-", 36))
     table.insert(lines, string.format("  Kills: %d   Deaths: %d   Duration: %.0fs   Tracked: %d",
       s.killCount or 0, s.deathCount or 0, dur, s.totalMonstersTracked or 0))
   end
 
   table.insert(lines, "")
-  table.insert(lines, "── Combat ──────────────────────────────────────")
+  table.insert(lines, "-- Combat " .. string.rep("-", 37))
   table.insert(lines, string.format("  Damage Received: %d   Waves: %d   Area: %d",
     stats.totalDamageReceived or 0, stats.waveAttacksObserved or 0, stats.areaAttacksObserved or 0))
 
@@ -305,7 +314,7 @@ local function buildStatsTab()
     local ok, ps = pcall(MonsterAI.getPredictionStats)
     if ok and ps then
       table.insert(lines, "")
-      table.insert(lines, "── Predictions ─────────────────────────────────")
+      table.insert(lines, "-- Predictions " .. string.rep("-", 32))
       table.insert(lines, string.format("  Events: %d   Correct: %d   Missed: %d   Acc: %.1f%%",
         ps.eventsProcessed or 0, ps.predictionsCorrect or 0,
         ps.predictionsMissed or 0, (ps.accuracy or 0) * 100))
@@ -322,7 +331,7 @@ local function buildStatsTab()
     local ok, sts = pcall(function() return st.getStats and st.getStats() or {} end)
     sts = ok and sts or {}
     table.insert(lines, "")
-    table.insert(lines, "── SpellTracker ─────────────────────────────────")
+    table.insert(lines, "-- SpellTracker " .. string.rep("-", 31))
     table.insert(lines, string.format("  Total: %d   /min: %.1f   Types: %d",
       sts.totalSpellsCast or 0, sts.spellsPerMinute or 0, sts.uniqueMissileTypes or 0))
 
@@ -351,7 +360,7 @@ local function buildStatsTab()
     local ok, t = pcall(MonsterAI.getImmediateThreat)
     if ok and t then
       table.insert(lines, "")
-      table.insert(lines, "── Threat ───────────────────────────────────────")
+      table.insert(lines, "-- Threat " .. string.rep("-", 37))
       table.insert(lines, string.format("  Status: %s   Level: %.1f   High-Threat: %d",
         t.immediateThreat and "DANGER!" or "Safe",
         t.totalThreat or 0, t.highThreatCount or 0))
@@ -370,7 +379,7 @@ local function buildScenarioTab()
     end)
     sc = ok and sc or {}
     local cfg = sc.config or {}
-    table.insert(lines, "── Scenario ─────────────────────────────────────")
+    table.insert(lines, "-- Scenario " .. string.rep("-", 35))
     local desc = cfg.description and (" (" .. cfg.description .. ")") or ""
     table.insert(lines, string.format("  Type: %s%s",
       (sc.currentScenario or "unknown"):upper(), desc))
@@ -396,7 +405,7 @@ local function buildScenarioTab()
     end)
     rs = ok and rs or {}
     table.insert(lines, "")
-    table.insert(lines, "── Reachability ─────────────────────────────────")
+    table.insert(lines, "-- Reachability " .. string.rep("-", 31))
     local hitRate = (rs.checksPerformed or 0) > 0
       and (rs.cacheHits or 0) / ((rs.checksPerformed or 0) + (rs.cacheHits or 0)) * 100 or 0
     table.insert(lines, string.format("  Checks: %d   Cache Hit: %.0f%%   Blocked: %d   Reachable: %d",
@@ -415,7 +424,7 @@ local function buildScenarioTab()
     if ok and danger then
       threats = threats or {}
       table.insert(lines, "")
-      table.insert(lines, "── Danger ───────────────────────────────────────")
+      table.insert(lines, "-- Danger " .. string.rep("-", 37))
       table.insert(lines, string.format("  Level: %.1f/10   Active Threats: %d", danger, #threats))
       for i = 1, math.min(5, #threats) do
         local t = threats[i]

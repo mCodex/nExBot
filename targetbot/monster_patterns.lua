@@ -81,8 +81,9 @@ end
 -- Persist partial updates to a known monster pattern
 -- Also runs decay at persist-time for patterns older than 7 days
 function MonsterAI.Patterns.persist(monsterName, updates)
-  if not monsterName then return end
+  if not monsterName or monsterName == "" then return end
   local name = monsterName:lower()
+  if name == "" or name == "unknown" then return end
   MonsterAI.Patterns.knownMonsters[name] = MonsterAI.Patterns.knownMonsters[name] or {}
   for k, v in pairs(updates) do
     MonsterAI.Patterns.knownMonsters[name][k] = v

@@ -1337,6 +1337,13 @@ if EventBus then
       if score and score > bestScore then bestScore, bestData, bestMonster = score, data, m end
     end
 
+    -- Track the best monster if it wasn't already tracked (monster:appear may have been missed)
+    if bestScore and bestScore > CONST.DAMAGE.CORRELATION_THRESHOLD and bestMonster and not bestData then
+      MonsterAI.Tracker.track(bestMonster)
+      local bid = safeGetId(bestMonster)
+      bestData = bid and MonsterAI.Tracker.monsters[bid]
+    end
+
     if bestScore and bestScore > CONST.DAMAGE.CORRELATION_THRESHOLD and bestData then
       -- Attribute this damage
       bestData.lastDamageTime = nowt
@@ -1401,24 +1408,38 @@ if EventBus then
       
       if not srcPos or not destPos then return end
       
-      -- Get the source tile and find creatures on it
+      -- Find the monster that fired (check source tile first, then nearby tiles as fallback)
       local Client = getClient()
       local srcTile = (Client and Client.getTile) and Client.getTile(srcPos) or (g_map and g_map.getTile and g_map.getTile(srcPos))
-      if not srcTile then return end
-      
-      local creatures = srcTile:getCreatures()
-      if not creatures or #creatures == 0 then return end
-      
-      -- Find a monster on the source tile (the caster)
       local src = nil
-      for i = 1, #creatures do
-        local c = creatures[i]
-        if c and safeIsMonster(c) and not safeIsDead(c) then
-          src = c
-          break
+
+      if srcTile then
+        local creatures = srcTile:getCreatures()
+        if creatures then
+          for i = 1, #creatures do
+            local c = creatures[i]
+            if c and safeIsMonster(c) and not safeIsDead(c) then
+              src = c; break
+            end
+          end
         end
       end
-      
+
+      -- Fallback: monster may have moved off the source tile between firing and callback
+      if not src then
+        local specs = g_map and g_map.getSpectatorsInRange and g_map.getSpectatorsInRange(srcPos, false, 2, 2) or {}
+        local bestDist = math.huge
+        for _, c in ipairs(specs) do
+          if safeIsMonster(c) and not safeIsDead(c) then
+            local cpos = safeCreatureCall(c, "getPosition", nil)
+            if cpos then
+              local d = math.max(math.abs(cpos.x - srcPos.x), math.abs(cpos.y - srcPos.y))
+              if d < bestDist then bestDist = d; src = c end
+            end
+          end
+        end
+      end
+
       if not src then return end
 
       local id = safeGetId(src)
