@@ -638,7 +638,13 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
         math.abs(lookahead.x - playerPos.x),
         math.abs(lookahead.y - playerPos.y)
       )
-      if lhDist >= 3 then
+      -- Reject floor-change tile as lookahead when the current WP is not a stair.
+      -- walkTo with allowFloorChange=false redirects away from stair tiles to an
+      -- adjacent tile, causing the bot to oscillate near the stair indefinitely
+      -- instead of advancing to the stair WP and using it properly.
+      local lookaheadIsStair = (FloorItems and FloorItems.isFloorChangeTile)
+        and FloorItems.isFloorChangeTile(lookahead)
+      if lhDist >= 3 and not lookaheadIsStair then
         walkTarget = lookahead
       end
     end
