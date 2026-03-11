@@ -734,22 +734,40 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if not buildWaypointCache then return end
 
   -- Z-LEVEL CHANGE: Must run BEFORE shouldSkipExecution so stale delays
-  -- from the old floor can't block rescue. All Z changes handled identically
-  -- (no intended/accidental distinction).
+  -- from the old floor can't block rescue.
   local playerPos = player and player:getPosition()
   if playerPos and lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
-    -- Clear ALL stale state from old floor
+    -- Determine whether this floor change was intentional (the focused WP is
+    -- already on the new floor, meaning goto navigated the stairs on purpose)
+    -- or accidental (player changed floor while targeting a different-floor WP).
+    local focusedChild = ui and ui.list and ui.list:getFocusedChild()
+    local focusedIdx   = focusedChild and ui.list:getChildIndex(focusedChild)
+    local focusedWp    = focusedIdx and waypointPositionCache[focusedIdx]
+    local intentional  = focusedWp and focusedWp.isGoto and focusedWp.z == playerPos.z
+
+    -- Always clear stale walk state regardless of intent
     walkState.delayUntil = 0
-    cavebotMacro.delay = nil
-    clearWaypointBlacklist()
+    cavebotMacro.delay   = nil
     safeResetWalking()
-    resetWaypointEngine()
-    -- Focus nearest same-Z goto WP (pure distance, no path validation)
-    local child, idx = findNearestSameFloorGoto(playerPos, playerPos.z, CaveBot.getMaxGotoDistance())
-    if child then
-      print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): focusing WP" .. idx)
-      focusWaypointForRecovery(child, idx)
+
+    if intentional then
+      -- Intentional stair use: the current WP is already on this floor.
+      -- Don't refocus — let the goto action complete normally.
+      -- Clear blacklists so fresh state on new floor, but keep engine in NORMAL.
+      clearWaypointBlacklist()
+      WaypointEngine.failureCount = 0
+      print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): intentional, continuing WP" .. (focusedIdx or "?"))
+    else
+      -- Accidental floor change: reset fully and snap to nearest same-floor WP.
+      clearWaypointBlacklist()
+      resetWaypointEngine()
+      local child, idx = findNearestSameFloorGoto(playerPos, playerPos.z, CaveBot.getMaxGotoDistance())
+      if child then
+        print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): accidental, focusing WP" .. idx)
+        focusWaypointForRecovery(child, idx)
+      end
     end
+
     lastPlayerFloor = playerPos.z
     return  -- Consume this tick for the Z transition
   end
@@ -1043,15 +1061,30 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   
   local nextChild = uiList:getChildByIndex(nextIndex)
   if nextChild then
-    -- Skip blacklisted waypoints AND floor-mismatched goto WPs (e.g. rescue
-    -- waypoints on a different floor that should only activate if the player
-    -- accidentally changes floors — never advance to them during normal routing).
+    -- Skip blacklisted WPs, and floor-mismatched WPs only when they form a
+    -- *trailing rescue block* — i.e. from this WP to the end of the list there
+    -- are no same-floor WPs (Banuta-style rescue WPs appended at end of route).
+    -- Intentional multi-floor routes (Wyrm-style) always have same-floor WPs
+    -- further ahead and are therefore NOT skipped.
+    local function isTrailingRescueBlock(startIdx)
+      if not playerPos then return false end
+      for i = startIdx + 1, actionCount do
+        local wp = waypointPositionCache[i]
+        if wp and wp.isGoto and wp.z == playerPos.z then
+          return false  -- same-floor WP exists ahead → intentional transition
+        end
+      end
+      return true  -- no same-floor WP until end of route → rescue block
+    end
+
     local function shouldSkipNext(child)
       if isWaypointBlacklisted(child) then return true end
       if child.action == "goto" and playerPos then
         local idx2 = uiList:getChildIndex(child)
         local wp2 = waypointPositionCache[idx2]
-        if wp2 and wp2.z ~= playerPos.z then return true end
+        if wp2 and wp2.z ~= playerPos.z then
+          return isTrailingRescueBlock(idx2)
+        end
       end
       return false
     end
