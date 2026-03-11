@@ -647,7 +647,7 @@ local function runWaypointEngine()
   return false
 end
 
--- Reset engine state
+-- Reset engine state (clears blacklists too — matches full-restart behavior)
 resetWaypointEngine = function()
   WaypointEngine.state = "NORMAL"
   WaypointEngine.failureCount = 0
@@ -659,6 +659,7 @@ resetWaypointEngine = function()
   WaypointEngine.wasTargetBotBlocking = false
   WaypointEngine.postCombatUntil = 0
   lastDispatchedChild = nil
+  clearWaypointBlacklist()
 end
 
 -- Cache TargetBot function references (avoid repeated table lookups)
@@ -913,7 +914,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       for _ = 1, actionCount do
         scanIdx = (scanIdx % actionCount) + 1
         local wp = waypointPositionCache[scanIdx]
-        if wp and wp.isGoto and wp.z == playerPos.z then
+        if wp and wp.isGoto and wp.z == playerPos.z and not isWaypointBlacklisted(wp.child) then
           focusWaypointForRecovery(wp.child, scanIdx)
           found = true
           break
