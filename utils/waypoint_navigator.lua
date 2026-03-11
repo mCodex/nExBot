@@ -208,13 +208,19 @@ function WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
     end
   end
 
-  -- Wrap-around segment (last -> first) if close enough
+  -- Wrap-around segment (last -> first) if close enough.
+  -- Skipped when the last goto is a floor-change tile: those routes are meant to
+  -- exit the floor via stairs/holes, not loop back.  Adding a wrap-around in
+  -- that case makes Pure Pursuit aim backwards (toward WP1) instead of forward
+  -- to the stair tile, causing the bot to spin on the current floor indefinitely.
   local last = gotos[#gotos]
   local first = gotos[1]
+  local lastIsStair = (FloorItems and FloorItems.isFloorChangeTile)
+    and FloorItems.isFloorChangeTile({ x = last.pos.x, y = last.pos.y, z = last.pos.z })
   local wrapDx = first.pos.x - last.pos.x
   local wrapDy = first.pos.y - last.pos.y
   local wrapLength = math.sqrt(wrapDx * wrapDx + wrapDy * wrapDy)
-  if wrapLength <= maxSegmentLength and wrapLength > 0 then
+  if not lastIsStair and wrapLength <= maxSegmentLength and wrapLength > 0 then
     route.segments[#route.segments + 1] = {
       fromPos = last.pos,
       toPos = first.pos,

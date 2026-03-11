@@ -743,7 +743,22 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     local focusedChild = ui and ui.list and ui.list:getFocusedChild()
     local focusedIdx   = focusedChild and ui.list:getChildIndex(focusedChild)
     local focusedWp    = focusedIdx and waypointPositionCache[focusedIdx]
+    -- Case 1: WP is already on the new floor (e.g. the goto navigated to a stair
+    -- tile whose destination is explicitly recorded with the new floor's z value).
     local intentional  = focusedWp and focusedWp.isGoto and focusedWp.z == playerPos.z
+
+    -- Case 2: Stair-triggered change — focused WP is a floor-change tile on the
+    -- OLD floor.  The goto walked the player onto a hole/ladder/rope and the
+    -- server teleported them to the adjacent floor.  This is intentional; using
+    -- findNearestSameFloorGoto here would snap to a WP *before* the stair
+    -- entrance and create an infinite loop (Wyrm / Banuta routes).
+    local stairUsed = false
+    if not intentional and focusedWp and focusedWp.isGoto and focusedWp.z == lastPlayerFloor then
+      local wpPos = { x = focusedWp.x, y = focusedWp.y, z = focusedWp.z }
+      if FloorItems and FloorItems.isFloorChangeTile then
+        stairUsed = FloorItems.isFloorChangeTile(wpPos)
+      end
+    end
 
     -- Always clear stale walk state regardless of intent
     walkState.delayUntil = 0
@@ -757,6 +772,14 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       clearWaypointBlacklist()
       WaypointEngine.failureCount = 0
       print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): intentional, continuing WP" .. (focusedIdx or "?"))
+    elseif stairUsed then
+      -- Stair tile on the old floor caused this change (goto-driven stair use).
+      -- Don't snap to nearest — the goto for this WP will instantFail (floor
+      -- mismatch) and the Z-mismatch guard will then advance to the next
+      -- same-floor goto naturally, preserving correct route order.
+      clearWaypointBlacklist()
+      WaypointEngine.failureCount = 0
+      print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): stair at WP" .. (focusedIdx or "?") .. ", advancing via Z-mismatch guard")
     else
       -- Accidental floor change: reset fully and snap to nearest same-floor WP.
       clearWaypointBlacklist()
