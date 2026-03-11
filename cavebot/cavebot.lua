@@ -328,7 +328,7 @@ WaypointEngine = {
   recoveryJustFocused = false,   -- suppress actionRetries reset after recovery focus
   lastRecoverySearch = 0,        -- throttle recovery searches (1/sec)
   recoveryStartedAt = 0,         -- when current recovery session began
-  RECOVERY_IDLE_TIMEOUT = 300000,-- 5 min: clear blacklists if completely stuck
+  RECOVERY_IDLE_TIMEOUT = 12000, -- 12s: clear blacklists if all WPs exhausted
 
   -- Drift detection: proactive refocus to nearest WP when player drifts too far
   -- NOTE: Corridor enforcement (WaypointNavigator) is now the primary drift detector.
