@@ -630,22 +630,31 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
       and type(WaypointNavigator.getLookaheadTarget) == "function" then
     local lookahead = WaypointNavigator.getLookaheadTarget(playerPos)
     if lookahead and lookahead.z == playerPos.z then
-      -- Reject degenerate lookahead: at route wrap-around the navigator can return
-      -- the last WP on the route (e.g. the start of the loop) which is already
-      -- behind the player, causing walkTo to return "arrived" immediately and
-      -- the bot to spin forever without actually walking to destPos.
       local lhDist = math.max(
         math.abs(lookahead.x - playerPos.x),
         math.abs(lookahead.y - playerPos.y)
       )
-      -- Reject floor-change tile as lookahead when the current WP is not a stair.
-      -- walkTo with allowFloorChange=false redirects away from stair tiles to an
-      -- adjacent tile, causing the bot to oscillate near the stair indefinitely
-      -- instead of advancing to the stair WP and using it properly.
-      local lookaheadIsStair = (FloorItems and FloorItems.isFloorChangeTile)
-        and FloorItems.isFloorChangeTile(lookahead)
-      if lhDist >= 3 and not lookaheadIsStair then
-        walkTarget = lookahead
+      if lhDist >= 3 then
+        -- Gate 1: reject floor-change tiles (walkTo redirects to adjacent tile
+        -- with allowFloorChange=false, causing oscillation near the stair).
+        local lookaheadIsStair = (FloorItems and FloorItems.isFloorChangeTile)
+          and FloorItems.isFloorChangeTile(lookahead)
+        -- Gate 2: reject unreachable targets behind walls.  The lookahead is a
+        -- geometric interpolation that ignores map topology; validate that A*
+        -- can actually find a path before committing.  Uses ignoreCreatures
+        -- (creatures are transient) and precision=1 (don't need exact tile).
+        local lookaheadReachable = true
+        if not lookaheadIsStair then
+          local lhPath = findPath(playerPos, lookahead, maxDist, {
+            ignoreNonPathable = true,
+            ignoreCreatures = true,
+            precision = 1,
+          })
+          lookaheadReachable = lhPath and #lhPath > 0
+        end
+        if not lookaheadIsStair and lookaheadReachable then
+          walkTarget = lookahead
+        end
       end
     end
   end
