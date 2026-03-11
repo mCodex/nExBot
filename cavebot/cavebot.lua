@@ -159,7 +159,9 @@ local function shouldSkipExecution()
         local elapsed = now - walkState.walkStartTime
         local HARD_TIMEOUT = 8000  -- 8 seconds absolute maximum
         local expectedDur = walkState.walkExpectedDuration or 5000  -- Fallback 5s if nil
-        local softTimeout = expectedDur * 1.5
+        -- Pure Pursuit lookahead targets may be close in straight-line but far in actual
+        -- winding-corridor path length. Use a floor of 5s to avoid premature timeout.
+        local softTimeout = math.max(expectedDur * 2.0, 5000)
         
         if elapsed > HARD_TIMEOUT or elapsed > softTimeout then
           -- Walking too long — stop and let macro recompute
@@ -188,8 +190,11 @@ local function shouldSkipExecution()
           if not walkState.minDist or curDist < walkState.minDist then
             walkState.minDist = curDist
           end
-          -- Scale regression tolerance: generous for U-shaped cave corridors
-          local tolerance = math.max(3, math.floor((walkState.walkStartDist or 20) * 0.6))
+          -- Pure Pursuit lookahead can be geometrically close (small Chebyshev) but
+          -- require a long winding path. Tolerance = max(startDist, 8) so regression
+          -- only fires when the player has gone FURTHER from the lookahead than they
+          -- started — a reliable signal that navigation truly went backward.
+          local tolerance = math.max(walkState.walkStartDist or 5, 8)
           if walkState.minDist and curDist > walkState.minDist + tolerance then
             -- Getting farther from closest point — stop and recompute
             if player.stopAutoWalk then
@@ -201,11 +206,13 @@ local function shouldSkipExecution()
             walkState.targetPos = nil
             return false
           end
-          -- Elapsed-progress check: if walking > 3s with zero distance decrease, stuck
-          -- Disabled for short walks (≤8 tiles) — the no-progress timer handles those
+          -- Elapsed-progress check: if walking > 6s with zero distance decrease, stuck.
+          -- 6s floor handles winding corridors where the player navigates away from the
+          -- lookahead before looping back around; HARD_TIMEOUT (8s) still catches true stucks.
+          -- Disabled for short walks (≤8 tiles) — the no-progress timer handles those.
           if walkState.walkStartTime and walkState.walkStartDist and (walkState.walkStartDist or 99) > 8 then
             local elapsed = now - walkState.walkStartTime
-            if elapsed > 3000 and curDist >= walkState.walkStartDist then
+            if elapsed > 6000 and curDist >= walkState.walkStartDist then
               if player.stopAutoWalk then
                 pcall(player.stopAutoWalk, player)
               end
