@@ -1680,14 +1680,282 @@ local function buildSummary()
 end
 
 -- ============================================================================
+-- TAB BUILDERS
+-- ============================================================================
+
+local function buildSessionTab()
+  local lines = {}
+  local m = analytics.metrics
+  local elapsed = getElapsed()
+  local metrics = calculateMetrics()
+  local levelInfo = Player.levelProgress()
+  local stamInfo = Player.staminaInfo()
+
+  table.insert(lines, string.format("Hunt Analyzer  —  %s", isSessionActive() and "ACTIVE" or "STOPPED"))
+  table.insert(lines, "")
+
+  addSection(lines, "SESSION", {
+    "Duration: " .. formatDuration(elapsed),
+    "Level: " .. levelInfo.level .. " (" .. string.format("%.1f%%", levelInfo.percent) .. ")"
+  })
+
+  local xpLines = {
+    "XP Gained: " .. formatNum(metrics.xpGained),
+    "XP/Hour: "  .. formatNum(math.floor(metrics.xpPerHour)),
+    "Progress/Hour: " .. string.format("%.2f%%", metrics.levelPercentPerHour)
+  }
+  local hoursToLevel = metrics.xpPerHour > 0 and levelInfo.xpRemaining / metrics.xpPerHour or 0
+  if hoursToLevel > 0 and hoursToLevel < 10000 then
+    table.insert(xpLines, "Time to Level: " .. string.format("%.1fh", hoursToLevel))
+  end
+  addSection(lines, "EXPERIENCE", xpLines)
+
+  addSection(lines, "COMBAT", {
+    "Kills: "       .. formatNum(m.kills) .. " (" .. formatNum(math.floor(metrics.killsPerHour)) .. "/h)",
+    "Damage Taken: " .. formatNum(m.damageTaken),
+    "Healing Done: " .. formatNum(m.healingDone),
+    "Deaths: " .. m.deathCount .. "   Near-Death: " .. m.nearDeathCount
+  })
+
+  addSection(lines, "STAMINA", (function()
+    local startStaminaMins = analytics.session and analytics.session.startStamina or 0
+    local staminaUsedMins  = math.max(0, startStaminaMins - stamInfo.minutes)
+    local usedStr
+    if staminaUsedMins > 0 then
+      local h = math.floor(staminaUsedMins / 60)
+      local mn = staminaUsedMins % 60
+      usedStr = h > 0 and string.format("%dh %dm", h, mn) or string.format("%dm", mn)
+    end
+    local sl = {
+      "Current: " .. string.format("%.2fh (%s)", stamInfo.hours, stamInfo.status),
+      "Session Start: " .. string.format("%.2fh", startStaminaMins / 60),
+    }
+    if usedStr then sl[#sl+1] = "Spent: " .. usedStr end
+    if stamInfo.greenRemaining > 0 then
+      sl[#sl+1] = "Green Left: " .. string.format("%.1fh", stamInfo.greenRemaining)
+    end
+    return sl
+  end)())
+
+  addSection(lines, "PLAYER", {
+    "Magic Level: " .. Player.mlevel(),
+    "Speed: "       .. Player.speed()
+  })
+
+  return table.concat(lines, "\n")
+end
+
+local function buildConsumptionTab()
+  local lines = {}
+  local m = analytics.metrics
+  local elapsed = getElapsed()
+  local metrics = calculateMetrics()
+
+  table.insert(lines, "Consumption  —  " .. formatDuration(elapsed))
+  table.insert(lines, "")
+
+  -- Spells
+  local spellList = {}
+  for name, data in pairs(analytics.spellsUsed or {}) do
+    spellList[#spellList+1] = {name=name, count=data.count or 0, mana=data.mana or 0, type=data.type or "other"}
+  end
+  table.sort(spellList, function(a,b) return a.count > b.count end)
+  local spellLines = {}
+  local totalSpells = (m.healSpellsCast or 0) + (m.attackSpellsCast or 0) + (m.supportSpellsCast or 0)
+  if totalSpells > 0 then
+    spellLines[1] = string.format("Total: %d (%.0f/h)  Mana: %s", totalSpells, perHour(totalSpells, elapsed), formatNum(m.manaSpent or 0))
+  end
+  for i = 1, math.min(10, #spellList) do
+    local sp = spellList[i]
+    local icon = sp.type == "heal" and "[H]" or sp.type == "attack" and "[A]" or "[S]"
+    spellLines[#spellLines+1] = string.format("%s %dx %s", icon, sp.count, sp.name)
+  end
+  if #spellList > 10 then spellLines[#spellLines+1] = string.format("... and %d more", #spellList - 10) end
+  if #spellLines == 0 then spellLines[1] = "No spells tracked yet" end
+  addSection(lines, "SPELLS USED", spellLines)
+
+  -- Potions
+  local potionList = {}
+  for name, count in pairs(analytics.potionsUsed or {}) do potionList[#potionList+1] = {name=name, count=count} end
+  table.sort(potionList, function(a,b) return a.count > b.count end)
+  local potionLines = {}
+  local totalPotions = m.potionsUsed or 0
+  if totalPotions > 0 then
+    potionLines[1] = string.format("Total: %d (%.0f/h)  HP: %d  MP: %d",
+      totalPotions, metrics.potionsPerHour or 0, m.healPotionsUsed or 0, m.manaPotionsUsed or 0)
+  end
+  for i = 1, math.min(8, #potionList) do
+    potionLines[#potionLines+1] = string.format("%dx %s", potionList[i].count, potionList[i].name)
+  end
+  if #potionList > 8 then potionLines[#potionLines+1] = string.format("... and %d more", #potionList - 8) end
+  if #potionLines == 0 then potionLines[1] = "No potions tracked yet" end
+  addSection(lines, "POTIONS USED", potionLines)
+
+  -- Runes
+  local runeList = {}
+  for name, count in pairs(analytics.runesUsed or {}) do
+    if count and count > 0 then runeList[#runeList+1] = {name=name, count=count} end
+  end
+  table.sort(runeList, function(a,b) return a.count > b.count end)
+  local runeLines = {}
+  local totalRunes = m.runesUsed or 0
+  if totalRunes > 0 then
+    runeLines[1] = string.format("Total: %d (%.0f/h)  Attack: %d  Heal: %d",
+      totalRunes, metrics.runesPerHour or 0, m.attackRunesUsed or 0, m.healRunesUsed or 0)
+  end
+  for i = 1, math.min(8, #runeList) do
+    runeLines[#runeLines+1] = string.format("%dx %s", runeList[i].count, runeList[i].name)
+  end
+  if #runeList > 8 then runeLines[#runeLines+1] = string.format("... and %d more", #runeList - 8) end
+  if #runeLines == 0 then runeLines[1] = "No runes tracked yet" end
+  addSection(lines, "RUNES USED", runeLines)
+
+  return table.concat(lines, "\n")
+end
+
+local function buildLootCombatTab()
+  local lines = {}
+  local m = analytics.metrics
+  local metrics = calculateMetrics()
+
+  table.insert(lines, "Loot & Combat")
+  table.insert(lines, "")
+
+  -- Monsters killed
+  local monsterList = {}
+  for name, count in pairs(analytics.monsters or {}) do monsterList[#monsterList+1] = {name=name, count=count} end
+  table.sort(monsterList, function(a,b) return a.count > b.count end)
+  local monLines = {}
+  for i = 1, math.min(10, #monsterList) do
+    monLines[#monLines+1] = string.format("%dx %s", monsterList[i].count, monsterList[i].name)
+  end
+  if #monsterList > 10 then monLines[#monLines+1] = string.format("... and %d more types", #monsterList - 10) end
+  if #monLines == 0 then monLines[1] = "No monsters killed yet" end
+  addSection(lines, "MONSTERS KILLED", monLines)
+
+  -- Loot
+  local lootLines = {
+    "Total Value: " .. formatNum(m.lootValue) .. " gp (" .. formatNum(math.floor(metrics.lootValuePerHour)) .. "/h)",
+    "Gold Coins: "  .. formatNum(m.lootGold) .. " (" .. formatNum(math.floor(metrics.lootGoldPerHour)) .. "/h)",
+    "Drops Parsed: " .. formatNum(m.lootDrops),
+    "Avg/Kill: "    .. formatNum(math.floor(metrics.lootPerKill)) .. " gp"
+  }
+  local topItems = {}
+  for name, data in pairs(analytics.lootItems or {}) do
+    topItems[#topItems+1] = {name=name, count=data.count or 0, value=data.value or 0}
+  end
+  table.sort(topItems, function(a,b) return a.value > b.value end)
+  for i = 1, math.min(5, #topItems) do
+    local itm = topItems[i]
+    lootLines[#lootLines+1] = string.format("%d) %s x%d (%s gp)", i, itm.name, itm.count, formatNum(math.floor(itm.value)))
+  end
+  addSection(lines, "LOOT", lootLines)
+
+  -- Combat detail
+  addSection(lines, "COMBAT DETAIL", {
+    "Damage Taken: "  .. formatNum(m.damageTaken),
+    "Healing Done: "  .. formatNum(m.healingDone),
+    "Damage Ratio: "  .. string.format("%.2f", metrics.damageRatio),
+    "Near-Deaths: "   .. m.nearDeathCount,
+    "Deaths: "        .. m.deathCount,
+  })
+
+  return table.concat(lines, "\n")
+end
+
+local function buildInsightsTab()
+  local lines = {}
+  local score = Insights.calculateScore()
+  addSection(lines, "HUNT SCORE", { Insights.scoreBar(score) })
+
+  local insightsList = Insights.analyze()
+  table.insert(lines, "[INSIGHTS]")
+  table.insert(lines, string.rep("-", 46))
+  local insightLines = Insights.format(insightsList)
+  if #insightLines > 0 then
+    for _, line in ipairs(insightLines) do table.insert(lines, line) end
+  else
+    table.insert(lines, "  No insights yet — hunt for a few minutes first.")
+  end
+  table.insert(lines, "")
+  table.insert(lines, "  [!]=Critical [*]=Warning [>]=Tip [i]=Info")
+  return table.concat(lines, "\n")
+end
+
+local HA_BUILDERS = {
+  buildSessionTab,
+  buildConsumptionTab,
+  buildLootCombatTab,
+  buildInsightsTab,
+}
+
+-- ============================================================================
 -- UI
 -- ============================================================================
 
-local analyticsWindow = nil
+local COLOR_ACTIVE    = "#3be4d0"
+local COLOR_INACTIVE  = "#a4aece"
+local BG_ACTIVE       = "#3be4d01a"
+local BG_INACTIVE     = "#1b2235"
+local BORDER_ACTIVE   = "#3be4d088"
+local BORDER_INACTIVE = "#050712"
 
--- Live update flag for analytics window (must be defined before showAnalytics)
-local liveUpdatesActive = false
-local lastSummaryText = ""
+local analyticsWindow    = nil
+local haActiveTab        = 1
+local haTabPanels        = {}
+local haTabBtns          = {}
+local liveUpdatesActive  = false
+
+local function haFindChild(parent, id)
+  if not parent or not id then return nil end
+  local ok, w = pcall(function() return parent[id] end)
+  if ok and w and type(w) ~= "string" and type(w) ~= "number" then return w end
+  ok, w = pcall(function() return parent:getChildById(id) end)
+  if ok and w then return w end
+  return nil
+end
+
+local function haUpdateWidgetRefs()
+  if not analyticsWindow then haTabPanels = {}; haTabBtns = {}; return end
+  local tabBar = haFindChild(analyticsWindow, "tabBar")
+  for i = 1, 4 do
+    haTabBtns[i]   = tabBar and haFindChild(tabBar, "tab" .. i .. "btn") or nil
+    haTabPanels[i] = haFindChild(analyticsWindow, "tab" .. i) or nil
+  end
+end
+
+local function haApplyTabStyle(idx, isActive)
+  local btn = haTabBtns[idx]
+  if not btn then return end
+  pcall(function()
+    btn:setColor(isActive and COLOR_ACTIVE or COLOR_INACTIVE)
+    btn:setBackgroundColor(isActive and BG_ACTIVE or BG_INACTIVE)
+    btn:setBorderColor(isActive and BORDER_ACTIVE or BORDER_INACTIVE)
+  end)
+end
+
+local function haSwitchTab(idx)
+  haActiveTab = idx
+  for i = 1, 4 do
+    local panel = haTabPanels[i]
+    if panel then pcall(function() if i == idx then panel:show() else panel:hide() end end) end
+    haApplyTabStyle(i, i == idx)
+    if analyticsWindow then
+      local sb = haFindChild(analyticsWindow, "tab" .. i .. "Scroll")
+      if sb then pcall(function() if i == idx then sb:show() else sb:hide() end end) end
+    end
+  end
+end
+
+local function haRefreshActiveTab(force)
+  if not analyticsWindow or not analyticsWindow:isVisible() then return end
+  local panel = haTabPanels[haActiveTab]
+  if not panel then return end
+  local label = haFindChild(panel, "text")
+  if not label then return end
+  local ok, txt = pcall(HA_BUILDERS[haActiveTab])
+  pcall(function() label:setText(ok and txt or ("Error: " .. tostring(txt))) end)
+end
 
 local function stopLiveUpdates()
   liveUpdatesActive = false
@@ -1695,86 +1963,89 @@ end
 
 local function doLiveUpdate()
   if not liveUpdatesActive then return end
-  
-  if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
-    pcall(function()
-      local newText = buildSummary()
-      if newText ~= lastSummaryText then
-        analyticsWindow.content.textContent:setText(newText)
-        lastSummaryText = newText
-      end
-    end)
-    -- Schedule next update
-    schedule(1000, doLiveUpdate)
-  else
-    -- Window closed, stop live updates
+  if not analyticsWindow or not analyticsWindow:isVisible() then
     liveUpdatesActive = false
+    return
   end
+  haRefreshActiveTab()
+  schedule(2000, doLiveUpdate)
 end
 
 local function startLiveUpdates()
-  if liveUpdatesActive then return end  -- Already running
+  if liveUpdatesActive then return end
   liveUpdatesActive = true
-  -- Start the update loop
-  schedule(1000, doLiveUpdate)
+  schedule(2000, doLiveUpdate)
 end
 
 local function showAnalytics()
-  if analyticsWindow then 
-    stopLiveUpdates()  -- Stop any existing live updates
+  if analyticsWindow then
+    stopLiveUpdates()
     pcall(function() analyticsWindow:destroy() end)
-    analyticsWindow = nil 
+    analyticsWindow = nil
   end
-  
-  -- Auto-start session if not active
-  if not isSessionActive() then
-    startSession()
+
+  if not isSessionActive() then startSession() end
+
+  -- Import OTUI style
+  pcall(function()
+    local path = "/core/smart_hunt.otui"
+    if g_resources and g_resources.fileExists and g_resources.fileExists(path) then
+      g_ui.importStyle(path)
+    end
+  end)
+
+  local ok, win = pcall(function() return UI.createWindow("HuntAnalyzerWindow") end)
+  if not ok or not win then
+    print(buildSummary())
+    return
   end
-  
-  -- Try to create window, fall back to console output
-  local ok, win = pcall(function() return UI.createWindow('HuntAnalyzerWindow') end)
-  if not ok or not win then 
-    print(buildSummary()) 
-    return 
-  end
-  
+
   analyticsWindow = win
-  
-  -- Safely access window elements
-  if analyticsWindow.content and analyticsWindow.content.textContent then
-    analyticsWindow.content.textContent:setText(buildSummary())
-  end
-  
-  if analyticsWindow.buttons then
-    if analyticsWindow.buttons.refreshButton then
-      -- Keep refresh button for manual refresh, but it's less needed now
-      analyticsWindow.buttons.refreshButton.onClick = function() 
-        if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
-          analyticsWindow.content.textContent:setText(buildSummary()) 
+  haUpdateWidgetRefs()
+
+  -- Wire tab buttons
+  local tabBar = haFindChild(win, "tabBar")
+  if tabBar then
+    for i = 1, 4 do
+      local btn = haFindChild(tabBar, "tab" .. i .. "btn")
+      if btn then
+        local idx = i
+        btn.onClick = function()
+          haSwitchTab(idx)
+          haRefreshActiveTab()
         end
       end
     end
-    if analyticsWindow.buttons.closeButton then
-      analyticsWindow.buttons.closeButton.onClick = function() 
-        stopLiveUpdates()  -- Stop live updates when closing
+  end
+
+  -- Wire action buttons
+  local buttons = haFindChild(win, "buttons")
+  if buttons then
+    local refreshBtn = haFindChild(buttons, "refresh")
+    local resetBtn   = haFindChild(buttons, "reset")
+    local closeBtn   = haFindChild(buttons, "close")
+
+    if refreshBtn then
+      refreshBtn.onClick = function() haRefreshActiveTab() end
+    end
+    if resetBtn then
+      resetBtn.onClick = function()
+        startSession()
+        haRefreshActiveTab()
+      end
+    end
+    if closeBtn then
+      closeBtn.onClick = function()
+        stopLiveUpdates()
         if analyticsWindow then pcall(function() analyticsWindow:destroy() end) end
-        analyticsWindow = nil 
-      end
-    end
-    if analyticsWindow.buttons.resetButton then
-      analyticsWindow.buttons.resetButton.onClick = function() 
-        startSession() 
-        if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
-          analyticsWindow.content.textContent:setText(buildSummary()) 
-        end
+        analyticsWindow = nil
       end
     end
   end
-  
-  -- Safely show window
+
+  haSwitchTab(haActiveTab)
+  haRefreshActiveTab()
   pcall(function() analyticsWindow:show():raise():focus() end)
-  
-  -- Start live updates
   startLiveUpdates()
 end
 
@@ -1811,26 +2082,8 @@ if btn then btn:setTooltip("View hunting analytics") end
 
 -- Monster Insights button below Hunt Analyzer
 local monsterBtn = UI.Button("Monster Insights", function()
-  -- Ensure monster inspector is loaded and window exists
-  if not MonsterInspectorWindow then
-    if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.showWindow then
-      nExBot.MonsterInspector.showWindow()
-    else
-      -- Try to load it manually
-      pcall(function() dofile("/targetbot/monster_inspector.lua") end)
-      if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.showWindow then
-        nExBot.MonsterInspector.showWindow()
-      end
-    end
-  else
-    MonsterInspectorWindow:setVisible(not MonsterInspectorWindow:isVisible())
-    if MonsterInspectorWindow:isVisible() then
-      if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.refreshPatterns then
-        nExBot.MonsterInspector.refreshPatterns()
-      elseif refreshPatterns then
-        refreshPatterns()
-      end
-    end
+  if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.toggleWindow then
+    nExBot.MonsterInspector.toggleWindow()
   end
 end)
 if monsterBtn then monsterBtn:setTooltip("View learned monster patterns and samples") end

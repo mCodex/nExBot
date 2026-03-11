@@ -54,6 +54,7 @@ local tabBtns           = {}   -- [1..4] NxButton widgets
 local refreshInProgress = false
 local lastRefreshMs     = 0
 local MIN_REFRESH_MS    = 2500
+local liveUpdateActive  = false
 
 -- ── Style import ──────────────────────────────────────────────────────────────
 
@@ -147,8 +148,42 @@ local function buildLiveTab()
   table.insert(lines, "")
 
   if count == 0 then
-    table.insert(lines, "  No creatures currently tracked.")
-    table.insert(lines, "  (Tracker populates during combat)")
+    -- Fallback: enumerate spectators directly so the tab is never blank
+    local nearby = {}
+    local p = player and player:getPosition()
+    if p then
+      pcall(function()
+        local specs = (g_map and g_map.getSpectatorsInRange
+          and g_map.getSpectatorsInRange(p, false, 8, 8)) or {}
+        for _, c in ipairs(specs) do
+          local ok2, valid = pcall(function()
+            return c:isMonster() and not c:isDead() and not c:isRemoved()
+          end)
+          if ok2 and valid then
+            local name = "?"
+            pcall(function() name = c:getName() end)
+            table.insert(nearby, name)
+          end
+        end
+      end)
+    end
+    if #nearby > 0 then
+      table.insert(lines, string.format("  %d nearby (TargetBot off — enable for full tracking):", #nearby))
+      table.insert(lines, "")
+      local seen = {}
+      for _, name in ipairs(nearby) do
+        seen[name] = (seen[name] or 0) + 1
+      end
+      local sorted = {}
+      for name, cnt in pairs(seen) do sorted[#sorted+1] = {name=name, cnt=cnt} end
+      table.sort(sorted, function(a,b) return a.cnt > b.cnt end)
+      for _, e in ipairs(sorted) do
+        table.insert(lines, string.format("  %dx %s", e.cnt, e.name))
+      end
+    else
+      table.insert(lines, "  No creatures currently tracked.")
+      table.insert(lines, "  Enable TargetBot for live tracking data.")
+    end
     return table.concat(lines, "\n")
   end
 
@@ -406,6 +441,29 @@ local BUILDERS = {
   buildScenarioTab,
 }
 
+-- ── Live update loop ──────────────────────────────────────────────────────────
+
+local function doLiveUpdate()
+  if not liveUpdateActive then return end
+  if not MonsterInspectorWindow or not MonsterInspectorWindow:isVisible() then
+    liveUpdateActive = false
+    return
+  end
+  refreshInProgress = false
+  refreshActiveTab()
+  schedule(3000, doLiveUpdate)
+end
+
+local function startLiveUpdate()
+  if liveUpdateActive then return end
+  liveUpdateActive = true
+  schedule(3000, doLiveUpdate)
+end
+
+local function stopLiveUpdate()
+  liveUpdateActive = false
+end
+
 -- ── Refresh ───────────────────────────────────────────────────────────────────
 
 local function refreshActiveTab()
@@ -447,6 +505,7 @@ local function bindButtons(win)
   if refreshBtn then
     refreshBtn.onClick = function()
       refreshInProgress = false
+      lastRefreshMs = 0   -- bypass throttle on manual refresh
       refreshActiveTab()
     end
   end
@@ -485,7 +544,11 @@ local function bindButtons(win)
       updateWidgetRefs()
       switchTab(activeTab)
       refreshInProgress = false
+      lastRefreshMs = 0
       refreshActiveTab()
+      startLiveUpdate()
+    else
+      stopLiveUpdate()
     end
   end
 end
