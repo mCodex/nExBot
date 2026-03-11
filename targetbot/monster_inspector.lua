@@ -443,6 +443,8 @@ local BUILDERS = {
 
 -- ── Live update loop ──────────────────────────────────────────────────────────
 
+local refreshActiveTab  -- forward declaration; defined below
+
 local function doLiveUpdate()
   if not liveUpdateActive then return end
   if not MonsterInspectorWindow or not MonsterInspectorWindow:isVisible() then
@@ -466,7 +468,7 @@ end
 
 -- ── Refresh ───────────────────────────────────────────────────────────────────
 
-local function refreshActiveTab()
+refreshActiveTab = function()
   if not MonsterInspectorWindow or not MonsterInspectorWindow:isVisible() then return end
   if refreshInProgress then return end
   if now and (now - lastRefreshMs) < MIN_REFRESH_MS then return end
