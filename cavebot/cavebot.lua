@@ -1043,10 +1043,21 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   
   local nextChild = uiList:getChildByIndex(nextIndex)
   if nextChild then
-    -- Skip blacklisted (stuck/unreachable) waypoints
-    if isWaypointBlacklisted(nextChild) then
+    -- Skip blacklisted waypoints AND floor-mismatched goto WPs (e.g. rescue
+    -- waypoints on a different floor that should only activate if the player
+    -- accidentally changes floors — never advance to them during normal routing).
+    local function shouldSkipNext(child)
+      if isWaypointBlacklisted(child) then return true end
+      if child.action == "goto" and playerPos then
+        local idx2 = uiList:getChildIndex(child)
+        local wp2 = waypointPositionCache[idx2]
+        if wp2 and wp2.z ~= playerPos.z then return true end
+      end
+      return false
+    end
+    if shouldSkipNext(nextChild) then
       local skipped = 0
-      while isWaypointBlacklisted(nextChild) and skipped < actionCount do
+      while shouldSkipNext(nextChild) and skipped < actionCount do
         nextIndex = (nextIndex % actionCount) + 1
         nextChild = uiList:getChildByIndex(nextIndex)
         skipped = skipped + 1

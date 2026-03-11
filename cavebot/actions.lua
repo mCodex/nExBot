@@ -630,7 +630,17 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
       and type(WaypointNavigator.getLookaheadTarget) == "function" then
     local lookahead = WaypointNavigator.getLookaheadTarget(playerPos)
     if lookahead and lookahead.z == playerPos.z then
-      walkTarget = lookahead
+      -- Reject degenerate lookahead: at route wrap-around the navigator can return
+      -- the last WP on the route (e.g. the start of the loop) which is already
+      -- behind the player, causing walkTo to return "arrived" immediately and
+      -- the bot to spin forever without actually walking to destPos.
+      local lhDist = math.max(
+        math.abs(lookahead.x - playerPos.x),
+        math.abs(lookahead.y - playerPos.y)
+      )
+      if lhDist >= 3 then
+        walkTarget = lookahead
+      end
     end
   end
 
