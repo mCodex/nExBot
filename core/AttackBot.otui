@@ -1,5 +1,12 @@
 AttackEntry < NxListEntryCheckable
   text-offset: 38 0
+  NxItem
+    id: id
+    anchors.left: enabled.right
+    anchors.verticalCenter: parent.verticalCenter
+    margin-left: 2
+    visible: false
+
   UIWidget
     id: spell
     anchors.left: enabled.right

@@ -832,9 +832,20 @@ end
 
       widget:setText(params.description)
       if params.itemId > 0 then
-        widget.spell:setVisible(false)
-        widget.id:setVisible(true)
-        widget.id:setItemId(params.itemId)
+        if widget.spell then
+          widget.spell:setVisible(false)
+        end
+        if widget.id then
+          widget.id:setVisible(true)
+          widget.id:setItemId(params.itemId)
+        end
+      else
+        if widget.id then
+          widget.id:setVisible(false)
+        end
+        if widget.spell then
+          widget.spell:setVisible(true)
+        end
       end
       widget:setTooltip(params.tooltip)
       widget.remove.onClick = function()
