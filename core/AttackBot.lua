@@ -15,12 +15,13 @@ setDefaultTab("Main")
 -- locales
 local panelName = "AttackBot"
 local currentSettings
-local showSettings = false
 local showItem = false
 local category = 1
 local patternCategory = 1
 local pattern = 1
 local mainWindow
+local attackBotKeyboardBound = false
+local attackEntryList
 
 -- ============================================================================
 -- BOTCORE INTEGRATION
@@ -725,12 +726,44 @@ end
   mainWindow:hide()
 
   local panel = mainWindow.mainPanel
-  local settingsUI = mainWindow.settingsPanel
+  local function rw(id)
+    return mainWindow:recursiveGetChildById(id)
+  end
+
+  local uiFormPane = rw("formPane")
+  local uiEntryList = rw("entryList")
+  local uiUp = rw("up")
+  local uiDown = rw("down")
+  local uiMonsters = rw("monsters")
+  local uiSpellName = rw("spellName")
+  local uiItemId = rw("itemId")
+  local uiCategory = rw("category")
+  local uiRange = rw("range")
+  local uiSelectorHint = rw("selectorHint")
+  local uiPreviousCategory = rw("previousCategory")
+  local uiNextCategory = rw("nextCategory")
+  local uiPreviousSource = rw("previousSource")
+  local uiNextSource = rw("nextSource")
+  local uiPreviousRange = rw("previousRange")
+  local uiNextRange = rw("nextRange")
+  local uiManaPercent = rw("manaPercent")
+  local uiCreatures = rw("creatures")
+  local uiMinHp = rw("minHp")
+  local uiMaxHp = rw("maxHp")
+  local uiCooldown = rw("cooldown")
+  local uiOrMore = rw("orMore")
+  local uiAddEntry = rw("addEntry")
+
+  if not uiEntryList or not uiMonsters or not uiSpellName or not uiItemId then
+    warn("[AttackBot] Failed to bind AttackBotWindow controls")
+    return
+  end
+  attackEntryList = uiEntryList
 
   mainWindow.onVisibilityChange = function(widget, visible)
     if not visible then
       currentSettings.attackTable = {}
-      for i, child in ipairs(panel.entryList:getChildren()) do
+      for i, child in ipairs(uiEntryList:getChildren()) do
         table.insert(currentSettings.attackTable, child.params)
       end
       nExBotConfigSave("atk")
@@ -739,40 +772,55 @@ end
 
   -- main panel
 
-    -- functions
-    function toggleSettings()
-      panel:setVisible(not showSettings)
-      mainWindow.shooterLabel:setVisible(not showSettings)
-      settingsUI:setVisible(showSettings)
-      mainWindow.settingsLabel:setVisible(showSettings)
-      mainWindow.settings:setText(showSettings and "Back" or "Settings")
-    end
-    toggleSettings()
+    local selectorHints = {
+      [1] = "Spell mode: type spell name, then press Enter to add.",
+      [2] = "Rune mode: drag a rune into the item slot, then press Enter.",
+      [3] = "Rune mode: drag a rune into the item slot, then press Enter.",
+      [4] = "Empowered spell: set conditions and add to queue.",
+      [5] = "Directional spell: choose pattern/range and add."
+    }
 
-    mainWindow.settings.onClick = function()
-      showSettings = not showSettings
-      toggleSettings()
+    local function focusPrimaryInput()
+      if showItem then
+        return
+      end
+      if uiSpellName and uiSpellName:isVisible() then
+        uiSpellName:focus()
+      end
+    end
+
+    local function updateMonstersWidth()
+      local baseWidth = (uiFormPane and uiFormPane:getWidth()) or (panel:getWidth() or 500)
+      local reserved = showItem and 90 or 200
+      uiMonsters:setWidth(math.max(170, baseWidth - reserved))
     end
 
     function toggleItem()
-      panel.monsters:setWidth(showItem and 405 or 341)
-      panel.itemId:setVisible(showItem)
-      panel.spellName:setVisible(not showItem)
+      updateMonstersWidth()
+      uiItemId:setVisible(showItem)
+      uiSpellName:setVisible(not showItem)
     end
     toggleItem()
 
+    panel.onGeometryChange = function()
+      updateMonstersWidth()
+    end
+
     function setCategoryText()
-      panel.category.description:setText(categories[category])
+      uiCategory.description:setText(categories[category])
+      if uiSelectorHint then
+        uiSelectorHint:setText(selectorHints[category] or selectorHints[1])
+      end
     end
     setCategoryText()
 
     function setPatternText()
-      panel.range.description:setText(patterns[patternCategory][pattern])
+      uiRange.description:setText(patterns[patternCategory][pattern])
     end
     setPatternText()
 
     -- in/de/crementation buttons
-    panel.previousCategory.onClick = function()
+    uiPreviousCategory.onClick = function()
       if category == 1 then
         category = #categories
       else
@@ -785,8 +833,9 @@ end
       toggleItem()
       setPatternText()
       setCategoryText()
+      focusPrimaryInput()
     end
-    panel.nextCategory.onClick = function()
+    uiNextCategory.onClick = function()
       if category == #categories then
         category = 1 
       else
@@ -799,14 +848,15 @@ end
       toggleItem()
       setPatternText()
       setCategoryText()
+      focusPrimaryInput()
     end
-    panel.previousSource.onClick = function()
+    uiPreviousSource.onClick = function()
       warn("[AttackBot] TODO, reserved for future use.")
     end
-    panel.nextSource.onClick = function()
+    uiNextSource.onClick = function()
       warn("[AttackBot] TODO, reserved for future use.")
     end
-    panel.previousRange.onClick = function()
+    uiPreviousRange.onClick = function()
       local t = patterns[patternCategory]
       if pattern == 1 then
         pattern = #t 
@@ -815,7 +865,7 @@ end
       end
       setPatternText()
     end
-    panel.nextRange.onClick = function()
+    uiNextRange.onClick = function()
       local t = patterns[patternCategory]
       if pattern == #t then
         pattern = 1 
@@ -832,16 +882,25 @@ end
 
       widget:setText(params.description)
       if params.itemId > 0 then
-        widget.spell:setVisible(false)
+        if widget.spell then
+          widget.spell:setVisible(false)
+        end
         if widget.id then
           widget.id:setVisible(true)
           widget.id:setItemId(params.itemId)
         end
+      else
+        if widget.id then
+          widget.id:setVisible(false)
+        end
+        if widget.spell then
+          widget.spell:setVisible(true)
+        end
       end
       widget:setTooltip(params.tooltip)
       widget.remove.onClick = function()
-        panel.up:setEnabled(false)
-        panel.down:setEnabled(false)
+        uiUp:setEnabled(false)
+        uiDown:setEnabled(false)
         widget:destroy()
       end
       widget.enabled:setChecked(params.enabled)
@@ -851,15 +910,15 @@ end
       end
       -- will serve as edit
       widget.onDoubleClick = function(widget)
-        panel.manaPercent:setValue(params.mana)
-        panel.creatures:setValue(params.count)
-        panel.minHp:setValue(params.minHp)
-        panel.maxHp:setValue(params.maxHp)
-        panel.cooldown:setValue(params.cooldown)
+        uiManaPercent:setValue(params.mana)
+        uiCreatures:setValue(params.count)
+        uiMinHp:setValue(params.minHp)
+        uiMaxHp:setValue(params.maxHp)
+        uiCooldown:setValue(params.cooldown)
         showItem = params.itemId > 100 and true or false
-        panel.itemId:setItemId(params.itemId)
-        panel.spellName:setText(params.spell or "")
-        panel.orMore:setChecked(params.orMore)
+        uiItemId:setItemId(params.itemId)
+        uiSpellName:setText(params.spell or "")
+        uiOrMore:setChecked(params.orMore)
         toggleItem()
         category = params.category
         patternCategory = params.patternCategory
@@ -869,18 +928,18 @@ end
         widget:destroy()
       end
       widget.onClick = function(widget)
-        if #panel.entryList:getChildren() == 1 then
-          panel.up:setEnabled(false)
-          panel.down:setEnabled(false)
-        elseif panel.entryList:getChildIndex(widget) == 1 then
-          panel.up:setEnabled(false)
-          panel.down:setEnabled(true)
-        elseif panel.entryList:getChildIndex(widget) == panel.entryList:getChildCount() then
-          panel.up:setEnabled(true)
-          panel.down:setEnabled(false)
+        if #uiEntryList:getChildren() == 1 then
+          uiUp:setEnabled(false)
+          uiDown:setEnabled(false)
+        elseif uiEntryList:getChildIndex(widget) == 1 then
+          uiUp:setEnabled(false)
+          uiDown:setEnabled(true)
+        elseif uiEntryList:getChildIndex(widget) == uiEntryList:getChildCount() then
+          uiUp:setEnabled(true)
+          uiDown:setEnabled(false)
         else
-          panel.up:setEnabled(true)
-          panel.down:setEnabled(true)
+          uiUp:setEnabled(true)
+          uiDown:setEnabled(true)
         end
       end
     end
@@ -890,31 +949,31 @@ end
     function refreshAttacks()
       if not currentSettings.attackTable then return end
 
-      panel.entryList:destroyChildren()
+      uiEntryList:destroyChildren()
       for i, entry in pairs(currentSettings.attackTable) do
-        local label = UI.createWidget("AttackEntry", panel.entryList)
+        local label = UI.createWidget("AttackEntry", uiEntryList)
         label.params = entry
         setupWidget(label)
       end
     end
     refreshAttacks()
-    panel.up:setEnabled(false)
-    panel.down:setEnabled(false)
+    uiUp:setEnabled(false)
+    uiDown:setEnabled(false)
 
     -- adding values
-    panel.addEntry.onClick = function(wdiget)
+    uiAddEntry.onClick = function(wdiget)
       -- first variables
-      local creatures = panel.monsters:getText():lower()
+      local creatures = uiMonsters:getText():lower()
       local monsters = (creatures:len() == 0 or creatures == "*" or creatures == "monster names") and true or string.split(creatures, ",")
-      local mana = panel.manaPercent:getValue()
-      local count = panel.creatures:getValue()
-      local minHp = panel.minHp:getValue()
-      local maxHp = panel.maxHp:getValue()
-      local cooldown = panel.cooldown:getValue()
-      local itemId = panel.itemId:getItemId()
-      local spell = panel.spellName:getText()
+      local mana = uiManaPercent:getValue()
+      local count = uiCreatures:getValue()
+      local minHp = uiMinHp:getValue()
+      local maxHp = uiMaxHp:getValue()
+      local cooldown = uiCooldown:getValue()
+      local itemId = uiItemId:getItemId()
+      local spell = uiSpellName:getText()
       local tooltip = monsters ~= true and creatures
-      local orMore = panel.orMore:isChecked()
+      local orMore = uiOrMore:isChecked()
 
       -- validation
       if showItem and itemId < 100 then
@@ -953,7 +1012,7 @@ end
         description = '['..type..'] '..countDescription.. ' '..specificMonsters..': '..attackType..', '..categoryName..' ('..minHp..'%-'..maxHp..'%)'
       }
 
-      local label = UI.createWidget("AttackEntry", panel.entryList)
+      local label = UI.createWidget("AttackEntry", uiEntryList)
       label.params = params
       setupWidget(label)
       resetFields()
@@ -961,85 +1020,55 @@ end
 
     -- moving values
     -- up
-    panel.up.onClick = function(widget)
-      local focused = panel.entryList:getFocusedChild()
-      local n = panel.entryList:getChildIndex(focused)
+    uiUp.onClick = function(widget)
+      local focused = uiEntryList:getFocusedChild()
+      local n = uiEntryList:getChildIndex(focused)
 
       if n-1 == 1 then
         widget:setEnabled(false)
       end
-      panel.down:setEnabled(true)
-      panel.entryList:moveChildToIndex(focused, n-1)
-      panel.entryList:ensureChildVisible(focused)
+      uiDown:setEnabled(true)
+      uiEntryList:moveChildToIndex(focused, n-1)
+      uiEntryList:ensureChildVisible(focused)
     end
     -- down
-    panel.down.onClick = function(widget)
-      local focused = panel.entryList:getFocusedChild()
-      local n = panel.entryList:getChildIndex(focused)
+    uiDown.onClick = function(widget)
+      local focused = uiEntryList:getFocusedChild()
+      local n = uiEntryList:getChildIndex(focused)
 
-      if n + 1 == panel.entryList:getChildCount() then
+      if n + 1 == uiEntryList:getChildCount() then
         widget:setEnabled(false)
       end
-      panel.up:setEnabled(true)
-      panel.entryList:moveChildToIndex(focused, n+1)
-      panel.entryList:ensureChildVisible(focused)
+      uiUp:setEnabled(true)
+      uiEntryList:moveChildToIndex(focused, n+1)
+      uiEntryList:ensureChildVisible(focused)
     end
-
-  -- [[settings panel]] --
-  settingsUI.profileName.onTextChange = function(widget, text)
-    currentSettings.name = text
-    setProfileName()
-  end
-  settingsUI.IgnoreMana.onClick = function(widget)
-    currentSettings.ignoreMana = not currentSettings.ignoreMana
-    settingsUI.IgnoreMana:setChecked(currentSettings.ignoreMana)
-  end
-  settingsUI.Rotate.onClick = function(widget)
-    currentSettings.Rotate = not currentSettings.Rotate
-    settingsUI.Rotate:setChecked(currentSettings.Rotate)
-  end
-  settingsUI.Kills.onClick = function(widget)
-    currentSettings.Kills = not currentSettings.Kills
-    settingsUI.Kills:setChecked(currentSettings.Kills)
-  end
-  settingsUI.Cooldown.onClick = function(widget)
-    currentSettings.Cooldown = not currentSettings.Cooldown
-    settingsUI.Cooldown:setChecked(currentSettings.Cooldown)
-  end
-  settingsUI.Visible.onClick = function(widget)
-    currentSettings.Visible = not currentSettings.Visible
-    settingsUI.Visible:setChecked(currentSettings.Visible)
-  end
-  settingsUI.PvpMode.onClick = function(widget)
-    currentSettings.pvpMode = not currentSettings.pvpMode
-    settingsUI.PvpMode:setChecked(currentSettings.pvpMode)
-  end
-  settingsUI.PvpSafe.onClick = function(widget)
-    currentSettings.PvpSafe = not currentSettings.PvpSafe
-    settingsUI.PvpSafe:setChecked(currentSettings.PvpSafe)
-  end
-  settingsUI.Training.onClick = function(widget)
-    currentSettings.Training = not currentSettings.Training
-    settingsUI.Training:setChecked(currentSettings.Training)
-  end
-  settingsUI.BlackListSafe.onClick = function(widget)
-    currentSettings.BlackListSafe = not currentSettings.BlackListSafe
-    settingsUI.BlackListSafe:setChecked(currentSettings.BlackListSafe)
-  end
-  settingsUI.KillsAmount.onValueChange = function(widget, value)
-    currentSettings.KillsAmount = value
-  end
-  settingsUI.AntiRsRange.onValueChange = function(widget, value)
-    currentSettings.AntiRsRange = value
-  end
-
 
    -- window elements
   mainWindow.closeButton.onClick = function()
-    showSettings = false
-    toggleSettings()
     resetFields()
     mainWindow:hide()
+  end
+
+  if not attackBotKeyboardBound then
+    attackBotKeyboardBound = true
+    onKeyPress(function(keys)
+      if not mainWindow or not mainWindow:isVisible() then
+        return
+      end
+
+      if keys == "Escape" then
+        resetFields()
+        focusPrimaryInput()
+        return
+      end
+
+      if keys == "Enter" then
+        if uiAddEntry and uiAddEntry.onClick then
+          uiAddEntry.onClick(uiAddEntry)
+        end
+      end
+    end)
   end
 
   -- core functions
@@ -1051,15 +1080,16 @@ end
     category = 1
     setPatternText()
     setCategoryText()
-    panel.manaPercent:setText(1)
-    panel.creatures:setText(1)
-    panel.minHp:setValue(0)
-    panel.maxHp:setValue(100)
-    panel.cooldown:setText(1)
-    panel.monsters:setText("monster names")
-    panel.itemId:setItemId(0)
-    panel.spellName:setText("spell name")
-    panel.orMore:setChecked(false)
+    uiManaPercent:setText(1)
+    uiCreatures:setText(1)
+    uiMinHp:setValue(0)
+    uiMaxHp:setValue(100)
+    uiCooldown:setText(1)
+    uiMonsters:setText("monster names")
+    uiItemId:setItemId(0)
+    uiSpellName:setText("spell name")
+    uiOrMore:setChecked(false)
+    focusPrimaryInput()
   end
   resetFields()
 
@@ -1069,19 +1099,6 @@ end
     setProfileName()
     -- main panel
     refreshAttacks()
-    -- settings
-    settingsUI.profileName:setText(currentSettings.name)
-    settingsUI.Visible:setChecked(currentSettings.Visible)
-    settingsUI.Cooldown:setChecked(currentSettings.Cooldown)
-    settingsUI.PvpMode:setChecked(currentSettings.pvpMode)
-    settingsUI.PvpSafe:setChecked(currentSettings.PvpSafe)
-    settingsUI.BlackListSafe:setChecked(currentSettings.BlackListSafe)
-    settingsUI.AntiRsRange:setValue(currentSettings.AntiRsRange)
-    settingsUI.IgnoreMana:setChecked(currentSettings.ignoreMana)
-    settingsUI.Rotate:setChecked(currentSettings.Rotate)
-    settingsUI.Kills:setChecked(currentSettings.Kills)
-    settingsUI.KillsAmount:setValue(currentSettings.KillsAmount)
-    settingsUI.Training:setChecked(currentSettings.Training)
   end
   loadSettings()
 
@@ -1744,7 +1761,7 @@ function attackBotMain()
 
   -- Global guards (cannot attack at all)
   if not currentSettings or not currentSettings.enabled then return end
-  if not panel or not panel.entryList then return end
+  if not attackEntryList then return end
   if not target() then return end
   if SafeCall.isInPz() then return end
   if isGlobalBackoffActive() then return end
@@ -1770,7 +1787,7 @@ function attackBotMain()
   -- Resource availability cache (items/spells checked once per item/spell key)
   local availableItems = {}
   local canCastCaller = SafeCall.getCachedCaller("canCast")
-  local entries = panel.entryList:getChildren()
+  local entries = attackEntryList:getChildren()
 
   -- ========== ACT: Find highest-priority valid entry and execute ==========
 
