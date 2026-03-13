@@ -5,6 +5,7 @@ AttackEntry < NxListEntryCheckable
     id: id
     anchors.left: enabled.right
     anchors.verticalCenter: parent.verticalCenter
+    size: 16 16
     margin-left: 2
     visible: false
 
@@ -35,7 +36,7 @@ AttackBotBotPanel < NxBotSection
     anchors.right: parent.right
     width: 52
     height: 20
-    text: Manage
+    text: Setup
 
   NxButton
     id: 1
@@ -127,7 +128,7 @@ AttackBotPanel < Panel
       id: entryListScrollBar
       anchors.top: entryList.top
       anchors.bottom: entryList.bottom
-      anchors.right: entryList.right
+      anchors.right: parent.right
       step: 14
       pixels-scroll: true
 
@@ -204,30 +205,10 @@ AttackBotPanel < Panel
       tooltip: Attack type. Change this first.
 
     NxNavPrevButton
-      id: previousSource
+      id: previousRange
       anchors.left: parent.left
       anchors.top: category.bottom
       margin-top: 7
-
-    NxCategoryBar
-      id: source
-      anchors.left: previousSource.right
-      anchors.verticalCenter: previousSource.verticalCenter
-      margin-left: 3
-      width: 110
-      tooltip: Reserved source selector.
-
-    NxNavNextButton
-      id: nextSource
-      anchors.left: source.right
-      anchors.verticalCenter: previousSource.verticalCenter
-      margin-left: 2
-
-    NxNavPrevButton
-      id: previousRange
-      anchors.left: nextSource.right
-      anchors.verticalCenter: nextSource.verticalCenter
-      margin-left: 8
 
     NxNavNextButton
       id: nextRange

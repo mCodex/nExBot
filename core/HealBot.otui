@@ -19,24 +19,44 @@ SpellConditionBox < NxComboBox
 SpellEntry < NxListEntryCheckable
 
 ItemEntry < NxListEntryCheckable
+  text-offset: 58 0
+
+  NxItem
+    id: id
+    anchors.left: enabled.right
+    anchors.verticalCenter: parent.verticalCenter
+    margin-left: 2
 
 SpellHealing < NxPanel
-  size: 490 130
+  anchors.left: parent.left
+  anchors.right: parent.right
+  anchors.top: parent.top
+  height: 188
+  image-source: /images/ui/panel_flat
+  image-border: 3
+  padding: 7
 
   NxLabel
     id: title
-    anchors.verticalCenter: parent.top
+    anchors.top: parent.top
     anchors.left: parent.left
-    margin-left: 5
+    anchors.right: parent.right
     text: Spell Healing
+    text-align: center
     color: #46e6a6
+
+  HorizontalSeparator
+    anchors.top: title.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 4
 
   SpellSourceBox
     id: spellSource
-    anchors.top: spellList.top
-    anchors.left: spellList.right
-    margin-left: 80
-    width: 125
+    anchors.top: prev.bottom
+    anchors.right: parent.right
+    margin-top: 7
+    width: 128
     font: verdana-11px-rounded
 
   NxLabel
@@ -44,21 +64,20 @@ SpellHealing < NxPanel
     anchors.left: spellList.right
     anchors.verticalCenter: prev.verticalCenter
     text: When
-    margin-left: 7
+    margin-left: 10
 
   NxLabel
     id: isSpell
-    anchors.left: spellList.right
+    anchors.left: whenSpell.left
     anchors.top: whenSpell.bottom
     text: Is
-    margin-top: 9
-    margin-left: 7
+    margin-top: 11
 
   SpellConditionBox
     id: spellCondition
     anchors.left: spellSource.left
     anchors.top: spellSource.bottom
-    margin-top: 15
+    margin-top: 10
     width: 80
     font: verdana-11px-rounded
 
@@ -74,7 +93,7 @@ SpellHealing < NxPanel
     anchors.left: isSpell.left
     anchors.top: isSpell.bottom
     text: Cast
-    margin-top: 9
+    margin-top: 11
 
   NxTextInput
     id: spellFormula
@@ -87,25 +106,38 @@ SpellHealing < NxPanel
     anchors.left: castSpell.left
     anchors.top: castSpell.bottom
     text: Mana Cost:
-    margin-top: 8
+    margin-top: 10
 
   NxTextInput
     id: manaCost
     anchors.left: spellFormula.left
     anchors.top: spellFormula.bottom
-    width: 40
+    margin-top: 2
+    width: 46
+
+  NxLabel
+    id: spellHint
+    anchors.left: castSpell.left
+    anchors.right: spellSource.right
+    anchors.top: manaSpell.bottom
+    anchors.bottom: controls.top
+    margin-top: 8
+    margin-bottom: 4
+    text: Trigger hint
+    color: #a4aece
+    text-wrap: true
 
   TextList
     id: spellList
     anchors.left: parent.left
-    anchors.bottom: parent.bottom
-    anchors.top: parent.top
+    anchors.bottom: controls.top
+    anchors.top: spellSource.top
     padding: 1
     padding-top: 2
-    width: 270
-    margin-bottom: 7
-    margin-left: 7
-    margin-top: 10
+    padding-right: 16
+    width: 320
+    margin-bottom: 6
+    margin-left: 4
     vertical-scrollbar: spellListScrollBar
 
   VerticalScrollBar
@@ -116,48 +148,70 @@ SpellHealing < NxPanel
     step: 14
     pixels-scroll: true
 
+  Panel
+    id: controls
+    anchors.left: parent.left
+    margin-left: 4
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    height: 21
+
   NxButton
     id: addSpell
-    anchors.right: spellFormula.right
-    anchors.bottom: spellList.bottom
-    text: Add
-    size: 40 17
+    anchors.right: controls.right
+    anchors.verticalCenter: controls.verticalCenter
+    text: Add Spell
+    size: 74 18
     font: cipsoftFont
 
   NxButton
     id: MoveUp
     anchors.right: prev.left
-    anchors.bottom: prev.bottom
+    anchors.verticalCenter: prev.verticalCenter
     margin-right: 5
     text: Move Up
-    size: 55 17
+    size: 62 18
     font: cipsoftFont
 
   NxButton
     id: MoveDown
     anchors.right: prev.left
-    anchors.bottom: prev.bottom
+    anchors.verticalCenter: prev.verticalCenter
     margin-right: 5
     text: Move Down
-    size: 55 17
+    size: 72 18
     font: cipsoftFont
 
 ItemHealing < NxPanel
-  size: 490 120
+  anchors.left: parent.left
+  anchors.right: parent.right
+  anchors.top: prev.bottom
+  anchors.bottom: parent.bottom
+  margin-top: 10
+  image-source: /images/ui/panel_flat
+  image-border: 3
+  padding: 7
 
   NxLabel
     id: title
-    anchors.verticalCenter: parent.top
+    anchors.top: parent.top
     anchors.left: parent.left
-    margin-left: 5
+    anchors.right: parent.right
     text: Item Healing
+    text-align: center
     color: #ff4b81
+
+  HorizontalSeparator
+    anchors.top: title.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 4
 
   SpellSourceBox
     id: itemSource
-    anchors.top: itemList.top
+    anchors.top: prev.bottom
     anchors.right: parent.right
-    margin-right: 10
+    margin-top: 7
     width: 128
     font: verdana-11px-rounded
 
@@ -166,21 +220,20 @@ ItemHealing < NxPanel
     anchors.left: itemList.right
     anchors.verticalCenter: prev.verticalCenter
     text: When
-    margin-left: 7
+    margin-left: 10
 
   NxLabel
     id: isItem
-    anchors.left: itemList.right
+    anchors.left: whenItem.left
     anchors.top: whenItem.bottom
     text: Is
-    margin-top: 9
-    margin-left: 7
+    margin-top: 11
 
   SpellConditionBox
     id: itemCondition
     anchors.left: itemSource.left
     anchors.top: itemSource.bottom
-    margin-top: 15
+    margin-top: 10
     width: 80
     font: verdana-11px-rounded
 
@@ -196,24 +249,37 @@ ItemHealing < NxPanel
     anchors.left: isItem.left
     anchors.top: isItem.bottom
     text: Use
-    margin-top: 15
+    margin-top: 11
 
   NxItem
     id: itemId
     anchors.left: itemCondition.left
     anchors.top: itemCondition.bottom
+    margin-top: 2
+
+  NxLabel
+    id: itemHint
+    anchors.left: useItem.left
+    anchors.right: itemSource.right
+    anchors.top: useItem.bottom
+    anchors.bottom: controls.top
+    margin-top: 8
+    margin-bottom: 4
+    text: Trigger hint
+    color: #a4aece
+    text-wrap: true
 
   TextList
     id: itemList
     anchors.left: parent.left
-    anchors.bottom: parent.bottom
-    anchors.top: parent.top
+    anchors.bottom: controls.top
+    anchors.top: itemSource.top
     padding: 1
     padding-top: 2
-    width: 270
-    margin-top: 10
-    margin-bottom: 7
-    margin-left: 8
+    padding-right: 16
+    width: 320
+    margin-bottom: 6
+    margin-left: 4
     vertical-scrollbar: itemListScrollBar
 
   VerticalScrollBar
@@ -224,57 +290,77 @@ ItemHealing < NxPanel
     step: 14
     pixels-scroll: true
 
+  Panel
+    id: controls
+    anchors.left: parent.left
+    margin-left: 4
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    height: 21
+
   NxButton
     id: addItem
-    anchors.right: itemValue.right
-    anchors.bottom: itemList.bottom
-    text: Add
-    size: 40 17
+    anchors.right: controls.right
+    anchors.verticalCenter: controls.verticalCenter
+    text: Add Item
+    size: 72 18
     font: cipsoftFont
 
   NxButton
     id: MoveUp
     anchors.right: prev.left
-    anchors.bottom: prev.bottom
+    anchors.verticalCenter: prev.verticalCenter
     margin-right: 5
     text: Move Up
-    size: 55 17
+    size: 62 18
     font: cipsoftFont
 
   NxButton
     id: MoveDown
     anchors.right: prev.left
-    anchors.bottom: prev.bottom
+    anchors.verticalCenter: prev.verticalCenter
     margin-right: 5
     text: Move Down
-    size: 55 17
+    size: 72 18
     font: cipsoftFont
 
 HealerPanel < Panel
-  size: 510 275
+  anchors.left: parent.left
+  anchors.right: parent.right
+  anchors.top: parent.top
+  anchors.bottom: parent.bottom
 
   SpellHealing
     id: spells
     anchors.top: parent.top
-    margin-top: 8
     anchors.left: parent.left
+    anchors.right: parent.right
+    height: 188
 
   ItemHealing
     id: items
     anchors.top: prev.bottom
     anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
     margin-top: 10
 
 HealBotSettingsPanel < Panel
-  size: 500 267
+  anchors.left: parent.left
+  anchors.right: parent.right
+  anchors.top: parent.top
+  anchors.bottom: parent.bottom
   padding-top: 8
+  image-source: /images/ui/panel_flat
+  image-border: 3
+  padding: 8
 
   Panel
     id: list
     anchors.left: parent.left
     anchors.top: parent.top
     anchors.bottom: parent.bottom
-    margin-right: 240
+    width: 215
     padding-left: 6
     padding-right: 6
     padding-top: 6
@@ -322,14 +408,15 @@ HealBotSettingsPanel < Panel
     anchors.top: prev.top
     anchors.bottom: prev.bottom
     anchors.left: prev.right
-    margin-left: 8
+    margin-left: 10
 
   NxPanel
     id: profiles
-    anchors.fill: parent
-    anchors.left: prev.left
-    margin-left: 8
-    margin-right: 8
+    anchors.left: prev.right
+    anchors.right: parent.right
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    margin-left: 10
     padding: 8
 
     NxLabel
@@ -369,28 +456,27 @@ HealBotSettingsPanel < Panel
 
 HealWindow < NxWindow
   !text: tr('Self Healer')
-  size: 520 360
-  @onEscape: self:hide()
+  size: 720 500
+  minimum-size: 620 440
 
   NxLabel
     id: title
     anchors.left: parent.left
+    anchors.right: parent.right
     anchors.top: parent.top
-    margin-left: 2
+    margin-top: 3
     !text: tr('More important methods come first (Example: Exura gran above Exura)')
-    text-align: left
+    text-align: center
     color: #a4aece
 
   HealerPanel
     id: healer
     anchors.top: prev.bottom
     anchors.left: parent.left
-
-  HealBotSettingsPanel
-    id: settings
-    anchors.top: title.bottom
-    anchors.left: parent.left
-    visible: false
+    anchors.right: parent.right
+    anchors.bottom: closeButton.top
+    margin-top: 6
+    margin-bottom: 8
 
   NxButton
     id: closeButton
@@ -398,15 +484,8 @@ HealWindow < NxWindow
     font: cipsoftFont
     anchors.right: parent.right
     anchors.bottom: parent.bottom
-    size: 45 21
+    size: 58 21
     margin-right: 5
-
-  NxButton
-    id: settingsButton
-    !text: tr('Settings')
-    font: cipsoftFont
-    anchors.left: parent.left
-    anchors.bottom: parent.bottom
 
   HorizontalSeparator
     id: separator

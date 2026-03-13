@@ -38,6 +38,7 @@ local function ensureCurrentSettings()
 end
 
 local standBySpells, standByItems = false, false
+local healKeyboardBound = false
 
 -- Load heal modules using simple dofile; they set globals directly
 -- Try multiple paths in order of likelihood
@@ -402,6 +403,38 @@ if rootWidget then
 
   local refreshSpells
   local refreshItems
+  local activeHealForm = "spell"
+
+  local function setActiveHealForm(form)
+    activeHealForm = form == "item" and "item" or "spell"
+  end
+
+  local function clearSpellForm()
+    healWindow.healer.spells.spellFormula:setText('')
+    healWindow.healer.spells.spellValue:setText('')
+    healWindow.healer.spells.manaCost:setText('')
+    healWindow.healer.spells.spellFormula:focus()
+  end
+
+  local function clearItemForm()
+    healWindow.healer.items.itemId:setItemId(0)
+    healWindow.healer.items.itemValue:setText('')
+    healWindow.healer.items.itemValue:focus()
+  end
+
+  local function refreshSpellHint()
+    local src = healWindow.healer.spells.spellSource:getCurrentOption().text
+    local eq = healWindow.healer.spells.spellCondition:getCurrentOption().text
+    local hint = "Cast spell when " .. src .. " is " .. eq:lower() .. " the trigger value."
+    healWindow.healer.spells.spellHint:setText(hint)
+  end
+
+  local function refreshItemHint()
+    local src = healWindow.healer.items.itemSource:getCurrentOption().text
+    local eq = healWindow.healer.items.itemCondition:getCurrentOption().text
+    local hint = "Use item when " .. src .. " is " .. eq:lower() .. " the trigger value."
+    healWindow.healer.items.itemHint:setText(hint)
+  end
 
   local loadSettings = function()
     ui.title:setOn(currentSettings.enabled)
@@ -409,13 +442,10 @@ if rootWidget then
     setProfileName()
     refreshSpells()
     refreshItems()
+    refreshSpellHint()
+    refreshItemHint()
     applyHealEngineToggles()
-    healWindow.settings.list.Visible:setChecked(currentSettings.Visible)
-    healWindow.settings.list.Cooldown:setChecked(currentSettings.Cooldown)
-    healWindow.settings.list.Delay:setChecked(currentSettings.Delay)
-    healWindow.settings.list.MessageDelay:setChecked(currentSettings.MessageDelay)
-    healWindow.settings.list.Interval:setChecked(currentSettings.Interval)
-    healWindow.settings.list.Conditions:setChecked(currentSettings.Conditions)
+
   end
 
     refreshSpells = function()
@@ -514,6 +544,42 @@ if rootWidget then
       saveHeal()
     end
 
+    healWindow.healer.spells.spellSource.onOptionChange = function(widget)
+      setActiveHealForm("spell")
+      refreshSpellHint()
+    end
+
+    healWindow.healer.spells.spellCondition.onOptionChange = function(widget)
+      setActiveHealForm("spell")
+      refreshSpellHint()
+    end
+
+    healWindow.healer.items.itemSource.onOptionChange = function(widget)
+      setActiveHealForm("item")
+      refreshItemHint()
+    end
+
+    healWindow.healer.items.itemCondition.onOptionChange = function(widget)
+      setActiveHealForm("item")
+      refreshItemHint()
+    end
+
+    healWindow.healer.spells.spellFormula.onTextChange = function(widget)
+      setActiveHealForm("spell")
+    end
+    healWindow.healer.spells.spellValue.onTextChange = function(widget)
+      setActiveHealForm("spell")
+    end
+    healWindow.healer.spells.manaCost.onTextChange = function(widget)
+      setActiveHealForm("spell")
+    end
+    healWindow.healer.items.itemValue.onTextChange = function(widget)
+      setActiveHealForm("item")
+    end
+    healWindow.healer.items.itemId.onItemChange = function(widget)
+      setActiveHealForm("item")
+    end
+
     healWindow.healer.spells.addSpell.onClick = function()
       ensureCurrentSettings()
       if not currentSettings then
@@ -529,9 +595,7 @@ if rootWidget then
       local origin = (src == "Current Mana" and "MP") or (src == "Current Health" and "HP") or (src == "Mana Percent" and "MP%") or (src == "Health Percent" and "HP%") or "burst"
       local sign = (eq == "Above" and ">") or (eq == "Below" and "<") or "="
       table.insert(currentSettings.spellTable, {index = #currentSettings.spellTable+1, spell = spellFormula, sign = sign, origin = origin, cost = manaCost, value = trigger, enabled = true})
-      healWindow.healer.spells.spellFormula:setText('')
-      healWindow.healer.spells.spellValue:setText('')
-      healWindow.healer.spells.manaCost:setText('')
+      clearSpellForm()
       refreshSpells()
       applyHealEngineToggles()
       saveHeal()
@@ -546,8 +610,7 @@ if rootWidget then
       local origin = (src == "Current Mana" and "MP") or (src == "Current Health" and "HP") or (src == "Mana Percent" and "MP%") or (src == "Health Percent" and "HP%") or "burst"
       local sign = (eq == "Above" and ">") or (eq == "Below" and "<") or "="
       table.insert(currentSettings.itemTable, {index = #currentSettings.itemTable+1, item = id, sign = sign, origin = origin, value = trigger, enabled = true})
-      healWindow.healer.items.itemId:setItemId(0)
-      healWindow.healer.items.itemValue:setText('')
+      clearItemForm()
       refreshItems()
       applyHealEngineToggles()
       saveHeal()
@@ -584,11 +647,24 @@ if rootWidget then
     end
   end
 
-  healWindow.settings.profiles.ResetSettings.onClick = function()
-    resetSettings()
-    loadSettings()
-  end
 
+  if not healKeyboardBound then
+    healKeyboardBound = true
+    onKeyPress(function(keys)
+      if not healWindow or not healWindow:isVisible() then return end
+      if keys == "Escape" then
+        if activeHealForm == "item" then clearItemForm() else clearSpellForm() end
+        return
+      end
+      if keys == "Enter" then
+        if activeHealForm == "item" then
+          healWindow.healer.items.addItem.onClick()
+        else
+          healWindow.healer.spells.addSpell.onClick()
+        end
+      end
+    end)
+  end
 
   -- public functions
   HealBot = {} -- global table

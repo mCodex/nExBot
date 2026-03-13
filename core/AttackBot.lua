@@ -742,8 +742,6 @@ end
   local uiSelectorHint = rw("selectorHint")
   local uiPreviousCategory = rw("previousCategory")
   local uiNextCategory = rw("nextCategory")
-  local uiPreviousSource = rw("previousSource")
-  local uiNextSource = rw("nextSource")
   local uiPreviousRange = rw("previousRange")
   local uiNextRange = rw("nextRange")
   local uiManaPercent = rw("manaPercent")
@@ -850,12 +848,6 @@ end
       setCategoryText()
       focusPrimaryInput()
     end
-    uiPreviousSource.onClick = function()
-      warn("[AttackBot] TODO, reserved for future use.")
-    end
-    uiNextSource.onClick = function()
-      warn("[AttackBot] TODO, reserved for future use.")
-    end
     uiPreviousRange.onClick = function()
       local t = patterns[patternCategory]
       if pattern == 1 then
@@ -888,6 +880,8 @@ end
         if widget.id then
           widget.id:setVisible(true)
           widget.id:setItemId(params.itemId)
+          pcall(function() widget.id:setItemCount(0) end)
+          pcall(function() widget.id:setItemSubType(0) end)
         end
       else
         if widget.id then
