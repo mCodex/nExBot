@@ -1561,7 +1561,7 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     if TargetBot then
       TargetBot.UnreachableTracker = TargetBot.UnreachableTracker or {
         entries = {},
-        ttl = 800,
+        ttl = 300,
         lastCleanup = 0,
         cleanupInterval = 2000
       }

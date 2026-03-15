@@ -122,7 +122,11 @@ end
 local lastNudgeDir  = nil
 local lastNudgeTime = 0
 
+--- All 8 directions for expanded nudge
+local ALL_DIRS = {0, 1, 2, 3, 4, 5, 6, 7}
+
 --- Try a single keyboard step toward dest. Returns "nudge" or false.
+--- Tries all 8 directions: primary first, then adjacent, then remaining.
 local function tryKeyboardNudge(playerPos, dest)
   if not playerPos or not dest then return false end
   if player:isWalking() then return false end
@@ -130,13 +134,36 @@ local function tryKeyboardNudge(playerPos, dest)
   local dir = getDirectionTo(playerPos, dest)
   if dir == nil then return false end
 
-  local candidates = { dir }
-  local adj = ADJACENT_DIRS[dir]
-  if adj then candidates[2] = adj[1]; candidates[3] = adj[2] end
+  -- Build priority-ordered candidate list: primary → adjacent → remaining
+  local used = {}
+  local candidates = {}
 
-  -- Anti-oscillation
-  if dir == lastNudgeDir and now - lastNudgeTime < 500 and adj then
-    candidates = { adj[1], adj[2], dir }
+  -- Primary direction
+  candidates[#candidates + 1] = dir
+  used[dir] = true
+
+  -- Adjacent directions
+  local adj = ADJACENT_DIRS[dir]
+  if adj then
+    for _, d in ipairs(adj) do
+      if not used[d] then
+        candidates[#candidates + 1] = d
+        used[d] = true
+      end
+    end
+  end
+
+  -- Remaining directions (perpendicular and backward)
+  for _, d in ipairs(ALL_DIRS) do
+    if not used[d] then
+      candidates[#candidates + 1] = d
+    end
+  end
+
+  -- Anti-oscillation: rotate primary to end if same direction nudge recently
+  if dir == lastNudgeDir and now - lastNudgeTime < 500 then
+    table.remove(candidates, 1)
+    candidates[#candidates + 1] = dir
   end
 
   for _, d in ipairs(candidates) do
@@ -228,7 +255,11 @@ local function findWalkablePath(playerPos, dest, opts)
     return path, false
   end
 
-  -- 3) RELAXED pathfinding (last resort, includes ignoreNonPathable)
+  -- 3) RELAXED pathfinding (narrow passages near trees/objects).
+  -- ignoreNonPathable lets A* route through tiles flagged non-pathable
+  -- (common near trees, objects) that are actually walkable.
+  -- Multi-step validation: check first 3 steps against REAL tile walkability
+  -- to reject paths that go through actual walls.
   local relaxedPath, wasRelaxed = PS().findPathRelaxed(playerPos, dest, {
     maxSteps        = maxSteps,
     ignoreCreatures = opts.ignoreCreatures or false,
@@ -236,15 +267,42 @@ local function findWalkablePath(playerPos, dest, opts)
     precision       = opts.precision or 0,
   })
 
-  if relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1]) then
-    PS().setCursor(relaxedPath, dest)
-    local sm = PS().smoothPath(relaxedPath, playerPos)
-    if sm and #sm > 0 and #sm <= #relaxedPath then
-      relaxedPath = sm
-      local cur = PS().getCursor()
-      if cur then cur.path = relaxedPath end
+  if relaxedPath and #relaxedPath > 0 then
+    local VALIDATE_STEPS = math.min(3, #relaxedPath)
+    local probe = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+    local validSteps = 0
+
+    for i = 1, VALIDATE_STEPS do
+      local dir = relaxedPath[i]
+      if i == 1 then
+        -- First step: canWalkDirection (most reliable for current position)
+        if not resolveWalkableDir(dir) then break end
+      else
+        -- Steps 2+: check actual tile walkability
+        local off = DIR_TO_OFFSET[dir]
+        if not off then break end
+        local nextPos = {x = probe.x + off.x, y = probe.y + off.y, z = probe.z}
+        if PathUtils and PathUtils.isTileWalkable then
+          if not PathUtils.isTileWalkable(nextPos, true) then break end
+        end
+      end
+      validSteps = validSteps + 1
+      local off = DIR_TO_OFFSET[relaxedPath[i]]
+      if off then
+        probe = {x = probe.x + off.x, y = probe.y + off.y, z = probe.z}
+      end
     end
-    return relaxedPath, wasRelaxed
+
+    if validSteps >= VALIDATE_STEPS then
+      PS().setCursor(relaxedPath, dest)
+      local sm = PS().smoothPath(relaxedPath, playerPos)
+      if sm and #sm > 0 and #sm <= #relaxedPath then
+        relaxedPath = sm
+        local cur = PS().getCursor()
+        if cur then cur.path = relaxedPath end
+      end
+      return relaxedPath, true
+    end
   end
 
   -- No walkable path found
@@ -353,34 +411,53 @@ CaveBot.walkTo = function(dest, maxDist, params)
     local manhattan = distX + distY
 
     if manhattan <= 3 then
+      -- Direct step when adjacent (no pathfinding needed)
+      if manhattan == 1 then
+        local dir = getDirectionTo(playerPos, dest)
+        if dir and canWalkDirection(dir) then
+          PS().walkStep(dir)
+          return true
+        end
+      end
+
       -- Close: precise keyboard steps.  Prefer the raw pathfinder direction
       -- (precision=0 must land on the exact tile); fall back to smoothed only
       -- when the raw direction is blocked (creature, pushable).
       local fcPath = PS().findPath(playerPos, dest, {ignoreNonPathable = true, precision = 0})
+      -- Fallback: relaxed pathfinding (stair tiles often flagged non-pathable)
+      if (not fcPath or #fcPath == 0) and PS().findPathRelaxed then
+        fcPath = PS().findPathRelaxed(playerPos, dest, {
+          ignoreNonPathable = true, precision = 0,
+        })
+      end
       if fcPath and #fcPath > 0 then
         local dir = fcPath[1]
         if canWalkDirection(dir) then
           PS().walkStep(dir)
-        else
-          local smoothed = PS().smoothDirection(dir, true) or dir
-          if smoothed ~= dir and canWalkDirection(smoothed) then
-            PS().walkStep(smoothed)
-          end
+          return true
+        end
+        local smoothed = PS().smoothDirection(dir, true) or dir
+        if smoothed ~= dir and canWalkDirection(smoothed) then
+          PS().walkStep(smoothed)
+          return true
         end
       end
-      return true
+      -- No path or step blocked → signal failure so retries accumulate
+      return false
     else
       -- Far: guarded autoWalk
       local isSafe = PS().nativePathIsSafe(playerPos, dest, {ignoreNonPathable = true})
       if isSafe then
         PS().autoWalk(dest, maxDist, {ignoreNonPathable = true, precision = precision})
-      else
-        local dirToDest = getDirectionTo(playerPos, dest)
-        if dirToDest and canWalkDirection(dirToDest) then
-          PS().walkStep(dirToDest)
-        end
+        return true
       end
-      return true
+      local dirToDest = getDirectionTo(playerPos, dest)
+      if dirToDest and canWalkDirection(dirToDest) then
+        PS().walkStep(dirToDest)
+        return true
+      end
+      -- Can't reach FC tile from here → signal failure
+      return false
     end
   end
 
@@ -408,6 +485,15 @@ CaveBot.walkTo = function(dest, maxDist, params)
   })
 
   if not path then
+    -- mapClick fallback: use native autoWalk (game's own pathfinding)
+    -- which can sometimes route around obstacles our A* can't handle
+    if CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("mapClick") then
+      local distToDest = math.max(math.abs(dest.x - playerPos.x), math.abs(dest.y - playerPos.y))
+      if distToDest > 1 then
+        PS().autoWalk(dest, maxDist, {ignoreNonPathable = true, precision = precision})
+        return true
+      end
+    end
     return tryKeyboardNudge(playerPos, dest)
   end
 

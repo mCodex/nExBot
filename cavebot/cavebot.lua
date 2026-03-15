@@ -342,6 +342,10 @@ WaypointEngine = {
   wasTargetBotBlocking = false,
   postCombatUntil      = 0,      -- tighter corridor check for 3s after combat ends
 
+  -- Corridor breach counter: sustained breaches in NORMAL state trigger RECOVERING
+  corridorBreachCount = 0,
+  CORRIDOR_BREACH_THRESHOLD = 3, -- 3 sustained breaches → RECOVERING
+
   -- Performance: avoid redundant UI lookups
   tickCount = 0,
   lastTickTime = 0,
@@ -658,6 +662,7 @@ resetWaypointEngine = function()
   WaypointEngine.lastRefocusTime = 0
   WaypointEngine.wasTargetBotBlocking = false
   WaypointEngine.postCombatUntil = 0
+  WaypointEngine.corridorBreachCount = 0
   lastDispatchedChild = nil
   clearWaypointBlacklist()
 end
@@ -774,20 +779,62 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): intentional, continuing WP" .. (focusedIdx or "?"))
     elseif stairUsed then
       -- Stair tile on the old floor caused this change (goto-driven stair use).
-      -- Don't snap to nearest — the goto for this WP will instantFail (floor
-      -- mismatch) and the Z-mismatch guard will then advance to the next
-      -- same-floor goto naturally, preserving correct route order.
+      -- Advance to the next WP in sequence (currentIndex+1) — this preserves
+      -- correct route order instead of falling through to the Z-mismatch scan.
       clearWaypointBlacklist()
       WaypointEngine.failureCount = 0
-      print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): stair at WP" .. (focusedIdx or "?") .. ", advancing via Z-mismatch guard")
+      local actionCount = ui.list:getChildCount()
+      if focusedIdx and actionCount > 0 then
+        local nextIdx = (focusedIdx % actionCount) + 1
+        local nextChild = ui.list:getChildByIndex(nextIdx)
+        if nextChild then
+          ui.list:focusChild(nextChild)
+          actionRetries = 0
+        end
+      end
+      print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): stair at WP" .. (focusedIdx or "?") .. ", advancing to next WP")
     else
-      -- Accidental floor change: reset fully and snap to nearest same-floor WP.
+      -- Accidental floor change: reset fully and find nearest same-floor WP.
+      -- Forward-biased: scan forward from current index first, prefer closest
+      -- forward WP, then wrap to beginning for rescue WPs.
       clearWaypointBlacklist()
       resetWaypointEngine()
-      local child, idx = findNearestSameFloorGoto(playerPos, playerPos.z, CaveBot.getMaxGotoDistance())
-      if child then
-        print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): accidental, focusing WP" .. idx)
-        focusWaypointForRecovery(child, idx)
+      local maxDist = CaveBot.getMaxGotoDistance()
+      local bestChild, bestIdx, bestDist = nil, nil, math.huge
+      local actionCount = ui.list:getChildCount()
+      buildWaypointCache()
+      -- Forward scan: from focusedIdx+1 to end
+      if focusedIdx and actionCount > 0 then
+        for i = focusedIdx + 1, actionCount do
+          local wp = waypointPositionCache[i]
+          if wp and wp.isGoto and wp.z == playerPos.z then
+            local d = math.max(math.abs(playerPos.x - wp.x), math.abs(playerPos.y - wp.y))
+            if d <= maxDist and d < bestDist then
+              bestChild, bestIdx, bestDist = wp.child, i, d
+              break  -- First forward match wins (closest in sequence)
+            end
+          end
+        end
+        -- Wrap scan: from 1 to focusedIdx for rescue WPs
+        if not bestChild then
+          for i = 1, (focusedIdx or actionCount) do
+            local wp = waypointPositionCache[i]
+            if wp and wp.isGoto and wp.z == playerPos.z then
+              local d = math.max(math.abs(playerPos.x - wp.x), math.abs(playerPos.y - wp.y))
+              if d <= maxDist and d < bestDist then
+                bestChild, bestIdx, bestDist = wp.child, i, d
+              end
+            end
+          end
+        end
+      end
+      -- Fallback: distance-based (if forward scan found nothing within maxDist)
+      if not bestChild then
+        bestChild, bestIdx = findNearestSameFloorGoto(playerPos, playerPos.z, maxDist)
+      end
+      if bestChild then
+        print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): accidental, focusing WP" .. bestIdx)
+        focusWaypointForRecovery(bestChild, bestIdx)
       end
     end
 
@@ -894,11 +941,10 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   end
 
   -- Trigger 2: Corridor enforcement (checked every tick when not walking/in-combat)
-  -- During post-combat window (3s): "margin" triggers too (catch 6-15 tile drift from chase).
-  -- Otherwise: only hard "outside" (15+ tiles) to avoid interfering with normal A* detours.
+  -- NORMAL state: count sustained breaches → transition to RECOVERING after threshold.
+  -- RECOVERING state: corridor refocus is handled by executeRecovery().
+  -- Post-combat window (3s): "margin" triggers too (catch 6-15 tile drift from chase).
   if WaypointNavigator and playerPos and not player:isWalking() then
-    -- Guard: skip if the current goto action was just dispatched recently
-    -- (prevents canceling a walk between A* pathfinder steps)
     if (now - WaypointEngine.lastRefocusTime) >= WaypointEngine.REFOCUS_COOLDOWN and type(CaveBot.ensureNavigatorRoute) == 'function' then
       CaveBot.ensureNavigatorRoute(playerPos.z)
       local status, dist, recovery
@@ -908,25 +954,52 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       local inPostCombat = now < WaypointEngine.postCombatUntil
       local breached = status and ((inPostCombat and status ~= "inside") or (status == "outside"))
 
-      if breached and recovery then
-        local wp = waypointPositionCache[recovery.nextWpIdx]
-        if wp and wp.child and not isWaypointBlacklisted(wp.child) then
-          print("[CaveBot] Corridor breach: " .. math.floor(dist) .. " tiles off-route, refocusing WP" .. recovery.nextWpIdx)
-          focusWaypointForRecovery(wp.child, recovery.nextWpIdx)
-          WaypointEngine.lastRefocusTime = now
-          return
+      if breached then
+        if WaypointEngine.state == "RECOVERING" and recovery then
+          -- RECOVERING: immediate corridor refocus (bot is genuinely lost)
+          local wp = waypointPositionCache[recovery.nextWpIdx]
+          if wp and wp.child and not isWaypointBlacklisted(wp.child) then
+            print("[CaveBot] Corridor breach (recovery): " .. math.floor(dist) .. " tiles off-route, refocusing WP" .. recovery.nextWpIdx)
+            focusWaypointForRecovery(wp.child, recovery.nextWpIdx)
+            WaypointEngine.lastRefocusTime = now
+            return
+          end
+        else
+          -- NORMAL: count sustained breaches, don't refocus directly
+          WaypointEngine.corridorBreachCount = WaypointEngine.corridorBreachCount + 1
+          if WaypointEngine.corridorBreachCount >= WaypointEngine.CORRIDOR_BREACH_THRESHOLD then
+            print("[CaveBot] Sustained corridor breach (" .. WaypointEngine.corridorBreachCount .. " checks, " .. math.floor(dist) .. " tiles off-route) — entering RECOVERING")
+            WaypointEngine.corridorBreachCount = 0
+            transitionTo("RECOVERING")
+            return
+          end
         end
+      else
+        -- Inside corridor: reset breach counter
+        WaypointEngine.corridorBreachCount = 0
       end
     end
   end
 
   -- Trigger 3: Periodic drift check (fallback when corridor is unavailable)
+  -- Only refocus if current WP is blacklisted or has failures — trust the sequence otherwise.
   if (now - WaypointEngine.lastDriftCheck) >= WaypointEngine.DRIFT_CHECK_INTERVAL then
     WaypointEngine.lastDriftCheck = now
     if not player:isWalking() then
-      local pp = pos()
-      if pp and maybeRefocusNearestWaypoint(pp) then
-        return
+      local currentAction = uiList and uiList:getFocusedChild()
+      local shouldRefocus = false
+      if currentAction then
+        if isWaypointBlacklisted(currentAction) then
+          shouldRefocus = true
+        elseif WaypointEngine.failureCount > 0 then
+          shouldRefocus = true
+        end
+      end
+      if shouldRefocus then
+        local pp = pos()
+        if pp and maybeRefocusNearestWaypoint(pp) then
+          return
+        end
       end
     end
   end
@@ -943,22 +1016,43 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if not currentAction then return end
 
   -- Z-MISMATCH GUARD: If focused WP is a goto on a different floor than player,
-  -- scan forward to the next same-floor goto (wraps around to WP1).
-  -- Prevents rapid cycling: arrive→advance→Z-mismatch→instantFail→recovery→arrive→...
+  -- advance sequentially (not wrapping scan) to preserve route order.
+  -- Only advance to the immediate next WP(s); skip non-goto actions naturally.
+  -- If next goto is also wrong floor → let normal failure/recovery handle it.
   if playerPos and currentAction.action == "goto" then
     buildWaypointCache()
     local focusedIdx = uiList:getChildIndex(currentAction)
     local cachedWp = waypointPositionCache[focusedIdx]
     if cachedWp and cachedWp.z ~= playerPos.z then
       local found = false
+      -- Try advancing sequentially: check next few WPs (up to 5 non-goto skips)
+      local maxSkip = 5
       local scanIdx = focusedIdx
-      for _ = 1, actionCount do
-        scanIdx = (scanIdx % actionCount) + 1
+      for _ = 1, maxSkip do
+        scanIdx = scanIdx + 1
+        if scanIdx > actionCount then break end  -- Don't wrap around
+        local nextChild = uiList:getChildByIndex(scanIdx)
+        if not nextChild then break end
         local wp = waypointPositionCache[scanIdx]
-        if wp and wp.isGoto and wp.z == playerPos.z and not isWaypointBlacklisted(wp.child) then
-          focusWaypointForRecovery(wp.child, scanIdx)
-          found = true
-          break
+        if wp and wp.isGoto then
+          -- Found next goto: only accept if same floor
+          if wp.z == playerPos.z and not isWaypointBlacklisted(wp.child) then
+            focusWaypointForRecovery(wp.child, scanIdx)
+            found = true
+          end
+          break  -- Stop at first goto regardless (don't skip past it)
+        end
+        -- Non-goto action: skip it (labels, use, say, etc.)
+      end
+      -- Rescue fallback: if ALL forward WPs are wrong floor, wrap to find rescue WPs
+      if not found then
+        for scanI = 1, focusedIdx - 1 do
+          local wp = waypointPositionCache[scanI]
+          if wp and wp.isGoto and wp.z == playerPos.z and not isWaypointBlacklisted(wp.child) then
+            focusWaypointForRecovery(wp.child, scanI)
+            found = true
+            break
+          end
         end
       end
       if found then return end
@@ -1491,6 +1585,8 @@ findReachableWaypoint = function(playerPos, options)
   end
 
   -- Collect same-floor, non-blacklisted candidates (prefer goto WPs for recovery)
+  -- Forward-bias: penalize backward WPs (before currentIdx) by 2× distance
+  -- so the bot prefers to continue forward in the .cfg sequence.
   local candidates = {}
   for i, wp in pairs(waypointPositionCache) do
     if isWaypointBlacklisted(wp.child) then goto continue end
@@ -1501,8 +1597,14 @@ findReachableWaypoint = function(playerPos, options)
     -- Include if within maxDist OR if it's one of the very closest (proximity guarantee)
     if dist > maxDist * 1.5 then goto continue end
 
+    -- Forward-bias: backward WPs get 2× effective distance for sorting
+    local sortDist = dist
+    if currentIdx > 0 and i < currentIdx then
+      sortDist = dist * 2
+    end
+
     candidates[#candidates + 1] = {
-      index = i, dist = dist, child = wp.child,
+      index = i, dist = dist, sortDist = sortDist, child = wp.child,
       x = wp.x, y = wp.y, z = wp.z,
       isGoto = wp.isGoto, withinRange = (dist <= maxDist)
     }
@@ -1513,8 +1615,8 @@ findReachableWaypoint = function(playerPos, options)
     return nil, nil
   end
 
-  -- Sort by distance
-  table.sort(candidates, function(a, b) return a.dist < b.dist end)
+  -- Sort by effective distance (forward-biased)
+  table.sort(candidates, function(a, b) return a.sortDist < b.sortDist end)
 
   -- Path-validate top candidates (max 5 strict A* calls, bounded cost)
   -- This prevents selecting WPs behind walls during recovery.

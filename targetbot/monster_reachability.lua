@@ -32,7 +32,9 @@ local R = MonsterAI.Reachability
 R.cache            = {}
 R.cacheTime        = {}
 R.CACHE_TTL        = 1500
-R.BLOCKED_COOLDOWN = 5000
+R.BLOCKED_COOLDOWN_STATIC  = 15000  -- Never-reachable: 15s (wall-blocked from first check)
+R.BLOCKED_COOLDOWN_DYNAMIC = 5000   -- Previously-reachable: 5s (walked behind wall)
+R.BLOCKED_COOLDOWN_MAX     = 30000  -- Cap for escalating cooldown
 R.blockedCreatures = {}
 
 R.stats = {
@@ -66,9 +68,12 @@ function R.isReachable(creature, forceRecheck)
       return cr.reachable, cr.reason, cr.path
     end
     local bl = R.blockedCreatures[id]
-    if bl and (nowt - bl.blockedTime) < R.BLOCKED_COOLDOWN then
-      if bl.attempts < 3 then bl.attempts = bl.attempts + 1
-      else R.stats.cacheHits = R.stats.cacheHits + 1; return false, bl.reason, nil end
+    if bl then
+      local cooldown = bl.cooldown or (bl.wasEverReachable and R.BLOCKED_COOLDOWN_DYNAMIC or R.BLOCKED_COOLDOWN_STATIC)
+      if (nowt - bl.blockedTime) < cooldown then
+        if bl.attempts < 3 then bl.attempts = bl.attempts + 1
+        else R.stats.cacheHits = R.stats.cacheHits + 1; return false, bl.reason, nil end
+      end
     end
   end
 
@@ -143,7 +148,17 @@ function R.isReachable(creature, forceRecheck)
     if ok2 then hasLOS = los end
   end
 
+  -- LoS check is soft: path exists so melee can still reach (around corners)
+  -- Note: no_path creatures never reach here (bailed out above), so the
+  -- no_path + no_los hard-block is naturally enforced.
+  if not hasLOS then
+    R.stats.byReason.no_los = (R.stats.byReason.no_los or 0) + 1
+  end
+
   R.stats.reachable = R.stats.reachable + 1
+  -- Mark as ever-reachable for dynamic cooldown
+  local existing = R.blockedCreatures[id]
+  if existing then existing.wasEverReachable = true end
   R.clearBlocked(id)
   return R.cacheResult(id, true, hasLOS and "clear" or "no_los_melee_ok", result)
 end
@@ -161,8 +176,21 @@ end
 
 function R.markBlocked(id, reason)
   local e = R.blockedCreatures[id]
-  if e then e.attempts = e.attempts + 1; e.reason = reason
-  else R.blockedCreatures[id] = { blockedTime = nowMs(), attempts = 1, reason = reason } end
+  if e then
+    e.attempts = e.attempts + 1
+    e.reason = reason
+    -- Escalate cooldown on repeated blocks (doubled, capped)
+    if e.attempts > 1 then
+      local baseCooldown = e.wasEverReachable and R.BLOCKED_COOLDOWN_DYNAMIC or R.BLOCKED_COOLDOWN_STATIC
+      e.cooldown = math.min(baseCooldown * e.attempts, R.BLOCKED_COOLDOWN_MAX)
+    end
+  else
+    R.blockedCreatures[id] = {
+      blockedTime = nowMs(), attempts = 1, reason = reason,
+      wasEverReachable = false,
+      cooldown = R.BLOCKED_COOLDOWN_STATIC  -- Default to static until proven reachable
+    }
+  end
 end
 
 function R.clearBlocked(id) R.blockedCreatures[id] = nil end
@@ -170,7 +198,7 @@ function R.clearCache()      R.cache = {}; R.cacheTime = {} end
 
 function R.cleanup()
   local nowt   = nowMs()
-  local expiry = R.BLOCKED_COOLDOWN * 2
+  local expiry = R.BLOCKED_COOLDOWN_MAX * 2
   for id, d in pairs(R.blockedCreatures) do
     if (nowt - d.blockedTime) > expiry then R.blockedCreatures[id] = nil end
   end
@@ -197,7 +225,8 @@ function R.getCachedPath(cid) local c = R.cache[cid]; return c and c.path or nil
 function R.isBlocked(cid)
   local b = R.blockedCreatures[cid]
   if not b then return false end
-  if (nowMs() - b.blockedTime) > R.BLOCKED_COOLDOWN then R.blockedCreatures[cid] = nil; return false end
+  local cooldown = b.cooldown or (b.wasEverReachable and R.BLOCKED_COOLDOWN_DYNAMIC or R.BLOCKED_COOLDOWN_STATIC)
+  if (nowMs() - b.blockedTime) > cooldown then R.blockedCreatures[cid] = nil; return false end
   return true, b.reason, b.attempts
 end
 

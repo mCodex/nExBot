@@ -80,8 +80,8 @@ local function ensureDeps()
       CC = {
         TICK_INTERVAL = 100, COMMAND_COOLDOWN = 350, CONFIRM_TIMEOUT = 1200,
         GRACE_PERIOD = 1500, KEEPALIVE_INTERVAL = 2000, STOP_DEBOUNCE = 150,
-        REAFFIRM_RETRY_MAX = 5, ENGAGE_BACKOFF_BASE = 1500,
-        ENGAGE_BACKOFF_GROWTH = 1.5, SWITCH_COOLDOWN = 2500,
+        REAFFIRM_RETRY_MAX = 3, ENGAGE_BACKOFF_BASE = 1000,
+        ENGAGE_BACKOFF_GROWTH = 1.5, ENGAGE_BACKOFF_CAP = 3000, SWITCH_COOLDOWN = 2500,
         CONFIG_SWITCH_COOLDOWN = 400, CRITICAL_HP = 25,
         PATH_SKIP_DURATION = 10000,
       }
@@ -541,7 +541,7 @@ local function handleEngaging()
     -- Grow timeout for next attempt
     state.currentTimeout = math.min(
       state.currentTimeout * CC.ENGAGE_BACKOFF_GROWTH,
-      5000  -- hard cap 5s
+      CC.ENGAGE_BACKOFF_CAP or 3000  -- use constant cap
     )
     state.enteredAt = nowMs()
     log("Retry " .. state.retries .. "/" .. CC.REAFFIRM_RETRY_MAX ..
