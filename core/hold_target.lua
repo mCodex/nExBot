@@ -2,11 +2,45 @@ setDefaultTab("Tools")
 
 local targetID = nil
 
+local UNREACHABLE_TEXT_PATTERNS = {
+    "sorry, not possible",
+    "there is no way",
+    "creature is not reachable",
+}
+
+local function isUnreachableMessage(text)
+    if type(text) ~= "string" then return false end
+    local t = text:lower()
+    for i = 1, #UNREACHABLE_TEXT_PATTERNS do
+        if t:find(UNREACHABLE_TEXT_PATTERNS[i], 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
 -- escape when attacking will reset hold target
 onKeyPress(function(keys)
     if keys == "Escape" and targetID then
         targetID = nil
     end
+end)
+
+-- If the client reports unreachable while Hold Target is active, clear the
+-- remembered target so this module doesn't keep forcing the same stale target.
+onTextMessage(function(mode, text)
+    if not targetID then return end
+    if not isUnreachableMessage(text) then return end
+
+    if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.markBlocked then
+        pcall(function() MonsterAI.Reachability.markBlocked(targetID, "not_possible") end)
+    end
+
+    if AttackStateMachine and AttackStateMachine.skipCreature then
+        pcall(function() AttackStateMachine.skipCreature(targetID, 15000) end)
+    end
+
+    targetID = nil
 end)
 
 -- Hold Target handler function (shared by UnifiedTick and fallback macro)
@@ -28,6 +62,26 @@ local function holdTargetHandler()
                 local oldTarget = spec:getId() == targetID
 
                 if sameFloor and oldTarget then
+                    -- Respect ASM skip-list: do not re-force recently blocked targets.
+                    if AttackStateMachine and AttackStateMachine.isSkipped and AttackStateMachine.isSkipped(targetID) then
+                        targetID = nil
+                        return
+                    end
+
+                    -- Respect reachability: if blocked/unreachable, clear hold lock.
+                    if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable then
+                        local reachable = false
+                        local okReach, rr = pcall(function() return MonsterAI.Reachability.isReachable(spec) end)
+                        if okReach and rr == true then reachable = true end
+                        if not reachable then
+                            targetID = nil
+                            if AttackStateMachine and AttackStateMachine.skipCreature then
+                                pcall(function() AttackStateMachine.skipCreature(spec:getId(), 15000) end)
+                            end
+                            return
+                        end
+                    end
+
                     -- Route through ASM to prevent competing attack commands
                     if AttackStateMachine and AttackStateMachine.forceAttack then
                         AttackStateMachine.forceAttack(spec)

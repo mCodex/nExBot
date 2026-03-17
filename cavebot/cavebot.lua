@@ -296,8 +296,15 @@ local chebyshevDist = Directions.chebyshevDistance  -- SSoT: constants/direction
 local waypointPositionCache = {} -- Waypoint position cache table
 local waypointCacheValid = false
 local waypointCacheFloors = {}
+local routeGraphCache = nil
+local routeValidationReport = nil
+local routeValidationPrintedFingerprint = nil
 local startupWaypointFound = false
 local startupCheckTime = nil   -- Set on first check to enforce 500ms delay
+
+local WaypointSchema = CaveBot and CaveBot.WaypointSchema
+local RouteCompiler = CaveBot and CaveBot.RouteCompiler
+local RouteValidator = CaveBot and CaveBot.RouteValidator
 
 --[[
   WAYPOINT ENGINE
@@ -665,6 +672,7 @@ resetWaypointEngine = function()
   WaypointEngine.corridorBreachCount = 0
   lastDispatchedChild = nil
   clearWaypointBlacklist()
+  if CaveBot.NavigationV2 then CaveBot.NavigationV2.reset() end
 end
 
 -- Cache TargetBot function references (avoid repeated table lookups)
@@ -734,114 +742,62 @@ if EventBus then
   end, 5)  -- High priority
 end
 
+-- ============================================================================
+-- NAVIGATION V2 CONTEXT
+-- Shared context object passed to NavigationV2.handleFloorChange /
+-- NavigationV2.handleRecovery on every macro tick.
+-- Callbacks are closures over cavebot.lua locals — valid once macro runs.
+-- Data fields are refreshed by updateNavCtx() each tick.
+-- ============================================================================
+local navCtx = {
+  -- Stable callbacks (upvalue closures; all locals fully assigned by macro time).
+  setLastFloor         = function(z) lastPlayerFloor = z end,
+  setActionRetries     = function(n) actionRetries = n end,
+  clearDelays          = function() walkState.delayUntil = 0; cavebotMacro.delay = nil end,
+  safeResetWalking     = function() safeResetWalking() end,
+  focusWaypoint        = function(c, i) focusWaypointForRecovery(c, i) end,
+  clearBlacklist       = function() clearWaypointBlacklist() end,
+  resetEngine          = function() resetWaypointEngine() end,
+  transitionTo         = function(s) transitionTo(s) end,
+  isBlacklisted        = function(c) return isWaypointBlacklisted(c) end,
+  blacklistWaypoint    = function(c) blacklistWaypoint(c) end,
+  buildCache           = function() buildWaypointCache() end,
+  getWaypointCache     = function() return waypointPositionCache end,
+  getActionCount       = function() return ui.list and ui.list:getChildCount() or 0 end,
+  findNearestSameFloor = function(pp, z, d) return findNearestSameFloorGoto(pp, z, d) end,
+  getMaxGotoDist       = CaveBot.getMaxGotoDistance,
+  -- Data fields (refreshed by updateNavCtx each tick).
+  playerPos            = nil,
+  lastPlayerFloor      = nil,
+  focusedChild         = nil,
+  focusedIdx           = nil,
+  waypointCache        = nil,
+  actionCount          = 0,
+  uiList               = nil,
+  engine               = WaypointEngine,  -- stable table reference
+}
+
+local function updateNavCtx(playerPos)
+  navCtx.playerPos       = playerPos
+  navCtx.lastPlayerFloor = lastPlayerFloor
+  navCtx.uiList          = ui.list
+  navCtx.waypointCache   = waypointPositionCache
+  navCtx.actionCount     = ui.list:getChildCount()
+  local fc               = ui.list:getFocusedChild()
+  navCtx.focusedChild    = fc
+  navCtx.focusedIdx      = fc and ui.list:getChildIndex(fc) or nil
+end
+
 cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   -- Guard: forward-declared functions may not be assigned yet during reload
   if not buildWaypointCache then return end
 
-  -- Z-LEVEL CHANGE: Must run BEFORE shouldSkipExecution so stale delays
-  -- from the old floor can't block rescue.
   local playerPos = player and player:getPosition()
-  if playerPos and lastPlayerFloor and playerPos.z ~= lastPlayerFloor then
-    -- Determine whether this floor change was intentional (the focused WP is
-    -- already on the new floor, meaning goto navigated the stairs on purpose)
-    -- or accidental (player changed floor while targeting a different-floor WP).
-    local focusedChild = ui and ui.list and ui.list:getFocusedChild()
-    local focusedIdx   = focusedChild and ui.list:getChildIndex(focusedChild)
-    local focusedWp    = focusedIdx and waypointPositionCache[focusedIdx]
-    -- Case 1: WP is already on the new floor (e.g. the goto navigated to a stair
-    -- tile whose destination is explicitly recorded with the new floor's z value).
-    local intentional  = focusedWp and focusedWp.isGoto and focusedWp.z == playerPos.z
-
-    -- Case 2: Stair-triggered change — focused WP is a floor-change tile on the
-    -- OLD floor.  The goto walked the player onto a hole/ladder/rope and the
-    -- server teleported them to the adjacent floor.  This is intentional; using
-    -- findNearestSameFloorGoto here would snap to a WP *before* the stair
-    -- entrance and create an infinite loop (Wyrm / Banuta routes).
-    local stairUsed = false
-    if not intentional and focusedWp and focusedWp.isGoto and focusedWp.z == lastPlayerFloor then
-      local wpPos = { x = focusedWp.x, y = focusedWp.y, z = focusedWp.z }
-      if FloorItems and FloorItems.isFloorChangeTile then
-        stairUsed = FloorItems.isFloorChangeTile(wpPos)
-      end
-    end
-
-    -- Always clear stale walk state regardless of intent
-    walkState.delayUntil = 0
-    cavebotMacro.delay   = nil
-    safeResetWalking()
-
-    if intentional then
-      -- Intentional stair use: the current WP is already on this floor.
-      -- Don't refocus — let the goto action complete normally.
-      -- Clear blacklists so fresh state on new floor, but keep engine in NORMAL.
-      clearWaypointBlacklist()
-      WaypointEngine.failureCount = 0
-      print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): intentional, continuing WP" .. (focusedIdx or "?"))
-    elseif stairUsed then
-      -- Stair tile on the old floor caused this change (goto-driven stair use).
-      -- Advance to the next WP in sequence (currentIndex+1) — this preserves
-      -- correct route order instead of falling through to the Z-mismatch scan.
-      clearWaypointBlacklist()
-      WaypointEngine.failureCount = 0
-      local actionCount = ui.list:getChildCount()
-      if focusedIdx and actionCount > 0 then
-        local nextIdx = (focusedIdx % actionCount) + 1
-        local nextChild = ui.list:getChildByIndex(nextIdx)
-        if nextChild then
-          ui.list:focusChild(nextChild)
-          actionRetries = 0
-        end
-      end
-      print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): stair at WP" .. (focusedIdx or "?") .. ", advancing to next WP")
-    else
-      -- Accidental floor change: reset fully and find nearest same-floor WP.
-      -- Forward-biased: scan forward from current index first, prefer closest
-      -- forward WP, then wrap to beginning for rescue WPs.
-      clearWaypointBlacklist()
-      resetWaypointEngine()
-      local maxDist = CaveBot.getMaxGotoDistance()
-      local bestChild, bestIdx, bestDist = nil, nil, math.huge
-      local actionCount = ui.list:getChildCount()
-      buildWaypointCache()
-      -- Forward scan: from focusedIdx+1 to end
-      if focusedIdx and actionCount > 0 then
-        for i = focusedIdx + 1, actionCount do
-          local wp = waypointPositionCache[i]
-          if wp and wp.isGoto and wp.z == playerPos.z then
-            local d = math.max(math.abs(playerPos.x - wp.x), math.abs(playerPos.y - wp.y))
-            if d <= maxDist and d < bestDist then
-              bestChild, bestIdx, bestDist = wp.child, i, d
-              break  -- First forward match wins (closest in sequence)
-            end
-          end
-        end
-        -- Wrap scan: from 1 to focusedIdx for rescue WPs
-        if not bestChild then
-          for i = 1, (focusedIdx or actionCount) do
-            local wp = waypointPositionCache[i]
-            if wp and wp.isGoto and wp.z == playerPos.z then
-              local d = math.max(math.abs(playerPos.x - wp.x), math.abs(playerPos.y - wp.y))
-              if d <= maxDist and d < bestDist then
-                bestChild, bestIdx, bestDist = wp.child, i, d
-              end
-            end
-          end
-        end
-      end
-      -- Fallback: distance-based (if forward scan found nothing within maxDist)
-      if not bestChild then
-        bestChild, bestIdx = findNearestSameFloorGoto(playerPos, playerPos.z, maxDist)
-      end
-      if bestChild then
-        print("[CaveBot] Z-change (" .. lastPlayerFloor .. "→" .. playerPos.z .. "): accidental, focusing WP" .. bestIdx)
-        focusWaypointForRecovery(bestChild, bestIdx)
-      end
-    end
-
-    lastPlayerFloor = playerPos.z
-    return  -- Consume this tick for the Z transition
+  -- FLOOR TRACKING + Z-LEVEL CHANGE: delegated to NavigationV2.
+  updateNavCtx(playerPos)
+  if CaveBot.NavigationV2 and CaveBot.NavigationV2.handleFloorChange(navCtx) then
+    return
   end
-  if playerPos then lastPlayerFloor = playerPos.z end
 
   -- SMART EXECUTION: Skip if we shouldn't execute this tick
   if shouldSkipExecution() then return end
@@ -858,9 +814,9 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     checkStartupWaypoint()
   end
   
-  -- WAYPOINT ENGINE: High-performance stuck detection and recovery
-  if runWaypointEngine() then
-    return  -- Engine handled recovery, skip normal processing
+  -- NAVIGATION V2: Recovery engine (handles RECOVERING/HARD_STUCK states).
+  if CaveBot.NavigationV2 and CaveBot.NavigationV2.handleRecovery(navCtx) then
+    return
   end
   
   -- Lazy-init TargetBot cache
@@ -1386,10 +1342,15 @@ end
 
 -- Get waypoint engine statistics
 CaveBot.getWaypointStats = function()
+  local navV2State = nil
+  if CaveBot.NavigationV2 and CaveBot.NavigationV2.getState then
+    navV2State = CaveBot.NavigationV2.getState()
+  end
   return {
     state = WaypointEngine.state,
     failureCount = WaypointEngine.failureCount,
-    isRecovering = (WaypointEngine.state == "RECOVERING")
+    isRecovering = (WaypointEngine.state == "RECOVERING"),
+    navV2State = navV2State
   }
 end
 
@@ -1422,6 +1383,10 @@ end
 -- @return table {x, y, z} or nil
 local function parseWaypointPosition(text)
   if not text then return nil end
+  if WaypointSchema and WaypointSchema.parsePositionFromText then
+    local parsed = WaypointSchema.parsePositionFromText(text)
+    if parsed then return parsed end
+  end
   -- Detect usewith prefix: format is "usewith:itemid,x,y,z" — skip itemid
   local prefix = text:match("^(%w+):")
   if prefix and prefix:lower() == "usewith" then
@@ -1463,6 +1428,8 @@ invalidateWaypointCache = function()
   waypointPositionCache = {}
   waypointCacheValid = false
   waypointCacheFloors = {}
+  routeGraphCache = nil
+  routeValidationReport = nil
   -- Invalidate WaypointNavigator route (segment cache is stale)
   if WaypointNavigator and WaypointNavigator.invalidate then
     WaypointNavigator.invalidate()
@@ -1487,9 +1454,17 @@ buildWaypointCache = function()
   waypointPositionCache = {}
   waypointCacheFloors = {}
   local actions = ui.list:getChildren()
+  local routeNodes = {}
   
   for i, child in ipairs(actions) do
     local text = child:getText()
+    local parsed = WaypointSchema and WaypointSchema.parseLine and WaypointSchema.parseLine(text, i) or nil
+    if parsed then
+      parsed.child = child
+      parsed.action = child.action or parsed.action
+      routeNodes[#routeNodes + 1] = parsed
+    end
+
     local pos = parseWaypointPosition(text)
     if pos then
       waypointPositionCache[i] = {
@@ -1503,8 +1478,32 @@ buildWaypointCache = function()
       waypointCacheFloors[pos.z] = true
     end
   end
+
+  if #routeNodes > 0 and RouteCompiler and RouteCompiler.compile then
+    routeGraphCache = RouteCompiler.compile(routeNodes)
+    if RouteValidator and RouteValidator.validate then
+      routeValidationReport = RouteValidator.validate(routeGraphCache)
+      if routeValidationReport and not routeValidationReport.ok then
+        local fingerprint = tostring(routeValidationReport.errors) .. ":" .. tostring(routeValidationReport.warnings)
+        if fingerprint ~= routeValidationPrintedFingerprint then
+          routeValidationPrintedFingerprint = fingerprint
+          warn("[CaveBot] Route validation found " .. routeValidationReport.errors .. " error(s) and " .. routeValidationReport.warnings .. " warning(s)")
+        end
+      end
+    end
+  end
   
   waypointCacheValid = true
+end
+
+CaveBot.getRouteGraph = function()
+  buildWaypointCache()
+  return routeGraphCache
+end
+
+CaveBot.getRouteValidationReport = function()
+  buildWaypointCache()
+  return routeValidationReport
 end
 
 -- Lightweight distance-only search for the nearest goto WP on a given floor.

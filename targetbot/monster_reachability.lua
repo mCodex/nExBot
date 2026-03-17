@@ -104,7 +104,7 @@ function R.isReachable(creature, forceRecheck)
   end)
   if not ok or not result or #result == 0 then
     R.stats.byReason.no_path = R.stats.byReason.no_path + 1
-    R.markBlocked(id, "no_path")
+    R.markBlocked(id, "no_path", creature)
     return R.cacheResult(id, false, "no_path", nil)
   end
 
@@ -119,7 +119,7 @@ function R.isReachable(creature, forceRecheck)
       if tile then
         if tile.isWalkable and not tile:isWalkable() then
           R.stats.byReason.blocked_tile = R.stats.byReason.blocked_tile + 1
-          R.markBlocked(id, "blocked_tile")
+          R.markBlocked(id, "blocked_tile", creature)
           return R.cacheResult(id, false, "blocked_tile", nil)
         end
         local items = tile.getItems and tile:getItems()
@@ -127,7 +127,7 @@ function R.isReachable(creature, forceRecheck)
           for _, item in ipairs(items) do
             if item.isNotWalkable and item:isNotWalkable() then
               R.stats.byReason.blocked_tile = R.stats.byReason.blocked_tile + 1
-              R.markBlocked(id, "blocked_tile")
+              R.markBlocked(id, "blocked_tile", creature)
               return R.cacheResult(id, false, "blocked_tile", nil)
             end
           end
@@ -174,21 +174,30 @@ function R.cacheResult(id, reachable, reason, path)
   return reachable, reason, path
 end
 
-function R.markBlocked(id, reason)
+function R.markBlocked(id, reason, creature)
   local e = R.blockedCreatures[id]
   if e then
     e.attempts = e.attempts + 1
     e.reason = reason
+    e.blockedTime = nowMs()
+    local c = creature or e.creature
+    if c then
+      local cpos = safeCreatureCall(c, "getPosition", nil)
+      if cpos then e.lastPos = {x = cpos.x, y = cpos.y, z = cpos.z} end
+    end
     -- Escalate cooldown on repeated blocks (doubled, capped)
     if e.attempts > 1 then
       local baseCooldown = e.wasEverReachable and R.BLOCKED_COOLDOWN_DYNAMIC or R.BLOCKED_COOLDOWN_STATIC
       e.cooldown = math.min(baseCooldown * e.attempts, R.BLOCKED_COOLDOWN_MAX)
     end
   else
+    local cpos = creature and safeCreatureCall(creature, "getPosition", nil) or nil
     R.blockedCreatures[id] = {
       blockedTime = nowMs(), attempts = 1, reason = reason,
       wasEverReachable = false,
-      cooldown = R.BLOCKED_COOLDOWN_STATIC  -- Default to static until proven reachable
+      cooldown = R.BLOCKED_COOLDOWN_STATIC,  -- Default to static until proven reachable
+      creature = creature,
+      lastPos = cpos and {x = cpos.x, y = cpos.y, z = cpos.z} or nil,
     }
   end
 end
@@ -276,7 +285,23 @@ if EventBus and EventBus.on then
     if tbOff() then return end
     if creature and safeIsMonster(creature) then
       local id = safeGetId(creature)
-      if id and R.blockedCreatures[id] then R.clearBlocked(id); R.cache[id] = nil; R.cacheTime[id] = nil end
+      if id and R.blockedCreatures[id] then
+        local entry = R.blockedCreatures[id]
+        local cpos = safeCreatureCall(creature, "getPosition", nil)
+        if cpos and entry.lastPos then
+          local moved = math.max(math.abs(cpos.x - entry.lastPos.x), math.abs(cpos.y - entry.lastPos.y))
+          -- Keep blocked state for micro-movements near the same wall tile.
+          -- Only clear when monster meaningfully repositions.
+          if moved >= 2 or cpos.z ~= entry.lastPos.z then
+            R.clearBlocked(id)
+          else
+            entry.lastPos = {x = cpos.x, y = cpos.y, z = cpos.z}
+          end
+        end
+        -- Always drop cached path/reachability so next check reflects new tile.
+        R.cache[id] = nil
+        R.cacheTime[id] = nil
+      end
     end
   end)
 end

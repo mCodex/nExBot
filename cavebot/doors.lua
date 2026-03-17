@@ -2,6 +2,27 @@ CaveBot.Extensions.OpenDoors = {}
 
 local getClient = nExBot.Shared.getClient
 
+local function chebyshev(a, b)
+  return math.max(math.abs(a.x - b.x), math.abs(a.y - b.y))
+end
+
+local function getDoorApproachPos(doorPos, playerPos)
+  local offsets = {
+    {x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0},
+    {x=1,y=-1},{x=1,y=1},{x=-1,y=1},{x=-1,y=-1}
+  }
+  local best, bestDist = nil, math.huge
+  for i = 1, #offsets do
+    local p = {x = doorPos.x + offsets[i].x, y = doorPos.y + offsets[i].y, z = doorPos.z}
+    local d = chebyshev(playerPos, p)
+    if d < bestDist then
+      best = p
+      bestDist = d
+    end
+  end
+  return best
+end
+
 CaveBot.Extensions.OpenDoors.setup = function()
   CaveBot.registerAction("OpenDoors", "#6be8e0", function(value, retries)
     local pos = string.split(value, ",")
@@ -20,6 +41,22 @@ CaveBot.Extensions.OpenDoors.setup = function()
     end
 
     pos = {x=tonumber(pos[1]), y=tonumber(pos[2]), z=tonumber(pos[3])}  
+    local playerPos = player:getPosition()
+    if not playerPos then return false end
+
+    if chebyshev(playerPos, pos) > 1 then
+      local maxDist = CaveBot.getMaxGotoDistance and CaveBot.getMaxGotoDistance() or 50
+      local approachPos = getDoorApproachPos(pos, playerPos)
+      local walkResult = CaveBot.walkTo(approachPos, maxDist, {
+        precision = 1,
+        allowFloorChange = false,
+      })
+      if walkResult then
+        CaveBot.delay(100)
+        return "retry"
+      end
+      return false
+    end
 
     local Client = getClient()
     local doorTile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))

@@ -29,6 +29,13 @@ safeDofile("/cavebot/editor.lua")
 safeDofile("/cavebot/recorder.lua")
 safeDofile("/cavebot/tools.lua")
 safeDofile("/cavebot/walking.lua")
+safeDofile("/cavebot/waypoint_schema.lua")
+safeDofile("/cavebot/route_compiler.lua")
+safeDofile("/cavebot/route_validator.lua")
+safeDofile("/cavebot/loop_guard_v2.lua")
+safeDofile("/cavebot/recovery_planner_v2.lua")
+safeDofile("/cavebot/navigation_v2.lua")
+safeDofile("/cavebot/config_loader.lua")
 
 safeDofile("/cavebot/minimap.lua")
 

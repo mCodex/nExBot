@@ -129,6 +129,49 @@ local function cName(c)
   return ok and v or "?"
 end
 
+local function canEngageCreature(creature)
+  if not creature or cDead(creature) then return false end
+
+  local id = cId(creature)
+  if id and AttackStateMachine.isSkipped and AttackStateMachine.isSkipped(id) then
+    return false
+  end
+
+  if not (MonsterAI and MonsterAI.Reachability) then
+    return true
+  end
+
+  if id and MonsterAI.Reachability.isBlocked then
+    local isBlocked, reason = MonsterAI.Reachability.isBlocked(id)
+    if isBlocked and (reason == "no_path" or reason == "blocked_tile" or reason == "not_possible") then
+      return false
+    end
+  end
+
+    local C = getClient()
+    local lp = (C and C.getLocalPlayer and C.getLocalPlayer())
+      or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
+    local okP, pPos = pcall(function() return lp and lp:getPosition() end)
+    local okC, cPos = pcall(function() return creature:getPosition() end)
+    pPos = okP and pPos or nil
+    cPos = okC and cPos or nil
+  if not pPos or not cPos then return false end
+
+  local dist = math.max(math.abs(cPos.x - pPos.x), math.abs(cPos.y - pPos.y))
+  if dist <= 1 then
+    return true
+  end
+
+  if MonsterAI.Reachability.isReachable then
+    local ok, reachable = pcall(function()
+      return MonsterAI.Reachability.isReachable(creature)
+    end)
+    return ok and reachable == true
+  end
+
+  return true
+end
+
 -- ============================================================================
 -- INTERNAL STATE
 -- ============================================================================
@@ -464,6 +507,28 @@ local function handleIdle()
       end
       for _, spec in ipairs(specs) do
         if cId(spec) == state.holdTargetId and not cDead(spec) then
+          -- Don't re-lock recently skipped targets.
+          if AttackStateMachine.isSkipped and AttackStateMachine.isSkipped(state.holdTargetId) then
+            state.holdTargetId = nil
+            state.holdTargetName = nil
+            return
+          end
+
+          -- Respect strict reachability before hold-target re-acquire.
+          if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable then
+            local okReach, reachable = pcall(function()
+              return MonsterAI.Reachability.isReachable(spec)
+            end)
+            if not okReach or not reachable then
+              if AttackStateMachine.skipCreature then
+                AttackStateMachine.skipCreature(state.holdTargetId, CC.PATH_SKIP_DURATION)
+              end
+              state.holdTargetId = nil
+              state.holdTargetName = nil
+              return
+            end
+          end
+
           log("Hold-target re-acquired: " .. cName(spec))
           setTarget(spec, state.priority, "hold_reacquire")
           return
@@ -679,7 +744,14 @@ function AttackStateMachine.requestAttack(creature, priority)
   ensureDeps()
   if (nowMs() - state.lastStopAt) < CC.STOP_DEBOUNCE then return false end
 
+  if not canEngageCreature(creature) then
+    return false
+  end
+
   local id = cId(creature)
+  if id and AttackStateMachine.isSkipped and AttackStateMachine.isSkipped(id) then
+    return false
+  end
 
   -- REAFFIRM path: same target in ENGAGING → reset retries, keep going
   if id == state.targetId then
@@ -723,7 +795,14 @@ end
 function AttackStateMachine.forceAttack(creature)
   if not creature or cDead(creature) then return false end
 
+  if not canEngageCreature(creature) then
+    return false
+  end
+
   local id = cId(creature)
+  if id and AttackStateMachine.isSkipped and AttackStateMachine.isSkipped(id) then
+    return false
+  end
   if id == state.targetId and state.current ~= STATE.IDLE then
     -- Already targeting — just refresh
     state.creature = creature

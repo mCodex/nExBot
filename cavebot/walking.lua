@@ -100,6 +100,26 @@ local function isNearFloorChangeTile(tilePos)
   return false
 end
 
+local function getFloorChangeApproachTile(playerPos, dest)
+  if not playerPos or not dest then return nil end
+  local bestTile, bestLen = nil, math.huge
+  for _, off in ipairs(Dirs.ADJACENT_OFFSETS or {}) do
+    local alt = applyOffset(dest, off)
+    if not isFloorChangeTile(alt) then
+      local path = PS().findPath(playerPos, alt, {
+        ignoreNonPathable = true,
+        ignoreCreatures = true,
+        precision = 0,
+      })
+      if path and #path > 0 and #path < bestLen then
+        bestTile = alt
+        bestLen = #path
+      end
+    end
+  end
+  return bestTile
+end
+
 local function stopAutoWalk()
   if PathUtils and PathUtils.stopAutoWalk then PathUtils.stopAutoWalk(); return end
   if player and player.stopAutoWalk then player:stopAutoWalk() end
@@ -409,8 +429,9 @@ CaveBot.walkTo = function(dest, maxDist, params)
   if allowFloorChange then
     if player:isWalking() then return true end
     local manhattan = distX + distY
+    local approachDest = getFloorChangeApproachTile(playerPos, dest)
 
-    if manhattan <= 3 then
+    if manhattan <= 2 or (approachDest and posEquals(playerPos, approachDest)) then
       -- Direct step when adjacent (no pathfinding needed)
       if manhattan == 1 then
         local dir = getDirectionTo(playerPos, dest)
@@ -445,13 +466,15 @@ CaveBot.walkTo = function(dest, maxDist, params)
       -- No path or step blocked → signal failure so retries accumulate
       return false
     else
-      -- Far: guarded autoWalk
-      local isSafe = PS().nativePathIsSafe(playerPos, dest, {ignoreNonPathable = true})
+      -- Far: walk to a non-FC adjacent approach tile first, then enter the
+      -- FC tile with precise keyboard steps when close.
+      local walkDest = approachDest or dest
+      local isSafe = PS().nativePathIsSafe(playerPos, walkDest, {ignoreNonPathable = true})
       if isSafe then
-        PS().autoWalk(dest, maxDist, {ignoreNonPathable = true, precision = precision})
+        PS().autoWalk(walkDest, maxDist, {ignoreNonPathable = true, precision = 0})
         return true
       end
-      local dirToDest = getDirectionTo(playerPos, dest)
+      local dirToDest = getDirectionTo(playerPos, walkDest)
       if dirToDest and canWalkDirection(dirToDest) then
         PS().walkStep(dirToDest)
         return true
@@ -485,15 +508,6 @@ CaveBot.walkTo = function(dest, maxDist, params)
   })
 
   if not path then
-    -- mapClick fallback: use native autoWalk (game's own pathfinding)
-    -- which can sometimes route around obstacles our A* can't handle
-    if CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("mapClick") then
-      local distToDest = math.max(math.abs(dest.x - playerPos.x), math.abs(dest.y - playerPos.y))
-      if distToDest > 1 then
-        PS().autoWalk(dest, maxDist, {ignoreNonPathable = true, precision = precision})
-        return true
-      end
-    end
     return tryKeyboardNudge(playerPos, dest)
   end
 

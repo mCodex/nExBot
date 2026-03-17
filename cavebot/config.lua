@@ -19,8 +19,6 @@ CaveBot.Config.setup = function()
   add("walkDelay", "Walk delay", 10)
   add("ignoreFields", "Ignore fields", true)  
   add("walkingDebug", "Walking debug", false) -- Disabled by default for performance
-  add("skipBlocked", "Skip blocked path", false)
-  add("mapClick", "Map click walking", true)
   add("useDelay", "Delay after use", 400)
   add("autoUseTools", "Auto use tools", true)
   add("autoOpenDoors", "Auto open doors", true)

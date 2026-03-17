@@ -458,6 +458,64 @@ local gotoProgress = {
   PROGRESS_MIN = 2,   -- must close ≥2 tiles to count as progress
 }
 
+local function isNearFloorChangePos(p)
+  if not p or not FloorItems or not FloorItems.isFloorChangeTile then return false end
+  if FloorItems.isFloorChangeTile(p) then return true end
+  local adj = {
+    {x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0},
+    {x=1,y=-1},{x=1,y=1},{x=-1,y=1},{x=-1,y=-1}
+  }
+  for i = 1, #adj do
+    local q = {x = p.x + adj[i].x, y = p.y + adj[i].y, z = p.z}
+    if FloorItems.isFloorChangeTile(q) then
+      return true
+    end
+  end
+  return false
+end
+
+local function getAdjacentApproachPos(playerPos, targetPos)
+  if not playerPos or not targetPos then return targetPos end
+  local bestPos, bestDist = nil, math.huge
+  local adj = {
+    {x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0},
+    {x=1,y=-1},{x=1,y=1},{x=-1,y=1},{x=-1,y=-1}
+  }
+  for i = 1, #adj do
+    local alt = {x = targetPos.x + adj[i].x, y = targetPos.y + adj[i].y, z = targetPos.z}
+    if not isNearFloorChangePos(alt) then
+      local d = math.max(math.abs(playerPos.x - alt.x), math.abs(playerPos.y - alt.y))
+      if d < bestDist then
+        bestPos = alt
+        bestDist = d
+      end
+    end
+  end
+  return bestPos or targetPos
+end
+
+local function classifyGotoBlock(playerPos, destPos, isFloorChange, maxDist)
+  if not playerPos or not destPos then return "unknown" end
+  if playerPos.z ~= destPos.z then return "floor" end
+
+  if not isFloorChange and FloorItems and FloorItems.isFieldTile and FloorItems.isFieldTile(destPos) then
+    return "field"
+  end
+
+  local blocker = getBlockingMonster(playerPos, destPos, maxDist)
+  if blocker then
+    return "creature"
+  end
+
+  local Client = getClient()
+  local tile = (Client and Client.getTile and Client.getTile(destPos)) or (g_map and g_map.getTile and g_map.getTile(destPos))
+  if tile and tile.isWalkable and not tile:isWalkable() then
+    return "wall"
+  end
+
+  return "unknown"
+end
+
 CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   -- ========== PARSE POSITION ==========
   local posMatch = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+),?\\s*([0-9]?)")
@@ -553,7 +611,7 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   end
 
   -- ========== ARRIVAL CHECK ==========
-  if distX <= precision and distY <= precision then
+  if dist <= precision then
     CaveBot.clearWaypointTarget()
     if isFloorChange then
       if playerPos.z == expectedFloorAfterChange then
@@ -589,12 +647,14 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   end
 
   -- ========== MAX RETRIES ==========
-  local maxRetries = CaveBot.Config.get("mapClick") and 4 or 8
+  local maxRetries = 8
+  local hardRetryLimit = 14
   if retries >= maxRetries then
-    -- skipBlocked: advance past blocked WPs instead of entering recovery
-    if CaveBot.Config.get("skipBlocked") then
-      CaveBot.clearWaypointTarget()
-      return true  -- Complete this WP, advance to next in sequence
+    local reason = classifyGotoBlock(playerPos, destPos, isFloorChange, maxDist)
+    if (reason == "creature" or reason == "field") and retries < hardRetryLimit then
+      -- Transient blockers get bounded extra retries before recovery.
+      CaveBot.delay(120)
+      return "retry"
     end
     return false
   end
@@ -651,8 +711,11 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   -- (ignoreCreatures, ignoreFields, attack blocker) works against a guaranteed-
   -- walkable recorded position.
   local walkTarget = destPos
+    local nearTransition = isNearFloorChangePos(playerPos) or isNearFloorChangePos(destPos)
   if retries == 0
       and not isFloorChange
+      and not nearTransition
+      and dist > 6
       and WaypointNavigator
       and type(WaypointNavigator.isRouteBuilt) == "function"
       and WaypointNavigator.isRouteBuilt()
@@ -663,7 +726,7 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
         math.abs(lookahead.x - playerPos.x),
         math.abs(lookahead.y - playerPos.y)
       )
-      if lhDist >= 3 then
+      if lhDist >= 5 then
         -- Gate 1: reject floor-change tiles (walkTo redirects to adjacent tile
         -- with allowFloorChange=false, causing oscillation near the stair).
         local lookaheadIsStair = (FloorItems and FloorItems.isFloorChangeTile)
@@ -770,16 +833,16 @@ CaveBot.registerAction("use", "#3be4d0", function(value, retries, prev)
 
   local dist = math.max(math.abs(pos.x-playerPos.x), math.abs(pos.y-playerPos.y))
 
-  if dist > 7 then
-    -- Too far: walk closer first
-    if isFC or dist > 10 then return false end
+  if dist > 1 then
+    -- Walk to an adjacent usable approach tile for reliable interaction.
     local maxDist = CaveBot.getMaxGotoDistance and CaveBot.getMaxGotoDistance() or 50
-    local walkResult = CaveBot.walkTo(pos, maxDist, {
+    local approachPos = getAdjacentApproachPos(playerPos, pos)
+    local walkResult = CaveBot.walkTo(approachPos, maxDist, {
       precision = 1,
       allowFloorChange = false
     })
     if walkResult then
-      CaveBot.delay(200)
+      CaveBot.delay(100)
       return "retry"
     end
     return false
@@ -845,16 +908,16 @@ CaveBot.registerAction("usewith", "#3be4d0", function(value, retries, prev)
 
   local dist = math.max(math.abs(pos.x-playerPos.x), math.abs(pos.y-playerPos.y))
 
-  if dist > 7 then
-    -- Too far: walk closer first
-    if isFC or dist > 10 then return false end
+  if dist > 1 then
+    -- Walk to an adjacent usable approach tile for reliable interaction.
     local maxDist = CaveBot.getMaxGotoDistance and CaveBot.getMaxGotoDistance() or 50
-    local walkResult = CaveBot.walkTo(pos, maxDist, {
+    local approachPos = getAdjacentApproachPos(playerPos, pos)
+    local walkResult = CaveBot.walkTo(approachPos, maxDist, {
       precision = 1,
       allowFloorChange = false
     })
     if walkResult then
-      CaveBot.delay(200)
+      CaveBot.delay(100)
       return "retry"
     end
     return false

@@ -358,8 +358,20 @@ function EventTargeting.getLiveMonsterCount()
     if isTargetableMonster(creature) then
       local okPos, cpos = pcall(function() return creature:getPosition() end)
       if okPos and cpos and cpos.z == playerZ then
-        count = count + 1
-        monsters[#monsters + 1] = creature
+        -- Skip confirmed-blocked (wall-blocked) creatures so they are not
+        -- counted as live monsters requiring attention.
+        local skip = false
+        if MonsterAI and MonsterAI.Reachability then
+          local okId, cid = pcall(function() return creature:getId() end)
+          if okId and cid then
+            local isBlocked, reason = MonsterAI.Reachability.isBlocked(cid)
+            skip = isBlocked and (reason == "no_path" or reason == "blocked_tile" or reason == "not_possible")
+          end
+        end
+        if not skip then
+          count = count + 1
+          monsters[#monsters + 1] = creature
+        end
       end
     end
   end
@@ -936,14 +948,25 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   -- Verify path exists before attacking (prevents attacking through walls, etc.)
   -- ═══════════════════════════════════════════════════════════════════════════
   if dist > 1 then
-    -- Re-validate path if not provided or stale
-    if not path then
+    -- Always run strict reachability gate here (even when `path` is already
+    -- provided from cache/caller) so stale/lenient paths never bypass wall checks.
+    if MonsterAI and MonsterAI.Reachability then
+      local reachable, reason = MonsterAI.Reachability.isReachable(creature)
+      if not reachable then
+        if EventTargeting.DEBUG then
+          print("[EventTargeting] BLOCKED: " .. creature:getName() .. " unreachable: " .. tostring(reason))
+        end
+        return
+      end
+      path = MonsterAI.Reachability.getCachedPath(id) or path
+    elseif not path then
+      -- Fallback when Reachability module is unavailable.
       local validatedPath, pathLen, reachable = EventTargeting.PathValidator.validate(playerPos, creaturePos)
       if not reachable then
         if EventTargeting.DEBUG then
           print("[EventTargeting] BLOCKED: " .. creature:getName() .. " is unreachable (no path)")
         end
-        return  -- Do NOT attack unreachable targets
+        return
       end
       path = validatedPath
     end
