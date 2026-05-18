@@ -157,6 +157,9 @@ local EquipState = {
     inventoryCache = nil,       -- Cached inventory index
     inventoryCacheTime = 0,     -- When inventory was last cached
     INVENTORY_CACHE_TTL = 300,  -- ms before inventory cache expires
+    inventoryGeneration = 0,
+    contextFingerprint = nil,
+    contextInventoryGeneration = 0,
 }
 
 -- ============================================================================
@@ -1168,6 +1171,27 @@ local function triggerEquipCheck()
     EquipState.correctEq = false
 end
 
+local function bucketPercent(value)
+    value = tonumber(value) or 0
+    return math.floor(value / 5)
+end
+
+local function buildContextFingerprint(ctx)
+    return table.concat({
+        bucketPercent(ctx.hp),
+        bucketPercent(ctx.mp),
+        tonumber(ctx.monsters) or 0,
+        tonumber(ctx.players) or 0,
+        ctx.target or "",
+        ctx.inPz and 1 or 0,
+        ctx.paralyzed and 1 or 0,
+        bucketPercent(ctx.danger),
+        ctx.cavebotOn and 1 or 0,
+        ctx.targetbotOn and 1 or 0,
+        ctx.healbotOn and 1 or 0,
+    }, "|")
+end
+
 -- Get cached inventory index (avoids rebuilding on every check)
 local function getCachedInventoryIndex()
     local timeSinceCache = now - EquipState.inventoryCacheTime
@@ -1182,6 +1206,7 @@ end
 local function invalidateInventoryCache()
     EquipState.inventoryCache = nil
     EquipState.inventoryCacheTime = 0
+    EquipState.inventoryGeneration = EquipState.inventoryGeneration + 1
 end
 
 -- Throttled equipment check - only runs once per CHECK_INTERVAL
@@ -1207,11 +1232,22 @@ local function throttledEquipCheck()
     EquipState.lastCheckTime = now
     
     local ctx = snapshotContext()
+    local contextFingerprint = buildContextFingerprint(ctx)
+    if not EquipState.needsEquipCheck
+        and EquipState.correctEq
+        and EquipState.contextFingerprint == contextFingerprint
+        and EquipState.contextInventoryGeneration == EquipState.inventoryGeneration then
+        return
+    end
+
     local inventoryIndex = getCachedInventoryIndex()
+    local sawMissingItem = false
+    local actionFailed = false
     
     for _, rule in ipairs(rules) do
         if rulePasses(rule, ctx) then
             local action, missing = computeAction(rule, ctx, inventoryIndex)
+            if missing then sawMissingItem = true end
             if action then
                 if action.kind == "unequip" then
                     if unequipSlot(action.slotIdx) then
@@ -1221,6 +1257,8 @@ local function throttledEquipCheck()
                         EquipState.lastRule = rule
                         invalidateInventoryCache()
                         return
+                    else
+                        actionFailed = true
                     end
                 elseif action.kind == "equip" then
                     if equipSlot(action.slotIdx, action.itemId) then
@@ -1230,11 +1268,19 @@ local function throttledEquipCheck()
                         EquipState.lastRule = rule
                         invalidateInventoryCache()
                         return
+                    else
+                        actionFailed = true
                     end
                 end
             end
         end
     end
+
+    EquipState.missingItem = sawMissingItem
+    EquipState.contextFingerprint = contextFingerprint
+    EquipState.contextInventoryGeneration = EquipState.inventoryGeneration
+    EquipState.needsEquipCheck = actionFailed
+    EquipState.correctEq = not actionFailed
 end
 
 -- Subscribe via EventBus if available (just set flag, throttled check handles the rest)
@@ -1244,6 +1290,11 @@ if EventBus then
     EventBus.on("target:change", function() triggerEquipCheck() end, 100)
     EventBus.on("player:pz", function() triggerEquipCheck() end, 100)
     EventBus.on("player:states", function() triggerEquipCheck() end, 100)
+    EventBus.on("container:open", function() invalidateInventoryCache(); triggerEquipCheck() end, 50)
+    EventBus.on("container:close", function() invalidateInventoryCache(); triggerEquipCheck() end, 50)
+    EventBus.on("container:update", function() invalidateInventoryCache(); triggerEquipCheck() end, 50)
+    EventBus.on("container:addItem", function() invalidateInventoryCache(); triggerEquipCheck() end, 50)
+    EventBus.on("container:removeItem", function() invalidateInventoryCache(); triggerEquipCheck() end, 50)
 else
     -- FALLBACK: Use native OTC callbacks only if EventBus unavailable
     if onManaChange then onManaChange(function() triggerEquipCheck() end) end

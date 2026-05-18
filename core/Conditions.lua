@@ -238,49 +238,79 @@ Panel
   end
 
   local utanaCast = nil
-  
-  -- Cure conditions handler (500ms)
-  local function cureConditionsHandler()
-    if not config.enabled or modules.game_cooldown.isGroupCooldownIconActive(2) then return end
-    if hppercent() > 95 then
-      if config.curePoison and mana() >= config.poisonCost and isPoisioned() then say("exana pox") 
-      elseif config.cureCurse and mana() >= config.curseCost and isCursed() then say("exana mort") 
-      elseif config.cureBleed and mana() >= config.bleedCost and isBleeding() then say("exana kor")
-      elseif config.cureBurn and mana() >= config.burnCost and isBurning() then say("exana flam") 
-      elseif config.cureElectrify and mana() >= config.electrifyCost and isEnergized() then say("exana vis") 
-      end
-    end
-    if (not config.ignoreInPz or not isInPz()) and config.holdUtura and mana() >= config.uturaCost and canCast(config.uturaType) and hppercent() < 90 then say(config.uturaType)
-    elseif (not config.ignoreInPz or not isInPz()) and config.holdUtana and mana() >= config.utanaCost and (not utanaCast or (now - utanaCast > 120000)) then say("utana vid") utanaCast = now
-    end
+
+  local function actionLimiter()
+    return BotCore and BotCore.ActionRateLimiter
   end
-  
-  -- Hold spells handler (50ms - high frequency for responsiveness)
-  local function holdSpellsHandler()
+
+  local function castConditionSpell(spell, interval)
+    local limiter = actionLimiter()
+    if limiter and limiter.castSpell then
+      return limiter.castSpell(spell, {
+        interval = interval or 250,
+        globalKey = "conditions:spell"
+      })
+    end
+    say(spell)
+    return true
+  end
+
+  local function healingGroupReady()
+    if BotCore and BotCore.Cooldown and BotCore.Cooldown.isHealingOnCooldown then
+      return not BotCore.Cooldown.isHealingOnCooldown()
+    end
+    if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
+      return not modules.game_cooldown.isGroupCooldownIconActive(2)
+    end
+    return true
+  end
+
+  -- Single condition spell handler. Cast at most one spell per tick to avoid
+  -- cure/hold races sending multiple talk packets in the same frame.
+  local function conditionSpellsHandler()
     if not config.enabled then return end
-    if (not config.ignoreInPz or not isInPz()) and config.holdUtamo and mana() >= config.utamoCost and not hasManaShield() then say("utamo vita")
-    elseif ((not config.ignoreInPz or not isInPz()) and standTime() < 5000 and config.holdHaste and mana() >= config.hasteCost and not hasHaste() and not getSpellCoolDown(config.hasteSpell) and (not target() or not config.stopHaste or TargetBot.isCaveBotActionAllowed())) and standTime() < 3000 then say(config.hasteSpell)
-    elseif config.cureParalyse and mana() >= config.paralyseCost and isParalyzed() and not getSpellCoolDown(config.paralyseSpell) then say(config.paralyseSpell)
+
+    local canUseHold = not config.ignoreInPz or not isInPz()
+
+    if healingGroupReady() and hppercent() > 95 then
+      if config.curePoison and mana() >= config.poisonCost and isPoisioned() and castConditionSpell("exana pox") then return end
+      if config.cureCurse and mana() >= config.curseCost and isCursed() and castConditionSpell("exana mort") then return end
+      if config.cureBleed and mana() >= config.bleedCost and isBleeding() and castConditionSpell("exana kor") then return end
+      if config.cureBurn and mana() >= config.burnCost and isBurning() and castConditionSpell("exana flam") then return end
+      if config.cureElectrify and mana() >= config.electrifyCost and isEnergized() and castConditionSpell("exana vis") then return end
+    end
+
+    if canUseHold and config.holdUtura and mana() >= config.uturaCost and canCast(config.uturaType) and hppercent() < 90 and castConditionSpell(config.uturaType) then
+      return
+    end
+
+    if canUseHold and config.holdUtana and mana() >= config.utanaCost and (not utanaCast or (now - utanaCast > 120000)) and castConditionSpell("utana vid") then
+      utanaCast = now
+      return
+    end
+
+    if canUseHold and config.holdUtamo and mana() >= config.utamoCost and not hasManaShield() and castConditionSpell("utamo vita") then
+      return
+    end
+
+    if canUseHold and standTime() < 3000 and config.holdHaste and mana() >= config.hasteCost and not hasHaste() and not getSpellCoolDown(config.hasteSpell) and (not target() or not config.stopHaste or TargetBot.isCaveBotActionAllowed()) and castConditionSpell(config.hasteSpell) then
+      return
+    end
+
+    if config.cureParalyse and mana() >= config.paralyseCost and isParalyzed() and not getSpellCoolDown(config.paralyseSpell) then
+      castConditionSpell(config.paralyseSpell)
     end
   end
   
   -- Use UnifiedTick if available (reduces macro overhead)
   if UnifiedTick and UnifiedTick.register then
-    UnifiedTick.register("conditions_cure", {
-      interval = 500,
-      priority = UnifiedTick.Priority and UnifiedTick.Priority.NORMAL or 50,
-      handler = cureConditionsHandler,
-      group = "conditions"
-    })
-    
-    UnifiedTick.register("conditions_hold_spells", {
-      interval = 50,
+    UnifiedTick.register("conditions_spells", {
+      interval = 100,
       priority = UnifiedTick.Priority and UnifiedTick.Priority.HIGH or 75,
-      handler = holdSpellsHandler,
+      handler = conditionSpellsHandler,
       group = "conditions"
     })
   else
     -- Fallback to traditional macros
-    macro(500, cureConditionsHandler)
-    macro(50, holdSpellsHandler)
+    macro(100, conditionSpellsHandler)
   end

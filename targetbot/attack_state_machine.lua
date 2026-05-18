@@ -147,6 +147,7 @@ local state = {
   -- Attack tracking
   lastCommandAt   = 0,
   lastConfirmedAt = 0,
+  lastReaffirmAt  = 0,
   retries         = 0,
   currentTimeout  = 0,     -- current confirm timeout (grows with backoff)
 
@@ -684,6 +685,12 @@ function AttackStateMachine.requestAttack(creature, priority)
   -- REAFFIRM path: same target in ENGAGING → reset retries, keep going
   if id == state.targetId then
     if state.current == STATE.ENGAGING then
+      local t = nowMs()
+      if (t - state.lastReaffirmAt) < CC.COMMAND_COOLDOWN then
+        return true
+      end
+      state.lastReaffirmAt = t
+
       -- Refresh creature ref (may be newer object)
       state.creature = creature
       state.stats.reaffirms = state.stats.reaffirms + 1
@@ -760,6 +767,7 @@ function AttackStateMachine.reset()
   state.priority        = 0
   state.lastCommandAt   = 0
   state.lastConfirmedAt = 0
+  state.lastReaffirmAt  = 0
   state.retries         = 0
   state.currentTimeout  = 0
   state.lastStopAt      = 0

@@ -38,6 +38,7 @@ local basePath = "/core/bot_core/"
 -- Core managers (no dependencies)
 dofile(basePath .. "stats.lua")
 dofile(basePath .. "cooldown.lua")
+dofile(basePath .. "action_rate_limiter.lua")
 
 -- Condition checker (depends on Stats)
 dofile(basePath .. "conditions.lua")

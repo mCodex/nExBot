@@ -2,6 +2,26 @@ CaveBot.Extensions.OpenDoors = {}
 
 local getClient = nExBot.Shared.getClient
 
+local function actionLimiter()
+  return BotCore and BotCore.ActionRateLimiter
+end
+
+local function posKey(pos)
+  if not pos then return "unknown" end
+  return tostring(pos.x) .. ":" .. tostring(pos.y) .. ":" .. tostring(pos.z)
+end
+
+local function throttleDoor(pos)
+  local limiter = actionLimiter()
+  if not limiter or not limiter.allow then return true end
+  local ok, remaining = limiter.allow("opendoors:" .. posKey(pos), 250, "use")
+  if not ok then
+    delay(math.max(remaining or 50, 50))
+    return false
+  end
+  return true
+end
+
 CaveBot.Extensions.OpenDoors.setup = function()
   CaveBot.registerAction("OpenDoors", "#00FFFF", function(value, retries)
     local pos = string.split(value, ",")
@@ -44,20 +64,24 @@ CaveBot.Extensions.OpenDoors.setup = function()
         
         -- Check if it's a locked door and we have a key
         if key and DoorItems and DoorItems.isLockedDoor(itemId) then
+          if not throttleDoor(pos) then return "retry" end
           useWith(key, topThing)
           delay(200)
           return "retry"
         -- Check if it's a closed door (can open without key)
         elseif DoorItems and DoorItems.isClosedDoor(itemId) then
+          if not throttleDoor(pos) then return "retry" end
           use(topThing)
           delay(200)
           return "retry"
         -- Original fallback behavior
         elseif not key then
+          if not throttleDoor(pos) then return "retry" end
           use(topThing)
           delay(200)
           return "retry"
         else
+          if not throttleDoor(pos) then return "retry" end
           useWith(key, topThing)
           delay(200)
           return "retry"

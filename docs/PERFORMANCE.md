@@ -32,6 +32,25 @@ Instead of 30+ separate macro timers, nExBot consolidates into a single **50 ms 
 
 Floor transitions fire hundreds of creature appear/disappear events in a single frame. nExBot's `EventBus` detects this burst pattern and blocks expensive callbacks (targeting, looting, Monster AI) during the transition, preventing freezes.
 
+### Outbound Action Rate Limiting
+
+Network-facing client actions are gated by `BotCore.ActionRateLimiter`. The limiter is intentionally small: each action key stores its last execution time and suppresses duplicate calls inside a short cooldown window. This prevents tight CaveBot retry loops from repeatedly sending `say`, `attack`, `use`, `open`, `move`, or walk commands faster than the client/server can process them.
+
+Default intervals:
+
+| Action | Default |
+|--------|---------|
+| Spell/talk | 250 ms |
+| Attack | 350 ms |
+| Use/useWith | 200 ms |
+| Open container | 300 ms |
+| Move item/creature | 200 ms |
+| Walk | 150 ms |
+| autoWalk | 300 ms |
+| Stash item | 250 ms |
+
+For diagnostics, call `BotCore.ActionRateLimiter.getStats()` while debugging. It returns per-key `sent` and `suppressed` counters so spammy modules are visible without packet sniffing.
+
 ---
 
 ## 💾 Caching Systems

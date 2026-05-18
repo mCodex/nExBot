@@ -2,6 +2,26 @@ CaveBot.Extensions.ClearTile = {}
 
 local getClient = nExBot.Shared.getClient
 
+local function actionLimiter()
+  return BotCore and BotCore.ActionRateLimiter
+end
+
+local function posKey(pos)
+  if not pos then return "unknown" end
+  return tostring(pos.x) .. ":" .. tostring(pos.y) .. ":" .. tostring(pos.z)
+end
+
+local function throttleRetry(action, pos, interval, actionType)
+  local limiter = actionLimiter()
+  if not limiter or not limiter.allow then return true end
+  local ok, remaining = limiter.allow("cleartile:" .. action .. ":" .. posKey(pos), interval, actionType)
+  if not ok then
+    delay(math.max(remaining or 50, 50))
+    return false
+  end
+  return true
+end
+
 CaveBot.Extensions.ClearTile.setup = function()
   CaveBot.registerAction("ClearTile", "#00FFFF", function(value, retries)
     local data = string.split(value, ",")
@@ -48,7 +68,9 @@ CaveBot.Extensions.ClearTile.setup = function()
     if tile:isWalkable() and tile:getTopUseThing():isNotMoveable() and not hasCreature and not doors then
       if stand then
         if not CaveBot.MatchPosition(tPos, 0) then
+          if not throttleRetry("goto-stand", tPos, 200, "path") then return "retry" end
           CaveBot.GoTo(tPos, 0)
+          delay(100)
           return "retry"
         end
       end
@@ -57,7 +79,9 @@ CaveBot.Extensions.ClearTile.setup = function()
     end
 
     if not CaveBot.MatchPosition(tPos, 3) then
+      if not throttleRetry("goto", tPos, 200, "path") then return "retry" end
       CaveBot.GoTo(tPos, 3)
+      delay(100)
       return "retry"
     end
 
@@ -70,7 +94,9 @@ CaveBot.Extensions.ClearTile.setup = function()
     if hasCreature2 then
       local c = tile:getCreatures()[1]
       if c:isMonster() then
+        if not throttleRetry("attack", tPos, 350, "attack") then return "retry" end
         attack(c)
+        delay(150)
         return "retry"
       end
     end
@@ -80,7 +106,9 @@ CaveBot.Extensions.ClearTile.setup = function()
     if item:isItem() then
       if item and not item:isNotMoveable() then
         print("CaveBot[ClearTile]: moving item... " .. item:getId().. " from tile")
+        if not throttleRetry("move-item", tPos, 250, "move") then return "retry" end
         if Client and Client.move then Client.move(item, pPos, item:getCount()) elseif g_game then g_game.move(item, pPos, item:getCount()) end
+        delay(200)
         return "retry"
       end   
     end
@@ -113,7 +141,9 @@ CaveBot.Extensions.ClearTile.setup = function()
             local tileToPush = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
             tileToPush:setText("here")
             schedule(500, function() tileToPush:setText("") end)
+            if not throttleRetry("push-player", tPos, 350, "move") then return "retry" end
             if Client and Client.move then Client.move(c, pos, 1) elseif g_game then g_game.move(c, pos, 1) end
+            delay(250)
             return "retry"
           end
         end
@@ -121,10 +151,13 @@ CaveBot.Extensions.ClearTile.setup = function()
 
     -- doors
     if doors then
+      if not throttleRetry("use-door", tPos, 250, "use") then return "retry" end
       use(tile:getTopUseThing())
+      delay(200)
       return "retry"
     end
 
+    delay(100)
     return "retry"
   end)
 

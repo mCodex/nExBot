@@ -12,6 +12,86 @@ local item = nil
 local currentId = 0
 local triedToTakeOff = false
 local destination = nil
+local shrineSearch = { key = nil, at = 0, result = nil, failed = false }
+
+local function nowMs()
+  if nExBot and nExBot.Shared and nExBot.Shared.nowMs then
+    return nExBot.Shared.nowMs()
+  end
+  if now then return now end
+  return os.time() * 1000
+end
+
+local function posKey(pos)
+  if not pos then return "unknown" end
+  return tostring(pos.x) .. ":" .. tostring(pos.y) .. ":" .. tostring(pos.z)
+end
+
+local function actionLimiter()
+  return BotCore and BotCore.ActionRateLimiter
+end
+
+local function throttleRetry(key, interval, actionType)
+  local limiter = actionLimiter()
+  if not limiter or not limiter.allow then return true end
+  local ok, remaining = limiter.allow("imbuing:" .. key, interval, actionType)
+  if not ok then
+    delay(math.max(remaining or 50, 50))
+    return false
+  end
+  return true
+end
+
+local function findShrine(Client, playerPos)
+  local key = posKey(playerPos)
+  local t = nowMs()
+  if shrineSearch.key == key and (t - shrineSearch.at) < 2000 then
+    return shrineSearch.result
+  end
+
+  local found = nil
+  local nearTiles = getNearTiles(playerPos)
+  local searchTiles = {}
+  local playerTile = (Client and Client.getTile) and Client.getTile(playerPos) or (g_map and g_map.getTile(playerPos))
+  if playerTile then searchTiles[#searchTiles+1] = playerTile end
+  for _, tile in ipairs(nearTiles) do searchTiles[#searchTiles+1] = tile end
+
+  for _, tile in ipairs(searchTiles) do
+    for _, itm in ipairs(tile:getItems()) do
+      local id = itm:getId()
+      if table.find(SHRINES, id) then
+        found = itm
+        break
+      end
+    end
+    if found then break end
+  end
+
+  if not found then
+    for dx = -7, 7 do
+      for dy = -7, 7 do
+        local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
+        local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
+        if tile then
+          for _, itm in ipairs(tile:getItems()) do
+            if table.find(SHRINES, itm:getId()) then
+              found = itm
+              break
+            end
+          end
+          if found then break end
+        end
+      end
+      if found then break end
+    end
+  end
+
+  shrineSearch.key = key
+  shrineSearch.at = t
+  shrineSearch.result = found
+  shrineSearch.failed = not found
+  return found
+end
 
 local function reset()
   EquipManager.setOn()
@@ -21,6 +101,10 @@ local function reset()
   currentId = 0
   triedToTakeOff = false
   destination = nil
+  shrineSearch.key = nil
+  shrineSearch.at = 0
+  shrineSearch.result = nil
+  shrineSearch.failed = false
 end
 
 CaveBot.Extensions.Imbuing.setup = function()
@@ -59,46 +143,9 @@ CaveBot.Extensions.Imbuing.setup = function()
       return true
     end
 
-    -- Search nearby tiles for shrine instead of full floor scan
     local Client = getClient()
     local playerPos = player:getPosition()
-    local nearTiles = getNearTiles(playerPos)
-    -- Also check tiles in a wider radius (up to 7 sqm) around player
-    local searchTiles = {}
-    -- Start with the player's own tile
-    local playerTile = (Client and Client.getTile) and Client.getTile(playerPos) or (g_map and g_map.getTile(playerPos))
-    if playerTile then searchTiles[#searchTiles+1] = playerTile end
-    for _, t in ipairs(nearTiles) do searchTiles[#searchTiles+1] = t end
-    -- Expand search to 7-tile radius if not found nearby
-    for _, tile in ipairs(searchTiles) do
-      for _, itm in ipairs(tile:getItems()) do
-          local id = itm:getId()
-          if table.find(SHRINES, id) then
-            shrine = itm
-            break
-          end
-      end
-      if shrine then break end
-    end
-    -- Fallback: scan spectator range tiles if shrine not found nearby
-    if not shrine then
-      for dx = -7, 7 do
-        for dy = -7, 7 do
-          local checkPos = {x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z}
-          local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
-          if tile then
-            for _, itm in ipairs(tile:getItems()) do
-              if table.find(SHRINES, itm:getId()) then
-                shrine = itm
-                break
-              end
-            end
-            if shrine then break end
-          end
-        end
-        if shrine then break end
-      end
-    end
+    shrine = shrine or findShrine(Client, playerPos)
 
     -- if not shrine
     if not shrine then
@@ -122,6 +169,7 @@ CaveBot.Extensions.Imbuing.setup = function()
         return "retry"
       end
       triedToTakeOff = true
+      if not throttleRetry("equip-off:" .. tostring(currentId), 500, "move") then return "retry" end
       if Client and Client.equipItemId then Client.equipItemId(currentId) elseif g_game then g_game.equipItemId(currentId) end
       delay(1000)
       return "retry"
@@ -132,11 +180,13 @@ CaveBot.Extensions.Imbuing.setup = function()
 
     -- reaching shrine
     if not CaveBot.MatchPosition(destination, 1) then
+      if not throttleRetry("goto-shrine", 250, "path") then return "retry" end
       CaveBot.GoTo(destination, 1)
       delay(200)
       return "retry"
     end
 
+    if not throttleRetry("use-shrine", 500, "useWith") then return "retry" end
     useWith(shrine, item)
     currentIndex = currentIndex + 1
     warn("CaveBot[Imbuing] Using shrine on item: "..currentId)
