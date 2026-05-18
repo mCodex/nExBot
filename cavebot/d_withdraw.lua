@@ -2,6 +2,21 @@ CaveBot.Extensions.DWithdraw = {}
 
 local getClient = nExBot.Shared.getClient
 
+local function actionLimiter()
+	return BotCore and BotCore.ActionRateLimiter
+end
+
+local function throttleRetry(key, interval, actionType)
+	local limiter = actionLimiter()
+	if not limiter or not limiter.allow then return true end
+	local ok, remaining = limiter.allow("dpwithdraw:" .. key, interval, actionType)
+	if not ok then
+		delay(math.max(remaining or 50, 50))
+		return false
+	end
+	return true
+end
+
 CaveBot.Extensions.DWithdraw.setup = function()
 	CaveBot.registerAction("dpwithdraw", "#002FFF", function(value, retries)
 		local capLimit
@@ -58,7 +73,9 @@ CaveBot.Extensions.DWithdraw.setup = function()
 			local Client = getClient()
 			for i, item in pairs(destContainer:getItems()) do
 				if item:getId() == destId then
+					if not throttleRetry("open-next", 300, "open") then return "retry" end
 					if Client and Client.openContainer then Client.openContainer(item, destContainer) elseif g_game then g_game.open(item, destContainer) end
+					delay(300)
 					return "retry"
 				end
 			end
@@ -76,7 +93,9 @@ CaveBot.Extensions.DWithdraw.setup = function()
 			local Client = getClient()
 			for i, item in pairs(destContainer:getItems()) do
 				if item:getId() == destId then
+					if not throttleRetry("open-full", 300, "open") then return "retry" end
 					if Client and Client.openContainer then Client.openContainer(foundNextContainer, destContainer) elseif g_game then g_game.open(foundNextContainer, destContainer) end
+					delay(300)
 					return "retry"
 				end
 			end
@@ -96,7 +115,9 @@ CaveBot.Extensions.DWithdraw.setup = function()
 			if string.find(container:getName():lower(), "depot box") then
 				for j, item in ipairs(container:getItems()) do
 					statusMessage("[D_Withdraw] witdhrawing item: "..item:getId())
+					if not throttleRetry("move-item", 250, "move") then return "retry" end
 					if Client and Client.move then Client.move(item, destContainer:getSlotPosition(destContainer:getItemsCount()), item:getCount()) elseif g_game then g_game.move(item, destContainer:getSlotPosition(destContainer:getItemsCount()), item:getCount()) end
+					delay(250)
 					return "retry"
 				end
 			end

@@ -154,6 +154,21 @@ local status = ""
 local lastFoodConsumption = 0
 local lootDirty = false
 
+local function actionLimiter()
+  return BotCore and BotCore.ActionRateLimiter
+end
+
+local function throttleLootAction(key, interval, actionType)
+  local limiter = actionLimiter()
+  if not limiter or not limiter.allow then return true end
+  local ok, remaining = limiter.allow("looting:" .. key, interval, actionType)
+  if not ok then
+    waitTill = now + math.max(remaining or 50, 50)
+    return false
+  end
+  return true
+end
+
 -- ─── Loot Lock ────────────────────────────────────────────────────────────────
 -- Prevents Container Panel's forceOpen from fighting with corpse container
 -- windows. Two-phase: ACTIVE (holding windows) → GRACE (post-close cooldown).
@@ -321,6 +336,7 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   end
 
   lootLockAcquire()
+  if not throttleLootAction("open-corpse", extras.lootDelay or 200, "open") then return true end
   if Client and Client.open then
     Client.open(container)
   elseif g_game and g_game.open then
@@ -452,6 +468,10 @@ local function processContainerQueue()
   end
   
   -- Open the container
+  if not throttleLootAction("open-queue", 300, "open") then
+    table.insert(containerOpenQueue, 1, entry)
+    return #containerOpenQueue > 0
+  end
   lastQueueProcess = now
   openedThisCycle[entry.key] = true
   
@@ -588,6 +608,7 @@ TargetBot.Looting.getLootContainers = function(containers)
         if okId and itemId and containersById[itemId] and not openedContainersById[itemId] then
           -- Found a closed loot container in inventory
           local Client = getClient()
+          if not throttleLootAction("open-inventory", 300, "open") then return lootContainers end
           if Client and Client.open then
             Client.open(item)
           elseif g_game and g_game.open then
@@ -612,6 +633,7 @@ TargetBot.Looting.getLootContainers = function(containers)
         if okId and itemId and containersById[itemId] and not openedContainersById[itemId] then
           -- Found a closed loot container in inventory
           local Client = getClient()
+          if not throttleLootAction("open-inventory", 300, "open") then return lootContainers end
           if Client and Client.open then
             Client.open(item)
           elseif g_game and g_game.open then
@@ -684,6 +706,7 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
 
       if isFood then
         local Client = getClient()
+        if not throttleLootAction("use-food", 200, "use") then return end
         if Client and Client.use then
           Client.use(item)
         elseif g_game and g_game.use then
@@ -709,6 +732,7 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
     nextContainer.lootTries = (nextContainer.lootTries or 0) + 1
     if nextContainer.lootTries < 3 then -- Increased from 2 for more reliability
       local Client3 = getClient()
+      if not throttleLootAction("open-nested", 300, "open") then return end
       if Client3 and Client3.open then
         Client3.open(nextContainer, container)
       elseif g_game and g_game.open then
@@ -725,6 +749,7 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
       altContainer.lootTries = (altContainer.lootTries or 0) + 1
       if altContainer.lootTries < 3 then
         local Client4 = getClient()
+        if not throttleLootAction("open-nested", 300, "open") then return end
         if Client4 and Client4.open then
           Client4.open(altContainer, container)
         elseif g_game and g_game.open then
@@ -779,6 +804,7 @@ TargetBot.Looting.lootItem = function(lootContainers, item)
       for slot = 1, #containerItems do
         local citem = containerItems[slot]
         if citem:getId() == itemId and citem:getCount() < 100 then
+          if not throttleLootAction("move-stack", 200, "move") then return end
           if Client and Client.move then
             Client.move(item, container:getSlotPosition(slot - 1), count)
           elseif g_game and g_game.move then
@@ -793,6 +819,7 @@ TargetBot.Looting.lootItem = function(lootContainers, item)
 
   local container = lootContainers[1]
   local moveCount = isStackable and item:getCount() or 1
+  if not throttleLootAction("move-item", 200, "move") then return end
   if Client and Client.move then
     Client.move(item, container:getSlotPosition(container:getItemsCount()), moveCount)
   elseif g_game and g_game.move then

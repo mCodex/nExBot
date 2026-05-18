@@ -967,6 +967,12 @@ local isUnsafeToUnequip = EquipperService and EquipperService.isUnsafeToUnequip 
     return false
 end
 
+local function throttleEquipAction(key, interval, actionType)
+    local limiter = BotCore and BotCore.ActionRateLimiter
+    if not limiter or not limiter.allow then return true end
+    return limiter.allow("equipper:" .. key, interval, actionType)
+end
+
 local function unequipSlot(slotIdx)
     local item = slotHasItem(slotIdx)
     if not item then return false end
@@ -983,6 +989,9 @@ local function unequipSlot(slotIdx)
         
         return false
     end
+    if not throttleEquipAction("unequip:" .. tostring(slotIdx), 250, "move") then
+        return false
+    end
     local pos = dest:getSlotPosition(dest:getItemsCount())
     local ok = g_game.move(item, pos, item:getCount())
     
@@ -996,6 +1005,9 @@ local function equipSlot(slotIdx, itemId)
     -- Try direct equip API first (non-blocking request)
     local triedEquipApi = false
     if g_game and g_game.equipItemId then
+        if not throttleEquipAction("equip-id:" .. tostring(itemId), 250, "move") then
+            return false
+        end
         triedEquipApi = true
         local ok = pcall(function() g_game.equipItemId(itemId) end)
         
@@ -1029,6 +1041,9 @@ local function equipSlot(slotIdx, itemId)
         
             -- item not found in open containers
             return false
+    end
+    if not throttleEquipAction("equip-move:" .. tostring(itemId), 250, "move") then
+        return false
     end
     local ok2 = g_game.move(found, {x = 65535, y = mappedSlot, z = 0}, found:getCount())
     

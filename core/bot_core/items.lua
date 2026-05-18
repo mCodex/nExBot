@@ -14,6 +14,16 @@
 local Items = {}
 BotCore.Items = Items
 
+local function actionLimiter()
+  return BotCore and BotCore.ActionRateLimiter
+end
+
+local function allowItemAction(key, interval, actionType)
+  local limiter = actionLimiter()
+  if not limiter or not limiter.allow then return true end
+  return limiter.allow("items:" .. key, interval, actionType)
+end
+
 -- ============================================================================
 -- HOTKEY-STYLE ITEM USAGE
 -- ============================================================================
@@ -24,6 +34,7 @@ BotCore.Items = Items
 function Items.useSelf(itemId)
   local localPlayer = g_game.getLocalPlayer()
   if not localPlayer then return false end
+  if not allowItemAction("use-self:" .. tostring(itemId), 200, "useWith") then return false end
   
   -- Method 1: Use inventory item with player (works without open backpack - like hotkeys)
   if g_game.useInventoryItemWith then
@@ -54,6 +65,7 @@ end
 -- @return boolean success
 function Items.useOn(itemId, target, subType)
   if not target then return false end
+  if not allowItemAction("use-on:" .. tostring(itemId), 200, "useWith") then return false end
   
   -- Determine subType based on client version
   local thing = g_things.getThingType(itemId)
@@ -269,6 +281,7 @@ function Items.drop(itemIdOrObject)
   end
   
   if not item then return false end
+  if not allowItemAction("drop:" .. tostring(type(itemIdOrObject) == "number" and itemIdOrObject or item:getId()), 200, "move") then return false end
   
   g_game.move(item, pos(), item:getCount())
   return true

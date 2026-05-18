@@ -1633,23 +1633,26 @@ end)
 local function moveItemToContainer(item, destContainer)
     if not item or not destContainer then return false end
     if containerIsFull(destContainer) then return false end
+    local limiter = BotCore and BotCore.ActionRateLimiter
+    if limiter and limiter.allow and not limiter.allow("containers:sort-move", 250, "move") then
+        return false
+    end
     local destPos = destContainer:getSlotPosition(destContainer:getItemsCount())
     g_game.move(item, destPos, item:getCount())
     return true
 end
 
-local function findDestinationForItem(itemId)
+local function buildDestinationMap()
+    local destinationByItemId = {}
     for _, entry in ipairs(config.containerList) do
-        if entry.enabled and entry.items then
+        if entry.enabled and entry.itemId and entry.items then
             local items = extractItemIds(entry.items)
             for _, id in ipairs(items) do
-                if id == itemId then
-                    return getContainerByItem and getContainerByItem(entry.itemId, true)
-                end
+                destinationByItemId[id] = entry.itemId
             end
         end
     end
-    return nil
+    return destinationByItemId
 end
 
 local function isContainerOpen(itemId)
@@ -1666,6 +1669,10 @@ end
 local function openConfiguredContainer(itemId)
     if isContainerOpen(itemId) then return false end
     if not canForceOpen(itemId) then return false end
+    local limiter = BotCore and BotCore.ActionRateLimiter
+    if limiter and limiter.allow and not limiter.allow("containers:force-open:" .. tostring(itemId), 300, "open") then
+        return false
+    end
 
     local slots = {getBack(), getAmmo(), getFinger(), getNeck(), getLeft(), getRight()}
     for _, slotItem in ipairs(slots) do
@@ -1714,13 +1721,15 @@ sortingMacro = macro(300, function(m)
 
     -- Item sorting
     if config.sortEnabled then
+        local destinationByItemId = buildDestinationMap()
         for _, container in pairs(getContainers()) do
             local containerName = container:getName()
             if not isExcludedContainer(containerName) then
                 local containerItemId = container:getContainerItem():getId()
                 for _, item in ipairs(container:getItems()) do
                     local itemId = item:getId()
-                    local destination = findDestinationForItem(itemId)
+                    local destinationItemId = destinationByItemId[itemId]
+                    local destination = destinationItemId and getContainerByItem and getContainerByItem(destinationItemId, true)
                     if destination then
                         local destItemId = destination:getContainerItem():getId()
                         if destItemId ~= containerItemId then

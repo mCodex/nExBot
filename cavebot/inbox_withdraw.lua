@@ -2,6 +2,21 @@ CaveBot.Extensions.InWithdraw = {}
 
 local getClient = nExBot.Shared.getClient
 
+local function actionLimiter()
+	return BotCore and BotCore.ActionRateLimiter
+end
+
+local function throttleRetry(key, interval, actionType)
+	local limiter = actionLimiter()
+	if not limiter or not limiter.allow then return true end
+	local ok, remaining = limiter.allow("inwithdraw:" .. key, interval, actionType)
+	if not ok then
+		delay(math.max(remaining or 50, 50))
+		return false
+	end
+	return true
+end
+
 CaveBot.Extensions.InWithdraw.setup = function()
 	CaveBot.registerAction("inwithdraw", "#002FFF", function(value, retries)
 		local data = string.split(value, ",")
@@ -75,10 +90,14 @@ CaveBot.Extensions.InWithdraw.setup = function()
 				for j, item in pairs(container:getItems()) do
 					if item:getId() == withdrawId then
 						if item:isStackable() then
+							if not throttleRetry("move-stack", 250, "move") then return "retry" end
 							if Client and Client.move then Client.move(item, destination:getSlotPosition(destination:getItemsCount()), math.min(item:getCount(), (amount - currentAmount))) elseif g_game then g_game.move(item, destination:getSlotPosition(destination:getItemsCount()), math.min(item:getCount(), (amount - currentAmount))) end
+							delay(250)
 							return "retry"
 						else
+							if not throttleRetry("move-item", 250, "move") then return "retry" end
 							if Client and Client.move then Client.move(item, destination:getSlotPosition(destination:getItemsCount()), 1) elseif g_game then g_game.move(item, destination:getSlotPosition(destination:getItemsCount()), 1) end
+							delay(250)
 							return "retry"
 						end
 						return "retry"

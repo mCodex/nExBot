@@ -35,6 +35,12 @@ if voc() == 2 or voc() == 12 then
     local lastMoveTime = 0
     local MOVE_COOLDOWN = 300 -- ms between moves to prevent spam
     local lastQuiverId = nil
+
+    local function throttleMove(key)
+        local limiter = BotCore and BotCore.ActionRateLimiter
+        if not limiter or not limiter.allow then return true end
+        return limiter.allow("quiver:" .. key, MOVE_COOLDOWN, "move")
+    end
     
     -- Find ammo item in OPEN containers only (simple and reliable)
     local function findAmmoItem(ammoIds)
@@ -133,6 +139,7 @@ if voc() == 2 or voc() == 12 then
                 if destContainer then
                     local pos = destContainer:getSlotPosition(destContainer:getItemsCount())
                     local Client = getClient()
+                    if not throttleMove("clear") then return false end
                     if Client and Client.move then
                         Client.move(item, pos, item:getCount())
                     elseif g_game and g_game.move then
@@ -149,6 +156,7 @@ if voc() == 2 or voc() == 12 then
             if ammoItem then
                 local pos = quiverContainer:getSlotPosition(quiverContainer:getItemsCount())
                 local Client = getClient()
+                if not throttleMove("fill") then return false end
                 if Client and Client.move then
                     Client.move(ammoItem, pos, ammoItem:getCount())
                 elseif g_game and g_game.move then

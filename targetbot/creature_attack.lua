@@ -1537,14 +1537,18 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     local desiredMode = useNativeChase and 1 or 0
     local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or -1
     if currentMode ~= desiredMode then
-      if Client and Client.setChaseMode then
-        Client.setChaseMode(desiredMode)
-      elseif g_game and g_game.setChaseMode then
-        g_game.setChaseMode(desiredMode)
-      end
-      -- Cache the mode for other modules
-      if TargetCore and TargetCore.Native then
-        TargetCore.Native.lastChaseMode = desiredMode
+      local limiter = BotCore and BotCore.ActionRateLimiter
+      local canSetChaseMode = not limiter or not limiter.allow or limiter.allow("targetbot:chase-mode", 300, "default")
+      if canSetChaseMode then
+        if Client and Client.setChaseMode then
+          Client.setChaseMode(desiredMode)
+        elseif g_game and g_game.setChaseMode then
+          g_game.setChaseMode(desiredMode)
+        end
+        -- Cache the mode for other modules
+        if TargetCore and TargetCore.Native then
+          TargetCore.Native.lastChaseMode = desiredMode
+        end
       end
     end
   end

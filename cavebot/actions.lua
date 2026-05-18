@@ -4,6 +4,21 @@ nExBot.lastLabel = ""
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
 
+local function actionLimiter()
+  return BotCore and BotCore.ActionRateLimiter
+end
+
+local function throttleCavebotAction(key, interval, actionType)
+  local limiter = actionLimiter()
+  if not limiter or not limiter.allow then return true end
+  local ok, remaining = limiter.allow("cavebot:" .. key, interval, actionType)
+  if not ok then
+    delay(math.max(remaining or 50, 50))
+    return false
+  end
+  return true
+end
+
 local oldTibia = getClientVersion() < 960
 local nextTile = nil
 
@@ -40,6 +55,7 @@ onTextMessage(function(mode, text)
     if not hasCreature and tile:isWalkable() and itemCount > 9 then
       local topThing = tile:getTopThing()
       if not inPz then
+        if not throttleCavebotAction("antistuck-disintegrate", 250, "useWith") then return end
         return useWith(3197, topThing) -- disintegrate
       else
         if now < lastMoved + 200 then return end -- delay to prevent clogging
@@ -48,6 +64,7 @@ onTextMessage(function(mode, text)
           local tpos = nearTile:getPosition()
           if playerPos.x ~= tpos.x or playerPos.y ~= tpos.y or playerPos.z ~= tpos.z then
             if nearTile:isWalkable() then
+              if not throttleCavebotAction("antistuck-move", 250, "move") then return end
               lastMoved = now
               local Client = getClient()
               if Client and Client.move then
@@ -141,10 +158,11 @@ local function pushPlayer(creature)
     local stairs = (minimapColor >= 210 and minimapColor <= 213)
 
     if not stairs and tile:isWalkable() then
+      if not throttleCavebotAction("push-player", 350, "move") then return false end
       if Client and Client.move then
-        Client.move(creature, pos)
+        return Client.move(creature, pos)
       else
-        g_game.move(creature, pos)
+        return g_game.move(creature, pos)
       end
     end
   end
@@ -719,10 +737,12 @@ CaveBot.registerAction("usewith", "#EEB292", function(value, retries, prev)
 end)
 
 CaveBot.registerAction("say", "#FF55FF", function(value, retries, prev)
+  if not throttleCavebotAction("say:" .. tostring(value), 500, "talk") then return "retry" end
   say(value)
   return true
 end)
 CaveBot.registerAction("npcsay", "#FF55FF", function(value, retries, prev)
+  if not throttleCavebotAction("npcsay:" .. tostring(value), 500, "talk") then return "retry" end
   NPC.say(value)
   return true
 end)

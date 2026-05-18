@@ -126,6 +126,17 @@ end
 -- @return boolean success
 local function useItemOnTarget(itemId, target, subType)
   if not itemId or not target then return false end
+
+  local limiter = BotCore and BotCore.ActionRateLimiter
+  if limiter and limiter.allow then
+    local targetKey = "unknown"
+    pcall(function()
+      targetKey = target.getId and target:getId() or target:getName()
+    end)
+    if not limiter.allow("combat:item:" .. tostring(itemId) .. ":" .. tostring(targetKey), 200, "useWith") then
+      return false
+    end
+  end
   
   -- Use BotCore.Items if available (consolidated implementation)
   if BotCore.Items and BotCore.Items.useOn then
