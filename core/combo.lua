@@ -53,6 +53,14 @@ end
 
 local config = storage[panelName]
 
+-- Rate-limit outbound combo actions (DRY: shared limiter)
+local function throttleComboAction(key, intervalMs, actionType)
+  local limiter = BotCore and BotCore.ActionRateLimiter
+  if not limiter or not limiter.allow then return true end
+  local ok = limiter.allow("combo:" .. key, intervalMs, actionType or "default")
+  return ok
+end
+
 ui.title:setOn(config.enabled)
 ui.title.onClick = function(widget)
 config.enabled = not config.enabled
@@ -293,13 +301,13 @@ onTalk(function(name, level, mode, text, channelId, pos)
   end
   if config.enabled and config.commandsEnabled and (config.shootLeader and name:lower() == config.shootLeader:lower()) or (config.sayLeader and name:lower() == config.sayLeader:lower()) or (config.castLeader and name:lower() == config.castLeader:lower()) then
     if string.find(text, "ue") then
-      say(config.spell)
+      if throttleComboAction("chat-spell", 250, "spell") then say(config.spell) end
     elseif string.find(text, "sd") then
       local params = string.split(text, ",")
       if #params == 2 then
         local target = params[2]:trim()
         local creature = SafeCall.getCreatureByName(target)
-        if creature then
+        if creature and throttleComboAction("chat-sd", 300, "useWith") then
           if useWith then useWith(3155, creature) end
         end
       end
@@ -308,7 +316,7 @@ onTalk(function(name, level, mode, text, channelId, pos)
       if #attParams == 2 then
         local atTarget = attParams[2]:trim()
         local creature = SafeCall.getCreatureByName(atTarget)
-        if creature and config.attack == "COMMAND TARGET" then
+        if creature and config.attack == "COMMAND TARGET" and throttleComboAction("chat-attack", 350, "attack") then
           g_game.attack(creature)
         end
       end
@@ -344,27 +352,28 @@ onMissle(function(missle)
     leaderTarget = t1
     if c1:getName():lower() == config.shootLeader:lower() then
       if config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item) then
-        if useWith then useWith(config.item, t1) end
+        if useWith and throttleComboAction("missile-useWith", 250, "useWith") then useWith(config.item, t1) end
       end
       if config.attackSpellEnabled and config.spell:len() > 1 then
-        say(config.spell)
+        if throttleComboAction("missile-spell", 250, "spell") then say(config.spell) end
       end 
     end
   end
 end)
 
--- Leader target attack handler (100ms)
+-- Leader target attack handler (100ms). Only one attack per tick.
 local function leaderTargetHandler()
   if not config.enabled or not config.attackLeaderTargetEnabled then return end
   if leaderTarget and config.attack == "LEADER TARGET" then
     local target = SafeCall.getTarget()
-    if not target or target:getName() ~= leaderTarget:getName() then
+    if (not target or target:getName() ~= leaderTarget:getName()) and throttleComboAction("leader-target", 350, "attack") then
       g_game.attack(leaderTarget)
+      return
     end
   end
   if config.enabled and config.serverEnabled and config.attack == "SERVER LEADER TARGET" and serverTarget then
     local target = SafeCall.getTarget()
-    if serverTarget and not target or (target and target:getName() ~= serverTarget) then
+    if ((serverTarget and not target) or (target and target:getName() ~= serverTarget)) and throttleComboAction("server-target", 350, "attack") then
       g_game.attack(serverTarget)
     end
   end
@@ -427,10 +436,10 @@ local function comboTriggerHandler()
   if config.enabled and startCombo then
     if config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item) then
       local target = SafeCall.getTarget()
-      if useWith and target then useWith(config.item, target) end
+      if useWith and target and throttleComboAction("trigger-useWith", 250, "useWith") then useWith(config.item, target) end
     end
     if config.attackSpellEnabled and config.spell:len() > 1 then
-      say(config.spell)
+      if throttleComboAction("trigger-spell", 250, "spell") then say(config.spell) end
     end
     startCombo = false
   end
@@ -491,7 +500,9 @@ if BotServer._websocket and config.enabled and config.serverEnabled then
       if not (target and target()) or (target and target():getName() == msgCreature) then
         if config.serverLeaderTarget then
           serverTarget = msgCreature
-          if g_game and g_game.attack then g_game.attack(msgCreature) end
+          if g_game and g_game.attack and throttleComboAction("server-listen-attack", 350, "attack") then
+            g_game.attack(msgCreature)
+          end
         end
       end
     end
@@ -499,7 +510,7 @@ if BotServer._websocket and config.enabled and config.serverEnabled then
   BotServer.listen("useWith", function(name, message)
    local tile = g_map.getTile(message)
    if config.serverTriggers and name:lower() ~= player:getName():lower() and name:lower() == config.serverLeader:lower() and config.attackItemEnabled and config.item and findItem and findItem(config.item) then
-    if useWith then useWith(config.item, tile:getTopUseThing()) end
+    if useWith and throttleComboAction("server-listen-useWith", 250, "useWith") then useWith(config.item, tile:getTopUseThing()) end
    end
   end)
 end

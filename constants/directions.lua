@@ -13,6 +13,9 @@
 -- Declare as global (not local) so it's accessible after dofile
 Directions = Directions or {}
 
+-- Singleton guard: skip the body on subsequent dofile() calls
+if Directions._loaded then return Directions end
+
 -- ============================================================================
 -- DIRECTION CONSTANTS (from OTClient)
 -- These should match the global constants defined by OTClient
@@ -316,4 +319,5 @@ function Directions.rotateCounterClockwise(dir, steps)
   return Directions.rotateClockwise(dir, -(steps or 1))
 end
 
+Directions._loaded = true
 return Directions

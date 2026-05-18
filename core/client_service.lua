@@ -2033,6 +2033,18 @@ function ClientService.getTilesInRange(pos, rangeX, rangeY, multifloor)
   return tiles
 end
 
+-- Bounded tile scan centered on player. Replaces unbounded
+-- g_map.getTiles(posz()) full-floor walks. Default radius 10
+-- (covers typical 30x30 client view). Returns {} if no player yet.
+function ClientService.getTilesAroundPlayer(radius)
+  radius = radius or 10
+  local player = g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()
+  if not player then return {} end
+  local pos = player:getPosition()
+  if not pos then return {} end
+  return ClientService.getTilesInRange(pos, radius, radius, false)
+end
+
 function ClientService.cleanTile(pos)
   local acl = loadACL()
   if acl and acl.map and acl.map.cleanTile then

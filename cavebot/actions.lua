@@ -55,7 +55,7 @@ onTextMessage(function(mode, text)
     if not hasCreature and tile:isWalkable() and itemCount > 9 then
       local topThing = tile:getTopThing()
       if not inPz then
-        if not throttleCavebotAction("antistuck-disintegrate", 250, "useWith") then return end
+        if not throttleCavebotAction("antistuck-disintegrate", 500, "useWith") then return end
         return useWith(3197, topThing) -- disintegrate
       else
         if now < lastMoved + 200 then return end -- delay to prevent clogging

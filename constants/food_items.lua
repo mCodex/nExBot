@@ -13,6 +13,9 @@
 -- Declare as global (not local) so it's accessible after dofile
 FoodItems = FoodItems or {}
 
+-- Singleton guard: skip the body on subsequent dofile() calls
+if FoodItems._loaded then return FoodItems end
+
 -- ============================================================================
 -- FOOD ITEMS WITH REGENERATION TIME (seconds)
 -- Higher value = more filling
@@ -188,4 +191,5 @@ function FoodItems.findBestFood(container)
   return bestFood, bestPos
 end
 
+FoodItems._loaded = true
 return FoodItems

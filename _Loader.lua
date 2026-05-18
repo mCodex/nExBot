@@ -267,13 +267,22 @@ loadCategory("acl_compat", {
 -- Store client info
 -- Detection runs inline to avoid dependency on adapter loading success.
 -- We re-use the same fingerprint logic from acl/init.lua but self-contained.
+-- Cached ACL loader: avoids re-parsing /core/acl/init.lua across the
+-- inline detection block and the autoDetectClient schedule retries.
+local _aclCached
+local function loadAclCached()
+  if _aclCached ~= nil then return _aclCached end
+  local ok, mod = pcall(function() return dofile("/core/acl/init.lua") end)
+  _aclCached = ok and mod or false
+  return _aclCached
+end
+
 do
   local detected = false
 
   -- Try ACL module first (may have been loaded in Phase 1)
-  local aclStatus, acl = pcall(function()
-    return dofile("/core/acl/init.lua")
-  end)
+  local acl = loadAclCached()
+  local aclStatus = acl and true or false
   if aclStatus and acl and acl.getClientType then
     local ctype = acl.getClientType()
     if ctype and ctype ~= 0 then
@@ -336,10 +345,8 @@ end
 -- Re-check detection after startup when globals are more likely to exist
 local function autoDetectClient(attempt, maxAttempts)
   schedule(1500, function()
-    local ok, acl = pcall(function()
-      return dofile("/core/acl/init.lua")
-    end)
-    if ok and acl and acl.refreshDetection then
+    local acl = loadAclCached()
+    if acl and acl.refreshDetection then
       local prevType = nExBot.clientType
       local prevName = nExBot.clientName
       local newType = acl.refreshDetection()
@@ -437,7 +444,7 @@ loadCategory("architecture", {
 -- ============================================================================
 loadCategory("features_legacy", {
   "extras",
-  "cavebot",
+  "targetbot_init",
   "alarms",
   "Conditions",
   "Equipper",
@@ -482,10 +489,10 @@ loadCategory("analytics", {
   "cavebot_control_panel",
 })
 
--- NOTE: TargetBot scripts are loaded by core/cavebot.lua (in features_legacy phase)
+-- NOTE: TargetBot scripts are loaded by core/targetbot_init.lua (in features_legacy phase)
 -- to avoid duplicating the loading, we don't load them again here.
 
--- NOTE: CaveBot scripts are loaded by core/cavebot.lua (in features_legacy phase)
+-- NOTE: CaveBot scripts are loaded by core/targetbot_init.lua (in features_legacy phase)
 -- to avoid duplicating the loading, we don't load them again here.
 
 -- ============================================================================
@@ -540,7 +547,7 @@ if totalTime > 1000 then
   warn("[nExBot] Slow startup: " .. totalTime .. "ms")
   local slowModules = {}
   for name, time in pairs(loadTimes) do
-    if time > 100 and not name:match("^_") then
+    if time > 75 and not name:match("^_") then
       slowModules[#slowModules + 1] = name .. ":" .. time .. "ms"
     end
   end

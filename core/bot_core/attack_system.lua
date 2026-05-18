@@ -220,10 +220,12 @@ local function hasEnoughMana(manaCost)
   return currentMana >= manaCost
 end
 
--- Check if in protection zone (can't attack from PZ)
+-- Check if in protection zone (can't attack from PZ).
+-- Delegates to SafeCall.isInPz which wraps the OTClient global. The
+-- previous local copy here was named `isInPz`, shadowing the global and
+-- causing infinite recursion when the conditional fired.
 local function isInPz()
-  if isInPz then return isInPz() end
-  return false
+  return SafeCall and SafeCall.isInPz and SafeCall.isInPz() or false
 end
 
 -- ============================================================================

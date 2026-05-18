@@ -249,7 +249,12 @@ end
 -- @param itemId: item ID to find
 -- @return item or nil
 function Items.findOnGround(itemId)
-  for _, tile in ipairs(g_map.getTiles(posz())) do
+  -- Bounded to ~screen view (radius 10) — ground items outside the client
+  -- viewport aren't reachable anyway.
+  local tiles = (ClientService and ClientService.getTilesAroundPlayer)
+    and ClientService.getTilesAroundPlayer(10)
+    or g_map.getTiles(posz())
+  for _, tile in ipairs(tiles) do
     for _, item in ipairs(tile:getItems()) do
       if item:getId() == itemId then
         return item

@@ -229,38 +229,49 @@ local function setupRegenEventListener()
   end, 50)
 end
 
--- Eat food until full
+-- Eat food until full. Re-entry guard prevents stacked schedule() chains.
 local function eatUntilFull()
+  if State.eatingInProgress then return end
+  State.eatingInProgress = true
+
   local maxEats = 10
   local eatCount = 0
-  
+  local stepDelay = math.max(CONFIG.EAT_FOOD_INTERVAL - 300, 500)
+
   local function eatOnce()
-    if eatCount >= maxEats then return end
-    
+    if eatCount >= maxEats then
+      State.eatingInProgress = false
+      return
+    end
+
     -- Check regeneration time
     local regenTime = getRegenTime()
     if regenTime >= CONFIG.MAX_REGEN_TIME then
-      return  -- Already full
+      State.eatingInProgress = false
+      return
     end
-    
+
     -- Find and eat food
     local food = findFoodInContainers()
     if food then
       g_game.use(food)
       eatCount = eatCount + 1
-      schedule(CONFIG.EAT_FOOD_INTERVAL - 300, eatOnce)  -- Continue eating
+      schedule(stepDelay, eatOnce)
       return
     end
-    
+
     -- Fallback: Use by ID
     local foodId = findFoodById()
     if foodId then
       if use then use(foodId) end
       eatCount = eatCount + 1
-      schedule(CONFIG.EAT_FOOD_INTERVAL - 300, eatOnce)
+      schedule(stepDelay, eatOnce)
+      return
     end
+
+    State.eatingInProgress = false
   end
-  
+
   eatOnce()
 end
 

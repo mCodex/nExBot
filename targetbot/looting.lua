@@ -804,7 +804,7 @@ TargetBot.Looting.lootItem = function(lootContainers, item)
       for slot = 1, #containerItems do
         local citem = containerItems[slot]
         if citem:getId() == itemId and citem:getCount() < 100 then
-          if not throttleLootAction("move-stack", 200, "move") then return end
+          if not throttleLootAction("move-stack", 300, "move") then return end
           if Client and Client.move then
             Client.move(item, container:getSlotPosition(slot - 1), count)
           elseif g_game and g_game.move then
@@ -819,7 +819,7 @@ TargetBot.Looting.lootItem = function(lootContainers, item)
 
   local container = lootContainers[1]
   local moveCount = isStackable and item:getCount() or 1
-  if not throttleLootAction("move-item", 200, "move") then return end
+  if not throttleLootAction("move-item", 300, "move") then return end
   if Client and Client.move then
     Client.move(item, container:getSlotPosition(container:getItemsCount()), moveCount)
   elseif g_game and g_game.move then

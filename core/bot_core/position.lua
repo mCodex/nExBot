@@ -238,8 +238,14 @@ function Position.getBestTileByPattern(pattern, creatureType, maxDist, safe)
   
   local best = nil
   local getCreaturesInArea = BotCore.Creatures and BotCore.Creatures.getInArea or getCreaturesInArea
-  
-  for _, tile in pairs(g_map.getTiles(posz())) do
+
+  -- Bounded scan: maxDist around player is sufficient (pattern lookups
+  -- never use tiles beyond maxDist from player anyway).
+  local tiles = (ClientService and ClientService.getTilesAroundPlayer)
+    and ClientService.getTilesAroundPlayer(maxDist)
+    or g_map.getTiles(posz())
+
+  for _, tile in pairs(tiles) do
     local tilePos = tile:getPosition()
     
     if Position.distanceFromPlayer(tilePos) <= maxDist then

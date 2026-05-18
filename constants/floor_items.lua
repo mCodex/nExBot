@@ -13,6 +13,9 @@
 -- Declare as global (not local) so it's accessible after dofile
 FloorItems = FloorItems or {}
 
+-- Singleton guard: skip the (large) body on subsequent dofile() calls
+if FloorItems._loaded then return FloorItems end
+
 -- ============================================================================
 -- MINIMAP COLORS FOR FLOOR CHANGE
 -- ============================================================================
@@ -285,4 +288,5 @@ function FloorItems.hasField(pos)
   return false, nil
 end
 
+FloorItems._loaded = true
 return FloorItems

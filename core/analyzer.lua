@@ -143,31 +143,48 @@ local windowsTable = {"MainAnalyzerWindow",
   end
 end
 
-local mainWindow = UI.createMiniWindow("MainAnalyzerWindow")
-mainWindow:hide()
-mainWindow:setContentMaximumHeight(267)
-local huntingWindow = UI.createMiniWindow("HuntingAnalyzer")
-huntingWindow:hide()
-local lootWindow = UI.createMiniWindow("LootAnalyzer")
-lootWindow:hide()
-local supplyWindow = UI.createMiniWindow("SupplyAnalyzer")
-supplyWindow:hide()
-local impactWindow = UI.createMiniWindow("ImpactAnalyzer")
-impactWindow:hide()
-impactWindow:setContentMaximumHeight(615)
-local xpWindow = UI.createMiniWindow("XPAnalyzer")
-xpWindow:hide()
-xpWindow:setContentMaximumHeight(230)
-local settingsWindow = UI.createWindow("FeaturesWindow")
-settingsWindow:hide()
-local partyHuntWindow = UI.createMiniWindow("PartyAnalyzerWindow")
-partyHuntWindow:hide()
-local dropTrackerWindow = UI.createMiniWindow("DropTracker")
-dropTrackerWindow:hide()
-local statsWindow = UI.createMiniWindow("CaveBotStats")
-statsWindow:hide()
-local bossWindow = UI.createMiniWindow("BossTracker")
-bossWindow:hide()
+-- Window handles (assigned asynchronously below to keep startup snappy).
+-- All windows are created hidden, so deferring is safe: their toggles are
+-- wired to UI buttons that the user only clicks after boot completes.
+local mainWindow
+local huntingWindow
+local lootWindow
+local supplyWindow
+local impactWindow
+local xpWindow
+local settingsWindow
+local partyHuntWindow
+local dropTrackerWindow
+local statsWindow
+local bossWindow
+
+schedule(50, function()
+  mainWindow = UI.createMiniWindow("MainAnalyzerWindow")
+  mainWindow:hide()
+  mainWindow:setContentMaximumHeight(267)
+  huntingWindow = UI.createMiniWindow("HuntingAnalyzer")
+  huntingWindow:hide()
+  lootWindow = UI.createMiniWindow("LootAnalyzer")
+  lootWindow:hide()
+  supplyWindow = UI.createMiniWindow("SupplyAnalyzer")
+  supplyWindow:hide()
+  impactWindow = UI.createMiniWindow("ImpactAnalyzer")
+  impactWindow:hide()
+  impactWindow:setContentMaximumHeight(615)
+  xpWindow = UI.createMiniWindow("XPAnalyzer")
+  xpWindow:hide()
+  xpWindow:setContentMaximumHeight(230)
+  settingsWindow = UI.createWindow("FeaturesWindow")
+  settingsWindow:hide()
+  partyHuntWindow = UI.createMiniWindow("PartyAnalyzerWindow")
+  partyHuntWindow:hide()
+  dropTrackerWindow = UI.createMiniWindow("DropTracker")
+  dropTrackerWindow:hide()
+  statsWindow = UI.createMiniWindow("CaveBotStats")
+  statsWindow:hide()
+  bossWindow = UI.createMiniWindow("BossTracker")
+  bossWindow:hide()
+end)
 
 --f
 local toggle = function()
