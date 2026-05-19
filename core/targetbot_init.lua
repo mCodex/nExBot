@@ -98,6 +98,7 @@ local function initTargetBot()
 	importStyle("/targetbot/monster_inspector.otui")
 end
 
+local _inTargetBotSection = false
 local function loadDeferred(idx)
 	idx = idx or 1
 	if idx > #deferredModules then
@@ -108,8 +109,10 @@ local function loadDeferred(idx)
 	local entry = deferredModules[idx]
 	if entry == "__TARGETBOT_HEADER__" then
 		initTargetBot()
+		_inTargetBotSection = true
 	else
-		setDefaultTab(cavebotTab)
+		-- Route UI built during this dofile to the correct tab.
+		setDefaultTab(_inTargetBotSection and targetingTab or cavebotTab)
 		safeDofile(entry)
 	end
 	schedule(20, function() loadDeferred(idx + 1) end)
