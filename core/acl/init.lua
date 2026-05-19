@@ -102,13 +102,6 @@ local function detectClient(force)
   ACL.lastDetection = { type = _clientType, name = ACL.clientName, signals = signals }
   if nExBot then nExBot.clientDetection = ACL.lastDetection end
 
-  if not ACL._signalsPrinted then
-    ACL._signalsPrinted = true
-    local parts = {}
-    for k, v in pairs(signals) do parts[#parts + 1] = k .. "=" .. tostring(v) end
-    print("[ACL] Detection: " .. ACL.clientName .. " | " .. table.concat(parts, ", "))
-  end
-
   return _clientType
 end
 
