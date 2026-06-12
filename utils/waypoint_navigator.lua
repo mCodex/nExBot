@@ -238,6 +238,30 @@ function WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
   end
   route.totalLength = cumDist
 
+  -- ========== ADAPTIVE CORRIDOR WIDTHS ==========
+  -- Tighten corridor in dense waypoint areas (turns, zig-zags), widen on
+  -- long straight segments. This prevents false drift detections in narrow
+  -- caves while keeping responsive recovery on open stretches.
+  if #route.segments > 0 then
+    local avgSegLen = route.totalLength / #route.segments
+    if avgSegLen < 10 then
+      -- Dense waypoints (< 10 tiles avg): tight corridor for cave corridors
+      corridor.width = 4
+      corridor.softWidth = 7
+      corridor.hardWidth = 11
+    elseif avgSegLen > 20 then
+      -- Sparse waypoints (> 20 tiles avg): wide corridor for open areas
+      corridor.width = 8
+      corridor.softWidth = 13
+      corridor.hardWidth = 17
+    else
+      -- Default: balanced corridor for mixed terrain
+      corridor.width = 6
+      corridor.softWidth = 10
+      corridor.hardWidth = 15
+    end
+  end
+
   route.built = true
 end
 

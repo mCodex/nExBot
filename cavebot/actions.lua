@@ -486,6 +486,25 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     CaveBot.ensureNavigatorRoute(playerPos.z)
   end
 
+  -- ========== PURE PURSUIT LOOKAHEAD ==========
+  -- Compute a target point N tiles ahead on the route for smooth, arcing
+  -- movement through corners instead of walking point-to-point linearly.
+  local lookaheadTarget = nil
+  if WaypointNavigator and WaypointNavigator.isRouteBuilt and WaypointNavigator.isRouteBuilt() then
+    lookaheadTarget = WaypointNavigator.getLookaheadTarget(playerPos)
+    if lookaheadTarget then
+      if lookaheadTarget.z ~= playerPos.z then
+        lookaheadTarget = nil
+      else
+        local lx = math.abs(lookaheadTarget.x - playerPos.x)
+        local ly = math.abs(lookaheadTarget.y - playerPos.y)
+        if math.max(lx, ly) > maxDist then
+          lookaheadTarget = nil
+        end
+      end
+    end
+  end
+
   -- ========== FLOOR CHECK ==========
   if destPos.z ~= playerPos.z then
     return false, true
@@ -629,12 +648,12 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
 
   -- ========== ATTEMPT WALK ==========
-  -- Walk directly to destPos. The A* pathfinder computes optimal smooth paths
-  -- around obstacles. No lookahead target needed — smooth movement comes from
-  -- the widened arrival precision (player advances to next WP before stopping).
-  local walkResult = CaveBot.walkTo(destPos, maxDist, walkParams)
+  -- Walk to the Pure Pursuit lookahead target for smooth arcing movement
+  -- through corners, or fall back to destPos when unavailable.
+  -- Floor-change WPs skip lookahead to ensure exact positioning.
+  local walkDest = (lookaheadTarget and not isFloorChange) and lookaheadTarget or destPos
+  local walkResult = CaveBot.walkTo(walkDest, maxDist, walkParams)
   if walkResult == "nudge" then
-    -- Nudge only — count as retry so progressive strategies activate
     if CaveBot.setCurrentWaypointTarget then
       CaveBot.setCurrentWaypointTarget(destPos, precision)
     end

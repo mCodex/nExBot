@@ -229,14 +229,6 @@ function PathStrategy.findPathRelaxed(startPos, goalPos, opts)
   path = PathStrategy.findPath(startPos, goalPos, base)
   if path then return path, false end
 
-  -- Early exit: for far destinations (>30 tiles), attempts 4+5 are unlikely to help
-  -- and just waste CPU. They only matter for close-range blocked tiles.
-  local dx = math.abs(goalPos.x - startPos.x)
-  local dy = math.abs(goalPos.y - startPos.y)
-  if (dx + dy) > 30 then
-    return nil, false
-  end
-
   -- Attempt 4: allow unseen tiles
   _flagsCacheRef = nil
   base.allowUnseen = true

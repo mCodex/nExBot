@@ -404,6 +404,36 @@ CaveBot.walkTo = function(dest, maxDist, params)
   })
 
   if not path then
+    -- FALLBACK: Use findEveryPath to find the closest reachable tile near dest
+    -- when A* fails entirely (walls, complex obstacles). This avoids the blind
+    -- single-step keyboard nudge that gets stuck in zig-zag caves.
+    local everyOpts = { ignoreNonPathable = true, ignoreCreatures = true }
+    local everyResult = PathUtils.findEveryPath and PathUtils.findEveryPath(playerPos, maxDist, everyOpts)
+    if everyResult then
+      local bestPos, bestCheb = nil, math.huge
+      for posKey, node in pairs(everyResult) do
+        local parts = posKey:split(",")
+        local px, py, pz = tonumber(parts[1]), tonumber(parts[2]), tonumber(parts[3])
+        if px and py and pz and pz == dest.z then
+          local d = math.max(math.abs(px - dest.x), math.abs(py - dest.y))
+          if d < bestCheb then
+            bestCheb = d
+            bestPos = { x = px, y = py, z = pz }
+          end
+        end
+      end
+      if bestPos and bestCheb < math.max(distX, distY) then
+        local altPath, _ = findWalkablePath(playerPos, bestPos, {
+          maxSteps = maxDist, ignoreCreatures = ignoreCreatures, ignoreFields = ignoreFields, precision = precision,
+        })
+        if altPath then
+          path = altPath
+        end
+      end
+    end
+  end
+
+  if not path then
     return tryKeyboardNudge(playerPos, dest)
   end
 

@@ -586,7 +586,49 @@ local function executeRecovery()
           transitionTo("NORMAL")
           return true
         end
-        -- print("[CaveBot] Recovery (segment-aware): focusing forward WP" .. wpIdx)
+        -- Validate the A* path to this WP before focusing.
+        -- If unreachable (behind wall), scan forward to find a reachable WP.
+        local ps = getPS()
+        local pathOk = false
+        if ps and ps.findPath then
+          local testPath = ps.findPath(playerPos, wp, {
+            maxSteps = math.min(math.floor(d * 1.5) + 3, 50),
+            ignoreNonPathable = true,
+          })
+          pathOk = (testPath and #testPath > 0)
+        else
+          pathOk = true  -- no pathfinder available, trust distance
+        end
+
+        if not pathOk then
+          -- Scan forward: try next segments to find a reachable WP
+          local gotoIndices = WaypointNavigator.getGotoIndices and WaypointNavigator.getGotoIndices() or {}
+          local foundReachable = false
+          for _, gIdx in ipairs(gotoIndices) do
+            if gIdx > wpIdx then
+              local fwdWp = waypointPositionCache[gIdx]
+              if fwdWp and fwdWp.child and not isWaypointBlacklisted(fwdWp.child) and fwdWp.z == playerPos.z then
+                local fwdDist = math.max(math.abs(playerPos.x - fwdWp.x), math.abs(playerPos.y - fwdWp.y))
+                if fwdDist <= maxDist then
+                  local fwdPath = ps.findPath(playerPos, fwdWp, {
+                    maxSteps = math.min(math.floor(fwdDist * 1.5) + 3, 50),
+                    ignoreNonPathable = true,
+                  })
+                  if fwdPath and #fwdPath > 0 then
+                    wp, wpIdx = fwdWp, gIdx
+                    d = fwdDist
+                    foundReachable = true
+                    break
+                  end
+                end
+              end
+            end
+          end
+          if not foundReachable then
+            -- No reachable forward WP found: still focus the original,
+            -- walkTo will findEveryPath to the closest reachable point
+          end
+        end
         focusWaypointForRecovery(wp.child, wpIdx)
         transitionTo("NORMAL")
         return true
