@@ -307,22 +307,6 @@ Analytics.HealBot = {
   end
 }
 
--- AttackBot compatibility
-Analytics.AttackBot = {
-  getAnalytics = function()
-    return {
-      spells = _data.attacks.spells,
-      runes = _data.attacks.runes,
-      empowerments = _data.attacks.empowerments,
-      totalAttacks = _data.attacks.totalSpells + _data.attacks.totalRunes,
-      log = _data.log
-    }
-  end,
-  resetAnalytics = function()
-    Analytics.resetAttacks()
-  end
-}
-
 -- Export for global access
 BotCore = BotCore or {}
 BotCore.Analytics = Analytics

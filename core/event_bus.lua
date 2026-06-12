@@ -286,9 +286,11 @@ end
 --------------------------------------------------------------------------------
 
 -- Creature events
+-- NOTE: Z-change burst suppression is NOT applied here. During floor transitions,
+-- creatures on the NEW floor MUST be detected immediately. Only the main macro
+-- loop (target.lua) checks zChanging() before attacking.
 if onCreatureAppear then
   onCreatureAppear(function(creature)
-    if _zBurst() then return end
     if creature:isMonster() then
       EventBus.emit("monster:appear", creature)
     elseif creature:isPlayer() then
@@ -302,7 +304,6 @@ end
 
 if onCreatureDisappear then
   onCreatureDisappear(function(creature)
-    if _zBurst() then return end
     if creature:isMonster() then
       EventBus.emit("monster:disappear", creature)
     elseif creature:isPlayer() then

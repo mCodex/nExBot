@@ -265,7 +265,6 @@ local function startSession()
   analytics.peakStats.maxSpeed = Player.speed()
   
   if HealBot and HealBot.resetAnalytics then HealBot.resetAnalytics() end
-  if AttackBot and AttackBot.resetAnalytics then AttackBot.resetAnalytics() end
   if EventBus then EventBus.emit("analytics:session:start") end
 end
 

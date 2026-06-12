@@ -1,16 +1,16 @@
-# 🧭 CaveBot
+# CaveBot
 
 Automated waypoint navigation, supply management, and hunting route automation.
 
 ---
 
-## 📖 Overview
+## Overview
 
 CaveBot is nExBot's navigation engine. It follows a list of waypoints to walk your character through hunting routes, open doors, use tools, refill supplies, deposit loot, and interact with NPCs — all automatically.
 
 Key capabilities:
 
-- Waypoint-based route navigation
+- Waypoint-based route navigation (linear, user-defined sequence)
 - Floor-change prevention (never accidentally walks on stairs)
 - Intelligent field handling (fire, poison, energy)
 - Door opening and tool usage (rope, shovel, machete)
@@ -22,10 +22,11 @@ Key capabilities:
 - Travel system (boats, carpets, teleports)
 - Task/quest management
 - Save/load complete routes as config files
+- **Waypoint recovery** — uses pathfinding to find the nearest reachable waypoint when stuck
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 1. Open the **Cave** tab.
 2. Click **Show Editor** to open the waypoint editor.
@@ -37,7 +38,7 @@ Key capabilities:
 
 ---
 
-## 📍 Waypoint Types
+## Waypoint Types
 
 ### Movement
 
@@ -50,7 +51,6 @@ Walk to a specific coordinate.
 32000,32000,7,3      → Walk within 3 tiles of position
 ```
 
-> [!TIP]
 > Use the **precision** parameter (4th value) to avoid wasting time on exact positioning. A value of 2–3 is recommended for most waypoints.
 
 #### label
@@ -63,7 +63,6 @@ label:refill
 label:depot
 ```
 
-> [!NOTE]
 > Labels are case-sensitive. `Hunt` and `hunt` are different labels.
 
 #### gotolabel
@@ -174,9 +173,34 @@ Withdraw items from the depot, depot box, or inbox.
 
 ---
 
-## 🦿 Walking Engine (v4.0)
+## Walking Engine
 
-The walking engine is the heart of CaveBot. It handles pathfinding, field avoidance, floor-change safety, and humanized movement.
+The walking engine follows waypoints linearly — 1→2→3→...→N→wrap — with no Pure Pursuit lookahead, no corridor enforcement, and no blacklist state machine.
+
+### Core Loop
+
+```text
+100ms macro tick:
+  → If player walking somewhere: skip (let walk finish)
+  → If recovering from stuck: skip
+  → If TargetBot blocking movement: skip
+  → Get focused waypoint from UI list
+  → Execute action callback
+  → callback returns true/false/"retry"/"walking"
+  → On success: advance focus to next waypoint
+  → On retry exhausted (30 for goto): try waypoint recovery, then advance
+```
+
+### Waypoint Advancement
+
+Waypoints are processed in strict linear order:
+
+| Result | Meaning | Behaviour |
+|--------|---------|-----------|
+| `true` | Success | Advance to the next waypoint (1→2→3→...→N→wrap) |
+| `false` | Failure | For `goto`: stay on current WP, increment retries. For other actions: advance to next |
+| `"retry"` | In progress | Stay on same waypoint, increment retry counter |
+| `"walking"` | Moving | Wait for walk to complete, don't count as retry |
 
 ### Floor-Change Prevention
 
@@ -191,122 +215,66 @@ Path Found → Validate each step → Floor change detected?
 
 ### Field Handling
 
-When a path crosses fire, poison, or energy fields:
-
-1. Normal pathfinding tries without `ignoreFields`
-2. If it fails, retries with `ignoreFields = true`
-3. Uses keyboard step-by-step walking (`walk(direction)`) to cross each field tile
-4. This bypasses autoWalk's inability to cross damaging fields
+When a path crosses fire, poison, or energy fields and `ignoreFields` is enabled, pathfinding retries with relaxed flags to route around or through them. The walkTo function handles field tiles automatically.
 
 Enable **"Ignore fields"** in the CaveBot config panel to allow field crossing.
 
-### Chunked Walking
+### Pathfinding Strategy
 
-Paths are split into segments of **max 25 tiles** per autoWalk call. autoWalk kicks in for paths with **5+ tiles** where direction changes make up ≤55% of total steps. This covers most cave corridors while keeping pathfinding fresh.
+Single `findPath` call with progressive flag escalation:
 
-### Step Pipelining
+```text
+1. Try findPath with default settings
+2. If that fails → findPath with ignoreCreatures
+3. If that fails → findPath with ignoreNonPathable (relaxes PZ borders)
+```
 
-When using keyboard stepping (short paths or high-zigzag routes), the engine dispatches **2 steps ahead** to create smooth animation without pauses between steps. Pipelining is disabled when:
-- The next step's direction changes by more than 90°
-- A floor-change tile is within 2 steps
-- `canWalkDirection` fails for the lookahead step
+No multi-attempt `findPathRelaxed`, no cursor cache, no anti-zigzag smoothing.
 
-### PathCursor Preservation
+### Walking Dispatch
 
-The PathStrategy cursor (cached A\* path) is preserved across ticks when the bot retries the same waypoint. Previously, `safeResetWalking()` destroyed the cursor every tick, forcing a redundant A\* recomputation. Now the cursor only resets when the destination waypoint changes.
+- **≤3 tiles** from destination → keyboard step-by-step (`walk(direction)`)
+- **>3 tiles** → native `autoWalk` to a floor-change-safe destination chunk
+
+The native autoWalk route is validated against floor-change tiles before dispatching. If the direct route crosses a stair/hole, the destination is truncated to the safe prefix.
+
+---
+
+## Waypoint Recovery
+
+When the bot gets stuck — started mid-cave, pushed off path by monsters, or can't reach the current waypoint — it automatically recovers using pathfinding.
+
+### Recovery Algorithm
+
+```text
+Stuck detected (no progress after 30 retries):
+  → WaypointNavigator.findNearestReachable(playerPos, waypoints, maxDist)
+      → Scan ALL goto waypoints on the same floor
+      → For each: PathStrategy.findPath() to check actual reachability
+      → Sort by path length (NOT Chebyshev distance)
+  → If found: focus that waypoint, walkTo it
+  → If not found: nearest Chebyshev-distance goto on same floor
+  → Set recovering = true → normal loop pauses until arrival
+  → On arrival: recovering = false → resume normal execution
+```
 
 ### Stuck Detection
 
-If a goto action accumulates 3 consecutive failures (`recordFailure()`), the WaypointEngine transitions to RECOVERING and runs a path-validated scan for the nearest reachable waypoint. The goto callback uses progressive escalation (ignoreCreatures after 1 retry, ignoreFields after 2, blocker attack after 2) before reaching maxRetries and returning `false`.
+Position history is tracked over a 2-second window. If the player hasn't moved more than 1 tile in that window, stuck is triggered when retries run out.
 
-### Pathfinding Strategy
+### Key Differences from vBot 4.8
 
-```text
-1. Try findPath with strict settings (no ignoreNonPathable — respects PZ, invisible walls)
-2. If that fails → findPath with ignoreNonPathable (relaxes PZ borders)
-3. If that fails → findPath ignoring creatures
-4. If distance ≤ 30 → findPath allowing unseen tiles
-5. If distance ≤ 30 → findPath ignoring fields
-6. If distance > 30, only attempts 1–3 run (early exit saves CPU)
-```
-
-> [!NOTE]
-> For destinations more than 30 tiles away, relaxed pathfinding attempts 4 and 5 are skipped because they rarely help at long-range and waste CPU with unnecessary A\* searches.
+| vBot 4.8 | nExBot |
+|----------|--------|
+| Chebyshev distance through walls | Actual pathfinding distance |
+| Same-floor only | Multi-floor via route compiler floor transitions |
+| Hard distance cap (50) | Progressive: pathfinding → Chebyshev fallback |
+| Startup only | Continuous stuck detection mid-hunt |
+| No path reachability check | `PathStrategy.findPath()` verifies reachable |
 
 ---
 
-## ⏩ Waypoint Advancement
-
-CaveBot processes waypoints sequentially. Each action's callback returns one of three results:
-
-| Result | Meaning | Behaviour |
-|--------|---------|-----------|
-| `true` | Success | Advance to the next waypoint |
-| `false` | Failure | For `goto`: stay on current waypoint, trigger stuck detection. For other actions: advance to next |
-| `"retry"` | In progress | Stay on same waypoint, increment retry counter |
-
-> [!NOTE]
-> **Why goto failures don't advance:** If `goto` returned `false` and the bot moved to the next waypoint, it would rapidly cycle through all unreachable waypoints (1→2→…→N→1) at ~13/s while the player stands still. Instead, the WaypointEngine's stuck detection kicks in and finds the nearest reachable waypoint via recovery strategies.
-
----
-
-## 🔄 Waypoint Recovery
-
-When the bot detects it's stuck (3 consecutive goto failures), it enters recovery:
-
-```text
-NORMAL → RECOVERING → (found reachable WP) → NORMAL
-                   → (no candidates)       → idle, retry every 1s
-                   → (5 min timeout)        → clear blacklists, retry
-```
-
-### Recovery: Path-Validated Scan
-
-Recovery collects all waypoints with known coordinates (not just `goto:` — also `stand`, `lure`, `use`, etc.), sorts by Chebyshev distance, and validates reachability:
-
-| # | Phase | Description |
-|---|-------|-------------|
-| 1 | Collect | Gather all WPs within 1.5x `gotoMaxDistance`, sorted by distance |
-| 2 | Validate | Run `PathStrategy.findPath()` (strict, no ignoreNonPathable) on the top 5 candidates. Discard those with no valid path. |
-| 3 | Proximity guarantee | Always validate the 3 closest WPs by distance, regardless of `maxDist` cutoff |
-
-Goto-type waypoints are preferred during recovery since they have verified walkable positions. The expanded WP cache means any action with coordinate data can serve as a navigation anchor.
-
-### Adaptive Blacklists
-
-When recovery blacklists a waypoint, it uses **exponential decay** instead of permanent blacklists:
-
-```text
-TTL = base_ttl * 2^(fail_count - 1)     capped at 120s
-```
-
-- **Base TTL**: 15 seconds
-- **Max TTL**: 120 seconds (2 minutes)
-- Each failure for the same WP doubles the blacklist duration
-- `recordSuccess()` clears all blacklists and failure counts
-- **Safety valve**: after 5 minutes of continuous recovery with no progress, all blacklists are cleared automatically
-
-This prevents the cascading exclusion bug where permanent blacklists eliminated nearby valid WPs that just had a temporary pathfinding failure.
-
-Recovery focuses the target waypoint directly and resets retries for a clean start.
-
----
-
-## 🛡️ Waypoint Guard
-
-The goto action detects unreachable waypoints early and signals instant failure:
-
-| Condition | Response |
-|-----------|----------|
-| Wrong floor (`destPos.z ~= playerPos.z`) | Returns `false` with `instantFail` — pumps 3 failures + exponential blacklist (base 15s, doubling per failure via `BLACKLIST_BASE_TTL * 2^(failCount-1)`, capped at 120s) |
-| Too far (`dist > maxDist`) | Returns `false` with `instantFail` — same exponential blacklist + fast-track recovery |
-| Max retries exceeded (`retries > 16` for goto, `> 8` otherwise) | Returns `false` — feeds `recordFailure()` for stuck detection |
-
-Instant failures trigger the WaypointEngine's recovery within a single macro tick (3 failures = recovery threshold).
-
----
-
-## 🎒 Supply Management
+## Supply Management
 
 ### Supply Check
 
@@ -344,7 +312,7 @@ label:depot
 
 ---
 
-## 📦 Depositor
+## Depositor
 
 The Depositor module handles loot depositing at the depot. Configure it through the **Depositor Config** panel:
 
@@ -355,13 +323,13 @@ The Depositor module handles loot depositing at the depot. Configure it through 
 
 ---
 
-## 🔗 Pull System Integration
+## Pull System Integration
 
 When TargetBot's Lure/Pull system is active, CaveBot **pauses** waypoint execution so the player stays in place and fights. Navigation only resumes after the lure target count is satisfied or all nearby monsters are dead.
 
 ---
 
-## 🎥 Recorder
+## Recorder
 
 The CaveBot Recorder allows you to record waypoints by simply walking your route:
 
@@ -374,7 +342,7 @@ This is the fastest way to create a new route.
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### Settings
 
@@ -402,7 +370,7 @@ nExBot ships with **50+ pre-built configs** for popular hunting spots:
 
 ---
 
-## 📝 Script Examples
+## Script Examples
 
 ### Basic Hunting Loop
 
@@ -457,12 +425,12 @@ end
 
 ---
 
-## ❓ Troubleshooting
+## Troubleshooting
 
 ### CaveBot stops moving
 
 1. Is CaveBot **enabled** and **started** (`Ctrl+Z`)?
-2. Is TargetBot's Pull System pausing navigation?
+2. Is the Waypoint Recovery active? Check the status on the Cave panel.
 3. Are the waypoint coordinates reachable from your current position?
 4. Is there a door or obstacle blocking the path?
 5. Check for field tiles — enable "Ignore fields" if needed.
@@ -480,4 +448,8 @@ end
 
 ### Client freezes when far from waypoint
 
-This is already handled. Large distances trigger an instant failure in the goto action, which fast-tracks recovery to find the nearest reachable waypoint by distance. Pathfinding is capped at 50 tiles. If the bot can't find any reachable waypoint, it idles in recovery mode and retries every second (with a 5-minute safety valve that clears all blacklists).
+Large distances trigger an instant failure in the goto action, which triggers waypoint recovery. The navigator will find the nearest reachable waypoint using pathfinding and walk you there. If no reachable waypoint is found, the bot advances forward through the route.
+
+### Started hunting mid-cave and bot doesn't move
+
+The WaypointNavigator now scans all goto waypoints on startup using pathfinding. It will find the nearest reachable waypoint and navigate there automatically. If you're on a different floor, it will find the closest floor-transition waypoint and route you there first.

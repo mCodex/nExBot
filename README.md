@@ -6,7 +6,6 @@
 
 **A high-performance automation bot for OTClientV8 (vBot) and OpenTibiaBR (OTCR) with AI-powered combat, real-time analytics, and intelligent navigation.**
 
-> [!NOTE]
 > nExBot runs on both **vBot (OTClientV8)** and **OTCR (OpenTibiaBR)** — the client is auto-detected at startup, no manual configuration needed.
 
 ---
@@ -23,7 +22,7 @@
 
 ---
 
-## 🤖 What is nExBot?
+## What is nExBot?
 
 nExBot is a modular Tibia bot that automates hunting, healing, navigation, and analytics.
 
@@ -33,15 +32,15 @@ nExBot is a modular Tibia bot that automates hunting, healing, navigation, and a
 |--------|-------------|
 | **HealBot** | Ultra-fast healing (75 ms response) with spells, potions, support buffs, and condition curing |
 | **AttackBot** | Automated attack spells and runes with AoE optimization and cooldown management |
-| **CaveBot** | Waypoint navigation with floor-change safety, field handling, supply refills, and 50+ pre-built routes |
-| **TargetBot** | AI combat with 9-stage priority scoring, behavior learning, wave prediction, and movement coordination |
+| **CaveBot** | Linear waypoint navigation with floor-change safety, field handling, supply refills, and 50+ pre-built routes |
+| **TargetBot** | Intelligent targeting with direct spectator scans, priority scoring, AttackStateMachine, and movement |
 | **Hunt Analyzer** | Real-time session analytics — kills/hour, XP/hour, profit, Hunt Score, efficiency insights |
 | **Containers** | Auto-open, quiver management, and container role assignments |
 | **Extras** | Anti-RS, alarms, equipment swapping, conditions, combo system, push max |
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Install
 
@@ -72,48 +71,46 @@ See the full [Installing guide](docs/INSTALLING.md) for step-by-step instruction
 3. **CaveBot** — Load a pre-built config or record waypoints (Cave tab → Show Editor).
 4. **AttackBot** — Set attack spell rotation (Main tab → AttackBot).
 
-> [!TIP]
 > Load a pre-built config from `cavebot_configs/` for the fastest setup — **50+ routes** are included for popular hunting spots.
 
 ### 4. Hunt
 
 Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress in **Hunt Analyzer**.
 
-### ⚠️ Note for OT Developers
+### Note for OT Developers
 
-> [!CAUTION]
 > **Do NOT place nExBot inside a `mods/` folder or custom mod directory.** The auto-updater requires write access to the user-data `bot/` path — mod folders are read-only at runtime, so updates will fail silently.
 
-👉 See the [Installing guide — Auto-Updater section](docs/INSTALLING.md#%EF%B8%8F-auto-updater--custom-mod-folders-ot-developers) for the full explanation and correct folder setup.
+See the [Installing guide — Auto-Updater section](docs/INSTALLING.md#%EF%B8%8F-auto-updater--custom-mod-folders-ot-developers) for the full explanation and correct folder setup.
 
 ---
 
-## ✨ Features
+## Features
 
-### 🎯 TargetBot — AI Combat
+### TargetBot — Intelligent Targeting
 - **AttackStateMachine** — sole attack issuer, eliminates attack-once-then-stop bugs
-- **9-stage TBI priority** — distance, health, danger, wave prediction, adaptive weights
-- **Monster Insights** — 12 SRP modules that learn monster behavior in real-time
-- **Movement coordination** — intent-based voting resolves wave avoidance, keep-distance, AoE positioning, and chase
+- **Direct spectator scans** — every 100ms, no event cache or monitoring layer (vBot 4.8 hybrid)
+- **Priority scoring** — config priority, distance bonus, HP-based finish-kill bonus
+- **Movement system** — chase, keep-distance, avoid-attacks, reposition
 
-### 🧭 CaveBot — Navigation
-- **Walking engine v4.0** — smooth autoWalk pipelining (5+ tiles), step pipelining (2-step lookahead), PathCursor preservation, adaptive recovery with path validation and exponential-decay blacklists
+### CaveBot — Navigation
+- **Linear waypoint execution** — strictly follows user-defined waypoints 1→2→3→...→N, no Pure Pursuit lookahead, no blacklist state machine
+- **Waypoint recovery** — pathfinding-based stuck detection and recovery; finds the nearest reachable waypoint when pushed off-path or started mid-cave
 - **15+ waypoint types** — goto, label, action, buy, sell, lure, standLure, depositor, travel, imbuing, tasker, withdraw
 - **50+ pre-built configs** — Asura, Banuta, Demons, Dragons, Hydras, Nagas, and more
 
-### 💚 HealBot — Survival
+### HealBot — Survival
 - **75 ms response** — event-driven, cached health data, zero-allocation casting
 - **Cascading priority** — multiple spells and potions at different HP/MP thresholds
 - **Condition handling** — auto-cure poison, paralyze, burn
 
-### 🔌 Client Abstraction (ACL)
+### Client Abstraction (ACL)
 
-> [!IMPORTANT]
 > The ACL auto-detects vBot vs. OTCR at startup — all game operations use a unified `ClientService` API. OTCR-exclusive features (imbuing, stash, forge, prey, market) are enabled automatically.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```text
 _Loader.lua (entry point)
@@ -123,59 +120,50 @@ _Loader.lua (entry point)
 ├── UnifiedStorage (per-character JSON persistence)
 │
 ├── HealBot ←──── player:health events
-├── AttackBot ←── TargetBot decisions
-├── CaveBot ←──── 250ms waypoint engine
+├── AttackBot ←── TargetBot current target (direct read)
+├── CaveBot ←──── 100ms linear waypoint macro
 ├── TargetBot ←── creature events + Monster AI
 │   ├── AttackStateMachine (sole attack issuer)
-│   ├── Monster Insights (12 AI modules)
-│   └── MovementCoordinator (intent voting)
+│   └── creature_attack.lua (movement + spells)
 │
 └── Hunt Analyzer ←── passive analytics
 ```
 
 | Pattern | Where |
 |---------|-------|
-| Event-Driven | EventBus, HealBot, TargetBot |
-| State Machine | AttackStateMachine, CaveBot WaypointEngine (NORMAL↔RECOVERING) |
-| Intent Voting | MovementCoordinator |
-| LRU Cache | Creature configs, pathfinding (4-entry), FC tile cache |
-| PathCursor Preservation | Walking engine — cursor survives across ticks for same destination |
-| Step Pipelining | Keyboard walking — 2-step lookahead dispatch |
-| One-time Backend Detection | PathStrategy resolves pathfinder API once at init |
-| Adaptive Blacklist Decay | Recovery — exponential TTL replaces permanent blacklists |
-| EWMA | Monster tracking, cooldowns |
+| Event-Driven | EventBus, HealBot |
+| State Machine | AttackStateMachine |
+| Direct Scan | TargetBot (vBot 4.8 style, every 100ms) |
 | BFS Traversal | ContainerOpener, Looting |
-| Burst Detection | Z-change protection |
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 | Guide | Description |
 |-------|-------------|
-| 📥 [Installing](docs/INSTALLING.md) | Installation for vBot and OTCR |
-| 💚 [HealBot](docs/HEALBOT.md) | Healing spells, potions, conditions |
-| ⚔️ [AttackBot](docs/ATTACKBOT.md) | Attack spells, runes, AoE optimization |
-| 🧭 [CaveBot](docs/CAVEBOT.md) | Navigation, waypoints, supply management |
-| 🎯 [TargetBot](docs/TARGETBOT.md) | Combat AI, Monster Insights, movement |
-| 📦 [Containers](docs/CONTAINERS.md) | Container management, quiver system |
-| 📊 [Hunt Analyzer](docs/SMARTHUNT.md) | Session analytics and insights (SmartHunt) |
-| 🛠️ [Extras & Tools](docs/EXTRAS.md) | Safety, equipment, utilities |
-| 🏗️ [Architecture](docs/ARCHITECTURE.md) | Technical design and internals |
-| ⚡ [Performance](docs/PERFORMANCE.md) | Optimization and tuning |
-| ❓ [FAQ](docs/FAQ.md) | Troubleshooting and common questions |
+| Installing | Installation for vBot and OTCR |
+| HealBot | Healing spells, potions, conditions |
+| AttackBot | Attack spells, runes, AoE optimization |
+| CaveBot | Navigation, waypoints, supply management |
+| TargetBot | Targeting, combat movement, looting |
+| Containers | Container management, quiver system |
+| Hunt Analyzer | Session analytics and insights (SmartHunt) |
+| Extras & Tools | Safety, equipment, utilities |
+| Architecture | Technical design and internals |
+| Performance | Optimization and tuning |
+| FAQ | Troubleshooting and common questions |
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-> [!WARNING]
 > Always test your changes on multiple servers before submitting a PR. Follow existing Lua style (2-space indentation) and update docs for notable changes.
 
 ---
 
-## 📄 License
+## License
 
 [MIT License](LICENSE) — see LICENSE file for details.

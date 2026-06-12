@@ -23,67 +23,10 @@ local mainWindow
 local attackBotKeyboardBound = false
 local attackEntryList
 
--- ============================================================================
--- BOTCORE INTEGRATION
--- ============================================================================
-
--- Local analytics wrapper (for fallback if BotCore not available)
-local attackAnalytics = storage.attackAnalytics or {
-  spells = {},
-  runes = {},
-  empowerments = 0,
-  totalAttacks = 0,
-  log = {}
-}
-storage.attackAnalytics = attackAnalytics
-
--- Record an attack action (delegates to BotCore.Analytics if available)
-local function recordAttackAction(cat, idOrFormula)
-  -- Use BotCore.Analytics if available
-  if BotCore and BotCore.Analytics then
-    BotCore.Analytics.recordAttack(cat, idOrFormula)
-    return
-  end
-  
-  -- Fallback to local analytics
-  attackAnalytics.totalAttacks = attackAnalytics.totalAttacks + 1
-  
-  if cat == 1 or cat == 4 or cat == 5 then
-    local spellName = tostring(idOrFormula)
-    attackAnalytics.spells[spellName] = (attackAnalytics.spells[spellName] or 0) + 1
-    if cat == 4 then
-      attackAnalytics.empowerments = attackAnalytics.empowerments + 1
-    end
-  elseif cat == 2 or cat == 3 then
-    -- Use string key for runeId to prevent sparse array issues in JSON serialization
-    local runeKey = tostring(tonumber(idOrFormula) or 0)
-    attackAnalytics.runes[runeKey] = (attackAnalytics.runes[runeKey] or 0) + 1
-  end
-  
-  local log = attackAnalytics.log
-  log[#log + 1] = { t = now, cat = cat, action = tostring(idOrFormula) }
-  TrimArray(log, 50)
-end
-
--- Public API for SmartHunt (redirects to BotCore.Analytics if available)
+-- Public API (no analytics; kept for external consumers)
 AttackBot = AttackBot or {}
-AttackBot.getAnalytics = function()
-  if BotCore and BotCore.Analytics then
-    return BotCore.Analytics.AttackBot.getAnalytics()
-  end
-  return attackAnalytics
-end
-AttackBot.resetAnalytics = function()
-  if BotCore and BotCore.Analytics then
-    BotCore.Analytics.AttackBot.resetAnalytics()
-    return
-  end
-  attackAnalytics.spells = {}
-  attackAnalytics.runes = {}
-  attackAnalytics.empowerments = 0
-  attackAnalytics.totalAttacks = 0
-  attackAnalytics.log = {}
-end
+AttackBot.getAnalytics = function() return { spells = {}, runes = {}, empowerments = 0, totalAttacks = 0, log = {} } end
+AttackBot.resetAnalytics = function() end
 
 -- label library
 
@@ -710,20 +653,20 @@ if ui.title then
   end
 end
   
-if ui.setup then
-  ui.setup.onClick = function(widget)
-    mainWindow:show()
-    mainWindow:raise()
-    mainWindow:focus()
-  end
-end
-
   mainWindow = UI.createWindow("AttackBotWindow")
   if not mainWindow then
     warn("[AttackBot] Failed to create main window AttackBotWindow")
     return
   end
   mainWindow:hide()
+
+  if ui.setup then
+    ui.setup.onClick = function()
+      mainWindow:show()
+      mainWindow:raise()
+      mainWindow:focus()
+    end
+  end
 
   local panel = mainWindow.mainPanel
   local function rw(id)
@@ -752,8 +695,13 @@ end
   local uiOrMore = rw("orMore")
   local uiAddEntry = rw("addEntry")
 
-  if not uiEntryList or not uiMonsters or not uiSpellName or not uiItemId then
-    warn("[AttackBot] Failed to bind AttackBotWindow controls")
+  if not uiUp and panel and panel.listPane and panel.listPane.controls then
+    uiUp = panel.listPane.controls.up
+    uiDown = panel.listPane.controls.down
+  end
+
+  if not uiEntryList or not uiMonsters or not uiSpellName or not uiItemId or not uiUp or not uiDown then
+    warn("[AttackBot] Failed to bind AttackBotWindow controls (missing: entryList=" .. tostring(uiEntryList) .. ", monsters=" .. tostring(uiMonsters) .. ", spellName=" .. tostring(uiSpellName) .. ", itemId=" .. tostring(uiItemId) .. ", up=" .. tostring(uiUp) .. ", down=" .. tostring(uiDown) .. ")")
     return
   end
   attackEntryList = uiEntryList
@@ -868,6 +816,24 @@ end
     end
     -- eo in/de/crementation
 
+    local function updateMoveButtons()
+      local entry = uiEntryList:getFocusedChild()
+      if not entry then
+        uiUp:setEnabled(false)
+        uiDown:setEnabled(false)
+        return
+      end
+      local count = uiEntryList:getChildCount()
+      if count <= 1 then
+        uiUp:setEnabled(false)
+        uiDown:setEnabled(false)
+        return
+      end
+      local idx = uiEntryList:getChildIndex(entry)
+      uiUp:setEnabled(idx > 1)
+      uiDown:setEnabled(idx < count)
+    end
+
   ------- [[core table function]] -------
     function setupWidget(widget)
       local params = widget.params
@@ -893,17 +859,16 @@ end
       end
       widget:setTooltip(params.tooltip)
       widget.remove.onClick = function()
-        uiUp:setEnabled(false)
-        uiDown:setEnabled(false)
         widget:destroy()
+        updateMoveButtons()
       end
       widget.enabled:setChecked(params.enabled)
       widget.enabled.onClick = function()
         params.enabled = not params.enabled
         widget.enabled:setChecked(params.enabled)
+        updateMoveButtons()
       end
-      -- will serve as edit
-      widget.onDoubleClick = function(widget)
+      widget.onDoubleClick = function()
         uiManaPercent:setValue(params.mana)
         uiCreatures:setValue(params.count)
         uiMinHp:setValue(params.minHp)
@@ -921,20 +886,8 @@ end
         setCategoryText()
         widget:destroy()
       end
-      widget.onClick = function(widget)
-        if #uiEntryList:getChildren() == 1 then
-          uiUp:setEnabled(false)
-          uiDown:setEnabled(false)
-        elseif uiEntryList:getChildIndex(widget) == 1 then
-          uiUp:setEnabled(false)
-          uiDown:setEnabled(true)
-        elseif uiEntryList:getChildIndex(widget) == uiEntryList:getChildCount() then
-          uiUp:setEnabled(true)
-          uiDown:setEnabled(false)
-        else
-          uiUp:setEnabled(true)
-          uiDown:setEnabled(true)
-        end
+      widget.onClick = function()
+        updateMoveButtons()
       end
     end
 
@@ -953,6 +906,9 @@ end
     refreshAttacks()
     uiUp:setEnabled(false)
     uiDown:setEnabled(false)
+    uiEntryList.onChildFocusChange = function()
+      updateMoveButtons()
+    end
 
     -- adding values
     uiAddEntry.onClick = function(wdiget)
@@ -1012,30 +968,33 @@ end
       resetFields()
     end
 
-    -- moving values
-    -- up
-    uiUp.onClick = function(widget)
-      local focused = uiEntryList:getFocusedChild()
-      local n = uiEntryList:getChildIndex(focused)
-
-      if n-1 == 1 then
-        widget:setEnabled(false)
-      end
-      uiDown:setEnabled(true)
-      uiEntryList:moveChildToIndex(focused, n-1)
-      uiEntryList:ensureChildVisible(focused)
+    -- moving values (using framework focus — matching HealBot/Equipper pattern)
+    uiUp.onClick = function()
+      local input = uiEntryList:getFocusedChild()
+      if not input then return end
+      local idx = uiEntryList:getChildIndex(input)
+      if idx < 2 then return end
+      local t = currentSettings.attackTable
+      t[idx], t[idx-1] = t[idx-1], t[idx]
+      uiEntryList:moveChildToIndex(input, idx - 1)
+      uiEntryList:focusChild(input)
+      uiEntryList:ensureChildVisible(input)
+      updateMoveButtons()
+      nExBotConfigSave("atk")
     end
-    -- down
-    uiDown.onClick = function(widget)
-      local focused = uiEntryList:getFocusedChild()
-      local n = uiEntryList:getChildIndex(focused)
-
-      if n + 1 == uiEntryList:getChildCount() then
-        widget:setEnabled(false)
-      end
-      uiUp:setEnabled(true)
-      uiEntryList:moveChildToIndex(focused, n+1)
-      uiEntryList:ensureChildVisible(focused)
+    uiDown.onClick = function()
+      local input = uiEntryList:getFocusedChild()
+      if not input then return end
+      local idx = uiEntryList:getChildIndex(input)
+      local count = uiEntryList:getChildCount()
+      if idx >= count then return end
+      local t = currentSettings.attackTable
+      t[idx], t[idx+1] = t[idx+1], t[idx]
+      uiEntryList:moveChildToIndex(input, idx + 1)
+      uiEntryList:focusChild(input)
+      uiEntryList:ensureChildVisible(input)
+      updateMoveButtons()
+      nExBotConfigSave("atk")
     end
 
    -- window elements
@@ -1186,9 +1145,6 @@ local function toCooldownMs(cd)
 end
 
 local spellState = {}
-local globalCastBackoffUntil = 0
-local GLOBAL_CAST_BACKOFF = 250
-local FAILED_CAST_BACKOFF = 350
 
 local function isSpellCategory(category)
   return category == 1 or category == 4 or category == 5
@@ -1208,74 +1164,9 @@ local function getSpellState(key)
   return state
 end
 
-local function applyGlobalBackoff(ms)
-  if not ms or ms <= 0 then return end
-  local untilTs = nowMs() + ms
-  if untilTs > globalCastBackoffUntil then
-    globalCastBackoffUntil = untilTs
-  end
-end
-
-local function isGlobalBackoffActive()
-  return nowMs() < globalCastBackoffUntil
-end
-
-local function confirmSpellCast(spellKey, beforeTs, onSuccess, onFail)
-  schedule(120, function()
-    local afterTs = SpellCastTable and SpellCastTable[spellKey] and SpellCastTable[spellKey].t or 0
-    if afterTs > (beforeTs or 0) then
-      if onSuccess then onSuccess() end
-    else
-      if onFail then onFail() end
-    end
-  end)
-end
-
 local function attemptSpellCast(entry, context)
   local spellKey = getSpellKey(entry)
   if spellKey == "" then return false end
-
-  -- For Absolute Sweep (category 5, pattern 8) respect rotation setting
-  if entry.category == 5 and entry.pattern == 8 and context and context._attackCache and context._attackCache.bestSweepDir and context.settings and context.settings.Rotate then
-    local desired = context._attackCache.bestSweepDir
-    if player:getDirection() ~= desired then
-      -- Prevent rapid oscillation by enforcing a small cooldown
-      if now - lastAutoRotate < rotationCooldown then
-        return true
-      end
-
-      -- Rotation attempt window and throttling (avoid starvation)
-      local cache = context._attackCache
-      if cache then
-        if cache.rotationAttemptsDir ~= desired then
-          cache.rotationAttemptsDir = desired
-          cache.rotationAttempts = 0
-          cache.rotationAttemptsStart = now
-        else
-          if cache.rotationAttemptsStart and now - cache.rotationAttemptsStart > 3000 then
-            cache.rotationAttempts = 0
-            cache.rotationAttemptsStart = now
-          end
-        end
-
-        local MAX_ROTATE_ATTEMPTS = 3
-        if (cache.rotationAttempts or 0) >= MAX_ROTATE_ATTEMPTS then
-          -- allow attack to proceed without rotating
-        else
-          -- Rotate towards best side and defer attack to next tick
-          turn(desired)
-          lastAutoRotate = now
-          cache.rotationAttempts = (cache.rotationAttempts or 0) + 1
-          return true
-        end
-      else
-        -- No cache available: rotate normally
-        turn(desired)
-        lastAutoRotate = now
-        return true
-      end
-    end
-  end
 
   local state = getSpellState(spellKey)
   local cdMs = toCooldownMs(entry.cooldown)
@@ -1290,23 +1181,9 @@ local function attemptSpellCast(entry, context)
     if ok == false then return false end
   end
 
-  local beforeTs = SpellCastTable and SpellCastTable[spellKey] and SpellCastTable[spellKey].t or 0
-  if state then state.lastAttemptAt = nowMs() end
-
   cast(spellKey, math.max(cdMs, 100))
 
-  confirmSpellCast(spellKey, beforeTs, function()
-    if state then
-      state.nextReadyAt = nowMs() + cdMs
-    end
-    applyGlobalBackoff(GLOBAL_CAST_BACKOFF)
-    recordAttackAction(entry.category, entry.spell)
-  end, function()
-    if context.settings.Cooldown and state then
-      state.nextReadyAt = math.max(state.nextReadyAt or 0, nowMs() + FAILED_CAST_BACKOFF)
-    end
-    applyGlobalBackoff(FAILED_CAST_BACKOFF)
-  end)
+  if state then state.nextReadyAt = nowMs() + cdMs end
 
   return true
 end
@@ -1443,7 +1320,6 @@ function getBestTileByPattern(pattern, minHp, maxHp, safePattern, monsterNamesTa
 end
 
 -- Use rune on target - works even with closed backpack (hotkey-style)
--- Uses BotCore.Items for consolidated item usage
 local function useRuneOnTarget(runeId, targetCreatureOrTile)
   lastAttackTime = now -- Update attack time for non-blocking cooldown
   local Client = getClient()
@@ -1452,12 +1328,6 @@ local function useRuneOnTarget(runeId, targetCreatureOrTile)
   if useWith and targetCreatureOrTile then
     local ok, res = pcall(useWith, runeId, targetCreatureOrTile)
     if ok then return true end
-  end
-  
-  -- Fallback methods
-  if BotCore and BotCore.Items and BotCore.Items.useOn then
-    local ok, res = pcall(BotCore.Items.useOn, runeId, targetCreatureOrTile)
-    if ok and res then return true end
   end
   
   -- Use ClientService if available
@@ -1490,8 +1360,6 @@ function executeAttackBotAction(categoryOrPos, idOrFormula, cooldown)
   -- Mark action as used for cooldown tracking
   stamp(tostring(idOrFormula))
   
-  -- Record analytics before executing
-  recordAttackAction(categoryOrPos, idOrFormula)
   
   if categoryOrPos == 4 or categoryOrPos == 5 or categoryOrPos == 1 then
     cast(idOrFormula, cooldown)
@@ -1505,69 +1373,20 @@ end
 local lastAttackTime = 0
 local ATTACK_COOLDOWN = 100
 
--- Pre-allocated direction data (avoid table creation per tick)
-local directionCounts = {0, 0, 0, 0}  -- N, E, S, W
-local DIR_NORTH, DIR_EAST, DIR_SOUTH, DIR_WEST = 0, 1, 2, 3
 
--- Cache client version check (doesn't change at runtime)
-local isOldClient = getClientVersion() < 960
 
--- Use UnifiedTick if available for reduced macro overhead
-local attackMacro
-if UnifiedTick and UnifiedTick.register then
-  UnifiedTick.register("attackbot_main", {
-    interval = 100,
-    priority = UnifiedTick.Priority and UnifiedTick.Priority.HIGH or 75,
-    handler = function() attackBotMain() end,
-    group = "attackbot"
-  })
-else
-  attackMacro = macro(100, function()
-    attackBotMain()
-  end)
-end
-
--- ============================================================================
--- SIMPLIFIED ATTACKBOT - HIGH PERFORMANCE & ACCURACY
--- ============================================================================
-
--- Per-tick cache for expensive computations
-local lastAutoRotate = 0
-local rotationCooldown = 500 -- ms
-local ATTACK_DEBUG = false -- set to true to enable debug logs
-
-local function newAttackCache()
-  return {
-    monstersInArea = {}, -- key -> number
-    bestTileByPattern = {}, -- key -> {amount=, pos=}
-    now = now
-  }
-end
-
-local function cacheKeyForArea(category, posOrCreature, pattern, minHp, maxHp, safePattern, monsterNamesTable)
-  -- Create a stable key for caching getMonstersInArea
-  local p = posOrCreature and (type(posOrCreature) == "table" and (posOrCreature.x..":"..posOrCreature.y..":"..posOrCreature.z) or tostring(posOrCreature)) or "nil"
-  local namesKey = monsterNamesTable == true and "any" or (monsterNamesTable and table.concat(monsterNamesTable, ",") or "")
-  return table.concat({tostring(category), p, tostring(pattern or "nil"), tostring(minHp), tostring(maxHp), tostring(safePattern), namesKey}, "|")
-end
-
--- Build a stable cache key for area-rune pattern lookups (used by evaluateEntry + executeAttack)
-local function buildPatternKey(entry, pvpSafe)
-  local monstersKey = entry.monsters == true and "any" or (type(entry.monsters) == "table" and table.concat(entry.monsters, ",") or "")
-  return entry.patternCategory..":"..entry.pattern..":"..tostring(pvpSafe)..":"..entry.minHp..":"..entry.maxHp..":"..monstersKey
-end
+local attackMacro = macro(100, function()
+  attackBotMain()
+end)
 
 -- Pure evaluator using caching and vBot semantics
-local function evaluateEntry(entry, context, cache)
+local function evaluateEntry(entry, context)
   if not entry.enabled then return false end
 
-  -- Mana check
   if context.mana < entry.mana then return false end
 
-  -- Cooldown check
   local cdMs = toCooldownMs(entry.cooldown)
   if context.settings.Cooldown then
-    -- Categories 1, 4, 5 are spell-based; categories 2, 3 are rune-based
     if isSpellCategory(entry.category) then
       local state = getSpellState(getSpellKey(entry))
       if state and nowMs() < state.nextReadyAt then return false end
@@ -1576,123 +1395,40 @@ local function evaluateEntry(entry, context, cache)
     end
   end
 
-  -- Target checks
   if not context.target then return false end
   local targetHp = context.target:getHealthPercent()
   local targetDist = distanceFromPlayer(context.target:getPosition())
 
-  -- Safety checks (context-wide, already computed once per tick)
   if context.blacklisted or context.killsBlocked then return false end
 
-  -- PVP mode: disallow area runes in pvp situations
   if context.settings.pvpMode and entry.category == 2 and targetHp >= entry.minHp and targetHp <= entry.maxHp and context.target:canShoot() then
     return false
   end
 
-  -- HP condition for attack entries
   if targetHp < entry.minHp or targetHp > entry.maxHp then return false end
 
-  -- Category-specific checks
   if entry.category == 2 then
-    -- Area rune: use pattern-based search
     local pat = getPattern(entry.patternCategory, entry.pattern, context.settings.PvpSafe)
-    local pKey = buildPatternKey(entry, context.settings.PvpSafe)
-    local data = cache.bestTileByPattern[pKey]
-    if not data then
-      data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
-      cache.bestTileByPattern[pKey] = data
-    end
+    local data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
     local monsterAmount = data and data.amount or 0
-
     if entry.orMore then return monsterAmount >= entry.count else return monsterAmount == entry.count end
   end
 
-  -- For targeted/empowerment/absolute entries
   if entry.category == 1 or entry.category == 3 or entry.category == 4 or entry.category == 5 then
-    -- Special-case: Absolute category
     if entry.category == 5 then
-      -- For sweep (pattern == 8), we already handle directional counts above
-      if entry.pattern == 8 then
-        local cacheKeyN = "dirN:"..entry.minHp..":"..entry.maxHp
-        local cacheKeyE = "dirE:"..entry.minHp..":"..entry.maxHp
-        local cacheKeyS = "dirS:"..entry.minHp..":"..entry.maxHp
-        local cacheKeyW = "dirW:"..entry.minHp..":"..entry.maxHp
-
-        local monstersN = cache.monstersInArea[cacheKeyN]
-        local monstersE = cache.monstersInArea[cacheKeyE]
-        local monstersS = cache.monstersInArea[cacheKeyS]
-        local monstersW = cache.monstersInArea[cacheKeyW]
-
-        if monstersN == nil then
-          monstersN = getMonstersInArea(2, pos(), posN, entry.minHp, entry.maxHp, false, entry.monsters)
-          cache.monstersInArea[cacheKeyN] = monstersN
-        end
-        if monstersE == nil then
-          monstersE = getMonstersInArea(2, pos(), posE, entry.minHp, entry.maxHp, false, entry.monsters)
-          cache.monstersInArea[cacheKeyE] = monstersE
-        end
-        if monstersS == nil then
-          monstersS = getMonstersInArea(2, pos(), posS, entry.minHp, entry.maxHp, false, entry.monsters)
-          cache.monstersInArea[cacheKeyS] = monstersS
-        end
-        if monstersW == nil then
-          monstersW = getMonstersInArea(2, pos(), posW, entry.minHp, entry.maxHp, false, entry.monsters)
-          cache.monstersInArea[cacheKeyW] = monstersW
-        end
-
-        local bestSide = math.max(monstersN, monstersE, monstersS, monstersW)
-        local bestDir = nil
-        if bestSide == monstersN then bestDir = 0
-        elseif bestSide == monstersE then bestDir = 1
-        elseif bestSide == monstersS then bestDir = 2
-        elseif bestSide == monstersW then bestDir = 3
-        end
-        -- require no players nearby if PvP safe is enabled
-        local players = SafeCall.getPlayers and SafeCall.getPlayers(2) or {}
-        local playersNearby = (#players > 0)
-        local sweepMatch = entry.orMore and bestSide >= entry.count or bestSide == entry.count
-        if sweepMatch and (not context.settings.PvpSafe or not playersNearby) then
-          -- store best sweep direction for executeAttack to use (rotation)
-          cache.bestSweepDir = bestDir
-          cache.bestSweepSide = bestSide
-          -- reset rotation attempts when best direction changes
-          cache.rotationAttemptsDir = bestDir
-          cache.rotationAttempts = 0
-          cache.rotationAttemptsStart = now
-          return true
-        else
-          return false
-        end
-      end
-
-      -- For other absolute patterns, follow vBot behavior and use pattern shapes
       local pCat = entry.patternCategory
       local pattern = entry.pattern
       local anchorParam = (pattern == 2 or pattern == 6 or pattern == 7 or pattern > 9) and player or pos()
       local safe = context.settings.PvpSafe and spellPatterns[pCat][entry.pattern][2] or false
       local patternShape = spellPatterns[pCat][entry.pattern][1]
-      local cacheKey = cacheKeyForArea(entry.category, anchorParam, patternShape, entry.minHp, entry.maxHp, safe, entry.monsters)
-      local monsterAmount = cache.monstersInArea[cacheKey]
-      if monsterAmount == nil then
-        monsterAmount = getMonstersInArea(entry.category, anchorParam, patternShape, entry.minHp, entry.maxHp, safe, entry.monsters)
-        cache.monstersInArea[cacheKey] = monsterAmount
-      end
-
+      local monsterAmount = getMonstersInArea(entry.category, anchorParam, patternShape, entry.minHp, entry.maxHp, safe, entry.monsters)
       if entry.orMore then return monsterAmount >= entry.count else return monsterAmount == entry.count end
     end
 
-    -- Fallback for targeted/empowerment entries
-    -- Anchor targeted/emp entries to the current target and respect numeric pattern as a radius
     local posArg = (entry.category == 1 or entry.category == 3) and context.target or nil
     local patternArg = (entry.category == 1 or entry.category == 3) and entry.pattern or nil
-    local key = cacheKeyForArea(entry.category, posArg, patternArg, entry.minHp, entry.maxHp, false, entry.monsters)
-    local monsterAmount = cache.monstersInArea[key]
-    if monsterAmount == nil then
-      monsterAmount = getMonstersInArea(entry.category, posArg, patternArg, entry.minHp, entry.maxHp, false, entry.monsters)
-      cache.monstersInArea[key] = monsterAmount
-    end
+    local monsterAmount = getMonstersInArea(entry.category, posArg, patternArg, entry.minHp, entry.maxHp, false, entry.monsters)
 
-    -- For targeted categories, also ensure target is within configured range
     if entry.category == 1 or entry.category == 3 then
       if targetDist > entry.pattern then return false end
     end
@@ -1704,43 +1440,25 @@ end
 
 -- Pure function: Execute attack action
 local function executeAttack(entry, context)
-  -- Categories 1 (targeted spell), 4 (empowerment), 5 (absolute) are spell-based
   if isSpellCategory(entry.category) then
     return attemptSpellCast(entry, context)
   end
 
   local stampKey = entry.key or tostring(entry.itemId or entry.spell)
-  local actionId = entry.itemId > 100 and entry.itemId or entry.spell
 
   if entry.category == 3 then
-    -- Targeted runes
     local okTargeted = useRuneOnTarget(entry.itemId, context.target)
-    if okTargeted then
-      stamp(stampKey)
-      recordAttackAction(entry.category, actionId)
-      if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
-      return true
-    end
+    if okTargeted then stamp(stampKey); return true end
     return false
   elseif entry.category == 2 then
-    -- Area runes - prefer cached best tile when available
     local pat = spellPatterns[entry.patternCategory][entry.pattern][context.settings.PvpSafe and 2 or 1]
-    local pKey = buildPatternKey(entry, context.settings.PvpSafe)
-    local data = context and context._attackCache and context._attackCache.bestTileByPattern and context._attackCache.bestTileByPattern[pKey]
-    if not data then
-      data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
-    end
+    local data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
     if data and data.pos then
       local Client = getClient()
       local tile = (Client and Client.getTile) and Client.getTile(data.pos) or (g_map and g_map.getTile(data.pos))
       if tile then
         local okArea = useRuneOnTarget(entry.itemId, tile:getTopUseThing())
-        if okArea then
-          stamp(stampKey)
-          recordAttackAction(entry.category, actionId)
-          if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
-          return true
-        end
+        if okArea then stamp(stampKey); return true end
       end
     end
     return false
@@ -1753,43 +1471,31 @@ end
 function attackBotMain()
   -- ========== ARRANGE: Gather world state and pre-check context ==========
 
-  -- Global guards (cannot attack at all)
   if not currentSettings or not currentSettings.enabled then return end
   if not attackEntryList then return end
   if not target() then return end
   if SafeCall.isInPz() then return end
-  if isGlobalBackoffActive() then return end
-  if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then return end
   if modules.game_cooldown.isGroupCooldownIconActive(1) then return end
-  if BotCore and BotCore.Priority and not BotCore.Priority.canAttack() then return end
   if currentSettings.Training and target():getName():lower():find("training") then return end
 
-  -- Build context snapshot (computed ONCE per tick, shared across all entries)
   local context = {
     target = target(),
     mana = manapercent(),
     settings = currentSettings,
-    -- Pre-compute context-wide safety flags (avoids per-entry recalc)
     blacklisted = currentSettings.BlackListSafe and isBlackListedPlayerInRange(currentSettings.AntiRsRange),
     killsBlocked = currentSettings.Kills and killsToRs() <= currentSettings.KillsAmount,
-    _attackCache = newAttackCache(),
   }
 
-  -- Early-exit if context-wide safety blocks all attacks
   if context.blacklisted or context.killsBlocked then return end
 
-  -- Resource availability cache (items/spells checked once per item/spell key)
   local availableItems = {}
   local canCastCaller = SafeCall.getCachedCaller("canCast")
   local entries = attackEntryList:getChildren()
-
-  -- ========== ACT: Find highest-priority valid entry and execute ==========
 
   for _, child in ipairs(entries) do
     local entry = child.params
     if not entry then goto continue end
 
-    -- Resource check (item in inventory / spell castable)
     local available = false
     if entry.itemId and entry.itemId > 100 then
       if availableItems[entry.itemId] == nil then
@@ -1808,13 +1514,11 @@ function attackBotMain()
 
     if not available then goto continue end
 
-    -- ========== ASSERT: Verify cooldowns still clear before evaluation ==========
-    if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then break end
     if modules.game_cooldown.isGroupCooldownIconActive(1) then break end
 
-    if evaluateEntry(entry, context, context._attackCache) then
+    if evaluateEntry(entry, context) then
       local attempted = executeAttack(entry, context)
-      if attempted then return end  -- One action per tick (spell or rune)
+      if attempted then return end
     end
     ::continue::
   end

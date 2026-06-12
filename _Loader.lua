@@ -67,6 +67,18 @@ nExBot.showDebug = nExBot.showDebug or false
 nExBot.suppressDebugPrefixes = nExBot.suppressDebugPrefixes or {"[HealBot]", "[MonsterInspector]"}
 nExBot.slowOpInstrumentation = nExBot.slowOpInstrumentation or false
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- TAB ORDERING: Create all tabs in the desired order.
+-- First call to setDefaultTab("X") creates the tab; order is preserved.
+-- Must happen before any module loads to lock in the correct order.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+setDefaultTab("Main")
+setDefaultTab("Tools")
+setDefaultTab("Cave")
+setDefaultTab("Target")
+setDefaultTab("HP")
+
 -- NativeProfiler removed: wrapping every callback with pcall+os.clock added
 -- significant aggregate overhead during bulk events (z-change floor transitions).
 

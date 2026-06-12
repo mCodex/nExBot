@@ -20,35 +20,24 @@ local function throttleCavebotAction(key, interval, actionType)
 end
 
 local oldTibia = getClientVersion() < 960
-local nextTile = nil
 
--- Throttle table for unknown floor-change minimap color warnings (once per tile+color)
 local warnedUnknownFloor = {}
 
--- Use canonical direction table from Directions module (DRY: SSoT is constants/directions.lua)
 local DIR_MOD_LOOKUP = Directions.DIR_TO_OFFSET
 
--- Direction-offset helper using Directions module
-local nextPos = nil -- creature
-local nextPosF = nil -- furniture
 local function modPos(dir)
-    local mod = DIR_MOD_LOOKUP[dir]
-    if mod then 
-        return { mod.x, mod.y }
-    end
-    return { 0, 0 }
+  local mod = DIR_MOD_LOOKUP[dir]
+  if mod then return { mod.x, mod.y } end
+  return { 0, 0 }
 end
 
--- stack-covered antystuck, in & out pz - optimized with early returns
 local lastMoved = now - 200
 onTextMessage(function(mode, text)
   if text ~= 'There is not enough room.' then return end
   if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
-
   local playerPos = pos()
   local tiles = getNearTiles(playerPos)
   local inPz = isInPz()
-
   for i, tile in ipairs(tiles) do
     local itemCount = #tile:getItems()
     local hasCreature = tile.hasCreature and tile:hasCreature()
@@ -56,9 +45,9 @@ onTextMessage(function(mode, text)
       local topThing = tile:getTopThing()
       if not inPz then
         if not throttleCavebotAction("antistuck-disintegrate", 500, "useWith") then return end
-        return useWith(3197, topThing) -- disintegrate
+        return useWith(3197, topThing)
       else
-        if now < lastMoved + 200 then return end -- delay to prevent clogging
+        if now < lastMoved + 200 then return end
         local nearTiles = getNearTiles(tile:getPosition())
         for j, nearTile in ipairs(nearTiles) do
           local tpos = nearTile:getPosition()
@@ -70,7 +59,7 @@ onTextMessage(function(mode, text)
               if Client and Client.move then
                 return Client.move(topThing, tpos)
               else
-                return g_game.move(topThing, tpos) -- move item
+                return g_game.move(topThing, tpos)
               end
             end
           end
@@ -80,20 +69,15 @@ onTextMessage(function(mode, text)
   end
 end)
 
--- Pre-built lookup set for O(1) furniture ignore check
 local furnitureIgnoreSet = { [2986] = true }
 local function breakFurniture(destPos)
   if isInPz() then return false end
-  
   local candidate = { thing = nil, dist = 100 }
   local playerPos = player:getPosition()
   local playerZ = playerPos.z
   local Client = getClient()
-  
-  -- Scan only tiles in a radius around player and destination instead of entire floor
   local scannedSet = {}
   local tilesToCheck = {}
-  
   local function addTilesAround(centerPos, radius)
     for dx = -radius, radius do
       for dy = -radius, radius do
@@ -107,26 +91,20 @@ local function breakFurniture(destPos)
       end
     end
   end
-  
-  -- Check around player (walking range) and around destination
   addTilesAround(playerPos, 7)
   if destPos then addTilesAround(destPos, 3) end
-  
   for i, tile in ipairs(tilesToCheck) do
     local topThing = tile:getTopThing()
     if topThing then
       local thingId = topThing:getId()
       local isWg = thingId == 2130
       local isItem = topThing:isItem()
-      
       if isWg or (not furnitureIgnoreSet[thingId] and isItem) then
         local walkable = tile:isWalkable()
         local moveable = not topThing:isNotMoveable()
-        
         if isWg or (not walkable and moveable) then
           local tpos = tile:getPosition()
           local path = findPath(playerPos, tpos, 7, { ignoreNonPathable = true, precision = 1 })
-          
           if path then
             local distance = getDistanceBetween(destPos, tpos)
             if distance < candidate.dist then
@@ -138,12 +116,10 @@ local function breakFurniture(destPos)
       end
     end
   end
-
   if candidate.thing then
     useWith(3197, candidate.thing)
     return true
   end
-  
   return false
 end
 
@@ -151,12 +127,10 @@ local function pushPlayer(creature)
   local cpos = creature:getPosition()
   local tiles = getNearTiles(cpos)
   local Client = getClient()
-
   for i, tile in ipairs(tiles) do
     local pos = tile:getPosition()
     local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor(pos)) or 0
     local stairs = (minimapColor >= 210 and minimapColor <= 213)
-
     if not stairs and tile:isWalkable() then
       if not throttleCavebotAction("push-player", 350, "move") then return false end
       if Client and Client.move then
@@ -166,41 +140,22 @@ local function pushPlayer(creature)
       end
     end
   end
-
 end
 
--- Recovery is handled exclusively by WaypointEngine (SRP: single authority).
--- The old pathfinder() function was removed because it competed with
--- WaypointEngine by changing focus before stuck detection could trigger,
--- resetting actionRetries and preventing smart recovery strategies.
-
--- it adds an action widget to list
 CaveBot.addAction = function(action, value, focus)
   action = action:lower()
   local raction = CaveBot.Actions[action]
-  if not raction then
-    return warn("Invalid cavebot action: " .. action)
-  end
-  if type(value) == 'number' then
-    value = tostring(value)
-  end
+  if not raction then return warn("Invalid cavebot action: " .. action) end
+  if type(value) == 'number' then value = tostring(value) end
   local widget = UI.createWidget("CaveBotAction", CaveBot.actionList)
   widget:setText(action .. ":" .. value:split("\n")[1])
   widget.action = action
   widget.value = value
-  if raction.color then
-    widget:setColor(raction.color)
-  end
-  -- Invalidate caches when editor adds a new action
-  if CaveBot.invalidateWaypointCache then
-    CaveBot.invalidateWaypointCache()
-  end
-  if CaveBot.invalidateGotoDistCache then
-    CaveBot.invalidateGotoDistCache()
-  end
-  widget.onDoubleClick = function(cwidget) -- edit on double click
+  if raction.color then widget:setColor(raction.color) end
+  if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
+  widget.onDoubleClick = function(cwidget)
     if CaveBot.Editor then
-      schedule(20, function() -- schedule to have correct focus
+      schedule(20, function()
         CaveBot.Editor.edit(cwidget.action, cwidget.value, function(action, value)
           CaveBot.editAction(cwidget, action, value)
           CaveBot.save()
@@ -215,62 +170,34 @@ CaveBot.addAction = function(action, value, focus)
   return widget
 end
 
--- it updates existing widget, you should call CaveBot.save() later
 CaveBot.editAction = function(widget, action, value)
   action = action:lower()
   local raction = CaveBot.Actions[action]
-  if not raction then
-    return warn("Invalid cavebot action: " .. action)
-  end
-  
-  if not widget.action or not widget.value then
-    return warn("Invalid cavebot action widget, has missing action or value")  
-  end
-  
+  if not raction then return warn("Invalid cavebot action: " .. action) end
+  if not widget.action or not widget.value then return warn("Invalid cavebot action widget, has missing action or value") end
   widget:setText(action .. ":" .. value:split("\n")[1])
   widget.action = action
   widget.value = value
-  if raction.color then
-    widget:setColor(raction.color)
-  end
-  if CaveBot.invalidateGotoDistCache then
-    CaveBot.invalidateGotoDistCache()
-  end
+  if raction.color then widget:setColor(raction.color) end
   return widget
 end
 
---[[
-registerAction:
-action - string, color - string, callback = function(value, retries, prev)
-value is a string value of action, retries is number which will grow by 1 if return is "retry"
-prev is a true when previuos action was executed succesfully, false otherwise
-it must return true if executed correctly, false otherwise
-it can also return string "retry", then the function will be called again in 20 ms
-]]--
-CaveBot.registerAction = function(action, color, callback) 
+CaveBot.registerAction = function(action, color, callback)
   action = action:lower()
-  if CaveBot.Actions[action] then
-    return warn("Duplicated acction: " .. action)
-  end
-  CaveBot.Actions[action] = {
-    color=color,
-    callback=callback
-  }
+  if CaveBot.Actions[action] then return warn("Duplicated acction: " .. action) end
+  CaveBot.Actions[action] = { color=color, callback=callback }
 end
 
 CaveBot.registerAction("label", "#ffc857", function(value, retries, prev)
   nExBot.lastLabel = value
-  
-  -- SmartHunt: Track waypoint entry for route optimization
   if nExBot.SmartHunt and nExBot.SmartHunt.Routes then
     nExBot.SmartHunt.Routes.enterWaypoint(value)
   end
-  
   return true
 end)
 
 CaveBot.registerAction("gotolabel", "#ffc857", function(value, retries, prev)
-  return CaveBot.gotoLabel(value) 
+  return CaveBot.gotoLabel(value)
 end)
 
 CaveBot.registerAction("delay", "#8893b3", function(value, retries, prev)
@@ -279,12 +206,7 @@ CaveBot.registerAction("delay", "#8893b3", function(value, retries, prev)
     local val = tonumber(data[1]:trim())
     local random
     local final
-
-
-    if #data == 2 then
-      random = tonumber(data[2]:trim())
-    end
-
+    if #data == 2 then random = tonumber(data[2]:trim()) end
     if random then
       local diff = (val/100) * random
       local min = val - diff
@@ -292,8 +214,7 @@ CaveBot.registerAction("delay", "#8893b3", function(value, retries, prev)
       final = math.random(min, max)
     end
     final = final or val
-
-    CaveBot.delay(final) 
+    CaveBot.delay(final)
     return "retry"
   end
   return true
@@ -309,11 +230,8 @@ CaveBot.registerAction("follow", "#46e6a6", function(value, retries, prev)
   local pos = pos()
   if getDistanceBetween(cpos, pos) < 2 then
     local Client = getClient()
-    if Client and Client.cancelFollow then
-      Client.cancelFollow()
-    else
-      g_game.cancelFollow()
-    end
+    if Client and Client.cancelFollow then Client.cancelFollow()
+    else g_game.cancelFollow() end
     return true
   else
     follow(c)
@@ -328,166 +246,22 @@ CaveBot.registerAction("function", "#ff4b81", function(value, retries, prev)
   for extension, callbacks in pairs(CaveBot.Extensions) do
     prefix = prefix .. "local " .. extension .. " = CaveBot.Extensions." .. extension .. "\n"
   end
-  local status, result = pcall(function() 
+  local status, result = pcall(function()
     return assert(load(prefix .. value, "cavebot_function"))()
   end)
   if not status then
     warn("warn in cavebot function:\n" .. result)
     return false
-  end  
+  end
   return result
 end)
 
---[[
-  ============================================
-  OPTIMIZED GOTO ACTION - Minimal Pathfinding
-  ============================================
-  
-  Key optimizations:
-  1. Early exits before ANY pathfinding
-  2. Single pathfinding call when possible
-  3. Let walkTo handle the complexity
-  4. Reduced retry overhead
-  
-  The walkTo function now handles path caching internally.
-]]
-
--- Walk strategy enum
-local WALK_STRATEGY = {
-  DIRECT = 1,
-  ATTACK_BLOCKER = 2,
-  FAILED = 3
-}
-
--- Direction offset lookup (reuse canonical table)
-local DIR_OFFSET = DIR_MOD_LOOKUP
-
--- Check if path is blocked by attackable monster
-local function getBlockingMonster(playerPos, destPos, maxDist)
-  -- Only check if we're close to destination
-  local dist = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
-  if dist > 5 then return nil end
-  
-  -- Try to find path ignoring creatures
-  local path = findPath(playerPos, destPos, maxDist, {
-    ignoreNonPathable = true,
-    ignoreCreatures = true,
-    precision = 1
-  })
-  
-  if not path or #path == 0 then return nil end
-  
-  -- Check first step for blocking monster
-  local dir = path[1]
-  local offset = DIR_OFFSET[dir]
-  if not offset then return nil end
-  
-  local checkPos = {
-    x = playerPos.x + offset.x,
-    y = playerPos.y + offset.y,
-    z = playerPos.z
-  }
-  
-  local Client = getClient()
-  local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
-  if not tile then return nil end
-  if not tile.hasCreature or not tile:hasCreature() then return nil end
-  
-  local creatures = tile:getCreatures()
-  for _, creature in ipairs(creatures) do
-    if creature:isMonster() then
-      local hp = creature:getHealthPercent()
-      if hp and hp > 0 and (oldTibia or creature:getType() < 3) then
-        return creature
-      end
-    end
-  end
-  
-  return nil
-end
-
--- Get Chebyshev distance to the next goto waypoint in the list
--- Used for adaptive arrival precision (prevents zone overlap on close WPs)
-local nextGotoDistCache = {}
-local nextGotoDistCacheCount = 0
-local function invalidateGotoDistCache()
-  nextGotoDistCache = {}
-  nextGotoDistCacheCount = 0
-end
-CaveBot.invalidateGotoDistCache = invalidateGotoDistCache
-local function getDistanceToNextGoto(currentIdx)
-  -- Build composite key from index + action value for cache stability
-  local currentAction = ui and ui.list and ui.list:getChildren() and ui.list:getChildren()[currentIdx]
-  local actionVal = currentAction and (currentAction.value or currentAction:getText()) or ""
-  local cacheKey = currentIdx .. ":" .. tostring(actionVal)
-  if nextGotoDistCache[cacheKey] then return nextGotoDistCache[cacheKey] end
-  if not ui or not ui.list then return 50 end
-  local children = ui.list:getChildren()
-  if not children then return 50 end
-  for i = currentIdx + 1, #children do
-    local child = children[i]
-    if child then
-      local actionType = child.action or child:getText()
-      if type(actionType) == "string" and actionType:match("^goto$") then
-        local val = child.value or child:getText()
-        if val then
-          local m = regexMatch(val, "([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
-          if m and m[1] then
-            local nextPos = {x = tonumber(m[1][2]), y = tonumber(m[1][3]), z = tonumber(m[1][4])}
-            if nextPos.x and nextPos.y then
-              -- Chebyshev from current WP to next goto WP
-              local currentAction = children[currentIdx]
-              if currentAction then
-                local cv = currentAction.value or currentAction:getText()
-                if cv then
-                  local cm = regexMatch(cv, "([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
-                  if cm and cm[1] then
-                    local curPos = {x = tonumber(cm[1][2]), y = tonumber(cm[1][3])}
-                    if curPos.x and curPos.y then
-                      local d = math.max(math.abs(nextPos.x - curPos.x), math.abs(nextPos.y - curPos.y))
-                      -- Cache with size limit
-                      if nextGotoDistCacheCount < 200 then
-                        nextGotoDistCache[cacheKey] = d
-                        nextGotoDistCacheCount = nextGotoDistCacheCount + 1
-                      end
-                      return d
-                    end
-                  end
-                end
-              end
-            end
-          end
-        end
-      end
-    end
-  end
-  return 50  -- Default: no next goto found, use wide precision
-end
-
--- ============================================================================
--- OSCILLATION / STUCK DETECTION for goto handler
--- Detects when the bot is looping 2-3 tiles without making progress toward the WP.
--- ============================================================================
-local gotoProgress = {
-  wpKey = nil,        -- "x,y,z" of current WP (reset on WP change)
-  bestDist = math.huge, -- closest distance achieved to WP
-  staleTicks = 0,     -- ticks without meaningful progress
-  STALE_THRESHOLD = 8, -- fast-fail after 8 non-progress ticks (~600ms)
-  PROGRESS_MIN = 2,   -- must close ≥2 tiles to count as progress
-}
-
 local function isNearFloorChangePos(p)
-  if not p or not FloorItems or not FloorItems.isFloorChangeTile then return false end
-  if FloorItems.isFloorChangeTile(p) then return true end
-  local adj = {
-    {x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0},
-    {x=1,y=-1},{x=1,y=1},{x=-1,y=1},{x=-1,y=-1}
-  }
+  if not p or not PathUtils or not PathUtils.isFloorChangeTile then return false end
+  if PathUtils.isFloorChangeTile(p) then return true end
+  local adj = {{x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0},{x=1,y=-1},{x=1,y=1},{x=-1,y=1},{x=-1,y=-1}}
   for i = 1, #adj do
-    local q = {x = p.x + adj[i].x, y = p.y + adj[i].y, z = p.z}
-    if FloorItems.isFloorChangeTile(q) then
-      return true
-    end
+    if PathUtils.isFloorChangeTile({x = p.x + adj[i].x, y = p.y + adj[i].y, z = p.z}) then return true end
   end
   return false
 end
@@ -495,53 +269,29 @@ end
 local function getAdjacentApproachPos(playerPos, targetPos)
   if not playerPos or not targetPos then return targetPos end
   local bestPos, bestDist = nil, math.huge
-  local adj = {
-    {x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0},
-    {x=1,y=-1},{x=1,y=1},{x=-1,y=1},{x=-1,y=-1}
-  }
+  local adj = {{x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0},{x=1,y=-1},{x=1,y=1},{x=-1,y=1},{x=-1,y=-1}}
   for i = 1, #adj do
     local alt = {x = targetPos.x + adj[i].x, y = targetPos.y + adj[i].y, z = targetPos.z}
     if not isNearFloorChangePos(alt) then
       local d = math.max(math.abs(playerPos.x - alt.x), math.abs(playerPos.y - alt.y))
-      if d < bestDist then
-        bestPos = alt
-        bestDist = d
-      end
+      if d < bestDist then bestPos = alt; bestDist = d end
     end
   end
   return bestPos or targetPos
 end
 
-local function classifyGotoBlock(playerPos, destPos, isFloorChange, maxDist)
-  if not playerPos or not destPos then return "unknown" end
-  if playerPos.z ~= destPos.z then return "floor" end
-
-  if not isFloorChange and FloorItems and FloorItems.isFieldTile and FloorItems.isFieldTile(destPos) then
-    return "field"
-  end
-
-  local blocker = getBlockingMonster(playerPos, destPos, maxDist)
-  if blocker then
-    return "creature"
-  end
-
-  local Client = getClient()
-  local tile = (Client and Client.getTile and Client.getTile(destPos)) or (g_map and g_map.getTile and g_map.getTile(destPos))
-  if tile and tile.isWalkable and not tile:isWalkable() then
-    return "wall"
-  end
-
-  return "unknown"
-end
+-- ============================================================================
+-- SIMPLIFIED GOTO ACTION — Linear waypoint execution
+-- No Pure Pursuit, no oscillation tracker, no blocking monster classification
+-- ============================================================================
 
 CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
-  -- ========== PARSE POSITION ==========
+  -- Parse position
   local posMatch = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+),?\\s*([0-9]?)")
   if not posMatch[1] then
     warn("Invalid cavebot goto value: " .. value)
     return false
   end
-
   local destPos = {
     x = tonumber(posMatch[1][2]),
     y = tonumber(posMatch[1][3]),
@@ -551,39 +301,13 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   local playerPos = player:getPosition()
   local maxDist = CaveBot.getMaxGotoDistance()
 
-  -- ========== ENSURE NAVIGATOR ROUTE IS BUILT ==========
-  if WaypointNavigator and CaveBot.ensureNavigatorRoute then
-    CaveBot.ensureNavigatorRoute(playerPos.z)
-  end
+  -- Floor check
+  if destPos.z ~= playerPos.z then return false, true end
 
-  -- ========== PURE PURSUIT LOOKAHEAD ==========
-  -- Compute a target point N tiles ahead on the route for smooth, arcing
-  -- movement through corners instead of walking point-to-point linearly.
-  local lookaheadTarget = nil
-  if WaypointNavigator and WaypointNavigator.isRouteBuilt and WaypointNavigator.isRouteBuilt() then
-    lookaheadTarget = WaypointNavigator.getLookaheadTarget(playerPos)
-    if lookaheadTarget then
-      if lookaheadTarget.z ~= playerPos.z then
-        lookaheadTarget = nil
-      else
-        local lx = math.abs(lookaheadTarget.x - playerPos.x)
-        local ly = math.abs(lookaheadTarget.y - playerPos.y)
-        if math.max(lx, ly) > maxDist then
-          lookaheadTarget = nil
-        end
-      end
-    end
-  end
-
-  -- ========== FLOOR CHECK ==========
-  if destPos.z ~= playerPos.z then
-    return false, true
-  end
-
-  -- ========== FLOOR-CHANGE TILE DETECTION ==========
+  -- Floor-change tile detection
   local Client = getClient()
   local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(destPos) or (g_map and g_map.getMinimapColor(destPos)) or 0
-  local isFloorChange = (FloorItems and FloorItems.isFloorChangeTile) and FloorItems.isFloorChangeTile(destPos) or false
+  local isFloorChange = PathUtils and PathUtils.isFloorChangeTile and PathUtils.isFloorChangeTile(destPos) or false
 
   local expectedFloorAfterChange = nil
   if isFloorChange then
@@ -593,8 +317,6 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
     elseif minimapColor == 212 or minimapColor == 213 then
       expectedFloorAfterChange = destPos.z + 1
     end
-    -- Fallback: if minimap color didn't match known floor-change colors,
-    -- default to destPos.z so downstream logic always has a value
     if expectedFloorAfterChange == nil then
       expectedFloorAfterChange = destPos.z
       local warnKey = destPos.x .. "," .. destPos.y .. "," .. destPos.z .. ":" .. tostring(minimapColor)
@@ -605,229 +327,63 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
     end
   end
 
-  -- ========== ARRIVAL PRECISION ==========
-  -- Adaptive: scale precision by distance to next goto WP to prevent zone overlap.
-  -- Floor-change WPs keep precision=0 (must step on the exact tile).
-  if not isFloorChange and precision > 0 then
-    local currentAction = ui and ui.list and ui.list:getFocusedChild()
-    local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
-    if waypointIdx then
-      local nextDist = getDistanceToNextGoto(waypointIdx)
-      precision = math.max(1, math.min(3, math.floor(nextDist / 2.5)))
-    else
-      precision = math.max(precision, 3)
-    end
-  end
-
-  -- ========== DISTANCE CALCULATIONS ==========
+  -- Distance
   local distX = math.abs(destPos.x - playerPos.x)
   local distY = math.abs(destPos.y - playerPos.y)
-  local dist  = math.max(distX, distY)
+  local dist = math.max(distX, distY)
 
-  -- ========== OSCILLATION / STUCK DETECTION ==========
-  local wpKey = destPos.x .. "," .. destPos.y .. "," .. destPos.z
-  if gotoProgress.wpKey ~= wpKey then
-    -- New waypoint: reset tracker
-    gotoProgress.wpKey = wpKey
-    gotoProgress.bestDist = dist
-    gotoProgress.staleTicks = 0
-  else
-    -- Same WP: check if we've made progress
-    if dist <= gotoProgress.bestDist - gotoProgress.PROGRESS_MIN then
-      gotoProgress.bestDist = dist
-      gotoProgress.staleTicks = 0
-    else
-      gotoProgress.staleTicks = gotoProgress.staleTicks + 1
-    end
-    -- Fast-fail if stuck oscillating (only when retries > 0 — give first attempt a chance)
-    if gotoProgress.staleTicks >= gotoProgress.STALE_THRESHOLD and retries > 0 then
-      gotoProgress.staleTicks = 0
-      gotoProgress.bestDist = dist  -- reset for next attempt
-      return false  -- trigger failure → recovery
-    end
-  end
-
-  -- ========== ARRIVAL CHECK ==========
+  -- Arrival check
   if dist <= precision then
     CaveBot.clearWaypointTarget()
     if isFloorChange then
-      if playerPos.z == expectedFloorAfterChange then
-        return true
-      end
+      if playerPos.z == expectedFloorAfterChange then return true end
       CaveBot.delay(50)
       return "retry"
     end
     return true
   end
 
-  -- ========== CURRENTLY WALKING ==========
+  -- Currently walking — check EventBus instant arrival
   if player and player:isWalking() then
-    -- Update progress tracker while walking (prevent false stale detection)
-    if dist < gotoProgress.bestDist then
-      gotoProgress.bestDist = dist
-      gotoProgress.staleTicks = 0
-    end
-    -- Check instant arrival via EventBus
     if CaveBot.hasArrivedAtWaypoint and CaveBot.hasArrivedAtWaypoint() then
       CaveBot.clearWaypointTarget()
       return true
     end
-    -- Don't count walking ticks as retries
     return "walking"
   end
 
-  -- ========== TOO FAR ==========
-  if dist > maxDist then
-    -- Keep strict sequence: do NOT auto-advance to another WP just because it's
-    -- closer in geometry. Let failure/recovery handle desync states.
-    return false, true
-  end
+  -- Too far
+  if dist > maxDist then return false, true end
 
-  -- ========== MAX RETRIES ==========
-  local maxRetries = 8
-  local hardRetryLimit = 14
-  if retries >= maxRetries then
-    local reason = classifyGotoBlock(playerPos, destPos, isFloorChange, maxDist)
-    if (reason == "creature" or reason == "field") and retries < hardRetryLimit then
-      -- Transient blockers get bounded extra retries before recovery.
-      CaveBot.delay(120)
-      return "retry"
-    end
-    return false
-  end
+  -- Max retries: simple counter, then advance
+  local maxRetries = 30
+  if retries >= maxRetries then return false end
 
-  -- ========== BLOCKING MONSTER (retry > 2) ==========
-  if retries > 2 then
-    local blocker = getBlockingMonster(playerPos, destPos, maxDist)
-    if blocker then
-      local Client = getClient()
-      local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
-      if currentTarget ~= blocker then
-        attack(blocker)
-      end
-      if Client and Client.setChaseMode then
-        Client.setChaseMode(1)
-      else
-        g_game.setChaseMode(1)
-      end
-      CaveBot.delay(100)
-      return "retry"
-    end
-  end
-
-  -- ========== WALK PARAMETERS ==========
-  -- Walk precision matches arrival precision minus 1: A* stops at the zone
-  -- boundary rather than overshooting to the center.
+  -- Walk parameters with progressive escalation
   local walkParams = {
     ignoreNonPathable = true,
     precision = isFloorChange and 0 or math.max(0, precision - 1),
     allowFloorChange = isFloorChange
   }
-  if retries > 1 then
-    walkParams.ignoreCreatures = true
-  end
-  if retries > 2 then
-    walkParams.ignoreFields = true
-  end
+  if retries > 1 then walkParams.ignoreCreatures = true end
+  if retries > 2 then walkParams.ignoreFields = true end
 
-  -- ========== STAIR APPROACH STABILIZATION ==========
-  -- When close to a FC tile, stop autoWalk to prevent overshooting.
-  -- walkTo's FC handler will use precise keyboard steps.
+  -- Stop autoWalk when close to FC tile for precise steps
   if isFloorChange and dist <= 3 then
     if CaveBot.stopAutoWalk then CaveBot.stopAutoWalk() end
   end
 
-  -- ========== RESOLVE WALK TARGET ==========
-  -- Use Pure Pursuit lookahead when the route is built: walk to a point 10 tiles
-  -- ahead on the route instead of the exact waypoint position. This creates smooth
-  -- movement through congested WP sequences.
-  -- Floor-change waypoints bypass lookahead: they require exact tile precision.
-  -- Use Pure Pursuit lookahead only on clean (retry=0) attempts.
-  -- The lookahead is a geometric interpolation and may land on impassable tiles;
-  -- when blocked (retries > 0) fall back to destPos so progressive escalation
-  -- (ignoreCreatures, ignoreFields, attack blocker) works against a guaranteed-
-  -- walkable recorded position.
-  local walkTarget = destPos
-    local nearTransition = isNearFloorChangePos(playerPos) or isNearFloorChangePos(destPos)
-  if retries == 0
-      and not isFloorChange
-      and not nearTransition
-      and dist > 6
-      and WaypointNavigator
-      and type(WaypointNavigator.isRouteBuilt) == "function"
-      and WaypointNavigator.isRouteBuilt()
-      and type(WaypointNavigator.getLookaheadTarget) == "function" then
-    local lookahead = WaypointNavigator.getLookaheadTarget(playerPos)
-    if lookahead and lookahead.z == playerPos.z then
-      local lhDist = math.max(
-        math.abs(lookahead.x - playerPos.x),
-        math.abs(lookahead.y - playerPos.y)
-      )
-      if lhDist >= 5 then
-        -- Gate 1: reject floor-change tiles (walkTo redirects to adjacent tile
-        -- with allowFloorChange=false, causing oscillation near the stair).
-        local lookaheadIsStair = (FloorItems and FloorItems.isFloorChangeTile)
-          and FloorItems.isFloorChangeTile(lookahead)
-        -- Gate 2: reject unreachable targets behind walls.  The lookahead is a
-        -- geometric interpolation that ignores map topology; validate that A*
-        -- can actually find a path before committing.  Uses ignoreCreatures
-        -- (creatures are transient) and precision=1 (don't need exact tile).
-        local lookaheadReachable = true
-        if not lookaheadIsStair then
-          local lhPath = findPath(playerPos, lookahead, maxDist, {
-            ignoreNonPathable = true,
-            ignoreCreatures = true,
-            precision = 1,
-          })
-          lookaheadReachable = lhPath and #lhPath > 0
-        end
-        if not lookaheadIsStair and lookaheadReachable then
-          walkTarget = lookahead
-        end
-      end
-    end
-  end
-
-  -- ========== ATTEMPT WALK ==========
-  local walkResult = CaveBot.walkTo(walkTarget, maxDist, walkParams)
-  if walkResult == "nudge" then
+  -- Attempt walk
+  local walkResult = CaveBot.walkTo(destPos, maxDist, walkParams)
+  if walkResult then
     if CaveBot.setCurrentWaypointTarget then
       CaveBot.setCurrentWaypointTarget(destPos, precision)
-    end
-    local walkDelay = dist <= 3 and 0 or dist <= 8 and 25 or dist <= 15 and 50 or 75
-    if walkDelay > 0 then CaveBot.delay(walkDelay) end
-    return "retry"
-  elseif walkResult then
-    if CaveBot.setCurrentWaypointTarget then
-      CaveBot.setCurrentWaypointTarget(destPos, precision)
-    end
-    if CaveBot.setWalkingToWaypoint then
-      CaveBot.setWalkingToWaypoint(walkTarget)
     end
     local walkDelay = dist <= 3 and 0 or dist <= 8 and 25 or dist <= 15 and 50 or 75
     if walkDelay > 0 then CaveBot.delay(walkDelay) end
     return "walking"
   end
 
-  -- Walk failed — try adjacent tiles on retries > 2 (blocked WP workaround)
-  if retries > 2 and not isFloorChange then
-    local CARDINAL_OFFSETS = {{x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0}}
-    for _, off in ipairs(CARDINAL_OFFSETS) do
-      local altDest = {x = destPos.x + off.x, y = destPos.y + off.y, z = destPos.z}
-      local altResult = CaveBot.walkTo(altDest, maxDist, walkParams)
-      if altResult and altResult ~= "nudge" then
-        if CaveBot.setCurrentWaypointTarget then
-          CaveBot.setCurrentWaypointTarget(destPos, precision)
-        end
-        CaveBot.delay(50)
-        return "walking"
-      end
-    end
-  end
-
-  if CaveBot.clearWalkingState then
-    CaveBot.clearWalkingState()
-  end
   return "retry"
 end)
 
@@ -842,67 +398,36 @@ CaveBot.registerAction("use", "#3be4d0", function(value, retries, prev)
     use(itemid)
     return true
   end
-
-  pos = {x=tonumber(pos[1][2]), y=tonumber(pos[1][3]), z=tonumber(pos[1][4])}  
+  pos = {x=tonumber(pos[1][2]), y=tonumber(pos[1][3]), z=tonumber(pos[1][4])}
   local playerPos = player:getPosition()
-
-  -- Floor-change awareness: if the target is a FC tile, handle approach + use
-  local isFC = (FloorItems and FloorItems.isFloorChangeTile) and FloorItems.isFloorChangeTile(pos) or false
-
+  local isFC = PathUtils and PathUtils.isFloorChangeTile and PathUtils.isFloorChangeTile(pos) or false
   if pos.z ~= playerPos.z then
     if isFC then
-      -- Player already changed floor after using the stair → complete
       local Client = getClient()
       local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor(pos)) or 0
       local expectedFloor = pos.z
-      if minimapColor == 210 or minimapColor == 211 then
-        expectedFloor = pos.z - 1
-      elseif minimapColor == 212 or minimapColor == 213 then
-        expectedFloor = pos.z + 1
-      end
-      if playerPos.z == expectedFloor then
-        return true  -- Arrived at expected floor
-      end
+      if minimapColor == 210 or minimapColor == 211 then expectedFloor = pos.z - 1
+      elseif minimapColor == 212 or minimapColor == 213 then expectedFloor = pos.z + 1 end
+      if playerPos.z == expectedFloor then return true end
     end
-    return false -- different floor, not a FC tile or wrong floor
+    return false
   end
-
   local dist = math.max(math.abs(pos.x-playerPos.x), math.abs(pos.y-playerPos.y))
-
   if dist > 1 then
-    -- Walk to an adjacent usable approach tile for reliable interaction.
     local maxDist = CaveBot.getMaxGotoDistance and CaveBot.getMaxGotoDistance() or 50
     local approachPos = getAdjacentApproachPos(playerPos, pos)
-    local walkResult = CaveBot.walkTo(approachPos, maxDist, {
-      precision = 1,
-      allowFloorChange = false
-    })
-    if walkResult then
-      CaveBot.delay(100)
-      return "retry"
-    end
+    local walkResult = CaveBot.walkTo(approachPos, maxDist, { precision = 1, allowFloorChange = false })
+    if walkResult then CaveBot.delay(100); return "retry" end
     return false
   end
-
   local Client = getClient()
   local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
-  if not tile then
-    return false
-  end
-
+  if not tile then return false end
   local topThing = tile:getTopUseThing()
-  if not topThing then
-    return false
-  end
-
+  if not topThing then return false end
   use(topThing)
   CaveBot.delay(CaveBot.Config.get("useDelay") + CaveBot.Config.get("ping"))
-
-  -- For FC tiles, wait for floor change instead of completing immediately
-  if isFC then
-    return "retry"
-  end
-
+  if isFC then return "retry" end
   return true
 end)
 
@@ -916,68 +441,37 @@ CaveBot.registerAction("usewith", "#3be4d0", function(value, retries, prev)
     use(itemid)
     return true
   end
-
   local itemid = tonumber(pos[1][2])
-  pos = {x=tonumber(pos[1][3]), y=tonumber(pos[1][4]), z=tonumber(pos[1][5])}  
+  pos = {x=tonumber(pos[1][3]), y=tonumber(pos[1][4]), z=tonumber(pos[1][5])}
   local playerPos = player:getPosition()
-
-  -- Floor-change awareness: if the target is a FC tile (rope hole, shovel spot)
-  local isFC = (FloorItems and FloorItems.isFloorChangeTile) and FloorItems.isFloorChangeTile(pos) or false
-
+  local isFC = PathUtils and PathUtils.isFloorChangeTile and PathUtils.isFloorChangeTile(pos) or false
   if pos.z ~= playerPos.z then
     if isFC then
-      -- Player already changed floor after using item on stair → complete
       local Client = getClient()
       local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor(pos)) or 0
       local expectedFloor = pos.z
-      if minimapColor == 210 or minimapColor == 211 then
-        expectedFloor = pos.z - 1
-      elseif minimapColor == 212 or minimapColor == 213 then
-        expectedFloor = pos.z + 1
-      end
-      if playerPos.z == expectedFloor then
-        return true  -- Arrived at expected floor
-      end
+      if minimapColor == 210 or minimapColor == 211 then expectedFloor = pos.z - 1
+      elseif minimapColor == 212 or minimapColor == 213 then expectedFloor = pos.z + 1 end
+      if playerPos.z == expectedFloor then return true end
     end
-    return false -- different floor
+    return false
   end
-
   local dist = math.max(math.abs(pos.x-playerPos.x), math.abs(pos.y-playerPos.y))
-
   if dist > 1 then
-    -- Walk to an adjacent usable approach tile for reliable interaction.
     local maxDist = CaveBot.getMaxGotoDistance and CaveBot.getMaxGotoDistance() or 50
     local approachPos = getAdjacentApproachPos(playerPos, pos)
-    local walkResult = CaveBot.walkTo(approachPos, maxDist, {
-      precision = 1,
-      allowFloorChange = false
-    })
-    if walkResult then
-      CaveBot.delay(100)
-      return "retry"
-    end
+    local walkResult = CaveBot.walkTo(approachPos, maxDist, { precision = 1, allowFloorChange = false })
+    if walkResult then CaveBot.delay(100); return "retry" end
     return false
   end
-
   local Client = getClient()
   local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
-  if not tile then
-    return false
-  end
-
+  if not tile then return false end
   local topThing = tile:getTopUseThing()
-  if not topThing then
-    return false
-  end
-
+  if not topThing then return false end
   usewith(itemid, topThing)
   CaveBot.delay(CaveBot.Config.get("useDelay") + CaveBot.Config.get("ping"))
-
-  -- For FC tiles, wait for floor change instead of completing immediately
-  if isFC then
-    return "retry"
-  end
-
+  if isFC then return "retry" end
   return true
 end)
 

@@ -1,5 +1,5 @@
 --[[
-  Monster AI Core Module v3.0
+  Monster AI Core Module v4.0
   
   Foundation module for the Monster AI Analysis system.
   Provides the shared namespace, safe creature validation helpers,
@@ -10,18 +10,11 @@
   
   Architecture (SRP decomposition):
     monster_ai_core.lua      -> Namespace, constants, safe helpers
-    monster_patterns.lua     -> Pattern persistence & lookup
     monster_tracking.lua     -> Per-creature data collection
-    monster_prediction.lua   -> Behavior prediction & confidence
-    monster_combat_feedback.lua -> Adaptive learning from combat
-    monster_spell_tracker.lua   -> Spell/missile analysis
-    auto_tuner.lua           -> Classification & danger tuning
     monster_scenario.lua     -> Anti-zigzag & engagement locks
     monster_reachability.lua -> Path analysis & blocked creatures
-    monster_tbi.lua          -> TargetBot Integration (priority scoring)
-    monster_ai.lua           -> Orchestrator (VolumeAdaptation, RealTime,
-                                 Telemetry, Metrics, Classifier, EventBus,
-                                 updateAll, public API, tick registration)
+    monster_ai.lua           -> Orchestrator (EventBus wiring, updateAll,
+                                 public API, tick registration)
 ]]
 
 -- ============================================================================

@@ -195,16 +195,15 @@ if true then
     end
   end
 
-  -- Window title handler function
   local function windowTitleHandler()
     if settings.title then
       if hppercent() > 0 then
-          g_window.setTitle("Tibia - " .. name() .. " - " .. lvl() .. "lvl " .. vocText)
+        pcall(g_window.setTitle, "Tibia - " .. name() .. " - " .. lvl() .. "lvl " .. vocText)
       else
-          g_window.setTitle("Tibia - " .. name() .. " - DEAD")
+        pcall(g_window.setTitle, "Tibia - " .. name() .. " - DEAD")
       end
     else
-      g_window.setTitle("Tibia - " .. name())
+      pcall(g_window.setTitle, "Tibia - " .. name())
     end
   end
 
