@@ -609,7 +609,7 @@ local function executeRecovery()
               local fwdWp = waypointPositionCache[gIdx]
               if fwdWp and fwdWp.child and not isWaypointBlacklisted(fwdWp.child) and fwdWp.z == playerPos.z then
                 local fwdDist = math.max(math.abs(playerPos.x - fwdWp.x), math.abs(playerPos.y - fwdWp.y))
-                if fwdDist <= maxDist then
+                if fwdDist <= CaveBot.getMaxGotoDistance() then
                   local fwdPath = ps.findPath(playerPos, fwdWp, {
                     maxSteps = math.min(math.floor(fwdDist * 1.5) + 3, 50),
                     ignoreNonPathable = true,

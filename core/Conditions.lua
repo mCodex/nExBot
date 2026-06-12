@@ -267,6 +267,7 @@ Panel
 
   -- Single condition spell handler. Cast at most one spell per tick to avoid
   -- cure/hold races sending multiple talk packets in the same frame.
+  local nowMs = nExBot and nExBot.Shared and nExBot.Shared.nowMs or function() return now or (os.clock() * 1000) end
   local function conditionSpellsHandler()
     if not config.enabled then return end
 
@@ -284,8 +285,8 @@ Panel
       return
     end
 
-    if canUseHold and config.holdUtana and mana() >= config.utanaCost and (not utanaCast or (now - utanaCast > 120000)) and castConditionSpell("utana vid") then
-      utanaCast = now
+    if canUseHold and config.holdUtana and mana() >= config.utanaCost and (not utanaCast or (nowMs() - utanaCast > 120000)) and castConditionSpell("utana vid") then
+      utanaCast = nowMs()
       return
     end
 
@@ -297,7 +298,7 @@ Panel
       return
     end
 
-    if config.cureParalyse and mana() >= config.paralyseCost and isParalyzed() and not getSpellCoolDown(config.paralyseSpell) then
+    if healingGroupReady() and config.cureParalyse and mana() >= config.paralyseCost and isParalyzed() and not getSpellCoolDown(config.paralyseSpell) then
       castConditionSpell(config.paralyseSpell)
     end
   end

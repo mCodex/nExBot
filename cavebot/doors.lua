@@ -51,6 +51,7 @@ CaveBot.Extensions.OpenDoors.setup = function()
     if not doorTile:isWalkable() then
       -- Use GlobalConfig for door handling if available
       if GlobalConfig and GlobalConfig.openDoor then
+        if not throttleDoor(pos) then return "retry" end
         if GlobalConfig.openDoor(doorTile, key) then
           delay(200)
           return "retry"

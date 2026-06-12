@@ -135,6 +135,7 @@ end
 function ActionRateLimiter.resetStats()
   state.sent = {}
   state.suppressed = {}
+  state.last = {}
 end
 
 BotCore = BotCore or {}

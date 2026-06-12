@@ -94,7 +94,7 @@ CaveBot.Extensions.DWithdraw.setup = function()
 			for i, item in pairs(destContainer:getItems()) do
 				if item:getId() == destId then
 					if not throttleRetry("open-full", 300, "open") then return "retry" end
-					if Client and Client.openContainer then Client.openContainer(foundNextContainer, destContainer) elseif g_game then g_game.open(foundNextContainer, destContainer) end
+					if Client and Client.openContainer then Client.openContainer(item, destContainer) elseif g_game then g_game.open(item, destContainer) end
 					delay(300)
 					return "retry"
 				end

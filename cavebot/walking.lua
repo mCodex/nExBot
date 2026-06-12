@@ -412,6 +412,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
     if everyResult then
       local bestPos, bestCheb = nil, math.huge
       for posKey, node in pairs(everyResult) do
+        -- Relies on OTClient's extended string:split method (used throughout codebase)
         local parts = posKey:split(",")
         local px, py, pz = tonumber(parts[1]), tonumber(parts[2]), tonumber(parts[3])
         if px and py and pz and pz == dest.z then

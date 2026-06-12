@@ -1648,7 +1648,9 @@ local function buildDestinationMap()
         if entry.enabled and entry.itemId and entry.items then
             local items = extractItemIds(entry.items)
             for _, id in ipairs(items) do
-                destinationByItemId[id] = entry.itemId
+                if destinationByItemId[id] == nil then
+                    destinationByItemId[id] = entry.itemId
+                end
             end
         end
     end

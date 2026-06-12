@@ -8,7 +8,7 @@ local function nowMs()
     if nExBot and nExBot.Shared and nExBot.Shared.nowMs then
         return nExBot.Shared.nowMs()
     end
-    if now then return now end
+    if now then return now() end
     return os.time() * 1000
 end
 
@@ -42,7 +42,7 @@ local function getCachedPaths(fromPos, toPos)
     pathCache.key = key
     pathCache.at = t
     pathCache.withoutMonsters = findPath(fromPos, toPos, 30, { ignoreFields = true, ignoreNonPathable = true, ignoreCreatures = true, precision = 0})
-    pathCache.withMonsters = findPath(fromPos, toPos, maxDist, { ignoreFields = true, ignoreNonPathable = true, ignoreCreatures = false, precision = 0 })
+    pathCache.withMonsters = findPath(fromPos, toPos, 30, { ignoreFields = true, ignoreNonPathable = true, ignoreCreatures = false, precision = 0 })
     return pathCache.withoutMonsters, pathCache.withMonsters
 end
 
@@ -116,50 +116,49 @@ CaveBot.Extensions.StandLure.setup = function()
             if not pathWithoutMonsters then
                 reset()
                 warn("[Rush Lure] No possible path to reach position, skipping.")
-                return false -- spot is unreachable 
-                        elseif pathWithoutMonsters and not pathWithMonsters then
-                            local foundMonster = false
-                            for i, dir in ipairs(pathWithoutMonsters) do
-                                local dirs = modPos(dir)
-                                nextPos = nextPos or {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-                                nextPos.x = nextPos.x + dirs[1]
-                                nextPos.y = nextPos.y + dirs[2]
+                return false -- spot is unreachable
+            elseif pathWithoutMonsters and not pathWithMonsters then
+                local foundMonster = false
+                for i, dir in ipairs(pathWithoutMonsters) do
+                    local dirs = modPos(dir)
+                    nextPos = nextPos or {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+                    nextPos.x = nextPos.x + dirs[1]
+                    nextPos.y = nextPos.y + dirs[2]
 
-                                local Client = getClient()
-                                local tile = (Client and Client.getTile) and Client.getTile(nextPos) or (g_map and g_map.getTile(nextPos))
-                                if tile then
-                                    local hasCreature = tile.hasCreature and tile:hasCreature()
-                                    if hasCreature then
-                                        local creature = tile:getCreatures()[1]
-                                        local hppc = creature:getHealthPercent()
-                                        if creature:isMonster() and (hppc and hppc > 0) and (oldTibia or creature:getType() < 3) then
-                                            -- real blocking creature can not meet those conditions - ie. it could be player, so just in case check if the next creature is reachable
-                                            local path = findPath(playerPos, creature:getPosition(), 7, { ignoreNonPathable = true, precision = 1 }) 
-                                            if path then
-                                                creature:setMarked('#00FF00')
-                                                local attackingCreature = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature())
-                                                if attackingCreature ~= creature then
-                                                    if not throttleRetry("attack-blocker", 350, "attack") then return "retry" end
-                                                    attack(creature)
-                                                end
-                                                if not throttleRetry("chase-mode", 300, "default") then return "retry" end
-                                                if Client and Client.setChaseMode then Client.setChaseMode(1) elseif g_game then g_game.setChaseMode(1) end
-                                                resetRetries = true -- reset retries, we are trying to unclog the cavebot
-                                                delay(200)
-                                                return "retry"
-                                            end
-                                        end
+                    local Client = getClient()
+                    local tile = (Client and Client.getTile) and Client.getTile(nextPos) or (g_map and g_map.getTile(nextPos))
+                    if tile then
+                        local hasCreature = tile.hasCreature and tile:hasCreature()
+                        if hasCreature then
+                            local creature = tile:getCreatures()[1]
+                            local hppc = creature:getHealthPercent()
+                            if creature:isMonster() and (hppc and hppc > 0) and (oldTibia or creature:getType() < 3) then
+                                local path = findPath(playerPos, creature:getPosition(), 7, { ignoreNonPathable = true, precision = 1 })
+                                if path then
+                                    creature:setMarked('#00FF00')
+                                    local attackingCreature = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature())
+                                    if attackingCreature ~= creature then
+                                        if not throttleRetry("attack-blocker", 350, "attack") then return "retry" end
+                                        attack(creature)
                                     end
+                                    if not throttleRetry("chase-mode", 300, "default") then return "retry" end
+                                    if Client and Client.setChaseMode then Client.setChaseMode(1) elseif g_game then g_game.setChaseMode(1) end
+                                    resetRetries = true
+                                    delay(200)
+                                    return "retry"
                                 end
                             end
-          
-              local Client = getClient()
-              local attackingCreature = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature())
-              if not attackingCreature then
-                reset()
-                warn("[Rush Lure] No path, no blocking monster, skipping.")
-                return false -- no other way
-              end
+                        end
+                    end
+                end
+
+                local Client = getClient()
+                local attackingCreature = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature())
+                if not attackingCreature then
+                    reset()
+                    warn("[Rush Lure] No path, no blocking monster, skipping.")
+                    return false -- no other way
+                end
             end
 
             -- reaching position, delay targetbot in process

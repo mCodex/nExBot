@@ -2038,7 +2038,7 @@ end
 -- (covers typical 30x30 client view). Returns {} if no player yet.
 function ClientService.getTilesAroundPlayer(radius)
   radius = radius or 10
-  local player = g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()
+  local player = ClientService.getLocalPlayer()
   if not player then return {} end
   local pos = player:getPosition()
   if not pos then return {} end

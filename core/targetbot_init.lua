@@ -14,8 +14,8 @@ local function safeDofile(path)
 		return res
 	else
 		warn("[CaveBot] Failed to load " .. path .. ": " .. tostring(res))
+		return nil
 	end
-	return res
 end
 
 -- Essential UI and core modules (load immediately)

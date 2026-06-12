@@ -1188,7 +1188,7 @@ end
 
 local function bucketPercent(value)
     value = tonumber(value) or 0
-    return math.floor(value / 5)
+    return math.floor(value)
 end
 
 local function buildContextFingerprint(ctx)
@@ -1204,6 +1204,7 @@ local function buildContextFingerprint(ctx)
         ctx.cavebotOn and 1 or 0,
         ctx.targetbotOn and 1 or 0,
         ctx.healbotOn and 1 or 0,
+        ctx.hotkey or "",
     }, "|")
 end
 

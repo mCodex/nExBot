@@ -685,14 +685,13 @@ function AttackStateMachine.requestAttack(creature, priority)
   -- REAFFIRM path: same target in ENGAGING → reset retries, keep going
   if id == state.targetId then
     if state.current == STATE.ENGAGING then
+      -- Refresh creature ref before any early return so stale handles never persist
+      state.creature = creature
       local t = nowMs()
       if (t - state.lastReaffirmAt) < CC.COMMAND_COOLDOWN then
         return true
       end
       state.lastReaffirmAt = t
-
-      -- Refresh creature ref (may be newer object)
-      state.creature = creature
       state.stats.reaffirms = state.stats.reaffirms + 1
       -- Only actively re-send if game doesn't show us attacking yet.
       -- sendAttack's toggle guard also prevents this, but being

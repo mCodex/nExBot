@@ -373,7 +373,7 @@ local function leaderTargetHandler()
   end
   if config.enabled and config.serverEnabled and config.attack == "SERVER LEADER TARGET" and serverTarget then
     local target = SafeCall.getTarget()
-    if ((serverTarget and not target) or (target and target:getName() ~= serverTarget)) and throttleComboAction("server-target", 350, "attack") then
+    if ((serverTarget and not target) or (target and target:getName() ~= serverTarget:getName())) and throttleComboAction("server-target", 350, "attack") then
       g_game.attack(serverTarget)
     end
   end

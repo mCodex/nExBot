@@ -1554,7 +1554,13 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   end
   
   -- Store whether we're using native chase for the walk function
-  TargetBot.usingNativeChase = useNativeChase
+  -- In the fallback path, compute effective mode to reflect actual client state.
+  if ChaseController then
+    TargetBot.usingNativeChase = useNativeChase
+  else
+    local effectiveMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or (useNativeChase and 1 or 0)
+    TargetBot.usingNativeChase = (effectiveMode == 1)
+  end
   
   -- ═══════════════════════════════════════════════════════════════════════════
   -- REACHABILITY VALIDATION (v2.1): Verify target before attack
