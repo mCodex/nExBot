@@ -27,7 +27,7 @@ local resetTaskData = function()
 end
 
 CaveBot.Extensions.Tasker.setup = function()
-  CaveBot.registerAction("Tasker", "#FF0090", function(value, retries)
+  CaveBot.registerAction("Tasker", "#ff6b9d", function(value, retries)
     local taskName = ""
     local monster = ""
     local monster2 = ""

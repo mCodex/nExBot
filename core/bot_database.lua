@@ -34,6 +34,11 @@ local CONFIG = {
   SCHEMA_VERSION = 1,        -- For future migrations
 }
 
+-- Nx design system styling constants for macro BotSwitch buttons
+local NX_ACCENT = "#3be4d0"
+local NX_MUTED  = "#a4aece"
+local NX_FONT   = "verdana-11px-rounded"
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- SCHEMA DEFINITION (Single Source of Truth for All Defaults)
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -421,6 +426,29 @@ function BotDB.registerMacro(macroRef, key, onEnable)
   
   -- Track registered macro for programmatic access
   _registeredMacros[key] = macroRef
+
+  -- Apply Nx design system styling to the macro's BotSwitch button.
+  -- Applied synchronously at registration time — avoids the deferred
+  -- schedule() / false-positive pcall bug that left buttons unstyled.
+  local btn = macroRef and macroRef.button
+  if btn then
+    pcall(function() btn:setFont(NX_FONT) end)
+
+    local function applyMacroColor()
+      pcall(function()
+        local b = macroRef.button
+        if b then b:setColor(macroRef:isOn() and NX_ACCENT or NX_MUTED) end
+      end)
+    end
+    applyMacroColor()
+
+    -- Re-apply color on every toggle so on/off states stay correct
+    local prevSwitch = macroRef.onSwitch
+    macroRef.onSwitch = function(ref)
+      if prevSwitch then pcall(prevSwitch, ref) end
+      applyMacroColor()
+    end
+  end
 end
 
 -- Get registered macro by key

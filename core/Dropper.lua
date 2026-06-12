@@ -1,29 +1,30 @@
 setDefaultTab("Tools")
 
 local ui = setupUI([[
-Panel
-  height: 19
+NxBotSection
+  height: 30
 
-  BotSwitch
+  NxSwitch
     id: title
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
-    width: 130
+    anchors.right: parent.right
+    margin-right: 50
+    margin-top: 0
     !text: tr('Dropper')
 
-  Button
+  NxButton
     id: edit
-    anchors.top: prev.top
-    anchors.left: prev.right
+    anchors.top: parent.top
     anchors.right: parent.right
-    margin-left: 3
-    height: 17
+    width: 46
+    height: 20
     text: Edit
 ]])
 
 local edit = setupUI([[
-Panel
+NxBotSection
   height: 150
     
   Label

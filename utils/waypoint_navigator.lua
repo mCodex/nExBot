@@ -185,6 +185,9 @@ function WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
   end
 
   -- Build segments between consecutive gotos (reference waypointPositionCache directly)
+  -- IMPORTANT: Never drop consecutive user-defined segments by distance.
+  -- Large/open-area routes can legitimately have long links; skipping them
+  -- truncates the route and causes early wrap loops (WP1..WP4 repeating).
   for i = 1, #gotos - 1 do
     local from = gotos[i]
     local to = gotos[i + 1]
@@ -192,15 +195,15 @@ function WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
     local dy = to.pos.y - from.pos.y
     local length = math.sqrt(dx * dx + dy * dy)
 
-    if length <= maxSegmentLength then
+    if length > 0 then
       route.segments[#route.segments + 1] = {
         fromPos = from.pos,   -- reference, not copy
         toPos = to.pos,       -- reference, not copy
         fromIdx = from.idx,
         toIdx = to.idx,
         length = length,
-        dirX = length > 0 and dx / length or 0,
-        dirY = length > 0 and dy / length or 0,
+        dirX = dx / length,
+        dirY = dy / length,
         cumulativeDist = 0,  -- filled below
         midX = (from.pos.x + to.pos.x) * 0.5,  -- for spatial pruning
         midY = (from.pos.y + to.pos.y) * 0.5,
@@ -208,13 +211,19 @@ function WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
     end
   end
 
-  -- Wrap-around segment (last -> first) if close enough
+  -- Wrap-around segment (last -> first) if close enough.
+  -- Skipped when the last goto is a floor-change tile: those routes are meant to
+  -- exit the floor via stairs/holes, not loop back.  Adding a wrap-around in
+  -- that case makes Pure Pursuit aim backwards (toward WP1) instead of forward
+  -- to the stair tile, causing the bot to spin on the current floor indefinitely.
   local last = gotos[#gotos]
   local first = gotos[1]
+  local lastIsStair = (FloorItems and FloorItems.isFloorChangeTile)
+    and FloorItems.isFloorChangeTile({ x = last.pos.x, y = last.pos.y, z = last.pos.z })
   local wrapDx = first.pos.x - last.pos.x
   local wrapDy = first.pos.y - last.pos.y
   local wrapLength = math.sqrt(wrapDx * wrapDx + wrapDy * wrapDy)
-  if wrapLength <= maxSegmentLength and wrapLength > 0 then
+  if not lastIsStair and wrapLength <= maxSegmentLength and wrapLength > 0 then
     route.segments[#route.segments + 1] = {
       fromPos = last.pos,
       toPos = first.pos,
@@ -338,8 +347,10 @@ end
 -- ============================================================================
 
 --- Get the correct next waypoint for the player to walk to.
--- Uses distance-based advance: advances when <4 tiles from segment end,
--- regardless of segment length (consistent behavior).
+-- Advisory only: the goto action's distance≤precision arrival check is the
+-- authoritative WP completion gate. This function should NOT trigger early
+-- advance; it returns the segment endpoint so callers know which WP the
+-- player is heading toward.
 -- @param playerPos table {x, y, z}
 -- @return waypointIndex (or nil), waypointPos (or nil)
 function WaypointNavigator.getNextWaypoint(playerPos)
@@ -358,9 +369,10 @@ function WaypointNavigator.getNextWaypoint(playerPos)
 
   local seg = route.segments[segIdx]
 
-  -- Distance-based advance: advance when <4 tiles from segment end
+  -- Advance to next segment only when effectively at the endpoint (<1 tile).
+  -- The goto action handles WP completion via its own arrival precision check.
   local remainingDist = (1 - progress) * seg.length
-  if remainingDist < 4 and segIdx < #route.segments then
+  if remainingDist < 1 and segIdx < #route.segments then
     local nextSeg = route.segments[segIdx + 1]
     return nextSeg.toIdx, nextSeg.toPos
   end

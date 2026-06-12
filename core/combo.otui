@@ -1,13 +1,13 @@
-AttackComboBoxPopupMenu < ComboBoxPopupMenu
-AttackComboBoxPopupMenuButton < ComboBoxPopupMenuButton
-AttackComboBox < ComboBox
+AttackComboBoxPopupMenu < NxComboBoxPopupMenu
+AttackComboBoxPopupMenuButton < NxComboBoxPopupMenuButton
+AttackComboBox < NxComboBox
   @onSetup: |
     self:addOption("LEADER TARGET")
     self:addOption("COMMAND TARGET")    
 
-FollowComboBoxPopupMenu < ComboBoxPopupMenu
-FollowComboBoxPopupMenuButton < ComboBoxPopupMenuButton
-FollowComboBox < ComboBox
+FollowComboBoxPopupMenu < NxComboBoxPopupMenu
+FollowComboBoxPopupMenuButton < NxComboBoxPopupMenuButton
+FollowComboBox < NxComboBox
   @onSetup: |
     self:addOption("LEADER TARGET")
     self:addOption("SERVER LEADER TARGET")    
@@ -21,23 +21,23 @@ ComboTrigger < Panel
   padding: 3
   size: 450 72
 
-  Label
+  NxLabel
     id: triggerLabel1
     anchors.left: parent.left
     anchors.top: parent.top
     text: On Say
     margin-top: 8
     margin-left: 5
-    color: #ffaa00
+    color: #3be4d0
 
-  Label
+  NxLabel
     id: leaderLabel
     anchors.left: triggerLabel1.right
     anchors.top: triggerLabel1.top
     text: Leader:
-    margin-left: 35  
+    margin-left: 35
 
-  TextEdit
+  NxTextInput
     id: onSayLeader
     anchors.left: leaderLabel.right
     anchors.top: leaderLabel.top
@@ -46,14 +46,14 @@ ComboTrigger < Panel
     width: 120
     font: cipsoftFont
 
-  Label
+  NxLabel
     id: phrase
     anchors.left: onSayLeader.right
     anchors.top: onSayLeader.top
     text: Phrase:
     margin-left: 5
 
-  TextEdit
+  NxTextInput
     id: onSayPhrase
     anchors.left: phrase.right
     anchors.top: leaderLabel.top
@@ -62,29 +62,29 @@ ComboTrigger < Panel
     width: 120
     font: cipsoftFont
 
-  CheckBox
+  NxCheckBox
     id: onSayToggle
     anchors.left: onSayPhrase.right
     anchors.top: onSayPhrase.top
     margin-top: 1
     margin-left: 5
 
-  Label
+  NxLabel
     id: triggerLabel2
     anchors.left: triggerLabel1.left
     anchors.top: triggerLabel1.bottom
     text: On Shoot
     margin-top: 5
-    color: #ffaa00  
+    color: #3be4d0
 
-  Label
+  NxLabel
     id: leaderLabel1
     anchors.left: triggerLabel2.right
     anchors.top: triggerLabel2.top
     text: Leader:
-    margin-left: 24  
+    margin-left: 24
 
-  TextEdit
+  NxTextInput
     id: onShootLeader
     anchors.left: leaderLabel1.right
     anchors.top: leaderLabel1.top
@@ -92,31 +92,31 @@ ComboTrigger < Panel
     anchors.right: onSayPhrase.right
     margin-left: 5
     width: 120
-    font: cipsoftFont  
+    font: cipsoftFont
 
-  CheckBox
+  NxCheckBox
     id: onShootToggle
     anchors.left: onShootLeader.right
     anchors.top: onShootLeader.top
     margin-top: 1
     margin-left: 5
 
-  Label
+  NxLabel
     id: triggerLabel3
     anchors.left: triggerLabel2.left
     anchors.top: triggerLabel2.bottom
     text: On Cast
     margin-top: 5
-    color: #ffaa00  
+    color: #3be4d0
 
-  Label
+  NxLabel
     id: leaderLabel2
     anchors.left: triggerLabel3.right
     anchors.top: triggerLabel3.top
     text: Leader:
-    margin-left: 32  
+    margin-left: 32
 
-  TextEdit
+  NxTextInput
     id: onCastLeader
     anchors.left: leaderLabel2.right
     anchors.top: leaderLabel2.top
@@ -124,14 +124,14 @@ ComboTrigger < Panel
     anchors.right: onSayPhrase.right
     margin-left: 5
     width: 120
-    font: cipsoftFont  
+    font: cipsoftFont
 
-  CheckBox
+  NxCheckBox
     id: onCastToggle
     anchors.left: onCastLeader.right
     anchors.top: onCastLeader.top
     margin-top: 1
-    margin-left: 5    
+    margin-left: 5
 
 ComboActions < Panel
   id: actions
@@ -140,7 +140,7 @@ ComboActions < Panel
   padding: 3
   size: 220 100
 
-  Label
+  NxLabel
     id: label1
     anchors.left: parent.left
     anchors.top: parent.top
@@ -148,94 +148,94 @@ ComboActions < Panel
     margin-top: 5
     margin-left: 3
     height: 15
-    color: #ffaa00    
+    color: #3be4d0
 
   FollowComboBox
     id: followLeader
     anchors.left: prev.right
-    anchors.top: prev.top 
-    margin-left: 7 
+    anchors.top: prev.top
+    margin-left: 7
     height: 15
     width: 145
-    font: cipsoftFont    
+    font: cipsoftFont
 
-  CheckBox
+  NxCheckBox
     id: followLeaderToggle
     anchors.left: followLeader.right
     anchors.top: followLeader.top
     margin-top: 2
-    margin-left: 5    
+    margin-left: 5
 
-  Label
+  NxLabel
     id: label2
     anchors.left: label1.left
     anchors.top: label1.bottom
     margin-top: 5
     text: Attack:
-    color: #ffaa00
+    color: #3be4d0
 
   AttackComboBox
     id: attackLeaderTarget
     anchors.left: prev.right
-    anchors.top: prev.top 
-    margin-left: 5 
+    anchors.top: prev.top
+    margin-left: 5
     height: 15
     width: 145
     font: cipsoftFont
 
-  CheckBox
+  NxCheckBox
     id: attackLeaderTargetToggle
     anchors.left: attackLeaderTarget.right
     anchors.top: attackLeaderTarget.top
     margin-top: 2
     margin-left: 5
 
-  Label
+  NxLabel
     id: label3
     anchors.left: label2.left
     anchors.top: label2.bottom
     margin-top: 5
     text: Spell:
-    color: #ffaa00
+    color: #3be4d0
 
-  TextEdit
+  NxTextInput
     id: attackSpell
     anchors.left: prev.right
-    anchors.top: prev.top 
+    anchors.top: prev.top
     anchors.right: attackLeaderTarget.right
-    margin-left: 17 
+    margin-left: 17
     height: 15
     width: 145
     font: cipsoftFont
 
-  CheckBox
+  NxCheckBox
     id: attackSpellToggle
     anchors.left: attackSpell.right
     anchors.top: attackSpell.top
     margin-top: 2
-    margin-left: 5  
+    margin-left: 5
 
-  Label
+  NxLabel
     id: label4
     anchors.left: label3.left
     anchors.top: label3.bottom
     margin-top: 15
     text: Attack Item:
-    color: #ffaa00
+    color: #3be4d0
 
-  BotItem
+  NxItem
     id: attackItem
     anchors.left: prev.right
     anchors.verticalCenter: prev.verticalCenter
     margin-left: 10
 
-  CheckBox
+  NxCheckBox
     id: attackItemToggle
-    anchors.left: prev.right 
+    anchors.left: prev.right
     anchors.verticalCenter: prev.verticalCenter
     margin-left: 5
 
-  BotSwitch
+  NxSwitch
     id: commandsToggle
     anchors.left: prev.right
     anchors.top: attackItem.top
@@ -253,17 +253,17 @@ BotServer < Panel
   padding: 3
   size: 220 100 
 
-  Label
+  NxLabel
     id: labelX
     anchors.left: parent.left
     anchors.top: parent.top
     text: Leader:
     height: 15
-    color: #ffaa00 
+    color: #3be4d0
     margin-left: 3
-    margin-top: 5 
+    margin-top: 5
 
-  TextEdit
+  NxTextInput
     id: botServerLeader
     anchors.left: prev.right
     anchors.top: prev.top
@@ -273,7 +273,7 @@ BotServer < Panel
     height: 15
     font: cipsoftFont
 
-  Button
+  NxButton
     id: partyButton
     anchors.left: labelX.left
     anchors.top: botServerLeader.bottom
@@ -283,7 +283,7 @@ BotServer < Panel
     text-wrap: true
     multiline: true
 
-  BotSwitch
+  NxSwitch
     id: botServerToggle
     anchors.left: prev.right
     anchors.top: botServerLeader.bottom
@@ -294,7 +294,7 @@ BotServer < Panel
     margin-top: 5
     text: Server Enabled
 
-  BotSwitch
+  NxSwitch
     id: targetServerLeaderToggle
     anchors.left: partyButton.left
     anchors.top: partyButton.bottom
@@ -303,7 +303,7 @@ BotServer < Panel
     height: 30
     text: Leader Targets
 
-  BotSwitch
+  NxSwitch
     id: Triggers
     anchors.left: prev.right
     anchors.top: partyButton.bottom
@@ -314,7 +314,7 @@ BotServer < Panel
     margin-right: 3
     text: Triggers  
 
-ComboWindow < MainWindow
+ComboWindow < NxWindow
   !text: tr('Combo Options')
   size: 500 280
   @onEscape: self:hide()
@@ -325,52 +325,52 @@ ComboWindow < MainWindow
     anchors.horizontalCenter: parent.horizontalCenter
     margin-top: 7
 
-  Label
-    id: title
+  NxLabel
+    id: triggersTitle
     anchors.top: parent.top
     anchors.left: parent.left
     margin-left: 10
     text: Combo Trigger
-    color: #ff7700
+    color: #3be4d0
 
-  ComboActions    
+  ComboActions
     id: actions
     anchors.top: trigger.bottom
     anchors.left: trigger.left
     margin-top: 15
 
-  Label
-    id: title
+  NxLabel
+    id: actionsTitle
     anchors.top: parent.top
     anchors.left: parent.left
     margin-left: 10
     margin-top: 85
     text: Combo Actions
-    color: #ff7700   
+    color: #3be4d0
 
-  BotServer    
+  BotServer
     id: server
     anchors.top: actions.top
     anchors.left: actions.right
-    margin-left: 10 
+    margin-left: 10
 
-  Label
-    id: title
+  NxLabel
+    id: serverTitle
     anchors.top: parent.top
     anchors.left: server.left
     margin-left: 3
     margin-top: 85
     text: BotServer
-    color: #ff7700
+    color: #3be4d0
 
-  HorizontalSeparator
+  NxSeparator
     id: separator
     anchors.right: parent.right
     anchors.left: parent.left
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NxButton
     id: closeButton
     !text: tr('Close')
     font: cipsoftFont
@@ -380,7 +380,7 @@ ComboWindow < MainWindow
     margin-top: 15
     margin-right: 5
 
-  Button
+  NxButton
     id: toolsButton
     !text: tr('Help')
     font: cipsoftFont

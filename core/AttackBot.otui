@@ -1,624 +1,449 @@
-AttackEntry < UIWidget
-  background-color: alpha
-  text-offset: 35 1
-  focusable: true
-  height: 16
-  font: verdana-11px-rounded
-  text-align: left
+AttackEntry < NxListEntryCheckable
+  text-offset: 38 0
 
-  CheckBox
-    id: enabled
-    anchors.left: parent.left
-    anchors.verticalCenter: parent.verticalCenter
-    width: 15
-    height: 15
-    margin-top: 2
-    margin-left: 3
-
-  UIItem
+  NxItem
     id: id
-    anchors.left: prev.right
+    anchors.left: enabled.right
     anchors.verticalCenter: parent.verticalCenter
     size: 16 16
-    focusable: false
+    margin-left: 2
     visible: false
 
   UIWidget
     id: spell
     anchors.left: enabled.right
     anchors.verticalCenter: parent.verticalCenter
-    size: 12 12
-    margin-left: 1
+    size: 16 16
+    margin-left: 2
     image-source: /images/game/dangerous
 
-  $focus:
-    background-color: #00000055
+AttackBotBotPanel < NxBotSection
+  height: 52
+  margin-top: 6
 
-  Button
-    id: remove
-    !text: tr('x')
-    anchors.right: parent.right
-    margin-right: 15
-    width: 15
-    height: 15
-
-AttackBotBotPanel < Panel
-  height: 38
-
-  BotSwitch
+  NxSwitch
     id: title
     anchors.top: parent.top
     anchors.left: parent.left
+    anchors.right: parent.right
+    margin-right: 56
     text-align: center
-    width: 130
     !text: tr('AttackBot')
 
-  Button
-    id: settings
+  NxButton
+    id: setup
     anchors.top: prev.top
-    anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 3
-    height: 17
+    width: 52
+    height: 20
     text: Setup
 
-  Button
+  NxButton
     id: 1
-    anchors.top: prev.bottom
+    anchors.top: title.bottom
     anchors.left: parent.left
+    margin-top: 6
+    size: 18 17
     text: 1
-    margin-right: 2
-    margin-top: 4
-    size: 17 17
 
-  Button
+  NxButton
     id: 2
-    anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
+    anchors.verticalCenter: prev.verticalCenter
+    margin-left: 4
+    size: 18 17
     text: 2
-    margin-left: 4
-    size: 17 17
-    
-  Button
-    id: 3
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    text: 3
-    margin-left: 4
-    size: 17 17
 
-  Button
+  NxButton
+    id: 3
+    anchors.left: prev.right
+    anchors.verticalCenter: prev.verticalCenter
+    margin-left: 4
+    size: 18 17
+    text: 3
+
+  NxButton
     id: 4
-    anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
+    anchors.verticalCenter: prev.verticalCenter
+    margin-left: 4
+    size: 18 17
     text: 4
-    margin-left: 4
-    size: 17 17 
-    
-  Button
+
+  NxButton
     id: 5
-    anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
-    text: 5
-    margin-left: 4
-    size: 17 17
-    
-  Label
-    id: name
     anchors.verticalCenter: prev.verticalCenter
+    margin-left: 4
+    size: 18 17
+    text: 5
+
+  NxLabel
+    id: name
     anchors.left: prev.right
     anchors.right: parent.right
-    text-align: center
-    margin-left: 4
+    anchors.verticalCenter: prev.verticalCenter
+    margin-left: 6
     height: 17
+    text-align: center
     text: Profile #1
-    background: #292A2A
-
-CategoryLabel < Panel
-  size: 315 15
-  image-source: /images/ui/panel_flat
-  image-border: 5
-  padding: 1
-
-  Label
-    id: description
-    anchors.fill: parent
-    text-align: center
-    text: Area Rune (avalanche, great fireball, etc)
-    font: verdana-11px-rounded
-    background: #363636
-
-SourceLabel < Panel
-  size: 105 15
-  image-source: /images/ui/panel_flat
-  image-border: 5
-  padding: 1
-
-  Label
-    id: description
-    anchors.fill: parent
-    text-align: center
-    text: Monster Name
-    font: verdana-11px-rounded
-    background: #363636
-
-RangeLabel < Panel
-  size: 323 15
-  image-source: /images/ui/panel_flat
-  image-border: 5
-  padding: 1
-
-  Label
-    id: description
-    anchors.fill: parent
-    text-align: center
-    text: 5 Sqm
-    font: verdana-11px-rounded
-    background: #363636
-
-PreButton < PreviousButton
-  background: #363636
-  height: 15
-
-NexButton < NextButton
-  background: #363636
-  height: 15
 
 AttackBotPanel < Panel
-  size: 500 200
+  anchors.fill: parent
   image-source: /images/ui/panel_flat
   image-border: 5
-  padding: 5
+  padding: 8
 
-  TextList
-    id: entryList
+  Panel
+    id: listPane
     anchors.left: parent.left
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    width: 338
+    image-source: /images/ui/panel_flat
+    image-border: 3
+    padding: 5
+
+    NxLabel
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      text: Priority Queue
+      text-align: center
+      color: #ff4b81
+      font: verdana-11px-rounded
+
+    TextList
+      id: entryList
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: prev.bottom
+      anchors.bottom: controls.top
+      margin-top: 4
+      margin-bottom: 5
+      margin-right: 18
+      vertical-scrollbar: entryListScrollBar
+
+    VerticalScrollBar
+      id: entryListScrollBar
+      anchors.top: entryList.top
+      anchors.bottom: entryList.bottom
+      anchors.right: parent.right
+      step: 14
+      pixels-scroll: true
+
+    Panel
+      id: controls
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      height: 20
+
+      NxButton
+        id: down
+        anchors.right: up.left
+        anchors.verticalCenter: parent.verticalCenter
+        margin-right: 5
+        size: 74 18
+        text: Move Down
+        text-align: center
+        font: cipsoftFont
+
+      NxButton
+        id: up
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        size: 70 18
+        text: Move Up
+        text-align: center
+        font: cipsoftFont
+
+  Panel
+    id: formPane
+    anchors.left: listPane.right
     anchors.right: parent.right
     anchors.top: parent.top
-    margin-top: 3
-    size: 430 100
-    vertical-scrollbar: entryListScrollBar
-
-  VerticalScrollBar
-    id: entryListScrollBar
-    anchors.top: entryList.top
-    anchors.bottom: entryList.bottom
-    anchors.right: entryList.right
-    step: 14
-    pixels-scroll: true
-
-  PreButton
-    id: previousCategory
-    anchors.left: entryList.left
-    anchors.top: entryList.bottom
-    margin-top: 8
-
-  NexButton
-    id: nextCategory
-    anchors.left: category.right
-    anchors.top: entryList.bottom
-    margin-top: 8
-    margin-left: 2
-
-  CategoryLabel
-    id: category
-    anchors.top: entryList.bottom
-    anchors.left: previousCategory.right
-    anchors.verticalCenter: previousCategory.verticalCenter
-    margin-left: 3
-
-  PreButton
-    id: previousSource
-    anchors.left: entryList.left
-    anchors.top: category.bottom
-    margin-top: 8
-
-  NexButton
-    id: nextSource
-    anchors.left: source.right
-    anchors.top: category.bottom
-    margin-top: 8
-    margin-left: 2
-
-  SourceLabel
-    id: source
-    anchors.top: category.bottom
-    anchors.left: previousSource.right
-    anchors.verticalCenter: previousSource.verticalCenter
-    margin-left: 3
-
-  PreButton
-    id: previousRange
-    anchors.left: nextSource.right
-    anchors.verticalCenter: nextSource.verticalCenter
+    anchors.bottom: parent.bottom
     margin-left: 8
+    image-source: /images/ui/panel_flat
+    image-border: 3
+    padding: 9
 
-  NexButton
-    id: nextRange
-    anchors.left: range.right
-    anchors.verticalCenter: range.verticalCenter
-    margin-left: 2
+    NxLabel
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      text: New Rule
+      text-align: center
+      color: #ff4b81
+      font: verdana-11px-rounded
 
-  RangeLabel
-    id: range
-    anchors.left: previousRange.right
-    anchors.verticalCenter: previousRange.verticalCenter
-    margin-left: 3
+    HorizontalSeparator
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: prev.bottom
+      margin-top: 4
 
-  TextEdit
-    id: monsters
-    anchors.left: entryList.left
-    anchors.top: range.bottom
-    margin-top: 5
-    size: 405 15
-    text: monster names
-    font: cipsoftFont
-    background: #363636
+    NxNavPrevButton
+      id: previousCategory
+      anchors.left: parent.left
+      anchors.top: prev.bottom
+      margin-top: 7
 
-  Label
-    anchors.left: prev.left
-    anchors.top: prev.bottom
-    margin-top: 6
-    margin-left: 3
-    text-align: center
-    text: Mana%:
-    font: verdana-11px-rounded
-  
-  SpinBox
-    id: manaPercent
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 4
-    size: 30 20
-    minimum: 0
-    maximum: 99
-    step: 1
-    editable: true
-    focusable: true
+    NxNavNextButton
+      id: nextCategory
+      anchors.right: parent.right
+      anchors.verticalCenter: previousCategory.verticalCenter
 
-  Label
-    anchors.left: prev.right
-    margin-left: 7
-    anchors.verticalCenter: prev.verticalCenter
-    text: Creatures: 
-    font: verdana-11px-rounded
+    NxCategoryBar
+      id: category
+      anchors.left: previousCategory.right
+      anchors.right: nextCategory.left
+      anchors.verticalCenter: previousCategory.verticalCenter
+      margin-left: 3
+      margin-right: 2
+      tooltip: Attack type. Change this first.
 
-  SpinBox
-    id: creatures
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 4
-    size: 30 20
-    minimum: 1
-    maximum: 99
-    step: 1
-    editable: true
-    focusable: true
+    NxNavPrevButton
+      id: previousRange
+      anchors.left: parent.left
+      anchors.top: category.bottom
+      margin-top: 7
 
-  CheckBox
-    id: orMore
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 3
-    tooltip: or more creatures
+    NxNavNextButton
+      id: nextRange
+      anchors.right: parent.right
+      anchors.verticalCenter: previousRange.verticalCenter
 
-  Label
-    anchors.left: prev.right
-    margin-left: 7
-    anchors.verticalCenter: prev.verticalCenter
-    text: HP: 
-    font: verdana-11px-rounded
+    NxCategoryBar
+      id: range
+      anchors.left: previousRange.right
+      anchors.right: nextRange.left
+      anchors.verticalCenter: previousRange.verticalCenter
+      margin-left: 3
+      margin-right: 2
+      tooltip: Attack pattern and distance.
 
-  SpinBox
-    id: minHp
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 4
-    size: 40 20
-    minimum: 0
-    maximum: 99
-    value: 0
-    editable: true
-    focusable: true
+    NxLabel
+      id: selectorHint
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: range.bottom
+      margin-top: 7
+      text: Spell mode: type spell name, then press Enter to add.
+      color: #a4aece
+      text-align: center
+      font: verdana-11px-rounded
 
-  Label
-    anchors.left: prev.right
-    margin-left: 4
-    anchors.verticalCenter: prev.verticalCenter
-    text: - 
-    font: verdana-11px-rounded
+    NxLabel
+      anchors.left: parent.left
+      anchors.top: selectorHint.bottom
+      margin-top: 8
+      text: Targets:
+      font: verdana-11px-rounded
 
-  SpinBox
-    id: maxHp
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 4
-    size: 40 20
-    minimum: 1
-    maximum: 100
-    value: 100
-    editable: true
-    focusable: true
+    NxTextInput
+      id: monsters
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 6
+      width: 250
+      height: 20
+      text: monster names
+      font: cipsoftFont
+      tooltip: Use * for any creature or comma-separated names.
 
-  Label
-    anchors.left: prev.right
-    margin-left: 7
-    anchors.verticalCenter: prev.verticalCenter
-    text: CD (s): 
-    font: verdana-11px-rounded
+    NxTextInput
+      id: spellName
+      anchors.top: monsters.top
+      anchors.left: monsters.right
+      anchors.right: parent.right
+      margin-left: 6
+      height: 20
+      text: spell name
+      font: cipsoftFont
+      visible: false
+      tooltip: Spell text to cast when conditions match.
 
-  SpinBox
-    id: cooldown
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-left: 4
-    size: 60 20
-    minimum: 0
-    maximum: 999999
-    step: 1
-    value: 0
-    editable: true
-    focusable: true
+    NxLabel
+      anchors.left: parent.left
+      anchors.top: monsters.bottom
+      margin-top: 10
+      text: Mana%:
+      font: verdana-11px-rounded
 
-  Button
-    id: up
-    anchors.right: parent.right
-    anchors.top: entryList.bottom
-    size: 60 17
-    text: Move Up
-    text-align: center
-    font: cipsoftFont
-    margin-top: 7
-    margin-right: 8
+    NxSpinBox
+      id: manaPercent
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 6
+      size: 44 20
+      minimum: 0
+      maximum: 99
+      step: 1
+      editable: true
+      focusable: true
 
-  Button
-    id: down
-    anchors.right: prev.left
-    anchors.verticalCenter: prev.verticalCenter
-    size: 60 17
-    margin-right: 5
-    text: Move Down
-    text-align: center
-    font: cipsoftFont
-  
-  Button
-    id: addEntry
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 40 19
-    text-align: center
-    text: New
-    font: cipsoftFont
+    NxLabel
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 10
+      text: Creatures:
+      font: verdana-11px-rounded
 
-  BotItem
-    id: itemId
-    anchors.right: addEntry.left
-    margin-right: 5
-    anchors.bottom: parent.bottom
-    margin-bottom: 2
-    tooltip: drag item here on press to open window
+    NxSpinBox
+      id: creatures
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 6
+      size: 44 20
+      minimum: 1
+      maximum: 99
+      step: 1
+      editable: true
+      focusable: true
 
-  TextEdit
-    id: spellName
-    anchors.top: monsters.top
-    anchors.left: monsters.right
-    anchors.right: parent.right
-    margin-left: 5
-    height: 15
-    text: spell name
-    background: #363636
-    font: cipsoftFont
-    visible: false
+    NxCheckBox
+      id: orMore
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 6
+      tooltip: or more creatures
 
-SettingsPanel < Panel
-  size: 500 200
-  image-source: /images/ui/panel_flat
-  image-border: 5
-  padding: 10
+    NxLabel
+      anchors.left: parent.left
+      anchors.top: prev.bottom
+      margin-top: 10
+      text: HP:
+      font: verdana-11px-rounded
 
-  VerticalSeparator
-    anchors.top: parent.top
-    anchors.bottom: parent.bottom
-    anchors.left: Visible.right
-    margin-left: 10
-    margin-top: 5
-    margin-bottom: 5
+    NxSpinBox
+      id: minHp
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 6
+      size: 50 20
+      minimum: 0
+      maximum: 99
+      value: 0
+      editable: true
+      focusable: true
 
-  Label
-    anchors.top: parent.top
-    anchors.left: prev.right
-    anchors.right: parent.right
-    margin-left: 10
-    text-align: center
-    font: verdana-11px-rounded
-    text: Profile:
+    NxLabel
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 6
+      text: -
+      font: verdana-11px-rounded
 
-  TextEdit
-    id: profileName
-    anchors.top: prev.bottom
-    margin-top: 3
-    anchors.left: prev.left
-    anchors.right: prev.right
-    margin-left: 20
-    margin-right: 20
+    NxSpinBox
+      id: maxHp
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 6
+      size: 50 20
+      minimum: 1
+      maximum: 100
+      value: 100
+      editable: true
+      focusable: true
 
-  Button
-    id: resetSettings
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    text-align: center
-    text: Reset Settings
+    NxLabel
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 10
+      text: CD (s):
+      font: verdana-11px-rounded
 
-  CheckBox 
-    id: IgnoreMana
-    anchors.top: parent.top
-    anchors.left: parent.left
-    margin-top: 5
-    width: 200
-    text: Check RL Tibia conditions
+    NxSpinBox
+      id: cooldown
+      anchors.left: prev.right
+      anchors.verticalCenter: prev.verticalCenter
+      margin-left: 6
+      size: 60 20
+      minimum: 0
+      maximum: 999999
+      step: 1
+      value: 0
+      editable: true
+      focusable: true
 
-  CheckBox
-    id: Kills
-    anchors.top: prev.bottom
-    anchors.left: prev.left
-    margin-top: 8
-    width: 200
-    height: 22
-    text: Don't use area attacks if less than kills to red skull
-    text-wrap: true
-    text-align: left
+    NxItem
+      id: itemId
+      anchors.left: parent.left
+      anchors.bottom: addEntry.bottom
+      margin-bottom: 1
+      tooltip: Drag rune item here when category is rune-based.
 
-  SpinBox
-    id: KillsAmount
-    anchors.top: prev.top
-    anchors.bottom: prev.bottom
-    anchors.left: prev.right
-    text-align: left
-    width: 30
-    minimum: 1
-    maximum: 10
-    focusable: true 
-    margin-left: 5
+    NxButton
+      id: addEntry
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      size: 88 22
+      text-align: center
+      text: Add Rule
+      font: cipsoftFont
+      tooltip: Enter also adds a new rule.
 
-  CheckBox
-    id: Rotate
-    anchors.top: Kills.bottom
-    anchors.left: Kills.left
-    margin-top: 8
-    width: 220
-    text: Turn to side with most monsters
+    NxLabel
+      id: keyboardHint
+      anchors.left: itemId.right
+      anchors.right: addEntry.left
+      anchors.verticalCenter: addEntry.verticalCenter
+      margin-left: 8
+      margin-right: 8
+      text: Enter: Add  |  Esc: Clear
+      color: #a4aece
+      text-align: center
+      font: verdana-11px-rounded
 
-  CheckBox
-    id: Cooldown
-    anchors.top: prev.bottom
-    anchors.left: prev.left
-    margin-top: 8
-    width: 220
-    text: Check spell cooldowns
+AttackBotWindow < NxWindow
+  size: 760 420
+  minimum-size: 640 360
+  padding: 12
+  text: AttackBot
 
-  CheckBox
-    id: Visible
-    anchors.top: prev.bottom
-    anchors.left: prev.left
-    margin-top: 8
-    width: 245
-    text: Items must be visible (recommended)
-
-  CheckBox
-    id: PvpMode
-    anchors.top: prev.bottom
-    anchors.left: prev.left
-    margin-top: 8
-    width: 245
-    text: PVP mode
-
-  CheckBox
-    id: PvpSafe
-    anchors.top: prev.bottom
-    anchors.left: prev.left
-    margin-top: 8
-    width: 245
-    text: PVP safe
-
-  CheckBox
-    id: Training
-    anchors.top: prev.bottom
-    anchors.left: prev.left
-    margin-top: 8
-    width: 245
-    text: Stop when attacking trainers
-
-  CheckBox
-    id: BlackListSafe
-    anchors.top: prev.bottom
-    anchors.left: prev.left
-    margin-top: 8
-    width: 200
-    height: 18
-    text: Stop if Anti-RS player in range
-
-  SpinBox
-    id: AntiRsRange
-    anchors.top: prev.top
-    anchors.bottom: prev.bottom
-    anchors.left: prev.right
-    text-align: center
-    width: 50
-    minimum: 1
-    maximum: 10
-    focusable: true 
-    margin-left: 5
-
-AttackBotWindow < MainWindow
-  size: 535 300
-  padding: 15
-  text: AttackBot v2
-  @onEscape: self:hide()
-
-  Label
+  NxLabel
     id: mainLabel
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: parent.top
-    margin-top: 10
-    margin-left: 2
-    !text: tr('More important methods come first (Example: Exori gran above Exori)')
+    margin-top: 15
+    text: Priority matters. Put high-impact spells first.
+    text-align: center
+    font: verdana-11px-rounded
+    color: #a4aece
+
+  NxLabel
+    id: shooterLabel
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: mainLabel.bottom
+    margin-top: 5
+    text: Spell Shooter
     text-align: left
     font: verdana-11px-rounded
-    color: #aeaeae  
-
-  SettingsPanel
-    id: settingsPanel
-    anchors.top: prev.bottom
-    margin-top: 10
-    anchors.left: parent.left
-    margin-left: 2
-
-  Label
-    id: settingsLabel
-    anchors.verticalCenter: prev.top
-    anchors.left: prev.left
-    margin-left: 3
-    text: Settings
-    color: #fe4400
-    font: verdana-11px-rounded
+    color: #ff4b81
 
   AttackBotPanel
     id: mainPanel
-    anchors.top: mainLabel.bottom
-    margin-top: 10
     anchors.left: parent.left
-    margin-left: 2
-    visible: false    
-
-  Label
-    id: shooterLabel
-    anchors.verticalCenter: prev.top
-    anchors.left: prev.left
-    margin-left: 3
-    text: Spell Shooter
-    color: #fe4400
-    font: verdana-11px-rounded
-    visible: false    
-
-  HorizontalSeparator
-    anchors.left: parent.left
-    anchors.right: parent.right 
+    anchors.right: parent.right
+    anchors.top: shooterLabel.bottom
     anchors.bottom: closeButton.top
-    margin-bottom: 10
+    margin-top: 5
+    margin-bottom: 7
 
-  Button
+  NxButton
     id: closeButton
     anchors.right: parent.right
     anchors.bottom: parent.bottom
-    size: 45 21
+    size: 62 21
     text: Close
     font: cipsoftFont
 
-  Button
-    id: settings
+  HorizontalSeparator
     anchors.left: parent.left
-    anchors.verticalCenter: prev.verticalCenter
-    size: 50 21
-    font: cipsoftFont
-    text: Settings
+    anchors.right: parent.right
+    anchors.bottom: closeButton.top
+    margin-bottom: 10

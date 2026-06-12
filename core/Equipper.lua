@@ -15,24 +15,25 @@ end
 -- ============================================================================
 
 local ui = setupUI([[
-Panel
-  height: 19
+NxBotSection
+  height: 30
+  margin-top: 4
 
-  BotSwitch
+  NxSwitch
     id: switch
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
-    width: 130
+    anchors.right: parent.right
+    margin-right: 50
     !text: tr('EQ Manager')
 
-  Button
+  NxButton
     id: setup
-    anchors.top: prev.top
-    anchors.left: prev.right
+    anchors.top: parent.top
     anchors.right: parent.right
-    margin-left: 3
-    height: 17
+    width: 46
+    height: 20
     text: Setup
 ]])
 ui:setId(panelName)

@@ -1,7 +1,7 @@
 StashItem < Panel
   height: 40
 
-  BotItem
+  NxItem
     id: item
     anchors.top: parent.top
     margin-top: 2
@@ -18,21 +18,21 @@ StashItem < Panel
     text-align:left
     text: item name
     font: verdana-11px-rounded
-    color: #FFFFFF
+    color: #f5f7ff
 
   UIWidget
     id: slot
     anchors.top: prev.bottom
     margin-top: 3
-    anchors.bottom: Item.bottom
+    anchors.bottom: item.bottom
     anchors.left: prev.left
     anchors.right: parent.right    
     font: verdana-11px-rounded
     text-align:left
     text: Add item to select locker.
-    color: #CCCCCC
+    color: #a4aece
 
-DepositerPanel < MainWindow
+DepositerPanel < NxWindow
   size: 230 380
   !text: tr('Depositer Panel')
   @onEscape: self:hide()
@@ -45,7 +45,7 @@ DepositerPanel < MainWindow
     text: Double click here to add item.
     text-align: left
     font: verdana-11px-rounded
-    color: #aeaeae           
+    color: #a4aece
 
   ScrollablePanel
     id: DepositerList
@@ -81,14 +81,14 @@ DepositerPanel < MainWindow
     margin-right: 3
     background: #ffffff88
 
-  HorizontalSeparator
+  NxSeparator
     id: sep
     anchors.right: parent.right
     anchors.left: parent.left
     anchors.bottom: CloseButton.top
     margin-bottom: 8    
 
-  Button
+  NxButton
     id: CloseButton
     !text: tr('Close')
     font: cipsoftFont

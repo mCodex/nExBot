@@ -1,5 +1,5 @@
-CategoryCheckBox < CheckBox
-  font: verdana-11px-rounded 
+CategoryCheckBox < NxCheckBox
+  font: verdana-11px-rounded
   margin-top: 3
 
   $checked:
@@ -27,7 +27,7 @@ HealScroll < Panel
 
 HealItem < Panel
 
-  BotItem
+  NxItem
     id: item
     anchors.left: parent.left
     anchors.verticalCenter: parent.verticalCenter
@@ -43,11 +43,11 @@ HealItem < Panel
 
 ToolTipLabel < UIWidget
   font: verdana-11px-rounded
-  color: #dfdfdf
+  color: #f5f7ff
   height: 14
-  text-align: center 
+  text-align: center
 
-HealerPlayerEntry < Label
+HealerPlayerEntry < NxLabel
   background-color: alpha
   text-offset: 5 1
   focusable: true
@@ -56,75 +56,85 @@ HealerPlayerEntry < Label
   text-align: left
 
   $focus:
-    background-color: #00000055
-  
-  Button
+    background-color: #3be4d033
+
+  NxButton
     id: remove
     anchors.right: parent.right
-    margin-right: 2
     anchors.verticalCenter: parent.verticalCenter
     size: 15 15
     margin-right: 15
     text: X
     tooltip: Remove player from the list
 
-PriorityEntry < ToolTipLabel
+PriorityEntry < UIWidget
   background-color: alpha
-  text-offset: 18 1
   focusable: true
   height: 16
-  font: verdana-11px-rounded
-  text-align: left
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
 
-  CheckBox
+  @onSetup: |
+    self.setText = function(self, text) self.spellName:setText(text) end
+    self.getText = function(self) return self.spellName:getText() end
+    self.setTooltip = function(self, text) self.spellName:setTooltip(text) end
+
+  NxCheckBox
     id: enabled
     anchors.left: parent.left
     anchors.verticalCenter: parent.verticalCenter
     size: 15 15
     margin-top: 2
-    margin-left: 3 
+    margin-left: 3
 
-  Button
-    id: remove
-    anchors.right: parent.right
-    margin-right: 2
-    anchors.verticalCenter: parent.verticalCenter
-    size: 14 14
-    text: X
-    tooltip: Remove spell
-    visible: false
-  
-  Button
-    id: increment
-    anchors.right: remove.left
-    margin-right: 2
-    anchors.verticalCenter: parent.verticalCenter
-    size: 14 14
-    text: +
-    tooltip: Increase Priority
-
-  Button
+  NxButton
     id: decrement
-    anchors.right: prev.left
-    margin-right: 2
+    anchors.left: parent.left
+    margin-left: 140
     anchors.verticalCenter: parent.verticalCenter
     size: 14 14
     text: -
     tooltip: Decrease Priority
 
-TargetSettings < Panel
-  size: 280 140
-  padding: 3
-  image-source: /images/ui/window
-  image-border: 6
+  NxButton
+    id: increment
+    anchors.left: prev.right
+    margin-left: 2
+    anchors.verticalCenter: parent.verticalCenter
+    size: 14 14
+    text: +
+    tooltip: Increase Priority
 
-  Label
+  NxButton
+    id: remove
+    anchors.left: prev.right
+    margin-left: 2
+    anchors.verticalCenter: parent.verticalCenter
+    size: 14 14
+    text: X
+    tooltip: Remove spell
+    visible: false
+
+  NxLabel
+    id: spellName
+    phantom: true
+    anchors.left: enabled.right
+    anchors.right: decrement.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-left: 5
+    margin-right: 3
+    font: verdana-11px-rounded
+    text-align: left
+
+TargetSettings < NxBotSection
+  size: 310 160
+  padding: 3
+
+  NxLabel
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.top: parent.top
-    font: verdana-11px-rounded 
+    font: verdana-11px-rounded
     text: Heal Target Settings
 
   Groups
@@ -140,8 +150,8 @@ TargetSettings < Panel
     margin-left: 5
     anchors.verticalCenter: prev.verticalCenter
 
-Groups < FlatPanel
-  size: 150 90
+Groups < NxPanel
+  size: 160 108
   padding: 3
   padding-top: 5
 
@@ -152,7 +162,7 @@ Groups < FlatPanel
     text: Groups
     tooltip: Players added in custom list will always be in scope
 
-  HorizontalSeparator
+  NxSeparator
     anchors.top: prev.bottom
     margin-top: 2
     anchors.left: parent.left
@@ -181,8 +191,8 @@ Groups < FlatPanel
       id: guild
       text: Guild Members
   
-Vocations < FlatPanel
-  size: 100 105
+Vocations < NxPanel
+  size: 115 105
   padding: 3
   padding-top: 5
 
@@ -193,7 +203,7 @@ Vocations < FlatPanel
     font: verdana-11px-rounded 
     text: Vocations
 
-  HorizontalSeparator
+  NxSeparator
     anchors.top: prev.bottom
     margin-top: 2
     anchors.left: parent.left
@@ -231,12 +241,10 @@ Vocations < FlatPanel
       id: monks
       text: Monks
 
-Priority < Panel
-  size: 190 155
+Priority < NxBotSection
+  size: 215 170
   padding: 6
   padding-top: 3
-  image-source: /images/ui/window
-  image-border: 6
 
   ToolTipLabel
     id: title
@@ -253,10 +261,9 @@ Priority < Panel
     anchors.right: parent.right
     anchors.bottom: addSpellButton.top
     margin-bottom: 3
-    fit-children: true
     padding-top: 1
 
-  Button
+  NxButton
     id: addSpellButton
     anchors.left: parent.left
     anchors.right: parent.right
@@ -266,25 +273,25 @@ Priority < Panel
     text: + Add Custom Spell
     tooltip: Add a new custom healing spell
 
-AddPlayer < FlatPanel
+AddPlayer < NxPanel
   padding: 5
 
-  Label
+  NxLabel
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
-    font: verdana-11px-rounded 
+    font: verdana-11px-rounded
     text: Add Player to Custom List
     text-align: center
     text-wrap: true
 
-  HorizontalSeparator
+  NxSeparator
     anchors.top: prev.bottom
     anchors.left: parent.left
     anchors.right: parent.right
     margin-top: 2
 
-  SpinBox
+  NxSpinBox
     id: health
     anchors.left: parent.left
     anchors.top: prev.bottom
@@ -296,24 +303,24 @@ AddPlayer < FlatPanel
     focusable: true
     text-align: center
 
-  Label
+  NxLabel
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 3
-    font: verdana-11px-rounded 
+    font: verdana-11px-rounded
     text: %HP - heal if below
 
-  TextEdit
+  NxTextInput
     id: name
     anchors.top: health.bottom
     margin-top: 5
     anchors.left: health.left
     anchors.right: parent.right
-    font: verdana-11px-rounded 
+    font: verdana-11px-rounded
     text-align: center
     text: friend name
 
-  Button
+  NxButton
     id: add
     anchors.left: health.left
     anchors.right: parent.right
@@ -327,7 +334,6 @@ PlayerList < Panel
   TextList
     id: list
     anchors.fill: parent
-    fit-children: true
     padding-top: 2
     vertical-scrollbar: listScrollBar
 
@@ -339,12 +345,10 @@ PlayerList < Panel
     step: 14
     pixels-scroll: true
 
-CustomList < Panel
-  size: 190 140
+CustomList < NxBotSection
+  size: 215 160
   padding: 6
   padding-top: 3
-  image-source: /images/ui/window
-  image-border: 6
 
   ToolTipLabel
     anchors.horizontalCenter: parent.horizontalCenter
@@ -365,16 +369,14 @@ CustomList < Panel
     id: playerList
     anchors.fill: prev
 
-Conditions < Panel
-  size: 280 170
+Conditions < NxBotSection
+  size: 310 170
   padding: 3
-  image-source: /images/ui/window
-  image-border: 6
 
-  Label
+  NxLabel
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.top: parent.top
-    font: verdana-11px-rounded 
+    font: verdana-11px-rounded
     text: Player Conditions
 
   Panel
@@ -385,13 +387,13 @@ Conditions < Panel
     padding-top: 3
     layout: 
       type: grid
-      cell-size: 128 31
+      cell-size: 142 31
       cell-spacing: 5
       num-columns: 2
 
-FriendHealer < MainWindow
+FriendHealer < NxWindow
   !text: tr('Friend Healer')
-  size: 512 390
+  size: 560 410
   padding-top: 30
   @onEscape: self:hide()
 
@@ -417,14 +419,14 @@ FriendHealer < MainWindow
     margin-top: 10
     anchors.left: priority.left
 
-  HorizontalSeparator
+  NxSeparator
     id: separator
     anchors.right: parent.right
     anchors.left: parent.left
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NxButton
     id: closeButton
     !text: tr('Close')
     font: cipsoftFont

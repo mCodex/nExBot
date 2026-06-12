@@ -455,25 +455,57 @@ end
 local function createUpdaterUI()
   setDefaultTab("Main")
 
-  _ui = setupUI([[
-Panel
-  height: 19
+  local logoPath = nExBot.paths.base .. "/assets/logo"
 
-  BotSwitch
+  setupUI(string.format([=[
+NxBotSection
+  height: 95
+  margin-top: 4
+  margin-bottom: 4
+  background-color: #1b2235
+  border-width: 1
+  border-color: #3be4d088
+  image-source: ~
+
+  Panel
+    id: logoImg
+    anchors.top: parent.top
+    anchors.horizontalCenter: parent.horizontalCenter
+    margin-top: 5
+    size: 66 60
+    image-source: %s
+    image-smooth: true
+
+  Label
+    id: brandText
+    anchors.top: logoImg.bottom
+    anchors.horizontalCenter: parent.horizontalCenter
+    margin-top: 5
+    text: nExBot
+    font: verdana-11px-rounded
+    color: #3be4d0
+]=], logoPath))
+
+  _ui = setupUI([[
+NxBotSection
+  height: 30
+
+  NxSwitch
     id: autoCheck
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
-    width: 130
+    anchors.right: parent.right
+    margin-right: 50
+    margin-top: 0
     !text: tr('Auto-Updater')
 
-  Button
+  NxButton
     id: checkNow
-    anchors.top: prev.top
-    anchors.left: prev.right
+    anchors.top: parent.top
     anchors.right: parent.right
-    margin-left: 3
-    height: 17
+    width: 46
+    height: 20
     text: Check
 ]])
   _ui:setId("nExBotUpdater")

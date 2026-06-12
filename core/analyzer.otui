@@ -9,7 +9,7 @@ BossCreaturePanel < Panel
     old-scaling: true
     margin-left: 3
 
-  Label
+  NxLabel
     id: name
     anchors.left: creature.right
     margin: 1
@@ -19,10 +19,10 @@ BossCreaturePanel < Panel
     anchors.bottom: creature.verticalCenter
     anchors.right: parent.right
     font: verdana-11px-rounded
-    color: #FFFFFF
+    color: #f5f7ff
     text: Duke Krule
 
-  Label
+  NxLabel
     id: cooldown
     anchors.left: creature.right
     margin: 1
@@ -39,20 +39,21 @@ SearchPanel < TextEdit
   margin-top: 1
   @onClick: modules.client_textedit.show(self)
 
-  Button
+  NxButton
     id: clear
     anchors.right: parent.right
     margin-right: -2
     anchors.verticalCenter: parent.verticalCenter
     size: 18 18
     text: X
+    tooltip: Clear search field
     @onClick: |
       self:getParent():setText("")
 
 TrackerItem < Panel
   height: 40
 
-  BotItem
+  NxItem
     id: item
     anchors.top: parent.top
     margin-top: 2
@@ -70,19 +71,19 @@ TrackerItem < Panel
     text: Set Item to start track.
     text-align:left
     font: verdana-11px-rounded
-    color: #FFFFFF
+    color: #f5f7ff
 
   UIWidget
     id: drops
     anchors.top: prev.bottom
     margin-top: 3
-    anchors.bottom: Item.bottom
+    anchors.bottom: item.bottom
     anchors.left: prev.left
     anchors.right: parent.right    
     font: verdana-11px-rounded
     text-align:left
     text: Loot Drops: 0
-    color: #CCCCCC
+    color: #a4aece
 
 
 DualLabel < Label
@@ -92,7 +93,7 @@ DualLabel < Label
   text-align: left
   width: 50
 
-  Label
+  NxLabel
     id: value
     anchors.right: parent.right
     margin-right: 4
@@ -174,9 +175,9 @@ AnalyzerPriceLabel < Label
   height: 16
 
   $focus:
-    background-color: #00000055
+    background-color: #3be4d033
 
-  Button
+  NxButton
     id: remove
     !text: tr('x')
     anchors.right: parent.right
@@ -216,7 +217,7 @@ AnalyzerLootItem < UIItem
   virtual: true
   background-color: alpha 
 
-  Label
+  NxLabel
     id: count
     font: verdana-11px-rounded
     color: white
@@ -250,23 +251,22 @@ AnalyzerProgressBar < ProgressBar
   margin-right: 3
   border: 1 black
 
-AnalyzerButton < Button
+AnalyzerButton < NxButton
   height: 22
   margin-bottom: 2
   font: verdana-11px-rounded
   text-offset: 0 4
 
-MainAnalyzerWindow < MiniWindow
+MainAnalyzerWindow < NxMiniWindow
   id: MainAnalyzerWindow
   text: Analytics Selector
   height: 293
   icon: /images/topbuttons/analyzers
 
-  MiniWindowContents
+  NxMiniContents
     padding-left: 5
     padding-right: 5
     padding-top: 5
-    layout: verticalBox
 
     AnalyzerButton
       id: HuntingAnalyzer
@@ -310,111 +310,102 @@ MainAnalyzerWindow < MiniWindow
     AnalyzerButton
       id: Settings
       text: Features & Settings
-      color: #FABD02
+      color: #3be4d0
 
     AnalyzerButton
       id: ResetSession
       text: Reset Session
-      color: #FF0000
+      color: #ff4b81
 
-HuntingAnalyzer < MiniWindow  
+HuntingAnalyzer < NxMiniWindow  
   id: HuntingAnalyzerWindow
   text: Hunt Analyzer
   icon: /images/topbuttons/analyzers
 
-  MiniWindowContents
-    padding-top: 3
-    layout: verticalBox
+  NxMiniContents
+    padding: 3
 
-LootAnalyzer < MiniWindow
+LootAnalyzer < NxMiniWindow
   id: LootAnalyzerWindow    
   text: Loot Analyzer
   icon: /images/topbuttons/analyzers
 
-  MiniWindowContents
-    padding-top: 3
-    layout: verticalBox
+  NxMiniContents
+    padding: 3
 
-SupplyAnalyzer < MiniWindow
+SupplyAnalyzer < NxMiniWindow
   id: SupplyAnalyzerWindow    
   text: Supply Analyzer
   icon: /images/topbuttons/analyzers
 
-  MiniWindowContents
-    padding-top: 3
-    layout: verticalBox
+  NxMiniContents
+    padding: 3
 
-ImpactAnalyzer < MiniWindow
+ImpactAnalyzer < NxMiniWindow
   id: ImpactAnalyzerWindow    
   text: Impact Analyzer
   icon: /images/topbuttons/analyzers
 
-  MiniWindowContents
-    padding-top: 3
-    layout: verticalBox
+  NxMiniContents
+    padding: 3
 
-XPAnalyzer < MiniWindow
+XPAnalyzer < NxMiniWindow
   id: XPAnalyzerWindow    
   text: XP Analyzer
   height: 150
   icon: /images/topbuttons/analyzers
 
-  MiniWindowContents
-    padding-top: 3
-    layout: verticalBox
+  NxMiniContents
+    padding: 3
 
-PartyAnalyzerWindow < MiniWindow
+PartyAnalyzerWindow < NxMiniWindow
   id: PartyAnalyzerWindow
   text: Party Hunt
   height: 200
   icon: /images/topbuttons/analyzers
 
-  MiniWindowContents
+  NxMiniContents
     padding-left: 3
     padding-right: 3
     padding-top: 1
-    layout: verticalBox
 
-DropTracker < MiniWindow
+DropTracker < NxMiniWindow
   id: DropTracker
   text: Drop Tracker
   height: 200
   icon: /images/topbuttons/analyzers
 
-  MiniWindowContents
+  NxMiniContents
     padding-left: 3
     padding-right: 3
     padding-top: 1
-    layout: verticalBox
 
-CaveBotStats < MiniWindow
+CaveBotStats < NxMiniWindow
   id: CaveBotStats
   text: CaveBot Stats
   height: 200
   icon: /images/topbuttons/analyzers
 
-  MiniWindowContents
+  NxMiniContents
     padding-left: 3
     padding-right: 3
     padding-top: 1
-    layout: verticalBox
 
-BossTracker < MiniWindow
+BossTracker < NxMiniWindow
   id: BossTracker
   text: Boss Cooldowns
   height: 200
   icon: /images/topbuttons/analyzers
 
-  MiniWindowContents
+  NxMiniContents
     padding-left: 3
     padding-right: 3
     padding-top: 1
-    layout: verticalBox
 
     SearchPanel
       id: search
 
-FeaturesWindow < MainWindow
+FeaturesWindow < NxWindow
   id: FeaturesWindow
   size: 250 370
   padding: 15
@@ -439,13 +430,13 @@ FeaturesWindow < MainWindow
     step: 14
     pixels-scroll: true
 
-  BotItem
+  NxItem
     id: ID
     anchors.left: CustomPrices.left
     anchors.top: CustomPrices.bottom
     margin-top: 5
 
-  SpinBox
+  NxSpinBox
     id: NewPrice
     anchors.left: prev.right
     margin-left: 5
@@ -457,7 +448,7 @@ FeaturesWindow < MainWindow
     text-align: center
     focusable: true
 
-  Button
+  NxButton
     id: addItem
     anchors.left: prev.right
     margin-left: 5
@@ -466,20 +457,20 @@ FeaturesWindow < MainWindow
     text: Add
     font: verdana-11px-rounded    
 
-  HorizontalSeparator
+  NxSeparator
     anchors.left: ID.right
     margin-left: 5
     anchors.right: CustomPrices.right
     anchors.verticalCenter: ID.top
 
-  HorizontalSeparator
+  NxSeparator
     id: secondSeparator
     anchors.left: ID.right
     margin-left: 5
     anchors.right: CustomPrices.right
     anchors.bottom: ID.bottom
 
-  BotSwitch
+  NxSwitch
     id: RarityFrames
     anchors.left: CustomPrices.left
     anchors.right: CustomPrices.right
@@ -488,18 +479,18 @@ FeaturesWindow < MainWindow
     text: Rarity Frames
     font: verdana-11px-rounded   
 
-  HorizontalSeparator
+  NxSeparator
     anchors.right: parent.right
     anchors.left: parent.left
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NxButtonSm
     id: closeButton
     !text: tr('Close')
     font: cipsoftFont
     anchors.right: parent.right
     anchors.bottom: parent.bottom
-    size: 45 21
+    size: 45 20
     margin-top: 15
     margin-right: 5 

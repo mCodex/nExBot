@@ -60,103 +60,15 @@ end
 -- object is in an invalid internal state. These helpers prevent that.
 -- ============================================================================
 
--- Cache for recently validated creatures to reduce overhead
-local validatedCreatures = {}
-local validatedCreaturesTTL = 100 -- ms
-
--- Check if a creature is valid and safe to call methods on
--- Returns true only if the creature can be safely accessed
-local function isCreatureValid(creature)
-  if not creature then return false end
-  if type(creature) ~= "userdata" and type(creature) ~= "table" then return false end
-  
-  -- Try the most basic operation possible - if this fails, creature is invalid
-  local ok, id = pcall(function() return creature:getId() end)
-  if not ok or not id then return false end
-  
-  -- Check validation cache
-  local nowt = nowMs()
-  local cached = validatedCreatures[id]
-  if cached and (nowt - cached.time) < validatedCreaturesTTL then
-    return cached.valid
-  end
-  
-  -- Perform full validation - try to access position (critical method)
-  local okPos, pos = pcall(function() return creature:getPosition() end)
-  local valid = okPos and pos ~= nil
-  
-  -- Cache result
-  validatedCreatures[id] = { valid = valid, time = nowt }
-  
-  -- Cleanup old cache entries periodically
-  if math.random(1, 50) == 1 then
-    for cid, data in pairs(validatedCreatures) do
-      if (nowt - data.time) > validatedCreaturesTTL * 10 then
-        validatedCreatures[cid] = nil
-      end
-    end
-  end
-  
-  return valid
-end
-
--- Safely call a method on a creature, returning default if it fails
--- This wraps the entire call including method lookup in pcall
-local function safeCreatureCall(creature, methodName, default)
-  if not creature then return default end
-  
-  local ok, result = pcall(function()
-    local method = creature[methodName]
-    if not method then return nil end
-    return method(creature)
-  end)
-  
-  if ok then
-    return result ~= nil and result or default
-  else
-    return default
-  end
-end
-
--- Safely get creature ID (most common operation)
-local function safeGetId(creature)
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
-end
-
--- Safely check if creature is dead
-local function safeIsDead(creature)
-  if not creature then return true end
-  local ok, dead = pcall(function() return creature:isDead() end)
-  return ok and dead or true
-end
-
--- Safely check if creature is a monster
-local function safeIsMonster(creature)
-  if not creature then return false end
-  local ok, monster = pcall(function() return creature:isMonster() end)
-  return ok and monster or false
-end
-
--- Safely check if creature is removed
-local function safeIsRemoved(creature)
-  if not creature then return true end
-  local ok, removed = pcall(function() return creature:isRemoved() end)
-  if not ok then return true end
-  return removed or false
-end
-
--- Combined safe check: is the creature a valid, alive monster?
-local function isValidAliveMonster(creature)
-  if not creature then return false end
-  
-  local ok, result = pcall(function()
-    return creature:isMonster() and not creature:isDead() and not creature:isRemoved()
-  end)
-  
-  return ok and result or false
-end
+-- Delegate all safe-creature helpers to monster_ai_core (single source of truth, DRY)
+local _H               = MonsterAI._helpers
+local isCreatureValid  = _H.isCreatureValid
+local safeCreatureCall = _H.safeCreatureCall
+local safeGetId        = _H.safeGetId
+local safeIsDead       = _H.safeIsDead
+local safeIsMonster    = _H.safeIsMonster
+local safeIsRemoved    = _H.safeIsRemoved
+local isValidAliveMonster = _H.isValidAliveMonster
 
 -- Extended telemetry defaults
 MonsterAI.COLLECT_EXTENDED = (MonsterAI.COLLECT_EXTENDED == nil) and true or MonsterAI.COLLECT_EXTENDED
@@ -1425,6 +1337,13 @@ if EventBus then
       if score and score > bestScore then bestScore, bestData, bestMonster = score, data, m end
     end
 
+    -- Track the best monster if it wasn't already tracked (monster:appear may have been missed)
+    if bestScore and bestScore > CONST.DAMAGE.CORRELATION_THRESHOLD and bestMonster and not bestData then
+      MonsterAI.Tracker.track(bestMonster)
+      local bid = safeGetId(bestMonster)
+      bestData = bid and MonsterAI.Tracker.monsters[bid]
+    end
+
     if bestScore and bestScore > CONST.DAMAGE.CORRELATION_THRESHOLD and bestData then
       -- Attribute this damage
       bestData.lastDamageTime = nowt
@@ -1489,24 +1408,38 @@ if EventBus then
       
       if not srcPos or not destPos then return end
       
-      -- Get the source tile and find creatures on it
+      -- Find the monster that fired (check source tile first, then nearby tiles as fallback)
       local Client = getClient()
       local srcTile = (Client and Client.getTile) and Client.getTile(srcPos) or (g_map and g_map.getTile and g_map.getTile(srcPos))
-      if not srcTile then return end
-      
-      local creatures = srcTile:getCreatures()
-      if not creatures or #creatures == 0 then return end
-      
-      -- Find a monster on the source tile (the caster)
       local src = nil
-      for i = 1, #creatures do
-        local c = creatures[i]
-        if c and safeIsMonster(c) and not safeIsDead(c) then
-          src = c
-          break
+
+      if srcTile then
+        local creatures = srcTile:getCreatures()
+        if creatures then
+          for i = 1, #creatures do
+            local c = creatures[i]
+            if c and safeIsMonster(c) and not safeIsDead(c) then
+              src = c; break
+            end
+          end
         end
       end
-      
+
+      -- Fallback: monster may have moved off the source tile between firing and callback
+      if not src then
+        local specs = g_map and g_map.getSpectatorsInRange and g_map.getSpectatorsInRange(srcPos, false, 2, 2) or {}
+        local bestDist = math.huge
+        for _, c in ipairs(specs) do
+          if safeIsMonster(c) and not safeIsDead(c) then
+            local cpos = safeCreatureCall(c, "getPosition", nil)
+            if cpos then
+              local d = math.max(math.abs(cpos.x - srcPos.x), math.abs(cpos.y - srcPos.y))
+              if d < bestDist then bestDist = d; src = c end
+            end
+          end
+        end
+      end
+
       if not src then return end
 
       local id = safeGetId(src)
@@ -2028,7 +1961,27 @@ function MonsterAI.updateAll()
     pcall(function() MonsterAI.CombatFeedback.checkTimeouts() end)
   end
 
-  MonsterAI.lastUpdate = nowMs()
+  -- Checksum guard: emit monsterai:state_updated only when tracked state changes.
+  -- Prevents Monster Inspector (and any other subscriber) from rebuilding on silent ticks.
+  local nowt = nowMs()
+  local chk = 0
+  if MonsterAI.Tracker and MonsterAI.Tracker.monsters then
+    for id, d in pairs(MonsterAI.Tracker.monsters) do
+      -- Cheap XOR-style accumulation — avoids heavy string hashing
+      chk = (chk + (id % 997) + ((d.lastAttackTime or 0) % 997)) % 65521
+    end
+  end
+  if MonsterAI.RealTime and MonsterAI.RealTime.threatCache then
+    chk = (chk + math.floor((MonsterAI.RealTime.threatCache.totalThreat or 0) * 100) % 997) % 65521
+  end
+  if chk ~= MonsterAI._stateChecksum then
+    MonsterAI._stateChecksum = chk
+    if EventBus then
+      pcall(function() EventBus.emit("monsterai:state_updated") end)
+    end
+  end
+
+  MonsterAI.lastUpdate = nowt
 end
 
 -- ============================================================================

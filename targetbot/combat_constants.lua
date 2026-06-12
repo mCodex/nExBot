@@ -26,9 +26,10 @@ CC.CONFIRM_TIMEOUT        = 1200   -- Max wait for server confirmation (ms)
 CC.GRACE_PERIOD           = 1500   -- Stay LOCKED despite transient nil (ms)
 CC.KEEPALIVE_INTERVAL     = 2000   -- Re-send attack while LOCKED (ms)
 CC.STOP_DEBOUNCE          = 150    -- After stop, block requestAttack (ms) — was 800
-CC.REAFFIRM_RETRY_MAX     = 5     -- Max retries before forfeit — was 3
-CC.ENGAGE_BACKOFF_BASE    = 1500   -- First retry timeout (ms)
+CC.REAFFIRM_RETRY_MAX     = 3     -- Max retries before forfeit
+CC.ENGAGE_BACKOFF_BASE    = 1000   -- First retry timeout (ms)
 CC.ENGAGE_BACKOFF_GROWTH  = 1.5   -- Exponential backoff multiplier
+CC.ENGAGE_BACKOFF_CAP     = 3000   -- Max backoff cap (ms)
 
 -- Target switching
 CC.SWITCH_COOLDOWN         = 2500  -- Min between target switches (ms)

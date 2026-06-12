@@ -2,7 +2,7 @@ AlarmCheckBox < Panel
   height: 20
   margin-top: 2
 
-  CheckBox
+  NxCheckBox
     id: tick
     anchors.fill: parent
     margin-top: 4
@@ -14,7 +14,7 @@ AlarmCheckBoxAndSpinBox < Panel
   height: 20
   margin-top: 2
 
-  CheckBox
+  NxCheckBox
     id: tick
     anchors.fill: parent
     anchors.right: next.left
@@ -23,7 +23,7 @@ AlarmCheckBoxAndSpinBox < Panel
     text: Player Attack
     text-offset: 17 -3
 
-  SpinBox
+  NxSpinBox
     id: value
     anchors.top: parent.top
     margin-top: 1
@@ -41,7 +41,7 @@ AlarmCheckBoxAndTextEdit < Panel
   height: 20
   margin-top: 2
 
-  CheckBox
+  NxCheckBox
     id: tick
     anchors.fill: parent
     anchors.right: next.left
@@ -50,7 +50,7 @@ AlarmCheckBoxAndTextEdit < Panel
     text: Creature Name
     text-offset: 17 -3
 
-  BotTextEdit
+  NxTextInput
     id: text
     anchors.right: parent.right
     anchors.top: parent.top
@@ -60,13 +60,13 @@ AlarmCheckBoxAndTextEdit < Panel
     margin-top: 1
     margin-bottom: 1
 
-AlarmsWindow < MainWindow
+AlarmsWindow < NxWindow
   !text: tr('Alarms')
   size: 330 400
   padding: 15
   @onEscape: self:hide()
 
-  FlatPanel
+  NxPanel
     id: list
     anchors.fill: parent
     anchors.bottom: settingsList.top
@@ -76,7 +76,7 @@ AlarmsWindow < MainWindow
     padding: 10
     padding-top: 5
 
-  FlatPanel
+  NxPanel
     id: settingsList
     anchors.left: parent.left
     anchors.right: parent.right
@@ -89,25 +89,25 @@ AlarmsWindow < MainWindow
       type: verticalBox
       fit-children: true
 
-  Label
+  NxLabel
     anchors.verticalCenter: settingsList.top
     anchors.left: settingsList.left
     margin-left: 5
     width: 200
     text: Alarms Settings
     font: verdana-11px-rounded
-    color: #9f5031
+    color: #3be4d0
 
-  Label
+  NxLabel
     anchors.verticalCenter: list.top
     anchors.left: list.left
     margin-left: 5
     width: 200
     text: Active Alarms
     font: verdana-11px-rounded
-    color: #9f5031
+    color: #3be4d0
 
-  HorizontalSeparator
+  NxSeparator
     id: separator
     anchors.right: parent.right
     anchors.left: parent.left
@@ -124,7 +124,7 @@ AlarmsWindow < MainWindow
     margin-right: 3
     background: #ffffff88  
 
-  Button
+  NxButton
     id: closeButton
     !text: tr('Close')
     font: cipsoftFont

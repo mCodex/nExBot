@@ -13,6 +13,7 @@ CaveBotControlPanel < Panel
     text-align: center
     text: CaveBot Control Panel
     font: verdana-11px-rounded
+    color: #3be4d0
     margin-top: 3
 
   HorizontalSeparator

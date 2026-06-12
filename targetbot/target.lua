@@ -1359,7 +1359,19 @@ TargetBot.hasTargetableMonstersOnScreen = function()
             -- Check if this creature has a matching TargetBot config (it's targetable)
             local cfgs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(creature)
             if cfgs and cfgs[1] then
-              monsterCount = monsterCount + 1
+              -- Skip confirmed wall-blocked creatures so they don't stall CaveBot
+              -- indefinitely. isBlocked() checks the escalating-TTL blacklist only
+              -- (cheap: no pathfinding). Threshold ≥ 2 attempts means one transient
+              -- fail is tolerated; repeated fails = genuinely unreachable.
+              local okId, cid = pcall(function() return creature:getId() end)
+              local blocked = false
+              if okId and cid and MonsterAI and MonsterAI.Reachability then
+                local isBlocked, reason = MonsterAI.Reachability.isBlocked(cid)
+                blocked = isBlocked and (reason == "no_path" or reason == "blocked_tile" or reason == "not_possible")
+              end
+              if not blocked then
+                monsterCount = monsterCount + 1
+              end
             end
           end
         end
@@ -1888,6 +1900,19 @@ local function processCandidate(creature, pos, isCurrentTarget, batchPaths)
   -- Get creature ID for path caching
   local okId, creatureId = pcall(function() return creature:getId() end)
   creatureId = okId and creatureId or nil
+
+  -- Respect AttackStateMachine skip-list globally.
+  if creatureId and AttackStateMachine and AttackStateMachine.isSkipped and AttackStateMachine.isSkipped(creatureId) then
+    return nil, nil
+  end
+
+  -- Respect confirmed blocked states before doing any extra path work.
+  if creatureId and MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isBlocked then
+    local isBlocked, reason = MonsterAI.Reachability.isBlocked(creatureId)
+    if isBlocked and (reason == "no_path" or reason == "blocked_tile" or reason == "not_possible") then
+      return nil, nil
+    end
+  end
   
   -- v2.2: Calculate distance first - adjacent creatures should ALWAYS be targetable
   local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
@@ -1928,13 +1953,13 @@ local function processCandidate(creature, pos, isCurrentTarget, batchPaths)
   
   -- If no cached path, calculate new one
   if not path then
-    -- Use MonsterAI.Reachability if available (but don't let it block adjacent/current targets)
-    if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable and not isCurrentTarget then
+    -- Use strict MonsterAI.Reachability gate for all non-adjacent candidates.
+    if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable then
       local reachResult, reason, cachedPath = MonsterAI.Reachability.isReachable(creature)
       if reachResult and cachedPath then
         path = cachedPath
-      elseif not reachResult and dist > 3 then
-        -- Only skip if truly far and blocked
+      elseif not reachResult then
+        -- Unreachable is unreachable — skip candidate immediately.
         return nil, nil
       end
     end
@@ -1962,33 +1987,6 @@ local function processCandidate(creature, pos, isCurrentTarget, batchPaths)
     -- Cache the path result
     if creatureId and path then
       setCachedPath(creatureId, path, pos, cpos)
-    end
-  end
-  
-  -- If still no path for nearby creatures, create a simple direction-based path
-  if (not path or #path == 0) and dist <= 3 then
-    -- Create a simple path towards the creature
-    local simplePath = {}
-    local dx = cpos.x - pos.x
-    local dy = cpos.y - pos.y
-    
-    -- Determine direction
-    local dir = nil
-    if dx > 0 and dy < 0 then dir = NorthEast or 4
-    elseif dx > 0 and dy > 0 then dir = SouthEast or 5
-    elseif dx < 0 and dy > 0 then dir = SouthWest or 6
-    elseif dx < 0 and dy < 0 then dir = NorthWest or 7
-    elseif dx > 0 then dir = East or 1
-    elseif dx < 0 then dir = West or 3
-    elseif dy > 0 then dir = South or 2
-    elseif dy < 0 then dir = North or 0
-    end
-    
-    if dir then
-      for i = 1, dist do
-        simplePath[i] = dir
-      end
-      path = simplePath
     end
   end
   
@@ -2180,29 +2178,13 @@ recalculateBestTarget = function()
         local okId, id = pcall(function() return creature:getId() end)
         id = id or i
         
-        -- v2.2: Special handling for current target - be more lenient with path validation
+        -- Current target tracking only affects switch logic, not reachability.
         local isCurrentTarget = (currentTargetId and id == currentTargetId)
         
         -- Calculate path and params (pass isCurrentTarget for enhanced path finding)
         -- v3.1: Pass batchPaths for OpenTibiaBR optimization
         local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
         local params, path = processCandidate(creature, pos, isCurrentTarget, batchPaths)
-        
-        -- For current target, try harder to find a path if initial attempt failed
-        if isCurrentTarget and (not path or not params or not params.config) then
-          -- Try with relaxed path params
-          local relaxedPath = findPath(pos, cpos, 12, {
-            ignoreLastCreature = true,
-            ignoreNonPathable = true,
-            ignoreCost = true,
-            ignoreCreatures = true,
-            allowOnlyVisibleTiles = false  -- More relaxed
-          })
-          if relaxedPath and #relaxedPath > 0 then
-            path = relaxedPath
-            params = TargetBot.Creature.calculateParams(creature, path)
-          end
-        end
         
         -- IMPROVED: Track all creatures, not just those with perfect paths
         -- Creatures with blocked paths can still be targeted if they're close
@@ -2231,36 +2213,6 @@ recalculateBestTarget = function()
           if params.priority > bestPriority then
             bestPriority = params.priority
             bestTarget = params
-          end
-        elseif isCurrentTarget and not creature:isDead() then
-          -- v2.2: Current target has no path but is not dead
-          -- Still add it to cache to prevent "losing" the target
-          local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
-          if dist <= 2 then
-            -- Very close - might just be blocked by other creatures, keep targeting
-            local fallbackParams = TargetBot.Creature.calculateParams(creature, {1})  -- Fake short path
-            if fallbackParams and fallbackParams.config then
-              fallbackParams.priority = getAdjustedPriority(creature, fallbackParams, dist)
-              CreatureCache.monsters[id] = {
-                creature = creature,
-                path = nil,
-                pathTime = now,
-                lastUpdate = now,
-                reachable = false,
-                closeButBlocked = true
-              }
-              CreatureCache.monsterCount = CreatureCache.monsterCount + 1
-              currentTargetStillValid = true
-              currentTargetParams = fallbackParams
-              
-              -- Give it a slightly reduced priority but don't abandon it
-              if fallbackParams.priority * 0.8 > bestPriority then
-                bestPriority = fallbackParams.priority * 0.8
-                bestTarget = fallbackParams
-              end
-            end
-          else
-            unreachableCount = unreachableCount + 1
           end
         else
           -- Creature has blocked path - don't add to active targeting
@@ -2610,6 +2562,18 @@ targetbotMacro = macro(250, function()
     if okPos and cpos and cpos.z == pos.z then
       local dist = getDistanceBetween(pos, cpos)
       if dist and dist <= 3 then
+        local okAtkId, atkId = pcall(function() return currentAttack:getId() end)
+        local skipSticky = false
+        if okAtkId and atkId and AttackStateMachine and AttackStateMachine.isSkipped then
+          skipSticky = AttackStateMachine.isSkipped(atkId)
+        end
+        if okAtkId and atkId and not skipSticky and MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isBlocked then
+          local isBlocked, reason = MonsterAI.Reachability.isBlocked(atkId)
+          skipSticky = isBlocked and (reason == "no_path" or reason == "blocked_tile" or reason == "not_possible")
+        end
+        if skipSticky then
+          bestTarget = nil
+        else
         local cfgs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(currentAttack)
         if cfgs and cfgs[1] then
           bestTarget = {
@@ -2620,6 +2584,7 @@ targetbotMacro = macro(250, function()
           }
           -- prevent walking away while target is still alive
           cavebotAllowance = now + 600
+        end
         end
       end
     end
@@ -2907,6 +2872,79 @@ TargetBot.stopAttack = function(clearWalk)
     autoAttackTarget(nil)
   end
 end
+
+-- ==========================================================================
+-- UNREACHABLE FEEDBACK INTERCEPTOR
+-- If the client returns "Sorry, not possible." while attacking a monster,
+-- treat it as immediate reachability failure and skip that creature.
+-- Works on OTCv8 and OpenTibiaBR.
+-- ==========================================================================
+
+local UNREACHABLE_TEXT_PATTERNS = {
+  "sorry, not possible",
+  "there is no way",
+  "creature is not reachable",
+}
+
+local function getCurrentAttackCreature()
+  local C = getClient()
+  if C and C.getAttackingCreature then
+    local ok, c = pcall(C.getAttackingCreature)
+    if ok and c then return c end
+  end
+  if g_game and g_game.getAttackingCreature then
+    local ok, c = pcall(g_game.getAttackingCreature)
+    if ok and c then return c end
+  end
+  return nil
+end
+
+local function isUnreachableMessage(text)
+  if type(text) ~= "string" then return false end
+  local t = text:lower()
+  for i = 1, #UNREACHABLE_TEXT_PATTERNS do
+    if t:find(UNREACHABLE_TEXT_PATTERNS[i], 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+onTextMessage(function(mode, text)
+  if not TargetBot or not TargetBot.canAttack or not TargetBot.canAttack() then return end
+  if not isUnreachableMessage(text) then return end
+
+  local creature = getCurrentAttackCreature()
+  if not creature then return end
+
+  local okMonster, isMonster = pcall(function() return creature:isMonster() end)
+  if not okMonster or not isMonster then return end
+
+  local okId, cid = pcall(function() return creature:getId() end)
+  if not okId or not cid then return end
+
+  -- Reachability layer: mark blocked immediately from live client feedback.
+  if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.markBlocked then
+    pcall(function() MonsterAI.Reachability.markBlocked(cid, "not_possible", creature) end)
+  end
+
+  -- Attack layer: skip this creature for a window so ASM won't re-lock it.
+  if AttackStateMachine and AttackStateMachine.skipCreature then
+    pcall(function() AttackStateMachine.skipCreature(cid, 15000) end)
+  end
+
+  -- Stop current attack immediately and force next tick to pick another target.
+  if AttackStateMachine and AttackStateMachine.stop then
+    pcall(AttackStateMachine.stop)
+  else
+    pcall(function() TargetBot.stopAttack(true) end)
+  end
+
+  invalidateCache()
+  if debouncedInvalidateAndRecalc then
+    debouncedInvalidateAndRecalc()
+  end
+end)
 
 -- Note: Profile restoration is handled early in configs.lua
 -- before Config.setup() is called, so the dropdown loads correctly

@@ -186,6 +186,22 @@ local function loadStyles()
     end
   end
   
+  -- Load theme.otui first — base classes must exist before child styles
+  local themeFile = P.core .. "/theme.otui"
+  local themeLoaded = false
+  for i = #styleFiles, 1, -1 do
+    if styleFiles[i] == themeFile or styleFiles[i]:match("theme%.otui$") then
+      table.remove(styleFiles, i)
+      themeLoaded = true
+    end
+  end
+  if themeLoaded then
+    local ok, err = pcall(function() g_ui.importStyle(themeFile) end)
+    if not ok then
+      warn("[nExBot] CRITICAL: Failed to load theme.otui: " .. tostring(err))
+    end
+  end
+
   local failedStyles = {}
   for i = 1, #styleFiles do
     local ok, err = pcall(function() g_ui.importStyle(styleFiles[i]) end)
@@ -427,6 +443,28 @@ loadCategory("core", {
 })
 
 -- ============================================================================
+-- UI.Button STYLING HOOK
+-- ============================================================================
+-- Wraps UI.Button() so every button created via the bot API gets the
+-- verdana-11px-rounded font and NxText color automatically.
+-- ============================================================================
+if UI and UI.Button then
+  local _origBtn = UI.Button
+  local function newBtn(...)
+    local btn = _origBtn(...)
+    if btn then
+      pcall(function() btn:setFont("verdana-11px-rounded") end)
+      pcall(function() btn:setColor("#f5f7ff") end)
+    end
+    return btn
+  end
+  local ok = pcall(function()
+    if rawset then rawset(UI, "Button", newBtn) end
+  end)
+  if not ok then UI.Button = newBtn end
+end
+
+-- ============================================================================
 -- PHASE 6: ARCHITECTURE LAYER
 -- ============================================================================
 loadCategory("architecture", {
@@ -480,6 +518,7 @@ loadCategory("tools_legacy", {
 loadCategory("analytics", {
   "analyzer",
   "smart_hunt",
+  "hunt_context",
   "spy_level",
   "supplies",
   "depositer_config",
