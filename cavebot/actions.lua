@@ -433,7 +433,9 @@ end)
 
 CaveBot.registerAction("usewith", "#3be4d0", function(value, retries, prev)
   local pos = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
+  local itemid = nil
   if not pos[1] then
+    itemid = tonumber(value)
     if not itemid then
       warn("Invalid cavebot usewith action value. It should be (itemid,x,y,z) or item id, is: " .. value)
       return false
@@ -441,7 +443,7 @@ CaveBot.registerAction("usewith", "#3be4d0", function(value, retries, prev)
     use(itemid)
     return true
   end
-  local itemid = tonumber(pos[1][2])
+  itemid = tonumber(pos[1][2])
   pos = {x=tonumber(pos[1][3]), y=tonumber(pos[1][4]), z=tonumber(pos[1][5])}
   local playerPos = player:getPosition()
   local isFC = PathUtils and PathUtils.isFloorChangeTile and PathUtils.isFloorChangeTile(pos) or false

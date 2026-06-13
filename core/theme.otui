@@ -188,26 +188,6 @@ NxButton < UIButton
     color: #dfdfdf88
     background-color: #0b0f1e
 
-NxNavPrevButton < PreviousButton
-  background: #0b0f1e
-  height: 15
-  width: 15
-
-NxNavNextButton < NextButton
-  background: #0b0f1e
-  height: 15
-  width: 15
-
-NxCategoryBar < Panel
-  background-color: #0b0f1e
-  padding: 1
-  NxLabel
-    id: label
-    anchors.fill: parent
-    background: #0b0f1e
-    text-align: center
-    border-color: #3be4d0
-
 NxButtonSm < UIButton
   font: verdana-11px-rounded
   color: #f5f7ff
@@ -564,6 +544,7 @@ NxWindowFooter < Panel
 NxNavPrevButton < PreviousButton
   background: #0b0f1e
   height: 15
+  width: 15
 
   $focus:
     border-width: 1
@@ -572,6 +553,7 @@ NxNavPrevButton < PreviousButton
 NxNavNextButton < NextButton
   background: #0b0f1e
   height: 15
+  width: 15
 
   $focus:
     border-width: 1

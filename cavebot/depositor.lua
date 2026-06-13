@@ -18,7 +18,7 @@ local function throttleRetry(key, interval, actionType)
 	local ok, remaining = limiter.allow("depositor:" .. key, interval, actionType)
 	if not ok then
 		delay(math.max(remaining or 50, 50))
-		return false
+		return "throttle_wait"
 	end
 	return true
 end
@@ -85,7 +85,9 @@ CaveBot.Extensions.Depositor.setup = function()
 					if table.find(lootContainers, cId) then
 						for i, item in ipairs(container:getItems()) do
 							if item:getId() == cId then
-								if not throttleRetry("open-next", 300, "open") then return "retry" end
+								local tr = throttleRetry("open-next", 300, "open")
+								if tr == "throttle_wait" then return "throttle_wait" end
+								if not tr then return "retry" end
 								if Client and Client.openContainer then Client.openContainer(item, container) elseif g_game then g_game.open(item, container) end
 								delay(300)
 								return "retry"
@@ -138,7 +140,9 @@ CaveBot.Extensions.Depositor.setup = function()
 					if table.find(lootTable, id) then
 						local index = getStashingIndex(id) or item:isStackable() and 1 or 0
 						statusMessage("[Depositer] stashing item: " ..id.. " to depot: "..index+1)
-						if not throttleRetry("stash:" .. tostring(id), 250, "stash") then return "retry" end
+						local tr = throttleRetry("stash:" .. tostring(id), 250, "stash")
+						if tr == "throttle_wait" then return "throttle_wait" end
+						if not tr then return "retry" end
 						CaveBot.StashItem(item, index, destination)
 						delay(250)
 						return "retry"

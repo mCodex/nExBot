@@ -28,6 +28,16 @@ NxBotSection
       end
     end
 
+    local function syncExetaLowHpFromCharacterDB()
+      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        local charState = CharacterDB.get("macros.exetaLowHp") == true
+        if charState ~= exetaLowHpEnabled then
+          exetaLowHpEnabled = charState
+          exetaLowHpUI.title:setOn(exetaLowHpEnabled)
+        end
+      end
+    end
+
     local savedExetaLowHpState = (function()
       if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
         return CharacterDB.get("macros.exetaLowHp") == true
@@ -37,6 +47,15 @@ NxBotSection
     if savedExetaLowHpState then
       exetaLowHpEnabled = true
       exetaLowHpUI.title:setOn(true)
+    end
+
+    -- Re-sync when CharacterDB becomes ready (polling fallback)
+    if CharacterDB then
+      macro(1000, function()
+        if CharacterDB.isReady and CharacterDB.isReady() then
+          syncExetaLowHpFromCharacterDB()
+        end
+      end)
     end
 
     local lastCast = now
@@ -115,6 +134,16 @@ NxBotSection
       end
     end
 
+    local function syncExetaIfPlayerFromCharacterDB()
+      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        local charState = CharacterDB.get("macros.exetaIfPlayer") == true
+        if charState ~= exetaIfPlayerEnabled then
+          exetaIfPlayerEnabled = charState
+          exetaIfPlayerUI.title:setOn(exetaIfPlayerEnabled)
+        end
+      end
+    end
+
     local savedExetaIfPlayerState = (function()
       if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
         return CharacterDB.get("macros.exetaIfPlayer") == true
@@ -124,6 +153,15 @@ NxBotSection
     if savedExetaIfPlayerState then
       exetaIfPlayerEnabled = true
       exetaIfPlayerUI.title:setOn(true)
+    end
+
+    -- Re-sync when CharacterDB becomes ready (polling fallback)
+    if CharacterDB then
+      macro(1000, function()
+        if CharacterDB.isReady and CharacterDB.isReady() then
+          syncExetaIfPlayerFromCharacterDB()
+        end
+      end)
     end
 
     -- "Amp" (ranged attacker) macro: cast when a distant creature is attacking you
@@ -153,6 +191,16 @@ NxBotSection
       end
     end
 
+    local function syncExetaAmpFromCharacterDB()
+      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+        local charState = CharacterDB.get("macros.exetaAmpRes") == true
+        if charState ~= exetaAmpEnabled then
+          exetaAmpEnabled = charState
+          exetaAmpUI.title:setOn(exetaAmpEnabled)
+        end
+      end
+    end
+
     local savedExetaAmpState = (function()
       if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
         return CharacterDB.get("macros.exetaAmpRes") == true
@@ -162,6 +210,15 @@ NxBotSection
     if savedExetaAmpState then
       exetaAmpEnabled = true
       exetaAmpUI.title:setOn(true)
+    end
+
+    -- Re-sync when CharacterDB becomes ready (polling fallback)
+    if CharacterDB then
+      macro(1000, function()
+        if CharacterDB.isReady and CharacterDB.isReady() then
+          syncExetaAmpFromCharacterDB()
+        end
+      end)
     end
 
     -- Robust safe_unpack helper (handles missing table.unpack/unpack)

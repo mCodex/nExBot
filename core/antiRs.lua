@@ -137,6 +137,16 @@ antiRsUI.title.onClick = function(widget)
   end
 end
 
+local function syncAntiRsFromCharacterDB()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    local charState = CharacterDB.get("macros.antiRs") == true
+    if charState ~= antiRsEnabled then
+      antiRsEnabled = charState
+      antiRsUI.title:setOn(antiRsEnabled)
+    end
+  end
+end
+
 local savedAntiRsState = (function()
   if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
     return CharacterDB.get("macros.antiRs") == true
@@ -146,6 +156,15 @@ end)()
 if savedAntiRsState then
   antiRsEnabled = true
   antiRsUI.title:setOn(true)
+end
+
+-- Re-sync when CharacterDB becomes ready (polling fallback)
+if CharacterDB then
+  macro(1000, function()
+    if CharacterDB.isReady and CharacterDB.isReady() then
+      syncAntiRsFromCharacterDB()
+    end
+  end)
 end
 
 -- Listen for murder warning messages

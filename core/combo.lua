@@ -510,6 +510,7 @@ if BotServer._websocket and config.enabled and config.serverEnabled then
   end)
   BotServer.listen("useWith", function(name, message)
    local tile = g_map.getTile(message)
+   if not tile then return end
    if config.serverTriggers and name:lower() ~= player:getName():lower() and name:lower() == config.serverLeader:lower() and config.attackItemEnabled and config.item and findItem and findItem(config.item) then
     if useWith and throttleComboAction("server-listen-useWith", 250, "useWith") then useWith(config.item, tile:getTopUseThing()) end
    end

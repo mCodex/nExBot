@@ -122,6 +122,19 @@ depotWithdrawUI.title.onClick = function(widget)
   end
 end
 
+local function syncDepotWithdrawFromCharacterDB()
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    local charState = CharacterDB.get("macros.depotWithdraw") == true
+    if charState ~= depotWithdrawEnabled then
+      depotWithdrawEnabled = charState
+      depotWithdrawUI.title:setOn(depotWithdrawEnabled)
+      if UnifiedTick then
+        UnifiedTick.setEnabled("depot_withdraw", depotWithdrawEnabled)
+      end
+    end
+  end
+end
+
 local savedDepotWithdrawState = (function()
   if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
     return CharacterDB.get("macros.depotWithdraw") == true
@@ -134,4 +147,13 @@ if savedDepotWithdrawState then
   if UnifiedTick then
     UnifiedTick.setEnabled("depot_withdraw", true)
   end
+end
+
+-- Re-sync when CharacterDB becomes ready (polling fallback)
+if CharacterDB then
+  macro(1000, function()
+    if CharacterDB.isReady and CharacterDB.isReady() then
+      syncDepotWithdrawFromCharacterDB()
+    end
+  end)
 end

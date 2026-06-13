@@ -48,7 +48,7 @@ local SLOT_NAMES = {
 
 for i = 1, scripts do
   if not autoEquip[i] then
-    autoEquip[i] = {on = false, title = "Auto Equip", item1 = i == 1 and 3052 or 0, item2 = i == 1 and 3089 or 0, slot = i == 1 and 9 or 0}
+    autoEquip[i] = {on = false, title = "Auto Equip", item1 = i == 1 and 3052 or 0, item2 = i == 1 and 3089 or 0, slot = i == 1 and 9 or 1}
   end
 
   local cfg = autoEquip[i]

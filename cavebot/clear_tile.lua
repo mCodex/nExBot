@@ -17,7 +17,7 @@ local function throttleRetry(action, pos, interval, actionType)
   local ok, remaining = limiter.allow("cleartile:" .. action .. ":" .. posKey(pos), interval, actionType)
   if not ok then
     delay(math.max(remaining or 50, 50))
-    return false
+    return "throttle_wait"
   end
   return true
 end
@@ -66,20 +66,24 @@ CaveBot.Extensions.ClearTile.setup = function()
     -- no items on tile and walkability means we are done
     local hasCreature = tile.hasCreature and tile:hasCreature()
     if tile:isWalkable() and tile:getTopUseThing():isNotMoveable() and not hasCreature and not doors then
-      if stand then
-        if not CaveBot.MatchPosition(tPos, 0) then
-          if not throttleRetry("goto-stand", tPos, 200, "path") then return "retry" end
-          CaveBot.GoTo(tPos, 0)
-          delay(100)
-          return "retry"
-        end
+    if stand then
+      if not CaveBot.MatchPosition(tPos, 0) then
+        local tr = throttleRetry("goto-stand", tPos, 200, "path")
+        if tr == "throttle_wait" then return "throttle_wait" end
+        if not tr then return "retry" end
+        CaveBot.GoTo(tPos, 0)
+        delay(100)
+        return "retry"
       end
+    end
       print("CaveBot[ClearTile]: tile clear, proceeding")
       return true
     end
 
     if not CaveBot.MatchPosition(tPos, 3) then
-      if not throttleRetry("goto", tPos, 200, "path") then return "retry" end
+      local tr = throttleRetry("goto", tPos, 200, "path")
+      if tr == "throttle_wait" then return "throttle_wait" end
+      if not tr then return "retry" end
       CaveBot.GoTo(tPos, 3)
       delay(100)
       return "retry"
@@ -94,7 +98,9 @@ CaveBot.Extensions.ClearTile.setup = function()
     if hasCreature2 then
       local c = tile:getCreatures()[1]
       if c:isMonster() then
-        if not throttleRetry("attack", tPos, 350, "attack") then return "retry" end
+        local tr = throttleRetry("attack", tPos, 350, "attack")
+        if tr == "throttle_wait" then return "throttle_wait" end
+        if not tr then return "retry" end
         attack(c)
         delay(150)
         return "retry"
@@ -106,7 +112,9 @@ CaveBot.Extensions.ClearTile.setup = function()
     if item:isItem() then
       if item and not item:isNotMoveable() then
         print("CaveBot[ClearTile]: moving item... " .. item:getId().. " from tile")
-        if not throttleRetry("move-item", tPos, 250, "move") then return "retry" end
+        local tr = throttleRetry("move-item", tPos, 250, "move")
+        if tr == "throttle_wait" then return "throttle_wait" end
+        if not tr then return "retry" end
         if Client and Client.move then Client.move(item, pPos, item:getCount()) elseif g_game then g_game.move(item, pPos, item:getCount()) end
         delay(200)
         return "retry"
@@ -132,26 +140,30 @@ CaveBot.Extensions.ClearTile.setup = function()
             end
           end
 
-          if #candidates == 0 then
-            print("CaveBot[ClearTile]: can't find tile to push, cannot clear way, skipping")
-            return false
-          else
-            print("CaveBot[ClearTile]: pushing player... " .. c:getName() .. " out of the way")
-            local pos = candidates[math.random(1,#candidates)]
-            local tileToPush = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
-            tileToPush:setText("here")
-            schedule(500, function() tileToPush:setText("") end)
-            if not throttleRetry("push-player", tPos, 350, "move") then return "retry" end
-            if Client and Client.move then Client.move(c, pos, 1) elseif g_game then g_game.move(c, pos, 1) end
-            delay(250)
-            return "retry"
-          end
+            if #candidates == 0 then
+              print("CaveBot[ClearTile]: can't find tile to push, cannot clear way, skipping")
+              return false
+            else
+              print("CaveBot[ClearTile]: pushing player... " .. c:getName() .. " out of the way")
+              local pos = candidates[math.random(1,#candidates)]
+              local tileToPush = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile(pos))
+              tileToPush:setText("here")
+              schedule(500, function() tileToPush:setText("") end)
+              local tr = throttleRetry("push-player", tPos, 350, "move")
+              if tr == "throttle_wait" then return "throttle_wait" end
+              if not tr then return "retry" end
+              if Client and Client.move then Client.move(c, pos, 1) elseif g_game then g_game.move(c, pos, 1) end
+              delay(250)
+              return "retry"
+            end
         end
       end
 
     -- doors
     if doors then
-      if not throttleRetry("use-door", tPos, 250, "use") then return "retry" end
+      local tr = throttleRetry("use-door", tPos, 250, "use")
+      if tr == "throttle_wait" then return "throttle_wait" end
+      if not tr then return "retry" end
       use(tile:getTopUseThing())
       delay(200)
       return "retry"

@@ -88,32 +88,62 @@ NxBotSection
     -- text edits
     conditionsWindow.Cure.poison.cost:setText(config.poisonCost)
     conditionsWindow.Cure.poison.cost.onTextChange = function(widget, text)
-      config.poisonCost = tonumber(text)
+      local v = tonumber(text)
+      if v == nil then
+        widget:setText(tostring(config.poisonCost))
+      else
+        config.poisonCost = v
+      end
     end
 
     conditionsWindow.Cure.curse.cost:setText(config.curseCost)
     conditionsWindow.Cure.curse.cost.onTextChange = function(widget, text)
-      config.curseCost = tonumber(text)
+      local v = tonumber(text)
+      if v == nil then
+        widget:setText(tostring(config.curseCost))
+      else
+        config.curseCost = v
+      end
     end
 
     conditionsWindow.Cure.bleed.cost:setText(config.bleedCost)
     conditionsWindow.Cure.bleed.cost.onTextChange = function(widget, text)
-      config.bleedCost = tonumber(text)
+      local v = tonumber(text)
+      if v == nil then
+        widget:setText(tostring(config.bleedCost))
+      else
+        config.bleedCost = v
+      end
     end
 
     conditionsWindow.Cure.burn.cost:setText(config.burnCost)
     conditionsWindow.Cure.burn.cost.onTextChange = function(widget, text)
-      config.burnCost = tonumber(text)
+      local v = tonumber(text)
+      if v == nil then
+        widget:setText(tostring(config.burnCost))
+      else
+        config.burnCost = v
+      end
     end
 
     conditionsWindow.Cure.electrify.cost:setText(config.electrifyCost)
     conditionsWindow.Cure.electrify.cost.onTextChange = function(widget, text)
-      config.electrifyCost = tonumber(text)
+      local v = tonumber(text)
+      if v == nil then
+        widget:setText(tostring(config.electrifyCost))
+      else
+        config.electrifyCost = v
+      end
     end
 
     conditionsWindow.Cure.paralyse.cost:setText(config.paralyseCost)
     conditionsWindow.Cure.paralyse.cost.onTextChange = function(widget, text)
-      config.paralyseCost = tonumber(text)
+      local v = tonumber(text)
+      if v == nil then
+        widget:setText(tostring(config.paralyseCost))
+      else
+        config.paralyseCost = v
+      end
     end
 
     conditionsWindow.Cure.paralyseSpell.spell:setText(config.paralyseSpell)
@@ -128,22 +158,42 @@ NxBotSection
 
     conditionsWindow.Hold.haste.cost:setText(config.hasteCost)
     conditionsWindow.Hold.haste.cost.onTextChange = function(widget, text)
-      config.hasteCost = tonumber(text)
+      local v = tonumber(text)
+      if v == nil then
+        widget:setText(tostring(config.hasteCost))
+      else
+        config.hasteCost = v
+      end
     end
 
     conditionsWindow.Hold.utamo.cost:setText(config.utamoCost)
     conditionsWindow.Hold.utamo.cost.onTextChange = function(widget, text)
-      config.utamoCost = tonumber(text)
+      local v = tonumber(text)
+      if v == nil then
+        widget:setText(tostring(config.utamoCost))
+      else
+        config.utamoCost = v
+      end
     end
 
     conditionsWindow.Hold.utana.cost:setText(config.utanaCost)
     conditionsWindow.Hold.utana.cost.onTextChange = function(widget, text)
-      config.utanaCost = tonumber(text)
+      local v = tonumber(text)
+      if v == nil then
+        widget:setText(tostring(config.utanaCost))
+      else
+        config.utanaCost = v
+      end
     end
 
     conditionsWindow.Hold.utura.cost:setText(config.uturaCost)
     conditionsWindow.Hold.utura.cost.onTextChange = function(widget, text)
-      config.uturaCost = tonumber(text)
+      local v = tonumber(text)
+      if v == nil then
+        widget:setText(tostring(config.uturaCost))
+      else
+        config.uturaCost = v
+      end
     end
 
     -- combo box

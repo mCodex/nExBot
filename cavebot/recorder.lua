@@ -173,6 +173,7 @@ local function setup()
           pendingCorner = nil
           pendingTurnDir = nil
           pendingTurnCount = 0
+          prevDirection = { x = curDirX, y = curDirY }
         elseif pendingTurnDir and pendingTurnDir.x == curDirX and pendingTurnDir.y == curDirY then
           -- Continuing in the same pending direction; increment counter
           pendingTurnCount = pendingTurnCount + 1

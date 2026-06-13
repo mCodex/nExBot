@@ -448,7 +448,7 @@ end
 
 ### Client freezes when far from waypoint
 
-Large distances trigger an instant failure in the goto action, which triggers waypoint recovery. The navigator will find the nearest reachable waypoint using pathfinding and walk you there. If no reachable waypoint is found, the bot advances forward through the route.
+Large distances trigger an instant failure in the goto action, which triggers waypoint recovery. The navigator will find the nearest reachable waypoint using pathfinding and walk you there. If no reachable waypoint is found, the bot advances through the route.
 
 ### Started hunting mid-cave and bot doesn't move
 

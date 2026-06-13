@@ -26,7 +26,7 @@ Key capabilities:
 
 The targeting system is intentionally simple, modeled after vBot 4.8's proven approach:
 
-```
+```text
 Macro (100ms):
   ├── g_map.getSpectatorsInRange → creatures on screen
   ├── For each creature:

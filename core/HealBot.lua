@@ -442,6 +442,27 @@ if rootWidget then
     setProfileName()
     refreshSpells()
     refreshItems()
+    -- Sync checkboxes after list refresh to ensure UI matches currentSettings
+    if healWindow and healWindow.healer then
+      local spellList = healWindow.healer.spells.spellList
+      if spellList then
+        for i, child in ipairs(spellList:getChildren()) do
+          local entry = currentSettings.spellTable and currentSettings.spellTable[i]
+          if entry and child.enabled then
+            child.enabled:setChecked(entry.enabled)
+          end
+        end
+      end
+      local itemList = healWindow.healer.items.itemList
+      if itemList then
+        for i, child in ipairs(itemList:getChildren()) do
+          local entry = currentSettings.itemTable and currentSettings.itemTable[i]
+          if entry and child.enabled then
+            child.enabled:setChecked(entry.enabled)
+          end
+        end
+      end
+    end
     refreshSpellHint()
     refreshItemHint()
     applyHealEngineToggles()

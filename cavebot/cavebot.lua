@@ -52,6 +52,10 @@ end
 -- Simple walk state: only track "wait until walking finishes"
 local delayUntil = 0
 
+CaveBot.delay = function(value)
+  delayUntil = math.max(delayUntil, now + value)
+end
+
 -- ============================================================================
 -- EVENTBUS INTEGRATION — Instant waypoint arrival detection
 -- ============================================================================
@@ -393,7 +397,7 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
   end
 
   cavebotMacro.setOn(finalEnabled)
-  cavebotMacro.delay = nil
+  delayUntil = 0
   if lastConfig == name then
     ui.list:focusChild(ui.list:getChildByIndex(currentActionIndex))
   end
@@ -473,7 +477,16 @@ CaveBot.requestWaypointRecovery = function(reason)
   if (nowt - waypointRecovery.lastRequest) < waypointRecovery.cooldown then return false end
   waypointRecovery.lastRequest = nowt
   local ok = CaveBot.findBestWaypoint()
-  if ok then recovering = true end
+  if ok then
+    local focusedChild = ui.list:getFocusedChild()
+    if focusedChild and focusedChild.action == "goto" then
+      local actionDef = CaveBot.Actions["goto"]
+      if actionDef and actionDef.callback then
+        actionDef.callback(focusedChild.value, 0, true)
+      end
+    end
+    recovering = true
+  end
   return ok
 end
 
@@ -566,10 +579,6 @@ CaveBot.setCurrentProfile = function(name)
   if setCharacterProfile then setCharacterProfile("cavebotProfile", name) end
   if EventBus and EventBus.emit then pcall(function() EventBus.emit("cavebot:configChanged", name) end) end
   CaveBot.setOn()
-end
-
-CaveBot.delay = function(value)
-  cavebotMacro.delay = math.max(cavebotMacro.delay or 0, now + value)
 end
 
 CaveBot.GoTo = function(dest, precision)

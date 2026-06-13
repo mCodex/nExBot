@@ -444,8 +444,8 @@ function BotDB.registerMacro(macroRef, key, onEnable)
 
     -- Re-apply color on every toggle so on/off states stay correct
     local prevSwitch = macroRef.onSwitch
-    macroRef.onSwitch = function(ref)
-      if prevSwitch then pcall(prevSwitch, ref) end
+    macroRef.onSwitch = function(...)
+      if prevSwitch then pcall(prevSwitch, ...) end
       applyMacroColor()
     end
   end

@@ -49,7 +49,7 @@ function RouteValidator.validate(route)
   end
 
   local floorCount = countKeys(route.byFloor)
-  if floorCount > 1 and #route.floorTransitions == 0 then
+  if floorCount > 1 and #(route.floorTransitions or {}) == 0 then
     push(issues, "warning", "multi-floor-without-transitions", "Route spans multiple floors but has no consecutive goto floor transitions")
   end
 
