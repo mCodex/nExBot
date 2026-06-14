@@ -50,10 +50,13 @@ NxBotSection
     end
 
     -- Re-sync when CharacterDB becomes ready (polling fallback)
+    local exetaLowHpSynced = false
     if CharacterDB then
       macro(1000, function()
-        if CharacterDB.isReady and CharacterDB.isReady() then
+        if CharacterDB.isReady and CharacterDB.isReady() and not exetaLowHpSynced then
           syncExetaLowHpFromCharacterDB()
+          exetaLowHpSynced = true
+          return true
         end
       end)
     end
@@ -156,10 +159,13 @@ NxBotSection
     end
 
     -- Re-sync when CharacterDB becomes ready (polling fallback)
+    local exetaIfPlayerSynced = false
     if CharacterDB then
       macro(1000, function()
-        if CharacterDB.isReady and CharacterDB.isReady() then
+        if CharacterDB.isReady and CharacterDB.isReady() and not exetaIfPlayerSynced then
           syncExetaIfPlayerFromCharacterDB()
+          exetaIfPlayerSynced = true
+          return true
         end
       end)
     end
@@ -213,10 +219,13 @@ NxBotSection
     end
 
     -- Re-sync when CharacterDB becomes ready (polling fallback)
+    local exetaAmpSynced = false
     if CharacterDB then
       macro(1000, function()
-        if CharacterDB.isReady and CharacterDB.isReady() then
+        if CharacterDB.isReady and CharacterDB.isReady() and not exetaAmpSynced then
           syncExetaAmpFromCharacterDB()
+          exetaAmpSynced = true
+          return true
         end
       end)
     end

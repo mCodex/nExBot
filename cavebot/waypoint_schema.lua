@@ -117,7 +117,17 @@ function WaypointSchema.parseLine(text, index)
 
   if action == "lure" or action == "standlure" then
     local tokens = splitCsv(rawValue)
-    local mode = tokens[1]
+    if action == "standlure" then
+      node.action = "rushlure"
+      node.pos = parsePosition(tokens, 1)
+      node.delay = toNumber(tokens[4])
+      node.option = tokens[5]
+      if not node.pos then
+        node.parseError = "rushlure-invalid-position"
+      end
+      return node
+    end
+    local mode = tokens[1] and string.lower(tokens[1])
     if mode and (mode == "start" or mode == "stop" or mode == "toggle") then
       node.mode = mode
     else
