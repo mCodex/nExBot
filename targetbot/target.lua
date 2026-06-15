@@ -77,14 +77,31 @@ local function setStatus(text)
   pcall(function() ui.status.right:setText(text) end)
 end
 
--- Main macro (100ms, vBot 4.8 pure)
-targetbotMacro = macro(50, function()
+-- Persistent macro state (survives across 50ms ticks)
+local M = { lastTargetId = nil, lastAsmRequest = 0, ASM_COOLDOWN = 500 }
+
+-- Simple reachability: same floor + findPath attempt, never blocks (let server handle it)
+local function checkReachable(playerPos, cpos)
+  if not playerPos or not cpos then return true, 999 end
+  if cpos.z ~= playerPos.z then return false, 999 end
+  local PS = nExBot and nExBot.PathStrategy
+  local ok, path = pcall(function()
+    if PS and PS.findPath then
+      return PS.findPath(playerPos, cpos, { maxSteps = 12, ignoreCreatures = true, ignoreNonPathable = true, ignoreCost = true })
+    end
+    return findPath(playerPos, cpos, 12, { ignoreCreatures = true, ignoreNonPathable = true, ignoreCost = true })
+  end)
+  if ok and path and #path > 0 then return true, #path end
+  return true, math.max(math.abs(cpos.x - playerPos.x), math.abs(cpos.y - playerPos.y))
+end
+
+-- Main macro handler (used by both UnifiedTick and standalone macro)
+local targetTickHandler = function()
   if not config or not config.isOn or not config.isOn() then return end
   if TargetBot and TargetBot.explicitlyDisabled then return end
+  if zChanging() then return end
 
-  if AttackStateMachine and AttackStateMachine.update then
-    pcall(AttackStateMachine.update)
-  end
+  pcall(AttackStateMachine.update)
 
   local Client = getClient()
   local isOnline = Client and Client.isOnline and Client.isOnline() or g_game and g_game.isOnline and g_game.isOnline()
@@ -93,113 +110,47 @@ targetbotMacro = macro(50, function()
   local playerPos = player and player:getPosition()
   if not playerPos then return end
 
-  -- ACL-backed spectator scan with fallback chain
   local creatures = getNearbyCreatures(playerPos)
-  local bestTarget = nil
-  local bestPriority = 0
-  local targets = 0
-  local dangerLevel = 0
-  local debugReachable = 0
-  local debugUnreachable = 0
-  local debugNoConfig = 0
-  local useReachability = true  -- Can be toggled by config
+  local bestTarget, bestPriority = nil, 0
+  local targets, dangerLevel = 0, 0
 
   for i = 1, #creatures do
     local c = creatures[i]
-    if isTargetable(c) then
+    repeat
+      if not isTargetable(c) then break end
+
       local cpos = pcall(function() return c:getPosition() end) and c:getPosition()
-      if cpos and cpos.z == playerPos.z then
-        local dist = math.max(math.abs(cpos.x - playerPos.x), math.abs(cpos.y - playerPos.y))
-        if dist <= MAX_TARGET_DIST then
-          -- Proactive reachability check: skip unreachable creatures
-          local reachable = true
-          local pathLen = 999
-          local Reachability = MonsterAI and MonsterAI.Reachability
-          
-          if useReachability and Reachability and Reachability.isReachable then
-            local ok, rReason, rPath = Reachability.isReachable(c)
-            reachable = ok
-            if ok and rPath then pathLen = #rPath end
-          else
-            -- Fallback: simple distance-based reachability (always true if on same floor and in range)
-            local ok, path = pcall(findPath, playerPos, cpos, 7, {
-              ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true,
-            })
-            if not ok or not path or #path == 0 then
-              reachable = false
-            else
-              pathLen = #path
-            end
-          end
+      if not cpos then break end
 
-          -- Fallback: if too many creatures marked unreachable, disable reachability check
-          if not reachable then
-            debugUnreachable = debugUnreachable + 1
-            -- If more than 50% of creatures are "unreachable", assume reachability is broken
-            local totalChecked = debugReachable + debugUnreachable
-            if totalChecked > 5 and debugUnreachable / totalChecked > 0.5 then
-              useReachability = false
-              reachable = true  -- Override: treat as reachable
-              pathLen = dist
-              print("[TargetBot] Reachability check disabled - too many false negatives")
-            end
-          else
-            debugReachable = debugReachable + 1
-          end
+      local dist = math.max(math.abs(cpos.x - playerPos.x), math.abs(cpos.y - playerPos.y))
+      if dist > MAX_TARGET_DIST then break end
 
-          if reachable then
-            local cfg = TargetBot.Creature and TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(c)
-            if cfg and #cfg > 0 then
-              local configPrio = cfg[1].priority or 0
-              local hp = 100
-              pcall(function() hp = c:getHealthPercent() or 100 end)
-              local hpBonus = (hp < 25) and (25 - hp) * 2 or 0
-              local distBonus = math.max(0, MAX_TARGET_DIST - dist)
-              local pathBonus = (pathLen == 1) and 10 or (pathLen <= 3 and 5 or 0)
-              local priority = configPrio * 100 + distBonus + hpBonus + pathBonus
+      local reachable, pathLen = checkReachable(playerPos, cpos)
+      if not reachable then break end
 
-              local danger = cfg[1].danger or 0
-              dangerLevel = dangerLevel + danger
-              targets = targets + 1
+      local cfg = TargetBot.Creature and TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(c)
+      if not cfg or #cfg == 0 then break end
 
-              if priority > bestPriority then
-                bestPriority = priority
-                bestTarget = c
-              end
-            else
-              debugNoConfig = debugNoConfig + 1
-            end
-          else
-            local cfg2 = TargetBot.Creature and TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(c)
-            if cfg2 and #cfg2 > 0 then
-              dangerLevel = dangerLevel + (cfg2[1].danger or 0)
-              targets = targets + 1
-            end
-          end
-        end
+      local configPrio = cfg[1].priority or 0
+      local hp = 100
+      pcall(function() hp = c:getHealthPercent() or 100 end)
+      local hpBonus = (hp < 25) and (25 - hp) * 2 or 0
+      local distBonus = math.max(0, MAX_TARGET_DIST - dist)
+      local pathBonus = (pathLen == 1) and 10 or (pathLen <= 3 and 5 or 0)
+      local priority = configPrio * 100 + distBonus + hpBonus + pathBonus
+
+      dangerLevel = dangerLevel + (cfg[1].danger or 0)
+      targets = targets + 1
+
+      if priority > bestPriority then
+        bestPriority = priority
+        bestTarget = c
       end
-    end
+    until true
   end
 
   dangerValue = dangerLevel
   setWidgetText(ui.danger.right, tostring(dangerLevel))
-  
-  -- Debug: print reachability stats
-  if (now - (targetbotMacro._lastDebug or 0)) > 2000 then
-    targetbotMacro._lastDebug = now
-    print(string.format("[TargetBot] Creatures: %d | Reachable: %d | Unreachable: %d | NoConfig: %d | BestTarget: %s", 
-      #creatures, debugReachable, debugUnreachable, debugNoConfig, bestTarget and bestTarget:getName() or "none"))
-    if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.getStats then
-      local stats = MonsterAI.Reachability.getStats()
-      print(string.format("[Reachability] Checks: %d | CacheHits: %d | Blocked: %d | Reachable: %d", 
-        stats.checksPerformed, stats.cacheHits, stats.blocked, stats.reachable))
-    end
-    if AttackStateMachine and AttackStateMachine.getStats then
-      local asmStats = AttackStateMachine.getStats()
-      print(string.format("[ASM] State: %s | TargetId: %s | Active: %s", 
-        asmStats.state, tostring(asmStats.targetId), tostring(asmStats.state ~= "IDLE")))
-    end
-  end
 
   if bestTarget then
     local name = pcall(function() return bestTarget:getName() end) and bestTarget:getName() or "?"
@@ -208,18 +159,20 @@ targetbotMacro = macro(50, function()
     setStatus("Killing (" .. targets .. ")")
     lastAction = now
 
-    pcall(function()
-      if AttackStateMachine and AttackStateMachine.requestAttack then
-        AttackStateMachine.requestAttack(bestTarget, bestPriority)
-      end
-    end)
+    -- Only call ASM.requestAttack when target ID changes (prevents rapid switching)
+    local newId = cId(bestTarget)
+    if newId and newId ~= M.lastTargetId and (now - M.lastAsmRequest) >= M.ASM_COOLDOWN then
+      M.lastTargetId = newId
+      M.lastAsmRequest = now
+      pcall(AttackStateMachine.requestAttack, bestTarget, bestPriority)
+    end
 
-    pcall(function() TargetBot.Creature.attack({creature = bestTarget, config = (TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(bestTarget) or {})[1] or {}}, targets, false) end)
-
+    pcall(TargetBot.Creature.attack, { creature = bestTarget, config = (TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(bestTarget) or {})[1] or {} }, targets, false)
     if TargetBot.walk then TargetBot.walk() end
     return
   end
 
+  M.lastTargetId = nil
   setWidgetText(ui.target.right, "-")
   setWidgetText(ui.config.right, "-")
 
@@ -240,7 +193,29 @@ targetbotMacro = macro(50, function()
 
   setStatus("Waiting")
   if TargetBot.walk then TargetBot.walk() end
-end)
+end
+
+-- Sync persistent state when game target changes (e.g., right-click)
+if EventBus and EventBus.on then
+  EventBus.on("combat:target", function(creature)
+    if creature then
+      M.lastTargetId = cId(creature)
+    else
+      M.lastTargetId = nil
+    end
+  end)
+end
+
+-- Register on UnifiedTick (preferred) or fall back to standalone macro
+if UnifiedTick and UnifiedTick.registerTargetingHandler then
+  UnifiedTick.registerTargetingHandler("targetbot_main", targetTickHandler, 50)
+  targetbotMacro = {
+    setOn = function(e) UnifiedTick.setEnabled("targetbot_main", e ~= false) end,
+    setOff = function() UnifiedTick.setEnabled("targetbot_main", false) end,
+  }
+else
+  targetbotMacro = macro(50, targetTickHandler)
+end
 
 -- External API
 TargetBot.hasTargetableMonsters = function()

@@ -98,6 +98,9 @@ local function loadDeferred(idx)
 	if idx > #deferredModules then
 		nExBot = nExBot or {}
 		nExBot.bootReady = true
+		if UnifiedTick and UnifiedTick.start then
+			pcall(UnifiedTick.start)
+		end
 		return
 	end
 	local entry = deferredModules[idx]

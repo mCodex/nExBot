@@ -1514,3 +1514,15 @@ function MovementCoordinator.canMove()
 end
 
 nExBot.MovementCoordinator.canMove = MovementCoordinator.canMove
+
+-- Register on UnifiedTick for periodic intent processing
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register("movement_coordinator", {
+    interval = 100,
+    priority = UnifiedTick.Priority.HIGH,
+    group = "targeting",
+    handler = function()
+      pcall(MovementCoordinator.tick)
+    end,
+  })
+end

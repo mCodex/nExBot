@@ -692,10 +692,6 @@ if EventBus and EventBus.on then
       local dx = math.abs(newPos.x - oldPos.x)
       local dy = math.abs(newPos.y - oldPos.y)
       local dz = oldPos.z and newPos.z ~= oldPos.z
-      -- Clear pending FC state on Z change or teleport
-      if dz then
-        CaveBot._pendingFC = nil
-      end
       -- Only invalidate cache on significant movement (>10 tiles)
       if dx > 10 or dy > 10 then
         invalidateWaypointCache()

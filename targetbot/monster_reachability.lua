@@ -59,19 +59,12 @@ function R.isReachable(creature, forceRecheck)
   if not id then return false, "invalid", nil end
   local nowt = nowMs()
 
-  -- Debug
-  if (nowt - (R._lastDebug or 0)) > 2000 then
-    R._lastDebug = nowt
-    print(string.format("[Reachability] isReachable called for id=%s forceRecheck=%s", tostring(id), tostring(forceRecheck)))
-  end
-
   -- Cache
   if not forceRecheck then
     local cr = R.cache[id]
     local ct = R.cacheTime[id] or 0
     if cr ~= nil and (nowt - ct) < R.CACHE_TTL then
       R.stats.cacheHits = R.stats.cacheHits + 1
-      print(string.format("[Reachability] Cache hit for id=%s reachable=%s", tostring(id), tostring(cr.reachable)))
       return cr.reachable, cr.reason, cr.path
     end
     local bl = R.blockedCreatures[id]
@@ -85,32 +78,25 @@ function R.isReachable(creature, forceRecheck)
   end
 
   R.stats.checksPerformed = R.stats.checksPerformed + 1
-  print(string.format("[Reachability] Performing check for id=%s", tostring(id)))
 
   local playerPos = player and (function() local ok,p = pcall(function() return player:getPosition() end); return ok and p end)()
   local creaturePos = safeCreatureCall(creature, "getPosition", nil)
-  if not playerPos or not creaturePos then 
-    print(string.format("[Reachability] No position: playerPos=%s creaturePos=%s", tostring(playerPos), tostring(creaturePos)))
-    return R.cacheResult(id, false, "no_position", nil) 
+  if not playerPos or not creaturePos then
+    return R.cacheResult(id, false, "no_position", nil)
   end
 
-  -- Same floor
   if creaturePos.z ~= playerPos.z then
     R.stats.byReason.elevation = R.stats.byReason.elevation + 1
-    print(string.format("[Reachability] Different floor: playerZ=%d creatureZ=%d", playerPos.z, creaturePos.z))
     return R.cacheResult(id, false, "elevation", nil)
   end
 
-  -- Distance
   local dist = math.max(math.abs(creaturePos.x - playerPos.x), math.abs(creaturePos.y - playerPos.y))
   if dist > 15 then
     R.stats.byReason.too_far = R.stats.byReason.too_far + 1
-    print(string.format("[Reachability] Too far: dist=%d", dist))
     return R.cacheResult(id, false, "too_far", nil)
   end
 
   -- Pathfinding - use PathStrategy for better fallbacks and caching
-  print(string.format("[Reachability] Calling findPath for id=%s dist=%d", tostring(id), dist))
   local path = nil
   local PS = nExBot and nExBot.PathStrategy
   if PS and PS.findPath then
@@ -130,8 +116,7 @@ function R.isReachable(creature, forceRecheck)
     end)
     if ok and result and #result > 0 then path = result end
   end
-  
-  print(string.format("[Reachability] findPath result: path=%s len=%s", tostring(path), path and tostring(#path) or "nil"))
+
   if not path or #path == 0 then
     R.stats.byReason.no_path = R.stats.byReason.no_path + 1
     R.markBlocked(id, "no_path", creature)
