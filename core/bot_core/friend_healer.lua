@@ -358,8 +358,10 @@ local function isFriendForHealing(creature, config)
   end
   -- Integrate with global isFriend() from lib.lua (uses storage.playerList.friendList)
   if vocConditions.friends then
-    local globalFriend = _G.isFriend and _G.isFriend(creature)
-    if globalFriend then return true end
+    if nExBot and nExBot.isFriend then
+      local globalFriend = nExBot.isFriend(creature)
+      if globalFriend then return true end
+    end
   end
   
   return false

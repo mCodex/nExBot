@@ -174,14 +174,29 @@ end
 local function checkStartupWaypoint()
   if startupWaypointFound then return end
   if not startupCheckTime then startupCheckTime = now; return end
-  if now - startupCheckTime < 500 then return end
+  -- Reduced from 500ms to 100ms for faster startup
+  if now - startupCheckTime < 100 then return end
   local playerPos = player:getPosition()
   if not playerPos then return end
   buildWaypointCache()
+  
+  -- Try pathfinding-based nearest reachable first
   local best = WaypointNavigator.findNearestReachable(playerPos, waypointPositionCache, CaveBot.getMaxGotoDistance())
+  
+  -- Fallback: if pathfinding fails, use Chebyshev distance only (no pathfinding)
+  if not best then
+    best = WaypointNavigator.findBestOnFloor(playerPos, waypointPositionCache, CaveBot.getMaxGotoDistance())
+    if best then
+      print("[CaveBot] Startup: Using fallback waypoint selection (no pathfinding)")
+    end
+  end
+  
   if best then
     ui.list:focusChild(best.wp.child)
     actionRetries = 0
+    print("[CaveBot] Startup: Focused waypoint " .. best.idx .. " at " .. best.wp.x .. "," .. best.wp.y .. "," .. best.wp.z)
+  else
+    print("[CaveBot] Startup: No reachable waypoint found on current floor")
   end
   startupWaypointFound = true
 end
@@ -195,15 +210,31 @@ end
 local recovering = false
 local positionHistory = {}
 
+-- Adaptive tick rate state
+local currentMacroInterval = 100
+local MIN_MACRO_INTERVAL = 50    -- Walking: responsive
+local MAX_MACRO_INTERVAL = 300   -- Idle: lower CPU
+local IDLE_MACRO_INTERVAL = 200  -- Waiting/delayed
 
--- TargetBot caches
-local targetBotIsActive = nil
-local targetBotIsCaveBotAllowed = nil
 
-local function initTargetBotCache()
-  if TargetBot then
-    targetBotIsActive = TargetBot.isActive
-    targetBotIsCaveBotAllowed = TargetBot.isCaveBotActionAllowed
+-- TargetBot integration (uses EventBus events instead of polling)
+
+-- Adjust macro interval based on current state
+local function adjustMacroInterval(isWalking, isDelayed, isRecovering)
+  local newInterval
+  if isWalking then
+    newInterval = MIN_MACRO_INTERVAL
+  elseif isDelayed or isRecovering then
+    newInterval = IDLE_MACRO_INTERVAL
+  else
+    newInterval = MAX_MACRO_INTERVAL
+  end
+  
+  if newInterval ~= currentMacroInterval then
+    currentMacroInterval = newInterval
+    if cavebotMacro and cavebotMacro.setInterval then
+      cavebotMacro.setInterval(newInterval)
+    end
   end
 end
 
@@ -221,10 +252,16 @@ cavebotMacro = macro(100, function()
   end
 
   -- Skip if delay active
-  if now < delayUntil then return end
+  local isDelayed = now < delayUntil
+  if isDelayed then
+    adjustMacroInterval(false, true, recovering)
+    return
+  end
 
   -- Skip if player walking (let walk finish)
-  if player and player:isWalking() then
+  local isWalking = player and player:isWalking()
+  if isWalking then
+    adjustMacroInterval(true, false, recovering)
     if currentWaypointTarget.arrived then
       currentWaypointTarget.arrived = false
       if recovering then recovering = false end
@@ -234,6 +271,7 @@ cavebotMacro = macro(100, function()
 
   -- If recovering, check if we arrived
   if recovering then
+    adjustMacroInterval(false, false, true)
     if currentWaypointTarget.arrived then
       currentWaypointTarget.arrived = false
       recovering = false
@@ -242,10 +280,11 @@ cavebotMacro = macro(100, function()
     return
   end
 
-  -- Check TargetBot allows CaveBot action
-  if not targetBotIsActive and TargetBot then initTargetBotCache() end
-  if targetBotIsActive and targetBotIsActive() then
-    if targetBotIsCaveBotAllowed and not targetBotIsCaveBotAllowed() then
+  adjustMacroInterval(false, false, false)
+
+  -- Check TargetBot allows CaveBot action (using EventBus-driven state)
+  if TargetBot and TargetBot.isActive and TargetBot.isActive() then
+    if TargetBot.isCaveBotActionAllowed and not TargetBot.isCaveBotActionAllowed() then
       safeResetWalking(); return
     end
     if TargetBot.smartPullActive then safeResetWalking(); return end
@@ -470,12 +509,21 @@ end
 
 CaveBot.gotoNextWaypointInRange = CaveBot.findBestWaypoint
 
-local waypointRecovery = { lastRequest = 0, cooldown = 1500 }
+local waypointRecovery = { lastRequest = 0, cooldown = 1000, attempts = 0 }
 
 CaveBot.requestWaypointRecovery = function(reason)
   local nowt = now or (os.time() * 1000)
   if (nowt - waypointRecovery.lastRequest) < waypointRecovery.cooldown then return false end
+
+  -- Increase cooldown on repeated failures
+  waypointRecovery.attempts = waypointRecovery.attempts + 1
+  waypointRecovery.cooldown = math.min(1000 * waypointRecovery.attempts, 5000)
   waypointRecovery.lastRequest = nowt
+
+  if reason ~= "no_progress" then
+    print("[CaveBot] Recovery: " .. tostring(reason) .. " (attempt " .. waypointRecovery.attempts .. ")")
+  end
+
   local ok = CaveBot.findBestWaypoint()
   if ok then
     local focusedChild = ui.list:getFocusedChild()
@@ -486,6 +534,8 @@ CaveBot.requestWaypointRecovery = function(reason)
       end
     end
     recovering = true
+    waypointRecovery.attempts = 0
+    waypointRecovery.cooldown = 1000
   end
   return ok
 end
@@ -622,4 +672,42 @@ end
 
 CaveBotList = function()
   return ui.list
+end
+
+-- ============================================================================
+-- EVENTBUS INTEGRATION — Respond to targetbot events without polling
+-- ============================================================================
+
+if EventBus and EventBus.on then
+  -- When targetbot allows cavebot to act, reduce delay to act quickly
+  EventBus.on("targetbot:cavebot_allowed", function()
+    delayUntil = now  -- Clear any delay so cavebot acts immediately
+  end, 1)
+
+  -- When player moves, check if we need to re-evaluate waypoints
+  EventBus.on("player:move", function(newPos, oldPos)
+    if not CaveBot or CaveBot.isOff() then return end
+    oldPos = oldPos or {}
+    if newPos and oldPos.x then
+      local dx = math.abs(newPos.x - oldPos.x)
+      local dy = math.abs(newPos.y - oldPos.y)
+      local dz = oldPos.z and newPos.z ~= oldPos.z
+      -- Clear pending FC state on Z change or teleport
+      if dz then
+        CaveBot._pendingFC = nil
+      end
+      -- Only invalidate cache on significant movement (>10 tiles)
+      if dx > 10 or dy > 10 then
+        invalidateWaypointCache()
+      end
+    end
+  end, 50)
+
+  -- When combat ends, reset recovery state
+  EventBus.on("targetbot/combat_end", function()
+    if recovering then
+      recovering = false
+      actionRetries = 0
+    end
+  end, 50)
 end

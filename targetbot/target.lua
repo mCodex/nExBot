@@ -7,8 +7,46 @@ local dangerValue = 0
 local looterStatus = ""
 
 local getClient = nExBot.Shared.getClient
-local oldTibia = g_game.getClientVersion() < 960
 local MONSTER_DETECTION_RANGE = 14
+local MAX_TARGET_DIST = 12
+
+local function cId(c)
+  if not c then return nil end
+  local ok, v = pcall(function() return c:getId() end)
+  return ok and v or nil
+end
+
+local function getNearbyCreatures(playerPos)
+  if not playerPos then return {} end
+
+  -- g_map.getSpectatorsInRange (original working call, with pcall safety)
+  if g_map and g_map.getSpectatorsInRange then
+    local ok, result = pcall(g_map.getSpectatorsInRange, playerPos, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
+    if ok and type(result) == "table" and #result > 0 then return result end
+  end
+
+  -- Fallback: g_map.getSpectators
+  if g_map and g_map.getSpectators then
+    local ok, result = pcall(g_map.getSpectators, playerPos, false)
+    if ok and type(result) == "table" and #result > 0 then return result end
+  end
+
+  return {}
+end
+
+-- Robust creature validation: safe across all OTClient versions
+local function isTargetable(creature)
+  if not creature then return false end
+  local ok, isDead = pcall(function() return creature:isDead() end)
+  if ok and isDead then return false end
+  local ok2, removed = pcall(function() return creature:isRemoved() end)
+  if ok2 and removed then return false end
+  local ok3, isMonster = pcall(function() return creature:isMonster() end)
+  if not ok3 or not isMonster then return false end
+  local ok4, hp = pcall(function() return creature:getHealthPercent() end)
+  if ok4 and hp and hp <= 0 then return false end
+  return true
+end
 
 -- UI widget setup (must run before macro references ui)
 local configWidget = UI.Config()
@@ -39,23 +77,8 @@ local function setStatus(text)
   pcall(function() ui.status.right:setText(text) end)
 end
 
--- Validate a single creature for targeting
-local function isTargetable(creature)
-  if not creature then return false end
-  local ok, dead = pcall(function() return creature:isDead() end)
-  if ok and dead then return false end
-  local ok2, monster = pcall(function() return creature:isMonster() end)
-  if not ok2 or not monster then return false end
-  local ok3, hp = pcall(function() return creature:getHealthPercent() end)
-  if ok3 and hp and hp <= 0 then return false end
-  if oldTibia then return true end
-  local ok4, ctype = pcall(function() return creature:getType() end)
-  if ok4 and ctype then return ctype < 3 end
-  return true
-end
-
 -- Main macro (100ms, vBot 4.8 pure)
-targetbotMacro = macro(100, function()
+targetbotMacro = macro(50, function()
   if not config or not config.isOn or not config.isOn() then return end
   if TargetBot and TargetBot.explicitlyDisabled then return end
 
@@ -70,29 +93,70 @@ targetbotMacro = macro(100, function()
   local playerPos = player and player:getPosition()
   if not playerPos then return end
 
-  -- Direct spectator scan — no event cache, no OTBR interface
-  local creatures = g_map.getSpectatorsInRange(playerPos, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
+  -- ACL-backed spectator scan with fallback chain
+  local creatures = getNearbyCreatures(playerPos)
   local bestTarget = nil
   local bestPriority = 0
   local targets = 0
   local dangerLevel = 0
+  local debugReachable = 0
+  local debugUnreachable = 0
+  local debugNoConfig = 0
+  local useReachability = true  -- Can be toggled by config
 
-  if creatures then
-    for i = 1, #creatures do
-      local c = creatures[i]
-      if isTargetable(c) then
-        local cpos = pcall(function() return c:getPosition() end) and c:getPosition()
-        if cpos and cpos.z == playerPos.z then
-          local dist = math.max(math.abs(cpos.x - playerPos.x), math.abs(cpos.y - playerPos.y))
-          if dist <= 12 then
+  for i = 1, #creatures do
+    local c = creatures[i]
+    if isTargetable(c) then
+      local cpos = pcall(function() return c:getPosition() end) and c:getPosition()
+      if cpos and cpos.z == playerPos.z then
+        local dist = math.max(math.abs(cpos.x - playerPos.x), math.abs(cpos.y - playerPos.y))
+        if dist <= MAX_TARGET_DIST then
+          -- Proactive reachability check: skip unreachable creatures
+          local reachable = true
+          local pathLen = 999
+          local Reachability = MonsterAI and MonsterAI.Reachability
+          
+          if useReachability and Reachability and Reachability.isReachable then
+            local ok, rReason, rPath = Reachability.isReachable(c)
+            reachable = ok
+            if ok and rPath then pathLen = #rPath end
+          else
+            -- Fallback: simple distance-based reachability (always true if on same floor and in range)
+            local ok, path = pcall(findPath, playerPos, cpos, 7, {
+              ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true,
+            })
+            if not ok or not path or #path == 0 then
+              reachable = false
+            else
+              pathLen = #path
+            end
+          end
+
+          -- Fallback: if too many creatures marked unreachable, disable reachability check
+          if not reachable then
+            debugUnreachable = debugUnreachable + 1
+            -- If more than 50% of creatures are "unreachable", assume reachability is broken
+            local totalChecked = debugReachable + debugUnreachable
+            if totalChecked > 5 and debugUnreachable / totalChecked > 0.5 then
+              useReachability = false
+              reachable = true  -- Override: treat as reachable
+              pathLen = dist
+              print("[TargetBot] Reachability check disabled - too many false negatives")
+            end
+          else
+            debugReachable = debugReachable + 1
+          end
+
+          if reachable then
             local cfg = TargetBot.Creature and TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(c)
             if cfg and #cfg > 0 then
               local configPrio = cfg[1].priority or 0
               local hp = 100
               pcall(function() hp = c:getHealthPercent() or 100 end)
               local hpBonus = (hp < 25) and (25 - hp) * 2 or 0
-              local distBonus = math.max(0, 12 - dist)
-              local priority = configPrio * 100 + distBonus + hpBonus
+              local distBonus = math.max(0, MAX_TARGET_DIST - dist)
+              local pathBonus = (pathLen == 1) and 10 or (pathLen <= 3 and 5 or 0)
+              local priority = configPrio * 100 + distBonus + hpBonus + pathBonus
 
               local danger = cfg[1].danger or 0
               dangerLevel = dangerLevel + danger
@@ -102,6 +166,14 @@ targetbotMacro = macro(100, function()
                 bestPriority = priority
                 bestTarget = c
               end
+            else
+              debugNoConfig = debugNoConfig + 1
+            end
+          else
+            local cfg2 = TargetBot.Creature and TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(c)
+            if cfg2 and #cfg2 > 0 then
+              dangerLevel = dangerLevel + (cfg2[1].danger or 0)
+              targets = targets + 1
             end
           end
         end
@@ -111,6 +183,23 @@ targetbotMacro = macro(100, function()
 
   dangerValue = dangerLevel
   setWidgetText(ui.danger.right, tostring(dangerLevel))
+  
+  -- Debug: print reachability stats
+  if (now - (targetbotMacro._lastDebug or 0)) > 2000 then
+    targetbotMacro._lastDebug = now
+    print(string.format("[TargetBot] Creatures: %d | Reachable: %d | Unreachable: %d | NoConfig: %d | BestTarget: %s", 
+      #creatures, debugReachable, debugUnreachable, debugNoConfig, bestTarget and bestTarget:getName() or "none"))
+    if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.getStats then
+      local stats = MonsterAI.Reachability.getStats()
+      print(string.format("[Reachability] Checks: %d | CacheHits: %d | Blocked: %d | Reachable: %d", 
+        stats.checksPerformed, stats.cacheHits, stats.blocked, stats.reachable))
+    end
+    if AttackStateMachine and AttackStateMachine.getStats then
+      local asmStats = AttackStateMachine.getStats()
+      print(string.format("[ASM] State: %s | TargetId: %s | Active: %s", 
+        asmStats.state, tostring(asmStats.targetId), tostring(asmStats.state ~= "IDLE")))
+    end
+  end
 
   if bestTarget then
     local name = pcall(function() return bestTarget:getName() end) and bestTarget:getName() or "?"
@@ -157,10 +246,9 @@ end)
 TargetBot.hasTargetableMonsters = function()
   local p = player and player:getPosition()
   if not p then return false end
-  local c = g_map.getSpectatorsInRange(p, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
-  if not c then return false end
-  for i = 1, #c do
-    if isTargetable(c[i]) then return true end
+  local creatures = getNearbyCreatures(p)
+  for i = 1, #creatures do
+    if isTargetable(creatures[i]) then return true end
   end
   return false
 end
@@ -168,11 +256,10 @@ end
 TargetBot.getTargetableMonsterCount = function()
   local p = player and player:getPosition()
   if not p then return 0 end
-  local c = g_map.getSpectatorsInRange(p, false, MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
-  if not c then return 0 end
+  local creatures = getNearbyCreatures(p)
   local n = 0
-  for i = 1, #c do
-    if isTargetable(c[i]) then n = n + 1 end
+  for i = 1, #creatures do
+    if isTargetable(creatures[i]) then n = n + 1 end
   end
   return n
 end
@@ -193,7 +280,12 @@ TargetBot.getStatus = function()
 end
 
 TargetBot.allowCaveBot = function(time)
+  local prev = cavebotAllowance
   cavebotAllowance = now + time
+  -- Emit event when cavebot state changes
+  if prev <= now and EventBus then
+    pcall(function() EventBus.emit("targetbot:cavebot_allowed", time) end)
+  end
 end
 
 TargetBot.Danger = function() return dangerValue end
@@ -352,6 +444,11 @@ onTextMessage(function(mode, text)
 
   if AttackStateMachine and AttackStateMachine.skipCreature then
     pcall(function() AttackStateMachine.skipCreature(cid, 15000) end)
+  end
+  -- Also mark in reachability cache so proactive check blocks this creature
+  local Reachability = MonsterAI and MonsterAI.Reachability
+  if Reachability and Reachability.markBlocked then
+    pcall(function() Reachability.markBlocked(cid, "server_rejected", creature) end)
   end
   if AttackStateMachine and AttackStateMachine.stop then
     pcall(AttackStateMachine.stop)

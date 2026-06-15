@@ -20,10 +20,10 @@ CC.VERSION = "1.0"
 -- ==========================================================================
 
 -- ASM: Attack State Machine timing
-CC.TICK_INTERVAL          = 100    -- ASM tick rate (ms)
-CC.COMMAND_COOLDOWN       = 350    -- Min between g_game.attack() calls (ms)
-CC.CONFIRM_TIMEOUT        = 1200   -- Max wait for server confirmation (ms)
-CC.GRACE_PERIOD           = 1500   -- Stay LOCKED despite transient nil (ms)
+CC.TICK_INTERVAL          = 50     -- ASM tick rate (ms)
+CC.COMMAND_COOLDOWN       = 250    -- Min between g_game.attack() calls (ms)
+CC.CONFIRM_TIMEOUT        = 800    -- Max wait for server confirmation (ms)
+CC.GRACE_PERIOD           = 1000   -- Stay LOCKED despite transient nil (ms)
 CC.KEEPALIVE_INTERVAL     = 2000   -- Re-send attack while LOCKED (ms)
 CC.STOP_DEBOUNCE          = 150    -- After stop, block requestAttack (ms) — was 800
 CC.REAFFIRM_RETRY_MAX     = 3     -- Max retries before forfeit
@@ -32,7 +32,7 @@ CC.ENGAGE_BACKOFF_GROWTH  = 1.5   -- Exponential backoff multiplier
 CC.ENGAGE_BACKOFF_CAP     = 3000   -- Max backoff cap (ms)
 
 -- Target switching
-CC.SWITCH_COOLDOWN         = 2500  -- Min between target switches (ms)
+CC.SWITCH_COOLDOWN         = 1800  -- Min between target switches (ms)
 CC.CONFIG_SWITCH_COOLDOWN  = 400   -- Reduced cooldown for config priority switch (ms)
 CC.CRITICAL_HP             = 25    -- Below this HP%, never switch away
 CC.FINISH_KILL_HP          = 25    -- PriorityEngine finish-kill threshold
@@ -47,7 +47,7 @@ CC.OSCILLATION_WINDOW      = 2000  -- Anti-oscillation detection window (ms)
 CC.OSCILLATION_MAX         = 4     -- Max direction reversals before pause
 
 -- MonsterAI: Scenario & engagement
-CC.ENGAGEMENT_GRACE        = 1500  -- Scenario engagement validation grace (ms) — was 350
+CC.ENGAGEMENT_GRACE        = 1000  -- Scenario engagement validation grace (ms) — was 350
 CC.SCENARIO_DETECT_INTERVAL = 200  -- Scenario re-detect throttle (ms)
 
 -- PriorityEngine

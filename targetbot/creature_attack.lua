@@ -34,8 +34,11 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
       TargetBot.walkTo(keepPos, 10, { precision = 1 })
     end
   elseif chase and dist > 1 then
-    -- Chase: autoWalk toward creature
-    if player and player.autoWalk then
+    -- Chase: only autoWalk if a path exists (prevents silent stuck)
+    local ok, path = pcall(findPath, pos, cpos, 12, {
+      ignoreNonPathable = true, ignoreCreatures = true, ignoreCost = true,
+    })
+    if ok and path and #path > 0 then
       pcall(function() player:autoWalk(cpos) end)
     end
   end
@@ -52,6 +55,3 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   end
 end
 
-TargetBot.Creature.walk = function(creature, config, targets)
-  -- Movement is handled inline in TargetBot.Creature.attack
-end

@@ -12,7 +12,7 @@
   
   Usage:
     EventBus.on("creature:appear", function(creature) ... end)
-    EventBus.on("player:move", function(oldPos, newPos) ... end)
+    EventBus.on("player:move", function(newPos, oldPos) ... end)
     EventBus.emit("custom:event", data)
 ]]
 

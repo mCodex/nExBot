@@ -775,10 +775,6 @@ local analytics = {
   log = {}
 }
 
--- Flag to trigger immediate heal check
-local needsHealCheck = true
-local needsItemCheck = true
-
 -- Use BotCore.Condition for checks (pure functions)
 local function checkCondition(origin, sign, value)
   if BotCore and BotCore.Condition then
@@ -931,7 +927,7 @@ end
 -- Main healing macro loop (keeps heal engine ticking)
 local _lastApplyToggle = 0
 local syncDone = false
-local SYNC_INTERVAL_MS = 500  -- Reduced from 2000ms for faster profile updates
+local SYNC_INTERVAL_MS = 100  -- Fast sync for responsive profile updates
 
 -- HealBot handler function (shared by UnifiedTick and fallback macro)
 local function healBotHandler()
@@ -975,7 +971,7 @@ end
 if UnifiedTick and UnifiedTick.register then
   -- Register with UnifiedTick for consolidated tick management
   UnifiedTick.register("healbot_main", {
-    interval = 150,
+    interval = 80,
     priority = UnifiedTick.Priority.CRITICAL,
     handler = healBotHandler,
     group = "healing"
@@ -993,7 +989,7 @@ if UnifiedTick and UnifiedTick.register then
   end
 else
   -- Fallback to standalone macro if UnifiedTick not available
-  healMacro = macro(150, healBotHandler)
+  healMacro = macro(80, healBotHandler)
 end
 
 syncHealMacro()

@@ -146,6 +146,7 @@ local function handleEngaging()
   if (nowMs() - state.enteredAt) > CONFIRM_TIMEOUT then
     state.retries = state.retries + 1
     if state.retries > MAX_RETRIES then
+      skipCreature(state.targetId, SKIP_DURATION)
       clearTarget()
       transition(STATE.IDLE)
       return
@@ -240,8 +241,7 @@ end
 AttackStateMachine.requestSwitch = AttackStateMachine.requestAttack
 AttackStateMachine.forceSwitch = AttackStateMachine.forceAttack
 
-function AttackStateMachine.isPathBlocked() return false end
-function AttackStateMachine.findBestTarget() return nil, 0 end
+
 function AttackStateMachine.clearSkipList() state.skipList = {} end
 function AttackStateMachine.getStats()
   return { state = state.current, targetId = state.targetId, targetHealth = state.hp }

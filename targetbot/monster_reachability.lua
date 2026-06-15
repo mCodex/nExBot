@@ -32,7 +32,7 @@ local R = MonsterAI.Reachability
 R.cache            = {}
 R.cacheTime        = {}
 R.CACHE_TTL        = 1500
-R.BLOCKED_COOLDOWN_STATIC  = 15000  -- Never-reachable: 15s (wall-blocked from first check)
+R.BLOCKED_COOLDOWN_STATIC  = 3000   -- Never-reachable: 3s (wall-blocked from first check)
 R.BLOCKED_COOLDOWN_DYNAMIC = 5000   -- Previously-reachable: 5s (walked behind wall)
 R.BLOCKED_COOLDOWN_MAX     = 30000  -- Cap for escalating cooldown
 R.blockedCreatures = {}
@@ -59,12 +59,19 @@ function R.isReachable(creature, forceRecheck)
   if not id then return false, "invalid", nil end
   local nowt = nowMs()
 
+  -- Debug
+  if (nowt - (R._lastDebug or 0)) > 2000 then
+    R._lastDebug = nowt
+    print(string.format("[Reachability] isReachable called for id=%s forceRecheck=%s", tostring(id), tostring(forceRecheck)))
+  end
+
   -- Cache
   if not forceRecheck then
     local cr = R.cache[id]
     local ct = R.cacheTime[id] or 0
     if cr ~= nil and (nowt - ct) < R.CACHE_TTL then
       R.stats.cacheHits = R.stats.cacheHits + 1
+      print(string.format("[Reachability] Cache hit for id=%s reachable=%s", tostring(id), tostring(cr.reachable)))
       return cr.reachable, cr.reason, cr.path
     end
     local bl = R.blockedCreatures[id]
@@ -78,14 +85,19 @@ function R.isReachable(creature, forceRecheck)
   end
 
   R.stats.checksPerformed = R.stats.checksPerformed + 1
+  print(string.format("[Reachability] Performing check for id=%s", tostring(id)))
 
   local playerPos = player and (function() local ok,p = pcall(function() return player:getPosition() end); return ok and p end)()
   local creaturePos = safeCreatureCall(creature, "getPosition", nil)
-  if not playerPos or not creaturePos then return R.cacheResult(id, false, "no_position", nil) end
+  if not playerPos or not creaturePos then 
+    print(string.format("[Reachability] No position: playerPos=%s creaturePos=%s", tostring(playerPos), tostring(creaturePos)))
+    return R.cacheResult(id, false, "no_position", nil) 
+  end
 
   -- Same floor
   if creaturePos.z ~= playerPos.z then
     R.stats.byReason.elevation = R.stats.byReason.elevation + 1
+    print(string.format("[Reachability] Different floor: playerZ=%d creatureZ=%d", playerPos.z, creaturePos.z))
     return R.cacheResult(id, false, "elevation", nil)
   end
 
@@ -93,44 +105,53 @@ function R.isReachable(creature, forceRecheck)
   local dist = math.max(math.abs(creaturePos.x - playerPos.x), math.abs(creaturePos.y - playerPos.y))
   if dist > 15 then
     R.stats.byReason.too_far = R.stats.byReason.too_far + 1
+    print(string.format("[Reachability] Too far: dist=%d", dist))
     return R.cacheResult(id, false, "too_far", nil)
   end
 
-  -- Pathfinding
-  local ok, result = pcall(function()
-    return findPath(playerPos, creaturePos, 12, {
-      ignoreCreatures = true, ignoreNonPathable = false, ignoreCost = true, precision = 1
+  -- Pathfinding - use PathStrategy for better fallbacks and caching
+  print(string.format("[Reachability] Calling findPath for id=%s dist=%d", tostring(id), dist))
+  local path = nil
+  local PS = nExBot and nExBot.PathStrategy
+  if PS and PS.findPath then
+    path = PS.findPath(playerPos, creaturePos, {
+      maxSteps = 12,
+      ignoreCreatures = true,
+      ignoreNonPathable = true,  -- Allow non-pathable for reachability check
+      ignoreCost = true,
+      precision = 1
     })
-  end)
-  if not ok or not result or #result == 0 then
+  else
+    -- Fallback to direct findPath
+    local ok, result = pcall(function()
+      return findPath(playerPos, creaturePos, 12, {
+        ignoreCreatures = true, ignoreNonPathable = true, ignoreCost = true, precision = 1
+      })
+    end)
+    if ok and result and #result > 0 then path = result end
+  end
+  
+  print(string.format("[Reachability] findPath result: path=%s len=%s", tostring(path), path and tostring(#path) or "nil"))
+  if not path or #path == 0 then
     R.stats.byReason.no_path = R.stats.byReason.no_path + 1
     R.markBlocked(id, "no_path", creature)
     return R.cacheResult(id, false, "no_path", nil)
   end
 
-  -- Validate first few tiles
+  -- Validate first few tiles (only check first 3 steps, don't block on items)
   local probe = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-  for i = 1, math.min(5, #result) do
-    local off = DIR_OFFSETS[result[i]]
+  for i = 1, math.min(3, #path) do
+    local off = DIR_OFFSETS[path[i]]
     if off then
       probe = {x = probe.x + off.x, y = probe.y + off.y, z = probe.z}
       local C = getClient()
       local tile = (C and C.getTile) and C.getTile(probe) or (g_map and g_map.getTile and g_map.getTile(probe))
       if tile then
+        -- Only block if tile is completely unwalkable (not just items on it)
         if tile.isWalkable and not tile:isWalkable() then
           R.stats.byReason.blocked_tile = R.stats.byReason.blocked_tile + 1
           R.markBlocked(id, "blocked_tile", creature)
           return R.cacheResult(id, false, "blocked_tile", nil)
-        end
-        local items = tile.getItems and tile:getItems()
-        if items then
-          for _, item in ipairs(items) do
-            if item.isNotWalkable and item:isNotWalkable() then
-              R.stats.byReason.blocked_tile = R.stats.byReason.blocked_tile + 1
-              R.markBlocked(id, "blocked_tile", creature)
-              return R.cacheResult(id, false, "blocked_tile", nil)
-            end
-          end
         end
       end
     end
@@ -277,8 +298,12 @@ if EventBus and EventBus.on then
   EventBus.on("player:position", function(newPos, oldPos)
     if tbOff() then return end
     if oldPos then
+      local dz = newPos.z ~= oldPos.z
       local d = math.max(math.abs(newPos.x - oldPos.x), math.abs(newPos.y - oldPos.y))
-      if d > 2 then R.clearCache() end
+      if d > 2 or dz then
+        R.clearCache()
+        R.blockedCreatures = {}
+      end
     end
   end)
   EventBus.on("creature:move", function(creature)

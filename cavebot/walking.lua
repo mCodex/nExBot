@@ -62,7 +62,6 @@ local function stopAutoWalk()
   if g_game and g_game.stop then g_game.stop() end
 end
 
-local lastWalkZ = nil
 local MAX_PATHFIND_DIST = 50
 
 CaveBot.walkTo = function(dest, maxDist, params)
@@ -78,12 +77,6 @@ CaveBot.walkTo = function(dest, maxDist, params)
     ignoreFields = CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("ignoreFields") or false
   end
   maxDist = math.min(maxDist or 20, MAX_PATHFIND_DIST)
-
-  if lastWalkZ and playerPos.z ~= lastWalkZ then
-    lastWalkZ = playerPos.z
-    return false
-  end
-  lastWalkZ = playerPos.z
 
   local distX = math.abs(dest.x - playerPos.x)
   local distY = math.abs(dest.y - playerPos.y)
@@ -110,14 +103,16 @@ CaveBot.walkTo = function(dest, maxDist, params)
     end
   end
 
-  -- Redirect if dest is a floor-change tile (walk to adjacent instead)
-  local isFC = PathUtils and PathUtils.isFloorChangeTile
-  if isFC and isFC(dest) then
-    for _, off in ipairs(ADJACENT_OFFSETS) do
-      local alt = applyOffset(dest, off)
-      if not isFC(alt) then
-        dest = alt
-        break
+  -- Redirect if dest is a floor-change tile and player is not yet adjacent
+  if FloorItems.isFloorChangeTile and FloorItems.isFloorChangeTile(dest) then
+    local adjacentToPlayer = math.abs(playerPos.x - dest.x) <= 1 and math.abs(playerPos.y - dest.y) <= 1
+    if not adjacentToPlayer then
+      for _, off in ipairs(ADJACENT_OFFSETS) do
+        local alt = applyOffset(dest, off)
+        if not (FloorItems.isFloorChangeTile and FloorItems.isFloorChangeTile(alt)) then
+          dest = alt
+          break
+        end
       end
     end
   end
@@ -147,14 +142,11 @@ CaveBot.walkTo = function(dest, maxDist, params)
 
   -- Validate the native autoWalk route won't cross floor-change tiles
   local safeChunk = nil
-  local isSafe, nPath, unsafeIdx = PS().nativePathIsSafe(playerPos, dest, {
-    ignoreNonPathable = opts.ignoreNonPathable,
-    ignoreCreatures = opts.ignoreCreatures,
-  })
-  if isSafe then
+  local hasFC, unsafeIdx = PS().pathContainsFC(path, playerPos)
+  if not hasFC then
     safeChunk = dest
-  elseif nPath and unsafeIdx and unsafeIdx > 1 then
-    safeChunk, _ = PS().safePrefixDest(playerPos, nPath, unsafeIdx)
+  elseif unsafeIdx and unsafeIdx > 1 then
+    safeChunk, _ = PS().safePrefixDest(playerPos, path, unsafeIdx)
   else
     return false
   end
@@ -221,6 +213,6 @@ CaveBot.fullResetWalking = function()
 end
 
 CaveBot.stopAutoWalk = stopAutoWalk
-CaveBot.isFloorChangeTile = PathUtils and PathUtils.isFloorChangeTile or function() return false end
+CaveBot.isFloorChangeTile = FloorItems.isFloorChangeTile or function() return false end
 
 return true

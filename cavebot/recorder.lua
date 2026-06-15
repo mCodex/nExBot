@@ -1,26 +1,21 @@
 --[[
-  CaveBot Auto-Recorder v2.0.0
+  CaveBot Auto-Recorder v2.1.0
 
   Records goto waypoints as the player walks, optimized for linear
   waypoint execution.
 
-  DESIGN PRINCIPLES:
-  - SRP: Records waypoints. Does not navigate or pathfind.
-  - KISS: Simple direction-change detection + adaptive distance threshold.
-  - DRY: Reuses the existing CaveBot.addAction API.
-
-  KEY IMPROVEMENTS OVER v1:
+  KEY IMPROVEMENTS OVER v2:
   1. Direction-aware: places waypoints AT corners/turns, not after them
   2. Adaptive spacing: sparse on straight paths (15 tiles), dense at turns
-  3. Euclidean distance
-  4. Collinear elimination: removes redundant mid-straight waypoints
-  5. Post-floor-change anchor: records position on the new floor immediately
+  3. Throttled position handler: prevents CPU spikes from rapid position changes
+  4. Regex-free string parsing: simpler, faster deduplication
+  5. Collinear elimination: removes redundant mid-straight waypoints
+  6. Post-floor-change anchor: records position on the new floor immediately
 
   ALGORITHM:
   On each step, track the player's walking direction. When the direction
   changes (turn detected), record a waypoint at the LAST position before
   the turn. On straight paths, record every MAX_STRAIGHT_DIST tiles.
-  This produces optimal segment geometry for Pure Pursuit lookahead.
 ]]
 
 CaveBot.Recorder = {}
@@ -33,6 +28,8 @@ local stepsSinceLast = 0      -- steps since last recorded waypoint
 local pendingCorner = nil     -- position to record when a turn is confirmed
 local pendingTurnDir = nil    -- direction of the pending turn {x, y}
 local pendingTurnCount = 0    -- steps taken in pending direction (for turnConfirmSteps)
+local lastHandleTime = 0      -- throttle: last time position handler ran
+local HANDLE_THROTTLE_MS = 50 -- min interval between handler runs (ms)
 
 -- ============================================================================
 -- CONFIGURATION
@@ -68,7 +65,6 @@ end
 local function stepDirection(fromPos, toPos)
   local dx = toPos.x - fromPos.x
   local dy = toPos.y - fromPos.y
-  -- Normalize to -1, 0, 1 (single tile steps)
   local nx = dx == 0 and 0 or (dx > 0 and 1 or -1)
   local ny = dy == 0 and 0 or (dy > 0 and 1 or -1)
   return nx, ny
@@ -76,7 +72,6 @@ end
 
 --- Check if three points are approximately collinear.
 -- Uses cross product magnitude: if |AB × AC| / |AB| < tolerance, they're collinear.
--- Returns true if the middle point (b) is redundant.
 local function isCollinear(a, b, c)
   if not a or not b or not c then return false end
   local abx, aby = b.x - a.x, b.y - a.y
@@ -84,7 +79,6 @@ local function isCollinear(a, b, c)
   local cross = math.abs(abx * acy - aby * acx)
   local lenAB = math.sqrt(abx * abx + aby * aby)
   if lenAB < 0.01 then return true end  -- degenerate: a == b
-  -- Perpendicular distance from C to line AB
   local perpDist = cross / lenAB
   return perpDist < config.collinearTolerance * lenAB
 end
@@ -98,12 +92,8 @@ local prevRecorded = nil      -- position recorded before lastPos
 
 local function addPosition(pos)
   -- Collinear check: if lastPos sits on the line from prevRecorded to pos,
-  -- we could consider it redundant. But since we record at TURNS, the
-  -- lastPos should be at a direction change and is NOT redundant.
-  -- Only skip if the segment from prevRecorded through lastPos to pos
-  -- is nearly straight (meaning the "turn" was actually noise).
+  -- skip if it's still nearly straight (the "turn" was noise).
   if prevRecorded and lastPos and isCollinear(prevRecorded, lastPos, pos) then
-    -- Path is still straight — skip the intermediate waypoint
     lastPos = pos
     stepsSinceLast = 0
     return
@@ -125,6 +115,11 @@ end
 
 local function setup()
   onPlayerPositionChange(function(newPos, oldPos)
+    -- Throttle: skip if we processed a position change recently
+    local nowMs = now or (os.time() * 1000)
+    if nowMs - lastHandleTime < HANDLE_THROTTLE_MS then return end
+    lastHandleTime = nowMs
+
     if zChanging() then return end
     if CaveBot.isOn() or not isEnabled then return end
 
@@ -141,10 +136,7 @@ local function setup()
 
     -- ======== FLOOR CHANGE / TELEPORT ========
     if newPos.z ~= oldPos.z or math.abs(oldPos.x - newPos.x) > 1 or math.abs(oldPos.y - newPos.y) > 1 then
-      -- Record the pre-floor-change position with precision=0
       addStairs(oldPos)
-      -- Anchor destination: record newPos so the route has a starting point
-      -- on the new floor (floor change) or after the jump (same-floor teleport)
       addPosition(newPos)
       prevStepPos = newPos
       prevDirection = nil
@@ -157,34 +149,26 @@ local function setup()
     -- ======== NORMAL STEP: Direction-aware recording ========
     stepsSinceLast = stepsSinceLast + 1
     local curDirX, curDirY = stepDirection(oldPos, newPos)
-
-    -- Distance from last recorded waypoint (Chebyshev — grid movement)
     local distFromLast = chebyshevDist(lastPos, newPos)
 
     if prevDirection then
       local dirChanged = (curDirX ~= prevDirection.x or curDirY ~= prevDirection.y)
 
       if dirChanged then
-        -- Compute dot product to filter jitter: only record meaningful turns
-        -- (>= 45° direction change). Smaller changes are pathfinding noise.
         local dot = prevDirection.x * curDirX + prevDirection.y * curDirY
         if dot > config.minTurnDot then
-          -- Direction change too small (< 45°) — treat as noise, don't record
           pendingCorner = nil
           pendingTurnDir = nil
           pendingTurnCount = 0
           prevDirection = { x = curDirX, y = curDirY }
         elseif pendingTurnDir and pendingTurnDir.x == curDirX and pendingTurnDir.y == curDirY then
-          -- Continuing in the same pending direction; increment counter
           pendingTurnCount = pendingTurnCount + 1
         else
-          -- New direction change: start a new pending turn
           pendingCorner = oldPos
           pendingTurnDir = { x = curDirX, y = curDirY }
           pendingTurnCount = 1
         end
 
-        -- Confirm the turn once we've taken enough consistent steps
         if pendingTurnCount >= config.turnConfirmSteps and pendingCorner then
           local cornerDist = chebyshevDist(lastPos, pendingCorner)
           if cornerDist >= config.minRecordDist then
@@ -196,7 +180,6 @@ local function setup()
           pendingTurnCount = 0
         end
       else
-        -- Direction unchanged: clear any pending turn (it was jitter)
         if pendingTurnDir then
           pendingCorner = nil
           pendingTurnDir = nil
@@ -204,16 +187,11 @@ local function setup()
         end
 
         if distFromLast >= config.maxStraightDist then
-          -- STRAIGHT PATH: Max distance threshold reached, record a waypoint
-          -- to maintain reasonable segment lengths for the corridor system
           addPosition(newPos)
         end
       end
     else
-      -- No previous direction yet (after first step or floor change)
       prevDirection = { x = curDirX, y = curDirY }
-
-      -- If we've walked far enough without a direction, record
       if distFromLast >= config.maxStraightDist then
         addPosition(newPos)
       end
@@ -265,9 +243,19 @@ CaveBot.Recorder.enable = function()
   pendingTurnCount = 0
 end
 
+-- Parse "x,y,z" or "x,y,z,precision" from a goto text string
+local function parseGotoCoords(text)
+  if not text then return nil end
+  -- Remove any prefix before ":"
+  local coords = text:match(":(.+)$")
+  if not coords then coords = text end
+  -- Parse comma-separated values
+  local x, y, z = coords:match("(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
+  if not x then return nil end
+  return { x = tonumber(x), y = tonumber(y), z = tonumber(z) }
+end
+
 -- Remove duplicate waypoints that are within 1 tile of their neighbor.
--- Called at the end of disable() to clean up redundant WPs from floor changes,
--- teleports, and oscillation during manual walking.
 local function deduplicateWaypoints()
   local children = CaveBot.actionList and CaveBot.actionList:getChildren()
   if not children then return end
@@ -276,19 +264,15 @@ local function deduplicateWaypoints()
   for i, child in ipairs(children) do
     if child.action == "goto" then
       local text = child.value or child:getText()
-      local m = regexMatch(text, "([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
-      if m and m[1] then
-        local px, py, pz = tonumber(m[1][2]), tonumber(m[1][3]), tonumber(m[1][4])
-        if px and py and pz then
-          local pos = { x = px, y = py, z = pz }
-          if lastGotoPos and lastGotoPos.z == pos.z then
-            local d = math.max(math.abs(pos.x - lastGotoPos.x), math.abs(pos.y - lastGotoPos.y))
-            if d <= 1 then
-              removals[#removals + 1] = child
-            end
+      local pos = parseGotoCoords(text)
+      if pos then
+        if lastGotoPos and lastGotoPos.z == pos.z then
+          local d = math.max(math.abs(pos.x - lastGotoPos.x), math.abs(pos.y - lastGotoPos.y))
+          if d <= 1 then
+            removals[#removals + 1] = child
           end
-          lastGotoPos = pos
         end
+        lastGotoPos = pos
       end
     end
   end

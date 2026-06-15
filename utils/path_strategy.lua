@@ -1,5 +1,6 @@
 --[[
-  PathStrategy v2.0.0 — Unified Pathfinding & Movement Strategy
+  PathStrategy v2.1.0 — Unified Pathfinding & Movement Strategy
+  Added: findPath result caching with TTL for performance
   Simplified: no cursor cache, no anti-zigzag, no path smoothing, no findPathRelaxed.
 ]]
 
@@ -26,6 +27,10 @@ local PF_IGNORE_CREATURES     = 16
 
 local MAX_NATIVE_STEPS = 127
 local DEFAULT_MAX_STEPS = 50
+
+-- Path cache configuration
+local PATH_CACHE_TTL = 500          -- Cache TTL in milliseconds
+local PATH_CACHE_MAX_ENTRIES = 100  -- Maximum cache entries
 
 local DIR_TO_OFFSET, OPPOSITE
 local function _ensureDirTables()
@@ -60,6 +65,46 @@ local function optsToFlags(opts)
   _flagsCacheRef = opts
   _flagsCacheVal = flags
   return flags
+end
+
+-- Path result cache
+local _pathCache = {}
+local _pathCacheOrder = {}  -- LRU order
+
+local function makeCacheKey(startPos, goalPos, maxSteps, flags)
+  return string.format("%d,%d,%d|%d,%d,%d|%d|%d", 
+    startPos.x, startPos.y, startPos.z,
+    goalPos.x, goalPos.y, goalPos.z,
+    maxSteps, flags)
+end
+
+local function cacheGet(key)
+  local entry = _pathCache[key]
+  if not entry then return nil end
+  local nowMs = tick()
+  if nowMs - entry.time > PATH_CACHE_TTL then
+    _pathCache[key] = nil
+    return nil
+  end
+  -- Update LRU
+  for i, k in ipairs(_pathCacheOrder) do
+    if k == key then
+      table.remove(_pathCacheOrder, i)
+      break
+    end
+  end
+  _pathCacheOrder[#_pathCacheOrder + 1] = key
+  return entry.path
+end
+
+local function cacheSet(key, path)
+  -- Evict oldest if at capacity
+  if #_pathCacheOrder >= PATH_CACHE_MAX_ENTRIES then
+    local oldest = table.remove(_pathCacheOrder, 1)
+    _pathCache[oldest] = nil
+  end
+  _pathCache[key] = { path = path, time = tick() }
+  _pathCacheOrder[#_pathCacheOrder + 1] = key
 end
 
 local _pathBackend = nil
@@ -97,7 +142,29 @@ function PathStrategy.findPath(startPos, goalPos, opts)
   local maxSteps = math.min(opts.maxSteps or DEFAULT_MAX_STEPS, MAX_NATIVE_STEPS)
   local flags    = optsToFlags(opts)
   if not _pathBackend then _pathBackend = resolveBackend() end
-  return _pathBackend(startPos, goalPos, maxSteps, flags, opts)
+
+  -- Generate cache key
+  local key = makeCacheKey(startPos, goalPos, maxSteps, flags)
+  
+  -- Try cache first
+  local cached = cacheGet(key)
+  if cached then
+    return cached
+  end
+
+  -- Not in cache, compute
+  local path = _pathBackend(startPos, goalPos, maxSteps, flags, opts)
+  
+  -- Cache result (even nil to avoid repeated failed lookups)
+  cacheSet(key, path)
+  
+  return path
+end
+
+-- Clear path cache (useful when map changes significantly)
+function PathStrategy.clearPathCache()
+  _pathCache = {}
+  _pathCacheOrder = {}
 end
 
 function PathStrategy.stepDuration(diagonal)
@@ -140,6 +207,26 @@ function PathStrategy.nativePathIsSafe(startPos, goalPos, opts)
   return true, nativePath, nil
 end
 
+--[[
+  Check if an existing path contains a floor-change tile.
+  Returns true if path is safe, false + index of first FC step otherwise.
+  O(pathLength) — no redundant pathfinding.
+]]
+function PathStrategy.pathContainsFC(path, startPos)
+  if not path or #path == 0 then return false end
+  local isFC = getIsFC()
+  local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
+  for i = 1, #path do
+    local off = dirOffset(path[i])
+    if not off then break end
+    probe = applyOff(probe, off)
+    if isFC(probe) then
+      return true, i
+    end
+  end
+  return false
+end
+
 function PathStrategy.safePrefixDest(startPos, nativePath, unsafeIdx)
   local dest = {x = startPos.x, y = startPos.y, z = startPos.z}
   local safeSteps = math.max(0, (unsafeIdx or 1) - 1)
@@ -148,6 +235,68 @@ function PathStrategy.safePrefixDest(startPos, nativePath, unsafeIdx)
     if off then dest = applyOff(dest, off) end
   end
   return dest, safeSteps
+end
+
+--[[
+  Search for the nearest floor-change tile on the current floor
+  that transitions to targetZ. Uses minimap color (already cached
+  by the client) for O(1) lookups. Spiral search guarantees
+  finding the nearest tile by Manhattan distance.
+  @param fromPos Position on current floor
+  @param targetZ number Target Z coordinate
+  @param maxRadius number Search radius (default 30)
+  @return Position, expectedZ or nil, nil
+]]
+function PathStrategy.findNearestFC(fromPos, targetZ, maxRadius)
+  maxRadius = maxRadius or 30
+  if not fromPos or targetZ == nil then return nil end
+  local map = g_map
+  if not (map and map.getMinimapColor) then return nil end
+  local FloorItems = (function()
+    local ok, fi = pcall(dofile, "/constants/floor_items.lua")
+    if ok and fi then return fi end
+    ok, fi = pcall(dofile, "/core/constants/floor_items.lua")
+    return ok and fi or nil
+  end)()
+  local FI = FloorItems
+  if not (FI and FI.isFloorChangeColor and FI.getExpectedFloor) then return nil end
+
+  for r = 1, maxRadius do
+    local cx, cy = fromPos.x, fromPos.y
+    -- Top edge: (cx-r, cy-r) → (cx+r, cy-r)
+    local y = cy - r
+    for x = cx - r, cx + r do
+      local color = map.getMinimapColor({x = x, y = y, z = fromPos.z})
+      if color > 0 and FI.isFloorChangeColor(color) and FI.getExpectedFloor(color, fromPos.z) == targetZ then
+        return {x = x, y = y, z = fromPos.z}
+      end
+    end
+    -- Bottom edge: (cx-r, cy+r) → (cx+r, cy+r)
+    y = cy + r
+    for x = cx - r, cx + r do
+      local color = map.getMinimapColor({x = x, y = y, z = fromPos.z})
+      if color > 0 and FI.isFloorChangeColor(color) and FI.getExpectedFloor(color, fromPos.z) == targetZ then
+        return {x = x, y = y, z = fromPos.z}
+      end
+    end
+    -- Left edge (excluding corners): (cx-r, cy-r+1) → (cx-r, cy+r-1)
+    local x = cx - r
+    for y = cy - r + 1, cy + r - 1 do
+      local color = map.getMinimapColor({x = x, y = y, z = fromPos.z})
+      if color > 0 and FI.isFloorChangeColor(color) and FI.getExpectedFloor(color, fromPos.z) == targetZ then
+        return {x = x, y = y, z = fromPos.z}
+      end
+    end
+    -- Right edge (excluding corners): (cx+r, cy-r+1) → (cx+r, cy+r-1)
+    x = cx + r
+    for y = cy - r + 1, cy + r - 1 do
+      local color = map.getMinimapColor({x = x, y = y, z = fromPos.z})
+      if color > 0 and FI.isFloorChangeColor(color) and FI.getExpectedFloor(color, fromPos.z) == targetZ then
+        return {x = x, y = y, z = fromPos.z}
+      end
+    end
+  end
+  return nil
 end
 
 function PathStrategy.walkStep(dir)
@@ -188,6 +337,5 @@ PathStrategy.dirOffset  = dirOffset
 PathStrategy.applyOffset = applyOff
 PathStrategy.tick       = tick
 
-if _G then _G.PathStrategy = PathStrategy end
 if nExBot then nExBot.PathStrategy = PathStrategy end
 return PathStrategy

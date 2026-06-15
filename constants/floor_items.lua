@@ -21,11 +21,26 @@ if FloorItems._loaded then return FloorItems end
 -- ============================================================================
 
 FloorItems.FLOOR_CHANGE_COLORS = {
-  [210] = true,  -- Stairs up
-  [211] = true,  -- Stairs down  
-  [212] = true,  -- Rope spot
-  [213] = true,  -- Ladder
+  [210] = true, [211] = true,  -- Stairs up/down
+  [212] = true, [213] = true,  -- Rope spot / Ladder
+  [214] = true, [215] = true,  -- Additional floor-change colors
+  [216] = true, [217] = true,
 }
+
+-- LRU cache for isFloorChangeTile results (500 entries, no TTL — tiles don't change)
+local _fcTileCache = nil
+local function getFcCache()
+  if _fcTileCache then return _fcTileCache end
+  local ok, wc = pcall(require, "utils.weak_cache")
+  if ok and wc and wc.createLRU then
+    _fcTileCache = wc.createLRU(500)
+  end
+  return _fcTileCache
+end
+
+local function makeFcKey(pos)
+  return pos.x * 100000 + pos.y * 100 + pos.z
+end
 
 -- ============================================================================
 -- FLOOR CHANGE ITEMS (Stairs, Ramps, Ladders, Holes, Teleports)
@@ -194,6 +209,32 @@ function FloorItems.isFloorChange(itemId)
   return FloorItems.FLOOR_CHANGE[itemId] == true
 end
 
+-- Floor-change item subtypes for auto-use actions
+FloorItems.LADDER_IDS = {
+  [1219] = true, [1386] = true, [3678] = true, [5543] = true, [8599] = true,
+}
+FloorItems.ROPE_SPOT_IDS = {
+  [384] = true, [386] = true, [418] = true,
+}
+FloorItems.HOLE_IDS = {
+  [294] = true, [369] = true, [370] = true, [383] = true,
+  [392] = true, [408] = true, [409] = true, [410] = true,
+  [469] = true, [470] = true, [482] = true, [484] = true,
+  [595] = true, [596] = true,
+}
+
+function FloorItems.isLadder(itemId)
+  return FloorItems.LADDER_IDS[itemId] == true
+end
+
+function FloorItems.isRopeSpot(itemId)
+  return FloorItems.ROPE_SPOT_IDS[itemId] == true
+end
+
+function FloorItems.isHole(itemId)
+  return FloorItems.HOLE_IDS[itemId] == true
+end
+
 --[[
   Check if minimap color indicates floor change
   @param color number
@@ -201,6 +242,18 @@ end
 ]]
 function FloorItems.isFloorChangeColor(color)
   return FloorItems.FLOOR_CHANGE_COLORS[color] == true
+end
+
+--[[
+  Get expected floor after stepping on a floor-change tile.
+  @param color number minimap color of the tile
+  @param baseZ number the Z coordinate of the tile
+  @return number expected Z after floor change, or baseZ if unknown
+]]
+function FloorItems.getExpectedFloor(color, baseZ)
+  if color == 210 or color == 211 or color == 214 or color == 215 then return baseZ - 1 end
+  if color == 212 or color == 213 or color == 216 or color == 217 then return baseZ + 1 end
+  return baseZ
 end
 
 --[[
@@ -222,36 +275,49 @@ function FloorItems.getFieldType(itemId)
 end
 
 --[[
-  Check if position has floor-change tile
-  Uses minimap color first (fast), then tile inspection (slow)
+  Check if position has floor-change tile.
+  Minimap color is authoritative for explored tiles (color > 0).
+  Item inspection is only used for unexplored tiles (color == 0).
   @param pos Position
   @return boolean
 ]]
 function FloorItems.isFloorChangeTile(pos)
   if not pos then return false end
-  
-  -- Fast path: minimap color
-  local map = g_map
-  if map and map.getMinimapColor then
-    local color = map.getMinimapColor(pos)
-    if FloorItems.FLOOR_CHANGE_COLORS[color] then
-      return true
-    end
+
+  local cache = getFcCache()
+  if cache then
+    local key = makeFcKey(pos)
+    local cached = cache:get(key)
+    if cached ~= nil then return cached end
   end
-  
-  -- Slow path: tile inspection
-  local tile = map and map.getTile and map.getTile(pos)
+
+  local map = g_map
+  if not (map and map.getMinimapColor) then return false end
+  local color = map.getMinimapColor(pos)
+
+  -- Explored tile: minimap color is authoritative
+  if color > 0 then
+    local result = FloorItems.FLOOR_CHANGE_COLORS[color] == true
+    if cache then cache:set(makeFcKey(pos), result) end
+    return result
+  end
+
+  -- Unexplored tile (color 0): fall back to item inspection
+  local tile = map.getTile and map.getTile(pos)
   if tile then
     local ground = tile:getGround()
     if ground and FloorItems.FLOOR_CHANGE[ground:getId()] then
+      if cache then cache:set(makeFcKey(pos), true) end
       return true
     end
     local topThing = tile:getTopThing()
     if topThing and topThing.isItem and topThing:isItem() and FloorItems.FLOOR_CHANGE[topThing:getId()] then
+      if cache then cache:set(makeFcKey(pos), true) end
       return true
     end
   end
-  
+
+  if cache then cache:set(makeFcKey(pos), false) end
   return false
 end
 

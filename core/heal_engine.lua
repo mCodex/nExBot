@@ -58,10 +58,6 @@ local friendSpells = {
   { name = "exura sio",      key = "exura sio",      hp = 80, mpCost = 100, cd = 1100, prio = 3 },
 }
 
--- Event debounce (25ms for burst damage protection)
-local lastEventHeal = 0
-local EVENT_DEBOUNCE_MS = 25
-
 -- ============================================================================
 -- LOGGING
 -- ============================================================================
@@ -723,14 +719,8 @@ end
 -- CRITICAL: This provides instant reaction to damage for player safety!
 do
   local registered = false
-  local _lastStatEvent = 0
-  local _debounceMs = 25 -- Reduced from 50ms for faster burst damage response
 
   local function handleSnapshot()
-    local nowTime = nowMs()
-    if (nowTime - _lastStatEvent) < _debounceMs then return end
-    _lastStatEvent = nowTime
-
     local hpNow = getHpPercent()
     local mpNow = getMpPercent()
     local currentMana = getCurrentMana()

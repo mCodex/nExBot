@@ -80,51 +80,23 @@ PathUtils.FLOOR_CHANGE_COLORS = (FloorItems and FloorItems.FLOOR_CHANGE_COLORS) 
   [210] = true, [211] = true, [212] = true, [213] = true
 }
 
-PathUtils.FLOOR_CHANGE_ITEMS = (FloorItems and FloorItems.FLOOR_CHANGE) or {
-  [414] = true, [415] = true, [416] = true, [417] = true,
-  [428] = true, [429] = true, [430] = true, [431] = true,
-  [432] = true, [433] = true, [434] = true, [435] = true,
-  [1949] = true, [1950] = true, [1951] = true,
-  [1952] = true, [1953] = true, [1954] = true, [1955] = true,
-  [1956] = true, [1957] = true, [1958] = true, [1959] = true,
-  [1385] = true, [1396] = true, [1397] = true, [1398] = true,
-  [1399] = true, [1400] = true, [1401] = true, [1402] = true,
-  [4834] = true, [4835] = true, [4836] = true, [4837] = true,
-  [4838] = true, [4839] = true, [4840] = true, [4841] = true,
-  [6915] = true, [6916] = true, [6917] = true, [6918] = true,
-  [7545] = true, [7546] = true, [7547] = true, [7548] = true,
-  [1219] = true, [1386] = true, [3678] = true, [5543] = true,
-  [384] = true, [386] = true, [418] = true,
-  [294] = true, [369] = true, [370] = true, [383] = true,
-  [392] = true, [408] = true, [409] = true, [410] = true,
-  [469] = true, [470] = true, [482] = true, [484] = true,
-  [423] = true, [424] = true, [425] = true,
-  [426] = true, [427] = true,
-  [502] = true, [1387] = true,
-  [2129] = true, [2130] = true, [8709] = true,
-}
+PathUtils.FLOOR_CHANGE_ITEMS = (FloorItems and FloorItems.FLOOR_CHANGE) or {}
 
-PathUtils.FIELD_ITEMS = (FloorItems and FloorItems.FIELDS) or {
-  [1487] = true, [1488] = true, [1489] = true, [1490] = true, [1491] = true,
-  [1492] = true, [1493] = true, [1494] = true, [1495] = true, [1496] = true,
-  [1497] = true, [1498] = true, [1499] = true, [1500] = true, [1501] = true,
-  [1502] = true, [1503] = true, [1504] = true, [1505] = true, [1506] = true,
-  [2120] = true, [2121] = true, [2122] = true, [2123] = true, [2124] = true,
-  [2125] = true, [2126] = true, [2127] = true, [2128] = true,
-  [7487] = true, [7488] = true, [7489] = true, [7490] = true,
-  [8069] = true, [8070] = true, [8071] = true, [8072] = true,
-  [7465] = true, [7466] = true, [7467] = true, [7468] = true,
-  [2128] = true, [2129] = true, [2130] = true,
-  [7491] = true, [7492] = true, [7493] = true, [7494] = true,
-  [2130] = true, [2131] = true,
-}
+PathUtils.FIELD_ITEMS = (FloorItems and FloorItems.FIELD_ITEMS) or {}
 
 function PathUtils.isFloorChangeTile(pos)
   if not pos then return false end
   local map = getMap()
-  local color = map and map.getMinimapColor and map.getMinimapColor(pos) or 0
-  if PathUtils.FLOOR_CHANGE_COLORS[color] then return true end
-  local tile = map and map.getTile and map.getTile(pos)
+  if not (map and map.getMinimapColor) then return false end
+  local color = map.getMinimapColor(pos)
+
+  -- Explored tile: minimap color is authoritative
+  if color > 0 then
+    return PathUtils.FLOOR_CHANGE_COLORS[color] == true
+  end
+
+  -- Unexplored tile (color 0): fall back to item inspection
+  local tile = map.getTile and map.getTile(pos)
   if tile then
     local ground = tile:getGround()
     if ground and PathUtils.FLOOR_CHANGE_ITEMS[ground:getId()] then return true end

@@ -2,7 +2,25 @@ CaveBot.Actions = {}
 nExBot.lastLabel = ""
 
 local getClient = nExBot.Shared.getClient
-local getClientVersion = nExBot.Shared.getClientVersion
+
+local FloorItems = (function()
+  local ok, fi = pcall(dofile, "/constants/floor_items.lua")
+  if ok and fi then return fi end
+  ok, fi = pcall(dofile, "/core/constants/floor_items.lua")
+  return ok and fi or {}
+end)()
+
+local CARDINAL_OFFSETS = {{x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0}}
+
+local function getAdjacentPos(targetPos)
+  for _, off in ipairs(CARDINAL_OFFSETS) do
+    local alt = {x = targetPos.x + off.x, y = targetPos.y + off.y, z = targetPos.z}
+    if not (FloorItems.isFloorChangeTile and FloorItems.isFloorChangeTile(alt)) then
+      return alt
+    end
+  end
+  return nil
+end
 
 local function actionLimiter()
   return BotCore and BotCore.ActionRateLimiter
@@ -17,18 +35,6 @@ local function throttleCavebotAction(key, interval, actionType)
     return false
   end
   return true
-end
-
-local oldTibia = getClientVersion() < 960
-
-local warnedUnknownFloor = {}
-
-local DIR_MOD_LOOKUP = Directions.DIR_TO_OFFSET
-
-local function modPos(dir)
-  local mod = DIR_MOD_LOOKUP[dir]
-  if mod then return { mod.x, mod.y } end
-  return { 0, 0 }
 end
 
 local lastMoved = now - 200
@@ -68,79 +74,6 @@ onTextMessage(function(mode, text)
     end
   end
 end)
-
-local furnitureIgnoreSet = { [2986] = true }
-local function breakFurniture(destPos)
-  if isInPz() then return false end
-  local candidate = { thing = nil, dist = 100 }
-  local playerPos = player:getPosition()
-  local playerZ = playerPos.z
-  local Client = getClient()
-  local scannedSet = {}
-  local tilesToCheck = {}
-  local function addTilesAround(centerPos, radius)
-    for dx = -radius, radius do
-      for dy = -radius, radius do
-        local checkPos = {x = centerPos.x + dx, y = centerPos.y + dy, z = playerZ}
-        local key = checkPos.x .. "," .. checkPos.y
-        if not scannedSet[key] then
-          scannedSet[key] = true
-          local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
-          if tile then tilesToCheck[#tilesToCheck+1] = tile end
-        end
-      end
-    end
-  end
-  addTilesAround(playerPos, 7)
-  if destPos then addTilesAround(destPos, 3) end
-  for i, tile in ipairs(tilesToCheck) do
-    local topThing = tile:getTopThing()
-    if topThing then
-      local thingId = topThing:getId()
-      local isWg = thingId == 2130
-      local isItem = topThing:isItem()
-      if isWg or (not furnitureIgnoreSet[thingId] and isItem) then
-        local walkable = tile:isWalkable()
-        local moveable = not topThing:isNotMoveable()
-        if isWg or (not walkable and moveable) then
-          local tpos = tile:getPosition()
-          local path = findPath(playerPos, tpos, 7, { ignoreNonPathable = true, precision = 1 })
-          if path then
-            local distance = getDistanceBetween(destPos, tpos)
-            if distance < candidate.dist then
-              candidate.thing = topThing
-              candidate.dist = distance
-            end
-          end
-        end
-      end
-    end
-  end
-  if candidate.thing then
-    useWith(3197, candidate.thing)
-    return true
-  end
-  return false
-end
-
-local function pushPlayer(creature)
-  local cpos = creature:getPosition()
-  local tiles = getNearTiles(cpos)
-  local Client = getClient()
-  for i, tile in ipairs(tiles) do
-    local pos = tile:getPosition()
-    local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor(pos)) or 0
-    local stairs = (minimapColor >= 210 and minimapColor <= 213)
-    if not stairs and tile:isWalkable() then
-      if not throttleCavebotAction("push-player", 350, "move") then return false end
-      if Client and Client.move then
-        return Client.move(creature, pos)
-      else
-        return g_game.move(creature, pos)
-      end
-    end
-  end
-end
 
 CaveBot.addAction = function(action, value, focus)
   action = action:lower()
@@ -256,23 +189,17 @@ CaveBot.registerAction("function", "#ff4b81", function(value, retries, prev)
   return result
 end)
 
-local function isNearFloorChangePos(p)
-  if not p or not PathUtils or not PathUtils.isFloorChangeTile then return false end
-  if PathUtils.isFloorChangeTile(p) then return true end
-  local adj = {{x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0},{x=1,y=-1},{x=1,y=1},{x=-1,y=1},{x=-1,y=-1}}
-  for i = 1, #adj do
-    if PathUtils.isFloorChangeTile({x = p.x + adj[i].x, y = p.y + adj[i].y, z = p.z}) then return true end
-  end
-  return false
-end
+local ALL_OFFSETS = {
+  {x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0},
+  {x=1,y=-1},{x=1,y=1},{x=-1,y=1},{x=-1,y=-1}
+}
 
 local function getAdjacentApproachPos(playerPos, targetPos)
   if not playerPos or not targetPos then return targetPos end
   local bestPos, bestDist = nil, math.huge
-  local adj = {{x=0,y=-1},{x=1,y=0},{x=0,y=1},{x=-1,y=0},{x=1,y=-1},{x=1,y=1},{x=-1,y=1},{x=-1,y=-1}}
-  for i = 1, #adj do
-    local alt = {x = targetPos.x + adj[i].x, y = targetPos.y + adj[i].y, z = targetPos.z}
-    if not isNearFloorChangePos(alt) then
+  for _, off in ipairs(ALL_OFFSETS) do
+    local alt = {x = targetPos.x + off.x, y = targetPos.y + off.y, z = targetPos.z}
+    if not (FloorItems.isFloorChangeTile and FloorItems.isFloorChangeTile(alt)) then
       local d = math.max(math.abs(playerPos.x - alt.x), math.abs(playerPos.y - alt.y))
       if d < bestDist then bestPos = alt; bestDist = d end
     end
@@ -284,6 +211,8 @@ end
 -- SIMPLIFIED GOTO ACTION — Linear waypoint execution
 -- No Pure Pursuit, no oscillation tracker, no blocking monster classification
 -- ============================================================================
+
+CaveBot._pendingFC = nil
 
 CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   -- Parse position
@@ -300,31 +229,99 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   local precision = tonumber(posMatch[1][5]) or 1
   local playerPos = player:getPosition()
   local maxDist = CaveBot.getMaxGotoDistance()
+  -- Floor-change tile detection (delegated to FloorItems)
+  local isFC = FloorItems.isFloorChangeTile and FloorItems.isFloorChangeTile(destPos) or false
 
-  -- Floor check
-  if destPos.z ~= playerPos.z then return false, true end
-
-  -- Floor-change tile detection
-  local Client = getClient()
-  local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(destPos) or (g_map and g_map.getMinimapColor(destPos)) or 0
-  local isFloorChange = PathUtils and PathUtils.isFloorChangeTile and PathUtils.isFloorChangeTile(destPos) or false
-
-  local expectedFloorAfterChange = nil
-  if isFloorChange then
+  local expectedFC = nil
+  if isFC then
     precision = 0
-    if minimapColor == 210 or minimapColor == 211 then
-      expectedFloorAfterChange = destPos.z - 1
-    elseif minimapColor == 212 or minimapColor == 213 then
-      expectedFloorAfterChange = destPos.z + 1
-    end
-    if expectedFloorAfterChange == nil then
-      expectedFloorAfterChange = destPos.z
-      local warnKey = destPos.x .. "," .. destPos.y .. "," .. destPos.z .. ":" .. tostring(minimapColor)
-      if not warnedUnknownFloor[warnKey] then
-        warnedUnknownFloor[warnKey] = true
-        warn("[CaveBot] Floor-change tile at " .. destPos.x .. "," .. destPos.y .. "," .. destPos.z .. " has unknown minimap color " .. tostring(minimapColor) .. "; defaulting expectedFloor to " .. destPos.z)
+    local Client = getClient()
+    local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(destPos) or (g_map and g_map.getMinimapColor(destPos)) or 0
+    expectedFC = FloorItems.getExpectedFloor and FloorItems.getExpectedFloor(color, destPos.z) or destPos.z
+  end
+
+  -- ============================================================
+  -- FLOOR TRANSITION — Cross-floor / Z-level changes
+  -- Phases: 1=findFC 2=autoUse 3=postTransition
+  -- ============================================================
+  if destPos.z ~= playerPos.z then
+    -- Phase 3: Player Z now matches expected floor — transition complete
+    if CaveBot._pendingFC then
+      if playerPos.z == CaveBot._pendingFC.expectedFloor then
+        local savedDest = CaveBot._pendingFC.targetDest or destPos
+        CaveBot._pendingFC = nil
+        CaveBot.clearWaypointTarget()
+        local sameXY = math.abs(savedDest.x - playerPos.x) <= 1 and math.abs(savedDest.y - playerPos.y) <= 1
+        if sameXY then return true end
+        return "retry"
       end
+
+      -- Phase 2: At FC tile — auto-use or walk onto it
+      local fcPos = CaveBot._pendingFC.fcPos
+      if fcPos then
+        local dx = math.abs(playerPos.x - fcPos.x)
+        local dy = math.abs(playerPos.y - fcPos.y)
+        local distToFC = math.max(dx, dy)
+
+        if distToFC > 1 then
+          local adjacentPos = getAdjacentPos(fcPos)
+          if adjacentPos then
+            local atAdj = math.abs(playerPos.x - adjacentPos.x) <= 1 and math.abs(playerPos.y - adjacentPos.y) <= 1
+            if not atAdj then
+              local wr = CaveBot.walkTo(adjacentPos, maxDist, { ignoreNonPathable = true, precision = 1, allowFloorChange = false })
+              if wr then
+                if CaveBot.setCurrentWaypointTarget then CaveBot.setCurrentWaypointTarget(fcPos, 0) end
+                return "walking"
+              end
+            end
+          end
+        end
+
+        if distToFC == 0 then
+          if CaveBot.stopAutoWalk then CaveBot.stopAutoWalk() end
+        elseif distToFC == 1 then
+          local Client = getClient()
+          local tile = (Client and Client.getTile) and Client.getTile(fcPos) or (g_map and g_map.getTile and g_map.getTile(fcPos))
+          if tile then
+            local useThing = tile.getTopUseThing and tile:getTopUseThing() or tile:getTopThing()
+            local useId = useThing and useThing.isItem and useThing:getId() or 0
+            local ground = tile:getGround()
+            local groundId = ground and ground:getId() or 0
+            local ropeId = CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("ropeToolId") or 3003
+            local shovelId = CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("shovelToolId") or 3457
+
+            if (FloorItems.isLadder(groundId) or FloorItems.isLadder(useId)) and throttleCavebotAction("fc-use-ladder", 800, "use") then
+              use(useThing or ground)
+              CaveBot.delay(CaveBot.Config.get("useDelay") + CaveBot.Config.get("ping"))
+            elseif (FloorItems.isRopeSpot(groundId) or FloorItems.isRopeSpot(useId)) and throttleCavebotAction("fc-use-rope", 800, "useWith") then
+              useWith(ropeId, useThing or ground)
+              CaveBot.delay(CaveBot.Config.get("useDelay") + CaveBot.Config.get("ping"))
+            elseif (FloorItems.isHole(groundId) or FloorItems.isHole(useId)) and throttleCavebotAction("fc-use-shovel", 800, "useWith") then
+              useWith(shovelId, useThing or ground)
+              CaveBot.delay(CaveBot.Config.get("useDelay") + CaveBot.Config.get("ping"))
+            elseif not (player and player.isWalking and player:isWalking()) then
+              -- Stairs/ramps: walk onto FC tile
+              local wr = CaveBot.walkTo(fcPos, maxDist, { precision = 0, allowFloorChange = true })
+              if wr then return "walking" end
+            end
+          end
+        end
+      end
+      return "retry"
     end
+
+    -- Phase 1: Find nearest FC tile for floor transition
+    local PS = nExBot and nExBot.PathStrategy
+    local fcPos = PS and PS.findNearestFC and PS.findNearestFC(playerPos, destPos.z, 20)
+    if fcPos then
+      local map = g_map
+      local color = map and map.getMinimapColor and map.getMinimapColor(fcPos) or 0
+      local expectedFloor = FloorItems.getExpectedFloor and FloorItems.getExpectedFloor(color, fcPos.z) or destPos.z
+      CaveBot._pendingFC = { expectedFloor = expectedFloor, targetDest = destPos, fcPos = fcPos }
+      return "retry"
+    end
+
+    return false, true
   end
 
   -- Distance
@@ -335,8 +332,9 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   -- Arrival check
   if dist <= precision then
     CaveBot.clearWaypointTarget()
-    if isFloorChange then
-      if playerPos.z == expectedFloorAfterChange then return true end
+    if isFC then
+      if playerPos.z == expectedFC then return true end
+      CaveBot._pendingFC = { expectedFloor = expectedFC }
       CaveBot.delay(50)
       return "retry"
     end
@@ -355,25 +353,86 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   -- Too far
   if dist > maxDist then return false, true end
 
-  -- Max retries: simple counter, then advance
-  local maxRetries = 30
-  if retries >= maxRetries then return false end
+  -- Max retries
+  if retries >= 30 then return false end
 
   -- Walk parameters with progressive escalation
   local walkParams = {
     ignoreNonPathable = true,
-    precision = isFloorChange and 0 or math.max(0, precision - 1),
-    allowFloorChange = isFloorChange
+    precision = isFC and 0 or math.max(0, precision - 1),
+    allowFloorChange = false
   }
   if retries > 1 then walkParams.ignoreCreatures = true end
   if retries > 2 then walkParams.ignoreFields = true end
 
+  -- FC tile: adjacent approach only when not yet adjacent
+  if isFC and dist > 1 then
+    local adjacentPos = getAdjacentPos(destPos)
+    if adjacentPos then
+      local atAdj = math.abs(playerPos.x - adjacentPos.x) <= 1 and math.abs(playerPos.y - adjacentPos.y) <= 1
+      if not atAdj then
+        local wr = CaveBot.walkTo(adjacentPos, maxDist, {
+          ignoreNonPathable = true, precision = 1,
+          allowFloorChange = false,
+          ignoreCreatures = retries > 1, ignoreFields = retries > 2,
+        })
+        if wr then
+          if CaveBot.setCurrentWaypointTarget then
+            CaveBot.setCurrentWaypointTarget(destPos, 0)
+          end
+          return "walking"
+        end
+      end
+    end
+  end
+
+  -- FC tile: auto-use for ladders/ropes/holes when adjacent (dist == 1)
+  if isFC and dist == 1 then
+    local Client = getClient()
+    local tile = (Client and Client.getTile) and Client.getTile(destPos) or (g_map and g_map.getTile and g_map.getTile(destPos))
+    if tile then
+      local useThing = tile.getTopUseThing and tile:getTopUseThing() or tile:getTopThing()
+      local useId = useThing and useThing.isItem and useThing:getId() or 0
+      local ground = tile:getGround()
+      local groundId = ground and ground:getId() or 0
+
+      -- LADDER (requires USE action)
+      if FloorItems.isLadder(groundId) or FloorItems.isLadder(useId) then
+        if throttleCavebotAction("fc-use-ladder", 800, "use") then
+          use(useThing or ground)
+          CaveBot.delay(CaveBot.Config.get("useDelay") + CaveBot.Config.get("ping"))
+        end
+        return "retry"
+      end
+
+      -- ROPE SPOT
+      if FloorItems.isRopeSpot(groundId) or FloorItems.isRopeSpot(useId) then
+        local ropeId = CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("ropeToolId") or 3003
+        if throttleCavebotAction("fc-use-rope", 800, "useWith") then
+          useWith(ropeId, useThing or ground)
+          CaveBot.delay(CaveBot.Config.get("useDelay") + CaveBot.Config.get("ping"))
+        end
+        return "retry"
+      end
+
+      -- HOLE (requires SHOVEL)
+      if FloorItems.isHole(groundId) or FloorItems.isHole(useId) then
+        local shovelId = CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("shovelToolId") or 3457
+        if throttleCavebotAction("fc-use-shovel", 800, "useWith") then
+          useWith(shovelId, useThing or ground)
+          CaveBot.delay(CaveBot.Config.get("useDelay") + CaveBot.Config.get("ping"))
+        end
+        return "retry"
+      end
+    end
+  end
+
   -- Stop autoWalk when close to FC tile for precise steps
-  if isFloorChange and dist <= 3 then
+  if isFC and dist <= 3 then
     if CaveBot.stopAutoWalk then CaveBot.stopAutoWalk() end
   end
 
-  -- Attempt walk
+  -- Attempt walk to dest
   local walkResult = CaveBot.walkTo(destPos, maxDist, walkParams)
   if walkResult then
     if CaveBot.setCurrentWaypointTarget then
@@ -400,14 +459,12 @@ CaveBot.registerAction("use", "#3be4d0", function(value, retries, prev)
   end
   pos = {x=tonumber(pos[1][2]), y=tonumber(pos[1][3]), z=tonumber(pos[1][4])}
   local playerPos = player:getPosition()
-  local isFC = PathUtils and PathUtils.isFloorChangeTile and PathUtils.isFloorChangeTile(pos) or false
+  local isFC = FloorItems.isFloorChangeTile and FloorItems.isFloorChangeTile(pos) or false
   if pos.z ~= playerPos.z then
     if isFC then
       local Client = getClient()
       local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor(pos)) or 0
-      local expectedFloor = pos.z
-      if minimapColor == 210 or minimapColor == 211 then expectedFloor = pos.z - 1
-      elseif minimapColor == 212 or minimapColor == 213 then expectedFloor = pos.z + 1 end
+      local expectedFloor = FloorItems.getExpectedFloor and FloorItems.getExpectedFloor(minimapColor, pos.z) or pos.z
       if playerPos.z == expectedFloor then return true end
     end
     return false
@@ -446,14 +503,12 @@ CaveBot.registerAction("usewith", "#3be4d0", function(value, retries, prev)
   itemid = tonumber(pos[1][2])
   pos = {x=tonumber(pos[1][3]), y=tonumber(pos[1][4]), z=tonumber(pos[1][5])}
   local playerPos = player:getPosition()
-  local isFC = PathUtils and PathUtils.isFloorChangeTile and PathUtils.isFloorChangeTile(pos) or false
+  local isFC = FloorItems.isFloorChangeTile and FloorItems.isFloorChangeTile(pos) or false
   if pos.z ~= playerPos.z then
     if isFC then
       local Client = getClient()
       local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor(pos)) or 0
-      local expectedFloor = pos.z
-      if minimapColor == 210 or minimapColor == 211 then expectedFloor = pos.z - 1
-      elseif minimapColor == 212 or minimapColor == 213 then expectedFloor = pos.z + 1 end
+      local expectedFloor = FloorItems.getExpectedFloor and FloorItems.getExpectedFloor(minimapColor, pos.z) or pos.z
       if playerPos.z == expectedFloor then return true end
     end
     return false

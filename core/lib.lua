@@ -625,6 +625,7 @@ local function isInShape(dx, dy, range, shape, direction, cone)
   return false
 end
 nExBot.isInShape = isInShape
+nExBot.isFriend = isFriend
 
 function getMonstersAdvanced(range, shape, options)
   -- Delegate to BotCore.Creatures if loaded (DRY: single implementation)

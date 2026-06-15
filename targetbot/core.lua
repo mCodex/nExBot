@@ -150,82 +150,69 @@ local FloorItems = (function()
   return nil
 end)()
 
--- Minimal minimap colors that typically indicate stairs/ramps/holes
-TargetCore.PathSafety.FLOOR_CHANGE_COLORS = (FloorItems and FloorItems.FLOOR_CHANGE_COLORS) or {
-  [210] = true, [211] = true, [212] = true, [213] = true,
-  -- Additional colors that may indicate floor changes
-  [214] = true, [215] = true, [216] = true, [217] = true,
-}
+-- Floor-change colors: delegate to FloorItems as single source of truth
+TargetCore.PathSafety.FLOOR_CHANGE_COLORS = (FloorItems and FloorItems.FLOOR_CHANGE_COLORS) or {}
 
--- Comprehensive floor-change item ids (using constants or fallback)
-TargetCore.PathSafety.FLOOR_CHANGE_ITEMS = (FloorItems and FloorItems.FLOOR_CHANGE) or {
-  -- === STAIRS DOWN ===
-  [414] = true, [415] = true, [416] = true, [417] = true,
-  [428] = true, [429] = true, [430] = true, [431] = true,
-  -- === STAIRS UP ===
-  [432] = true, [433] = true, [434] = true, [435] = true,
-  -- === WOODEN STAIRS ===
-  [1949] = true, [1950] = true, [1951] = true,
-  [1952] = true, [1953] = true, [1954] = true, [1955] = true,
-  -- === RAMPS (MOST COMMON CAUSE OF ACCIDENTAL FLOOR CHANGES) ===
-  [1956] = true, [1957] = true, [1958] = true, [1959] = true,
-  [1385] = true, [1396] = true, [1397] = true, [1398] = true,
-  [1399] = true, [1400] = true, [1401] = true, [1402] = true,
-  [4834] = true, [4835] = true, [4836] = true, [4837] = true,
-  [4838] = true, [4839] = true, [4840] = true, [4841] = true,
-  [6915] = true, [6916] = true, [6917] = true, [6918] = true,
-  [7545] = true, [7546] = true, [7547] = true, [7548] = true,
-  -- === LADDERS ===
-  [1219] = true, [1386] = true, [3678] = true, [5543] = true,
-  -- === ROPE SPOTS ===
-  [384] = true, [386] = true, [418] = true,
-  -- === HOLES & PITFALLS ===
-  [294] = true, [369] = true, [370] = true, [383] = true,
-  [392] = true, [408] = true, [409] = true, [410] = true,
-  [469] = true, [470] = true, [482] = true, [484] = true,
-  -- === TRAPDOORS ===
-  [423] = true, [424] = true, [425] = true,
-  -- === SEWER GRATES ===
-  [426] = true, [427] = true,
-  -- === TELEPORTS & PORTALS ===
-  [502] = true, [1387] = true, [2129] = true, [2130] = true, [8709] = true,
-  -- === ADDITIONAL FLOOR CHANGE ITEMS ===
-  -- More teleports and portals
-  [1948] = true, [1947] = true, [7765] = true, [7766] = true,
-  [7767] = true, [7768] = true, [7769] = true, [7770] = true,
-  [7771] = true, [7772] = true,
-  -- Magic forcefields
-  [2128] = true, [2131] = true, [2132] = true, [2133] = true,
-  -- Additional holes and depressions
-  [293] = true, [385] = true, [387] = true, [388] = true,
-  [389] = true, [390] = true, [391] = true, [395] = true,
-  [396] = true, [397] = true, [398] = true, [399] = true,
-  [400] = true, [401] = true, [402] = true, [403] = true,
-  [404] = true, [405] = true, [406] = true, [407] = true,
-  -- More stairs and ramps
-  [4352] = true, [4353] = true, [4354] = true, [4355] = true,
-  [4356] = true, [4357] = true, [4358] = true, [4359] = true,
-  [4360] = true, [4361] = true, [4362] = true, [4363] = true,
-  [4364] = true, [4365] = true, [4366] = true, [4367] = true,
-  -- Underground ramps
-  [8710] = true, [8711] = true, [8712] = true, [8713] = true,
-  [8714] = true, [8715] = true, [8716] = true, [8717] = true,
-}
+-- Floor-change items: delegate to FloorItems constant as single source of truth
+TargetCore.PathSafety.FLOOR_CHANGE_ITEMS = (FloorItems and FloorItems.FLOOR_CHANGE) or {}
 
--- Check if tile position is a floor-change tile (no caching here)
+-- Floor-change tile cache (persistent across sessions, auto-evicts)
+local floorChangeCache = WeakCache and WeakCache.createLRU(500) or nil
+
+-- Generate cache key from position
+local function makeFloorChangeKey(pos)
+  return pos.x .. "," .. pos.y .. "," .. pos.z
+end
+
+-- Check if tile position is a floor-change tile (with caching)
+-- Minimap color is authoritative for explored tiles (color > 0).
+-- Item inspection is only used for unexplored tiles (color == 0).
 function TargetCore.PathSafety.isFloorChangeTile(pos)
   if not pos then return false end
+  
+  local key = makeFloorChangeKey(pos)
+  
+  -- Check cache first
+  if floorChangeCache then
+    local cached = floorChangeCache:get(key)
+    if cached ~= nil then
+      return cached
+    end
+  end
+  
   local Client = getClient()
   local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor and g_map.getMinimapColor(pos)) or 0
-  if color and TargetCore.PathSafety.FLOOR_CHANGE_COLORS[color] then return true end
+
+  -- Explored tile: minimap color is authoritative
+  if color > 0 then
+    local result = TargetCore.PathSafety.FLOOR_CHANGE_COLORS[color] == true
+    if floorChangeCache then floorChangeCache:set(key, result) end
+    return result
+  end
+
+  -- Unexplored tile (color 0): fall back to item inspection
   local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile and g_map.getTile(pos))
-  if not tile then return false end
+  if not tile then
+    if floorChangeCache then floorChangeCache:set(key, false) end
+    return false
+  end
   local ground = tile:getGround()
-  if ground and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[ground:getId()] then return true end
+  if ground and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[ground:getId()] then
+    if floorChangeCache then floorChangeCache:set(key, true) end
+    return true
+  end
   local useThing = tile:getTopUseThing()
-  if useThing and useThing:isItem() and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[useThing:getId()] then return true end
+  if useThing and useThing:isItem() and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[useThing:getId()] then
+    if floorChangeCache then floorChangeCache:set(key, true) end
+    return true
+  end
   local topThing = tile:getTopThing()
-  if topThing and topThing:isItem() and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[topThing:getId()] then return true end
+  if topThing and topThing:isItem() and TargetCore.PathSafety.FLOOR_CHANGE_ITEMS[topThing:getId()] then
+    if floorChangeCache then floorChangeCache:set(key, true) end
+    return true
+  end
+  
+  if floorChangeCache then floorChangeCache:set(key, false) end
   return false
 end
 
@@ -754,7 +741,7 @@ function TargetCore.Metrics.reset()
   TargetCore.Metrics.cacheHits = 0
   TargetCore.Metrics.cacheMisses = 0
   TargetCore.Metrics.avgPriorityCalcTime = 0
-  TargetCore.Metrics.lastReset = now
+  TargetCore.Metrics.lastReset = nowMs and nowMs() or (os.time() * 1000)
 end
 
 function TargetCore.Metrics.getCacheHitRate()

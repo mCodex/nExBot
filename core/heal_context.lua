@@ -81,16 +81,6 @@ function HealContext.get()
   return snapshotOnce()
 end
 
-function HealContext.isCritical()
-  snapshotOnce()
-  return HealContext.critical
-end
-
-function HealContext.isDanger()
-  snapshotOnce()
-  return HealContext.dangerFlag
-end
-
 function HealContext.setThresholds(opts)
   if not opts then return end
   if opts.hpCritical then HealContext.thresholds.hpCritical = opts.hpCritical end
