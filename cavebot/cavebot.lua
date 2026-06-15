@@ -507,6 +507,20 @@ CaveBot.findBestWaypoint = function()
   return false
 end
 
+CaveBot.findFloorTransitionWaypoint = function()
+  local playerPos = player:getPosition()
+  if not playerPos then return false end
+  buildWaypointCache()
+  local best = WaypointNavigator.findRescueWaypoint(playerPos, waypointPositionCache, CaveBot.getMaxGotoDistance())
+  if best then
+    ui.list:focusChild(best.wp.child)
+    actionRetries = 0
+    print("[CaveBot] Rescue: focused transition waypoint at " .. best.wp.x .. "," .. best.wp.y .. "," .. best.wp.z)
+    return true
+  end
+  return false
+end
+
 CaveBot.gotoNextWaypointInRange = CaveBot.findBestWaypoint
 
 local waypointRecovery = { lastRequest = 0, cooldown = 1000, attempts = 0 }

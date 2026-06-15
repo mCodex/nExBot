@@ -228,9 +228,15 @@ CaveBot.registerAction("goto", "#46e6a6", function(value, retries, prev)
   local playerPos = player:getPosition()
   local maxDist = CaveBot.getMaxGotoDistance()
 
-  -- Different floor: return false (use explicit "use" waypoints for stairs/ladders/ropes)
+  -- Different floor: try same-floor rescue, then floor-transition rescue, then skip
   if destPos.z ~= playerPos.z then
-    return false
+    if CaveBot.findBestWaypoint() then
+      return "retry"
+    end
+    if CaveBot.findFloorTransitionWaypoint() then
+      return "retry"
+    end
+    return false, true
   end
 
   local distX = math.abs(destPos.x - playerPos.x)

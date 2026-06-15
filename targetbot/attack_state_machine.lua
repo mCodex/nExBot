@@ -41,9 +41,9 @@ end
 
 local COOLDOWN = 300
 local CONFIRM_TIMEOUT = 1200
-local GRACE_PERIOD = 1500
+local GRACE_PERIOD = 500
 local STOP_DEBOUNCE = 150
-local SWITCH_COOLDOWN = 2500
+local SWITCH_COOLDOWN = 500
 local MAX_RETRIES = 2
 local SKIP_DURATION = 10000
 
@@ -249,6 +249,30 @@ end
 function AttackStateMachine.reset()
   state.current = STATE.IDLE; state.creature = nil; state.targetId = nil
   state.skipList = {}; state.retries = 0; state.lastStopAt = 0; state.lastSwitchAt = 0
+end
+
+-- EventBus: immediate re-targeting when current target dies
+-- Must clear lastStopAt AFTER transition() so the stop debounce doesn't block re-attack
+local function clearTargetAndReset()
+  if state.current == STATE.IDLE then return end
+  clearTarget()
+  transition(STATE.IDLE)
+  state.lastStopAt = 0
+  state.lastSwitchAt = 0
+end
+
+if EventBus and EventBus.on then
+  EventBus.on("monster:disappear", function(creature)
+    if not creature then return end
+    local cid = cId(creature)
+    if cid and cid == state.targetId then clearTargetAndReset() end
+  end, 100)
+
+  EventBus.on("monster:killed", function(creature)
+    if not creature then return end
+    local cid = cId(creature)
+    if cid and cid == state.targetId then clearTargetAndReset() end
+  end, 100)
 end
 
 return AttackStateMachine

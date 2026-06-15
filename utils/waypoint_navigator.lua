@@ -137,4 +137,59 @@ function WaypointNavigator.stuckDetected(posHistory, threshold)
 end
 
 
+--[[
+  Find nearest floor-transition rescue waypoint.
+  Auto-detects consecutive goto waypoints with different Z levels.
+  Returns the waypoint on player's floor that is closest to a transition.
+]]
+function WaypointNavigator.findRescueWaypoint(playerPos, waypoints, maxDist)
+  if not playerPos or not waypoints or #waypoints < 2 then return nil end
+  maxDist = maxDist or 50
+
+  local rescueCandidates = {}
+  local playerZ = playerPos.z
+
+  -- Build list of waypoints in insertion order
+  local ordered = {}
+  for i, wp in ipairs(waypoints) do
+    ordered[i] = wp
+  end
+
+  -- Detect floor transitions: consecutive goto waypoints with different Z
+  for i = 1, #ordered - 1 do
+    local a, b = ordered[i], ordered[i + 1]
+    if a and b and a.isGoto and b.isGoto and a.z ~= b.z then
+      if a.z == playerZ then
+        local cheb = math.max(math.abs(playerPos.x - a.x), math.abs(playerPos.y - a.y))
+        if cheb <= maxDist * 2 then
+          rescueCandidates[#rescueCandidates + 1] = { wp = a, idx = i, cheb = cheb, otherZ = b.z }
+        end
+      elseif b.z == playerZ then
+        local cheb = math.max(math.abs(playerPos.x - b.x), math.abs(playerPos.y - b.y))
+        if cheb <= maxDist * 2 then
+          rescueCandidates[#rescueCandidates + 1] = { wp = b, idx = i + 1, cheb = cheb, otherZ = a.z }
+        end
+      end
+    end
+  end
+
+  if #rescueCandidates == 0 then return nil end
+
+  table.sort(rescueCandidates, function(a, b) return a.cheb < b.cheb end)
+
+  local best = rescueCandidates[1]
+  if best.cheb <= 3 then
+    return { wp = best.wp, idx = best.idx, dist = best.cheb, directWalk = true }
+  end
+
+  -- Try pathfinding for the closest candidate
+  local opts = { maxSteps = math.min(best.cheb + 10, 50), ignoreCreatures = true, ignoreNonPathable = true }
+  local path = PS().findPath(playerPos, { x = best.wp.x, y = best.wp.y, z = best.wp.z }, opts)
+  if path and #path > 0 then
+    return { wp = best.wp, idx = best.idx, dist = #path }
+  end
+
+  return nil
+end
+
 return WaypointNavigator
