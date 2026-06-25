@@ -50,16 +50,7 @@ TargetCore.CONSTANTS = {
   },
   
   -- Direction index to vector (O(1) lookup)
-  DIR_VECTORS = {
-    [0] = {x = 0, y = -1},   -- North
-    [1] = {x = 1, y = 0},    -- East
-    [2] = {x = 0, y = 1},    -- South
-    [3] = {x = -1, y = 0},   -- West
-    [4] = {x = 1, y = -1},   -- NorthEast
-    [5] = {x = 1, y = 1},    -- SouthEast
-    [6] = {x = -1, y = 1},   -- SouthWest
-    [7] = {x = -1, y = -1}   -- NorthWest
-  },
+  DIR_VECTORS = Directions.DIR_TO_OFFSET,
   
   -- Adjacent offsets (pre-computed for iteration)
   ADJACENT_OFFSETS = {

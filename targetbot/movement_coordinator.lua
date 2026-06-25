@@ -510,16 +510,7 @@ end
 MovementCoordinator.WalkPrediction = {}
 
 -- Direction vectors for walk prediction
-local DIR_VECTORS = {
-  [0] = {x = 0, y = -1},  -- North
-  [1] = {x = 1, y = 0},   -- East
-  [2] = {x = 0, y = 1},   -- South
-  [3] = {x = -1, y = 0},  -- West
-  [4] = {x = 1, y = -1},  -- NE
-  [5] = {x = 1, y = 1},   -- SE
-  [6] = {x = -1, y = 1},  -- SW
-  [7] = {x = -1, y = -1}, -- NW
-}
+local DIR_VECTORS = Directions.DIR_TO_OFFSET
 
 -- Predict where creature will be after its current step completes
 -- @param creature The creature to predict

@@ -431,9 +431,7 @@ local function attributeDamageSource(damage)
   -- Cache spectator list for 200ms to avoid repeated API calls
   local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
   if not _damageAttrCachedCreatures or (nowt - _damageAttrCacheTime) > _damageAttrCacheTTL then
-    _damageAttrCachedCreatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
-      and MovementCoordinator.MonsterCache.getNearby(radius)
-      or g_map.getSpectatorsInRange(playerPos, false, radius, radius)
+    _damageAttrCachedCreatures = CreatureCache.getNearby(radius) or {}
     _damageAttrCacheTime = nowt
   end
 

@@ -107,25 +107,13 @@ local function safeCreatureCall(creature, methodName, default)
 end
 
 -- Safely get creature ID
-local function safeGetId(creature)
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
-end
+local safeGetId = SafeCreature.getId
 
 -- Safely check if creature is dead
-local function safeIsDead(creature)
-  if not creature then return true end
-  local ok, dead = pcall(function() return creature:isDead() end)
-  return ok and dead or true
-end
+local safeIsDead = SafeCreature.isDead
 
 -- Safely check if creature is a monster
-local function safeIsMonster(creature)
-  if not creature then return false end
-  local ok, monster = pcall(function() return creature:isMonster() end)
-  return ok and monster or false
-end
+local safeIsMonster = SafeCreature.isMonster
 
 -- Safely check if creature is removed
 local function safeIsRemoved(creature)

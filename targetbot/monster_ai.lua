@@ -118,44 +118,16 @@ local function safeCreatureCall(creature, methodName, default)
   end
 end
 
--- Safely get creature ID (most common operation)
-local function safeGetId(creature)
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
-end
-
--- Safely check if creature is dead
-local function safeIsDead(creature)
-  if not creature then return true end
-  local ok, dead = pcall(function() return creature:isDead() end)
-  return ok and dead or true
-end
-
--- Safely check if creature is a monster
-local function safeIsMonster(creature)
-  if not creature then return false end
-  local ok, monster = pcall(function() return creature:isMonster() end)
-  return ok and monster or false
-end
-
--- Safely check if creature is removed
-local function safeIsRemoved(creature)
-  if not creature then return true end
-  local ok, removed = pcall(function() return creature:isRemoved() end)
-  if not ok then return true end
-  return removed or false
-end
+-- Safe creature accessors (delegated to SafeCreature)
+local safeGetId = SafeCreature.getId
+local safeIsDead = SafeCreature.isDead
+local safeIsMonster = SafeCreature.isMonster
+local safeIsRemoved = SafeCreature.isRemoved
 
 -- Combined safe check: is the creature a valid, alive monster?
 local function isValidAliveMonster(creature)
   if not creature then return false end
-  
-  local ok, result = pcall(function()
-    return creature:isMonster() and not creature:isDead() and not creature:isRemoved()
-  end)
-  
-  return ok and result or false
+  return SafeCreature.isMonster(creature) and not SafeCreature.isDead(creature) and not SafeCreature.isRemoved(creature)
 end
 
 -- Extended telemetry defaults
@@ -1413,10 +1385,7 @@ if EventBus then
       return score, data
     end
 
-    local Client = getClient()
-    local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
-      and MovementCoordinator.MonsterCache.getNearby(CONST.DAMAGE.CORRELATION_RADIUS)
-      or ((Client and Client.getSpectatorsInRange) and Client.getSpectatorsInRange(playerPos, false, CONST.DAMAGE.CORRELATION_RADIUS, CONST.DAMAGE.CORRELATION_RADIUS) or (g_map and g_map.getSpectatorsInRange and g_map.getSpectatorsInRange(playerPos, false, CONST.DAMAGE.CORRELATION_RADIUS, CONST.DAMAGE.CORRELATION_RADIUS)))
+    local creatures = CreatureCache.getNearby(CONST.DAMAGE.CORRELATION_RADIUS) or {}
 
     local bestScore, bestData, bestMonster = 0, nil, nil
     for i = 1, #creatures do
@@ -1910,30 +1879,7 @@ function MonsterAI.updateAll()
     pcall(function() MonsterAI.VolumeAdaptation.update() end)
   end
 
-  -- OPTIMIZED: Prefer MonsterCache for O(1) cached creature lookup
-  -- This avoids expensive g_map.getSpectatorsInRange calls
-  local creatures = nil
-  if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
-    creatures = MovementCoordinator.MonsterCache.getNearby(8)
-  end
-  
-  -- Fallback only if MonsterCache is empty or unavailable
-  if not creatures or #creatures == 0 then
-    if SpectatorCache and SpectatorCache.getNearby then
-      creatures = SpectatorCache.getNearby(8, 8) or {}
-    else
-      local Client = getClient()
-      local ok, result = pcall(function()
-        if Client and Client.getSpectatorsInRange then
-          return Client.getSpectatorsInRange(playerPos, false, 8, 8)
-        elseif g_map and g_map.getSpectatorsInRange then
-          return g_map.getSpectatorsInRange(playerPos, false, 8, 8)
-        end
-        return {}
-      end)
-      creatures = ok and result or {}
-    end
-  end
+  local creatures = CreatureCache.getNearby(8) or {}
 
   if not creatures then
     return

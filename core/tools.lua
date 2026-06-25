@@ -9,6 +9,7 @@ local getClient = nExBot.Shared.getClient
 
 -- Version check helper
 local getClientVersion = nExBot.Shared.getClientVersion
+local SC = SafeCreature
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- PROFILE STORAGE INTEGRATION
@@ -949,30 +950,7 @@ local function saveFollowPlayerConfig()
   end
 end
 
--- Safe creature getters
-local function safeGetId(creature)
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
-end
-
-local function safeGetPosition(creature)
-  if not creature then return nil end
-  local ok, pos = pcall(function() return creature:getPosition() end)
-  return ok and pos or nil
-end
-
-local function safeGetName(creature)
-  if not creature then return nil end
-  local ok, name = pcall(function() return creature:getName() end)
-  return ok and name or nil
-end
-
-local function safeIsDead(creature)
-  if not creature then return true end
-  local ok, dead = pcall(function() return creature:isDead() end)
-  return ok and dead or true
-end
+-- Safe creature getters (delegated to SafeCreature)
 
 -- Calculate distance between positions (Chebyshev distance)
 local function calcDistance(pos1, pos2)
@@ -1003,7 +981,7 @@ local function findPlayerByName(name)
     local okPlayer, isPlayer = pcall(function() return c and c:isPlayer() end)
     local okLocal, isLocal = pcall(function() return c and c:isLocalPlayer() end)
     if okPlayer and isPlayer and (not okLocal or not isLocal) then
-      local cname = safeGetName(c)
+      local cname = SC.getName(c)
       if cname and (cname:lower() == lname or cname:lower():find(lname, 1, true)) then
         return c
       end
@@ -1020,9 +998,9 @@ local function followStartCreature(creature)
   local currentTime = now or (os.time() * 1000)
   
   -- Store reference
-  followState.targetPlayerId = safeGetId(creature)
+  followState.targetPlayerId = SC.getId(creature)
   followState.targetPlayerCreature = creature
-  followState.targetPlayerPosition = safeGetPosition(creature)
+  followState.targetPlayerPosition = SC.getPosition(creature)
   followState.lastNativeFollow = currentTime
   
   -- Use native follow API with ClientService fallback
@@ -1081,7 +1059,7 @@ local function isFollowingTarget()
   end
   
   if not currentFollow then return false end
-  return safeGetId(currentFollow) == followState.targetPlayerId
+  return SC.getId(currentFollow) == followState.targetPlayerId
 end
 
 -- v3.0: Enhanced path calculation with OpenTibiaBR g_map.findPath
@@ -1090,7 +1068,7 @@ local function getPathToLeader(leaderPos)
   local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if not localPlayer or not leaderPos then return nil, 999 end
   
-  local playerPos = safeGetPosition(localPlayer)
+  local playerPos = SC.getPosition(localPlayer)
   if not playerPos then return nil, 999 end
   
   -- Different floor = can't path
@@ -1145,7 +1123,7 @@ local function walkStepToLeader(leaderPos)
   local isWalking = localPlayer.isWalking and localPlayer:isWalking()
   if isWalking then return false end
   
-  local playerPos = safeGetPosition(localPlayer)
+  local playerPos = SC.getPosition(localPlayer)
   if not playerPos then return false end
   
   local path, pathLen = getPathToLeader(leaderPos)
@@ -1194,7 +1172,7 @@ local function smartWalkToLeader(leaderPos)
   local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if not localPlayer then return false end
   
-  local playerPos = safeGetPosition(localPlayer)
+  local playerPos = SC.getPosition(localPlayer)
   if not playerPos then return false end
   
   local path, pathLen = getPathToLeader(leaderPos)
@@ -1262,7 +1240,7 @@ local function reissueAttack()
   
   -- Verify target is still valid
   local target = followState.currentAttackTarget
-  if safeIsDead(target) then
+  if SC.isDead(target) then
     followState.currentAttackTarget = nil
     followState.currentAttackTargetId = nil
     followState.parallelMode = false
@@ -1320,7 +1298,7 @@ local function parallelWalkStep(leaderPos)
   local isWalking = localPlayer.isWalking and localPlayer:isWalking()
   if isWalking then return false end
   
-  local playerPos = safeGetPosition(localPlayer)
+  local playerPos = SC.getPosition(localPlayer)
   if not playerPos then return false end
   
   -- Calculate path to leader
@@ -1370,7 +1348,7 @@ local function executeParallelAttackFollow(leaderPos)
   local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if not localPlayer then return false end
   
-  local playerPos = safeGetPosition(localPlayer)
+  local playerPos = SC.getPosition(localPlayer)
   if not playerPos then return false end
   
   local distance = calcDistance(playerPos, leaderPos)
@@ -1385,7 +1363,7 @@ local function executeParallelAttackFollow(leaderPos)
   local currentTarget = getCurrentAttackTarget()
   if currentTarget then
     followState.currentAttackTarget = currentTarget
-    followState.currentAttackTargetId = safeGetId(currentTarget)
+    followState.currentAttackTargetId = SC.getId(currentTarget)
   end
   
   -- Step 1: Re-issue attack to maintain target lock
@@ -1415,7 +1393,7 @@ local function shouldForceFollow()
   local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if not localPlayer then return false end
   
-  local playerPos = safeGetPosition(localPlayer)
+  local playerPos = SC.getPosition(localPlayer)
   if not playerPos then return false end
   
   local leaderPos = followState.targetPlayerPosition
@@ -1457,7 +1435,7 @@ local function ensureFollowing()
   local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
   if not localPlayer then return end
   
-  local playerPos = safeGetPosition(localPlayer)
+  local playerPos = SC.getPosition(localPlayer)
   if not playerPos then return end
   
   -- Try to find the target player first
@@ -1465,9 +1443,9 @@ local function ensureFollowing()
   
   if target then
     -- Update our cached reference
-    followState.targetPlayerId = safeGetId(target)
+    followState.targetPlayerId = SC.getId(target)
     followState.targetPlayerCreature = target
-    followState.targetPlayerPosition = safeGetPosition(target)
+    followState.targetPlayerPosition = SC.getPosition(target)
     followState.lostLeaderTime = 0
     
     local leaderPos = followState.targetPlayerPosition
@@ -1540,7 +1518,7 @@ local function ensureFollowing()
     if not isAttacking then
       -- Check if we're already following them
       local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
-      local isFollowing = currentFollow and safeGetId(currentFollow) == followState.targetPlayerId
+      local isFollowing = currentFollow and SC.getId(currentFollow) == followState.targetPlayerId
       
       if not isFollowing then
         -- Not following our target - try native follow first
@@ -1567,9 +1545,9 @@ local function ensureFollowing()
     
     -- Check if native follow is still tracking them
     local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
-    if currentFollow and followState.targetPlayerId and safeGetId(currentFollow) == followState.targetPlayerId then
+    if currentFollow and followState.targetPlayerId and SC.getId(currentFollow) == followState.targetPlayerId then
       -- Native follow is still tracking, update position
-      followState.targetPlayerPosition = safeGetPosition(currentFollow)
+      followState.targetPlayerPosition = SC.getPosition(currentFollow)
       return
     end
     
@@ -1606,11 +1584,11 @@ if EventBus then
     if not followState.targetPlayerId then return end
     
     -- Check if this is our followed player
-    local creatureId = safeGetId(creature)
+    local creatureId = SC.getId(creature)
     if creatureId ~= followState.targetPlayerId then return end
     
     -- Update last known position
-    local newPos = safeGetPosition(creature)
+    local newPos = SC.getPosition(creature)
     followState.targetPlayerPosition = newPos
     followState.targetPlayerCreature = creature
     
@@ -1618,7 +1596,7 @@ if EventBus then
     local Client = getClient()
     local localPlayer = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
     if localPlayer then
-      local playerPos = safeGetPosition(localPlayer)
+      local playerPos = SC.getPosition(localPlayer)
       if playerPos and newPos then
         local distance = calcDistance(playerPos, newPos)
         followState.lastLeaderDistance = distance
@@ -1633,7 +1611,7 @@ if EventBus then
             currentFollow = g_game.getFollowingCreature()
           end
           
-          local isFollowing = currentFollow and safeGetId(currentFollow) == followState.targetPlayerId
+          local isFollowing = currentFollow and SC.getId(currentFollow) == followState.targetPlayerId
           local isWalking = localPlayer.isWalking and localPlayer:isWalking()
           
           -- If not following and not walking, we're frozen - fix it!
@@ -1730,7 +1708,7 @@ if EventBus then
     local name = followPlayerConfig.playerName and followPlayerConfig.playerName:trim():lower() or ""
     if name == "" then return end
     
-    local creatureName = safeGetName(creature)
+    local creatureName = SC.getName(creature)
     if creatureName then
       creatureName = creatureName:lower()
       if creatureName == name or creatureName:find(name, 1, true) then
@@ -1744,7 +1722,7 @@ if EventBus then
   -- When followed player disappears, track lost time but don't clear state
   EventBus.on("creature:disappear", function(creature)
     if not creature then return end
-    local creatureId = safeGetId(creature)
+    local creatureId = SC.getId(creature)
     if followState.targetPlayerId and creatureId == followState.targetPlayerId then
       -- Player went out of view
       followState.targetPlayerCreature = nil
@@ -1794,16 +1772,16 @@ local function updateFollowStatusLabel()
   local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
   local distance = followState.lastLeaderDistance or 0
   
-  if current and followState.targetPlayerId and safeGetId(current) == followState.targetPlayerId then
+  if current and followState.targetPlayerId and SC.getId(current) == followState.targetPlayerId then
     local suffix = ""
     if followState.forceFollowMode then
       suffix = " [CATCH UP!]"
     elseif isAttacking then
       suffix = " (attacking)"
     end
-    followStatusLabel:setText("Following: " .. safeGetName(current) .. " [" .. distance .. "m]" .. suffix)
+    followStatusLabel:setText("Following: " .. SC.getName(current) .. " [" .. distance .. "m]" .. suffix)
   elseif followState.targetPlayerId and followState.targetPlayerCreature then
-    local name = safeGetName(followState.targetPlayerCreature) or "..."
+    local name = SC.getName(followState.targetPlayerCreature) or "..."
     followStatusLabel:setText("Tracking: " .. name .. " [" .. distance .. "m]")
   else
     followStatusLabel:setText("Target: " .. (followPlayerConfig.playerName ~= "" and followPlayerConfig.playerName or "-"))

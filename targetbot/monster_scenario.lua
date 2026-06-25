@@ -134,9 +134,7 @@ function S.detectScenario()
   S.state.lastUpdate = nowt
 
   local monsters, totalDanger, mc = {}, 0, 0
-  local C = getClient()
-  local creatures = (C and C.getSpectators) and C.getSpectators(ppos, false)
-    or (g_map and g_map.getSpectators and g_map.getSpectators(ppos, false)) or {}
+  local creatures = CreatureCache.getNearby(14) or {}
 
   for _, cr in ipairs(creatures) do
     if cr and isValidAliveMonster(cr) then

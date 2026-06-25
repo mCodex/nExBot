@@ -25,7 +25,7 @@
     local nearest = CreatureCache.getNearestMonster(pos, maxRange)
 ]]
 
-local CreatureCache = {}
+CreatureCache = CreatureCache or {}
 
 -- ============================================================================
 -- CONFIGURATION
@@ -131,84 +131,11 @@ end
 
 local SC = SafeCreature or {}
 
-local function safeGetId(creature)
-  if SC and SC.getId then
-    local ok, result = pcall(SC.getId, creature)
-    return ok and result or nil
-  end
-  return nil
-end
-
-local function safeIsMonster(creature)
-  if SC and SC.isMonster then
-    local ok, result = pcall(SC.isMonster, creature)
-    return ok and result or false
-  end
-  return false
-end
-
-local function safeIsPlayer(creature)
-  if SC and SC.isPlayer then
-    local ok, result = pcall(SC.isPlayer, creature)
-    return ok and result or false
-  end
-  return false
-end
-
-local function safeIsNpc(creature)
-  if SC and SC.isNpc then
-    local ok, result = pcall(SC.isNpc, creature)
-    return ok and result or false
-  end
-  return false
-end
-
-local function safeIsDead(creature)
-  if SC and SC.isDead then
-    local ok, result = pcall(SC.isDead, creature)
-    return ok and result or true
-  end
-  return true
-end
-
-local function safeIsRemoved(creature)
-  if SC and SC.isRemoved then
-    local ok, result = pcall(SC.isRemoved, creature)
-    return ok and result or true
-  end
-  return true
-end
-
-local function safeGetPosition(creature)
-  if SC and SC.getPosition then
-    local ok, result = pcall(SC.getPosition, creature)
-    return ok and result or nil
-  end
-  return nil
-end
-
-local function safeGetName(creature)
-  if SC and SC.getName then
-    local ok, result = pcall(SC.getName, creature)
-    return ok and result or nil
-  end
-  return nil
-end
-
-local function safeGetHealthPercent(creature)
-  if SC and SC.getHealthPercent then
-    local ok, result = pcall(SC.getHealthPercent, creature)
-    return ok and result or 100
-  end
-  return 100
-end
-
--- Check if creature is valid and alive
 local function isValidCreature(creature)
   if not creature then return false end
-  local id = safeGetId(creature)
+  local id = SC.getId(creature)
   if not id then return false end
-  return not safeIsDead(creature) and not safeIsRemoved(creature)
+  return not SC.isDead(creature) and not SC.isRemoved(creature)
 end
 
 -- ============================================================================
@@ -279,11 +206,11 @@ end
 function CreatureCache.set(creature)
   if not isValidCreature(creature) then return nil end
   
-  local id = safeGetId(creature)
+  local id = SC.getId(creature)
   if not id then return nil end
-  
+
   local nowt = nowMs()
-  
+
   -- Get or create entry
   local entry = cache.creatures[id]
   if not entry then
@@ -291,27 +218,27 @@ function CreatureCache.set(creature)
     if cache.lruSize >= CreatureCache.CONFIG.MAX_SIZE then
       evictLRU()
     end
-    
+
     -- Create new entry (use pool if available)
     if CreatureCache.CONFIG.ENABLE_POOLING and nExBot and nExBot.acquireTable then
       entry = nExBot.acquireTable("creatureCacheEntry")
     else
       entry = {}
     end
-    
+
     cache.creatures[id] = entry
     cache.categoryDirty = true
   end
-  
+
   -- Update entry
   entry.id = id
   entry.creature = creature
-  entry.name = safeGetName(creature)
-  entry.position = safeGetPosition(creature)
-  entry.healthPercent = safeGetHealthPercent(creature)
-  entry.isMonster = safeIsMonster(creature)
-  entry.isPlayer = safeIsPlayer(creature)
-  entry.isNpc = safeIsNpc(creature)
+  entry.name = SC.getName(creature)
+  entry.position = SC.getPosition(creature)
+  entry.healthPercent = SC.getHealthPercent(creature)
+  entry.isMonster = SC.isMonster(creature)
+  entry.isPlayer = SC.isPlayer(creature)
+  entry.isNpc = SC.isNpc(creature)
   entry.lastUpdate = nowt
   
   -- Touch LRU
@@ -530,6 +457,52 @@ function CreatureCache.getNearby(rangeX, rangeY, ttl)
   return result
 end
 
+--[[
+  Get all spectators (creature objects, cached)
+  @param rangeX number
+  @param rangeY number
+  @param ttl number Cache TTL (ms)
+  @return array of creature objects
+]]
+function CreatureCache.getSpectators(rangeX, rangeY, ttl)
+  rangeX = rangeX or CreatureCache.CONFIG.SPECTATOR_RANGE_X
+  rangeY = rangeY or CreatureCache.CONFIG.SPECTATOR_RANGE_Y
+  ttl = ttl or CreatureCache.CONFIG.CACHE_TTL
+
+  local nowt = nowMs()
+  if (nowt - cache.lastUpdate) < ttl then
+    local result = {}
+    for id, entry in pairs(cache.creatures) do
+      if entry.creature then
+        result[#result + 1] = entry.creature
+      end
+    end
+    return result
+  end
+
+  CreatureCache.updateFromSpectators(rangeX, rangeY)
+  local result = {}
+  for id, entry in pairs(cache.creatures) do
+    if entry.creature then
+      result[#result + 1] = entry.creature
+    end
+  end
+  return result
+end
+
+--[[
+  Direct spectator query (for non-player positions)
+  Wraps the underlying getSpectatorsInRange API.
+  NOTE: This bypasses cache. For cached player-relative queries, use getNearby() or getSpectators().
+  @param pos Position center
+  @param rangeX number
+  @param rangeY number
+  @return array of creature objects
+]]
+function CreatureCache.getSpectatorsInRange(pos, rangeX, rangeY)
+  return getSpectatorsInRange(pos, rangeX, rangeY)
+end
+
 -- ============================================================================
 -- SPATIAL QUERIES
 -- ============================================================================
@@ -684,7 +657,7 @@ if EventBus and EventBus.on then
   
   -- Remove from cache when creature disappears
   EventBus.on("creature:disappear", function(creature)
-    local id = safeGetId(creature)
+    local id = SC.getId(creature)
     if id then
       CreatureCache.remove(id)
     end
@@ -692,7 +665,7 @@ if EventBus and EventBus.on then
   
   -- Update health when it changes
   EventBus.on("creature:health", function(creature, percent)
-    local id = safeGetId(creature)
+    local id = SC.getId(creature)
     if id and cache.creatures[id] then
       cache.creatures[id].healthPercent = percent
     end
@@ -706,6 +679,9 @@ end
 
 -- ============================================================================
 -- BACKWARDS COMPATIBILITY
+-- Register globally for consumer access
+CreatureCache = CreatureCache
+
 -- Provide same API as old SpectatorCache
 -- ============================================================================
 

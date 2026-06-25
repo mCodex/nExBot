@@ -449,19 +449,10 @@ local function handleIdle()
 
   -- Hold-target: re-scan for previously attacked creature
   if state.holdTargetId then
-    local C = getClient()
     local pPos = player and pcall(function() return player:getPosition() end) and player:getPosition()
     if pPos then
-      local specs
-      if C and C.getSpectatorsInRange then
-        local ok, s = pcall(C.getSpectatorsInRange, pPos, 7, 5, false)
-        specs = ok and s or {}
-      elseif g_map and g_map.getSpectatorsInRange then
-        local ok, s = pcall(g_map.getSpectatorsInRange, pPos, 7, 5, false)
-        specs = ok and s or {}
-      else
-        specs = {}
-      end
+      local ok, specs = pcall(CreatureCache.getNearby, 7, 5)
+      specs = ok and specs or {}
       for _, spec in ipairs(specs) do
         if cId(spec) == state.holdTargetId and not cDead(spec) then
           log("Hold-target re-acquired: " .. cName(spec))

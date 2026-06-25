@@ -68,28 +68,10 @@ local JITTER_MIN   = -25
 local JITTER_MAX   =  40
 local JITTER_DIAG  =  15         -- extra jitter for diagonal moves
 
--- Direction constants
-local DIR_NORTH     = North     or 0
-local DIR_EAST      = East      or 1
-local DIR_SOUTH     = South     or 2
-local DIR_WEST      = West      or 3
-local DIR_NE        = NorthEast or 4
-local DIR_SE        = SouthEast or 5
-local DIR_SW        = SouthWest or 6
-local DIR_NW        = NorthWest or 7
-
--- Direction tables: resolved lazily from Directions / PathUtils globals
--- (may not be set yet during Phase 3 file load)
-local DIR_TO_OFFSET, OPPOSITE, SIMILAR
-local function _ensureDirTables()
-  if DIR_TO_OFFSET then return end
-  local D = Directions
-  if D then
-    DIR_TO_OFFSET = D.DIR_TO_OFFSET
-    OPPOSITE      = D.OPPOSITE
-    SIMILAR       = D.ADJACENT
-  end
-end
+-- Direction tables
+local DIR_TO_OFFSET = Directions.DIR_TO_OFFSET
+local OPPOSITE      = Directions.OPPOSITE
+local SIMILAR       = Directions.ADJACENT
 
 -- ============================================================================
 -- INTERNAL HELPERS
@@ -107,7 +89,6 @@ local function _ensureHelpers()
 end
 
 local function dirOffset(dir)
-  _ensureDirTables()
   return DIR_TO_OFFSET and DIR_TO_OFFSET[dir]
 end
 
@@ -287,14 +268,11 @@ local _dirDampenUntil = 0         -- timestamp: hold direction until this time
 -- Lazy wrappers since PathUtils may not be loaded yet at file scope
 function PathStrategy.isSimilar(a, b)
   _ensureHelpers()
-  _ensureDirTables()
-  -- Fast inline check using SIMILAR table as fallback
   if SIMILAR and SIMILAR[a] then return SIMILAR[a][b] == true end
   local pu = PU()
   return pu and pu.areSimilarDirections and pu.areSimilarDirections(a, b) or false
 end
 function PathStrategy.isOpposite(a, b)
-  _ensureDirTables()
   if OPPOSITE then return OPPOSITE[a] == b end
   local pu = PU()
   return pu and pu.areOppositeDirections and pu.areOppositeDirections(a, b) or false
@@ -383,7 +361,6 @@ local function directionTo(from, to)
   local dy = to.y - from.y
   if dx ~= 0 then dx = dx > 0 and 1 or -1 end
   if dy ~= 0 then dy = dy > 0 and 1 or -1 end
-  _ensureDirTables()
   local key = dx .. "," .. dy
   local D = Directions
   return D and D.OFFSET_TO_DIR and D.OFFSET_TO_DIR[key]
@@ -704,7 +681,6 @@ local function _resolveConvenience()
   if _convenienceResolved then return end
   _convenienceResolved = true
   _ensureHelpers()
-  _ensureDirTables()
   local pu = PU()
   if pu then
     PathStrategy.posEquals        = pu.posEquals

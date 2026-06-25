@@ -174,7 +174,7 @@ end
 -- @param radius: AOE radius
 -- @return number of monsters, boolean hasPlayers
 local function countMonstersInRange(centerPos, radius)
-  local creatures = g_map.getSpectatorsInRange(centerPos, false, radius, radius)
+  local creatures = CreatureCache.getSpectatorsInRange(centerPos, radius, radius)
   local monsterCount = 0
   local hasPlayers = false
   

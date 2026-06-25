@@ -444,7 +444,6 @@ loadCategory("features_legacy", {
   "pushmax",
   "combo",
   "HealBot",
-  "new_healer",
   "AttackBot",
 })
 

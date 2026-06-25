@@ -210,20 +210,14 @@ function BotCore.checkCondition(origin, sign, value)
   return false
 end
 
--- Safety check: Should heal immediately? (non-configurable)
+-- Safety check: Should heal immediately? (HealEngine handles its own priority)
+-- Delegates to HealEngine for actual decisions; this is a simple fallback
 function BotCore.shouldHealNow()
-  if BotCore.Priority then
-    return BotCore.Priority.shouldHealNow()
-  end
-  -- Fallback: heal if HP < 50%
   return BotCore.hpPercent() < 50
 end
 
 -- Is emergency healing needed? (HP < 30%)
 function BotCore.isEmergency()
-  if BotCore.Priority then
-    return BotCore.Priority.getCurrentPriority() == BotCore.Priority.PRIORITY.EMERGENCY_HEAL
-  end
   return BotCore.hpPercent() < 30
 end
 

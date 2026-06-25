@@ -442,7 +442,6 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
   local settings = config.settings or {}
   local selfHp = getSelfHpPercent()
   local selfMp = getSelfMpPercent()
-  local currentMana = mana and mana() or 0
   
   -- Safely get friend properties
   local okName, friendName = pcall(function() return friend:getName() end)
@@ -473,77 +472,47 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
     return nil
   end
   
-  -- ========== PRIORITY 1: Custom Spell (user-defined spell like "exura" variations) ==========
-  if config.customSpell and config.customSpellName and friendHp < healAt then
-    local customSpell = config.customSpellName
-    local manaCost = 100  -- Default, could be configurable
-    if currentMana >= manaCost and not isHealingGroupOnCooldown() and distance <= 7 then
-      return {
-        type = "spell",
-        spell = customSpell,
-        targetName = friendName,
-        manaCost = manaCost,
-        urgency = calculateUrgency(friendHp, distance),
-        source = "customSpell"
-      }
+  -- ========== DELEGATE SPELL SELECTION TO HEALENGINE ==========
+  -- Build spell list from config priorities and let HealEngine pick the best
+  if HealEngine and HealEngine.evaluateAlly then
+    local spellList = {}
+    if config.customSpell and config.customSpellName and friendHp < healAt and distance <= 7 then
+      table.insert(spellList, {name = config.customSpellName, key = config.customSpellName:lower(), hp = healAt, mpCost = 100, cd = 1100, prio = 1})
+    end
+    if config.useGranSio and friendHp < granSioAt and distance <= 7 then
+      table.insert(spellList, {name = "exura gran sio", key = "exura_gran_sio", hp = granSioAt, mpCost = 140, cd = 1100, prio = 2})
+    end
+    if config.useTioSio and friendHp < tioSioAt and distance <= 7 then
+      table.insert(spellList, {name = "exura tio sio", key = "exura_tio_sio", hp = tioSioAt, mpCost = 120, cd = 1100, prio = 3})
+    end
+    if config.useSio and friendHp < healAt and distance <= 7 then
+      table.insert(spellList, {name = "exura sio", key = "exura_sio", hp = healAt, mpCost = 100, cd = 1100, prio = 4})
+    end
+
+    if #spellList > 0 then
+      local engineAction = HealEngine.evaluateAlly(friend, friendHp, spellList)
+      if engineAction then
+        return {
+          type = "spell",
+          spell = engineAction.name,
+          targetName = friendName,
+          manaCost = engineAction.mana or 100,
+          urgency = calculateUrgency(friendHp, distance),
+          source = "healEngine"
+        }
+      end
     end
   end
   
-  -- ========== PRIORITY 2: Exura Gran Sio (strong single target heal) ==========
-  if config.useGranSio and friendHp < granSioAt then
-    local manaCost = 140
-    if currentMana >= manaCost and not isHealingGroupOnCooldown() and distance <= 7 then
-      return {
-        type = "spell",
-        spell = "exura gran sio",
-        targetName = friendName,
-        manaCost = manaCost,
-        urgency = calculateUrgency(friendHp, distance),
-        source = "granSio"
-      }
-    end
-  end
-  
-  -- ========== PRIORITY 3: Exura Tio Sio (medium single target heal) ==========
-  if config.useTioSio and friendHp < tioSioAt then
-    local manaCost = 120
-    if currentMana >= manaCost and not isHealingGroupOnCooldown() and distance <= 7 then
-      return {
-        type = "spell",
-        spell = "exura tio sio",
-        targetName = friendName,
-        manaCost = manaCost,
-        urgency = calculateUrgency(friendHp, distance),
-        source = "tioSio"
-      }
-    end
-  end
-  
-  -- ========== PRIORITY 4: Exura Sio (normal single target heal) ==========
-  if config.useSio and friendHp < healAt then
-    local manaCost = 100
-    if currentMana >= manaCost and not isHealingGroupOnCooldown() and distance <= 7 then
-      return {
-        type = "spell",
-        spell = "exura sio",
-        targetName = friendName,
-        manaCost = manaCost,
-        urgency = calculateUrgency(friendHp, distance),
-        source = "sio"
-      }
-    end
-  end
-  
-  -- ========== PRIORITY 4: Exura Gran Mas Res (area heal, requires min players) ==========
+  -- ========== EXURA GRAN MAS RES (area heal, requires min players) ==========
   if config.useMasRes and friendHp < healAt then
     local friendsNeedingHeal = countFriendsInRange(config, 7)
     if friendsNeedingHeal >= masResPlayers then
-      local manaCost = 150
-      if currentMana >= manaCost and not isHealingGroupOnCooldown() then
+      if not isHealingGroupOnCooldown() then
         return {
           type = "area_spell",
           spell = "exura gran mas res",
-          manaCost = manaCost,
+          manaCost = 150,
           friendCount = friendsNeedingHeal,
           urgency = calculateUrgency(friendHp, distance),
           source = "masRes"
@@ -552,9 +521,8 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
     end
   end
   
-  -- ========== PRIORITY 5: Health Item / UH Rune (hotkey-style) ==========
+  -- ========== HEALTH ITEM / UH RUNE (hotkey-style) ==========
   if config.useHealthItem and friendHp < healAt then
-    -- Safely check if we can shoot the friend
     local okShoot, canShoot = pcall(function() return friend:canShoot() end)
     if not isRuneOnCooldown() and distance <= itemRange and (not okShoot or canShoot) then
       return {
@@ -568,11 +536,8 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
     end
   end
   
-  -- ========== PRIORITY 6: Mana Item (for supporting mage friends) ==========
-  -- Note: Mana potions typically require close range (distance <= 1)
+  -- ========== MANA ITEM (for supporting mage friends) ==========
   if config.useManaItem then
-    -- Only use mana items if friend's mana is low
-    -- For now, only use on friends explicitly marked for mana support
     if config.manaFriends and config.manaFriends[friendName] then
       if not isPotionOnCooldown() and distance <= 1 then
         return {

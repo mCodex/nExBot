@@ -39,48 +39,7 @@ local getClientVersion = nExBot.Shared.getClientVersion
 -- Defensive wrapper to handle cases where SafeCreature isn't fully loaded
 local SC = SafeCreature or {}
 
--- Defensive helper functions (fallback if SafeCreature methods missing)
-local function safeIsMonster(creature)
-  if SC.isMonster then return SC.isMonster(creature) end
-  if not creature then return false end
-  local ok, result = pcall(function() return creature:isMonster() end)
-  return ok and result == true
-end
 
-local function safeIsDead(creature)
-  if SC.isDead then return SC.isDead(creature) end
-  if not creature then return true end
-  local ok, result = pcall(function() return creature:isDead() end)
-  return ok and result == true
-end
-
-local function safeGetHealthPercent(creature)
-  if SC.getHealthPercent then return SC.getHealthPercent(creature) end
-  if not creature then return 0 end
-  local ok, hp = pcall(function() return creature:getHealthPercent() end)
-  return ok and hp or 0
-end
-
-local function safeGetPosition(creature)
-  if SC.getPosition then return SC.getPosition(creature) end
-  if not creature then return nil end
-  local ok, pos = pcall(function() return creature:getPosition() end)
-  return ok and pos or nil
-end
-
-local function safeGetId(creature)
-  if SC.getId then return SC.getId(creature) end
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
-end
-
-local function safeGetName(creature)
-  if SC.getName then return SC.getName(creature) end
-  if not creature then return nil end
-  local ok, name = pcall(function() return creature:getName() end)
-  return ok and name or nil
-end
 
 -- ============================================================================
 -- DEPENDENCIES
@@ -290,9 +249,9 @@ local function isTargetableMonster(creature)
   end
   
   -- Fallback: Use safe wrapper functions for DRY
-  if safeIsDead(creature) then return false end
-  if not safeIsMonster(creature) then return false end
-  if safeGetHealthPercent(creature) <= 0 then return false end
+  if SC.isDead(creature) then return false end
+  if not SC.isMonster(creature) then return false end
+  if SC.getHealthPercent(creature) <= 0 then return false end
   
   -- For old Tibia, all monsters are targetable
   if liveMonsterState.oldTibia then return true end
@@ -328,21 +287,9 @@ function EventTargeting.getLiveMonsterCount()
     return liveMonsterState.count, liveMonsterState.creatures
   end
   
-  -- Get creatures using the most reliable API available
-  local Client = getClient()
-  local creatures = nil
+  -- Get creatures from cache
   local range = CONST.LIVE_COUNT_RANGE
-  
-  -- Try getSpectatorsInRange first (most common)
-  if Client and Client.getSpectatorsInRange then
-    creatures = Client.getSpectatorsInRange(playerPos, false, range, range)
-  elseif Client and Client.getSpectators then
-    creatures = Client.getSpectators(playerPos, false)
-  elseif g_map and g_map.getSpectatorsInRange then
-    creatures = g_map.getSpectatorsInRange(playerPos, false, range, range)
-  elseif g_map and g_map.getSpectators then
-    creatures = g_map.getSpectators(playerPos, false)
-  end
+  local creatures = CreatureCache.getNearby(range, range)
   
   if not creatures then
     return liveMonsterState.count, liveMonsterState.creatures
@@ -571,16 +518,7 @@ function EventTargeting.PathValidator.validate(playerPos, targetPos)
       end
     else
       -- Fallback: manual check
-      local DIR_OFFSET = (PathUtils and PathUtils.DIR_TO_OFFSET) or {
-        [North or 0] = {x = 0, y = -1},
-        [East or 1] = {x = 1, y = 0},
-        [South or 2] = {x = 0, y = 1},
-        [West or 3] = {x = -1, y = 0},
-        [NorthEast or 4] = {x = 1, y = -1},
-        [SouthEast or 5] = {x = 1, y = 1},
-        [SouthWest or 6] = {x = -1, y = 1},
-        [NorthWest or 7] = {x = -1, y = -1}
-      }
+      local DIR_OFFSET = Directions.DIR_TO_OFFSET
       local probe = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
       for i = 1, pathLen do
         local off = DIR_OFFSET[path[i]]
@@ -604,9 +542,9 @@ function EventTargeting.PathValidator.getPath(creature)
   if not creature then return nil, 999, false end
   
   -- Safe ID access using safe wrapper
-  local id = safeGetId(creature)
+  local id = SC.getId(creature)
   if not id then return nil, 999, false end
-  
+
   local entry = creatureCache.entries[id]
   
   -- Check cached path
@@ -680,7 +618,7 @@ function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
   local priority = 0  -- Start at 0, build up from config priority
   
   -- Safe HP access using safe wrapper
-  local hp = safeGetHealthPercent(creature)
+  local hp = SC.getHealthPercent(creature)
   if hp == 0 then hp = 100 end  -- Default to 100 if not available
   
   local pathLen = path and #path or 10
@@ -1182,6 +1120,10 @@ end
 
 EventTargeting.CombatCoordinator = {}
 
+function EventTargeting.CombatCoordinator.onTargetChanged(creature, oldCreature)
+  EventTargeting.CombatCoordinator.checkCombatStatus()
+end
+
 -- Check if lure mode is active (should NOT pause CaveBot)
 function EventTargeting.CombatCoordinator.isLureModeActive()
   -- Check dynamicLure
@@ -1671,15 +1613,8 @@ local function scanVisibleMonsters()
   end
   
   -- Fallback: Use direct API if live count didn't work
-  local creatures = nil
   local range = CONST.DETECTION_RANGE
-  local Client = getClient()
-  
-  if Client and Client.getSpectatorsInRange then
-    creatures = Client.getSpectatorsInRange(playerPos, false, range, range)
-  elseif g_map and g_map.getSpectatorsInRange then
-    creatures = g_map.getSpectatorsInRange(playerPos, false, range, range)
-  end
+  local creatures = CreatureCache.getNearby(range, range)
   
   if not creatures or #creatures == 0 then return end
   

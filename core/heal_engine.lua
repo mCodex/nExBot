@@ -642,6 +642,46 @@ function HealEngine.planFriend(snap, target)
   return nil
 end
 
+-- Batch evaluate all spells for an ally and return the best action
+function HealEngine.evaluateAlly(ally, allyHp, spellList)
+  if not ally or not allyHp then return nil end
+  local list = spellList or friendSpells
+  if #list == 0 then return nil end
+
+  local currentMana = getCurrentMana()
+  local bestAction = nil
+  local bestPrio = 999
+
+  for _, spell in ipairs(list) do
+    local hpThreshold = spell.hp or 0
+    if allyHp <= hpThreshold then
+      local mpCost = spell.mpCost or spell.mana or spell.mp or 0
+      if currentMana >= mpCost and healingGroupReady() and ready(spell.key, spell.cd or 1100) then
+        local prio = spell.prio or 999
+        if prio < bestPrio then
+          bestPrio = prio
+          bestAction = spell
+        end
+      end
+    end
+  end
+
+  if bestAction then
+    local targetName = ally.getName and ally:getName() or ally.name or "target"
+    return {
+      kind = "spell",
+      name = string.format('%s "%s"', bestAction.name, targetName),
+      key = bestAction.key,
+      cd = bestAction.cd or 1100,
+      mana = bestAction.mpCost or bestAction.mana or 0,
+      targetName = targetName,
+      targetHp = allyHp
+    }
+  end
+
+  return nil
+end
+
 -- Set friend healing spells (allows customization from UI)
 function HealEngine.setFriendSpells(spellList)
   if spellList and type(spellList) == "table" and #spellList > 0 then
