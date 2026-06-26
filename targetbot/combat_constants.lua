@@ -24,7 +24,7 @@ CC.TICK_INTERVAL          = 100    -- ASM tick rate (ms)
 CC.COMMAND_COOLDOWN       = 350    -- Min between g_game.attack() calls (ms)
 CC.CONFIRM_TIMEOUT        = 1200   -- Max wait for server confirmation (ms)
 CC.GRACE_PERIOD           = 1500   -- Stay LOCKED despite transient nil (ms)
-CC.KEEPALIVE_INTERVAL     = 2000   -- Re-send attack while LOCKED (ms)
+
 CC.STOP_DEBOUNCE          = 150    -- After stop, block requestAttack (ms) — was 800
 CC.REAFFIRM_RETRY_MAX     = 5     -- Max retries before forfeit — was 3
 CC.ENGAGE_BACKOFF_BASE    = 1500   -- First retry timeout (ms)
@@ -51,8 +51,7 @@ CC.SCENARIO_DETECT_INTERVAL = 200  -- Scenario re-detect throttle (ms)
 
 -- PriorityEngine
 CC.PRIORITY_SCALE          = 1000  -- config.priority * this = base score
-CC.STICKINESS_BASE         = 100   -- Base bonus for current target
-CC.STICKINESS_FINISH_KILL  = 300   -- Bonus when current target < FINISH_KILL_HP
+-- ponytail: stickiness now defined in target_coordinator.lua with proper values
 CC.SWITCH_GATE_PENALTY     = 0     -- Hard-blocked targets get score = 0 (absolute gate)
 CC.RECALC_IDLE_INTERVAL    = 2000  -- Full recalc when stable + no new creatures (ms)
 CC.RECALC_ACTIVE_INTERVAL  = 150   -- Full recalc during active combat (ms)
@@ -72,7 +71,7 @@ function CC.applyClientTuning(isOTBR)
   if isOTBR then
     CC.COMMAND_COOLDOWN     = 450
     CC.CONFIRM_TIMEOUT      = 1500
-    CC.KEEPALIVE_INTERVAL   = 2500
+
     CC.ENGAGE_BACKOFF_BASE  = 1800
   end
   -- OTCv8 uses the defaults above (faster client, less latency)

@@ -599,7 +599,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Walk precision matches arrival precision minus 1: A* stops at the zone
   -- boundary rather than overshooting to the center.
   local walkParams = {
-    ignoreNonPathable = true,
     precision = isFloorChange and 0 or math.max(0, precision - 1),
     allowFloorChange = isFloorChange
   }

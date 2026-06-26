@@ -79,7 +79,7 @@ local function ensureDeps()
       -- Inline minimal defaults so ASM works standalone during boot
       CC = {
         TICK_INTERVAL = 100, COMMAND_COOLDOWN = 350, CONFIRM_TIMEOUT = 1200,
-        GRACE_PERIOD = 1500, KEEPALIVE_INTERVAL = 2000, STOP_DEBOUNCE = 150,
+        GRACE_PERIOD = 1500, STOP_DEBOUNCE = 150,
         REAFFIRM_RETRY_MAX = 5, ENGAGE_BACKOFF_BASE = 1500,
         ENGAGE_BACKOFF_GROWTH = 1.5, SWITCH_COOLDOWN = 2500,
         CONFIG_SWITCH_COOLDOWN = 400, CRITICAL_HP = 25,
@@ -169,7 +169,6 @@ local state = {
     kills      = 0,
     switches   = 0,
     skips      = 0,
-    reaffirms  = 0,
   },
 }
 
@@ -584,16 +583,7 @@ local function handleLocked()
     return
   end
 
-  -- Periodic keepalive: only re-send if attack appears lost.
-  -- sendAttack's toggle guard provides secondary protection, but
-  -- skipping the call entirely when confirmed saves the overhead.
-  if (nowMs() - state.lastCommandAt) > CC.KEEPALIVE_INTERVAL then
-    if not isConfirmed() then
-      sendAttack(state.creature, "keepalive")
-    else
-      state.lastCommandAt = nowMs()  -- confirmed & alive, just reset timer
-    end
-  end
+  -- No keepalive: g_game.attack() is persistent — server handles it.
 end
 
 -- ============================================================================
@@ -672,31 +662,13 @@ function AttackStateMachine.requestAttack(creature, priority)
 
   local id = cId(creature)
 
-  -- REAFFIRM path: same target in ENGAGING → reset retries, keep going
+  -- Same target → just update priority if higher, no-op otherwise.
+  -- g_game.attack() is persistent — no reaffirm needed.
   if id == state.targetId then
-    if state.current == STATE.ENGAGING then
-      -- Refresh creature ref (may be newer object)
-      state.creature = creature
-      state.stats.reaffirms = state.stats.reaffirms + 1
-      -- Only actively re-send if game doesn't show us attacking yet.
-      -- sendAttack's toggle guard also prevents this, but being
-      -- explicit avoids resetting backoff counters unnecessarily.
-      if not isConfirmed() then
-        state.retries  = 0
-        state.currentTimeout = 0
-        state.enteredAt = nowMs()
-        log("Reaffirm in ENGAGING: " .. cName(creature))
-        sendAttack(creature, "reaffirm")
-      else
-        log("Reaffirm skip (confirmed): " .. cName(creature))
-      end
-      return true
-    end
-    -- LOCKED or same target → update priority, no-op otherwise
     if priority and priority > state.priority then
       state.priority = priority
     end
-    return true  -- "accepted" — we're already on it
+    return true
   end
 
   -- New target
@@ -759,7 +731,7 @@ function AttackStateMachine.reset()
   state.holdTargetId    = nil
   state.holdTargetName  = nil
   state.skipList        = {}
-  state.stats = { commands = 0, confirms = 0, kills = 0, switches = 0, skips = 0, reaffirms = 0 }
+  state.stats = { commands = 0, confirms = 0, kills = 0, switches = 0, skips = 0 }
   log("Reset")
 end
 

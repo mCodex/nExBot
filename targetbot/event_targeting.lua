@@ -1435,7 +1435,7 @@ if EventBus then
     end
   end, 25)
   
-  -- Monster health changed - update priority
+  -- Monster health changed - update priority (no target switching)
   EventBus.on("monster:health", function(creature, percent, oldPercent)
     -- Skip processing if TargetBot is disabled
     if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
@@ -1449,15 +1449,9 @@ if EventBus then
     if entry then
       -- Recalculate priority
       local newPriority = EventTargeting.TargetAcquisition.calculatePriority(creature, entry.path)
-      local priorityChange = newPriority - (entry.priority or 0)
       entry.priority = newPriority
       entry.lastSeen = now
       touchEntry(id)
-      
-      -- If priority increased significantly, reevaluate as target
-      if priorityChange > 20 and entry.reachable then
-        EventTargeting.TargetAcquisition.evaluateTarget(creature, newPriority, entry.path)
-      end
     end
   end, 20)
   
@@ -1880,7 +1874,7 @@ if onCreatureAppear then
               local priority = EventTargeting.TargetAcquisition
                 and EventTargeting.TargetAcquisition.calculatePriority
                 and EventTargeting.TargetAcquisition.calculatePriority(creature) or 100
-              sent = AttackStateMachine.requestSwitch(creature, priority + 200) -- +200 for high-priority event
+              sent = AttackStateMachine.requestSwitch(creature, priority + 10) -- +10 tiebreaker for new creature
             elseif TargetBot and TargetBot.requestAttack then
               sent = TargetBot.requestAttack(creature, "event_high_priority")
             end

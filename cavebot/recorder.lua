@@ -121,12 +121,20 @@ end
 
 local function setup()
   onPlayerPositionChange(function(newPos, oldPos)
-    if zChanging() then return end
-    if CaveBot.isOn() or not isEnabled then return end
-
-    -- ======== FIRST STEP ========
-    if not lastPos then
-      addPosition(oldPos)
+    -- Floor change / teleport detection runs BEFORE zChanging() guard
+    -- ponytail: direct z-check prevents race with EventBus setting _zBlocked
+    if newPos and oldPos and (newPos.z ~= oldPos.z or math.abs(oldPos.x - newPos.x) > 1 or math.abs(oldPos.y - newPos.y) > 1) then
+      if not lastPos then
+        addPosition(oldPos)
+        prevStepPos = newPos
+        prevDirection = nil
+        pendingCorner = nil
+        pendingTurnDir = nil
+        pendingTurnCount = 0
+        lastPos = oldPos
+      end
+      addStairs(oldPos)
+      addPosition(newPos)
       prevStepPos = newPos
       prevDirection = nil
       pendingCorner = nil
@@ -135,13 +143,12 @@ local function setup()
       return
     end
 
-    -- ======== FLOOR CHANGE / TELEPORT ========
-    if newPos.z ~= oldPos.z or math.abs(oldPos.x - newPos.x) > 1 or math.abs(oldPos.y - newPos.y) > 1 then
-      -- Record the pre-floor-change position with precision=0
-      addStairs(oldPos)
-      -- Anchor destination: record newPos so the route has a starting point
-      -- on the new floor (floor change) or after the jump (same-floor teleport)
-      addPosition(newPos)
+    if zChanging() then return end
+    if CaveBot.isOn() or not isEnabled then return end
+
+    -- ======== FIRST STEP ========
+    if not lastPos then
+      addPosition(oldPos)
       prevStepPos = newPos
       prevDirection = nil
       pendingCorner = nil

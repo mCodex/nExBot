@@ -291,6 +291,7 @@ local waypointCacheValid = false
 local waypointCacheFloors = {}
 local startupWaypointFound = false
 local startupCheckTime = nil   -- Set on first check to enforce 500ms delay
+local startupFocusTarget = nil -- Fallback child ref when focusChild fails on startup
 
 --[[
   WAYPOINT ENGINE
@@ -431,7 +432,10 @@ end
 -- Focus a waypoint for recovery (cancel walk, reset retries)
 focusWaypointForRecovery = function(targetChild, targetIndex)
   if CaveBot.stopAutoWalk then CaveBot.stopAutoWalk() end
-  ui.list:focusChild(targetChild)
+  local ok, err = pcall(ui.list.focusChild, ui.list, targetChild)
+  if not ok then
+    startupFocusTarget = targetChild
+  end
   actionRetries = 0
   WaypointEngine.recoveryJustFocused = true
 end
@@ -762,6 +766,9 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     checkStartupWaypoint()
   end
   
+  -- Guard: skip action processing until startup check completes
+  if not startupWaypointFound then return end
+  
   -- WAYPOINT ENGINE: High-performance stuck detection and recovery
   if runWaypointEngine() then
     return  -- Engine handled recovery, skip normal processing
@@ -890,7 +897,18 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if actionCount == 0 then return end
   
   -- Get current action (single call pattern)
-  local currentAction = uiList:getFocusedChild() or uiList:getFirstChild()
+  -- If getFocusedChild returns nil (focusChild may have failed on startup),
+  -- use startupFocusTarget override. Clear it once focus is restored.
+  local currentAction
+  local focusedChild = uiList:getFocusedChild()
+  if focusedChild then
+    currentAction = focusedChild
+    startupFocusTarget = nil
+  elseif startupFocusTarget then
+    currentAction = startupFocusTarget
+  else
+    currentAction = uiList:getFirstChild()
+  end
   if not currentAction then return end
 
   -- Z-MISMATCH GUARD: If focused WP is a goto on a different floor than player,
@@ -1019,9 +1037,10 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   end
   
   -- Check if action changed focus during execution
-  local newFocused = uiList:getFocusedChild()
+  local newFocused = startupFocusTarget or uiList:getFocusedChild()
   if currentAction ~= newFocused then
     currentAction = newFocused or uiList:getFirstChild()
+    startupFocusTarget = nil
     actionRetries = 0
     prevActionResult = true
   end
@@ -1454,24 +1473,16 @@ findReachableWaypoint = function(playerPos, options)
     local shouldValidate = (rank <= PROXIMITY_GUARANTEE) or c.withinRange
     if not shouldValidate then goto skip_candidate end
 
-    -- Path validation: use strict findPath (no ignoreNonPathable) for top candidates
+    -- Path validation: strict findPath (no ignoreNonPathable).
+    -- Generous maxSteps (100) accounts for obstacle detours that make
+    -- the real path 2-5x longer than Chebyshev distance.
     local ps = getPS()
     if rank <= PATH_VALIDATE_COUNT and ps and ps.findPath then
       local path = ps.findPath(playerPos, c, {
-        maxSteps = math.min(math.floor(c.dist * 1.5) + 5, 50),
+        maxSteps = math.min(math.floor(c.dist * 3) + 10, 100),
       })
       if path and #path > 0 then
         validated[#validated + 1] = c
-      end
-      -- If strict fails, try with ignoreNonPathable as fallback
-      if not path or #path == 0 then
-        path = ps.findPath(playerPos, c, {
-          maxSteps = math.min(math.floor(c.dist * 1.5) + 5, 50),
-          ignoreNonPathable = true,
-        })
-        if path and #path > 0 then
-          validated[#validated + 1] = c
-        end
       end
     else
       -- Beyond validation budget: accept by distance (legacy behavior)
@@ -1546,28 +1557,7 @@ checkStartupWaypoint = function()
   
   buildWaypointCache()
   
-  -- Check if current focused waypoint is already reachable
-  local currentAction = ui.list:getFocusedChild()
-  if currentAction then
-    local currentIndex = ui.list:getChildIndex(currentAction)
-    local currentWp = waypointPositionCache[currentIndex]
-    
-    if currentWp and currentWp.z == playerPos.z then
-      local dist = chebyshevDist(playerPos, currentWp)
-      local maxDist = CaveBot.getMaxGotoDistance()
-      
-      if dist <= maxDist then
-        local path = findPath(playerPos, currentWp, maxDist, { ignoreNonPathable = true })
-        if path then
-          -- Current waypoint is reachable, no need to search
-          startupWaypointFound = true
-          return
-        end
-      end
-    end
-  end
-  
-  -- Current waypoint not reachable - find nearest globally
+  -- Find nearest reachable waypoint globally
   local maxDist = CaveBot.getMaxGotoDistance()
   local nearestChild, nearestIndex = findNearestGlobalWaypoint(playerPos, maxDist, {
     maxCandidates = 10,
@@ -1577,8 +1567,9 @@ checkStartupWaypoint = function()
   
   if nearestChild then
     print("[CaveBot] Startup: Found nearest reachable waypoint at index " .. nearestIndex)
+    startupWaypointFound = true  -- Set BEFORE focusWaypointForRecovery (focusChild may crash)
+    startupFocusTarget = nearestChild
     focusWaypointForRecovery(nearestChild, nearestIndex)
-    startupWaypointFound = true
     return
   end
   
@@ -1591,12 +1582,13 @@ checkStartupWaypoint = function()
   
   if extendedChild then
     print("[CaveBot] Startup: Found waypoint at extended range, index " .. extendedIndex)
+    startupWaypointFound = true
+    startupFocusTarget = extendedChild
     focusWaypointForRecovery(extendedChild, extendedIndex)
   else
     warn("[CaveBot] Startup: No reachable waypoint found. Bot may be stuck.")
+    startupWaypointFound = true
   end
-  
-  startupWaypointFound = true
 end
 
 -- Reset startup check (called on config change)

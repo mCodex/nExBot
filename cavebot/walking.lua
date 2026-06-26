@@ -144,7 +144,7 @@ local function tryKeyboardNudge(playerPos, dest)
       local off = DIR_TO_OFFSET[d]
       if off then
         local target = {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}
-        if not isFloorChangeTile(target) then
+        if not isFloorChangeTile(target) and PathUtils.isTileWalkable(target) then
           PS().walkStep(d)
           lastNudgeDir  = d
           lastNudgeTime = now
@@ -228,13 +228,24 @@ local function findWalkablePath(playerPos, dest, opts)
     return path, false
   end
 
-  -- 3) RELAXED pathfinding (last resort, includes ignoreNonPathable)
-  local relaxedPath, wasRelaxed = PS().findPathRelaxed(playerPos, dest, {
+  -- 3) RELAXED pathfinding (last resort — respects walkability, allows creatures/unseen/fields)
+  local relaxedOpts = {
     maxSteps        = maxSteps,
-    ignoreCreatures = opts.ignoreCreatures or false,
+    ignoreCreatures = true,
     ignoreFields    = opts.ignoreFields or false,
     precision       = opts.precision or 0,
-  })
+  }
+  local relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
+
+  if not (relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1])) then
+    relaxedOpts.allowUnseen = true
+    relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
+  end
+
+  if not (relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1])) then
+    relaxedOpts.ignoreFields = true
+    relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
+  end
 
   if relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1]) then
     PS().setCursor(relaxedPath, dest)
@@ -244,7 +255,7 @@ local function findWalkablePath(playerPos, dest, opts)
       local cur = PS().getCursor()
       if cur then cur.path = relaxedPath end
     end
-    return relaxedPath, wasRelaxed
+    return relaxedPath, true
   end
 
   -- No walkable path found
@@ -298,7 +309,7 @@ local function autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist)
   end
 
   local precision = chunkSteps >= 10 and 1 or 0
-  PS().autoWalk(chunkDest, maxDist, {ignoreNonPathable = true, precision = precision})
+  PS().autoWalk(chunkDest, maxDist, {precision = precision})
   PS().advanceCursor(chunkSteps, PS().rawStepDuration(false))
   return true
 end
@@ -369,11 +380,15 @@ CaveBot.walkTo = function(dest, maxDist, params)
       -- Far: guarded autoWalk
       local isSafe = PS().nativePathIsSafe(playerPos, dest, {ignoreNonPathable = true})
       if isSafe then
-        PS().autoWalk(dest, maxDist, {ignoreNonPathable = true, precision = precision})
+        PS().autoWalk(dest, maxDist, {precision = precision})
       else
         local dirToDest = getDirectionTo(playerPos, dest)
         if dirToDest and canWalkDirection(dirToDest) then
-          PS().walkStep(dirToDest)
+          local off = DIR_TO_OFFSET[dirToDest]
+          local target = off and {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}
+          if target and PathUtils.isTileWalkable(target) then
+            PS().walkStep(dirToDest)
+          end
         end
       end
       return true

@@ -5,6 +5,12 @@ local cavebotAllowance = 0
 local lureEnabled = true
 local recalculateBestTarget  -- forward declaration: defined at ~L2054, used by EventBus closures above it
 
+-- ponytail: priority bonus for current attack target prevents same-priority ping-pong
+-- Values based on PRIORITY_SCALE = 1000 (config priority 1 = 1000 base)
+local STICKY_BONUS = 800       -- ~80% of one config priority level
+local STICKY_BONUS_FINISH = 1200  -- extra bonus when target is low HP
+local lastEngagementAt = 0     -- minimum engagement duration guard (ms)
+
 -- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
 local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 
@@ -1217,6 +1223,12 @@ recalculateBestTarget = function()
       base = base + math.max(0, (8 - dist)) * 2
     end
     base = base + ((100 - hp) * 0.15)
+    -- ponytail: sticky bonus prevents retarget ping-pong
+    -- current target needs a full config priority level higher to be overridden
+    if currentTargetId and creature and creature:getId() == currentTargetId then
+      local hpOk, hpVal = pcall(function() return creature:getHealthPercent() end)
+      base = base + ((hpOk and hpVal and hpVal < 25) and STICKY_BONUS_FINISH or STICKY_BONUS)
+    end
     return base
   end
   
@@ -1415,19 +1427,18 @@ recalculateBestTarget = function()
   
   -- v2.2: If current target is still valid, ensure it's not replaced by a marginally better target
   -- This implements "target stickiness" at the recalculation level
+  -- ponytail: sticky bonus in getAdjustedPriority handles same-priority retarget prevention
+  -- threshold approach kept as safety net for edge cases
   if currentTargetStillValid and currentTargetParams and bestTarget then
     local currentHP = currentAttackTarget:getHealthPercent()
-    -- If current target is wounded, require higher priority to switch
     if currentHP < 70 then
-      local switchThreshold = 15  -- Need 15+ priority advantage to switch
+      local switchThreshold = 15
       if currentHP < 50 then switchThreshold = 25 end
       if currentHP < 30 then switchThreshold = 40 end
       if currentHP < 15 then switchThreshold = 75 end
-      
       if bestTarget ~= currentTargetParams then
         local priorityAdvantage = bestTarget.priority - currentTargetParams.priority
         if priorityAdvantage < switchThreshold then
-          -- Not enough priority advantage - keep current target
           bestTarget = currentTargetParams
           bestPriority = currentTargetParams.priority
         end
@@ -1728,8 +1739,15 @@ targetbotMacro = macro(250, function()
   
   -- Get best target (uses cache when possible)
     local bestTarget, targetCount, totalDanger
+    -- ponytail: skip recalculate if we just engaged a target (< 1500ms)
+    local Client_g = getClient()
+    local currentAttack_g = (Client_g and Client_g.getAttackingCreature) and Client_g.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+    if currentAttack_g and not currentAttack_g:isDead() and (now - lastEngagementAt) < 1500 then
+      bestTarget = monsterCache.bestTarget
+      targetCount = monsterCache.monsterCount or 0
+      totalDanger = monsterCache.totalDanger or 0
     -- If cache is clean and recent and we recalculated very recently, use cached values to avoid heavy work
-    if not monsterCache.dirty and (now - (monsterCache.lastFullUpdate or 0)) < (monsterCache.FULL_UPDATE_INTERVAL or 400) and (now - lastRecalcTime) < RECALC_COOLDOWN_MS then
+    elseif not monsterCache.dirty and (now - (monsterCache.lastFullUpdate or 0)) < (monsterCache.FULL_UPDATE_INTERVAL or 400) and (now - lastRecalcTime) < RECALC_COOLDOWN_MS then
       bestTarget = monsterCache.bestTarget
       targetCount = 0
       totalDanger = monsterCache.totalDanger or 0
@@ -1907,11 +1925,15 @@ targetbotMacro = macro(250, function()
         end
       end
       
-      -- v5.0: ALWAYS call requestAttack — ASM v3.0 handles REAFFIRM,
-      -- pendingSwitch, and duplicate-target logic internally.
-      -- The old "IDLE only" guard was a root cause of "attack once then stop".
+      -- Persistent attack: only requestAttack when target actually changes.
+      -- g_game.attack() is persistent — server handles continuous attacking.
+      -- Skip if already locked on the same creature.
       if allowSync then
-        AttackStateMachine.requestAttack(bestTarget.creature, 1000)
+        local smTargetId = AttackStateMachine.getTargetId()
+        if not smTargetId or bestTarget.creature:getId() ~= smTargetId then
+          AttackStateMachine.requestAttack(bestTarget.creature, 1000)
+          lastEngagementAt = now
+        end
       end
 
       -- Update AttackController based on state machine status

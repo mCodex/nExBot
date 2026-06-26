@@ -522,6 +522,9 @@ function PathStrategy.nativePathIsSafe(startPos, goalPos, opts)
     if isFC(probe) then
       return false, nativePath, i
     end
+    if not PU().isTileWalkable(probe) then
+      return false, nativePath, i
+    end
   end
   return true, nativePath, nil
 end
