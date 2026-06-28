@@ -73,7 +73,11 @@ Panel
 ]])
 edit:hide()
 
-local SharedHelpers = nExBot.SharedHelpers or {}
+local SharedHelpers = nExBot.SharedHelpers
+if not SharedHelpers then
+  warn("[Dropper] SharedHelpers not loaded")
+  return
+end
 local getProfileSetting = SharedHelpers.getProfileSetting
 local setProfileSetting = SharedHelpers.setProfileSetting
 

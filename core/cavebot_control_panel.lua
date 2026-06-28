@@ -10,6 +10,7 @@ do
     g_ui.loadUIFromString(content)
   else
     warn("[CaveBot] Failed to load cavebot_control_panel.otui from " .. path)
+    return
   end
 end
 

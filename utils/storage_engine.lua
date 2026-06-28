@@ -184,7 +184,7 @@ function StorageEngine.new(opts)
       if not storage then return false end
       if not storage[k] then return false end
       local e = get(m)
-      if e and next(e) then return false end
+      if e then local has = false; for _ in pairs(e) do has = true; break end; if has then return false end end
       set(m, deepClone(storage[k]))
       return true
     end,

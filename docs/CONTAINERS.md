@@ -53,26 +53,37 @@ Holds your attack and utility runes. AttackBot pulls runes from here during comb
 
 ## 🔓 Auto-Open System
 
-The Container Opener (v12) uses a sophisticated BFS queue system:
+The Container Panel uses a BFS queue system with re-scan on timeout:
 
 1. On login, it waits for containers to load (500 ms delay)
 2. Opens assigned containers
 3. Scans for nested containers and queues them for opening
 4. Handles paginated containers automatically
-5. Emits `containers:open_all_complete` via EventBus when done
+5. Re-scans parent containers on safety timeout (fixes late-opening backpacks)
+6. Skips monster corpses during sorting (dead, remains, body of)
+7. Enforces server-side container limit (max 19 open) to prevent server rejection
+8. Emits `containers:open_all_complete` via EventBus when done
 
 ### Architecture
 
 | Component | Responsibility |
 |-----------|----------------|
-| **ContainerQueue** | Manages the BFS queue of containers to open |
+| **ContainerBFS** | BFS queue with O(1) pop (index cursor instead of table.remove) |
 | **ContainerTracker** | Prevents duplicate opens (4-second grace period) |
 | **ContainerScanner** | Scans containers for nested containers |
-| **ContainerOpener** | Orchestrates the entire opening process |
+| **getCachedContainers()** | Per-tick cache — eliminates redundant g_game.getContainers() calls |
 
 ### Deduplication
 
 The queue uses slot-based keys (`containerId:absoluteSlotIndex`) for robust deduplication. The `ContainerTracker` prevents re-opening the same slot within a 4-second grace period, even if events fire multiple times.
+
+### Safety Timeout
+
+When a container entry is pending for too long, the safety timeout rescans the parent container before dropping the entry. This fixes backpacks that stay unopened when the child container opens before the parent.
+
+### Corpse Filtering
+
+The sorting system automatically skips monster corpses (identified by names containing "dead", "remains", or "body of") — these are looted by TargetBot, not sorted by the Container Panel.
 
 ---
 
@@ -178,3 +189,7 @@ The `onAddItem` handler queues new container items for opening, and `onContainer
 ### "Schedule execution error" or nil function errors
 
 This usually means a partial or outdated `Containers.lua` file. Replace it with the latest version and restart the client.
+
+### Containers closing immediately after opening
+
+The server has a limit of ~20 open containers. The bot enforces a guard at 19 — when the limit is reached, BFS pauses and resumes when a container closes. If containers keep closing, check that you don't have too many backpacks assigned.

@@ -10,8 +10,6 @@ local spyLevelEnabled = false
 if storage then
     if storage.tools and storage.tools.spyLevelEnabled ~= nil then
         spyLevelEnabled = storage.tools.spyLevelEnabled
-    elseif storage.spyLevelEnabled ~= nil then
-        spyLevelEnabled = storage.spyLevelEnabled
     end
 end
 

@@ -21,9 +21,10 @@ Key behaviors:
 ## Quick Start
 
 1. Open the **Tools** tab.
-2. Enter the party leader's **name** in the Target field.
-3. Toggle **Follow** ON.
-4. Toggle **Follow While Attacking** ON (recommended).
+2. Find the **Auto Follow** section.
+3. Enter the party leader's **name** in the Target field.
+4. Toggle **Follow Player** ON (this is the macro toggle).
+5. Toggle **Follow While Attacking** ON (recommended).
 
 ---
 
@@ -31,7 +32,9 @@ Key behaviors:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **Target** | "" | Player name to follow |
+| **Title** | "Auto Follow" | Section header in Tools tab |
+| **Target** | "" | Player name to follow (shown as "Target:" label) |
+| **Follow Player** | OFF | Macro toggle — click to enable/disable following |
 | **Follow While Attacking** | ON | Walk toward leader while fighting monsters |
 | **Max Distance** | 3 | Tiles before bot catches up to leader |
 
@@ -87,7 +90,7 @@ If the leader goes off-screen:
 ### Bot doesn't follow after login
 
 - Re-enter the leader name in the Target field
-- Toggle Follow OFF then ON
+- Toggle the Follow Player macro OFF then ON
 
 ---
 

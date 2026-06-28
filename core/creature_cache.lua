@@ -438,13 +438,15 @@ end
   @param ttl number Cache TTL (ms)
   @return array of creature objects
 ]]
+local _lastRangeX, _lastRangeY
+
 function CreatureCache.getSpectators(rangeX, rangeY, ttl)
   rangeX = rangeX or CreatureCache.CONFIG.SPECTATOR_RANGE_X
   rangeY = rangeY or CreatureCache.CONFIG.SPECTATOR_RANGE_Y
   ttl = ttl or CreatureCache.CONFIG.CACHE_TTL
 
   local nowt = nowMs()
-  if (nowt - cache.lastUpdate) < ttl then
+  if (nowt - cache.lastUpdate) < ttl and _lastRangeX == rangeX and _lastRangeY == rangeY then
     local result = {}
     for id, entry in pairs(cache.creatures) do
       if entry.creature then
@@ -454,6 +456,8 @@ function CreatureCache.getSpectators(rangeX, rangeY, ttl)
     return result
   end
 
+  _lastRangeX = rangeX
+  _lastRangeY = rangeY
   CreatureCache.updateFromSpectators(rangeX, rangeY)
   local result = {}
   for id, entry in pairs(cache.creatures) do

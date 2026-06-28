@@ -282,7 +282,7 @@ function TargetCore.PathSafety.recursiveReachable(startPos, destPos, depth, maxN
   maxNodes = maxNodes or 500
   local visited = {}
   local nodes = 0
-  local function key(p) return p.x * 10000 + p.y * 100 + p.z end
+  local function key(p) return p.x .. ":" .. p.y .. ":" .. p.z end
   local function dfs(p, d)
     if nodes > maxNodes then
       return false

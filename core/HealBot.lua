@@ -398,6 +398,7 @@ ui.settings.onClick = function(widget)
   end
 end
 
+local friendHealerWindow
 ui.allySetup.onClick = function(widget)
   if friendHealerWindow then
     friendHealerWindow:show()
@@ -668,7 +669,7 @@ local function getStats()
     return BotCore.Stats.getAll()
   end
   -- Fallback for standalone testing
-  local localPlayer = ClientService.getLocalPlayer()
+  local localPlayer = ClientService and ClientService.getLocalPlayer and ClientService.getLocalPlayer()
   if not localPlayer then return { hp = 0, maxHp = 1, hpPercent = 0, mp = 0, maxMp = 1, mpPercent = 0, burst = 0 } end
   local hp = localPlayer:getHealth()
   local maxHp = localPlayer:getMaxHealth()
@@ -1013,10 +1014,18 @@ local function loadAllyCustomPlayers()
     return
   end
   local charPlayers = CharacterDB.get("friendHealer.customPlayers")
-  if charPlayers and type(charPlayers) == "table" and #charPlayers > 0 then
-    allyConfig.customPlayers = charPlayers
-  elseif allyConfig.customPlayers and #allyConfig.customPlayers > 0 then
-    CharacterDB.set("friendHealer.customPlayers", allyConfig.customPlayers)
+  if charPlayers and type(charPlayers) == "table" then
+    local hasEntries = false
+    for _ in pairs(charPlayers) do hasEntries = true; break end
+    if hasEntries then
+      allyConfig.customPlayers = charPlayers
+    end
+  elseif allyConfig.customPlayers then
+    local hasEntries = false
+    for _ in pairs(allyConfig.customPlayers) do hasEntries = true; break end
+    if hasEntries then
+      CharacterDB.set("friendHealer.customPlayers", allyConfig.customPlayers)
+    end
   end
   local charConditions = CharacterDB.get("friendHealer.conditions")
   if charConditions and type(charConditions) == "table" then
@@ -1101,7 +1110,6 @@ end
 
 -- FriendHealer window
 local friendHealerMacro = nil
-local friendHealerWindow
 
 local function syncAllyHealerState()
     if BotCore and BotCore.FriendHealer and BotCore.FriendHealer.setEnabled then
@@ -1203,7 +1211,7 @@ if rootW then
     local list = widget:getParent()
     local label = list:getParent().title
     category = category or 0
-    if category == 2 and not storage.extras.checkPlayer then
+    if category == 2 and not (storage.extras and storage.extras.checkPlayer) then
         label:setColor("#d9321f")
         label:setTooltip("! WARNING ! Turn on check players in extras to use this feature!")
         return
@@ -1484,12 +1492,12 @@ if rootW then
 
             if curHp and curHp < 100 then
                 local isCustom = allyConfig.customPlayers and allyConfig.customPlayers[name]
-                if isCustom and curHp > isCustom then break end
-
-                if dist then
-                    inMasResRange = (dist <= 3) and inMasResRange + 1 or inMasResRange
-                    if curHp < healTarget.hp then
-                        healTarget = {creature = spec, hp = curHp}
+                if not (isCustom and curHp > isCustom) then
+                    if dist then
+                        inMasResRange = (dist <= 3) and inMasResRange + 1 or inMasResRange
+                        if curHp < healTarget.hp then
+                            healTarget = {creature = spec, hp = curHp}
+                        end
                     end
                 end
             end

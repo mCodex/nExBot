@@ -39,7 +39,9 @@ local _spectatorsCacheTime = 0
 local SPECTATORS_CACHE_TTL = 200
 
 local function getCachedSpectators(...)
-  local key = ... or false
+  local args = {...}
+  local nargs = #args
+  local key = nargs .. ":" .. tostring(args[1])
   local t = now or (os.time() * 1000)
   if _spectatorsCache and _spectatorsCacheKey == key and (t - _spectatorsCacheTime) < SPECTATORS_CACHE_TTL then
     return _spectatorsCache

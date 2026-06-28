@@ -102,8 +102,8 @@ CaveBot uses a combined approach for movement:
 3. findPath ignore creatures (if step 2 fails)
 4. findPath allow unseen tiles (if distance ≤ 30)
 5. findPath ignore fields (if distance ≤ 30)
-6. Short paths (≤5 tiles) → keyboard step-by-step with 2-step pipelining
-7. Longer paths (>5 tiles, ≤55% dir changes) → autoWalk with chunking (max 25 tiles)
+6. Short paths (≤2 tiles) → keyboard step-by-step with step pacing + 2-step pipelining
+7. Longer paths (>2 tiles, ≤55% dir changes) → autoWalk with chunking (max 25 tiles)
 ```
 
 Most walks complete with a single findPath + autoWalk dispatch. The PathCursor is preserved across ticks for the same destination, eliminating redundant A* recomputation.
@@ -194,12 +194,13 @@ Affected parameters:
 | `NEG_CACHE_MAX` | 32 | Max negative cache entries |
 | `MAX_WALK_CHUNK` | 25 | Max tiles per autoWalk dispatch |
 | `AUTOWALK_THRESHOLD` | 5 tiles | Min path length to use autoWalk |
+| `KEYBOARD_THRESHOLD` | 2 | Max path length (tiles) for keyboard stepping |
 | `DIR_CHANGE_TOLERANCE` | 55% | Max direction changes for autoWalk eligibility |
 | `VERIFY_INTERVAL` | 150 ms | Mid-walk verification interval |
 | `PIPELINING_DEPTH` | 2 | Steps dispatched ahead during keyboard walking |
 | `BLACKLIST_BASE_TTL` | 15000 ms | Base waypoint blacklist duration |
 | `BLACKLIST_MAX_TTL` | 120000 ms | Max waypoint blacklist duration |
-| `FINDPATH_LRU_SIZE` | 4 | Number of cached pathfinding results |
+| `FINDPATH_LRU_SIZE` | 8 | Number of cached pathfinding results |
 
 > [!WARNING]
 > Only adjust these if you understand the performance trade-offs. Lower values = faster response but more CPU. Higher values = less CPU but slower response.

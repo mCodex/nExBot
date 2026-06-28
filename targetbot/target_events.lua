@@ -95,7 +95,7 @@ if EventBus then
     if newId ~= lastCombatTargetId then
       if creature then
         if _combatEndPending then removeEvent(_combatEndPending); _combatEndPending = nil end
-        if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", true) else storage.targetbotCombatActive = true end
+        if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", true) end
         pcall(function() EventBus.emit("targetbot/combat_start", creature, { id = newId, pos = creature:getPosition() }) end)
         lastCombatTargetId = newId
       else
@@ -103,7 +103,7 @@ if EventBus then
         _combatEndPending = schedule(COMBAT_END_GRACE_MS, function()
           _combatEndPending = nil
           if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then return end
-          if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", false) else storage.targetbotCombatActive = false end
+          if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", false) end
           pcall(function() EventBus.emit("targetbot/combat_end") end)
           lastCombatTargetId = nil
         end)

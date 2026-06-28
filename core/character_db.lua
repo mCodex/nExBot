@@ -33,7 +33,18 @@ local engine = StorageEngine.new({
 
 CharacterDB = engine
 
-if g_game.getLocalPlayer() then engine.load() end
+if g_game.getLocalPlayer() then
+  engine.load()
+else
+  local function onReady()
+    if g_game.getLocalPlayer() then
+      engine.load()
+    end
+  end
+  schedule(500, onReady)
+  schedule(1500, onReady)
+  schedule(3000, onReady)
+end
 
 nExBot = nExBot or {}
 nExBot.CharacterDB = CharacterDB

@@ -802,7 +802,11 @@ function ContainerBFS.queueItem(item, containerId, slotIndex, prioritize)
     if itemId then ContainerBFS.openedTypes[itemId] = typeCount + 1 end
 
     local entry = { parentId = containerId, slot = slotIndex, itemId = itemId }
-    ContainerBFS.queue[#ContainerBFS.queue + 1] = entry
+    if prioritize then
+        table.insert(ContainerBFS.queue, 1, entry)
+    else
+        ContainerBFS.queue[#ContainerBFS.queue + 1] = entry
+    end
     return true
 end
 
@@ -874,7 +878,6 @@ function ContainerBFS.openNext()
                             if candidate and candidate:isContainer() and candidate:getId() == entry.itemId then
                                 local key = entry.parentId .. ":" .. idx
                                 if not ContainerBFS.opened[key] then
-                                    ContainerBFS.opened[key] = true
                                     local retry = { parentId = entry.parentId, slot = idx, itemId = entry.itemId }
                                     ContainerBFS.queue[#ContainerBFS.queue + 1] = retry
                                 end
@@ -1234,6 +1237,12 @@ local function findDestinationForItem(itemId)
     return nil
 end
 
+local cachedContainers = nil
+local function getCachedContainers()
+    if not cachedContainers then cachedContainers = g_game.getContainers() end
+    return cachedContainers
+end
+
 local function isContainerOpen(itemId)
     if not itemId then return false end
     for _, container in pairs(getCachedContainers()) do
@@ -1276,12 +1285,6 @@ local function openConfiguredContainer(itemId)
     end
 
     return false
-end
-
-local cachedContainers = nil
-local function getCachedContainers()
-    if not cachedContainers then cachedContainers = g_game.getContainers() end
-    return cachedContainers
 end
 
 

@@ -862,34 +862,10 @@ if Follow then
   end
 end
 
--- Status label
-local followStatusLabel = UI.Label("Target: -")
-followStatusLabel:setId("followStatusLabel")
-
 if Follow then
-  schedule(500, function()
-    if not followStatusLabel:isVisible() then return end
-    local s = Follow.getState()
-    local cfg = Follow.getConfig()
-    if not cfg.enabled or not cfg.playerName or cfg.playerName == "" then
-      followStatusLabel:setText("Target: -")
-      return
-    end
-    if s.leaderCreature then
-      local suffix = ""
-      if isAttacking() then suffix = " (attacking)" end
-      followStatusLabel:setText("Following: " .. (SC.getName(s.leaderCreature) or cfg.playerName) .. " [" .. (s.lastDistance or 0) .. "m]" .. suffix)
-    else
-      followStatusLabel:setText("Target: " .. cfg.playerName)
-    end
-  end)
-
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- FOLLOW PLAYER UI
-  -- ═══════════════════════════════════════════════════════════════════════════
+  UI.Label("Auto Follow")
 
   UI.Label("Target:")
-
   local followPlayerNameEdit = UI.TextEdit(Follow.getConfig().playerName, function(widget, text)
     Follow.setPlayerName(text:trim())
     Follow.saveConfig()

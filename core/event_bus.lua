@@ -725,6 +725,17 @@ if onWalk then
     if not cId or not _creatureMoveLastEmit[cId] or (nowMs5 - _creatureMoveLastEmit[cId]) >= CREATURE_MOVE_THROTTLE_MS then
       if cId then _creatureMoveLastEmit[cId] = nowMs5 end
       EventBus.emit("creature:move", creature, oldPos)
+    elseif cId then
+      _creatureMovePending = _creatureMovePending or {}
+      _creatureMovePending[cId] = {creature = creature, oldPos = oldPos}
+      schedule(CREATURE_MOVE_THROTTLE_MS, function()
+        local pending = _creatureMovePending and _creatureMovePending[cId]
+        if pending then
+          _creatureMovePending[cId] = nil
+          _creatureMoveLastEmit[cId] = nowMs5
+          EventBus.emit("creature:move", pending.creature, pending.oldPos)
+        end
+      end)
     end
     if creature:isMonster() then
       EventBus.emit("monster:walk", creature, oldPos, newPos)

@@ -806,7 +806,8 @@ nExBot.MonsterInspector.showWindow = function()
 
     -- If storage is empty, retry after a short delay to let updater collect samples
     local patterns = safeUnifiedGet("targetbot.monsterPatterns", {})
-    local hasPatterns = patterns and next(patterns) ~= nil
+    local hasPatterns = false
+    if patterns then for _ in pairs(patterns) do hasPatterns = true; break end end
     if not hasPatterns then
       schedule(500, function()
         if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end
@@ -830,7 +831,9 @@ nExBot.MonsterInspector.toggleWindow = function()
       refreshPatterns()
       -- Retry shortly if no patterns yet
       local patterns2 = safeUnifiedGet("targetbot.monsterPatterns", {})
-      if not (patterns2 and next(patterns2) ~= nil) then
+      local has2 = false
+      if patterns2 then for _ in pairs(patterns2) do has2 = true; break end end
+      if not has2 then
         schedule(500, function() if MonsterAI and MonsterAI.updateAll then pcall(function() MonsterAI.updateAll() end) end; refreshPatterns() end)
       end
     end

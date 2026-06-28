@@ -95,7 +95,7 @@ end
 
 local player
 local function getPlayer()
-  if not player or not SC.getPosition(player) then
+  if not player or not (SC and SC.getPosition and SC.getPosition(player)) then
     local C = getClient()
     player = (C and C.getLocalPlayer and C.getLocalPlayer())
           or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())

@@ -189,7 +189,8 @@ if true then
       ok, err = pcall(g_window.setTitle, "Tibia - " .. name())
     end
     if not ok and err then
-      error("setTitle failed: " .. tostring(err))
+      warn("[Extras] setTitle failed: " .. tostring(err))
+      settings.title = false
     end
   end
 

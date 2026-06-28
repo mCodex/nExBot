@@ -211,3 +211,9 @@ When you switch characters, their last-used profiles are automatically restored.
 ## 🖼️ Multi-Client Support
 
 nExBot supports running multiple OTClient instances simultaneously. Each character's configurations are independent — there is no conflict between running bots.
+
+---
+
+## 🍎 macOS Compatibility
+
+On macOS, `g_window.setTitle()` can throw a C++ exception. All `setTitle` calls in nExBot are wrapped in `pcall()` to prevent crashes. This is a known OTClient issue on macOS and does not affect functionality.

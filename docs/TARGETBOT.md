@@ -171,14 +171,14 @@ TargetBot uses an **intent-based voting system** for movement. Multiple subsyste
 
 | Priority | Intent | Description |
 |----------|--------|-------------|
-| 0 | **Follow** | Catch up to party leader |
-| 1 | **Wave Avoidance** | Dodge predicted wave attacks |
-| 2 | **Finish Kill** | Move into range of low-HP target |
-| 3 | **Spell Position** | Optimal position for AoE spells |
-| 4 | **Keep Distance** | Maintain range for ranged vocations |
-| 5 | **Reposition** | Multi-factor tile scoring for safety |
-| 6 | **Chase** | Close distance to target |
-| 7 | **Face Monster** | Turn toward target |
+| 95 | **Follow** | Catch up to party leader |
+| 90 | **Wave Avoidance** | Dodge predicted wave attacks |
+| 80 | **Finish Kill** | Move into range of low-HP target |
+| 70 | **Spell Position** | Optimal position for AoE spells |
+| 60 | **Keep Distance** | Maintain range for ranged vocations |
+| 50 | **Reposition** | Multi-factor tile scoring for safety |
+| 35 | **Chase** | Close distance to target |
+| 30 | **Face Monster** | Turn toward target |
 
 Each intent carries a **confidence score**. Only the highest-confidence intent executes per tick. This prevents erratic movement from conflicting systems.
 

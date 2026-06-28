@@ -330,6 +330,13 @@ TargetBot.Creature.walk = function(creature, config, targets)
   end
   if MonsterAI and MonsterAI.updateAll then MonsterAI.updateAll() end
   local needsPrecisionControl = config.avoidAttacks or config.keepDistance
+  local creatureHealth = creature and creature:getHealthPercent() or 100
+  local killUnder = storage.extras.killUnder or 30
+  local targetIsLowHealth = creatureHealth < killUnder
+  local isTrapped = nExBot.isPlayerTrapped and nExBot.isPlayerTrapped(pos) or false
+  local pathLen = 0
+  local path = findPath(pos, cpos, 10, {ignoreNonPathable = true, ignoreCreatures = true})
+  if path then pathLen = #path end
   local Client = getClient()
   if needsPrecisionControl then
     local hasSetChaseMode = (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode)
@@ -587,7 +594,6 @@ onPlayerPositionChange(function(newPos, oldPos)
   if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
   if not TargetBot or not TargetBot.isOff or TargetBot.isOff() then return end
   if not lureMax then return end
-  if storage.TargetBotDelayWhenPlayer then return end
   if not dynamicLureDelay then return end
   local targetThreshold = delayFrom or lureMax * 0.5
   if targetCount < targetThreshold or not (target and target()) then return end
@@ -610,6 +616,9 @@ if EventBus then
           local playerPos = player and player:getPosition()
           if playerPos then
             MovementCoordinator.Intent.register(MovementCoordinator.CONSTANTS.INTENT.LURE, playerPos, eligibility.confidence, "lure_event", { triggered = "target_count", targets = newCount, deficit = eligibility.deficit })
+            -- ponytail: LURE intent uses player pos, Execute.move short-circuits.
+            -- Call allowCaveBot directly so CaveBot stays blocked during lure.
+            if TargetBot.allowCaveBot then TargetBot.allowCaveBot(150) end
           end
         end
       else

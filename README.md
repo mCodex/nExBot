@@ -117,20 +117,6 @@ Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress i
 > [!IMPORTANT]
 > The ACL auto-detects vBot vs. OTCR at startup — all game operations use a unified `ClientService` API. OTCR-exclusive features (imbuing, stash, forge, prey, market) are enabled automatically.
 
-### ⚡ Performance
-
-- **UnifiedTick** — single 50 ms master tick for all modules (replaces 30+ individual timers)
-- **Cached spectator scanning** — 200 ms TTL cache for `getSpectators()` calls
-- **LRU pathfinding cache** — bounded memory for repeated path calculations
-- **Single attack authority** — AttackStateMachine is the sole issuer of `g_game.attack()`
-- **SafeCreature** — single pcall wrapper authority (eliminated 40+ raw pcall patterns)
-- **DRY deduplication** — single implementations for Chebyshev, PathCache, isTargetable, getLocalPlayer
-- **Table-driven ClientService** — 209 ACL methods via mapping table (2,287 → 795 lines)
-- **Unified storage engine** — single JSON backend for BotDatabase, CharacterDB, UnifiedStorage (1,682 → 479 lines)
-- **Shared helpers** — profile settings, debounce, path utils extracted to shared modules
-- **Container corpse filtering** — sorting system skips monster corpses (dead/remains/body of)
-- **Container dead code removal** — removed syncSetupWindowCheckboxes, forEachContainerByItemId, shouldItemGoToContainer
-
 ---
 
 ## 🏗️ Architecture

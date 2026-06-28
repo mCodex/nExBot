@@ -150,7 +150,9 @@ end
 -- @return boolean
 function CaveBot.HasLootItems()
     local lootSet = getLootItemsSet()
-    if not next(lootSet) then return false end
+    local hasItems = false
+    for _ in pairs(lootSet) do hasItems = true; break end
+    if not hasItems then return false end
     
     for _, container in pairs(getContainers()) do
         local name = container:getName():lower()

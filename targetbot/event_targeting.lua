@@ -900,7 +900,7 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   -- Scenario gate: avoid illegal switches (anti-zigzag)
   if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
     local currentTarget = ClientService.getAttackingCreature()
-    if currentTarget and not currentTarget:isDead() then
+    if currentTarget and not (SC and SC.isDead and SC.isDead(currentTarget)) then
       local newId = SC.getId(creature)
       local curId = SC.getId(currentTarget)
       if newId and curId and newId ~= curId then
@@ -1117,7 +1117,6 @@ function EventTargeting.CombatCoordinator.pauseCaveBot()
   
   -- Set combat active flag for CaveBot to check
   targetState.combatActive = true
-  storage.eventTargetingCombat = true
   
   -- Reset CaveBot walking if available
   if CaveBot and CaveBot.resetWalking then
@@ -1132,7 +1131,6 @@ end
 -- Resume CaveBot walking after combat
 function EventTargeting.CombatCoordinator.resumeCaveBot()
   targetState.combatActive = false
-  storage.eventTargetingCombat = false
   
   if EventTargeting.DEBUG then
     print("[EventTargeting] CaveBot resumed")
@@ -1809,7 +1807,7 @@ if onCreatureAppear then
             end
           
             -- If attack was throttled and we are not already attacking this creature, bail
-            local currentAttack = (ClientService and ClientService.getAttackingCreature) and ClientService.getAttackingCreature() or (ClientService.getAttackingCreature())
+            local currentAttack = (ClientService and ClientService.getAttackingCreature) and ClientService.getAttackingCreature() or nil
             local curId2 = currentAttack and SC.getId(currentAttack) or nil
             local newId2 = SC.getId(creature)
             if not sent and not (currentAttack and curId2 and newId2 and curId2 == newId2) then

@@ -6,7 +6,11 @@ local scripts = 2 -- if you want more auto equip panels you can change 2 to high
 local lastEquipTime = 0
 local EQUIP_COOLDOWN = 1000
 
-local SharedHelpers = nExBot.SharedHelpers or {}
+local SharedHelpers = nExBot.SharedHelpers
+if not SharedHelpers then
+  warn("[equip] SharedHelpers not loaded")
+  return
+end
 local getProfileSetting = SharedHelpers.getProfileSetting
 local setProfileSetting = SharedHelpers.setProfileSetting
 

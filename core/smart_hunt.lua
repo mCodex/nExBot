@@ -91,7 +91,8 @@ end
 -- Check if table has data (pure function)
 local function hasData(tbl)
   if not tbl then return false end
-  return next(tbl) ~= nil
+  for _ in pairs(tbl) do return true end
+  return false
 end
 
 -- Clamp value between min and max (pure function)
@@ -416,7 +417,8 @@ local function recordLoot(entry)
     if nameKey then
       local bucket = analytics.lootItems[nameKey] or {count = 0, value = 0}
       bucket.count = bucket.count + (itm.count or 0)
-      local itemValue = (itm.price or 0) * (itm.count or 0)
+      local unitPrice = COIN_VALUES[nameKey] or (itm.price or 0)
+      local itemValue = unitPrice * (itm.count or 0)
       bucket.value = bucket.value + itemValue
       analytics.lootItems[nameKey] = bucket
       -- Track gold from coins

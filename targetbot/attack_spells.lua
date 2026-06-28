@@ -59,7 +59,7 @@ TargetBot.sayAttackSpell = function(text, delay)
     return BotCore.AttackSystem.executeSingleSpell(text, delay)
   end
   if lastAttackSpell + delay < now then
-    say(text)
+    doSay(text)
     lastAttackSpell = now
     if HuntAnalytics and HuntAnalytics.trackAttackSpell then
       HuntAnalytics.trackAttackSpell(text, 0)

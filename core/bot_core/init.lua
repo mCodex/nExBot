@@ -31,7 +31,7 @@ BotCore.initialized = false
 
 -- COMPONENT LOADING (order matters for dependencies)
 
-local zChanging = nExBot.zChanging or function() return false end
+local zChanging = (nExBot and nExBot.zChanging) or function() return false end
 local basePath = "/core/bot_core/"
 
 -- Core managers (no dependencies)

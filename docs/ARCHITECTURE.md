@@ -136,14 +136,12 @@ The `_Loader.lua` organizes initialization into phases:
 |-------|---------|
 | 1 | ACL + Client abstraction |
 | 2 | Constants (floor items, food, directions) |
-| 3 | Utils (shared, ring buffer, path utils, path strategy) |
-| 4 | Core libraries (lib, items, configs, database) |
-| 5 | Architecture (EventBus, UnifiedStorage, UnifiedTick) |
-| 6 | Feature modules (HealBot, AttackBot, CaveBot, TargetBot, etc.) |
-| 7 | Tools (Containers, Dropper, antiRs, etc.) |
-| 8 | Analytics (Analyzer, Hunt Analyzer, Spy Level) |
-| 9 | Private scripts (user custom scripts) |
-| 10 | Activate UnifiedTick |
+| 3 | Utils (shared, shared_helpers, storage_engine, safe_creature, path_utils, path_strategy) |
+| 4 | Core libraries (lib, items, configs, database, updater) |
+| 6 | Architecture (EventBus, UnifiedStorage, UnifiedTick, CreatureCache, GlobalConfig) |
+| 8 | Legacy features (CaveBot, TargetBot, HealBot, AttackBot, Combo, Extras, etc.) |
+| 9 | Legacy tools (Containers, Dropper, antiRs, Tools, Equip, EatFood, etc.) |
+| 11 | Analytics (Analyzer, HuntAnalyzer, SpyLevel, Supplies, NPC Talk, HoldTarget) |
 
 Each module is error-isolated — a failure in one module doesn't prevent others from loading.
 

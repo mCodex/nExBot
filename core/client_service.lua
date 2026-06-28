@@ -42,7 +42,7 @@ end
 
 local function makeDelegate(methodName, source, default, opts)
   opts = opts or {}
-  local aclPath = opts.aclPath or "game"
+  local aclPath = opts.aclPath or source or "game"
   local aclKey = opts.aclKey or methodName
   return function(...)
     local acl = loadACL()

@@ -79,6 +79,7 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
     local monster = monsters[i]
     if monster and not monster:isDead() then
       local mpos = monster:getPosition()
+      if mpos then
       local mdir = monster:getDirection()
       local dist = math.max(math.abs(pos.x - mpos.x), math.abs(pos.y - mpos.y))
       local threat = { monster = monster, distance = dist, inWaveArc = false, arcDistance = 99 }
@@ -139,9 +140,8 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
         end
         local inPredPath = false
         if confidence and confidence >= AVOID_PREDICT_CONF then
-          inPredPath = pcall(function()
-            return MonsterAI.Predictor.isPositionInWavePath(pos, mpos, mdir, pattern.waveRange, pattern.waveWidth)
-          end)
+          local ok, pathResult = pcall(MonsterAI.Predictor.isPositionInWavePath, pos, mpos, mdir, pattern.waveRange, pattern.waveWidth)
+          inPredPath = ok and pathResult
         end
         if inPredPath then
           local maxWindow = AVOID_PREDICT_TTA_WINDOW or 3000
@@ -172,6 +172,7 @@ local function analyzePositionDanger(pos, monsters, usePrediction)
         result.totalDanger = result.totalDanger + 0.5
       end
       result.details[#result.details + 1] = threat
+      end -- if mpos
     end
   end
   if confCount > 0 then
@@ -364,12 +365,13 @@ local function avoidWaveAttacks()
   local currentTarget = target and target()
   local safePos, score = findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
   if safePos then
-    avoidanceState.lastMove = currentTime; avoidanceState.lastSafePos = safePos
-    avoidanceState.consecutiveMoves = avoidanceState.consecutiveMoves + 1
     if MovementCoordinator and MovementCoordinator.canMove and MovementCoordinator.canMove() then
+      avoidanceState.lastMove = currentTime; avoidanceState.lastSafePos = safePos
+      avoidanceState.consecutiveMoves = avoidanceState.consecutiveMoves + 1
       TargetBot.walkTo(safePos, 2, {ignoreNonPathable = true, precision = 0})
+      return true
     end
-    return true
+    return false
   end
   avoidanceState.consecutiveMoves = 0
   return false

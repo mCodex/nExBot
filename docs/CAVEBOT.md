@@ -202,11 +202,19 @@ Enable **"Ignore fields"** in the CaveBot config panel to allow field crossing.
 
 ### Chunked Walking
 
-Paths are split into segments of **max 25 tiles** per autoWalk call. autoWalk kicks in for paths with **5+ tiles** where direction changes make up ≤55% of total steps. This covers most cave corridors while keeping pathfinding fresh.
+Paths are split into segments of **max 25 tiles** per autoWalk call. autoWalk kicks in for paths with **3+ tiles** (above the keyboard threshold of 2) where direction changes make up ≤55% of total steps. This covers most cave corridors while keeping pathfinding fresh.
+
+### Step Pacing
+
+Keyboard steps are paced to match the server's step duration — the bot enforces a minimum interval between steps so movement feels smooth and human-like rather than pushing every 75ms tick.
+
+### Keyboard Threshold
+
+The `KEYBOARD_THRESHOLD` is set to **2 tiles** — paths with 2 or fewer tiles use keyboard stepping, while longer paths use native autowalk. This gives the best balance: autowalk handles multi-tile paths with proper server-paced timing, while keyboard stepping gives precise control for short nudges.
 
 ### Step Pipelining
 
-When using keyboard stepping (short paths or high-zigzag routes), the engine dispatches **2 steps ahead** to create smooth animation without pauses between steps. Pipelining is disabled when:
+When using keyboard stepping, the engine dispatches **2 steps ahead** to create smooth animation without pauses between steps. Pipelining is disabled when:
 - The next step's direction changes by more than 90°
 - A floor-change tile is within 2 steps
 - `canWalkDirection` fails for the lookahead step

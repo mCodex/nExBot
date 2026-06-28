@@ -140,21 +140,39 @@ end
 if hasLocalPlayer() then UnifiedStorage.load() end
 
 schedule(100, function()
-  if EventBus then
-    EventBus.on("targetbot:configChanged", function(cn) UnifiedStorage.set("targetbot.selectedConfig", cn) end)
-    EventBus.on("cavebot:configChanged", function(cn) UnifiedStorage.set("cavebot.selectedConfig", cn) end)
-    EventBus.on("macro:toggled", function(mn, en) UnifiedStorage.set("macros." .. mn, en) end)
-    EventBus.on("module:toggled", function(mn, en) UnifiedStorage.set(mn .. ".enabled", en) end)
-    EventBus.on("monsterAI:patternUpdated", function(monster, pattern)
-      local p = UnifiedStorage.get("targetbot.monsterPatterns") or {}
-      p[monster] = pattern
-      UnifiedStorage.set("targetbot.monsterPatterns", p)
+  if not EventBus then
+    schedule(500, function()
+      if EventBus then
+        EventBus.on("targetbot:configChanged", function(cn) UnifiedStorage.set("targetbot.selectedConfig", cn) end)
+        EventBus.on("cavebot:configChanged", function(cn) UnifiedStorage.set("cavebot.selectedConfig", cn) end)
+        EventBus.on("macro:toggled", function(mn, en) UnifiedStorage.set("macros." .. mn, en) end)
+        EventBus.on("module:toggled", function(mn, en) UnifiedStorage.set(mn .. ".enabled", en) end)
+        EventBus.on("monsterAI:patternUpdated", function(monster, pattern)
+          local p = UnifiedStorage.get("targetbot.monsterPatterns") or {}
+          p[monster] = pattern
+          UnifiedStorage.set("targetbot.monsterPatterns", p)
+        end)
+        EventBus.on("player:logout", function() UnifiedStorage.save() end)
+        EventBus.on("tick:slow", function()
+          if os.time() - _lastBackup > BACKUP_INTERVAL and UnifiedStorage.getData() then createBackup() end
+        end)
+      end
     end)
-    EventBus.on("player:logout", function() UnifiedStorage.save() end)
-    EventBus.on("tick:slow", function()
-      if os.time() - _lastBackup > BACKUP_INTERVAL and UnifiedStorage.getData() then createBackup() end
-    end)
+    return
   end
+  EventBus.on("targetbot:configChanged", function(cn) UnifiedStorage.set("targetbot.selectedConfig", cn) end)
+  EventBus.on("cavebot:configChanged", function(cn) UnifiedStorage.set("cavebot.selectedConfig", cn) end)
+  EventBus.on("macro:toggled", function(mn, en) UnifiedStorage.set("macros." .. mn, en) end)
+  EventBus.on("module:toggled", function(mn, en) UnifiedStorage.set(mn .. ".enabled", en) end)
+  EventBus.on("monsterAI:patternUpdated", function(monster, pattern)
+    local p = UnifiedStorage.get("targetbot.monsterPatterns") or {}
+    p[monster] = pattern
+    UnifiedStorage.set("targetbot.monsterPatterns", p)
+  end)
+  EventBus.on("player:logout", function() UnifiedStorage.save() end)
+  EventBus.on("tick:slow", function()
+    if os.time() - _lastBackup > BACKUP_INTERVAL and UnifiedStorage.getData() then createBackup() end
+  end)
   if not engine.getStats().initialized and hasLocalPlayer() then UnifiedStorage.load() end
 end)
 

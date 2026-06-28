@@ -57,7 +57,6 @@ end
 
 local leaderTarget = nil
 local startCombo = false
-local serverTarget = nil
 
 ui.title:setOn(config.enabled)
 ui.title.onClick = function(widget)
@@ -99,6 +98,11 @@ if rootWidget then
   comboWindow.actions.attackLeaderTarget:setOption(config.attack)
   comboWindow.actions.attackLeaderTarget.onOptionChange = function(widget)
     config.attack = widget:getCurrentOption().text
+    -- Auto-enable attack when LEADER TARGET is selected
+    if config.attack == "LEADER TARGET" then
+      config.attackLeaderTargetEnabled = true
+      comboWindow.actions.attackLeaderTargetToggle:setChecked(true)
+    end
   end
 
   comboWindow.trigger.onSayToggle:setChecked(config.onSayEnabled)
@@ -184,9 +188,10 @@ onTalk(function(name, level, mode, text, channelId, pos)
         or (config.sayLeader and name:lower() == config.sayLeader:lower())
         or (config.castLeader and name:lower() == config.castLeader:lower())
     if isLeader then
-      if string.find(text, "ue") then
+      local textLower = text:lower()
+      if textLower == "ue" then
         say(config.spell)
-      elseif string.find(text, "sd") then
+      elseif textLower == "sd" then
         local params = string.split(text, ",")
         if #params == 2 then
           local target = params[2]:trim()
@@ -195,7 +200,7 @@ onTalk(function(name, level, mode, text, channelId, pos)
             useWith(config.item, creature)
           end
         end
-      elseif string.find(text, "att") then
+      elseif textLower == "att" then
         local attParams = string.split(text, ",")
         if #attParams == 2 then
           local atTarget = attParams[2]:trim()
@@ -208,7 +213,7 @@ onTalk(function(name, level, mode, text, channelId, pos)
     end
   end
 
-  if isAttSpell and isAttSpell(text) and config.enabled then
+  if isAttSpell and isAttSpell(text) and config.enabled and isLeader and config.onCastEnabled then
     EventBus.emit("combo:trigger")
   end
 end)
@@ -227,25 +232,50 @@ onMissle(function(missle)
 
   local fromCreatures = from:getCreatures()
   local toCreatures = to:getCreatures()
-  if #fromCreatures ~= 1 or #toCreatures ~= 1 then return end
+  if #fromCreatures == 0 or #toCreatures == 0 then return end
 
-  local c1 = fromCreatures[1]
-  local t1 = toCreatures[1]
+  -- Find the leader among creatures on the source tile
+  local leader = nil
+  for _, c in ipairs(fromCreatures) do
+    if c:getName():lower() == config.shootLeader:lower() then
+      leader = c
+      break
+    end
+  end
+  if not leader then return end
+
+  -- Pick the target: prefer the first non-leader, non-local creature on destination tile
+  local player = g_game.getLocalPlayer()
+  local t1 = nil
+  for _, c in ipairs(toCreatures) do
+    if c ~= leader and (not player or c ~= player) then
+      t1 = c
+      break
+    end
+  end
+  if not t1 then return end
+
   leaderTarget = t1
-
-  if c1:getName():lower() == config.shootLeader:lower() then
-    if canUseAttackItem() and useWith then
-      useWith(config.item, t1)
-    end
-    if config.attackSpellEnabled and config.spell and config.spell:len() > 1 then
-      say(config.spell)
-    end
+  if canUseAttackItem() and useWith then
+    useWith(config.item, t1)
+  end
+  if config.attackSpellEnabled and config.spell and config.spell:len() > 1 then
+    say(config.spell)
+  end
+  if config.attack == "LEADER TARGET" and AttackStateMachine and AttackStateMachine.requestAttack then
+    AttackStateMachine.requestAttack(leaderTarget, 1000)
   end
 end)
 
 local function leaderTargetHandler()
-  if not config.enabled or not config.attackLeaderTargetEnabled then return end
+  if not config.enabled then return end
   if not leaderTarget or config.attack ~= "LEADER TARGET" then return end
+
+  -- Clear stale target (creature left screen or died)
+  if not leaderTarget then return end
+  if not leaderTarget.getPosition then leaderTarget = nil; return end
+  local ltPos = leaderTarget:getPosition()
+  if not ltPos then leaderTarget = nil; return end
 
   local target = SafeCall.getTarget()
   if not target or target:getName() ~= leaderTarget:getName() then
@@ -266,6 +296,7 @@ local function followLeaderHandler()
     toFollow = nil
     return
   end
+  toFollow = nil  -- Clear before evaluating rules
 
   if config.follow == "LEADER TARGET" and leaderTarget and leaderTarget:isPlayer() then
     toFollow = leaderTarget:getName()

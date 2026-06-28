@@ -31,6 +31,7 @@ MonsterAI.VERSION = "3.0"
 
 -- CLIENT SERVICE HELPERS (shared aliases)
 
+local SC = SafeCreature or {}
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
 
@@ -118,13 +119,8 @@ end
 
 -- Combined safe check: is the creature a valid, alive monster?
 local function isValidAliveMonster(creature)
-  if not creature then return false end
-  
-  local ok, result = pcall(function()
-    return creature:isMonster() and not creature:isDead() and not creature:isRemoved()
-  end)
-  
-  return ok and result or false
+  if not creature or not SC then return false end
+  return SC.isMonster(creature) and not SC.isDead(creature) and not SC.isRemoved(creature)
 end
 
 -- EXPORT HELPERS AS MODULE-LEVEL GLOBALS FOR OTHER MonsterAI FILES

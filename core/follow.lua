@@ -232,7 +232,7 @@ function Follow.tick()
   if not config.enabled then return end
 
   -- Yield to CaveBot when it's walking
-  if CaveBot and CaveBot.isOn and CaveBot.isOn() and WaypointEngine and WaypointEngine.isWalking then
+  if CaveBot and CaveBot.isOn and CaveBot.isOn() and WaypointEngine and WaypointEngine.isWalking and WaypointEngine.isWalking() then
     return
   end
 
@@ -268,18 +268,11 @@ function Follow.tick()
         local path = pathTo(lpos)
         if path and #path > 0 then
           registerFollowIntent(lpos, 0.95)
-          walkStep(path[1])
         end
       else
         -- Not attacking or followWhileAttacking off: catch up
         -- Don't cancel attack — g_game.attack() persists through movement server-side
         registerFollowIntent(lpos, 0.95)
-        local path = pathTo(lpos)
-        if path and #path > 0 then
-          walkStep(path[1])
-        else
-          startFollow(leader)
-        end
       end
       return
     end
@@ -304,10 +297,7 @@ function Follow.tick()
     end
 
     if state.lastKnownPos and (t - state.lastLostTime) < LOST_TIMEOUT then
-      local path = pathTo(state.lastKnownPos)
-      if path and #path > 0 then
-        walkStep(path[1])
-      end
+      registerFollowIntent(state.lastKnownPos, 0.80)
     end
   end
 end

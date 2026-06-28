@@ -129,9 +129,12 @@ local function setup()
         lastPos = oldPos
       end
       addStairs(oldPos)
-      addPosition(newPos)
+      -- Force-record landing tile (bypass collinearity check)
+      CaveBot.addAction("goto", newPos.x .. "," .. newPos.y .. "," .. newPos.z .. ",0", true)
+      prevRecorded = newPos
+      lastPos = newPos
+      stepsSinceLast = 0
       prevStepPos = newPos
-      prevDirection = nil
       pendingCorner = nil
       pendingTurnDir = nil
       pendingTurnCount = 0
