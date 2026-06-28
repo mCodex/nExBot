@@ -73,21 +73,8 @@ if voc == 1 or voc == 11 then
     end
 
     -- Safe debounce factory
-    local function makeDebounce(ms, fn)
-      if nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
-        return nExBot.EventUtil.debounce(ms, fn)
-      end
-      local scheduled = false
-      return function(...)
-        if scheduled then return end
-        scheduled = true
-        local args = {...}
-        schedule(ms, function()
-          scheduled = false
-          pcall(fn, safe_unpack(args))
-        end)
-      end
-    end
+    local SharedHelpers = nExBot.SharedHelpers or {}
+    local makeDebounce = SharedHelpers.makeDebounce
 
     local function checkAndCastExeta()
       if not exetaIfPlayerMacro:isOn() then return end

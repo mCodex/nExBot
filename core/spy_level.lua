@@ -1,5 +1,6 @@
 -- config
 
+local zChanging = nExBot.zChanging or function() return false end
 local keyUp = "="
 local keyDown = "-"
 local keyToggle = "Ctrl+Shift+L"

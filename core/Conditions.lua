@@ -70,8 +70,6 @@ Panel
     conditionsWindow:focus()
   end
 
-
-
   local rootWidget = g_ui.getRootWidget()
   if rootWidget then
     conditionsWindow = UI.createWindow('ConditionsWindow', rootWidget)

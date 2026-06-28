@@ -19,13 +19,11 @@ local BOSSES = {
   {"Urmahlulu", "Urmahlullu"}
 }
 
--- ============================================================================
 -- SESSION MANAGEMENT: Reset hunt data on bot restart/login
 -- 
 -- This fixes the issue of cached hunts from past sessions persisting.
 -- Session-specific data is cleared on each bot initialization.
 -- Persistent data (boss cooldowns, custom prices, settings) is preserved.
--- ============================================================================
 
 -- Clear session-specific hunt data (runs on every bot load)
 local function resetHuntSession()
@@ -220,7 +218,6 @@ local function clipboardData()
   local totalWaste, totalLoot, totalBalance = getSumStats()
   local final = ""
 
-
   local first = "Session data: From " .. HuntingSessionStart .." to ".. os.date('%Y-%m-%d, %H:%M:%S')
   local second = "Session: " .. sessionTime()
   local third = "Loot Type: Market"
@@ -389,7 +386,6 @@ label:setColor('#ED7117')
 local suppliesByRefill = UI.createWidget("AnalyzerItemsPanel", statsWindow.contentsPanel)
 UI.Separator(statsWindow.contentsPanel)
 
-
 --huntig
 local sessionTimeLabel = UI.DualLabel("Session:", "00:00h", {}, huntingWindow.contentsPanel).right
 local xpGainLabel = UI.DualLabel("XP Gain:", "0", {}, huntingWindow.contentsPanel).right
@@ -405,7 +401,6 @@ UI.DualLabel("Killed Monsters:", "", {maxWidth = 200}, huntingWindow.contentsPan
 local killedList = UI.createWidget("AnalyzerListPanel", huntingWindow.contentsPanel)
 UI.DualLabel("Looted items:", "", {maxWidth = 200}, huntingWindow.contentsPanel)
 local lootList = UI.createWidget("AnalyzerListPanel", huntingWindow.contentsPanel)
-
 
 --party
 UI.Button("Copy to Clipboard", function() clipboardData() end, partyHuntWindow.contentsPanel)
@@ -567,7 +562,6 @@ end, dropTrackerWindow.contentsPanel)
 UI.Separator(dropTrackerWindow.contentsPanel)
 createTrackedItems()
 
-
 --loot
 local lootInLootAnalyzerLabel = UI.DualLabel("Gold Value:", "0", {}, lootWindow.contentsPanel).right
 local lootHourInLootAnalyzerLabel = UI.DualLabel("Per Hour:", "0", {}, lootWindow.contentsPanel).right
@@ -580,9 +574,6 @@ local lootGraph = UI.createWidget("AnalyzerGraph", lootWindow.contentsPanel)
       lootGraph:setTitle("Loot/h")
       drawGraph(lootGraph, 0)
 
-
-
-
 --supplies
 local suppliesInSuppliesAnalyzerLabel = UI.DualLabel("Gold Value:", "0", {}, supplyWindow.contentsPanel).right
 local suppliesHourInSuppliesAnalyzerLabel = UI.DualLabel("Per Hour:", "0", {}, supplyWindow.contentsPanel).right
@@ -594,9 +585,6 @@ UI.Separator(supplyWindow.contentsPanel)
 local supplyGraph = UI.createWidget("AnalyzerGraph", supplyWindow.contentsPanel)
       supplyGraph:setTitle("Waste/h")
       drawGraph(supplyGraph, 0)      
-
-
-
 
 -- impact
 
@@ -628,7 +616,6 @@ if top3 and top3.left then top3.left:setWidth(135) end
 if top4 and top4.left then top4.left:setWidth(135) end
 if top5 and top5.left then top5.left:setWidth(135) end
 
-
 --- healing
 UI.Separator(impactWindow.contentsPanel)
 local title3 = UI.DualLabel("Healing", "", {}, impactWindow.contentsPanel).left
@@ -641,12 +628,6 @@ UI.Separator(impactWindow.contentsPanel)
 local healGraph = UI.createWidget("AnalyzerGraph", impactWindow.contentsPanel)
       healGraph:setTitle("HPS")
       drawGraph(healGraph, 0)  
-
-
-
-
-
-
 
 --xp
 local xpGrainInXpLabel = UI.DualLabel("XP Gain:", "0", {}, xpWindow.contentsPanel).right
@@ -661,15 +642,7 @@ local xpGraph = UI.createWidget("AnalyzerGraph", xpWindow.contentsPanel)
       drawGraph(xpGraph, 0)
       
 
-
-
-
---#############################################
 --#############################################   UI DONE
---#############################################
---#############################################
---#############################################
---#############################################
 
 setDefaultTab("Main")
 -- first, the variables
@@ -871,7 +844,6 @@ if BotServer._websocket then
       widget:setId(widgetName)
       widget.lastUpdate = now
 
-
       local t = membersData[name]
       widget.name:setText(name)
       widget.name:setColor("white")
@@ -922,7 +894,6 @@ if BotServer._websocket then
     end
   end)
 end
-
 
 function hightlightText(widget, color, duration)
   for i=0,duration do
@@ -1011,7 +982,6 @@ onTextMessage(function(mode, text)
             for i, child in ipairs(dropChildren) do
               local childName = child.name
               childName = childName and childName:getText()
-
 
               if childName and formattedLoot:find(childName) then
                 trackedLoot[tostring(child.item:getItemId())] = trackedLoot[tostring(child.item:getItemId())] + (amount or 1)
@@ -1148,7 +1118,6 @@ local function getFrame(v)
       return '/images/ui/item'
   end
 end
-
 
 displayCondition = function(menuPosition, lookThing, useThing, creatureThing)
   if lookThing and not lookThing:isCreature() and not lookThing:isNotMoveable() and lookThing:isPickupable() then
@@ -1681,7 +1650,6 @@ function wasteHour()
   end
 end
 
-
 function lootHour()
   local lootWorth, wasteWorth, balance = bottingStats()
   if uptime < 5*60 then
@@ -1743,7 +1711,6 @@ macro(500, function()
     lootInLootAnalyzerLabel:setText(format_thousand(lootWorth))
     lootHourInLootAnalyzerLabel:setText(format_thousand(lootHour()))
 
-
     --supply window
     suppliesInSuppliesAnalyzerLabel:setText(format_thousand(wasteWorth))
     suppliesHourInSuppliesAnalyzerLabel:setText(format_thousand(wasteHour()))
@@ -1779,7 +1746,6 @@ macro(500, function()
       local percent = percentWidget and percentWidget.getPercent and percentWidget:getPercent() or 0
       progressBar:setPercent(percent)
     end
-
 
     --stats
     totalRounds:setText(nExBot.CaveBotData.rounds)

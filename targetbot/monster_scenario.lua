@@ -17,6 +17,7 @@
 ]]
 
 -- BoundedPush/TrimArray are set as globals by utils/ring_buffer.lua (Phase 3)
+local zChanging = nExBot.zChanging or function() return false end
 local BoundedPush = BoundedPush
 local TrimArray = TrimArray
 
@@ -26,15 +27,11 @@ local safeGetId        = H.safeGetId
 local safeIsDead       = H.safeIsDead
 local safeIsRemoved    = H.safeIsRemoved
 
--- Guard: returns true when TargetBot is disabled
-local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 local safeCreatureCall = H.safeCreatureCall
 local getClient        = H.getClient
 local isValidAliveMonster = H.isValidAliveMonster
 
--- ============================================================================
 -- SCENARIO TYPES & STATE
--- ============================================================================
 
 MonsterAI.Scenario = MonsterAI.Scenario or {}
 local S = MonsterAI.Scenario
@@ -75,9 +72,7 @@ S.state = {
   ENGAGEMENT_GRACE_MS   = (CombatConstants and CombatConstants.GRACE_PERIOD) or 1500
 }
 
--- ============================================================================
 -- SCENARIO CONFIGS (v3.0 — stricter anti-zigzag)
--- ============================================================================
 
 S.configs = {
   [S.TYPES.IDLE] = {
@@ -121,9 +116,7 @@ S.configs = {
   }
 }
 
--- ============================================================================
 -- SCENARIO DETECTION
--- ============================================================================
 
 function S.detectScenario()
   local ppos = player and player:getPosition()
@@ -178,9 +171,7 @@ function S.detectScenario()
   return nt
 end
 
--- ============================================================================
 -- CLUSTER ANALYSIS
--- ============================================================================
 
 function S.analyzeCluster(monsters)
   if #monsters < 2 then S.state.clusterInfo = nil; return end
@@ -197,9 +188,7 @@ function S.analyzeCluster(monsters)
   S.state.clusterInfo = { centroid = {x=cx, y=cy}, spread = avg, type = ct, monsters = monsters }
 end
 
--- ============================================================================
 -- TARGET LOCK (prevents rapid switching)
--- ============================================================================
 
 function S.lockTarget(creatureId, health)
   local nowt    = nowMs()
@@ -227,11 +216,9 @@ function S.clearTargetLock()
   S.state.targetLockHealth = 100
 end
 
--- ============================================================================
 -- ENGAGEMENT LOCK (v3.0 — LINEAR TARGETING)
 -- Once we start attacking, we STAY on it until it dies or becomes
 -- unreachable. endEngagement does NOT clear the target lock.
--- ============================================================================
 
 function S.startEngagement(creatureId, health)
   if not creatureId then return end
@@ -327,9 +314,7 @@ function S.getEngagedTarget()
   return d and d.creature or nil
 end
 
--- ============================================================================
 -- TARGET SWITCH EVALUATION (v3.0 — strict linear targeting)
--- ============================================================================
 
 function S.shouldAllowTargetSwitch(newId, newPri, newHp)
   local nowt = nowMs()
@@ -395,9 +380,7 @@ function S.shouldAllowTargetSwitch(newId, newPri, newHp)
   return true, "allowed"
 end
 
--- ============================================================================
 -- ZIGZAG DETECTION
--- ============================================================================
 
 function S.recordMovement()
   local pp = player and player:getPosition()
@@ -423,20 +406,16 @@ function S.isZigzagging()
 end
 
 if EventBus and EventBus.on then
-  EventBus.on("player:move", function() if tbOff() then return end; S.recordMovement() end, 60)
+  EventBus.on("player:move", function() if TargetBot.isOff() then return end; S.recordMovement() end, 60)
 end
 
--- ============================================================================
 -- OPTIMAL TARGET SELECTION — Removed (PriorityEngine is the sole authority)
--- ============================================================================
 
 function S.getOptimalTarget()
   return nil
 end
 
--- ============================================================================
 -- STATS
--- ============================================================================
 
 function S.getStats()
   return { currentScenario = S.state.type, monsterCount = S.state.monsterCount,
@@ -446,18 +425,16 @@ function S.getStats()
     config = S.configs[S.state.type] or {} }
 end
 
--- ============================================================================
 -- EVENTBUS INTEGRATION
--- ============================================================================
 
 if EventBus and EventBus.on then
   EventBus.on("targetbot:target_changed", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if creature then S.lockTarget(creature:getId(), creature:getHealthPercent() or 100)
     else S.clearTargetLock() end
   end)
   EventBus.on("creature:death", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if creature and creature:getId() == S.state.targetLockId then S.clearTargetLock() end
     if creature and creature:getId() == S.state.engagementLockId then S.endEngagement("target_dead") end
   end)

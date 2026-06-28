@@ -13,10 +13,8 @@
 -- Declare as global (not local) so it's accessible after dofile
 FoodItems = FoodItems or {}
 
--- ============================================================================
 -- FOOD ITEMS WITH REGENERATION TIME (seconds)
 -- Higher value = more filling
--- ============================================================================
 
 FoodItems.FOODS = {
   -- ═══════════════════════════════════════════════════════════════════════
@@ -95,10 +93,8 @@ for id, _ in pairs(FoodItems.FOODS) do
   FoodItems.FOOD_IDS[id] = true
 end
 
--- ============================================================================
 -- FOOD PRIORITY (what to eat first)
 -- Higher priority = eat first (lower regen time foods first)
--- ============================================================================
 
 local priorityCache = nil
 
@@ -118,9 +114,7 @@ local function buildPriorityCache()
   return priorityCache
 end
 
--- ============================================================================
 -- HELPER FUNCTIONS
--- ============================================================================
 
 --[[
   Check if item ID is food

@@ -27,9 +27,7 @@
 
 CreatureCache = CreatureCache or {}
 
--- ============================================================================
 -- CONFIGURATION
--- ============================================================================
 
 CreatureCache.CONFIG = {
   MAX_SIZE = 100,           -- Maximum creatures to cache
@@ -41,9 +39,7 @@ CreatureCache.CONFIG = {
   USE_WEAK_REFS = true      -- Use weak references for creature objects
 }
 
--- ============================================================================
 -- INTERNAL STATE
--- ============================================================================
 
 -- Use WeakCache if available for automatic GC cleanup
 local WC = WeakCache
@@ -88,24 +84,12 @@ local nowMs = ClientHelper and ClientHelper.nowMs or function()
   return os.time() * 1000
 end
 
--- ============================================================================
 -- CLIENT HELPERS
--- ============================================================================
 
 local getClient = nExBot.Shared.getClient
 
-local function getLocalPlayer()
-  local Client = getClient()
-  if Client and Client.getLocalPlayer then
-    return Client.getLocalPlayer()
-  elseif g_game and g_game.getLocalPlayer then
-    return g_game.getLocalPlayer()
-  end
-  return nil
-end
-
 local function getPlayerPosition()
-  local player = getLocalPlayer()
+  local player = ClientService.getLocalPlayer()
   if not player then return nil end
   local ok, pos = pcall(function() return player:getPosition() end)
   return ok and pos or nil
@@ -125,9 +109,7 @@ local function getSpectatorsInRange(pos, rangeX, rangeY)
   return {}
 end
 
--- ============================================================================
 -- CREATURE VALIDATION (Delegates to SafeCreature)
--- ============================================================================
 
 local SC = SafeCreature or {}
 
@@ -138,9 +120,7 @@ local function isValidCreature(creature)
   return not SC.isDead(creature) and not SC.isRemoved(creature)
 end
 
--- ============================================================================
 -- LRU MANAGEMENT
--- ============================================================================
 
 local function touchLRU(id)
   local node = cache.lruNodes[id]
@@ -194,9 +174,7 @@ local function evictLRU()
   cache.stats.evictions = cache.stats.evictions + 1
 end
 
--- ============================================================================
 -- CACHE OPERATIONS
--- ============================================================================
 
 --[[
   Add or update a creature in cache
@@ -326,9 +304,7 @@ function CreatureCache.clear()
   cache.categoryDirty = true
 end
 
--- ============================================================================
 -- CATEGORY VIEWS
--- ============================================================================
 
 -- Rebuild category caches
 local function rebuildCategories()
@@ -387,9 +363,7 @@ function CreatureCache.getMonsterCount()
   return cache.monsters and #cache.monsters or 0
 end
 
--- ============================================================================
 -- SPECTATOR UPDATE
--- ============================================================================
 
 --[[
   Update cache with current spectators
@@ -503,9 +477,7 @@ function CreatureCache.getSpectatorsInRange(pos, rangeX, rangeY)
   return getSpectatorsInRange(pos, rangeX, rangeY)
 end
 
--- ============================================================================
 -- SPATIAL QUERIES
--- ============================================================================
 
 --[[
   Get nearest monster to a position
@@ -587,9 +559,7 @@ function CreatureCache.getMonstersOnFloor(z)
   return result
 end
 
--- ============================================================================
 -- CLEANUP
--- ============================================================================
 
 --[[
   Remove dead and invalid creatures from cache
@@ -611,9 +581,7 @@ function CreatureCache.cleanup()
   return removed
 end
 
--- ============================================================================
 -- STATISTICS
--- ============================================================================
 
 --[[
   Get cache statistics
@@ -644,10 +612,8 @@ function CreatureCache.resetStats()
   cache.stats.cleanups = 0
 end
 
--- ============================================================================
 -- EVENTBUS INTEGRATION
 -- Auto-update cache on creature events
--- ============================================================================
 
 if EventBus and EventBus.on then
   -- Update cache when creature appears
@@ -676,25 +642,5 @@ if EventBus and EventBus.on then
   --   cache.categoryDirty = true
   -- end, 5)
 end
-
--- ============================================================================
--- BACKWARDS COMPATIBILITY
--- Register globally for consumer access
-CreatureCache = CreatureCache
-
--- Provide same API as old SpectatorCache
--- ============================================================================
-
-CreatureCache.SpectatorCompat = {
-  getNearby = function(rx, ry, ttl)
-    return CreatureCache.getNearby(rx, ry, ttl)
-  end,
-  clear = function()
-    CreatureCache.clear()
-  end,
-  getStats = function()
-    return CreatureCache.getStats()
-  end
-}
 
 return CreatureCache

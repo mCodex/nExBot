@@ -12,18 +12,14 @@
   Populates: MonsterAI.Patterns
 ]]
 
--- ============================================================================
 -- HELPERS (from core)
--- ============================================================================
 
 local H = MonsterAI._helpers
 local nowMs = H.nowMs
 
 local CONST = MonsterAI.CONSTANTS
 
--- ============================================================================
 -- PATTERNS NAMESPACE
--- ============================================================================
 
 MonsterAI.Patterns = MonsterAI.Patterns or {
   knownMonsters = {},
@@ -42,9 +38,7 @@ MonsterAI.Patterns = MonsterAI.Patterns or {
   }
 }
 
--- ============================================================================
 -- STORAGE HELPERS (UnifiedStorage only — no dual fallback)
--- ============================================================================
 
 local function getStoredPatterns()
   if UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() then
@@ -62,9 +56,7 @@ local function setStoredPatterns(patterns)
   end
 end
 
--- ============================================================================
 -- PATTERN API
--- ============================================================================
 
 -- Register a known monster pattern
 function MonsterAI.Patterns.register(monsterName, pattern)
@@ -113,9 +105,7 @@ function MonsterAI.savePattern(monsterName)
   end
 end
 
--- ============================================================================
 -- PATTERN DECAY (reduce confidence of stale patterns)
--- ============================================================================
 
 function MonsterAI.decayPatterns()
   local nowt = nowMs()
@@ -132,9 +122,7 @@ function MonsterAI.decayPatterns()
   setStoredPatterns(patterns)
 end
 
--- ============================================================================
 -- INITIALIZATION — Load persisted patterns
--- ============================================================================
 
 local storedPatterns = getStoredPatterns()
 for k, v in pairs(storedPatterns) do

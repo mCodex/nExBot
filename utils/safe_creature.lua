@@ -18,9 +18,7 @@
 SafeCreature = SafeCreature or {}
 local SafeCreature = SafeCreature
 
--- ============================================================================
 -- BASIC ACCESSORS
--- ============================================================================
 
 --[[
   Get creature ID safely
@@ -88,9 +86,7 @@ function SafeCreature.getSpeed(creature)
   return ok and speed or 0
 end
 
--- ============================================================================
 -- TYPE CHECKS
--- ============================================================================
 
 --[[
   Check if creature is a monster safely
@@ -213,9 +209,7 @@ function SafeCreature.getShield(creature)
   return ok and result or 0
 end
 
--- ============================================================================
 -- COMBAT ACCESSORS
--- ============================================================================
 
 --[[
   Get creature skull safely
@@ -239,9 +233,7 @@ function SafeCreature.getOutfit(creature)
   return ok and outfit or nil
 end
 
--- ============================================================================
 -- GENERIC SAFE CALL (for methods not yet wrapped)
--- ============================================================================
 
 --[[
   Call any creature method safely with a default return value
@@ -258,9 +250,7 @@ function SafeCreature.call(creature, methodName, default)
   return ok and result or default
 end
 
--- ============================================================================
 -- BULK ACCESSOR (Single pcall for multiple properties)
--- ============================================================================
 
 --[[
   Get multiple creature properties in a single pcall
@@ -312,9 +302,7 @@ function SafeCreature.validate(creature)
   return true, props
 end
 
--- ============================================================================
 -- DISTANCE HELPERS
--- ============================================================================
 
 --[[
   Calculate distance between two positions
@@ -351,9 +339,7 @@ function SafeCreature.distanceBetween(creature1, creature2)
   return SafeCreature.distance(pos1, pos2)
 end
 
--- ============================================================================
 -- GLOBAL EXPORT
--- ============================================================================
 
 -- Expose as global for use by all modules (no _G in OTClient sandbox)
 -- SafeCreature is already global (declared without 'local')

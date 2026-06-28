@@ -11,9 +11,7 @@
   Populates: MonsterAI.Tracker
 ]]
 
--- ============================================================================
 -- HELPERS (from core)
--- ============================================================================
 
 -- BoundedPush/TrimArray are set as globals by utils/ring_buffer.lua (Phase 3)
 local BoundedPush = BoundedPush
@@ -30,9 +28,7 @@ local safeIsRemoved    = H.safeIsRemoved
 
 local CONST = MonsterAI.CONSTANTS
 
--- ============================================================================
 -- TRACKER STATE
--- ============================================================================
 
 MonsterAI.Tracker = MonsterAI.Tracker or {
   monsters = {},
@@ -45,9 +41,7 @@ MonsterAI.Tracker = MonsterAI.Tracker or {
   }
 }
 
--- ============================================================================
 -- TRACK / UNTRACK
--- ============================================================================
 
 function MonsterAI.Tracker.track(creature)
   if not creature then return end
@@ -191,9 +185,7 @@ function MonsterAI.Tracker.untrack(creatureId)
   end
 end
 
--- ============================================================================
 -- UPDATE (per-creature tick)
--- ============================================================================
 
 function MonsterAI.Tracker.update(creature)
   if not creature then return end
@@ -375,9 +367,7 @@ function MonsterAI.Tracker.update(creature)
   data.confidence = 0.1 + 0.6 * sampleRatio
 end
 
--- ============================================================================
 -- EWMA LEARNING
--- ============================================================================
 
 function MonsterAI.Tracker.updateEWMA(data, observed)
   if not data or not observed or observed <= 0 then return end
@@ -404,9 +394,7 @@ function MonsterAI.Tracker.updateEWMA(data, observed)
   })
 end
 
--- ============================================================================
 -- UTILITY: DPS + PREDICTED PATTERN
--- ============================================================================
 
 function MonsterAI.Tracker.getDPS(creatureId, windowMs)
   windowMs = windowMs or (MonsterAI.DPS_WINDOW or 5000)

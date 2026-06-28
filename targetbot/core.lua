@@ -14,9 +14,7 @@
   - TargetMetrics: Performance tracking and analysis
 ]]
 
--- ============================================================================
 -- MODULE NAMESPACE
--- ============================================================================
 
 TargetCore = TargetCore or {}
 
@@ -24,9 +22,7 @@ TargetCore = TargetCore or {}
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
 
--- ============================================================================
 -- CONSTANTS (Centralized, immutable)
--- ============================================================================
 
 TargetCore.CONSTANTS = {
   -- Creature types
@@ -124,11 +120,8 @@ TargetCore.Geometry.chebyshevDistance = TargetCore.chebyshevDistance
 TargetCore.Geometry.manhattanDistance = TargetCore.manhattanDistance
 TargetCore.Geometry.isAdjacent = TargetCore.isAdjacent
 
-
--- ============================================================================
 -- PATH SAFETY HELPERS (Pure-ish functions operating on map API)
 -- Exported so cavebot and other modules can share the same logic
--- ============================================================================
 
 TargetCore.PathSafety = TargetCore.PathSafety or {}
 
@@ -289,7 +282,7 @@ function TargetCore.PathSafety.recursiveReachable(startPos, destPos, depth, maxN
   maxNodes = maxNodes or 500
   local visited = {}
   local nodes = 0
-  local function key(p) return p.x..","..p.y..","..p.z end
+  local function key(p) return p.x * 10000 + p.y * 100 + p.z end
   local function dfs(p, d)
     if nodes > maxNodes then
       return false
@@ -329,7 +322,6 @@ function TargetCore.PathSafety.findSafeAlternate(playerPos, destPos, maxDist, op
   end
   -- small additional diagnostic: if no candidate found, optionally try to widen search if debug enabled
 
-
   -- BFS fallback (small radius)
   local radius = opts.radius or 3
   local queue = {{x = destPos.x, y = destPos.y, z = destPos.z}}
@@ -361,9 +353,7 @@ function TargetCore.PathSafety.findSafeAlternate(playerPos, destPos, maxDist, op
   return nil, nil
 end
 
--- ============================================================================
 -- PURE UTILITY FUNCTIONS
--- ============================================================================
 
 -- Calculate Manhattan distance (pure)
 function TargetCore.manhattanDistance(pos1, pos2)
@@ -418,9 +408,7 @@ function TargetCore.lerp(a, b, t)
   return a + (b - a) * TargetCore.clamp(t, 0, 1)
 end
 
--- ============================================================================
 -- WAVE AVOIDANCE SYSTEM (Pure Functions)
--- ============================================================================
 
 --[[
   Wave Attack Detection Algorithm:
@@ -590,9 +578,7 @@ function TargetCore.findSafestTile(playerPos, monsters, currentTarget, getTileFu
   return nil
 end
 
--- ============================================================================
 -- PRIORITY CALCULATION (Pure Functions)
--- ============================================================================
 
 --[[
   Priority Algorithm:
@@ -605,9 +591,7 @@ end
   4. RESPECT configuration (user-defined base priority)
 ]]
 
--- ============================================================================
 -- POSITIONING ALGORITHMS (Pure Functions)
--- ============================================================================
 
 -- Count walkable adjacent tiles (escape routes) (pure)
 function TargetCore.countEscapeRoutes(pos, getTileFunc)
@@ -722,9 +706,7 @@ function TargetCore.findBestPosition(centerPos, radius, context, getTileFunc)
   return best
 end
 
--- ============================================================================
 -- METRICS & ANALYTICS
--- ============================================================================
 
 TargetCore.Metrics = {
   targetsKilled = 0,
@@ -754,12 +736,10 @@ function TargetCore.Metrics.getCacheHitRate()
   return TargetCore.Metrics.cacheHits / total * 100
 end
 
--- ============================================================================
 -- OTCLIENT NATIVE API HELPERS
 -- 
 -- Wrappers for OTClient's game API to handle version differences and
 -- provide caching to reduce unnecessary API calls
--- ============================================================================
 
 TargetCore.Native = {
   -- Cached chase mode to avoid redundant setChaseMode calls
@@ -880,9 +860,7 @@ function TargetCore.Native.isFollowing(creature)
   return following and following:getId() == creature:getId()
 end
 
--- ============================================================================
 -- INITIALIZATION
--- ============================================================================
 
 -- Toggle to enable debug prints
 TargetCore.DEBUG = TargetCore.DEBUG or false

@@ -21,9 +21,7 @@ local safeGetId        = H.safeGetId
 
 local CONST = MonsterAI.CONSTANTS
 
--- ============================================================================
 -- SPELL TRACKER STATE
--- ============================================================================
 
 MonsterAI.SpellTracker = MonsterAI.SpellTracker or {
   stats = {
@@ -41,9 +39,7 @@ MonsterAI.SpellTracker = MonsterAI.SpellTracker or {
   typeSpellStats = {}
 }
 
--- ============================================================================
 -- PER-MONSTER INIT
--- ============================================================================
 
 function MonsterAI.SpellTracker.initMonster(creature)
   if not creature or not isCreatureValid(creature) then return nil end
@@ -77,9 +73,7 @@ function MonsterAI.SpellTracker.initMonster(creature)
   return data
 end
 
--- ============================================================================
 -- RECORD SPELL
--- ============================================================================
 
 function MonsterAI.SpellTracker.recordSpell(creatureId, missileType, sourcePos, targetPos)
   local nowt = nowMs()
@@ -217,9 +211,7 @@ function MonsterAI.SpellTracker.recordSpell(creatureId, missileType, sourcePos, 
   end
 end
 
--- ============================================================================
 -- ACCESSORS
--- ============================================================================
 
 function MonsterAI.SpellTracker.getMonsterSpells(creatureId)
   return MonsterAI.SpellTracker.monsterSpells[creatureId]
@@ -246,9 +238,7 @@ function MonsterAI.SpellTracker.getStats()
   return stats
 end
 
--- ============================================================================
 -- REACTIVITY ANALYSIS
--- ============================================================================
 
 function MonsterAI.SpellTracker.analyzeReactivity()
   local result = {
@@ -288,9 +278,7 @@ function MonsterAI.SpellTracker.analyzeReactivity()
   return result
 end
 
--- ============================================================================
 -- CLEANUP + SUMMARY
--- ============================================================================
 
 function MonsterAI.SpellTracker.cleanup(creatureId)
   if not creatureId then return end

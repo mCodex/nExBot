@@ -329,7 +329,6 @@ do
 
   if not nExBot._clientPrinted then
     nExBot._clientPrinted = true
-    print("[nExBot] Client detected: " .. tostring(nExBot.clientName) .. " (" .. tostring(nExBot.clientType) .. ")")
   end
 end
 
@@ -349,7 +348,6 @@ local function autoDetectClient(attempt, maxAttempts)
       nExBot.isOpenTibiaBR = acl.isOpenTibiaBR()
 
       if newType ~= prevType or nExBot.clientName ~= prevName then
-        print("[nExBot] Client detected (late): " .. tostring(nExBot.clientName) .. " (" .. tostring(newType) .. ")")
       end
 
       if nExBot.isOpenTibiaBR then
@@ -366,7 +364,6 @@ local function autoDetectClient(attempt, maxAttempts)
                 table.insert(keys, k)
               end
             end
-            print("[nExBot] Client signals: signals=" .. table.concat(keys, ","))
           end
         end
         return
@@ -393,6 +390,8 @@ loadCategory("constants", {
 -- ============================================================================
 loadCategory("utils", {
   "utils/shared",
+  "utils/shared_helpers",
+  "utils/storage_engine",
   "utils/ring_buffer",
   "utils/client_helper",
   "utils/safe_creature",
@@ -454,7 +453,6 @@ loadCategory("tools_legacy", {
   "ingame_editor",
   "Dropper",
   "Containers",
-  "container_opener",
   "quiver_manager",
   "quiver_label",
   "tools",

@@ -3,35 +3,36 @@
 
 local getClient = nExBot.Shared.getClient
 
-local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
+local SC = SafeCreature or {}
+
 local I = TargetBot.__internals
 
 if EventBus then
   -- invalidate + recalc on creature changes
   EventBus.on("monster:appear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if creature then I.debouncedInvalidateAndRecalc() end
   end, 20)
   EventBus.on("monster:disappear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     I.debouncedInvalidateAndRecalc()
   end, 20)
   EventBus.on("creature:move", function(creature, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
     if okMonster and isMonster then I.debouncedInvalidateAndRecalc() end
   end, 20)
   EventBus.on("monster:health", function(creature, percent)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     I.debouncedInvalidateAndRecalc()
   end, 20)
   EventBus.on("player:move", function(newPos, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if newPos and oldPos and newPos.z ~= oldPos.z then return end
     I.debouncedInvalidateAndRecalc()
   end, 10)
   EventBus.on("player:z_change_settled", function()
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if MonsterAI and MonsterAI.Reachability then
       MonsterAI.Reachability.clearCache()
       MonsterAI.Reachability.blockedCreatures = {}
@@ -40,12 +41,12 @@ if EventBus then
     if I.recalculateBestTarget then I.recalculateBestTarget() end
   end, 5)
   EventBus.on("combat:target", function(creature, oldCreature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     I.debouncedInvalidateAndRecalc()
   end, 20)
   -- Follow player integration
   EventBus.on("followplayer/force_follow", function(leaderPos, distance)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     pcall(function()
       I.followPlayerForceMode = true
       I.followPlayerForceExpiry = now + 2500
@@ -53,29 +54,28 @@ if EventBus then
     end)
   end, 100)
   EventBus.on("followplayer/enabled", function(playerName)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     pcall(function() I.followPlayerForceMode = false; I.followPlayerForceExpiry = 0 end)
   end, 80)
   EventBus.on("followplayer/disabled", function()
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     pcall(function() I.followPlayerForceMode = false; I.followPlayerForceExpiry = 0 end)
   end, 80)
   -- CreatureCache handlers
   EventBus.on("monster:appear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     I.updateCreatureInCache(creature)
   end, 50)
   EventBus.on("monster:disappear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     I.removeCreatureFromCache(creature)
   end, 50)
   EventBus.on("monster:health", function(creature, percent)
-    if tbOff() then return end
-    if percent <= 0 then I.removeCreatureFromCache(creature)
-    else I.invalidateCache() end
+    if TargetBot.isOff() then return end
+    if percent <= 0 then I.removeCreatureFromCache(creature) end
   end, 80)
   EventBus.on("player:move", function(newPos, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if newPos and oldPos and newPos.z ~= oldPos.z then
       I.invalidateCache()
       if AttackStateMachine and AttackStateMachine.clearSkipList then AttackStateMachine.clearSkipList() end
@@ -89,7 +89,7 @@ if EventBus then
   local _combatEndPending = nil
   local COMBAT_END_GRACE_MS = 1200
   EventBus.on("combat:target", function(creature, oldCreature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     I.invalidateCache()
     local newId = creature and creature:getId() or nil
     if newId ~= lastCombatTargetId then
@@ -112,7 +112,7 @@ if EventBus then
   end, 70)
   -- player:health emergency detection
   EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     local cfg = (UnifiedStorage and UnifiedStorage.get("targetbot.priority")) or (ProfileStorage and ProfileStorage.get and ProfileStorage.get('targetPriority')) or {}
     local threshold = cfg and cfg.emergencyHP or 25
     local percent = 100
@@ -129,19 +129,19 @@ if EventBus then
   -- Event-driven movement intents (keepDistance, chase)
   EventBus.on("creature:move", function(creature, oldPos)
     if TargetBot and TargetBot.isOn and not TargetBot.isOn() then return end
-    local okMonster, isMonster = pcall(function() return creature and creature:isMonster() end)
-    if not okMonster or not isMonster then return end
+    local isMonster = creature and SC.isMonster(creature)
+    if not isMonster then return end
     local Client = getClient()
     local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if not target then return end
-    local okCid, cid = pcall(function() return creature:getId() end)
-    local okTid, tid = pcall(function() return target:getId() end)
-    if not okCid or not okTid or cid ~= tid then return end
+    local cid = SC.getId(creature)
+    local tid = SC.getId(target)
+    if not cid or not tid or cid ~= tid then return end
     local config = TargetBot.ActiveMovementConfig
     if not config then return end
-    local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
-    local okCpos, creaturePos = pcall(function() return creature:getPosition() end)
-    if not okPpos or not playerPos or not okCpos or not creaturePos then return end
+    local playerPos = SC.getPosition(player)
+    local creaturePos = SC.getPosition(creature)
+    if not playerPos or not creaturePos then return end
     local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
     if config.keepDistance then
       local keepRange = config.keepDistanceRange or 4
@@ -177,20 +177,20 @@ if EventBus then
   end, 15)
   -- Event-driven finish kill
   EventBus.on("monster:health", function(creature, percent)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     local Client = getClient()
     local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if not target then return end
-    local okCid, cid = pcall(function() return creature:getId() end)
-    local okTid, tid = pcall(function() return target:getId() end)
-    if not okCid or not okTid or cid ~= tid then return end
+    local cid = SC.getId(creature)
+    local tid = SC.getId(target)
+    if not cid or not tid or cid ~= tid then return end
     local config = TargetBot.ActiveMovementConfig
     local threshold = config and config.finishKillThreshold or 30
     if percent and percent < threshold and percent > 0 then
-      local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
-      local okCpos, creaturePos = pcall(function() return creature:getPosition() end)
-      if not okPpos or not playerPos or not okCpos or not creaturePos then return end
+      local playerPos = SC.getPosition(player)
+      local creaturePos = SC.getPosition(creature)
+      if not playerPos or not creaturePos then return end
       local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
       if dist > 1 and MovementCoordinator and MovementCoordinator.Intent then
         local confidence = 0.65; if percent < 15 then confidence = 0.80 end; if percent < 10 then confidence = 0.90 end
@@ -199,11 +199,11 @@ if EventBus then
     end
   end, 25)
   EventBus.on("combat:target", function(creature, oldCreature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if creature and MovementCoordinator then
       pcall(function()
-        local okPos, pos = pcall(function() return creature:getPosition() end)
-        EventBus.emit("targetbot/target_acquired", creature, okPos and pos or nil)
+        local pos = SC.getPosition(creature)
+        EventBus.emit("targetbot/target_acquired", creature, pos)
       end)
     end
   end, 65)
@@ -235,27 +235,27 @@ if EventBus then
     end
   end
   EventBus.on("targetbot/target_acquired", function(creature, creaturePos)
-    if tbOff() then return end; pcall(function() I.enforceChaseModeNow() end)
+    if TargetBot.isOff() then return end; pcall(function() I.enforceChaseModeNow() end)
   end, 60)
   EventBus.on("targetbot/combat_start", function(creature, data)
-    if tbOff() then return end; pcall(function() I.enforceChaseModeNow() end)
+    if TargetBot.isOff() then return end; pcall(function() I.enforceChaseModeNow() end)
   end, 60)
   EventBus.on("targetbot/combat_end", function()
-    if tbOff() then return end; pcall(function() CME.enabled = false end)
+    if TargetBot.isOff() then return end; pcall(function() CME.enabled = false end)
   end, 60)
   EventBus.on("player:move", function(newPos, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if newPos and oldPos and newPos.z ~= oldPos.z then return end
     if CME.enabled then pcall(function() I.enforceChaseModeNow() end) end
   end, 5)
   EventBus.on("creature:move", function(creature, oldPos)
-    if tbOff() then return end; if not CME.enabled then return end
+    if TargetBot.isOff() then return end; if not CME.enabled then return end
     local Client = getClient()
     local target = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
     if not target then return end
-    local okCid, cid = pcall(function() return creature:getId() end)
-    local okTid, tid = pcall(function() return target:getId() end)
-    if okCid and okTid and cid == tid then pcall(function() I.enforceChaseModeNow() end) end
+    local cid = SC.getId(creature)
+    local tid = SC.getId(target)
+    if cid and tid and cid == tid then pcall(function() I.enforceChaseModeNow() end) end
   end, 5)
 end
 
@@ -328,9 +328,9 @@ if onPlayerHealthChange then onPlayerHealthChange(function(healthPercent)
             end
           end
         end
-        schedule(200, attemptRecovery); schedule(600, attemptRecovery); schedule(1200, attemptRecovery)
-        schedule(2500, attemptRecovery); schedule(5000, attemptRecovery)
-        schedule(8000, attemptRecovery); schedule(12000, attemptRecovery)
+        schedule(200, attemptRecovery)
+        schedule(1000, attemptRecovery)
+        schedule(5000, attemptRecovery)
       end
     end
   end
@@ -339,7 +339,7 @@ end) end
 -- EventTargeting EventBus handlers (from event_targeting.lua)
 if EventBus then
   EventBus.on("player:z_change_settled", function()
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if EventTargeting then EventTargeting.refreshLiveCount() end
   end, 3)
   local etDebounce = (nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce) and nExBot.EventUtil.debounce(150, function()
@@ -347,33 +347,33 @@ if EventBus then
   end)
   if etDebounce then
     EventBus.on("monster:appear", function(creature)
-      if tbOff() then return end; etDebounce()
+      if TargetBot.isOff() then return end; etDebounce()
     end, 30)
     EventBus.on("monster:disappear", function(creature)
-      if tbOff() then return end; etDebounce()
+      if TargetBot.isOff() then return end; etDebounce()
     end, 30)
     EventBus.on("monster:health", function(creature, percent)
-      if tbOff() then return end; etDebounce()
+      if TargetBot.isOff() then return end; etDebounce()
     end, 35)
     EventBus.on("creature:move", function(creature, oldPos)
-      if tbOff() then return end
+      if TargetBot.isOff() then return end
       local ok, isMonster = pcall(function() return creature and creature:isMonster() end)
       if ok and isMonster then etDebounce() end
     end, 35)
   end
   EventBus.on("player:move", function(newPos, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     local ppos = player and player:getPosition()
     if ppos and EventTargeting then EventTargeting.refreshLiveCount() end
   end, 8)
   EventBus.on("combat:target", function(creature, oldCreature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if EventTargeting and EventTargeting.CombatCoordinator then
       EventTargeting.CombatCoordinator.onTargetChanged(creature, oldCreature)
     end
   end, 30)
   EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if EventTargeting and EventTargeting.CombatCoordinator then
       EventTargeting.CombatCoordinator.onPlayerHealthChange(health, maxHealth, oldHealth, oldMax)
     end

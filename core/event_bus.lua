@@ -46,6 +46,7 @@ local _zGen = 0  -- generation token: prevents stale safety-valve from clearing 
 function zChanging()
   return _zBlocked
 end
+nExBot.zChanging = zChanging
 
 -- Activate z-change block (idempotent)
 local function _zActivate()
@@ -280,17 +281,25 @@ function EventBus.queueSize()
   return math.max(0, eventQueue.tail - eventQueue.head + 1)
 end
 
---------------------------------------------------------------------------------
 -- OTClient Native Event Registration
 -- Register once, dispatch through EventBus
---------------------------------------------------------------------------------
 
 -- Creature events
+-- Throttle monster:appear events — 10 subscribers, expensive per-monster allocation
+local _monsterAppearThrottle = {}
+local MONSTER_APPEAR_THROTTLE_MS = 300
+
 if onCreatureAppear then
   onCreatureAppear(function(creature)
     if _zBurst() then return end
     if creature:isMonster() then
-      EventBus.emit("monster:appear", creature)
+      local cId = nil
+      pcall(function() cId = creature:getId() end)
+      local nowMs3 = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+      if not cId or not _monsterAppearThrottle[cId] or (nowMs3 - _monsterAppearThrottle[cId]) >= MONSTER_APPEAR_THROTTLE_MS then
+        if cId then _monsterAppearThrottle[cId] = nowMs3 end
+        EventBus.emit("monster:appear", creature)
+      end
     elseif creature:isPlayer() then
       EventBus.emit("player:appear", creature)
     elseif creature:isNpc() then
@@ -316,6 +325,10 @@ end
 local creatureHealthCache = {}
 setmetatable(creatureHealthCache, { __mode = "k" }) -- Weak keys for auto-cleanup
 
+-- Throttle monster:health events — too many subscribers, too frequent
+local _monsterHealthThrottle = {}  -- { [creatureId] = lastEmitTime }
+local MONSTER_HEALTH_THROTTLE_MS = 150  -- 150ms between emits per creature
+
 -- Track killed monsters with their positions for corpse access
 local killedMonsters = {}  -- { [creatureId] = { pos, name, timestamp } }
 local KILLED_MONSTER_EXPIRY_MS = 15000  -- 15 seconds
@@ -325,12 +338,28 @@ function EventBus.getKilledMonsters()
   return killedMonsters
 end
 
--- Clean up old killed monster entries
+-- Clean up old killed monster entries + throttle tables
+local _cleanupCounter = 0
+local _creatureMoveLastEmit = {}
 local function cleanupKilledMonsters()
   local nowMs = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
   for id, data in pairs(killedMonsters) do
     if (nowMs - data.timestamp) > KILLED_MONSTER_EXPIRY_MS then
       killedMonsters[id] = nil
+    end
+  end
+  -- Prune throttle tables every ~10 calls (every ~5s at 500ms interval)
+  _cleanupCounter = _cleanupCounter + 1
+  if _cleanupCounter >= 10 then
+    _cleanupCounter = 0
+    for id, t in pairs(_monsterHealthThrottle) do
+      if (nowMs - t) > 5000 then _monsterHealthThrottle[id] = nil end
+    end
+    for id, t in pairs(_monsterAppearThrottle) do
+      if (nowMs - t) > 5000 then _monsterAppearThrottle[id] = nil end
+    end
+    for id, t in pairs(_creatureMoveLastEmit) do
+      if (nowMs - t) > 5000 then _creatureMoveLastEmit[id] = nil end
     end
   end
 end
@@ -341,15 +370,24 @@ if onCreatureHealthPercentChange then
     -- Get cached old HP (default to 100 if not tracked)
     local oldPercent = creatureHealthCache[creature] or 100
     creatureHealthCache[creature] = percent
-    
-    -- Emit with both old and new values for proper change detection
+
+    local nowMs2 = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+
+    -- Always emit creature:health (used by creature_cache, exeta, friend_healer — lightweight)
     EventBus.emit("creature:health", creature, percent, oldPercent)
-    
+
     if creature:isMonster() then
-      EventBus.emit("monster:health", creature, percent, oldPercent)
-      
+      -- Throttle monster:health — 9 subscribers, expensive work
+      local cId = nil
+      pcall(function() cId = creature:getId() end)
+      local isKill = percent <= 0 and oldPercent > 0
+      if isKill or not cId or not _monsterHealthThrottle[cId] or (nowMs2 - _monsterHealthThrottle[cId]) >= MONSTER_HEALTH_THROTTLE_MS then
+        if cId then _monsterHealthThrottle[cId] = nowMs2 end
+        EventBus.emit("monster:health", creature, percent, oldPercent)
+      end
+
       -- MONSTER KILLED: Detect when health drops to 0
-      if percent <= 0 and oldPercent > 0 then
+      if isKill then
         local creatureId = nil
         local creatureName = nil
         local creaturePos = nil
@@ -387,6 +425,8 @@ if onCreatureHealthPercentChange then
 end
 
 -- Player events
+local _playerMoveLastEmit = 0
+local PLAYER_MOVE_THROTTLE_MS = 80  -- Don't emit more than 12x/sec
 if onPlayerPositionChange then
   onPlayerPositionChange(function(newPos, oldPos)
     if newPos and oldPos and newPos.z ~= oldPos.z then
@@ -396,7 +436,11 @@ if onPlayerPositionChange then
         EventBus.emit("player:z_change_settled", newPos, oldPos)
       end)
     end
-    EventBus.emit("player:move", newPos, oldPos)
+    local nowMs4 = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+    if (nowMs4 - _playerMoveLastEmit) >= PLAYER_MOVE_THROTTLE_MS then
+      _playerMoveLastEmit = nowMs4
+      EventBus.emit("player:move", newPos, oldPos)
+    end
   end)
 end
 
@@ -601,10 +645,8 @@ local function checkEquipmentChanges()
   end
 end
 
--- ============================================================================
 -- UNIFIED TICK INTEGRATION
 -- Migrate polling macros to UnifiedTick for consolidated tick management
--- ============================================================================
 
 if UnifiedTick and UnifiedTick.register then
   -- Equipment check handler (200ms, LOW priority - UI updates)
@@ -671,10 +713,19 @@ if onGroupSpellCooldown then
 end
 
 -- Creature walk events
+local CREATURE_MOVE_THROTTLE_MS = 100
 if onWalk then
   onWalk(function(creature, oldPos, newPos)
     if _zBlocked then return end
     EventBus.emit("creature:walk", creature, oldPos, newPos)
+    -- Throttle creature:move — 14 subscribers, fires every walk step
+    local cId = nil
+    pcall(function() cId = creature:getId() end)
+    local nowMs5 = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+    if not cId or not _creatureMoveLastEmit[cId] or (nowMs5 - _creatureMoveLastEmit[cId]) >= CREATURE_MOVE_THROTTLE_MS then
+      if cId then _creatureMoveLastEmit[cId] = nowMs5 end
+      EventBus.emit("creature:move", creature, oldPos)
+    end
     if creature:isMonster() then
       EventBus.emit("monster:walk", creature, oldPos, newPos)
     elseif creature:isPlayer() then

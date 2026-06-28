@@ -26,19 +26,16 @@
     })
 ]]
 
+local zChanging = nExBot.zChanging or function() return false end
 local UnifiedTick = {}
 
--- ============================================================================
 -- CONFIGURATION
--- ============================================================================
 
 UnifiedTick.MASTER_INTERVAL = 50  -- Master tick interval (ms)
 UnifiedTick.DEBUG = false         -- Enable debug logging
 UnifiedTick.ENABLED = true        -- Global enable flag
 
--- ============================================================================
 -- PRIORITY LEVELS (Higher = runs first)
--- ============================================================================
 
 UnifiedTick.Priority = {
   CRITICAL = 100,   -- Safety-critical (healing, emergency)
@@ -48,9 +45,7 @@ UnifiedTick.Priority = {
   IDLE = 10         -- Non-essential (cosmetics, logging)
 }
 
--- ============================================================================
 -- INTERNAL STATE
--- ============================================================================
 
 local handlers = {}           -- Registered tick handlers
 local handlerOrder = {}       -- Sorted handler keys by priority
@@ -70,9 +65,7 @@ local stats = {
 -- Time helper
 local nowMs = nExBot.Shared.nowMs
 
--- ============================================================================
 -- HANDLER REGISTRATION
--- ============================================================================
 
 --[[
   Register a tick handler
@@ -201,9 +194,7 @@ function UnifiedTick._rebuildOrder()
   end)
 end
 
--- ============================================================================
 -- MASTER TICK EXECUTION
--- ============================================================================
 
 --[[
   Main tick function - called by master macro
@@ -279,9 +270,7 @@ function UnifiedTick._tick()
   end
 end
 
--- ============================================================================
 -- LIFECYCLE MANAGEMENT
--- ============================================================================
 
 --[[
   Start the unified tick system
@@ -333,9 +322,7 @@ function UnifiedTick.resume()
   lastTick = nowMs()
 end
 
--- ============================================================================
 -- STATISTICS AND DEBUGGING
--- ============================================================================
 
 --[[
   Get tick system statistics
@@ -402,10 +389,8 @@ function UnifiedTick.resetStats()
   end
 end
 
--- ============================================================================
 -- PRE-DEFINED HANDLER TEMPLATES
 -- Common handler patterns for easy migration
--- ============================================================================
 
 --[[
   Create a condition check handler
@@ -482,10 +467,8 @@ function UnifiedTick.registerAnalyticsHandler(name, analyticsFn, interval)
   })
 end
 
--- ============================================================================
 -- AUTO-START (Optional)
 -- Uncomment to auto-start when module is loaded
--- ============================================================================
 
 -- UnifiedTick.start()
 

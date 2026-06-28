@@ -169,6 +169,14 @@ Each module is error-isolated — a failure in one module doesn't prevent others
 | **Lazy Evaluation** | Skip unnecessary work | Safety checks, pathfinding |
 | **Burst Detection** | Z-change protection | EventBus |
 | **SSoT Constants** | DRY direction/floor data | Directions, FloorItems modules |
+| **UnifiedTick** | Single 50ms master tick replaces 30+ individual timers | All modules via `UnifiedTick.register()` |
+| **Spectator Cache** | 200ms TTL cache for `getSpectators()` calls | TargetBot, Looting |
+| **Single Attack Authority** | `AttackStateMachine` is sole issuer of `g_game.attack()` | TargetBot |
+| **SafeCreature** | Single pcall wrapper — all creature access via `SC.*` | TargetBot, CaveBot, Core |
+| **DRY Deduplication** | Chebyshev, PathCache, isTargetable, getLocalPlayer — one canonical copy each | target_pathfinding, ClientService |
+| **Table-Driven Delegation** | 209 ACL methods via mapping table + generic dispatch | ClientService |
+| **Unified Storage Engine** | Single JSON backend for BotDatabase, CharacterDB, UnifiedStorage | utils/storage_engine |
+| **Shared Helpers** | Profile settings, debounce, path utils — one copy each | utils/shared_helpers |
 
 ---
 

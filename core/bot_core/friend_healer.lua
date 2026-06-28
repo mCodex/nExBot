@@ -45,9 +45,7 @@ local SC = SafeCreature
 -- Module version for debugging
 FriendHealerEnhanced.VERSION = "3.0.1"
 
--- ============================================================================
 -- CONSTANTS
--- ============================================================================
 
 local SELF_CRITICAL_HP = 30      -- Below this: NEVER heal friends
 local SELF_LOW_HP = 50           -- Below this: NEVER heal friends
@@ -77,9 +75,7 @@ local RUNE_IDS = {
   INTENSE_HEALING = 3152,   -- IH rune
 }
 
--- ============================================================================
 -- PRIVATE STATE
--- ============================================================================
 
 local _state = {
   -- Cached friend list { name = { creature, lastHp, lastUpdate, priority } }
@@ -111,9 +107,7 @@ local _state = {
   spellCount = 0
 }
 
--- ============================================================================
 -- COOLDOWN INTEGRATION
--- ============================================================================
 
 -- Check if healing group cooldown is active (group 2)
 local function isHealingGroupOnCooldown()
@@ -161,9 +155,7 @@ local function markHealingUsed()
   end
 end
 
--- ============================================================================
 -- HOTKEY-STYLE ITEM USAGE
--- ============================================================================
 
 -- Use potion on friend using hotkey-style API
 -- @param potionId: potion item ID
@@ -269,9 +261,7 @@ local function castHealSpellOnFriend(spellName, friendName, manaCost)
   return false
 end
 
--- ============================================================================
 -- PURE FUNCTIONS: Targeting
--- ============================================================================
 
 -- Get self HP percent
 local function getSelfHpPercent()
@@ -379,9 +369,7 @@ local function calculateUrgency(hpPercent, distance)
   return math.max(0, math.min(100, urgency))
 end
 
--- ============================================================================
 -- HEALING ACTIONS (Fully integrated with UI config)
--- ============================================================================
 
 -- Count friends in range for area heals (improved with safe API calls)
 local function countFriendsInRange(config, maxRange)
@@ -624,9 +612,7 @@ function FriendHealerEnhanced.executeAction(action)
   return false
 end
 
--- ============================================================================
 -- MAIN TICK AND SCANNING
--- ============================================================================
 
 -- Find best friend to heal from spectators (improved with safe API calls)
 function FriendHealerEnhanced.findBestTarget(config)
@@ -718,9 +704,7 @@ function FriendHealerEnhanced.tick()
   return false
 end
 
--- ============================================================================
 -- EVENTBUS INTEGRATION (Improved for accuracy and performance)
--- ============================================================================
 
 -- DRY: Reuse SafeCreature instead of duplicating pcall wrappers
 local safeGetName = SC.getName
@@ -847,9 +831,7 @@ function FriendHealerEnhanced.setupEventListeners()
   end, 30)
 end
 
--- ============================================================================
 -- PUBLIC API
--- ============================================================================
 
 function FriendHealerEnhanced.init(config)
   _state.config = config
@@ -892,9 +874,7 @@ function FriendHealerEnhanced.cleanup()
   _state.friends = {}
 end
 
--- ============================================================================
 -- BACKWARD COMPATIBILITY (for new_healer.lua integration)
--- ============================================================================
 
 -- Event handler: Friend health changed (legacy API - EventBus handles this internally)
 function FriendHealerEnhanced.onFriendHealthChange(creature, newHpPercent, oldHpPercent)

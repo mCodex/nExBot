@@ -19,9 +19,7 @@
 
 local Shared = {}
 
---------------------------------------------------------------------------------
 -- CLIENT ACCESS (was duplicated in 20+ files)
---------------------------------------------------------------------------------
 
 --- Get the ClientService reference for cross-client compatibility.
 -- @return ClientService or nil
@@ -49,9 +47,7 @@ function Shared.isOldTibia()
   return Shared.getClientVersion() < 960
 end
 
---------------------------------------------------------------------------------
 -- TIME (was duplicated in 5+ files)
---------------------------------------------------------------------------------
 
 --- Get current time in milliseconds.
 -- @return number
@@ -61,9 +57,7 @@ function Shared.nowMs()
   return os.time() * 1000
 end
 
---------------------------------------------------------------------------------
 -- TABLE UTILITIES (deepClone was duplicated in 4 files)
---------------------------------------------------------------------------------
 
 --- Deep clone a table (recursive copy).
 -- @param t any - value to clone
@@ -113,9 +107,7 @@ function Shared.properCase(str)
   return table.concat(words, " ")
 end
 
---------------------------------------------------------------------------------
 -- COOLDOWN UTILITIES (shared healing/potion cooldown checks)
---------------------------------------------------------------------------------
 
 --- Check if healing group cooldown is active.
 -- @return boolean
@@ -142,9 +134,7 @@ function Shared.isPotionOnCooldown()
   return false
 end
 
---------------------------------------------------------------------------------
 -- PLAYER STAT ACCESSORS (used across heal modules)
---------------------------------------------------------------------------------
 
 --- Get player HP percent safely.
 -- @return number (0-100)
@@ -177,9 +167,7 @@ function Shared.isInPz()
   return false
 end
 
---------------------------------------------------------------------------------
 -- SEMVER UTILITIES (used by updater)
---------------------------------------------------------------------------------
 
 --- Parse a semver string into {major, minor, patch}.
 -- @param str string - e.g. "3.0.0"

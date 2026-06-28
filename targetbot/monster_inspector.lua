@@ -62,7 +62,6 @@ local function createWindowIfMissing()
   -- Ensure it's hidden initially
   pcall(function() MonsterInspectorWindow:hide() end)
 
-
   -- Rebind buttons and visibility handlers (same logic as below)
   -- Setup actual buttons if present - use direct property access (OTClient pattern)
   local function bindButtons()
@@ -169,8 +168,6 @@ local function updateWidgetRefs()
     warn("[MonsterInspector] Failed to bind textContent widget; UI may not be loaded or style import failed")
   end
 end
-
-
 
 -- Populate refs now (also called again on visibility change)
 updateWidgetRefs()
@@ -842,5 +839,4 @@ end
 
 -- Expose refreshPatterns function
 nExBot.MonsterInspector.refreshPatterns = refreshPatterns
-
 

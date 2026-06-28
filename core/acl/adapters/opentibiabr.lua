@@ -24,9 +24,7 @@
   vs the original 1138).
 ]]
 
--- =========================================================================
 -- LOAD BASE
--- =========================================================================
 
 local BaseAdapter
 do
@@ -34,9 +32,7 @@ do
   BaseAdapter = (ok and type(res) == "table" and res) or ACL_BaseAdapter or {}
 end
 
--- =========================================================================
 -- ADAPTER TABLE — inherits everything from Base via metatable
--- =========================================================================
 
 local A = {}
 
@@ -72,9 +68,7 @@ A.VERSION = "2.0.0"
 -- Sandbox global export
 ACL_LoadedAdapter = A
 
--- =========================================================================
 -- HELPER: Generate a thin wrapper for a g_game method
--- =========================================================================
 
 local function gameMethod(name, ...)
   if g_game and type(g_game[name]) == "function" then
@@ -82,9 +76,7 @@ local function gameMethod(name, ...)
   end
 end
 
--- =========================================================================
 -- GAME OVERRIDES
--- =========================================================================
 
 function A.game.forceWalk(direction)
   if g_game and g_game.forceWalk then return g_game.forceWalk(direction) end
@@ -138,9 +130,7 @@ function A.game.closeNPCTrade()            return gameMethod("closeNPCTrade") en
 function A.game.inspectionNormalObject(thing) return gameMethod("inspectionNormalObject", thing) end
 function A.game.inspectionObject(iType, id, count) return gameMethod("inspectionObject", iType, id, count or 1) end
 
--- =========================================================================
 -- STASH
--- =========================================================================
 
 function A.stash.withdraw(itemId, count)   return gameMethod("stashWithdraw", itemId, count) end
 function A.stash.stowItem(item, count)     return gameMethod("stashStowItem", item, count) end
@@ -148,18 +138,14 @@ function A.stash.stowAll(item)             return gameMethod("stashStowAll", ite
 function A.stash.open()                    return gameMethod("openStash") end
 function A.stash.search(itemId)            return gameMethod("requestStashSearch", itemId) end
 
--- =========================================================================
 -- IMBUEMENT
--- =========================================================================
 
 function A.imbuement.apply(slotId, imbuId, protection) return gameMethod("applyImbuement", slotId, imbuId, protection or false) end
 function A.imbuement.clear(slotId)         return gameMethod("clearImbuement", slotId) end
 function A.imbuement.requestWindow(item)   return gameMethod("requestImbuingWindow", item) end
 function A.imbuement.closeWindow()         return gameMethod("closeImbuingWindow") end
 
--- =========================================================================
 -- PREY
--- =========================================================================
 
 function A.prey.action(slotId, actionType, bonusType, monsterIdx)
   return gameMethod("preyAction", slotId, actionType, bonusType or 0, monsterIdx or 0)
@@ -168,18 +154,14 @@ function A.prey.requestData()              return gameMethod("requestPreyData") 
 function A.prey.selectCreature(slot, idx)  return gameMethod("selectPreyCreature", slot, idx) end
 function A.prey.refreshMonsters(slot)      return gameMethod("refreshPreyMonsters", slot) end
 
--- =========================================================================
 -- FORGE
--- =========================================================================
 
 function A.forge.request(action, ...)      return gameMethod("forgeRequest", action, ...) end
 function A.forge.fuse(a, b, core)          return gameMethod("forgeFuse", a, b, core or false) end
 function A.forge.transfer(donor, recv, core) return gameMethod("forgeTransfer", donor, recv, core or false) end
 function A.forge.open()                    return gameMethod("openForge") end
 
--- =========================================================================
 -- MARKET
--- =========================================================================
 
 function A.market.browse(cat, voc)         return gameMethod("browseMarket", cat or 0, voc or 0) end
 function A.market.createOffer(t, id, amt, price, anon) return gameMethod("createMarketOffer", t, id, amt, price, anon or false) end
@@ -187,9 +169,7 @@ function A.market.cancelOffer(offerId)     return gameMethod("cancelMarketOffer"
 function A.market.acceptOffer(offerId, amt)return gameMethod("acceptMarketOffer", offerId, amt) end
 function A.market.requestInfo(itemId)      return gameMethod("requestMarketInfo", itemId) end
 
--- =========================================================================
 -- BESTIARY / BOSSTIARY
--- =========================================================================
 
 function A.bestiary.request()              return gameMethod("requestBestiary") end
 function A.bestiary.requestOverview(race)  return gameMethod("requestBestiaryOverview", race) end
@@ -197,25 +177,19 @@ function A.bestiary.search(text)           return gameMethod("requestBestiarySea
 function A.bosstiary.requestInfo()         return gameMethod("requestBosstiaryInfo") end
 function A.bosstiary.requestSlotInfo()     return gameMethod("requestBossSlootInfo") end
 
--- =========================================================================
 -- GAME CONFIG
--- =========================================================================
 
 function A.gameConfig.get() return g_gameConfig or nil end
 function A.gameConfig.loadFonts(path) return g_gameConfig and g_gameConfig.loadFonts and g_gameConfig.loadFonts(path) end
 
--- =========================================================================
 -- PAPERDOLLS
--- =========================================================================
 
 function A.paperdolls.isAvailable() return g_paperdolls ~= nil end
 function A.paperdolls.get(id) return g_paperdolls and g_paperdolls.get and g_paperdolls.get(id) end
 function A.paperdolls.getAll() return g_paperdolls and g_paperdolls.getAll and g_paperdolls.getAll() or {} end
 function A.paperdolls.clear() return g_paperdolls and g_paperdolls.clear and g_paperdolls.clear() end
 
--- =========================================================================
 -- MAP OVERRIDES
--- =========================================================================
 
 function A.map.getSpectators(pos, multifloor)
   if not g_map then return {} end
@@ -299,9 +273,7 @@ function A.map.cleanTile(pos)
   return g_map and g_map.cleanTile and g_map.cleanTile(pos)
 end
 
--- =========================================================================
 -- COOLDOWN
--- =========================================================================
 
 function A.cooldown.isCooldownIconActive(iconId)
   local m = modules.game_cooldown
@@ -313,9 +285,7 @@ function A.cooldown.isGroupCooldownIconActive(groupId)
   return m and m.isGroupCooldownIconActive and m.isGroupCooldownIconActive(groupId) or false
 end
 
--- =========================================================================
 -- BOT
--- =========================================================================
 
 function A.bot.getConfigName()
   local bm = modules.game_bot
@@ -335,9 +305,7 @@ function A.bot.getConfigPath()
   return name and ("/bot/" .. name) or nil
 end
 
--- =========================================================================
 -- UTILS (inherits base, adds OTBR specifics)
--- =========================================================================
 
 function A.utils.getCreatureByName(name, caseSensitive)
   local p = g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()
@@ -399,9 +367,7 @@ function A.utils.itemAmount(itemId, subType)
   return count
 end
 
--- =========================================================================
 -- INIT / TERMINATE
--- =========================================================================
 
 function A.init()
   if nExBot and nExBot.showDebug then

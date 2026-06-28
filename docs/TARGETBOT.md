@@ -70,27 +70,38 @@ The creature with the highest score becomes the active target.
 
 ## ⚙️ Attack State Machine
 
-All attacks in nExBot go through a single **AttackStateMachine** (ASM). No other module is allowed to call `g_game.attack()` directly — this eliminates the classic "attack once then stop" bug caused by competing attack issuers.
+All attacks in nExBot go through a single **AttackStateMachine** (ASM). No other module is allowed to call `g_game.attack()` directly — this eliminates the classic "attack once then stop" bug caused by competing attack issuers. This includes combo.lua spell combos, which route through the ASM instead of attacking directly.
 
 ### State Flow
 
 ```text
-IDLE → ACQUIRING → CONFIRMING → ATTACKING → RECOVERING → IDLE
+IDLE → ENGAGING → LOCKED → IDLE
 ```
 
 | State | Description |
 |-------|-------------|
-| **IDLE** | No target. Waiting for `requestSwitch()`. |
-| **ACQUIRING** | Target selected, `g_game.attack()` sent. |
-| **CONFIRMING** | Waiting for server confirmation (up to 1000 ms). |
-| **ATTACKING** | Server confirmed. Actively fighting. |
-| **RECOVERING** | Target died or disappeared. Brief grace period before IDLE. |
+| **IDLE** | No target. Waiting for `requestAttack()`. |
+| **ENGAGING** | `g_game.attack()` sent. Waiting for server confirmation. Retries with exponential backoff (1.5s base, 1.5x growth, max 5 retries). |
+| **LOCKED** | Server confirmed attack. Actively fighting. Re-sends attack immediately if lost. |
+| **IDLE** | Target killed or unreachable. Brief grace period before next engagement. |
+
+### SafeCreature
+
+All creature access goes through `SafeCreature` (`utils/safe_creature.lua`). This eliminates 40+ raw `pcall()` wrappers across the codebase. Use `SC.getId(creature)`, `SC.getPosition(creature)`, `SC.isMonster(creature)`, etc. instead of inline pcall patterns.
+
+### Attack Persistence
+
+The bot sends `g_game.attack()` once per target. The Tibia server maintains the attack state automatically — the bot does not need to re-send the same attack command. The ASM only re-sends when it detects the attack has dropped (nil game target).
+
+When the ASM is ENGAGING or LOCKED, CaveBot is blocked from walking to prevent interrupting the attack. The `TargetBot.isActive()` window (1000ms) covers the macro interval plus ASM retry timing.
 
 ### Key Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| Reissue Interval | 1400 ms | Re-send attack if server didn't confirm |
+| Engage Backoff Base | 1500 ms | Initial retry delay |
+| Engage Backoff Growth | 1.5x | Multiplier per retry |
+| Engage Max Retries | 5 | Give up after this many |
 | Confirm Timeout | 1000 ms | Wait time for server confirmation |
 | Attack Cooldown | 300 ms | Minimum time between attack commands |
 | Switch Cooldown | 5000 ms | Minimum time between target switches |
@@ -160,6 +171,7 @@ TargetBot uses an **intent-based voting system** for movement. Multiple subsyste
 
 | Priority | Intent | Description |
 |----------|--------|-------------|
+| 0 | **Follow** | Catch up to party leader |
 | 1 | **Wave Avoidance** | Dodge predicted wave attacks |
 | 2 | **Finish Kill** | Move into range of low-HP target |
 | 3 | **Spell Position** | Optimal position for AoE spells |
@@ -348,7 +360,14 @@ MonsterAI.DEBUG = true
 2. Are there creatures configured in the creature list?
 3. Are matching monsters on screen?
 4. Do you have mana for attack spells?
-5. Check ASM state — it should be ATTACKING when a target is present.
+5. Check ASM state — it should be LOCKED when a target is present.
+
+### Attack stops after one hit
+
+The bot sends attack once and lets the server maintain it. If the attack drops:
+- The ASM re-sends immediately when it detects a nil game target
+- CaveBot stays blocked while the ASM is ENGAGING or LOCKED
+- Check that no other module is calling `g_game.attack()` or `cancelAttackAndFollow()`
 
 ### Target keeps switching (zigzag)
 
@@ -359,7 +378,7 @@ MonsterAI.DEBUG = true
 
 ### Not attacking after target dies
 
-- The ASM enters RECOVERING state for 350–600 ms after a kill
+- The ASM enters IDLE state after the grace period expires
 - This is normal — it prevents attacking the wrong creature during the transition
 - If it seems stuck, check for `STOP_START_DEBOUNCE` timing
 

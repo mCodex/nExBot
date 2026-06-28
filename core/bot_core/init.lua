@@ -29,10 +29,9 @@ BotCore = BotCore or {}
 BotCore.version = "1.0.0"
 BotCore.initialized = false
 
--- ============================================================================
 -- COMPONENT LOADING (order matters for dependencies)
--- ============================================================================
 
+local zChanging = nExBot.zChanging or function() return false end
 local basePath = "/core/bot_core/"
 
 -- Core managers (no dependencies)
@@ -63,9 +62,7 @@ dofile(basePath .. "attack_system.lua")
 -- Exposes as both BotCore.FriendHealer and BotCore.FriendHealerEnhanced for compatibility
 dofile(basePath .. "friend_healer.lua")
 
--- ============================================================================
 -- HIGH-PERFORMANCE TICK HANDLER
--- ============================================================================
 
 -- Single tick handler - runs at 50ms for critical healing response
 local function onBotCoreTick()
@@ -83,9 +80,7 @@ if macro then
   macro(50, onBotCoreTick)
 end
 
--- ============================================================================
 -- EVENT-DRIVEN UPDATES (instant response)
--- ============================================================================
 
 -- Hook into EventBus for instant stat updates
 if EventBus then
@@ -125,9 +120,7 @@ if onManaChange then
   end)
 end
 
--- ============================================================================
 -- EXHAUSTED EVENT HANDLING
--- ============================================================================
 
 -- Hook into exhausted events for graceful handling
 if onSpellCooldown then
@@ -148,9 +141,7 @@ if onGroupSpellCooldown then
   end)
 end
 
--- ============================================================================
 -- INITIALIZATION
--- ============================================================================
 
 -- Initialize cooldown event hooks
 if BotCore.Cooldown and BotCore.Cooldown.init then
@@ -160,9 +151,7 @@ end
 -- Mark as initialized
 BotCore.initialized = true
 
--- ============================================================================
 -- PUBLIC HELPERS (convenience functions)
--- ============================================================================
 
 -- Quick access using Priority engine (safety-first)
 function BotCore.canHeal()

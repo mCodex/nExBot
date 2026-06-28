@@ -6,6 +6,7 @@
 nExBot = nExBot or {} -- global namespace for bot variables
 
 -- Get ClientService reference (may not be loaded yet, lazy load in functions)
+local zChanging = nExBot.zChanging or function() return false end
 local function getClient()
   return ClientService
 end
@@ -589,12 +590,10 @@ local function getClientVersion()
 end
 local isOldTibia = getClientVersion() < 960
 
---------------------------------------------------------------------------------
 -- SHAPE-BASED CREATURE COUNTING
 -- Delegates to BotCore.Creatures when available; provides standalone fallback.
 -- Shape constants and isInShape are the single source of truth here.
 -- BotCore.Creatures reuses these via nExBot.SHAPE / nExBot.isInShape.
---------------------------------------------------------------------------------
 
 local SHAPE = {
   SQUARE = 1, CIRCLE = 2, DIAMOND = 3, CROSS = 4, CONE = 5
@@ -919,9 +918,6 @@ function target()
     end
     return (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
 end
-
--- returns target creature
-function getTarget() return target() end
 
 -- dist is boolean
 -- returns target position/distance from player

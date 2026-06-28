@@ -10,9 +10,7 @@ FollowComboBoxPopupMenuButton < ComboBoxPopupMenuButton
 FollowComboBox < ComboBox
   @onSetup: |
     self:addOption("LEADER TARGET")
-    self:addOption("SERVER LEADER TARGET")    
     self:addOption("LEADER")
-    self:addOption("SERVER LEADER")
 
 ComboTrigger < Panel
   id: trigger
@@ -316,7 +314,7 @@ BotServer < Panel
 
 ComboWindow < MainWindow
   !text: tr('Combo Options')
-  size: 500 280
+  size: 480 280
   @onEscape: self:hide()
 
   ComboTrigger
@@ -333,7 +331,7 @@ ComboWindow < MainWindow
     text: Combo Trigger
     color: #ff7700
 
-  ComboActions    
+  ComboActions
     id: actions
     anchors.top: trigger.bottom
     anchors.left: trigger.left
@@ -346,21 +344,6 @@ ComboWindow < MainWindow
     margin-left: 10
     margin-top: 85
     text: Combo Actions
-    color: #ff7700   
-
-  BotServer    
-    id: server
-    anchors.top: actions.top
-    anchors.left: actions.right
-    margin-left: 10 
-
-  Label
-    id: title
-    anchors.top: parent.top
-    anchors.left: server.left
-    margin-left: 3
-    margin-top: 85
-    text: BotServer
     color: #ff7700
 
   HorizontalSeparator
@@ -368,7 +351,7 @@ ComboWindow < MainWindow
     anchors.right: parent.right
     anchors.left: parent.left
     anchors.bottom: closeButton.top
-    margin-bottom: 8    
+    margin-bottom: 8
 
   Button
     id: closeButton

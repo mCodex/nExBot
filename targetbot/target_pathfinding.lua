@@ -76,12 +76,11 @@ end
 
 local function chebyshevDistance(p1, p2)
   if not p1 or not p2 then return 999 end
+  if p1.z ~= p2.z then return 999 end
   return math.max(math.abs(p1.x - p2.x), math.abs(p1.y - p2.y))
 end
 
-local function chebyshev(p1, p2)
-  return chebyshevDistance(p1, p2)
-end
+local chebyshev = chebyshevDistance
 
 local function getDistanceBetween(pos1, pos2)
   if not pos1 or not pos2 then return nil end
@@ -90,12 +89,13 @@ end
 
 local function isTargetableCreature(creature)
   if not creature then return false end
-  local okDead, isDead = pcall(function() return creature:isDead() end)
-  if okDead and isDead then return false end
-  local okMonster, isMonster = pcall(function() return creature:isMonster() end)
-  if not okMonster or not isMonster then return false end
-  local okHp, hp = pcall(function() return creature:getHealthPercent() end)
-  if okHp and hp and hp <= 0 then return false end
+  local SC = SafeCreature or {}
+  local isDead = SC.isDead(creature)
+  if isDead then return false end
+  local isMonster = SC.isMonster(creature)
+  if not isMonster then return false end
+  local hp = SC.getHealthPercent(creature)
+  if hp and hp <= 0 then return false end
   local Client = getClient()
   local oldTibia = (Client and Client.getClientVersion) and Client.getClientVersion() < 960
   if oldTibia then return true end
@@ -115,9 +115,7 @@ local function isTargetableMonster(creature)
   local Client = getClient()
   local oldTibia = (Client and Client.getClientVersion) and Client.getClientVersion() < 960
   if oldTibia then return true end
-  local creatureType = nil
-  local okType, cType = pcall(function() return creature:getType() end)
-  if okType then creatureType = cType end
+  local okType, creatureType = pcall(function() return creature:getType() end)
   if creatureType and creatureType >= 3 then return false end
   return true
 end

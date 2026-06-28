@@ -25,9 +25,7 @@
 local WeakCache = {}
 WeakCache.VERSION = "1.0"
 
--- ============================================================================
 -- WEAK TABLE FACTORIES
--- ============================================================================
 
 -- Create a table with weak keys
 -- When the key object is garbage collected, the entry is automatically removed
@@ -49,9 +47,7 @@ function WeakCache.createWeakValues()
   return t
 end
 
--- ============================================================================
 -- LRU CACHE (Least Recently Used)
--- ============================================================================
 
 -- Create an LRU cache with automatic eviction
 -- Uses a doubly-linked list for true O(1) touch/evict/remove.
@@ -187,9 +183,7 @@ function WeakCache.createLRU(maxSize, ttl)
   return cache
 end
 
--- ============================================================================
 -- EXPORT
--- ============================================================================
 
 -- Export to global (no _G in OTClient sandbox)
 -- WeakCache is already global (declared without 'local')

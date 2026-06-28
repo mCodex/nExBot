@@ -29,9 +29,7 @@
 BotCore.AttackSystem = BotCore.AttackSystem or {}
 local AttackSystem = BotCore.AttackSystem
 
--- ============================================================================
 -- CONSTANTS
--- ============================================================================
 
 local RUNE_COOLDOWN_MS = 2000      -- Default rune exhaustion
 local SPELL_COOLDOWN_MS = 2000     -- Default attack spell cooldown
@@ -48,9 +46,7 @@ local ATTACK_TYPE = {
   BASIC = 5
 }
 
--- ============================================================================
 -- PRIVATE STATE
--- ============================================================================
 
 local _state = {
   -- Last attack timestamps
@@ -74,9 +70,7 @@ local _state = {
   enabled = true
 }
 
--- ============================================================================
 -- COOLDOWN INTEGRATION (Uses BotCore.Cooldown as single source of truth)
--- ============================================================================
 
 -- Check if attack group cooldown is active
 local function isAttackGroupOnCooldown()
@@ -115,9 +109,7 @@ local function canAttack(lastTime, delay)
   return currentTime >= lastTime + (delay or SPELL_COOLDOWN_MS)
 end
 
--- ============================================================================
 -- HOTKEY-STYLE ITEM USAGE (High-performance, works without open backpack)
--- ============================================================================
 
 -- Use item on target using hotkey-style API
 -- @param itemId: rune/potion ID
@@ -165,9 +157,7 @@ local function useItemOnTarget(itemId, target, subType)
   return false
 end
 
--- ============================================================================
 -- PURE FUNCTIONS: Attack Planning
--- ============================================================================
 
 -- Count monsters in range for AOE attacks
 -- @param centerPos: center position for AOE
@@ -215,9 +205,7 @@ local function isInPz()
   return false
 end
 
--- ============================================================================
 -- ATTACK EXECUTION
--- ============================================================================
 
 -- Execute AOE spell attack
 -- @param spellText: spell incantation
@@ -390,9 +378,7 @@ function AttackSystem.executeSingleRune(runeId, target, delay, config)
   return false
 end
 
--- ============================================================================
 -- HIGH-LEVEL ATTACK PLANNING
--- ============================================================================
 
 --[[
   Plan the best attack action based on current combat state.
@@ -537,9 +523,7 @@ function AttackSystem.attack(target, config)
   return AttackSystem.executeAction(action, config)
 end
 
--- ============================================================================
 -- EVENTBUS INTEGRATION
--- ============================================================================
 
 -- Setup EventBus listeners for reactive attacks
 function AttackSystem.setupEventListeners()
@@ -580,9 +564,7 @@ function AttackSystem.setupEventListeners()
   end, 40)
 end
 
--- ============================================================================
 -- PUBLIC API
--- ============================================================================
 
 -- Initialize attack system
 function AttackSystem.init(config)
@@ -632,9 +614,7 @@ function AttackSystem.cleanup()
   _state.subscriptions = {}
 end
 
--- ============================================================================
 -- BACKWARDS COMPATIBILITY BRIDGE
--- ============================================================================
 
 -- These functions maintain compatibility with existing TargetBot code
 -- while using the new optimized implementation under the hood

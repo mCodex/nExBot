@@ -26,7 +26,6 @@ CaveBot.Extensions.DWithdraw.setup = function()
 			capLimit = tonumber(data[4]:trim())
 		end
 
-
 		-- cap check
 		if freecap() < (capLimit or 200) then
 			local Client = getClient()

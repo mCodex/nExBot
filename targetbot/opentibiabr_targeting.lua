@@ -15,17 +15,15 @@
   - Provides ~30-50% performance improvement for targeting calculations
 ]]
 
--- ============================================================================
 -- MODULE NAMESPACE
--- ============================================================================
 
 local OpenTibiaBRTargeting = {}
 OpenTibiaBRTargeting.VERSION = "1.0"
 OpenTibiaBRTargeting.DEBUG = false
 
--- ============================================================================
+local SC = SafeCreature or {}
+
 -- CLIENT SERVICE HELPER (using global ClientHelper)
--- ============================================================================
 
 local getClient = nExBot.Shared.getClient
 
@@ -40,9 +38,7 @@ local function log(msg)
   end
 end
 
--- ============================================================================
 -- FEATURE DETECTION
--- ============================================================================
 
 OpenTibiaBRTargeting.features = {
   findEveryPath = false,
@@ -75,10 +71,8 @@ local function detectFeatures()
   return true
 end
 
--- ============================================================================
 -- BATCH PATH CALCULATION
 -- Calculate paths to multiple destinations at once (much faster than one by one)
--- ============================================================================
 
 -- Cache for batch path results
 local batchPathCache = {
@@ -168,10 +162,8 @@ function OpenTibiaBRTargeting.getCachedPath(monsterId)
   return data and data.path or nil
 end
 
--- ============================================================================
 -- LINE-OF-SIGHT TARGETING
 -- Only get creatures that are in direct line of sight (no obstacles)
--- ============================================================================
 
 function OpenTibiaBRTargeting.getVisibleCreatures(pos, multifloor)
   if not OpenTibiaBRTargeting.features.getSightSpectators then
@@ -190,10 +182,8 @@ function OpenTibiaBRTargeting.getVisibleCreatures(pos, multifloor)
   return creatures or {}
 end
 
--- ============================================================================
 -- ENHANCED CREATURE LOOKUP
 -- Direct creature lookup by ID (faster than iterating all spectators)
--- ============================================================================
 
 function OpenTibiaBRTargeting.getCreatureById(creatureId)
   if not OpenTibiaBRTargeting.features.getCreatureById then
@@ -225,10 +215,8 @@ function OpenTibiaBRTargeting.isCreatureValid(creatureId)
   return ok and result
 end
 
--- ============================================================================
 -- PATTERN-BASED AOE DETECTION
 -- Get creatures matching a specific attack pattern (for AoE optimization)
--- ============================================================================
 
 -- Diamond pattern (3x3 rotated 45°) - common for arrows/bolts
 local DIAMOND_PATTERN = {
@@ -286,8 +274,8 @@ function OpenTibiaBRTargeting.countDiamondArrowHits(targetPos)
   
   local count = 0
   for _, creature in ipairs(creatures) do
-    local ok, isMonster = pcall(function() return creature:isMonster() and not creature:isDead() end)
-    if ok and isMonster then
+    local isMonster = SC.isMonster(creature) and not SC.isDead(creature)
+    if isMonster then
       count = count + 1
     end
   end
@@ -302,8 +290,8 @@ function OpenTibiaBRTargeting.countLargeAreaHits(targetPos)
   
   local count = 0
   for _, creature in ipairs(creatures) do
-    local ok, isMonster = pcall(function() return creature:isMonster() and not creature:isDead() end)
-    if ok and isMonster then
+    local isMonster = SC.isMonster(creature) and not SC.isDead(creature)
+    if isMonster then
       count = count + 1
     end
   end
@@ -339,13 +327,13 @@ function OpenTibiaBRTargeting.findBestAoEPosition(playerPos, range, pattern, pat
     if tilePos then
       local creatures = OpenTibiaBRTargeting.getCreaturesInPattern(tilePos, pattern, patternWidth, patternHeight)
       if creatures then
-        local count = 0
-        for _, creature in ipairs(creatures) do
-          local ok, isMonster = pcall(function() return creature:isMonster() and not creature:isDead() end)
-          if ok and isMonster then
-            count = count + 1
-          end
-        end
+  local count = 0
+  for _, creature in ipairs(creatures) do
+    local isMonster = SC.isMonster(creature) and not SC.isDead(creature)
+    if isMonster then
+      count = count + 1
+    end
+  end
         
         if count > bestCount then
           bestCount = count
@@ -358,10 +346,8 @@ function OpenTibiaBRTargeting.findBestAoEPosition(playerPos, range, pattern, pat
   return bestPos, bestCount
 end
 
--- ============================================================================
 -- ASYMMETRIC RANGE DETECTION
 -- Get creatures with different ranges in X and Y (useful for beam targeting)
--- ============================================================================
 
 function OpenTibiaBRTargeting.getCreaturesInAsymmetricRange(pos, multifloor, minRangeX, maxRangeX, minRangeY, maxRangeY)
   if not OpenTibiaBRTargeting.features.getSpectatorsInRangeEx then
@@ -412,10 +398,8 @@ function OpenTibiaBRTargeting.getCreaturesInFront(playerPos, direction, range)
   return OpenTibiaBRTargeting.getCreaturesInAsymmetricRange(playerPos, false, minX, maxX, minY, maxY)
 end
 
--- ============================================================================
 -- TARGETBOT INTEGRATION
 -- Hook into TargetBot to use enhanced features
--- ============================================================================
 
 function OpenTibiaBRTargeting.integrate()
   if not detectFeatures() then
@@ -445,9 +429,7 @@ function OpenTibiaBRTargeting.integrate()
   return true
 end
 
--- ============================================================================
 -- INITIALIZATION
--- ============================================================================
 
 -- Auto-integrate when module loads
 schedule(100, function()

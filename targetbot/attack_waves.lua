@@ -1,7 +1,6 @@
 -- TargetBot Attack Waves Module
 -- Wave/damage zone detection and avoidance
 
-local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 local getClient = nExBot.Shared.getClient
 local SC = SafeCreature or {}
 local Dirs = Directions
@@ -486,12 +485,12 @@ end
 
 if EventBus then
   EventBus.on("monster:disappear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     avoidanceState.lastSafePos = nil
     avoidanceState.consecutiveMoves = 0
   end, 20)
   EventBus.on("player:move", function(newPos, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if avoidanceState.lastSafePos then
       local atSafe = newPos.x == avoidanceState.lastSafePos.x and newPos.y == avoidanceState.lastSafePos.y
       if not atSafe then avoidanceState.lastSafePos = nil end
@@ -499,20 +498,19 @@ if EventBus then
   end, 20)
   local monsterDirections = {}
   EventBus.on("creature:move", function(creature, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not SC.isMonster(creature) then return end
     if SC.isDead(creature) then return end
     local id = SC.getId(creature)
     local newDir = nil
-    if SC.getDirection then newDir = SC.getDirection(creature)
-    else local ok, dir = pcall(function() return creature:getDirection() end); if ok then newDir = dir end end
+    newDir = SC.getDirection(creature)
     if not id or not newDir then return end
     local oldDir = monsterDirections[id]
     monsterDirections[id] = newDir
     if oldDir and oldDir ~= newDir then
-      local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
+      local playerPos = player and SC.getPosition(player) or nil
       local monsterPos = SC.getPosition(creature)
-      if not okPpos or not playerPos or not monsterPos then return end
+      if not playerPos or not monsterPos then return end
       local dist = math.max(math.abs(playerPos.x - monsterPos.x), math.abs(playerPos.y - monsterPos.y))
       if dist <= 5 then
         local inArc, arcDist = isInFrontArc(playerPos, monsterPos, newDir, 5, 1)
@@ -540,7 +538,7 @@ if EventBus then
     end
   end, 8)
   EventBus.on("monster:appear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not SC.isMonster(creature) then return end
     local okPpos, playerPos = pcall(function() return player and player:getPosition() end)
     local monsterPos = SC.getPosition(creature)
@@ -580,7 +578,7 @@ if EventBus then
     end
   end, 12)
   EventBus.on("monster:disappear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if creature then
       local id = creature:getId()
       if id then monsterDirections[id] = nil end
@@ -591,7 +589,7 @@ if EventBus then
   end)
   if debounceAvoid then
     EventBus.on("creature:appear", function(creature)
-      if tbOff() then return end
+      if TargetBot.isOff() then return end
       if creature and creature:isMonster() then
         local p = player and player:getPosition()
         local cpos = creature and creature:getPosition()
@@ -599,7 +597,7 @@ if EventBus then
       end
     end, 10)
     EventBus.on("creature:move", function(creature, oldPos)
-      if tbOff() then return end
+      if TargetBot.isOff() then return end
       if creature and creature:isMonster() then
         local p = player and player:getPosition()
         local cpos = creature and creature:getPosition()
@@ -607,7 +605,7 @@ if EventBus then
       end
     end, 10)
     EventBus.on("monster:disappear", function(creature)
-      if tbOff() then return end
+      if TargetBot.isOff() then return end
       debounceAvoid()
     end, 10)
   end

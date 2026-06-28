@@ -16,9 +16,7 @@ local SafeCall = SafeCall or require("core.safe_call")
 local BoundedPush = BoundedPush
 local TrimArray = TrimArray
 
--- ============================================================================
 -- PRIVATE STATE
--- ============================================================================
 
 -- Unified analytics structure
 local _data = storage.botCoreAnalytics or {
@@ -86,9 +84,7 @@ end
 -- Persist to storage
 storage.botCoreAnalytics = _data
 
--- ============================================================================
 -- PRIVATE HELPERS
--- ============================================================================
 
 -- Append to log with rotation (using TrimArray for O(1) amortized)
 local function appendLog(entry)
@@ -105,9 +101,7 @@ local function incrementCounter(tbl, key)
   tbl[strKey] = (tbl[strKey] or 0) + 1
 end
 
--- ============================================================================
 -- PUBLIC API: Session Management
--- ============================================================================
 
 function Analytics.startSession()
   _data.session.startTime = now or os.time() * 1000
@@ -129,9 +123,7 @@ function Analytics.getSessionDuration()
   return currentTime - _data.session.startTime
 end
 
--- ============================================================================
 -- PUBLIC API: Healing Analytics
--- ============================================================================
 
 -- Record a healing spell cast
 function Analytics.recordHealSpell(spellName, manaCost, hpBefore, hpAfter)
@@ -172,9 +164,7 @@ function Analytics.recordPotion(itemId, hpBefore, hpAfter)
   })
 end
 
--- ============================================================================
 -- PUBLIC API: Attack Analytics
--- ============================================================================
 
 -- Record an attack spell cast
 function Analytics.recordAttackSpell(spellName, category)
@@ -219,9 +209,7 @@ function Analytics.recordAttack(category, idOrFormula)
   end
 end
 
--- ============================================================================
 -- PUBLIC API: Support Analytics
--- ============================================================================
 
 function Analytics.recordSupportSpell(spellName)
   incrementCounter(_data.support.spells, spellName)
@@ -233,9 +221,7 @@ function Analytics.recordSupportSpell(spellName)
   })
 end
 
--- ============================================================================
 -- PUBLIC API: Data Getters
--- ============================================================================
 
 function Analytics.getHealingData()
   return _data.healing
@@ -257,9 +243,7 @@ function Analytics.getAll()
   return _data
 end
 
--- ============================================================================
 -- PUBLIC API: Reset
--- ============================================================================
 
 function Analytics.resetHealing()
   _data.healing = {
@@ -285,9 +269,7 @@ function Analytics.resetAll()
   _data.session = { startTime = 0, startXp = 0, isActive = false }
 end
 
--- ============================================================================
 -- COMPATIBILITY: Legacy API for existing bots
--- ============================================================================
 
 -- HealBot compatibility
 Analytics.HealBot = {

@@ -30,22 +30,21 @@
   See docs/TARGETBOT.md for the full design rationale.
 ]]
 
--- ============================================================================
 -- MODULE NAMESPACE
--- ============================================================================
 
 MonsterAI = MonsterAI or {}
 MonsterAI.VERSION = "3.0"
 
 -- BoundedPush/TrimArray are set as globals by utils/ring_buffer.lua (Phase 3)
+local zChanging = nExBot.zChanging or function() return false end
 local BoundedPush = BoundedPush
 local TrimArray = TrimArray
 
---------------------------------------------------------------------------------
 -- CLIENTSERVICE HELPERS (shared aliases)
---------------------------------------------------------------------------------
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
+
+local SC = SafeCreature or {}
 
 -- Time helper (use ClientHelper for DRY)
 local nowMs = ClientHelper and ClientHelper.nowMs or function()
@@ -54,81 +53,17 @@ local nowMs = ClientHelper and ClientHelper.nowMs or function()
   return os.time() * 1000
 end
 
--- ============================================================================
 -- SAFE CREATURE VALIDATION (Prevents C++ crashes)
 -- The OTClient C++ layer can crash even when methods exist if the creature
 -- object is in an invalid internal state. These helpers prevent that.
--- ============================================================================
 
--- Cache for recently validated creatures to reduce overhead
-local validatedCreatures = {}
-local validatedCreaturesTTL = 100 -- ms
-
--- Check if a creature is valid and safe to call methods on
--- Returns true only if the creature can be safely accessed
-local function isCreatureValid(creature)
-  if not creature then return false end
-  if type(creature) ~= "userdata" and type(creature) ~= "table" then return false end
-  
-  -- Try the most basic operation possible - if this fails, creature is invalid
-  local ok, id = pcall(function() return creature:getId() end)
-  if not ok or not id then return false end
-  
-  -- Check validation cache
-  local nowt = nowMs()
-  local cached = validatedCreatures[id]
-  if cached and (nowt - cached.time) < validatedCreaturesTTL then
-    return cached.valid
-  end
-  
-  -- Perform full validation - try to access position (critical method)
-  local okPos, pos = pcall(function() return creature:getPosition() end)
-  local valid = okPos and pos ~= nil
-  
-  -- Cache result
-  validatedCreatures[id] = { valid = valid, time = nowt }
-  
-  -- Cleanup old cache entries periodically
-  if math.random(1, 50) == 1 then
-    for cid, data in pairs(validatedCreatures) do
-      if (nowt - data.time) > validatedCreaturesTTL * 10 then
-        validatedCreatures[cid] = nil
-      end
-    end
-  end
-  
-  return valid
-end
-
--- Safely call a method on a creature, returning default if it fails
--- This wraps the entire call including method lookup in pcall
-local function safeCreatureCall(creature, methodName, default)
-  if not creature then return default end
-  
-  local ok, result = pcall(function()
-    local method = creature[methodName]
-    if not method then return nil end
-    return method(creature)
-  end)
-  
-  if ok then
-    return result ~= nil and result or default
-  else
-    return default
-  end
-end
-
--- Safe creature accessors (delegated to SafeCreature)
-local safeGetId = SafeCreature.getId
-local safeIsDead = SafeCreature.isDead
-local safeIsMonster = SafeCreature.isMonster
-local safeIsRemoved = SafeCreature.isRemoved
-
--- Combined safe check: is the creature a valid, alive monster?
-local function isValidAliveMonster(creature)
-  if not creature then return false end
-  return SafeCreature.isMonster(creature) and not SafeCreature.isDead(creature) and not SafeCreature.isRemoved(creature)
-end
+local isCreatureValid = MonsterAI._helpers.isCreatureValid
+local safeCreatureCall = MonsterAI._helpers.safeCreatureCall
+local safeGetId = MonsterAI._helpers.safeGetId
+local safeIsDead = MonsterAI._helpers.safeIsDead
+local safeIsMonster = MonsterAI._helpers.safeIsMonster
+local safeIsRemoved = MonsterAI._helpers.safeIsRemoved
+local isValidAliveMonster = MonsterAI._helpers.isValidAliveMonster
 
 -- Extended telemetry defaults
 MonsterAI.COLLECT_EXTENDED = (MonsterAI.COLLECT_EXTENDED == nil) and true or MonsterAI.COLLECT_EXTENDED
@@ -136,11 +71,9 @@ MonsterAI.DPS_WINDOW = MonsterAI.DPS_WINDOW or 5000 -- ms window for DPS calcula
 MonsterAI.AUTO_TUNE_ENABLED = (MonsterAI.AUTO_TUNE_ENABLED == nil) and true or MonsterAI.AUTO_TUNE_ENABLED
 MonsterAI.TELEMETRY_INTERVAL = MonsterAI.TELEMETRY_INTERVAL or 200 -- ms between telemetry samples
 
--- ============================================================================
 -- VOLUME ADAPTATION MODULE (NEW in v2.2)
 -- Automatically adjusts processing parameters based on monster count
 -- Optimizes CPU usage while maintaining responsiveness
--- ============================================================================
 
 MonsterAI.VolumeAdaptation = MonsterAI.VolumeAdaptation or {
   -- Current adaptation state
@@ -321,9 +254,7 @@ function MonsterAI.VolumeAdaptation.getStats()
   }
 end
 
--- ============================================================================
 -- REAL-TIME EVENT-DRIVEN STATE (O(1) lookups)
--- ============================================================================
 MonsterAI.RealTime = MonsterAI.RealTime or {
   -- Direction tracking: id -> {dir, lastChangeTime, consecutiveChanges, turnRate}
   directions = {},
@@ -350,10 +281,8 @@ MonsterAI.RealTime = MonsterAI.RealTime or {
   }
 }
 
--- ============================================================================
 -- EXTENDED TELEMETRY MODULE (OTClient API Integration)
 -- Collects rich creature data for analysis and auto-tuning
--- ============================================================================
 
 MonsterAI.Telemetry = MonsterAI.Telemetry or {
   -- Per-creature extended data: id -> telemetry snapshot
@@ -461,8 +390,7 @@ function MonsterAI.Telemetry.collectSnapshot(creature)
   -- Calculate distance from player (safely)
   local playerPos = nil
   if player then
-    local okPlayer, pPos = pcall(function() return player:getPosition() end)
-    if okPlayer then playerPos = pPos end
+    playerPos = SC.getPosition(player)
   end
   
   if playerPos and snapshot.position then
@@ -500,10 +428,8 @@ function MonsterAI.Telemetry.collectSnapshot(creature)
   return snapshot
 end
 
--- ============================================================================
 -- METRICS AGGREGATOR (NEW in v2.2)
 -- Centralized metrics collection for analysis and debugging
--- ============================================================================
 
 MonsterAI.Metrics = MonsterAI.Metrics or {
   -- Aggregate metrics across all subsystems
@@ -679,10 +605,8 @@ function MonsterAI.Metrics.getSummary()
   }
 end
 
--- ============================================================================
 -- PER-CHARACTER METRICS PERSISTENCE (via UnifiedStorage)
 -- Cumulative metrics survive across sessions for each character.
--- ============================================================================
 
 local METRICS_KEY       = "targetbot.monsterMetrics.aggregate"
 local TYPE_STATS_KEY    = "targetbot.monsterMetrics.typeStats"
@@ -843,9 +767,7 @@ function MonsterAI.Telemetry.getTypeSummary(name)
   return MonsterAI.Telemetry.typeStats[name:lower()]
 end
 
--- ============================================================================
 -- CONST alias for remaining code (full definition in monster_ai_core.lua)
--- ============================================================================
 local CONST = MonsterAI.CONSTANTS
 
 function MonsterAI.RealTime.onDirectionChange(creature, oldDir, newDir)
@@ -878,8 +800,7 @@ function MonsterAI.RealTime.onDirectionChange(creature, oldDir, newDir)
   -- Check if now facing player (immediate threat signal)
   local playerPos = nil
   if player then
-    local okP, pPos = pcall(function() return player:getPosition() end)
-    if okP then playerPos = pPos end
+    playerPos = SC.getPosition(player)
   end
   local monsterPos = safeCreatureCall(creature, "getPosition", nil)
   if playerPos and monsterPos then
@@ -1162,11 +1083,9 @@ function MonsterAI.RealTime.cleanup()
   end
 end
 
--- ============================================================================
 -- GET IMMEDIATE THREAT (Pure function for wave avoidance integration)
 -- Returns a threat assessment suitable for instant decision-making
 -- @return table { immediateThreat: boolean, totalThreat: number, threatCount: number, highestConfidence: number }
--- ============================================================================
 function MonsterAI.getImmediateThreat()
   local nowt = nowMs()
   local result = {
@@ -1239,13 +1158,10 @@ end
 -- Alias for backward compatibility
 MonsterAI.RealTime.getImmediateThreat = MonsterAI.getImmediateThreat
 
--- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
-local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
-
 if EventBus then
   -- Track monsters when they appear
   EventBus.on("monster:appear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     MonsterAI.Tracker.track(creature)
     
     -- Initialize direction tracking immediately
@@ -1262,8 +1178,7 @@ if EventBus then
       -- Check if already facing player (instant threat check)
       local playerPos = nil
       if player then
-        local okP, pPos = pcall(function() return player:getPosition() end)
-        if okP then playerPos = pPos end
+        playerPos = SC.getPosition(player)
       end
       local monsterPos = safeCreatureCall(creature, "getPosition", nil)
       if playerPos and monsterPos then
@@ -1281,7 +1196,7 @@ if EventBus then
   
   -- Untrack monsters when they disappear
   EventBus.on("monster:disappear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if creature then
       local id = safeGetId(creature)
       if id then
@@ -1301,7 +1216,7 @@ if EventBus then
   
   -- CRITICAL: Direction change detection (primary wave anticipation)
   EventBus.on("creature:move", function(creature, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     if not safeIsMonster(creature) then return end
     
@@ -1333,7 +1248,7 @@ if EventBus then
   
   -- Update tracking on monster health change (potential attack indicator)
   EventBus.on("monster:health", function(creature, percent)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if creature then
       MonsterAI.Tracker.update(creature)
       
@@ -1350,7 +1265,7 @@ if EventBus then
   
   -- Record when player takes damage (learning opportunity)
   EventBus.on("player:damage", function(damage, source)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     MonsterAI.Tracker.stats.totalDamageReceived = 
       MonsterAI.Tracker.stats.totalDamageReceived + damage
 
@@ -1358,8 +1273,7 @@ if EventBus then
     local nowt = nowMs()
     local playerPos = nil
     if player then
-      local okP, pPos = pcall(function() return player:getPosition() end)
-      if okP then playerPos = pPos end
+      playerPos = SC.getPosition(player)
     end
     if not playerPos then return end
 
@@ -1537,7 +1451,7 @@ if EventBus then
   -- Also listen for effect:missile EventBus event for additional coverage
   if EventBus then
     EventBus.on("effect:missile", function(missile)
-      if tbOff() then return end
+      if TargetBot.isOff() then return end
       if not missile then return end
       
       local srcPos = missile.getSource and missile:getSource()
@@ -1621,8 +1535,7 @@ if EventBus then
       -- Check if now facing player
       local playerPos = nil
       if player then
-        local okP, pPos = pcall(function() return player:getPosition() end)
-        if okP then playerPos = pPos end
+        playerPos = SC.getPosition(player)
       end
       local monsterPos = safeCreatureCall(creature, "getPosition", nil)
       if playerPos and monsterPos then
@@ -1666,7 +1579,7 @@ if EventBus then
   -- PLAYER ATTACK EVENT - Track engagement with monsters
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:attack", function(target)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not target then return end
     if not safeIsMonster(target) then return end
     
@@ -1698,7 +1611,7 @@ if EventBus then
   -- CREATURE DEATH EVENT - Finalize tracking and collect kill stats
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("creature:death", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     if not safeIsMonster(creature) then return end
     
@@ -1752,7 +1665,7 @@ if EventBus then
   -- PLAYER DEATH EVENT - Track session death stats
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:death", function()
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     local nowt = nowMs()
     
     MonsterAI.Telemetry.session.deathCount = (MonsterAI.Telemetry.session.deathCount or 0) + 1
@@ -1764,8 +1677,7 @@ if EventBus then
         local pos = safeCreatureCall(data.creature, "getPosition", nil)
         local playerPos = nil
         if player then
-          local okP, pPos = pcall(function() return player:getPosition() end)
-          if okP then playerPos = pPos end
+          playerPos = SC.getPosition(player)
         end
         if pos and playerPos then
           local dist = math.max(math.abs(pos.x - playerPos.x), math.abs(pos.y - playerPos.y))
@@ -1801,7 +1713,7 @@ if EventBus then
   -- SPELL CAST EVENT - Track player damage output for kill time calculation
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:spell", function(spellName, target)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not target or not target:isMonster() then return end
     
     local id = target:getId()
@@ -1818,7 +1730,7 @@ if EventBus then
   -- COMBAT STATUS CHANGES - Track when entering/leaving combat
   -- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   EventBus.on("player:combat_start", function()
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     local nowt = nowMs()
     MonsterAI.Telemetry.session.lastCombatStart = nowt
     
@@ -1843,7 +1755,7 @@ if EventBus then
   end, 20)
   
   EventBus.on("player:combat_end", function()
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     local nowt = nowMs()
     local combatStart = MonsterAI.Telemetry.session.lastCombatStart or nowt
     local combatDuration = nowt - combatStart
@@ -1860,9 +1772,7 @@ if EventBus then
   end, 20)
 end
 
--- ============================================================================
 -- PERIODIC UPDATE (Enhanced with RealTime threat processing)
--- ============================================================================
 
 -- Update all tracked monsters periodically
 function MonsterAI.updateAll()
@@ -1977,11 +1887,9 @@ function MonsterAI.updateAll()
   MonsterAI.lastUpdate = nowMs()
 end
 
--- ============================================================================
 -- PUBLIC API: Real-Time Threat Queries  
 -- NOTE: getImmediateThreat() is defined earlier (after cleanup function)
 -- for better integration with wave avoidance and prediction queue
--- ============================================================================
 
 -- Get prediction accuracy stats
 function MonsterAI.getPredictionStats()
@@ -2061,9 +1969,7 @@ end
 nExBot = nExBot or {}
 nExBot.MonsterAI = MonsterAI
 
--- ============================================================================
 -- ENHANCED PUBLIC API
--- ============================================================================
 
 -- Get full statistics summary for UI or debugging
 function MonsterAI.getStatsSummary()
@@ -2237,15 +2143,13 @@ function MonsterAI.resetSession()
   end
 end
 
--- ============================================================================
 -- ENHANCED EVENTBUS EMISSIONS
--- ============================================================================
 
 -- Emit periodic stats update for interested modules (gated by TargetBot state)
 if EventBus then
   schedule(5000, function()
     local function emitStatsUpdate()
-      if not tbOff() and EventBus and EventBus.emit then
+      if not TargetBot.isOff() and EventBus and EventBus.emit then
         local stats = MonsterAI.getStatsSummary()
         EventBus.emit("monsterai:stats_update", stats)
       end
@@ -2267,10 +2171,8 @@ local function shouldCollect()
   return true
 end
 
--- ============================================================================
 -- UNIFIED TICK INTEGRATION (Performance: consolidates macro overhead)
 -- Uses UnifiedTick system if available, falls back to individual macros
--- ============================================================================
 
 if UnifiedTick and UnifiedTick.register then
   -- Periodic background updater (500ms) - NORMAL priority

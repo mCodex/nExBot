@@ -22,9 +22,7 @@ local patternCategory = 1
 local pattern = 1
 local mainWindow
 
--- ============================================================================
 -- BOTCORE INTEGRATION
--- ============================================================================
 
 -- Local analytics wrapper (for fallback if BotCore not available)
 local attackAnalytics = storage.attackAnalytics or {
@@ -800,12 +798,8 @@ end
       setPatternText()
       setCategoryText()
     end
-    panel.previousSource.onClick = function()
-      warn("[AttackBot] TODO, reserved for future use.")
-    end
-    panel.nextSource.onClick = function()
-      warn("[AttackBot] TODO, reserved for future use.")
-    end
+    panel.previousSource.onClick = function() end
+    panel.nextSource.onClick = function() end
     panel.previousRange.onClick = function()
       local t = patterns[patternCategory]
       if pattern == 1 then
@@ -882,7 +876,6 @@ end
         end
       end
     end
-
 
     -- refreshing values
     function refreshAttacks()
@@ -1031,7 +1024,6 @@ end
     currentSettings.AntiRsRange = value
   end
 
-
    -- window elements
   mainWindow.closeButton.onClick = function()
     showSettings = false
@@ -1152,9 +1144,7 @@ end
       mainWindow:focus()
     end
 
--- ============================================================================
 -- COOLDOWN MANAGEMENT (use ClientHelper for DRY)
--- ============================================================================
 
 local cooldowns = {}
 
@@ -1318,7 +1308,6 @@ function getPattern(category, pattern, safe)
 
   return spellPatterns[category][pattern][safe]
 end
-
 
 function getMonstersInArea(category, posOrCreature, pattern, minHp, maxHp, safePattern, monsterNamesTable)
   -- monsterNamesTable can be nil
@@ -1514,9 +1503,7 @@ else
   end)
 end
 
--- ============================================================================
 -- SIMPLIFIED ATTACKBOT - HIGH PERFORMANCE & ACCURACY
--- ============================================================================
 
 -- Per-tick cache for expensive computations
 local lastAutoRotate = 0

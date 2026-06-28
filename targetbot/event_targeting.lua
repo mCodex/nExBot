@@ -23,42 +23,38 @@
   - EventTargeting.CombatCoordinator: CaveBot integration
 ]]
 
--- ============================================================================
 -- MODULE NAMESPACE
--- ============================================================================
 
 EventTargeting = EventTargeting or {}
 EventTargeting.VERSION = "2.2"
 EventTargeting.DEBUG = false
 
 -- Use shared ClientHelper aliases (loaded by _Loader.lua) for cross-client compatibility
+local zChanging = nExBot.zChanging or function() return false end
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
+
+if not nExBot.target_pathfinding then
+  dofile("/targetbot/target_pathfinding.lua")
+end
+local targetPathfinding = nExBot.target_pathfinding
 
 -- SafeCreature module for safe creature access (DRY)
 -- Defensive wrapper to handle cases where SafeCreature isn't fully loaded
 local SC = SafeCreature or {}
 
-
-
--- ============================================================================
 -- DEPENDENCIES
--- ============================================================================
 
 local SafeCall = SafeCall or require("core.safe_call")
 
 -- Load PathUtils if available (shared module for DRY)
 -- OTClient compatible - no _G usage
 local PathUtils = PathUtils  -- Try existing global
+local SharedHelpers = nExBot.SharedHelpers or {}
 local function ensurePathUtils()
   if PathUtils then return PathUtils end
-  local success = pcall(function()
-    dofile("nExBot/utils/path_utils.lua")
-  end)
-  -- After dofile, PathUtils should be global
-  if success then
-    PathUtils = PathUtils  -- Re-check global after dofile
-  end
+  SharedHelpers.ensurePathUtils()
+  PathUtils = PathUtils  -- Re-check global after dofile
   return PathUtils
 end
 ensurePathUtils()
@@ -78,9 +74,7 @@ local function ensureChaseController()
 end
 ensureChaseController()
 
--- ============================================================================
 -- CONSTANTS (Tunable for performance)
--- ============================================================================
 
 EventTargeting.CONSTANTS = {
   -- Detection range (tiles from player) - matches visible screen
@@ -142,9 +136,7 @@ end
 
 applyClientTuning()
 
--- ============================================================================
 -- INTERNAL STATE
--- ============================================================================
 
 -- Fast creature cache with path info
 local creatureCache = {
@@ -179,9 +171,7 @@ local PATH_PARAMS = {
   ignoreCreatures = true
 }
 
--- ============================================================================
 -- STATE MANAGEMENT
--- ============================================================================
 
 -- Clear all EventTargeting state (called when TargetBot is disabled)
 function EventTargeting.clearState()
@@ -223,11 +213,9 @@ local function canAttack()
   return true
 end
 
--- ============================================================================
 -- LIVE MONSTER COUNTING (Direct API - Most Accurate)
 -- Uses g_map.getSpectators/getSpectatorsInRange directly for accurate counting
 -- This bypasses the cache which may have stale data
--- ============================================================================
 
 local liveMonsterState = {
   count = 0,              -- Live count from direct API call
@@ -235,37 +223,6 @@ local liveMonsterState = {
   creatures = {},         -- Array of live monster references
   oldTibia = getClientVersion() < 960
 }
-
--- Check if a creature is a targetable monster (not summon)
--- OPTIMIZED: Uses PathUtils.validateCreature for reduced pcall overhead
-local function isTargetableMonster(creature)
-  if not creature then return false end
-  
-  -- Use PathUtils for optimized validation (single pcall, covers dead/monster/summon)
-  if PathUtils and PathUtils.isValidMonsterTarget then
-    if not PathUtils.isValidMonsterTarget(creature) then return false end
-    -- For old Tibia, all monsters are targetable (summon check already handled)
-    return true
-  end
-  
-  -- Fallback: Use safe wrapper functions for DRY
-  if SC.isDead(creature) then return false end
-  if not SC.isMonster(creature) then return false end
-  if SC.getHealthPercent(creature) <= 0 then return false end
-  
-  -- For old Tibia, all monsters are targetable
-  if liveMonsterState.oldTibia then return true end
-  
-  -- For new Tibia, check creature type to exclude other player's summons
-  local creatureType = nil
-  local okType, cType = pcall(function() return creature:getType() end)
-  if okType then creatureType = cType end
-  if creatureType and creatureType >= 3 then
-    return false  -- Summon
-  end
-  
-  return true
-end
 
 -- Get live count of targetable monsters using direct API
 -- This is the AUTHORITATIVE count - always accurate
@@ -302,9 +259,9 @@ function EventTargeting.getLiveMonsterCount()
   
   for i = 1, #creatures do
     local creature = creatures[i]
-    if isTargetableMonster(creature) then
-      local okPos, cpos = pcall(function() return creature:getPosition() end)
-      if okPos and cpos and cpos.z == playerZ then
+    if targetPathfinding.isTargetableMonster(creature) then
+      local cpos = SC.getPosition(creature)
+      if cpos and cpos.z == playerZ then
         count = count + 1
         monsters[#monsters + 1] = creature
       end
@@ -331,15 +288,10 @@ function EventTargeting.refreshLiveCount()
   return EventTargeting.getLiveMonsterCount()
 end
 
--- ============================================================================
 -- UTILITY FUNCTIONS
--- ============================================================================
 
--- Chebyshev distance (O(1))
-local function chebyshev(p1, p2)
-  if not p1 or not p2 then return 999 end
-  return math.max(math.abs(p1.x - p2.x), math.abs(p1.y - p2.y))
-end
+-- ponytail: reuse canonical chebyshev from target_pathfinding
+local chebyshev = nExBot.target_pathfinding.chebyshev
 
 -- Manhattan distance (O(1))
 local function manhattan(p1, p2)
@@ -358,9 +310,7 @@ local function updatePlayerRef()
   player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or player
 end
 
--- ============================================================================
 -- FLOOR CHANGE DETECTION (Prevents chasing across stairs/ropes)
--- ============================================================================
 
 -- Use centralized floor-change items from constants (DRY principle)
 if not FloorItems then
@@ -392,9 +342,7 @@ local function isFloorChangeTile(pos)
   return false
 end
 
--- ============================================================================
 -- CACHE MANAGEMENT
--- ============================================================================
 
 -- Touch entry (move to end of LRU)
 local function touchEntry(id)
@@ -442,8 +390,7 @@ local function cleanupCache()
     if entry and entry.lastSeen > cutoff then
       local creature = entry.creature
       -- Safe dead check
-      local okDead, isDead = pcall(function() return creature and creature:isDead() end)
-      if creature and (not okDead or not isDead) then
+      if creature and not SC.isDead(creature) then
         newEntries[id] = entry
         newOrder[#newOrder + 1] = id
         count = count + 1
@@ -457,9 +404,7 @@ local function cleanupCache()
   creatureCache.lastCleanup = now
 end
 
--- ============================================================================
 -- PATH VALIDATION
--- ============================================================================
 
 EventTargeting.PathValidator = {}
 
@@ -557,19 +502,17 @@ function EventTargeting.PathValidator.getPath(creature)
   if not player then return nil, 999, false end
   
   -- Safe position access
-  local okPpos, playerPos = pcall(function() return player:getPosition() end)
-  local okCpos, creaturePos = pcall(function() return creature:getPosition() end)
+  local playerPos = SC.getPosition(player)
+  local creaturePos = SC.getPosition(creature)
   
-  if not okPpos or not playerPos or not okCpos or not creaturePos then
+  if not playerPos or not creaturePos then
     return nil, 999, false
   end
   
   return EventTargeting.PathValidator.validate(playerPos, creaturePos)
 end
 
--- ============================================================================
 -- TARGET ACQUISITION (Event-Driven)
--- ============================================================================
 
 EventTargeting.TargetAcquisition = {}
 
@@ -578,12 +521,10 @@ function EventTargeting.TargetAcquisition.isValidTarget(creature)
   if not creature then return false end
   
   -- Safe dead check
-  local okDead, isDead = pcall(function() return creature:isDead() end)
-  if okDead and isDead then return false end
+  if SC.isDead(creature) then return false end
   
   -- Safe monster check
-  local okMonster, isMonster = pcall(function() return creature:isMonster() end)
-  if not okMonster or not isMonster then return false end
+  if not SC.isMonster(creature) then return false end
   
   -- Check against targetbot configs
   if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
@@ -675,11 +616,11 @@ function EventTargeting.TargetAcquisition.calculatePriority(creature, path)
   
   -- Current attack target bonus (safe)
   local Client = getClient()
-  local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+  local currentTarget = ClientService.getAttackingCreature()
   if currentTarget then
-    local okCid, cid = pcall(function() return creature:getId() end)
-    local okTid, tid = pcall(function() return currentTarget:getId() end)
-    if okCid and okTid and cid == tid then
+    local cid = SC.getId(creature)
+    local tid = SC.getId(currentTarget)
+    if cid and tid and cid == tid then
       priority = priority + 25
       -- Extra bonus for wounded current target
       if hp < 50 then
@@ -705,11 +646,11 @@ function EventTargeting.TargetAcquisition.processCreature(creature)
   if not player then return end
   
   -- Safe access to positions and ID
-  local okId, id = pcall(function() return creature:getId() end)
-  local okPpos, playerPos = pcall(function() return player:getPosition() end)
-  local okCpos, creaturePos = pcall(function() return creature:getPosition() end)
+  local id = SC.getId(creature)
+  local playerPos = SC.getPosition(player)
+  local creaturePos = SC.getPosition(creature)
   
-  if not okId or not id or not okPpos or not playerPos or not okCpos or not creaturePos then return end
+  if not id or not playerPos or not creaturePos then return end
   
   -- Check same floor and range
   if not sameFloor(playerPos, creaturePos) then return end
@@ -777,7 +718,7 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
   end
   
   local Client = getClient()
-  local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+  local currentTarget = ClientService.getAttackingCreature()
   
   -- If no current target, acquire immediately
   if not currentTarget or currentTarget:isDead() then
@@ -958,17 +899,17 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   
   -- Scenario gate: avoid illegal switches (anti-zigzag)
   if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
-    local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+    local currentTarget = ClientService.getAttackingCreature()
     if currentTarget and not currentTarget:isDead() then
-      local okNewId, newId = pcall(function() return creature:getId() end)
-      local okCurId, curId = pcall(function() return currentTarget:getId() end)
-      if okNewId and okCurId and newId ~= curId then
+      local newId = SC.getId(creature)
+      local curId = SC.getId(currentTarget)
+      if newId and curId and newId ~= curId then
         local newPriority = priorityHint
         if newPriority == nil then
           newPriority = EventTargeting.TargetAcquisition.calculatePriority(creature, path)
         end
-        local okHp, hp = pcall(function() return creature:getHealthPercent() end)
-        local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, newPriority or 0, okHp and hp or nil)
+        local hp = SC.getHealthPercent(creature)
+        local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, newPriority or 0, hp)
         if not allowed then
           return
         end
@@ -1015,9 +956,9 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
 
   -- If attack was throttled and we are not already attacking this creature, bail
   local Client = getClient()
-  local currentAttack = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
-  local okCurId, curId = pcall(function() return currentAttack and currentAttack:getId() end)
-  if not sent and not (currentAttack and okCurId and curId == id) then
+  local currentAttack = ClientService.getAttackingCreature()
+  local curId = currentAttack and SC.getId(currentAttack) or nil
+  if not sent and not (currentAttack and curId == id) then
     return
   end
 
@@ -1033,8 +974,8 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
 
   -- Update MonsterAI target lock for anti-zigzag stability
   if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
-    local okHp, hp = pcall(function() return creature:getHealthPercent() end)
-    MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
+    local hp = SC.getHealthPercent(creature)
+    MonsterAI.Scenario.lockTarget(id, hp or 100)
   end
   
   -- Emit combat start event
@@ -1114,9 +1055,7 @@ function EventTargeting.TargetAcquisition.processPending()
   end
 end
 
--- ============================================================================
 -- COMBAT COORDINATOR (CaveBot Integration)
--- ============================================================================
 
 EventTargeting.CombatCoordinator = {}
 
@@ -1157,7 +1096,7 @@ function EventTargeting.CombatCoordinator.shouldPauseCaveBot()
   end
   
   -- Check if we're in combat with a valid target
-  local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+  local currentTarget = ClientService.getAttackingCreature()
   if not currentTarget or currentTarget:isDead() then
     return false
   end
@@ -1250,7 +1189,7 @@ function EventTargeting.CombatCoordinator.checkCombatStatus()
   targetState.lastCombatCheck = now
   
   local Client = getClient()
-  local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+  local currentTarget = ClientService.getAttackingCreature()
   
   if not currentTarget or currentTarget:isDead() then
     -- Combat ended
@@ -1273,9 +1212,7 @@ function EventTargeting.CombatCoordinator.checkCombatStatus()
   end
 end
 
--- ============================================================================
 -- EVENTBUS INTEGRATION (High-Performance Event Handlers)
--- ============================================================================
 
 -- Debounce helper
 local lastProcessTime = 0
@@ -1362,7 +1299,7 @@ if EventBus then
     end
     
     -- Check if this is a higher priority than current target
-    local currentTarget = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
+    local currentTarget = ClientService.getAttackingCreature()
     if newConfigPriority > 0 and currentTarget and not currentTarget:isDead() then
       local currentConfigPriority = 0
       if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
@@ -1559,9 +1496,7 @@ if EventBus then
   end, 50)
 end
 
--- ============================================================================
 -- MAIN PROCESSING MACRO
--- ============================================================================
 
 -- Scan interval for full screen scan (catch any monsters EventBus missed)
 local lastFullScan = 0
@@ -1586,8 +1521,8 @@ local function scanVisibleMonsters()
     for i = 1, #liveCreatures do
       local creature = liveCreatures[i]
       if creature then
-        local okId, id = pcall(function() return creature:getId() end)
-        if okId and id then
+        local id = SC.getId(creature)
+        if id then
           -- Only process if not already in cache or cache entry is stale
           local entry = creatureCache.entries[id]
           if not entry or (currentTime - (entry.lastSeen or 0)) > 500 then
@@ -1617,11 +1552,11 @@ local function scanVisibleMonsters()
   local playerZ = playerPos.z
   for i = 1, #creatures do
     local creature = creatures[i]
-    if isTargetableMonster(creature) then
-      local okPos, cpos = pcall(function() return creature:getPosition() end)
-      if okPos and cpos and cpos.z == playerZ then
-        local okId, id = pcall(function() return creature:getId() end)
-        if okId and id then
+    if targetPathfinding.isTargetableMonster(creature) then
+      local cpos = SC.getPosition(creature)
+      if cpos and cpos.z == playerZ then
+        local id = SC.getId(creature)
+        if id then
           -- Only process if not already in cache or cache entry is stale
           local entry = creatureCache.entries[id]
           if not entry or (currentTime - (entry.lastSeen or 0)) > 500 then
@@ -1678,9 +1613,7 @@ macro(100, function()
   cleanupCache()
 end)
 
--- ============================================================================
 -- PUBLIC API
--- ============================================================================
 
 -- Get current combat state
 function EventTargeting.isInCombat()
@@ -1736,9 +1669,7 @@ function EventTargeting.debugStatus()
   end
 end
 
--- ============================================================================
 -- CAVEBOT INTEGRATION HOOK
--- ============================================================================
 
 -- Export function for CaveBot to check
 function EventTargeting.shouldPauseCaveBot()
@@ -1776,11 +1707,9 @@ function EventTargeting.getMonsterCount()
   return count
 end
 
--- ============================================================================
 -- NATIVE OTCLIENT CALLBACK INTEGRATION
 -- Direct hook into OTClient's onCreatureAppear for fastest possible detection
 -- This bypasses EventBus for even faster high-priority monster switching
--- ============================================================================
 
 -- Register native callback if available (fastest path)
 if onCreatureAppear then
@@ -1800,8 +1729,8 @@ if onCreatureAppear then
     updatePlayerRef()
     if not player then return end
     
-    local okPpos, playerPos = pcall(function() return player:getPosition() end)
-    local okCpos, creaturePos = pcall(function() return creature:getPosition() end)
+  local playerPos = SC.getPosition(player)
+  local creaturePos = SC.getPosition(creature)
     if not okPpos or not playerPos or not okCpos or not creaturePos then return end
     if playerPos.z ~= creaturePos.z then return end
     
@@ -1821,8 +1750,8 @@ if onCreatureAppear then
         end
         
         -- Check current target's priority
-        local Client = getClient()
-        local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+  local Client = getClient()
+  local currentTarget = Client and Client.getAttackingCreature and Client.getAttackingCreature()
         if newConfigPriority > 0 then
           local currentConfigPriority = 0
           if currentTarget and not currentTarget:isDead() then
@@ -1853,13 +1782,13 @@ if onCreatureAppear then
             -- Scenario gate: avoid illegal switches (anti-zigzag)
             if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
               local Client2 = getClient()
-              local currentTarget = (Client2 and Client2.getAttackingCreature) and Client2.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+              local currentTarget = ClientService.getAttackingCreature()
               if currentTarget and not currentTarget:isDead() then
-                local okNewId, newId = pcall(function() return creature:getId() end)
-                local okCurId, curId = pcall(function() return currentTarget:getId() end)
-                if okNewId and okCurId and newId ~= curId then
-                  local okHp, hp = pcall(function() return creature:getHealthPercent() end)
-                  local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, (newConfigPriority or 0) * 100, okHp and hp or nil)
+                local newId = SC.getId(creature)
+                local curId = SC.getId(currentTarget)
+                if newId and curId and newId ~= curId then
+                  local hp = SC.getHealthPercent(creature)
+                  local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, (newConfigPriority or 0) * 100, hp)
                   if not allowed then
                     return
                   end
@@ -1880,16 +1809,16 @@ if onCreatureAppear then
             end
           
             -- If attack was throttled and we are not already attacking this creature, bail
-            local currentAttack = (ClientService and ClientService.getAttackingCreature) and ClientService.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
-            local okCurId2, curId2 = pcall(function() return currentAttack and currentAttack:getId() end)
-            local okNewId2, newId2 = pcall(function() return creature:getId() end)
-            if not sent and not (currentAttack and okCurId2 and okNewId2 and curId2 == newId2) then
+            local currentAttack = (ClientService and ClientService.getAttackingCreature) and ClientService.getAttackingCreature() or (ClientService.getAttackingCreature())
+            local curId2 = currentAttack and SC.getId(currentAttack) or nil
+            local newId2 = SC.getId(creature)
+            if not sent and not (currentAttack and curId2 and newId2 and curId2 == newId2) then
               return
             end
             
             -- Also update our state
-            local okId, id = pcall(function() return creature:getId() end)
-            if okId and id then
+            local id = SC.getId(creature)
+            if id then
               targetState.currentTarget = creature
               targetState.currentTargetId = id
               targetState.lastAcquisition = now or (os.time() * 1000)
@@ -1897,9 +1826,9 @@ if onCreatureAppear then
             end
 
             -- Update MonsterAI target lock for anti-zigzag stability
-            if okId and id and MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
-              local okHp, hp = pcall(function() return creature:getHealthPercent() end)
-              MonsterAI.Scenario.lockTarget(id, okHp and hp or 100)
+            if id and MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.lockTarget then
+              local hp = SC.getHealthPercent(creature)
+              MonsterAI.Scenario.lockTarget(id, hp or 100)
             end
             
             -- Emit event for other systems

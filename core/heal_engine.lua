@@ -25,17 +25,13 @@
     - Added detailed logging for debugging
 ]]
 
--- ============================================================================
 -- MODULE INITIALIZATION
--- ============================================================================
 
 HealEngine = HealEngine or {}
 
 local VERSION = "2.0.0"
 
--- ============================================================================
 -- PRIVATE STATE (Encapsulated)
--- ============================================================================
 
 -- Local cooldown tracking (shared across sessions)
 local cooldowns = {}
@@ -62,9 +58,7 @@ local friendSpells = {
 local lastEventHeal = 0
 local EVENT_DEBOUNCE_MS = 25
 
--- ============================================================================
 -- LOGGING
--- ============================================================================
 
 local VERBOSE = (type(nExBotVerbose) == "boolean" and nExBotVerbose) or false
 
@@ -87,15 +81,11 @@ function HealEngine.setPotionDebug(flag)
   _potionDebug = not not flag
 end
 
--- ============================================================================
 -- TIME UTILITIES (DRY via Shared)
--- ============================================================================
 
 local nowMs = nExBot.Shared.nowMs
 
--- ============================================================================
 -- COOLDOWN MANAGEMENT (Unified with BotCore.Cooldown)
--- ============================================================================
 
 -- Check if healing group cooldown is active
 local function isHealingGroupOnCooldown()
@@ -158,9 +148,7 @@ local function markPotionUsed()
   end
 end
 
--- ============================================================================
 -- STAT ACCESSORS (Safe fallbacks)
--- ============================================================================
 
 local function getHpPercent()
   if hppercent then return hppercent() or 0 end
@@ -189,9 +177,7 @@ local function canUseItem()
   return potionReady()
 end
 
--- ============================================================================
 -- POTION USAGE (Safe wrapper - now prioritizes hotkey-style usage)
--- ============================================================================
 
 local function useItemSafe(itemId)
   if not itemId or itemId <= 0 then return false end
@@ -237,9 +223,7 @@ local function useItemSafe(itemId)
   return false
 end
 
--- ============================================================================
 -- LIST MANAGEMENT
--- ============================================================================
 
 local function sortByPrio(list)
   if not list or #list <= 1 then return end
@@ -252,9 +236,7 @@ local function sortByPrio(list)
 end
 sortByPrio(friendSpells)
 
--- ============================================================================
 -- PUBLIC API: Configuration
--- ============================================================================
 
 -- Configure feature usage; accepts partial table {selfSpells?, potions?, friendHeals?}
 function HealEngine.configure(opts)
@@ -478,7 +460,6 @@ function HealEngine.planSelf(snap)
     return true, nil
   end
 
-
   if options.selfSpells and #selfSpells > 0 then
     local rejectReasons = {}
     for _, spell in ipairs(selfSpells) do
@@ -494,7 +475,6 @@ function HealEngine.planSelf(snap)
       logDebug('[HealEngine] No eligible spells. Reasons: ' .. table.concat(rejectReasons, ' | '))
     end
   end
-
 
   if options.potions and #selfPotions > 0 then
     for _, pot in ipairs(selfPotions) do
@@ -521,7 +501,6 @@ function HealEngine.planSelf(snap)
 
       -- Evaluate reasons for not selecting this pot
 
-
       if pot.hp and hp <= pot.hp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
         if VERBOSE then print("[HealBot] Executing potion: " .. tostring(potionName) .. " (id=" .. tostring(pot.id) .. ") for HP " .. tostring(hp) .. "% <= " .. tostring(pot.hp) .. "%") end
         return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "heal"}
@@ -536,24 +515,6 @@ function HealEngine.planSelf(snap)
 
   logDebug("planSelf: no action selected")
   return nil
-end
-
--- Debug helper: simulate a self snapshot and print planned action
-function HealEngine.debugPlan(hp, mp, inPz)
-  local snap = { hp = hp or getHpPercent(), mp = mp or getMpPercent(), inPz = inPz }
-  local action = HealEngine.planSelf(snap)
-  if not action then
-    print(string.format("HealEngine.debugPlan: no action for hp=%.1f mp=%.1f inPz=%s", snap.hp, snap.mp, tostring(snap.inPz)))
-    return nil
-  end
-  if action.kind == "potion" then
-    print(string.format("HealEngine.debugPlan: selected potion id=%d name=%s type=%s", action.id or 0, action.name or "-", action.potionType or "-"))
-  elseif action.kind == "spell" then
-    print(string.format("HealEngine.debugPlan: selected spell %s", action.name or "-"))
-  else
-    print("HealEngine.debugPlan: selected action of kind=" .. tostring(action.kind))
-  end
-  return action
 end
 
 -- Select best friend action; target must include name and hp
@@ -834,5 +795,4 @@ end
 logDebug("HealEngine v2.0 loaded - Safety-critical healing system")
 
 return HealEngine
-
 

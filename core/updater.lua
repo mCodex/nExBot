@@ -34,9 +34,7 @@ end
 local Shared = nExBot.Shared
 local P = nExBot.paths
 
--- ============================================================================
 -- CONSTANTS
--- ============================================================================
 
 local GITHUB_OWNER    = "mCodex"
 local GITHUB_REPO     = "nExBot"
@@ -63,9 +61,7 @@ local EXCLUDE_PATTERNS = {
 -- Extensions we DO update.
 local INCLUDE_EXT = { lua = true, otui = true, ui = true, cfg = true }
 
--- ============================================================================
 -- FILE SYSTEM (SRP: only file I/O)
--- ============================================================================
 
 local function readLocalVersion()
   local ok, content = pcall(g_resources.readFileContents, P.base .. "/" .. VERSION_FILE)
@@ -133,9 +129,7 @@ local function ensureDir(relativePath)
   return ensureDirRecursive(P.base, relativePath)
 end
 
--- ============================================================================
 -- HTTP LAYER — auto-detect available API
--- ============================================================================
 
 local _httpBackend = nil  -- resolved once, cached for session
 
@@ -203,9 +197,7 @@ local function openInBrowser(url)
   end
 end
 
--- ============================================================================
 -- GITHUB API
--- ============================================================================
 
 local function fetchRemoteVersion(callback)
   httpGet(GITHUB_RAW_BASE .. "/" .. VERSION_FILE, function(content, err)
@@ -253,9 +245,7 @@ local function downloadFile(relativePath, callback, attempt)
   end)
 end
 
--- ============================================================================
 -- UPDATE ENGINE
--- ============================================================================
 
 local _state = {
   isChecking  = false,
@@ -393,9 +383,7 @@ local function applyUpdate(callback, onProgress)
   end)
 end
 
--- ============================================================================
 -- UI
--- ============================================================================
 
 local _ui
 
@@ -489,9 +477,7 @@ Panel
   return _ui
 end
 
--- ============================================================================
 -- AUTO-CHECK SCHEDULER
--- ============================================================================
 
 local function startAutoCheck()
   schedule(10000, function()
@@ -520,16 +506,12 @@ local function startAutoCheck()
   end)
 end
 
--- ============================================================================
 -- PUBLIC API
--- ============================================================================
 
 function Updater.checkForUpdate(cb) return checkForUpdate(cb) end
 function Updater.applyUpdate(cb, onProgress) return applyUpdate(cb, onProgress) end
 
--- ============================================================================
 -- INITIALIZE
--- ============================================================================
 
 createUpdaterUI()
 startAutoCheck()

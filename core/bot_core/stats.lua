@@ -30,15 +30,14 @@ local _cachedPlayer = nil
 local _lastPlayerCheck = 0
 local PLAYER_CHECK_INTERVAL = 1000  -- Revalidate every 1s
 
--- ============================================================================
 -- PRIVATE FUNCTIONS
--- ============================================================================
 
 -- Get cached local player (with periodic revalidation)
 local function getLocalPlayerCached()
+  if not ClientService then return nil end
   local currentTime = now or os.time() * 1000
   if not _cachedPlayer or (currentTime - _lastPlayerCheck) > PLAYER_CHECK_INTERVAL then
-    _cachedPlayer = g_game.getLocalPlayer()
+    _cachedPlayer = ClientService.getLocalPlayer()
     _lastPlayerCheck = currentTime
   end
   return _cachedPlayer
@@ -50,9 +49,7 @@ local function safePercent(current, max)
   return math.floor((current / max) * 100)
 end
 
--- ============================================================================
 -- PUBLIC API
--- ============================================================================
 
 -- Update all stats once per tick (call from main loop)
 function StatsManager.update()
@@ -100,9 +97,7 @@ function StatsManager.update()
   return _cache
 end
 
--- ============================================================================
 -- PURE GETTERS (no side effects, read from cache)
--- ============================================================================
 
 function StatsManager.getHp() return _cache.hp end
 function StatsManager.getMaxHp() return _cache.maxHp end

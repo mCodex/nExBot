@@ -30,10 +30,8 @@
 PathUtils = PathUtils or {}
 local PathUtils = PathUtils  -- local alias for speed
 
--- ============================================================================
 -- CLIENT SERVICE ABSTRACTION (ACL Pattern)
 -- Resolved lazily so Phase 3 load order doesn't require nExBot.Shared yet
--- ============================================================================
 
 local _getClient  -- resolved once on first call
 
@@ -62,9 +60,7 @@ local function getPlayer()
       or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
 end
 
--- ============================================================================
 -- DIRECTION CONSTANTS (Shared, no duplication)
--- ============================================================================
 
 -- Delegate to Directions module (DRY: SSoT is constants/directions.lua)
 PathUtils.DIR_TO_OFFSET = Directions.DIR_TO_OFFSET
@@ -75,9 +71,7 @@ PathUtils.CARDINAL_DIRS = Directions.CARDINAL
 PathUtils.DIAGONAL_DIRS = Directions.DIAGONAL
 PathUtils.ALL_DIRS = Directions.ALL
 
--- ============================================================================
 -- PATHFIND FLAGS (Native OTClientBR constants)
--- ============================================================================
 
 PathUtils.Flags = {
   ALLOW_NOT_SEEN = 1,
@@ -111,9 +105,7 @@ function PathUtils.paramsToFlags(params)
   return flags
 end
 
--- ============================================================================
 -- FLOOR-CHANGE DETECTION (Using constants/floor_items.lua as single source)
--- ============================================================================
 
 -- Load FloorItems constants if available
 local FloorItems = (function()
@@ -269,9 +261,7 @@ function PathUtils.isFieldTile(pos)
   return false
 end
 
--- ============================================================================
 -- TILE UTILITIES (Native API wrappers)
--- ============================================================================
 
 -- Get tile with fallback
 function PathUtils.getTile(pos)
@@ -318,14 +308,12 @@ function PathUtils.isTileSafe(pos, allowFloorChange)
   return true
 end
 
--- ============================================================================
 -- PATHFINDING (Native API with fallback)
--- ============================================================================
 
--- 1-entry LRU cache for findPath (avoids redundant A* on rapid retries)
--- 4-entry LRU cache for findPath: walking loop typically alternates 2-3 queries
--- (recovery probe + goto path + FC safety check). 4 entries avoid redundant A*.
-local FINDPATH_LRU_SIZE = 4
+-- 8-entry LRU cache for findPath (avoids redundant A* on rapid retries)
+-- Walking loop typically alternates 2-3 queries (recovery probe + goto + FC safety).
+-- 8 entries avoid redundant A* while keeping memory footprint small.
+local FINDPATH_LRU_SIZE = 8
 local FINDPATH_CACHE_TTL = 200
 local _fpLRU = {}       -- array of {key, time, result}, newest at [1]
 local _fpLRUCount = 0
@@ -345,7 +333,7 @@ function PathUtils.findPath(startPos, goalPos, maxDist, params)
   maxDist = maxDist or 50
   local flags = PathUtils.paramsToFlags(params)
   
-  -- 4-entry LRU: same start+goal+flags within TTL → reuse
+  -- 8-entry LRU: same start+goal+flags within TTL → reuse
   local key = startPos.x .. "," .. startPos.y .. "," .. startPos.z .. ">"
             .. goalPos.x .. "," .. goalPos.y .. "," .. goalPos.z .. ":" .. flags
   for i = 1, _fpLRUCount do
@@ -437,33 +425,7 @@ function PathUtils.findEveryPath(startPos, maxDist, params)
   return map.findEveryPath(startPos, maxDist or 10, nativeParams)
 end
 
--- Translate findEveryPath result to a path of directions
-function PathUtils.translatePathToDirections(paths, destPosStr)
-  if not paths or not destPosStr then return nil end
-  
-  local predirections = {}
-  local currentPos = destPosStr
-  
-  while currentPos and currentPos:len() > 0 do
-    local node = paths[currentPos]
-    if not node then break end
-    if node[3] < 0 then break end
-    table.insert(predirections, node[3])
-    currentPos = node[4]
-  end
-  
-  -- Reverse the path
-  local directions = {}
-  for i = #predirections, 1, -1 do
-    table.insert(directions, predirections[i])
-  end
-  
-  return directions
-end
-
--- ============================================================================
 -- AUTO-WALK STATE MANAGEMENT (Native API)
--- ============================================================================
 
 -- Check if player is currently auto-walking (native API)
 function PathUtils.isAutoWalking()
@@ -484,15 +446,6 @@ function PathUtils.stopAutoWalk()
   if game and game.stop then
     game.stop()
   end
-end
-
--- Check if player is walking (single step or auto)
-function PathUtils.isWalking()
-  local player = getPlayer()
-  if not player then return false end
-  local isStep = player.isWalking and player:isWalking() or false
-  local isAuto = player.isAutoWalking and player:isAutoWalking() or false
-  return isStep or isAuto
 end
 
 -- Get step duration (native API with caching)
@@ -523,16 +476,7 @@ function PathUtils.getStepDuration(diagonal)
   return diagonal and diagonalDur or cardinalDur
 end
 
--- Check if player can walk in direction (native API)
-function PathUtils.canWalk(dir)
-  local player = getPlayer()
-  if not player then return false end
-  return player.canWalk and player:canWalk(dir) or true
-end
-
--- ============================================================================
 -- DIRECTION UTILITIES
--- ============================================================================
 
 -- Pre-built lookup tables for direction checks (DRY: SSoT is constants/directions.lua)
 local ADJACENT_DIRS = Directions.ADJACENT
@@ -551,119 +495,7 @@ function PathUtils.areOppositeDirections(dir1, dir2)
   return OPPOSITE_DIRS[dir1] == dir2
 end
 
--- ============================================================================
--- POSITION UTILITIES
--- ============================================================================
-
--- Delegate to Directions module (SSoT — DRY)
-PathUtils.getDirectionTo = Directions.getDirectionTo
-PathUtils.chebyshevDistance = Directions.chebyshevDistance
-PathUtils.manhattanDistance = Directions.manhattanDistance
-
--- Apply direction offset to position
-function PathUtils.applyDirection(pos, dir)
-  if not pos or not dir then return nil end
-  local offset = PathUtils.DIR_TO_OFFSET[dir]
-  if not offset then return nil end
-  return {x = pos.x + offset.x, y = pos.y + offset.y, z = pos.z}
-end
-
--- Check if positions are equal
-function PathUtils.posEquals(pos1, pos2)
-  if not pos1 or not pos2 then return false end
-  return pos1.x == pos2.x and pos1.y == pos2.y and pos1.z == pos2.z
-end
-
--- Check if positions are on same floor
-function PathUtils.sameFloor(pos1, pos2)
-  if not pos1 or not pos2 then return false end
-  return pos1.z == pos2.z
-end
-
--- ============================================================================
--- CREATURE UTILITIES (Optimized with single validation)
--- ============================================================================
-
--- Validate creature in one call (reduces pcall overhead)
-function PathUtils.validateCreature(creature)
-  if not creature then
-    return false, nil, nil, nil
-  end
-  
-  local ok, result = pcall(function()
-    local isDead = creature:isDead()
-    local id = creature:getId()
-    local pos = creature:getPosition()
-    local hp = creature:getHealthPercent()
-    return {dead = isDead, id = id, pos = pos, hp = hp}
-  end)
-  
-  if not ok or not result then
-    return false, nil, nil, nil
-  end
-  
-  if result.dead then
-    return false, result.id, result.pos, result.hp
-  end
-  
-  return true, result.id, result.pos, result.hp
-end
-
--- Check if creature is a valid monster target
-function PathUtils.isValidMonsterTarget(creature)
-  if not creature then return false end
-  
-  local ok, valid = pcall(function()
-    if creature:isDead() then return false end
-    if not creature:isMonster() then return false end
-    -- Type 3+ = summons (not targetable)
-    local ctype = creature.getType and creature:getType() or 0
-    if ctype >= 3 then return false end
-    return true
-  end)
-  
-  return ok and valid
-end
-
--- ============================================================================
--- SPECTATOR UTILITIES (Native API)
--- ============================================================================
-
--- Get spectators with asymmetric range (native API)
-function PathUtils.getSpectatorsEx(centerPos, multiFloor, minX, maxX, minY, maxY)
-  local map = getMap()
-  if not map then return {} end
-  
-  if map.getSpectatorsInRangeEx then
-    return map.getSpectatorsInRangeEx(centerPos, multiFloor, minX, maxX, minY, maxY)
-  elseif map.getSpectatorsInRange then
-    local range = math.max(math.abs(minX), math.abs(maxX), math.abs(minY), math.abs(maxY))
-    return map.getSpectatorsInRange(centerPos, multiFloor, range, range)
-  end
-  
-  return {}
-end
-
--- Get spectators in symmetric range
-function PathUtils.getSpectators(centerPos, range, multiFloor)
-  local map = getMap()
-  if not map then return {} end
-  
-  range = range or 7
-  multiFloor = multiFloor or false
-  
-  if map.getSpectatorsInRange then
-    return map.getSpectatorsInRange(centerPos, multiFloor, range, range)
-  elseif map.getSpectators then
-    return map.getSpectators(centerPos, multiFloor)
-  end
-  
-  return {}
-end
-
--- ============================================================================
 -- MODULE EXPORT
--- ============================================================================
 
 -- PathUtils is already global (declared at top of file)
 return PathUtils

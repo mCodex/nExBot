@@ -10,9 +10,9 @@
   Depends on: monster_ai_core.lua, monster_patterns.lua, monster_tracking.lua
 ]]
 
--- ============================================================================
 -- HELPERS (from core)
--- ============================================================================
+
+local SC = SafeCreature or {}
 
 local H = MonsterAI._helpers
 local nowMs            = H.nowMs
@@ -23,9 +23,7 @@ local safeIsDead       = H.safeIsDead
 
 local CONST = MonsterAI.CONSTANTS
 
--- ============================================================================
 -- PREDICTOR
--- ============================================================================
 
 MonsterAI.Predictor = MonsterAI.Predictor or {}
 
@@ -54,8 +52,7 @@ function MonsterAI.Predictor.predictWaveAttack(creature)
 
   local playerPos = nil
   if player then
-    local okP, pPos = pcall(function() return player:getPosition() end)
-    if okP then playerPos = pPos end
+    playerPos = SC.getPosition(player)
   end
   if not playerPos then return false, 0, 999999 end
 
@@ -96,9 +93,7 @@ function MonsterAI.Predictor.predictWaveAttack(creature)
   return timeToAttack < 500, confidence, timeToAttack
 end
 
--- ============================================================================
 -- DIRECTION HELPERS (pure functions)
--- ============================================================================
 
 local FALLBACK_DIRS = {
   [0] = { x =  0, y = -1 },
@@ -132,9 +127,7 @@ function MonsterAI.Predictor.isFacingPosition(monsterPos, monsterDir, targetPos)
   end
 end
 
--- ============================================================================
 -- POSITION DANGER ASSESSMENT
--- ============================================================================
 
 --- Predict danger level for a position given nearby monsters.
 -- @return dangerLevel (WAVE_DANGER enum), confidence
@@ -215,10 +208,8 @@ function MonsterAI.Predictor.isPositionInWavePath(pos, monsterPos, monsterDir, r
   end
 end
 
--- ============================================================================
 -- CONFIDENCE SYSTEM
 -- Aggregates confidence from multiple sources for decision making.
--- ============================================================================
 
 MonsterAI.Confidence = MonsterAI.Confidence or {}
 

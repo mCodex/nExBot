@@ -10,9 +10,7 @@
   Architecture: DRY, KISS, SOLID, SRP - minimal, focused, efficient
 ]]
 
--- ============================================================================
 -- PURE OUTFIT FUNCTIONS
--- ============================================================================
 
 -- Get the current player's outfit
 local function getPlayerOutfit()
@@ -120,9 +118,7 @@ local function applyOutfit(outfit, targetName, isColorsOnly)
     return true
 end
 
--- ============================================================================
 -- MENU ACTION HANDLERS
--- ============================================================================
 
 -- Clone full outfit from target creature
 local function cloneOutfitAction(menuPosition, lookThing, useThing, creatureThing)
@@ -148,9 +144,7 @@ local function copyColorsAction(menuPosition, lookThing, useThing, creatureThing
     applyOutfit(newOutfit, name, true)
 end
 
--- ============================================================================
 -- MENU CONDITION (when to show the options)
--- ============================================================================
 
 -- Only show for other players (not self, not NPCs, not monsters)
 local function isValidPlayerTarget(menuPosition, lookThing, useThing, creatureThing)
@@ -160,9 +154,7 @@ local function isValidPlayerTarget(menuPosition, lookThing, useThing, creatureTh
     return true
 end
 
--- ============================================================================
 -- HOOK INTO GAME INTERFACE MENU
--- ============================================================================
 
 local function registerMenuOptions()
     local gameInterface = modules.game_interface
@@ -199,9 +191,7 @@ local function registerMenuOptions()
     return true
 end
 
--- ============================================================================
 -- INITIALIZATION
--- ============================================================================
 
 -- Register menu options on load
 registerMenuOptions()

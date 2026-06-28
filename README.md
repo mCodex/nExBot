@@ -37,6 +37,7 @@ nExBot is a modular Tibia bot that automates hunting, healing, navigation, and a
 | **TargetBot** | AI combat with 9-stage priority scoring, behavior learning, wave prediction, and movement coordination |
 | **Hunt Analyzer** | Real-time session analytics — kills/hour, XP/hour, profit, Hunt Score, efficiency insights |
 | **Containers** | Auto-open, quiver management, and container role assignments |
+| **Follow Player** | Party hunt companion — stays near leader while attacking monsters |
 | **Extras** | Anti-RS, alarms, equipment swapping, conditions, combo system, push max |
 
 ---
@@ -96,6 +97,11 @@ Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress i
 - **Monster Insights** — 12 SRP modules that learn monster behavior in real-time
 - **Movement coordination** — intent-based voting resolves wave avoidance, keep-distance, AoE positioning, and chase
 
+### 👥 Follow Player — Party Hunt
+- **Stay near leader** — attacks monsters but never walks past the party leader
+- **Parallel mode** — walks toward leader while attacking (ASM stays active via forceWalk)
+- **Lost leader recovery** — walks to last known position for up to 10 seconds
+
 ### 🧭 CaveBot — Navigation
 - **Walking engine v4.0** — smooth autoWalk pipelining (5+ tiles), step pipelining (2-step lookahead), PathCursor preservation, adaptive recovery with path validation and exponential-decay blacklists
 - **15+ waypoint types** — goto, label, action, buy, sell, lure, standLure, depositor, travel, imbuing, tasker, withdraw
@@ -110,6 +116,20 @@ Enable CaveBot and TargetBot, press **Start** (`Ctrl+Z`), and monitor progress i
 
 > [!IMPORTANT]
 > The ACL auto-detects vBot vs. OTCR at startup — all game operations use a unified `ClientService` API. OTCR-exclusive features (imbuing, stash, forge, prey, market) are enabled automatically.
+
+### ⚡ Performance
+
+- **UnifiedTick** — single 50 ms master tick for all modules (replaces 30+ individual timers)
+- **Cached spectator scanning** — 200 ms TTL cache for `getSpectators()` calls
+- **LRU pathfinding cache** — bounded memory for repeated path calculations
+- **Single attack authority** — AttackStateMachine is the sole issuer of `g_game.attack()`
+- **SafeCreature** — single pcall wrapper authority (eliminated 40+ raw pcall patterns)
+- **DRY deduplication** — single implementations for Chebyshev, PathCache, isTargetable, getLocalPlayer
+- **Table-driven ClientService** — 209 ACL methods via mapping table (2,287 → 795 lines)
+- **Unified storage engine** — single JSON backend for BotDatabase, CharacterDB, UnifiedStorage (1,682 → 479 lines)
+- **Shared helpers** — profile settings, debounce, path utils extracted to shared modules
+- **Container corpse filtering** — sorting system skips monster corpses (dead/remains/body of)
+- **Container dead code removal** — removed syncSetupWindowCheckboxes, forEachContainerByItemId, shouldItemGoToContainer
 
 ---
 
@@ -158,6 +178,7 @@ _Loader.lua (entry point)
 | ⚔️ [AttackBot](docs/ATTACKBOT.md) | Attack spells, runes, AoE optimization |
 | 🧭 [CaveBot](docs/CAVEBOT.md) | Navigation, waypoints, supply management |
 | 🎯 [TargetBot](docs/TARGETBOT.md) | Combat AI, Monster Insights, movement |
+| 👥 [Follow Player](docs/FOLLOW.md) | Party hunt companion — stay near leader |
 | 📦 [Containers](docs/CONTAINERS.md) | Container management, quiver system |
 | 📊 [Hunt Analyzer](docs/SMARTHUNT.md) | Session analytics and insights (SmartHunt) |
 | 🛠️ [Extras & Tools](docs/EXTRAS.md) | Safety, equipment, utilities |

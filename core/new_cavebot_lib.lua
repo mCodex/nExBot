@@ -1,6 +1,5 @@
 CaveBot = {} -- global namespace
 
--------------------------------------------------------------------
 -- CaveBot lib 1.0 - Optimized version
 -- Contains a universal set of functions to be used in CaveBot
 
@@ -11,7 +10,6 @@ CaveBot = {} -- global namespace
 -- overall tips to creating extension:
 --   - functions return action(nil) or true(done)
 --   - extensions are controlled by retries var
--------------------------------------------------------------------
 
 -- Pre-built lookup tables for O(1) access
 local LOCKERS_LIST = {3497, 3498, 3499, 3500}

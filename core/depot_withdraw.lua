@@ -48,7 +48,6 @@ local function depotWithdrawHandler()
     end
   end
 
-
 if playerContainer and freecap() >= 200 then
   local time = 500
     if depotContainer then 

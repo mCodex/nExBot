@@ -15,9 +15,7 @@ local CC = {}
 
 CC.VERSION = "1.0"
 
--- ==========================================================================
 -- CLIENT-AGNOSTIC DEFAULTS
--- ==========================================================================
 
 -- ASM: Attack State Machine timing
 CC.TICK_INTERVAL          = 100    -- ASM tick rate (ms)
@@ -62,10 +60,8 @@ CC.ZIGZAG_RATE_LIMIT       = 5000  -- Seconds between allowed switches (ms)
 CC.ZIGZAG_MAX_SWITCHES     = 3     -- Max switches before hard block
 CC.ZIGZAG_DECAY_TIME       = 10000 -- Time before switch counter decays (ms)
 
--- ==========================================================================
 -- CLIENT-SPECIFIC OVERRIDES
 -- Called once at boot by ASM after ACL detection completes.
--- ==========================================================================
 
 function CC.applyClientTuning(isOTBR)
   if isOTBR then
@@ -77,9 +73,7 @@ function CC.applyClientTuning(isOTBR)
   -- OTCv8 uses the defaults above (faster client, less latency)
 end
 
--- ==========================================================================
 -- FREEZE (prevent accidental mutation after init)
--- ==========================================================================
 
 local _frozen = false
 

@@ -41,9 +41,7 @@ local _cache = {
 -- Reference to OTClient cooldown module
 local _cooldownModule = nil
 
--- ============================================================================
 -- PRIVATE FUNCTIONS
--- ============================================================================
 
 -- Lazy load cooldown module
 local function getCooldownModule()
@@ -99,9 +97,7 @@ local function updateSpellCooldown(spellId)
   return isOnCooldown
 end
 
--- ============================================================================
 -- PUBLIC API: Group Cooldowns
--- ============================================================================
 
 -- Check if attack group (1) is on cooldown
 function CooldownManager.isAttackOnCooldown()
@@ -134,9 +130,7 @@ function CooldownManager.isGroupOnCooldown(groupId)
   return _cache.groups[groupId]
 end
 
--- ============================================================================
 -- PUBLIC API: Spell Cooldowns
--- ============================================================================
 
 -- Check if specific spell is on cooldown
 function CooldownManager.isSpellOnCooldown(spellId)
@@ -159,9 +153,7 @@ function CooldownManager.canCastSpell(spellId, groupId)
   return true
 end
 
--- ============================================================================
 -- PUBLIC API: Potion/Item Exhausted
--- ============================================================================
 
 -- Mark potion as used (start 1s exhausted)
 function CooldownManager.markPotionUsed()
@@ -182,9 +174,7 @@ function CooldownManager.getPotionCooldown()
   return remaining > 0 and remaining or 0
 end
 
--- ============================================================================
 -- PUBLIC API: Healing Cooldown (Shared between HealBot and FriendHealer)
--- ============================================================================
 
 -- Mark healing action as used (for shared exhaustion tracking)
 -- This is called by both HealEngine and FriendHealer to prevent conflicts
@@ -201,9 +191,7 @@ function CooldownManager.isHealingExhausted()
   return currentTime < _cache.healingExhaustedUntil
 end
 
--- ============================================================================
 -- PUBLIC API: Generic Action Check
--- ============================================================================
 
 -- Unified check for any action type
 -- actionType: "spell", "potion", "rune"
@@ -226,9 +214,7 @@ function CooldownManager.canPerformAction(actionType, options)
   return true
 end
 
--- ============================================================================
 -- EVENT HANDLERS: React to OTClient events
--- ============================================================================
 
 -- Hook into cooldown events for instant updates (if available)
 function CooldownManager.init()

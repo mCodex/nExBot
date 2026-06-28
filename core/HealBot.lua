@@ -606,7 +606,6 @@ if rootWidget then
     loadSettings()
   end
 
-
   -- public functions
   HealBot = {} -- global table
 
@@ -661,9 +660,7 @@ end
   Pre-caches stat functions and uses O(1) condition lookups.
 ]]
 
--- ============================================================================
 -- BOTCORE INTEGRATION
--- ============================================================================
 
 -- Use BotCore for stats (single source of truth)
 local function getStats()
@@ -671,7 +668,7 @@ local function getStats()
     return BotCore.Stats.getAll()
   end
   -- Fallback for standalone testing
-  local localPlayer = g_game.getLocalPlayer()
+  local localPlayer = ClientService.getLocalPlayer()
   if not localPlayer then return { hp = 0, maxHp = 1, hpPercent = 0, mp = 0, maxMp = 1, mpPercent = 0, burst = 0 } end
   local hp = localPlayer:getHealth()
   local maxHp = localPlayer:getMaxHealth()
@@ -726,7 +723,7 @@ local PLAYER_CHECK_INTERVAL = 1000  -- Revalidate player reference every 1s
 -- Get cached local player (with periodic revalidation)
 local function getLocalPlayerCached()
   if not cachedLocalPlayer or (now - lastPlayerCheck) > PLAYER_CHECK_INTERVAL then
-    cachedLocalPlayer = g_game.getLocalPlayer()
+    cachedLocalPlayer = ClientService.getLocalPlayer()
     lastPlayerCheck = now
   end
   return cachedLocalPlayer
@@ -841,11 +838,8 @@ HealBot.resetAnalytics = function()
   analytics.log = {}
 end
 
-
-
 -- Subscribe to EventBus for instant reaction to stat changes
 -- Note: BotCore handles event-driven stat updates, we just need to reset flags
-
 
 -- Fast spell macro (driven by HealBot on/off state)
 -- Main healing macro loop (keeps heal engine ticking)
@@ -918,7 +912,6 @@ end
 
 syncHealMacro()
 
-
 -- Initialize stats on load (BotCore handles this if available)
 if BotCore and BotCore.Stats then
   BotCore.Stats.update()
@@ -937,9 +930,7 @@ end
 
 validateStartup()
 
--- ============================================================================
 -- ALLY HEALING UI (merged from new_healer.lua)
--- ============================================================================
 
 local allyPanelName = "newHealer"
 

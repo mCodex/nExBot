@@ -25,6 +25,7 @@
 
 CaveBot.Recorder = {}
 
+local zChanging = nExBot.zChanging or function() return false end
 local isEnabled = nil
 local lastPos = nil           -- last RECORDED position (the waypoint)
 local prevStepPos = nil       -- position on the previous step (for direction tracking)
@@ -34,9 +35,7 @@ local pendingCorner = nil     -- position to record when a turn is confirmed
 local pendingTurnDir = nil    -- direction of the pending turn {x, y}
 local pendingTurnCount = 0    -- steps taken in pending direction (for turnConfirmSteps)
 
--- ============================================================================
 -- CONFIGURATION
--- ============================================================================
 
 local config = {
   -- Adaptive distance thresholds (Euclidean)
@@ -49,9 +48,7 @@ local config = {
   collinearTolerance = 0.15,  -- ~8.6 degrees (dot product threshold: cos(8.6°) ≈ 0.989)
 }
 
--- ============================================================================
 -- GEOMETRY HELPERS
--- ============================================================================
 
 --- Euclidean distance between two positions.
 local function euclideanDist(a, b)
@@ -88,9 +85,7 @@ end
 -- Track up to 2 previously recorded positions for collinear checks
 local prevRecorded = nil      -- position recorded before lastPos
 
--- ============================================================================
 -- RECORDING LOGIC
--- ============================================================================
 
 local function addPosition(pos)
   -- Collinear check: if lastPos sits on the line from prevRecorded to pos,
@@ -234,9 +229,7 @@ local function setup()
   end)
 end
 
--- ============================================================================
 -- PUBLIC API
--- ============================================================================
 
 CaveBot.Recorder.isOn = function()
   return isEnabled

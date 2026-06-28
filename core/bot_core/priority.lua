@@ -35,9 +35,7 @@ local _exhaustedState = {
 -- Action queue for current tick
 local _actionQueue = {}
 
--- ============================================================================
 -- EXHAUSTED HANDLING
--- ============================================================================
 
 -- Check if action type is exhausted
 function PriorityEngine.isExhausted(actionType)
@@ -88,9 +86,7 @@ function PriorityEngine.trackSuccessAction(actionType)
   end
 end
 
--- ============================================================================
 -- EXHAUSTION / COOLDOWN CHECKS
--- ============================================================================
 
 -- Check if can perform attack
 function PriorityEngine.canAttack()
@@ -131,9 +127,7 @@ function PriorityEngine.canUsePotion()
   return true
 end
 
--- ============================================================================
 -- ACTION EXECUTION WITH PRIORITY
--- ============================================================================
 
 -- Execute action with priority check
 function PriorityEngine.executeWithPriority(actionType, actionFn)
@@ -162,9 +156,7 @@ function PriorityEngine.executeWithPriority(actionType, actionFn)
   return actionFn()
 end
 
--- ============================================================================
 -- GRACEFUL EXHAUSTED RECOVERY
--- ============================================================================
 
 -- Handle exhausted event from OTClient
 function PriorityEngine.onExhausted(groupId, remainingMs)
@@ -186,9 +178,7 @@ function PriorityEngine.getStatus()
   }
 end
 
--- ============================================================================
 -- CONSTANTS EXPORT (read-only)
--- ============================================================================
 
 PriorityEngine.PRIORITY = PRIORITY
 

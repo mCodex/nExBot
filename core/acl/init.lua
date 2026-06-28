@@ -23,9 +23,7 @@ ACL.ClientType = {
 ACL.currentClient = ACL.ClientType.UNKNOWN
 ACL.clientName    = "Unknown"
 
--- =========================================================================
 -- DETECTION (scored signal table)
--- =========================================================================
 
 local _detected   = false
 local _clientType = ACL.ClientType.UNKNOWN
@@ -112,9 +110,7 @@ local function detectClient(force)
   return _clientType
 end
 
--- =========================================================================
 -- PUBLIC DETECTION API
--- =========================================================================
 
 function ACL.getClientType()           return detectClient() end
 function ACL.getClientName()           detectClient(); return ACL.clientName end
@@ -123,9 +119,7 @@ function ACL.isOpenTibiaBR()           return detectClient() == ACL.ClientType.O
 function ACL.refreshDetection()        _detected = false; return detectClient(true) end
 function ACL.getDetectionInfo()        detectClient(); return ACL.lastDetection end
 
--- =========================================================================
 -- ADAPTER LOADING
--- =========================================================================
 
 local adapter       = nil
 local adapterLoaded = false
@@ -176,9 +170,7 @@ local function loadAdapter()
   return adapter
 end
 
--- =========================================================================
 -- LAZY ACCESS — metatabled so ACL.game / ACL.map / etc resolve to adapter
--- =========================================================================
 
 setmetatable(ACL, {
   __index = function(t, key)
@@ -191,9 +183,7 @@ setmetatable(ACL, {
   end,
 })
 
--- =========================================================================
 -- INIT (called by _Loader.lua)
--- =========================================================================
 
 local _lateDetectionDone = false
 

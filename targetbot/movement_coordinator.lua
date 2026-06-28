@@ -32,21 +32,15 @@
   - MovementCoordinator.Scaling: Dynamic threshold scaling
 ]]
 
--- ============================================================================
 -- MODULE NAMESPACE
--- ============================================================================
 
 MovementCoordinator = MovementCoordinator or {}
 MovementCoordinator.VERSION = "1.0"
 
--- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
-local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 -- Toggle to enable movement coordinator debugging output
 MovementCoordinator.DEBUG = MovementCoordinator.DEBUG or false
 
--- ============================================================================
 -- CONSTANTS
--- ============================================================================
 
 MovementCoordinator.CONSTANTS = {
   -- Movement intent types (priority order)
@@ -60,7 +54,8 @@ MovementCoordinator.CONSTANTS = {
     CHASE = 7,               -- Close gap to target
     FACE_MONSTER = 8,        -- Diagonal correction
     LURE = 9,                -- Pull more monsters (CaveBot)
-    IDLE = 10                -- No movement needed
+    IDLE = 10,               -- No movement needed
+    FOLLOW = 11              -- Follow leader
   },
   
   -- Intent priorities (higher = more important)
@@ -74,7 +69,8 @@ MovementCoordinator.CONSTANTS = {
     [7] = 35,   -- CHASE
     [8] = 20,   -- FACE_MONSTER
     [9] = 15,   -- LURE
-    [10] = 0    -- IDLE
+    [10] = 0,   -- IDLE
+    [11] = 95   -- FOLLOW
   },
   
   -- Minimum confidence to execute movement (tuned for responsiveness)
@@ -88,7 +84,8 @@ MovementCoordinator.CONSTANTS = {
     [7] = 0.50,  -- CHASE: Lower for faster target acquisition
     [8] = 0.45,  -- FACE_MONSTER: Quick diagonal correction
     [9] = 0.50,  -- LURE: Responsive to lure needs
-    [10] = 1.0   -- IDLE: Never execute
+    [10] = 1.0,  -- IDLE: Never execute
+    [11] = 0.50  -- FOLLOW: Responsive to leader
   },
   
   -- Timing (tuned for responsiveness while preventing oscillation)
@@ -115,10 +112,8 @@ local PRIORITY = CONST.PRIORITY
 local THRESHOLDS = CONST.CONFIDENCE_THRESHOLDS
 local TIMING = CONST.TIMING
 
--- ============================================================================
 -- DYNAMIC SCALING
 -- Adjusts thresholds based on monster count for reactive behavior
--- ============================================================================
 
 MovementCoordinator.Scaling = {}
 
@@ -201,26 +196,14 @@ end
 -- Subscribe to creature events to maintain a local monster cache (lower latency)
 if EventBus then
   -- Debounced updater to avoid storms
-  local function makeDebounce(ms, fn)
-    if nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
-      return nExBot.EventUtil.debounce(ms, fn)
-    end
-    -- Simple fallback debounce using schedule
-    local scheduled = false
-    return function()
-      if scheduled then return end
-      scheduled = true
-      schedule(ms, function()
-        scheduled = false
-        pcall(fn)
-      end)
-    end
-  end
+  local SharedHelpers = nExBot.SharedHelpers
+  if not SharedHelpers then return end
+  local makeDebounce = SharedHelpers.makeDebounce
 
   local debounceUpdate = makeDebounce(100, function() scalingCache.lastUpdate = 0 end)
 
   EventBus.on("creature:appear", function(c)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if c and c:isMonster() and not c:isDead() then
       updateMonsterCacheFromCreature(c)
       -- Notify WavePredictor if available (non-blocking)
@@ -232,7 +215,7 @@ if EventBus then
   end, 10)
 
   EventBus.on("creature:move", function(c, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if c and c:isMonster() and not c:isDead() then
       updateMonsterCacheFromCreature(c)
       -- Update WavePredictor about movement
@@ -244,7 +227,7 @@ if EventBus then
   end, 10)
 
   EventBus.on("monster:disappear", function(c)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     removeCreatureFromCache(c)
     
     -- IMPROVED: Also clean up MonsterAI tracker data for this creature
@@ -271,7 +254,7 @@ if EventBus then
   
   -- When our target moves, instantly register chase intent with walk prediction
   EventBus.on("creature:move", function(creature, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     
     -- Check if this is our current attack target
@@ -344,7 +327,7 @@ if EventBus then
   
   -- When monster appears nearby, check for danger
   EventBus.on("monster:appear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     local playerPos = player and player:getPosition()
     local creaturePos = creature:getPosition()
@@ -363,7 +346,7 @@ if EventBus then
   
   -- When monster health changes to low, register finish kill intent
   EventBus.on("monster:health", function(creature, percent)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature or not percent then return end
     
     -- Check if this is our target
@@ -390,7 +373,7 @@ if EventBus then
   
   -- When player takes damage, consider emergency escape
   EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not health or not maxHealth then return end
     local percent = (health / maxHealth) * 100
     local oldPercent = oldHealth and oldMax and ((oldHealth / oldMax) * 100) or 100
@@ -435,13 +418,13 @@ if EventBus then
   
   -- Clear stale intents when combat ends
   EventBus.on("targetbot/combat_end", function()
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     MovementCoordinator.Intent.clear()
   end, 20)
   
   -- Clear chase intents when target dies
   EventBus.on("monster:disappear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     local attackingCreature = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
     if attackingCreature and creature:getId() == attackingCreature:getId() then
@@ -502,10 +485,8 @@ function MovementCoordinator.MonsterCache.getNearby(radius)
   return res
 end
 
--- ============================================================================
 -- WALK PREDICTION (OTClient API Enhancement)
 -- Predicts where a creature will be based on current walk state
--- ============================================================================
 
 MovementCoordinator.WalkPrediction = {}
 
@@ -660,9 +641,7 @@ function MovementCoordinator.Scaling.getHysteresis()
   return TIMING.HYSTERESIS_BONUS * scaleFactor
 end
 
--- ============================================================================
 -- STATE
--- ============================================================================
 
 MovementCoordinator.State = {
   -- Current intents from each system
@@ -698,9 +677,7 @@ MovementCoordinator.State = {
 
 local State = MovementCoordinator.State
 
--- ============================================================================
 -- INTENT MANAGEMENT
--- ============================================================================
 
 MovementCoordinator.Intent = {}
 
@@ -792,10 +769,8 @@ function MovementCoordinator.Intent.getSorted()
   return sorted
 end
 
--- ============================================================================
 -- VOTING SYSTEM
 -- Multiple intents can vote for same/similar positions
--- ============================================================================
 
 MovementCoordinator.Vote = {}
 
@@ -898,9 +873,7 @@ function MovementCoordinator.Vote.aggregate()
   return nil, 0
 end
 
--- ============================================================================
 -- DECISION MAKER
--- ============================================================================
 
 MovementCoordinator.Decide = {}
 
@@ -1065,9 +1038,7 @@ function MovementCoordinator.Decide.isOscillating()
   return false
 end
 
--- ============================================================================
 -- EXECUTION
--- ============================================================================
 
 MovementCoordinator.Execute = {}
 
@@ -1260,10 +1231,8 @@ function MovementCoordinator.Execute.move(decision)
   return success, success and "executed" or "execution_failed"
 end
 
--- ============================================================================
 -- INTEGRATION HELPERS
 -- Easy functions for other systems to register intents
--- ============================================================================
 
 -- Register wave avoidance intent
 function MovementCoordinator.avoidWave(safePos, confidence)
@@ -1327,10 +1296,8 @@ function MovementCoordinator.emergencyEscape(escapePos, confidence)
   return
 end
 
--- ============================================================================
 -- MAIN TICK
 -- Call this from main TargetBot loop
--- ============================================================================
 
 function MovementCoordinator.tick()
   local decision = MovementCoordinator.Decide.make()
@@ -1396,7 +1363,7 @@ end
 -- Run a short synthetic trace to generate representative telemetry for tuning
 function MovementCoordinator.Tuning.runSyntheticTrace()
   if not (nExBot and nExBot.Telemetry and nExBot.Telemetry.increment) then
-    print("[MovementCoordinator][Tuning] telemetry not available; cannot run synthetic trace")
+    warn("[MovementCoordinator][Tuning] telemetry not available; cannot run synthetic trace")
     return false
   end
 
@@ -1463,8 +1430,8 @@ function MovementCoordinator.Tuning.applyRecommendations(suggestions)
   table.insert(applied, string.format("OSCILLATION_WINDOW: %d -> %d", oldWin, TIMING.OSCILLATION_WINDOW))
 
   -- Print applied adjustments
-  print("[MovementCoordinator][Tuning] Applied adjustments:")
-  for _, a in ipairs(applied) do print("  - " .. a) end
+  warn("[MovementCoordinator][Tuning] Applied adjustments:")
+  for _, a in ipairs(applied) do warn("  - " .. a) end
 
   -- Record telemetry for applied tuning ops
   if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
@@ -1482,9 +1449,7 @@ function MovementCoordinator.getState()
   }
 end
 
--- ============================================================================
 -- EXPORTS
--- ============================================================================
 
 nExBot = nExBot or {}
 nExBot.MovementCoordinator = MovementCoordinator

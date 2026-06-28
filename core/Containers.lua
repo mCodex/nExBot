@@ -1,48 +1,10 @@
---[[
-  Container Panel - Advanced Container Management System v12.3
-  
-  Features:
-  - Open All: Opens main BP + all nested containers (auto-minimized)
-  - Reopen: Closes all and reopens from back slot
-  - Close All: Closes all open containers
-  - Min/Max: Minimizes/Maximizes all containers
-  - Setup: Configure containers with custom names and item sorting
-  - Sort Items: Automatically moves items to designated containers
-  - Keep Open: Force containers to stay open
-  - Rename: Custom names for container windows
-  
-  All operations use BFS (Breadth-First Search) to find nested containers.
-  Containers are auto-minimized after opening for cleaner UI.
-  
-  Architecture: DRY, SOLID, SRP principles with pure functions where possible.
-  
-  v12.3 Changes:
-  - FIXED: Main backpack not minimizing when auto-minimize enabled
-  - FIXED: Quiver not opening - now uses OTClient slot constants
-  - FIXED: Container count check using pairs() instead of # operator
-  - IMPROVED: Always minimize when auto-minimize is enabled (not just during processing)
-  
-  v12.2 Changes:
-  - FIXED: Infinite loop when opening/closing containers recursively
-  - FIXED: Quiver not opening on right hand slot for OpenTibiaBR
-  - IMPROVED: Container tracking now uses itemId to prevent re-opens
-  - IMPROVED: Scanner cooldowns prevent over-scanning same container
-  - IMPROVED: Grace periods increased for better stability
-  - IMPROVED: Max opens per item type to prevent infinite loops
-]]
 
 setDefaultTab("Tools")
 local panelName = "containerPanel"
 
--- ============================================================================
--- CONSTANTS
--- ============================================================================
 local PURSE_ITEM_ID = 23396
 local LOOT_BAG_ITEM_ID = 23721
 
--- ============================================================================
--- DEFAULT CONFIGURATION
--- ============================================================================
 local DEFAULT_CONTAINER_LIST = {
     {
         name = "Main Backpack",
@@ -62,7 +24,6 @@ local DEFAULT_CONTAINER_LIST = {
     }
 }
 
--- Default config structure
 local DEFAULT_CONFIG = {
     purse = true,
     autoMinimize = true,
@@ -75,18 +36,12 @@ local DEFAULT_CONFIG = {
     windowHeight = 200
 }
 
--- Alias shared deepClone (DRY)
 local deepClone = nExBot.Shared.deepClone
 
--- ============================================================================
--- STORAGE & STATE (Per-Character with CharacterDB)
--- ============================================================================
 
--- Internal state (not persisted)
 local _configData = nil
 local _saveTimer = nil
 
--- Schedule save to CharacterDB (debounced)
 local function scheduleSave()
     if not CharacterDB or not CharacterDB.isReady or not CharacterDB.isReady() then return end
     if not _configData then return end
@@ -97,34 +52,26 @@ local function scheduleSave()
     end)
 end
 
--- Initialize config from CharacterDB with migration from legacy storage
 local function initConfig()
     local cfg = {}
     
-    -- Try to load from CharacterDB first
     if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
         cfg = CharacterDB.getModule("containers") or {}
         
-        -- Migration: if CharacterDB has never been initialized (no _migrated flag) 
-        -- and legacy storage has data, migrate once
         if not cfg._migrated and storage[panelName] then
             local legacy = storage[panelName]
             if legacy.containerList and #legacy.containerList > 0 then
-                -- Migrate from legacy storage
                 cfg = deepClone(legacy)
             end
-            -- Mark as migrated so we don't overwrite user deletions
             cfg._migrated = true
             CharacterDB.setModule("containers", cfg)
         end
     else
-        -- Fallback to legacy storage (CharacterDB not ready yet)
         if storage[panelName] and type(storage[panelName]) == "table" then
             cfg = storage[panelName]
         end
     end
     
-    -- Ensure all required fields exist (migration for old configs)
     for key, defaultValue in pairs(DEFAULT_CONFIG) do
         if cfg[key] == nil then
             cfg[key] = type(defaultValue) == "table" and deepClone(defaultValue) or defaultValue
@@ -135,7 +82,6 @@ local function initConfig()
     return cfg
 end
 
--- Create a proxy that auto-saves to CharacterDB on changes
 local function createConfigProxy()
     return setmetatable({}, {
         __index = function(t, k)
@@ -158,18 +104,15 @@ local function createConfigProxy()
     })
 end
 
--- Initialize config now
 initConfig()
 local config = createConfigProxy()
 
--- Force save function (call after modifying nested tables like containerList)
 local function saveConfig()
     if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() and _configData then
         CharacterDB.setModule("containers", _configData)
     end
 end
 
--- Forward declaration for UI sync functions
 local syncUIWithConfig
 local refreshContainerList
 
@@ -269,7 +212,6 @@ Panel
   ]])
 containerUI:setId(panelName)
 
--- Set tooltips programmatically for better control
 containerUI.openAll:setTooltip("When enabled, automatically opens all containers on re-login\n(Toggle ON to enable auto-open on each login)")
 containerUI.setupBtn:setTooltip("Configure container names, sorting rules, and behavior")
 containerUI.reopenAll:setTooltip("Close all containers and reopen from back slot")
@@ -279,7 +221,6 @@ containerUI.maximizeAll:setTooltip("Maximize all container windows")
 containerUI.purseSwitch:setTooltip("Also open the purse when reopening")
 containerUI.autoMinSwitch:setTooltip("Automatically minimize containers after opening")
 
--- Sync UI with config (call on init and when CharacterDB becomes ready)
 syncUIWithConfig = function()
     if containerUI then
         containerUI.openAll:setOn(config.autoOpenOnLogin == true)
@@ -288,20 +229,14 @@ syncUIWithConfig = function()
     end
 end
 
--- Initial sync
 syncUIWithConfig()
 
--- Delayed re-sync to ensure CharacterDB is ready
--- (In case the player wasn't fully available at init time)
 schedule(500, function()
     if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
-        -- Reinitialize config from CharacterDB
         initConfig()
         syncUIWithConfig()
-        -- Refresh setup window if it exists
         if setupWindow then
             if refreshContainerList then refreshContainerList() end
-            -- Sync setup window checkboxes
             setupWindow.sortEnabled:setChecked(config.sortEnabled == true)
             setupWindow.forceOpen:setChecked(config.forceOpen == true)
             setupWindow.renameEnabled:setChecked(config.renameEnabled == true)
@@ -310,227 +245,22 @@ schedule(500, function()
     end
 end)
 
--- ============================================================================
--- SETUP WINDOW UI DEFINITION
--- ============================================================================
-g_ui.loadUIFromString([[
-ContainerEntry < Label
-  background-color: alpha
-  text-offset: 20 2
-  focusable: true
-  height: 18
-  font: verdana-11px-rounded
+do
+  local path = nExBot.paths.base .. "/core/Containers.otui"
+  local content = nil
+  if g_resources and g_resources.readFileContents then
+    content = g_resources.readFileContents(path)
+  end
+  if content then
+    g_ui.loadUIFromString(content)
+  else
+    warn("[Containers] Failed to load Containers.otui from " .. path)
+  end
+end
 
-  CheckBox
-    id: enabled
-    anchors.left: parent.left
-    anchors.verticalCenter: parent.verticalCenter
-    width: 15
-    height: 15
-    margin-left: 2
-
-  $focus:
-    background-color: #00000066
-
-  Button
-    id: minimize
-    !text: tr('M')
-    anchors.right: nested.left
-    anchors.verticalCenter: parent.verticalCenter
-    margin-right: 2
-    width: 16
-    height: 16
-
-  Button
-    id: nested
-    !text: tr('N')
-    anchors.right: remove.left
-    anchors.verticalCenter: parent.verticalCenter
-    margin-right: 2
-    width: 16
-    height: 16
-
-  Button
-    id: remove
-    !text: tr('X')
-    anchors.right: parent.right
-    anchors.verticalCenter: parent.verticalCenter
-    margin-right: 20
-    width: 16
-    height: 16
-
-ContainerSetupWindow < MainWindow
-  !text: tr('Container Setup')
-  size: 550 220
-  @onEscape: self:hide()
-
-  TextList
-    id: containerList
-    anchors.left: parent.left
-    anchors.top: parent.top
-    anchors.bottom: separator.top
-    width: 210
-    margin-bottom: 8
-    margin-top: 3
-    margin-left: 3
-    vertical-scrollbar: containerListScrollBar
-
-  VerticalScrollBar
-    id: containerListScrollBar
-    anchors.top: containerList.top
-    anchors.bottom: containerList.bottom
-    anchors.right: containerList.right
-    step: 18
-    pixels-scroll: true
-
-  VerticalSeparator
-    id: sep
-    anchors.top: parent.top
-    anchors.left: containerList.right
-    anchors.bottom: separator.top
-    margin-top: 3
-    margin-bottom: 8
-    margin-left: 8
-
-  Label
-    id: lblName
-    anchors.left: sep.right
-    anchors.top: sep.top
-    width: 65
-    text: Name:
-    margin-left: 10
-    margin-top: 3
-    font: verdana-11px-rounded
-
-  TextEdit
-    id: containerName
-    anchors.left: lblName.right
-    anchors.top: sep.top
-    anchors.right: parent.right
-    margin-right: 8
-    font: verdana-11px-rounded
-
-  Label
-    id: lblContainer
-    anchors.left: lblName.left
-    anchors.top: containerName.bottom
-    width: 65
-    text: Container:
-    margin-top: 8
-    font: verdana-11px-rounded
-
-  BotItem
-    id: containerId
-    anchors.left: containerName.left
-    anchors.top: lblContainer.top
-    margin-top: -3
-
-  Button
-    id: addContainer
-    anchors.left: containerId.right
-    anchors.top: containerId.top
-    margin-left: 8
-    text: Add/Update
-    width: 90
-    height: 20
-    font: verdana-11px-rounded
-
-  Label
-    id: lblItems
-    anchors.left: lblName.left
-    anchors.top: containerId.bottom
-    width: 65
-    text: Items:
-    margin-top: 8
-    font: verdana-11px-rounded
-
-  BotContainer
-    id: itemsList
-    anchors.left: containerName.left
-    anchors.top: lblItems.top
-    anchors.right: parent.right
-    anchors.bottom: separator.top
-    margin-right: 8
-    margin-bottom: 8
-    margin-top: -3
-
-  HorizontalSeparator
-    id: separator
-    anchors.right: parent.right
-    anchors.left: parent.left
-    anchors.bottom: closeBtn.top
-    margin-bottom: 8
-
-  CheckBox
-    id: sortEnabled
-    anchors.left: parent.left
-    anchors.bottom: parent.bottom
-    text: Sort Items
-    tooltip: Automatically move items to designated containers
-    width: 80
-    height: 15
-    margin-left: 8
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: forceOpen
-    anchors.left: prev.right
-    anchors.bottom: parent.bottom
-    text: Keep Open
-    tooltip: Force containers to stay open
-    width: 85
-    height: 15
-    margin-left: 10
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: renameEnabled
-    anchors.left: prev.right
-    anchors.bottom: parent.bottom
-    text: Rename
-    tooltip: Rename container windows with custom names
-    width: 70
-    height: 15
-    margin-left: 10
-    font: verdana-11px-rounded
-
-  CheckBox
-    id: lootBag
-    anchors.left: prev.right
-    anchors.bottom: parent.bottom
-    text: Loot Bag
-    tooltip: Also manage loot bag
-    width: 75
-    height: 15
-    margin-left: 10
-    font: verdana-11px-rounded
-
-  Button
-    id: closeBtn
-    !text: tr('Close')
-    font: verdana-11px-rounded
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 50 20
-
-  ResizeBorder
-    id: bottomResizeBorder
-    anchors.fill: separator
-    height: 3
-    minimum: 180
-    maximum: 350
-    margin-left: 3
-    margin-right: 3
-    background: #ffffff44
-]])
-
--- ============================================================================
--- SETUP WINDOW INSTANCE AND LOGIC
--- ============================================================================
 local setupWindow = nil
 local selectedContainerIndex = nil
 
--- Pure function: Extract item IDs from container items table
 local function extractItemIds(items)
     local ids = {}
     for _, entry in ipairs(items) do
@@ -543,7 +273,6 @@ local function extractItemIds(items)
     return ids
 end
 
--- Pure function: Find container entry by item ID
 local function findContainerByItemId(list, itemId)
     for index, entry in ipairs(list) do
         if entry.itemId == itemId then
@@ -553,17 +282,6 @@ local function findContainerByItemId(list, itemId)
     return nil, nil
 end
 
--- Pure function: Check if item should go to container
-local function shouldItemGoToContainer(itemId, containerEntry)
-    if not containerEntry or not containerEntry.items then return false end
-    local items = extractItemIds(containerEntry.items)
-    for _, id in ipairs(items) do
-        if id == itemId then return true end
-    end
-    return false
-end
-
--- Refresh the container list UI
 refreshContainerList = function()
     if not setupWindow then return end
     
@@ -575,14 +293,12 @@ refreshContainerList = function()
         label:setText(entry.name or "Container")
         label.enabled:setChecked(entry.enabled)
         
-        -- Color coding for buttons
         label.minimize:setColor(entry.minimize and '#00FF00' or '#FF6666')
         label.minimize:setTooltip(entry.minimize and 'Opens Minimized' or 'Opens Normal')
         
         label.nested:setColor(entry.openNested and '#00FF00' or '#FF6666')
         label.nested:setTooltip(entry.openNested and 'Opens Nested' or 'No Nested')
         
-        -- Selection handler
         label.onMouseRelease = function()
             selectedContainerIndex = index
             setupWindow.containerId:setItemId(entry.itemId or 0)
@@ -591,24 +307,20 @@ refreshContainerList = function()
             list:focusChild(label)
         end
         
-        -- Toggle enabled - immediately trigger sorting when activated
         label.enabled.onClick = function()
             entry.enabled = not entry.enabled
             label.enabled:setChecked(entry.enabled)
             saveConfig()  -- Persist to CharacterDB
-            -- Trigger immediate processing when rule is enabled
-            if entry.enabled and sortingMacro and (config.sortEnabled or config.forceOpen) then
+            if entry.enabled and sortingMacro and (config.sortEnabled or config.forceOpen) and not isLootLocked() then
                 sortingMacro:setOn()
             end
         end
         
-        -- Toggle minimize - apply immediately to open containers
         label.minimize.onClick = function()
             entry.minimize = not entry.minimize
             label.minimize:setColor(entry.minimize and '#00FF00' or '#FF6666')
             label.minimize:setTooltip(entry.minimize and 'Opens Minimized' or 'Opens Normal')
             saveConfig()  -- Persist to CharacterDB
-            -- Apply minimize state to currently open containers of this type
             if entry.enabled and entry.itemId then
                 for _, container in pairs(g_game.getContainers()) do
                     local containerItem = container:getContainerItem()
@@ -624,13 +336,11 @@ refreshContainerList = function()
             end
         end
         
-        -- Toggle nested - trigger container opening if enabled
         label.nested.onClick = function()
             entry.openNested = not entry.openNested
             label.nested:setColor(entry.openNested and '#00FF00' or '#FF6666')
             label.nested:setTooltip(entry.openNested and 'Opens Nested' or 'No Nested')
             saveConfig()  -- Persist to CharacterDB
-            -- Trigger nested container opening if enabled
             if ContainerBFS and ContainerBFS.isActive() and entry.enabled and entry.openNested and entry.itemId then
                 for _, container in pairs(g_game.getContainers()) do
                     local containerItem = container:getContainerItem()
@@ -650,7 +360,6 @@ refreshContainerList = function()
             end
         end
         
-        -- Remove entry
         label.remove.onClick = function()
             table.remove(config.containerList, index)
             refreshContainerList()
@@ -660,7 +369,6 @@ refreshContainerList = function()
     end
 end
 
--- Initialize setup window
 local function initSetupWindow()
     if setupWindow then return end
     
@@ -678,12 +386,10 @@ local function initSetupWindow()
     
     setupWindow = win
     
-    -- Set height BEFORE hide to avoid geometry callback saving 0
     local h = tonumber(config.windowHeight)
     if not h or h < 150 then h = 220 end
     setupWindow:setHeight(h)
     
-    -- Save window height on resize
     setupWindow.onGeometryChange = function(widget, old, new)
         if new.height >= 150 and old.height > 0 and new.height ~= old.height then
             config.windowHeight = new.height
@@ -692,19 +398,16 @@ local function initSetupWindow()
     
     setupWindow:hide()
     
-    -- Close button
     setupWindow.closeBtn.onClick = function()
         setupWindow:hide()
     end
     
-    -- Checkboxes
     setupWindow.sortEnabled:setChecked(config.sortEnabled)
     setupWindow.sortEnabled.onClick = function(widget)
         config.sortEnabled = not config.sortEnabled
         widget:setChecked(config.sortEnabled)
         saveConfig()  -- Persist to CharacterDB
-        -- Trigger immediate sorting when enabled
-        if config.sortEnabled and sortingMacro then
+        if config.sortEnabled and sortingMacro and not isLootLocked() then
             sortingMacro:setOn()
         end
     end
@@ -714,8 +417,7 @@ local function initSetupWindow()
         config.forceOpen = not config.forceOpen
         widget:setChecked(config.forceOpen)
         saveConfig()  -- Persist to CharacterDB
-        -- Trigger immediate check when enabled
-        if config.forceOpen and sortingMacro then
+        if config.forceOpen and sortingMacro and not isLootLocked() then
             sortingMacro:setOn()
         end
     end
@@ -734,7 +436,6 @@ local function initSetupWindow()
         saveConfig()  -- Persist to CharacterDB
     end
     
-    -- Add/Update container button
     setupWindow.addContainer.onClick = function()
         local itemId = setupWindow.containerId:getItemId()
         local name = setupWindow.containerName:getText()
@@ -755,11 +456,9 @@ local function initSetupWindow()
         local items = setupWindow.itemsList:getItems() or {}
         
         if existingIndex then
-            -- Update existing
             config.containerList[existingIndex].name = name
             config.containerList[existingIndex].items = items
         else
-            -- Add new
             config.containerList[#config.containerList + 1] = {
                 name = name,
                 enabled = true,
@@ -770,7 +469,6 @@ local function initSetupWindow()
             }
         end
         
-        -- Clear inputs
         setupWindow.containerId:setItemId(0)
         setupWindow.containerName:setText("")
         setupWindow.itemsList:setItems({})
@@ -779,19 +477,16 @@ local function initSetupWindow()
         refreshContainerList()
         saveConfig()  -- Persist to CharacterDB
         
-        -- Trigger immediate sorting when rule is added/updated
-        if config.sortEnabled and sortingMacro then
+        if config.sortEnabled and sortingMacro and not isLootLocked() then
             sortingMacro:setOn()
         end
     end
     
-    -- Items list change handler
     UI.Container(function()
         if selectedContainerIndex and config.containerList[selectedContainerIndex] then
             config.containerList[selectedContainerIndex].items = setupWindow.itemsList:getItems()
             saveConfig()  -- Persist to CharacterDB
-            -- Trigger immediate sorting when items list changes
-            if config.sortEnabled and sortingMacro then
+            if config.sortEnabled and sortingMacro and not isLootLocked() then
                 sortingMacro:setOn()
             end
         end
@@ -800,44 +495,14 @@ local function initSetupWindow()
     refreshContainerList()
 end
 
--- Sync setup window checkboxes with current config
-local function syncSetupWindowCheckboxes()
-    if not setupWindow then return end
-    setupWindow.sortEnabled:setChecked(config.sortEnabled == true)
-    setupWindow.forceOpen:setChecked(config.forceOpen == true)
-    setupWindow.renameEnabled:setChecked(config.renameEnabled == true)
-    setupWindow.lootBag:setChecked(config.lootBag == true)
-end
 
---[[
-  Container Opening System v5 - Event-Driven with Deep Nesting Support
-  
-  Key Improvements:
-  1. EventBus integration for instant container open detection
-  2. Proper depth tracking with level-by-level processing
-  3. Exponential backoff on failures
-  4. Queue-based processing for reliable ordering
-  5. Container ID tracking to prevent duplicate opens
-  
-  Algorithm:
-  1. Open main backpack, wait for container:open event
-  2. Scan all open containers for nested containers
-  3. Queue nested containers for opening (tracks container item IDs to prevent duplicates)
-  4. Process queue one at a time, wait for container:open event
-  5. When container opens, re-scan for more nested containers
-  6. Repeat until queue is empty and no more nested containers found
-]]
-
--- Helper: Check if container name should be excluded from operations
--- (defined early so ContainerOpener can use it)
 local function isExcludedContainer(containerName)
     if not containerName then return false end
     local name = containerName:lower()
     return name:find("depot") or name:find("inbox") or name:find("quiver")
+        or name:find("dead") or name:find("remains") or name:find("body of")
 end
 
--- Helper: Get container window from game_containers module
--- (defined early so ContainerOpener can use it)
 local function getContainerWindow(containerId)
     local gameContainers = modules.game_containers
     if gameContainers then
@@ -864,8 +529,6 @@ local function getContainerWindow(containerId)
     return nil
 end
 
--- Helper: Get configured entry for a container by its item ID
--- (defined early so ContainerOpener can use it)
 local function getContainerConfig(itemId)
     for _, entry in ipairs(config.containerList) do
         if entry.enabled and entry.itemId == itemId then
@@ -875,9 +538,6 @@ local function getContainerConfig(itemId)
     return nil
 end
 
--- ============================================================================
--- SHARED UI HELPERS (DRY — single definition for minimize/maximize)
--- ============================================================================
 
 local function minimizeWindow(window)
     if not window then return end
@@ -920,9 +580,16 @@ local function applyRename(container)
     end
 end
 
--- ============================================================================
--- QUIVER HELPERS
--- ============================================================================
+local ContainerBFS
+
+local function schedulePendingTimeout(pending, stateGuard, onTimeoutFn)
+    schedule(ContainerBFS.SAFETY_TIMEOUT, function()
+        if ContainerBFS.pendingOpen ~= pending then return end
+        if ContainerBFS.state ~= stateGuard then return end
+        if onTimeoutFn then onTimeoutFn() end
+    end)
+end
+
 
 local function isQuiverOpen()
     for _, container in pairs(g_game.getContainers()) do
@@ -935,16 +602,6 @@ local function isQuiverOpen()
         end
     end
     return false
-end
-
-local function getInventoryItemSafe(slotId)
-    local player = g_game.getLocalPlayer()
-    if not player then return nil end
-    if player.getInventoryItem then
-        local ok, item = pcall(function() return player:getInventoryItem(slotId) end)
-        if ok and item then return item end
-    end
-    return nil
 end
 
 local function getQuiverItem()
@@ -1004,9 +661,6 @@ local function openQuiverWithRetry(attempts)
     schedule(300, function() openQuiverWithRetry(attempts - 1) end)
 end
 
--- ============================================================================
--- CLIENT SERVICE HELPERS
--- ============================================================================
 
 local getClient = nExBot.Shared.getClient
 
@@ -1043,15 +697,13 @@ local function hasEnhancedAPIs()
     return Client and Client.isOpenTibiaBR and Client.isOpenTibiaBR()
 end
 
--- ============================================================================
--- CONTAINER BFS — Event-Driven State Machine
--- Replaces ContainerTracker + ContainerQueue + ContainerScanner + ContainerOpener
--- States: IDLE → OPENING_MAIN → RUNNING → (finish) → IDLE
--- ============================================================================
 
-local ContainerBFS = {
+local MAX_OPEN_CONTAINERS = 19  -- server limit is typically 20
+
+ContainerBFS = {
     state = "IDLE",
     queue = {},             -- array of {parentId, slot, itemId}
+    queueIdx = 1,           -- index into queue for O(1) pops (replaces table.remove(queue,1))
     opened = {},            -- set: "parentId:slot" -> true
     openedTypes = {},       -- itemId -> count (prevents infinite loops)
     pendingOpen = nil,      -- {entry, ts} or nil
@@ -1066,6 +718,7 @@ local ContainerBFS = {
 function ContainerBFS.reset()
     ContainerBFS.state = "IDLE"
     ContainerBFS.queue = {}
+    ContainerBFS.queueIdx = 1
     ContainerBFS.opened = {}
     ContainerBFS.openedTypes = {}
     ContainerBFS.pendingOpen = nil
@@ -1077,7 +730,6 @@ function ContainerBFS.isActive()
     return ContainerBFS.state ~= "IDLE"
 end
 
--- Scan a container's items and enqueue nested containers for opening
 function ContainerBFS.scanContainer(container)
     if not container then return end
     local name = container:getName() or ""
@@ -1106,7 +758,6 @@ function ContainerBFS.scanContainer(container)
     end
 end
 
--- Handle paged containers — seek to unvisited pages and scan them
 function ContainerBFS.handlePages(container)
     if not container or not container.hasPages or not container:hasPages() then return end
 
@@ -1136,7 +787,6 @@ function ContainerBFS.handlePages(container)
     end
 end
 
--- Queue an item for opening (used by forward refs and onAddItem)
 function ContainerBFS.queueItem(item, containerId, slotIndex, prioritize)
     if not item then return false end
     local ok, isC = pcall(function() return item:isContainer() end)
@@ -1152,19 +802,13 @@ function ContainerBFS.queueItem(item, containerId, slotIndex, prioritize)
     if itemId then ContainerBFS.openedTypes[itemId] = typeCount + 1 end
 
     local entry = { parentId = containerId, slot = slotIndex, itemId = itemId }
-    if prioritize then
-        table.insert(ContainerBFS.queue, 1, entry)
-    else
-        ContainerBFS.queue[#ContainerBFS.queue + 1] = entry
-    end
+    ContainerBFS.queue[#ContainerBFS.queue + 1] = entry
     return true
 end
 
--- Open the next container in the queue (called from event handler, not timer chain)
 function ContainerBFS.openNext()
     if ContainerBFS.state ~= "RUNNING" then return end
 
-    -- Respect timing between opens
     local t = getNow()
     local elapsed = t - ContainerBFS.lastOpenTime
     if elapsed < ContainerBFS.OPEN_DELAY then
@@ -1172,15 +816,21 @@ function ContainerBFS.openNext()
         return
     end
 
-    -- Pop entries until we find a valid one
-    while #ContainerBFS.queue > 0 do
-        local entry = table.remove(ContainerBFS.queue, 1)
+    local openCount = 0
+    for _ in pairs(g_game.getContainers()) do openCount = openCount + 1 end
+    if openCount >= MAX_OPEN_CONTAINERS then
+        ContainerBFS.state = "PAUSED"
+        return
+    end
+
+    while ContainerBFS.queueIdx <= #ContainerBFS.queue do
+        local entry = ContainerBFS.queue[ContainerBFS.queueIdx]
+        ContainerBFS.queueIdx = ContainerBFS.queueIdx + 1
         local parent = g_game.getContainer(entry.parentId)
         if parent then
             local items = parent:getItems()
             local item = items[entry.slot]
 
-            -- Verify item is still a container at that slot
             if not item or not item:isContainer() then
                 item = nil
                 for idx, candidate in ipairs(items) do
@@ -1200,7 +850,6 @@ function ContainerBFS.openNext()
             end
 
             if item then
-                -- Set pending and open
                 local pending = { entry = entry, ts = getNow() }
                 ContainerBFS.pendingOpen = pending
                 ContainerBFS.lastOpenTime = getNow()
@@ -1212,29 +861,37 @@ function ContainerBFS.openNext()
                     g_game.open(item, nil)
                 end
 
-                -- Refresh parent for OpenTibiaBR
                 if hasEnhancedAPIs() then
                     schedule(100, function() refreshContainer(parent) end)
                 end
 
-                -- Safety timeout: if container doesn't open in time, skip and move on
                 schedule(ContainerBFS.SAFETY_TIMEOUT, function()
-                    if ContainerBFS.pendingOpen == pending then
-                        ContainerBFS.pendingOpen = nil
-                        ContainerBFS.openNext()
+                    if ContainerBFS.pendingOpen ~= pending then return end
+                    ContainerBFS.pendingOpen = nil
+                    local stillOpen = g_game.getContainer(entry.parentId)
+                    if stillOpen then
+                        for idx, candidate in ipairs(stillOpen:getItems()) do
+                            if candidate and candidate:isContainer() and candidate:getId() == entry.itemId then
+                                local key = entry.parentId .. ":" .. idx
+                                if not ContainerBFS.opened[key] then
+                                    ContainerBFS.opened[key] = true
+                                    local retry = { parentId = entry.parentId, slot = idx, itemId = entry.itemId }
+                                    ContainerBFS.queue[#ContainerBFS.queue + 1] = retry
+                                end
+                            end
+                        end
+                        ContainerBFS.scanContainer(stillOpen)
                     end
+                    ContainerBFS.openNext()
                 end)
                 return  -- Wait for onContainerOpen or safety timeout
             end
         end
-        -- Parent gone or item invalid — skip, loop continues
     end
 
-    -- Queue is empty → finish
     ContainerBFS.finish()
 end
 
--- Called from onContainerOpen when a new container window opens
 function ContainerBFS.onContainerOpened(container)
     if not container then return end
 
@@ -1259,21 +916,20 @@ function ContainerBFS.onContainerOpened(container)
             if hasEnhancedAPIs() then refreshContainer(container) end
             ContainerBFS.scanContainer(container)
             ContainerBFS.handlePages(container)
+            local parent = g_game.getContainer(pending.entry.parentId)
+            if parent then ContainerBFS.scanContainer(parent) end
             ContainerBFS.openNext()
         end
     end
 end
 
--- Finish the BFS process
 function ContainerBFS.finish()
     local prevState = ContainerBFS.state
     ContainerBFS.state = "IDLE"
     ContainerBFS.pendingOpen = nil
 
-    -- Don't apply finalization if we never actually ran
     if prevState == "IDLE" then return end
 
-    -- Apply minimize to all open containers
     if config.autoMinimize then
         schedule(100, function()
             for _, c in pairs(g_game.getContainers()) do
@@ -1282,7 +938,6 @@ function ContainerBFS.finish()
         end)
     end
 
-    -- Apply renaming
     if config.renameEnabled then
         schedule(150, function()
             for _, c in pairs(g_game.getContainers()) do
@@ -1291,35 +946,29 @@ function ContainerBFS.finish()
         end)
     end
 
-    -- Callback
     local cb = ContainerBFS.onCompleteCallback
     ContainerBFS.onCompleteCallback = nil
     if cb then schedule(50, cb) end
 
-    -- Emit event
     if EventBus and EventBus.emit then
         EventBus.emit("containers:open_all_complete")
     end
 end
 
--- Start BFS: scan all open containers, then begin opening queued entries
 function ContainerBFS.start(onComplete)
     ContainerBFS.reset()
     ContainerBFS.onCompleteCallback = onComplete
     requestContainerSync()
 
-    -- Scan all currently open containers for nested items
     for _, c in pairs(g_game.getContainers()) do
         if hasEnhancedAPIs() then refreshContainer(c) end
         ContainerBFS.scanContainer(c)
     end
 
-    -- If we already found items to open, go straight to RUNNING
     if #ContainerBFS.queue > 0 then
         ContainerBFS.state = "RUNNING"
         ContainerBFS.openNext()
     else
-        -- Nothing queued — containers may be empty or all already open
         ContainerBFS.state = "IDLE"
         if onComplete then schedule(50, onComplete) end
         if EventBus and EventBus.emit then
@@ -1328,15 +977,11 @@ function ContainerBFS.start(onComplete)
     end
 end
 
--- Stop BFS
 function ContainerBFS.stop()
     ContainerBFS.state = "IDLE"
     ContainerBFS.pendingOpen = nil
 end
 
--- ============================================================================
--- FORCE OPEN COOLDOWN (Simple cooldown for sorting macro's force-open)
--- ============================================================================
 
 local _forceOpenCooldown = {}  -- itemId -> timestamp
 local FORCE_OPEN_COOLDOWN_MS = 2000
@@ -1351,13 +996,7 @@ local function markForceOpen(itemId)
     _forceOpenCooldown[itemId] = getNow()
 end
 
--- ============================================================================
--- CONTAINER EVENT HANDLERS
--- ============================================================================
 
--- Helper: check if TargetBot looting is actively using container windows.
--- Uses isActive() (not isLocked()) so forceOpen stays suppressed while
--- corpses remain in the loot queue, preventing the open/close loop.
 local function isLootLocked()
     return TargetBot and TargetBot.Looting and TargetBot.Looting.isActive and TargetBot.Looting.isActive()
 end
@@ -1365,17 +1004,13 @@ end
 onContainerOpen(function(container, previousContainer)
     if not container then return end
 
-    -- Drive the BFS state machine
     ContainerBFS.onContainerOpened(container)
 
-    -- Apply minimize and rename
     applyMinimize(container)
     applyRename(container)
 
-    -- Trigger sorting macro (suppress during active looting to prevent container fights)
     if sortingMacro and not isLootLocked() then sortingMacro:setOn() end
 
-    -- If BFS active and config says open nested: prioritize same-type children
     if ContainerBFS.isActive() then
         local containerItem = container:getContainerItem()
         local itemId = containerItem and containerItem:getId() or 0
@@ -1392,6 +1027,11 @@ onContainerOpen(function(container, previousContainer)
 end)
 
 onContainerClose(function(container)
+    if ContainerBFS.state == "PAUSED" then
+        ContainerBFS.state = "RUNNING"
+        schedule(50, function() ContainerBFS.openNext() end)
+    end
+
     if container and not container.lootContainer and not isLootLocked() then
         if sortingMacro and (config.sortEnabled or config.forceOpen) then
             sortingMacro:setOn()
@@ -1400,7 +1040,6 @@ onContainerClose(function(container)
 end)
 
 onAddItem(function(container, slot, item, oldItem)
-    -- If BFS active and a new container item appears, queue it
     if item and ContainerBFS.isActive() and container then
         local ok, isC = pcall(function() return item:isContainer() end)
         if ok and isC then
@@ -1429,55 +1068,16 @@ onPlayerInventoryChange(function(slot, item, oldItem)
     end
 end)
 
--- ============================================================================
--- PUBLIC API
--- ============================================================================
 
--- Open all containers: open main BP if needed, then BFS
-local function openAllContainers()
-    local hasMainBP = false
-    for _ in pairs(g_game.getContainers()) do hasMainBP = true; break end
-
-    if hasMainBP then
-        -- Main BP already open, start BFS directly
-        ContainerBFS.start()
-        schedule(200, function() openQuiverWithRetry(3) end)
-    else
-        -- Open main backpack from back slot
-        local bpItem = getBack()
-        if not bpItem then
-            warn("[Container Panel] No backpack in back slot!")
-            return
-        end
-        g_game.open(bpItem)
-        -- Use OPENING_MAIN state: BFS waits for first container:open event
-        ContainerBFS.reset()
-        ContainerBFS.state = "OPENING_MAIN"
-        -- Safety: if main BP doesn't open in 3s, abort
-        local pending = {}
-        ContainerBFS.pendingOpen = pending
-        schedule(3000, function()
-            if ContainerBFS.pendingOpen == pending and ContainerBFS.state == "OPENING_MAIN" then
-                ContainerBFS.state = "IDLE"
-                ContainerBFS.pendingOpen = nil
-            end
-        end)
-        schedule(400, function() openQuiverWithRetry(5) end)
-    end
-end
-
--- Reopen all backpacks: close all → open from back slot → BFS
 function reopenBackpacks(onComplete)
     if EventBus and EventBus.emit then
         EventBus.emit("containers:close_all")
     end
 
-    -- Close all containers
     for _, container in pairs(g_game.getContainers()) do
         g_game.close(container)
     end
 
-    -- After close, open main BP and start BFS
     schedule(300, function()
         local bpItem = getBack()
         if not bpItem then
@@ -1487,7 +1087,6 @@ function reopenBackpacks(onComplete)
         end
         g_game.open(bpItem)
 
-        -- Handle purse
         if config.purse then
             schedule(300, function()
                 local purseItem = getPurse()
@@ -1495,27 +1094,19 @@ function reopenBackpacks(onComplete)
             end)
         end
 
-        -- Open quiver
         schedule(400, function() openQuiverWithRetry(5) end)
 
-        -- Use OPENING_MAIN state: BFS waits for first container:open event
         ContainerBFS.reset()
         ContainerBFS.state = "OPENING_MAIN"
         ContainerBFS.onCompleteCallback = onComplete
-        -- Safety timeout
         local pending = {}
         ContainerBFS.pendingOpen = pending
-        schedule(3000, function()
-            if ContainerBFS.pendingOpen == pending and ContainerBFS.state == "OPENING_MAIN" then
-                ContainerBFS.finish()
-            end
+        schedulePendingTimeout(pending, "OPENING_MAIN", function()
+            ContainerBFS.finish()
         end)
     end)
 end
 
--- ============================================================================
--- BUTTON HANDLERS
--- ============================================================================
 
 containerUI.openAll.onClick = function(widget)
     config.autoOpenOnLogin = not config.autoOpenOnLogin
@@ -1567,9 +1158,6 @@ containerUI.autoMinSwitch.onClick = function(widget)
     saveConfig()
 end
 
--- ============================================================================
--- AUTO-OPEN ON RE-LOGIN
--- ============================================================================
 
 local lastKnownHealth = 0
 local hasTriggeredThisSession = false
@@ -1596,6 +1184,11 @@ local function triggerAutoOpen()
 end
 
 onPlayerHealthChange(function(healthPercent)
+    if healthPercent == 0 then
+        hasTriggeredThisSession = false
+        lastKnownHealth = 0
+        return
+    end
     if not config.autoOpenOnLogin then return end
     if lastKnownHealth == 0 and healthPercent > 0 and not hasTriggeredThisSession then
         hasTriggeredThisSession = true
@@ -1604,14 +1197,6 @@ onPlayerHealthChange(function(healthPercent)
     lastKnownHealth = healthPercent
 end)
 
-onPlayerHealthChange(function(healthPercent)
-    if healthPercent == 0 then
-        hasTriggeredThisSession = false
-        lastKnownHealth = 0
-    end
-end)
-
--- Initial startup check
 schedule(1000, function()
     if not config.autoOpenOnLogin then return end
     if hasTriggeredThisSession then return end
@@ -1626,9 +1211,6 @@ schedule(1000, function()
     end
 end)
 
--- ============================================================================
--- ITEM SORTING SYSTEM
--- ============================================================================
 
 local function moveItemToContainer(item, destContainer)
     if not item or not destContainer then return false end
@@ -1654,7 +1236,7 @@ end
 
 local function isContainerOpen(itemId)
     if not itemId then return false end
-    for _, container in pairs(g_game.getContainers()) do
+    for _, container in pairs(getCachedContainers()) do
         local containerItem = container:getContainerItem()
         if containerItem and containerItem:getId() == itemId then
             return true
@@ -1676,7 +1258,7 @@ local function openConfiguredContainer(itemId)
         end
     end
 
-    for _, container in pairs(g_game.getContainers()) do
+    for _, container in pairs(getCachedContainers()) do
         for _, item in ipairs(container:getItems()) do
             if item:isContainer() and item:getId() == itemId then
                 markForceOpen(itemId)
@@ -1696,25 +1278,34 @@ local function openConfiguredContainer(itemId)
     return false
 end
 
--- ============================================================================
--- SORTING MACRO (runs periodically, paused during BFS)
--- ============================================================================
+local cachedContainers = nil
+local function getCachedContainers()
+    if not cachedContainers then cachedContainers = g_game.getContainers() end
+    return cachedContainers
+end
+
 
 sortingMacro = macro(300, function(m)
+    cachedContainers = nil  -- reset per-tick cache
+
     if not config.sortEnabled and not config.forceOpen then
         m:setOff()
+        cachedContainers = nil
         return
     end
 
-    -- Don't interfere during container BFS
-    if ContainerBFS.isActive() then return end
+    if ContainerBFS.isActive() then
+        cachedContainers = nil
+        return
+    end
 
-    -- Don't interfere during active looting
-    if isLootLocked() then return end
+    if isLootLocked() then
+        cachedContainers = nil
+        return
+    end
 
-    -- Item sorting
     if config.sortEnabled then
-        for _, container in pairs(getContainers()) do
+        for _, container in pairs(getCachedContainers()) do
             local containerName = container:getName()
             if not isExcludedContainer(containerName) then
                 local containerItemId = container:getContainerItem():getId()
@@ -1734,7 +1325,6 @@ sortingMacro = macro(300, function(m)
         end
     end
 
-    -- Force open containers (early return above already guards loot lock)
     if config.forceOpen then
         for _, entry in ipairs(config.containerList) do
             if entry.enabled then
@@ -1747,7 +1337,6 @@ sortingMacro = macro(300, function(m)
             end
         end
 
-        -- Force open purse
         if config.purse then
             local purseContainer = getContainerByItem(PURSE_ITEM_ID)
             if not purseContainer and not isContainerOpen(PURSE_ITEM_ID) then
@@ -1762,7 +1351,6 @@ sortingMacro = macro(300, function(m)
             end
         end
 
-        -- Force open loot bag
         if config.lootBag then
             local lootBagContainer = getContainerByItem(LOOT_BAG_ITEM_ID)
             if not lootBagContainer and not isContainerOpen(LOOT_BAG_ITEM_ID) then
@@ -1783,6 +1371,6 @@ sortingMacro = macro(300, function(m)
         end
     end
 
-    -- Nothing to do
     m:setOff()
+    cachedContainers = nil
 end)

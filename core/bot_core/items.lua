@@ -14,9 +14,7 @@
 local Items = {}
 BotCore.Items = Items
 
--- ============================================================================
 -- HOTKEY-STYLE ITEM USAGE
--- ============================================================================
 
 -- Use item on self (like pressing a hotkey) - works without open backpack
 -- @param itemId: item ID to use
@@ -86,9 +84,7 @@ function Items.useOn(itemId, target, subType)
   return false
 end
 
--- ============================================================================
 -- ITEM COUNT AND FINDING
--- ============================================================================
 
 -- Get item count in inventory and containers
 -- @param itemId: item ID to count
@@ -106,9 +102,7 @@ function Items.has(itemId, minAmount)
   return Items.count(itemId) >= minAmount
 end
 
--- ============================================================================
 -- CONTAINER UTILITIES
--- ============================================================================
 
 -- Get container by name
 -- @param name: container name
@@ -153,9 +147,7 @@ function Items.isContainerFull(container)
   return container:getCapacity() <= #container:getItems()
 end
 
--- ============================================================================
 -- EQUIP STATE DETECTION
--- ============================================================================
 
 -- Mapping of inactive -> active item IDs (rings, amulets, etc.)
 local INACTIVE_TO_ACTIVE = {
@@ -229,9 +221,7 @@ function Items.isEquipped(itemId)
   return false
 end
 
--- ============================================================================
 -- GROUND ITEM UTILITIES
--- ============================================================================
 
 -- Find item on ground (current floor)
 -- @param itemId: item ID to find
@@ -274,9 +264,7 @@ function Items.drop(itemIdOrObject)
   return true
 end
 
--- ============================================================================
 -- TILE ITEM CHECKS
--- ============================================================================
 
 -- Check if item is on a specific tile
 -- @param itemId: item ID to find
@@ -303,9 +291,7 @@ function Items.isOnTile(itemId, tileOrPos)
   return false
 end
 
--- ============================================================================
 -- INITIALIZATION
--- ============================================================================
 
 if logInfo then
   logInfo("[BotCore] Items module loaded")

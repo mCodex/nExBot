@@ -14,13 +14,11 @@
     CaveBot.isNearFloorChangeTile
     CaveBot.getStepDuration(diagonal)
     CaveBot.isPlayerWalking()
-    CaveBot.doWalking()
 ]]
 
--- ============================================================================
 -- DEPENDENCIES
--- ============================================================================
 
+local zChanging = nExBot.zChanging or function() return false end
 local PathUtils    = PathUtils
 if not PathUtils then
   local ok, mod = pcall(require, "utils.path_utils")
@@ -45,9 +43,7 @@ if not CaveBot.fullResetWalking then CaveBot.fullResetWalking = function() end e
 
 local getClient = nExBot.Shared.getClient
 
--- ============================================================================
 -- DIRECTION & TILE UTILITIES (thin delegates)
--- ============================================================================
 
 local Dirs          = Directions or {}
 local DIR_TO_OFFSET = Dirs.DIR_TO_OFFSET or {}
@@ -106,9 +102,7 @@ local function stopAutoWalk()
   if g_game and g_game.stop then g_game.stop() end
 end
 
--- ============================================================================
 -- KEYBOARD NUDGE (fallback when pathfinding fails)
--- ============================================================================
 
 local ADJACENT_DIRS = {}
 if Directions and Directions.ADJACENT then
@@ -121,6 +115,7 @@ end
 
 local lastNudgeDir  = nil
 local lastNudgeTime = 0
+local lastStepTime  = 0
 
 --- Try a single keyboard step toward dest. Returns "nudge" or false.
 local function tryKeyboardNudge(playerPos, dest)
@@ -156,19 +151,15 @@ local function tryKeyboardNudge(playerPos, dest)
   return false
 end
 
--- ============================================================================
 -- MODULE STATE (minimal)
--- ============================================================================
 
 local lastWalkZ   = nil
 local lastSafePos = nil
 local MAX_PATHFIND_DIST = 50
 
--- ============================================================================
 -- CORE: FIND A WALKABLE PATH
 -- Tries cached cursor first, then strict, then relaxed.
 -- Always validates first step against canWalkDirection before accepting.
--- ============================================================================
 
 --- Check if a direction (or its smoothed variant) is physically walkable.
 --- Returns the walkable direction, or nil.
@@ -262,11 +253,9 @@ local function findWalkablePath(playerPos, dest, opts)
   return nil, false
 end
 
--- ============================================================================
 -- DISPATCH: KEYBOARD STEP vs AUTOWALK
--- ============================================================================
 
-local KEYBOARD_THRESHOLD = 12
+local KEYBOARD_THRESHOLD = 2
 
 --- Walk a single keyboard step along the path. Returns true on success.
 local function keyboardStep(path, playerPos, curIdx)
@@ -276,8 +265,13 @@ local function keyboardStep(path, playerPos, curIdx)
   local walkDir = resolveWalkableDir(dir)
   if not walkDir then return false end
 
+  local isDiag = walkDir >= 4
+  local stepDur = PS().rawStepDuration(isDiag) or 180
+  if (now - lastStepTime) < stepDur then return "walking" end
+
   PS().walkStep(walkDir)
-  PS().advanceCursor(1, PS().rawStepDuration(walkDir >= 4))
+  lastStepTime = now
+  PS().advanceCursor(1, stepDur)
   return true
 end
 
@@ -314,9 +308,7 @@ local function autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist)
   return true
 end
 
--- ============================================================================
 -- MAIN: CaveBot.walkTo
--- ============================================================================
 
 CaveBot.walkTo = function(dest, maxDist, params)
   local playerPos = pos()
@@ -485,9 +477,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
   end
 end
 
--- ============================================================================
 -- CONVENIENCE & PUBLIC API
--- ============================================================================
 
 CaveBot.safeWalkTo = function(dest, maxDist, params)
   params = params or {}
@@ -504,25 +494,6 @@ CaveBot.isPlayerWalking = function()
   return player and player.isWalking and player:isWalking()
 end
 
-CaveBot.getWalkWaitTime = function()
-  if not CaveBot.isPlayerWalking() then return 0 end
-  if PS() == NOOP_PS then return 200 end
-  return PS().rawStepDuration(false)
-end
-
-CaveBot.isPositionWalkable = function(checkPos, ignoreCreatures)
-  if PathUtils and PathUtils.isTileWalkable then
-    return PathUtils.isTileWalkable(checkPos, ignoreCreatures or false)
-  end
-  local Client = getClient()
-  local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
-  return tile and tile:isWalkable(ignoreCreatures or false) or false
-end
-
-CaveBot.doWalking = function()
-  return player and player:isWalking()
-end
-
 CaveBot.resetWalking = function()
   lastWalkZ = nil
   if PS() then PS().fullReset() end
@@ -537,9 +508,7 @@ CaveBot.stopAutoWalk          = stopAutoWalk
 CaveBot.isFloorChangeTile     = isFloorChangeTile
 CaveBot.isNearFloorChangeTile = isNearFloorChangeTile
 
--- ============================================================================
 -- EVENT: Position change (update safe pos, handle floor change)
--- ============================================================================
 
 onPlayerPositionChange(function(newPos, oldPos)
   if zChanging() then return end

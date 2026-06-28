@@ -1,35 +1,17 @@
 setDefaultTab("Cave")
 
-g_ui.loadUIFromString([[
-CaveBotControlPanel < Panel
-  margin-top: 5
-  layout:
-    type: verticalBox
-    fit-children: true
-
-  HorizontalSeparator
-  
-  Label
-    text-align: center
-    text: CaveBot Control Panel
-    font: verdana-11px-rounded
-    margin-top: 3
-
-  HorizontalSeparator
-    
-  Panel
-    id: buttons
-    margin-top: 2
-    layout:
-      type: grid
-      cell-size: 86 20
-      cell-spacing: 1
-      flow: true
-      fit-children: true
-
-  HorizontalSeparator
-    margin-top: 3
-]])
+do
+  local path = nExBot.paths.base .. "/core/cavebot_control_panel.otui"
+  local content = nil
+  if g_resources and g_resources.readFileContents then
+    content = g_resources.readFileContents(path)
+  end
+  if content then
+    g_ui.loadUIFromString(content)
+  else
+    warn("[CaveBot] Failed to load cavebot_control_panel.otui from " .. path)
+  end
+end
 
 local panel = UI.createWidget("CaveBotControlPanel")
 
@@ -44,20 +26,16 @@ storage.caveBot = {
 
 local forceRefill = UI.Button("Force Refill", function(widget)
     storage.caveBot.forceRefill = true
-    print("[CaveBot] Going back on refill on next supply check.")
 end, panel.buttons)
 
 local backStop = UI.Button("Back & Stop", function(widget)
     storage.caveBot.backStop = true
-    print("[CaveBot] Going back to city on next supply check and turning off CaveBot on depositer action.")
 end, panel.buttons)
 
 local backTrainers = UI.Button("To Trainers", function(widget)
     storage.caveBot.backTrainers = true
-    print("[CaveBot] Going back to city on next supply check and going to label 'toTrainers' on depositer action.")
 end, panel.buttons)
 
 local backOffline = UI.Button("Offline", function(widget)
     storage.caveBot.backOffline = true
-    print("[CaveBot] Going back to city on next supply check and going to label 'toOfflineTraining' on depositer action.")
 end, panel.buttons)

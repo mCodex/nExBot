@@ -13,10 +13,8 @@
 -- Declare as global (not local) so it's accessible after dofile
 Directions = Directions or {}
 
--- ============================================================================
 -- DIRECTION CONSTANTS (from OTClient)
 -- These should match the global constants defined by OTClient
--- ============================================================================
 
 -- Define locals if globals don't exist (for standalone testing)
 local _North = North or 0
@@ -28,9 +26,7 @@ local _SouthEast = SouthEast or 5
 local _SouthWest = SouthWest or 6
 local _NorthWest = NorthWest or 7
 
--- ============================================================================
 -- DIRECTION TO OFFSET MAPPING
--- ============================================================================
 
 Directions.DIR_TO_OFFSET = {
   [_North]     = { x =  0, y = -1 },
@@ -43,9 +39,7 @@ Directions.DIR_TO_OFFSET = {
   [_NorthWest] = { x = -1, y = -1 },
 }
 
--- ============================================================================
 -- OFFSET TO DIRECTION MAPPING (String key for fast lookup)
--- ============================================================================
 
 Directions.OFFSET_TO_DIR = {
   ["0,-1"]  = _North,
@@ -58,9 +52,7 @@ Directions.OFFSET_TO_DIR = {
   ["-1,-1"] = _NorthWest,
 }
 
--- ============================================================================
 -- DIRECTION ARRAYS
--- ============================================================================
 
 -- Cardinal directions only (4 directions)
 Directions.CARDINAL = { _North, _East, _South, _West }
@@ -86,9 +78,7 @@ Directions.ADJACENT_OFFSETS = {
   { x = -1, y = -1 },  -- NorthWest
 }
 
--- ============================================================================
 -- OPPOSITE DIRECTIONS
--- ============================================================================
 
 Directions.OPPOSITE = {
   [_North]     = _South,
@@ -101,9 +91,7 @@ Directions.OPPOSITE = {
   [_NorthWest] = _SouthEast,
 }
 
--- ============================================================================
 -- ADJACENT DIRECTIONS (for "similar direction" checks)
--- ============================================================================
 
 Directions.ADJACENT = {
   [_North]     = {[_NorthEast] = true, [_NorthWest] = true},
@@ -116,9 +104,7 @@ Directions.ADJACENT = {
   [_NorthWest] = {[_West] = true, [_North] = true},
 }
 
--- ============================================================================
 -- DIRECTION NAMES (for debugging)
--- ============================================================================
 
 Directions.NAMES = {
   [_North]     = "North",
@@ -131,9 +117,7 @@ Directions.NAMES = {
   [_NorthWest] = "NorthWest",
 }
 
--- ============================================================================
 -- HELPER FUNCTIONS
--- ============================================================================
 
 --[[
   Get offset for direction

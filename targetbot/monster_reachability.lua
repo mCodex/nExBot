@@ -9,22 +9,19 @@
   Populates: MonsterAI.Reachability
 ]]
 
+local zChanging = nExBot.zChanging or function() return false end
 local H = MonsterAI._helpers
 local nowMs            = H.nowMs
 local safeGetId        = H.safeGetId
 local safeIsDead       = H.safeIsDead
 local safeIsRemoved    = H.safeIsRemoved
 
--- Guard: returns true when TargetBot is disabled
-local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 local safeIsMonster    = H.safeIsMonster
 local safeCreatureCall = H.safeCreatureCall
 local getClient        = H.getClient
 local isCreatureValid  = H.isCreatureValid
 
--- ============================================================================
 -- STATE
--- ============================================================================
 
 MonsterAI.Reachability = MonsterAI.Reachability or {}
 local R = MonsterAI.Reachability
@@ -42,9 +39,7 @@ R.stats = {
 
 local DIR_OFFSETS = Directions.DIR_TO_OFFSET
 
--- ============================================================================
 -- CORE CHECK
--- ============================================================================
 
 function R.isReachable(creature, forceRecheck)
   if not creature then return false, "invalid", nil end
@@ -71,7 +66,7 @@ function R.isReachable(creature, forceRecheck)
 
   R.stats.checksPerformed = R.stats.checksPerformed + 1
 
-  local playerPos = player and (function() local ok,p = pcall(function() return player:getPosition() end); return ok and p end)()
+  local playerPos = player and SafeCreature.getPosition(player) or nil
   local creaturePos = safeCreatureCall(creature, "getPosition", nil)
   if not playerPos or not creaturePos then return R.cacheResult(id, false, "no_position", nil) end
 
@@ -145,9 +140,7 @@ function R.isReachable(creature, forceRecheck)
   return R.cacheResult(id, true, hasLOS and "clear" or "no_los_melee_ok", result)
 end
 
--- ============================================================================
 -- CACHE / BLOCKED MANAGEMENT
--- ============================================================================
 
 function R.cacheResult(id, reachable, reason, path)
   R.cache[id]     = { reachable = reachable, reason = reason, path = path }
@@ -176,9 +169,7 @@ function R.cleanup()
   end
 end
 
--- ============================================================================
 -- BATCH & ACCESSORS
--- ============================================================================
 
 function R.filterReachable(creatures)
   local reach, unreach = {}, {}
@@ -214,9 +205,7 @@ function R.getStats()
            byReason = R.stats.byReason, blockedCount = bc, cacheSize = cc }
 end
 
--- ============================================================================
 -- TICK REGISTRATION
--- ============================================================================
 
 if UnifiedTick and UnifiedTick.register then
   UnifiedTick.register({ id = "monsterai_reachability_cleanup", interval = 10000,
@@ -234,14 +223,14 @@ end
 -- EventBus hooks
 if EventBus and EventBus.on then
   EventBus.on("player:position", function(newPos, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if oldPos then
       local d = math.max(math.abs(newPos.x - oldPos.x), math.abs(newPos.y - oldPos.y))
       if d > 2 then R.clearCache() end
     end
   end)
   EventBus.on("creature:move", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if creature and safeIsMonster(creature) then
       local id = safeGetId(creature)
       if id and R.blockedCreatures[id] then R.clearBlocked(id); R.cache[id] = nil; R.cacheTime[id] = nil end

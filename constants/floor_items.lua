@@ -13,9 +13,7 @@
 -- Declare as global (not local) so it's accessible after dofile
 FloorItems = FloorItems or {}
 
--- ============================================================================
 -- MINIMAP COLORS FOR FLOOR CHANGE
--- ============================================================================
 
 FloorItems.FLOOR_CHANGE_COLORS = {
   [210] = true,  -- Stairs up
@@ -24,9 +22,7 @@ FloorItems.FLOOR_CHANGE_COLORS = {
   [213] = true,  -- Ladder
 }
 
--- ============================================================================
 -- FLOOR CHANGE ITEMS (Stairs, Ramps, Ladders, Holes, Teleports)
--- ============================================================================
 
 FloorItems.FLOOR_CHANGE = {
   -- ═══════════════════════════════════════════════════════════════════════
@@ -134,9 +130,7 @@ FloorItems.FLOOR_CHANGE = {
   [1958] = true,  -- City teleport
 }
 
--- ============================================================================
 -- FIELD ITEMS (Fire, Energy, Poison, Magic Walls)
--- ============================================================================
 
 FloorItems.FIELDS = {
   -- ═══════════════════════════════════════════════════════════════════════
@@ -178,9 +172,7 @@ for id, _ in pairs(FloorItems.FIELDS) do
   FloorItems.FIELD_ITEMS[id] = true
 end
 
--- ============================================================================
 -- HELPER FUNCTIONS
--- ============================================================================
 
 --[[
   Check if item ID is a floor-change item

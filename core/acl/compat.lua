@@ -8,9 +8,7 @@
 
 local Client = ClientService
 
--- =========================================================================
 -- SAFECALL ENHANCEMENTS (kept — these are used by other modules)
--- =========================================================================
 
 if SafeCall then
   local origUseWith = SafeCall.useWith
@@ -35,9 +33,7 @@ if SafeCall then
   end
 end
 
--- =========================================================================
 -- EXPORT (empty — no GameWrapper/MapWrapper needed)
--- =========================================================================
 
 local Compat = {}
 ACLCompat = Compat

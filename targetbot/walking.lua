@@ -11,18 +11,11 @@ local getClient = nExBot.Shared.getClient
 
 local getClientVersion = nExBot.Shared.getClientVersion
 
--- Load PathUtils if available (shared module for DRY)
-local PathUtils = nil
+-- PathUtils is set as global by path_utils.lua (loaded in Phase 3 by _Loader)
+local SharedHelpers = nExBot.SharedHelpers or {}
 local function ensurePathUtils()
   if PathUtils then return PathUtils end
-  -- OTClient compatible - just try dofile
-  local success = pcall(function()
-    dofile("nExBot/utils/path_utils.lua")
-  end)
-  -- After dofile, PathUtils should be global
-  if success then
-    PathUtils = PathUtils  -- Re-check global
-  end
+  SharedHelpers.ensurePathUtils()
   return PathUtils
 end
 ensurePathUtils()
@@ -43,132 +36,23 @@ local DIR_TO_OFFSET = (PathUtils and PathUtils.DIR_TO_OFFSET) or {
   [NorthWest] = {x = -1, y = -1}
 }
 
--- Use PathUtils for floor-change colors if available
-local FLOOR_CHANGE_COLORS = (PathUtils and PathUtils.FLOOR_CHANGE_COLORS) or {
-  [210] = true, [211] = true, [212] = true, [213] = true,
-}
-
--- Use PathUtils for floor-change items if available
-local FLOOR_CHANGE_ITEMS = (PathUtils and PathUtils.FLOOR_CHANGE_ITEMS) or {
-  -- Minimal fallback set
-  [414]=true,[415]=true,[416]=true,[417]=true,
-  [1956]=true,[1957]=true,[1958]=true,[1959]=true,
-  [1219]=true,[384]=true,[386]=true,[418]=true,
-}
-
--- Use PathUtils for floor-change detection (DRY)
+-- Use PathUtils for floor-change detection (DRY, guaranteed loaded by ensurePathUtils)
 local function isFloorChangeTile(pos)
-  if PathUtils and PathUtils.isFloorChangeTile then
-    return PathUtils.isFloorChangeTile(pos)
-  end
-  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isFloorChangeTile then
-    return TargetCore.PathSafety.isFloorChangeTile(pos)
-  end
-  -- Fallback implementation
-  if not pos then return false end
-  local Client = getClient()
-  local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor and g_map.getMinimapColor(pos)) or 0
-  if FLOOR_CHANGE_COLORS[color] then return true end
-  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile and g_map.getTile(pos))
-  if not tile then return false end
-  local ground = tile:getGround()
-  if ground and FLOOR_CHANGE_ITEMS[ground:getId()] then return true end
-  local topUse = tile:getTopUseThing()
-  if topUse and topUse:isItem() and FLOOR_CHANGE_ITEMS[topUse:getId()] then return true end
-  local top = tile:getTopThing()
-  if top and top:isItem() and FLOOR_CHANGE_ITEMS[top:getId()] then return true end
-  return false
+  return PathUtils.isFloorChangeTile(pos)
 end
 
--- Use PathUtils for path validation (DRY)
+-- Use TargetCore for path floor-change validation (DRY)
 local function pathCrossesFloorChange(path, startPos)
-  if PathUtils and PathUtils.pathCrossesFloorChange then
-    return PathUtils.pathCrossesFloorChange(path, startPos)
-  end
-  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.pathCrossesFloorChange then
-    return TargetCore.PathSafety.pathCrossesFloorChange(path, startPos)
-  end
-  -- Fallback implementation
-  if not path or #path == 0 or not startPos then return false end
-  local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
-  for i = 1, #path do
-    local off = DIR_TO_OFFSET[path[i]]
-    if off then
-      probe.x = probe.x + off.x
-      probe.y = probe.y + off.y
-      if isFloorChangeTile(probe) then
-        return true
-      end
-    end
-  end
-  return false
+  return TargetCore.PathSafety.pathCrossesFloorChange(path, startPos)
 end
 
--- ============================================================================
--- ANTI-ZIGZAG SYSTEM
--- ============================================================================
-
-local AntiZigzag = {
-  lastDirection = nil,
-  lastDirectionTime = 0,
-  minChangeDelay = 100,  -- Minimum ms between direction changes
-  directionHistory = {},  -- Ring buffer for last N directions
-  historySize = 3,
-}
-
--- Check if two directions are similar (same or adjacent)
+-- Use PathUtils for direction relationship checks (DRY)
 local function areSimilarDirections(dir1, dir2)
-  if PathUtils and PathUtils.areSimilarDirections then
-    return PathUtils.areSimilarDirections(dir1, dir2)
-  end
-  if dir1 == dir2 then return true end
-  -- Adjacent check using offsets
-  local off1 = DIR_TO_OFFSET[dir1]
-  local off2 = DIR_TO_OFFSET[dir2]
-  if not off1 or not off2 then return false end
-  return math.abs(off1.x - off2.x) <= 1 and math.abs(off1.y - off2.y) <= 1
+  return PathUtils.areSimilarDirections(dir1, dir2)
 end
 
--- Check if two directions are opposite
 local function areOppositeDirections(dir1, dir2)
-  if PathUtils and PathUtils.areOppositeDirections then
-    return PathUtils.areOppositeDirections(dir1, dir2)
-  end
-  local off1 = DIR_TO_OFFSET[dir1]
-  local off2 = DIR_TO_OFFSET[dir2]
-  if not off1 or not off2 then return false end
-  return off1.x == -off2.x and off1.y == -off2.y
-end
-
--- Validate direction change to prevent zigzag
-local function validateDirectionChange(newDir)
-  local currentTime = now
-  local timeSinceChange = currentTime - AntiZigzag.lastDirectionTime
-  
-  -- Allow any direction if enough time passed
-  if timeSinceChange >= AntiZigzag.minChangeDelay then
-    -- Check for oscillation pattern
-    if #AntiZigzag.directionHistory >= 2 then
-      local prevDir = AntiZigzag.directionHistory[#AntiZigzag.directionHistory]
-      local prevPrevDir = AntiZigzag.directionHistory[#AntiZigzag.directionHistory - 1]
-      
-      -- Detect A-B-A pattern (zigzag)
-      if prevPrevDir == newDir and areOppositeDirections(prevDir, newDir) then
-        -- Zigzag detected, dampen the change
-        return false
-      end
-    end
-    
-    -- Record direction
-    AntiZigzag.directionHistory[#AntiZigzag.directionHistory + 1] = newDir
-    TrimArray(AntiZigzag.directionHistory, AntiZigzag.historySize)
-    AntiZigzag.lastDirection = newDir
-    AntiZigzag.lastDirectionTime = currentTime
-    return true
-  end
-  
-  -- Too soon, only allow similar direction
-  return areSimilarDirections(AntiZigzag.lastDirection, newDir)
+  return PathUtils.areOppositeDirections(dir1, dir2)
 end
 
 -- Path cache for TargetBot walking
@@ -321,12 +205,6 @@ TargetBot.walk = function()
       end
     end
     
-    -- ANTI-ZIGZAG: Validate direction change
-    if not validateDirectionChange(nextDir) then
-      -- Direction change too rapid, wait for next tick
-      return
-    end
-    
     -- Use cached path - take first step
     walk(nextDir)
     WalkCache.idx = WalkCache.idx + 1
@@ -359,13 +237,6 @@ TargetBot.walk = function()
     WalkCache.timestamp = now
     WalkCache.idx = 1
     
-    -- ANTI-ZIGZAG: Validate first step direction
-    local firstDir = path[WalkCache.idx]
-    if not validateDirectionChange(firstDir) then
-      -- Direction change too rapid, wait for next tick
-      return
-    end
-    
     -- Take first step
     walk(firstDir)
     WalkCache.idx = WalkCache.idx + 1
@@ -380,8 +251,4 @@ TargetBot.clearWalk = function()
   dest = nil
   WalkCache.path = nil
   WalkCache.timestamp = 0
-  -- Reset anti-zigzag state
-  AntiZigzag.lastDirection = nil
-  AntiZigzag.lastDirectionTime = 0
-  AntiZigzag.directionHistory = {}
 end

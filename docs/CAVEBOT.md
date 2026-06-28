@@ -359,6 +359,16 @@ The Depositor module handles loot depositing at the depot. Configure it through 
 
 When TargetBot's Lure/Pull system is active, CaveBot **pauses** waypoint execution so the player stays in place and fights. Navigation only resumes after the lure target count is satisfied or all nearby monsters are dead.
 
+### Combat Blocking
+
+CaveBot checks three conditions before walking:
+
+1. **TargetBot.shouldWaitForMonsters()** — pauses when targetable monsters are on screen (respects lure/pull allowCaveBot override)
+2. **AttackStateMachine.isActive()** — blocks while ASM is ENGAGING or LOCKED (attack in progress)
+3. **EventTargeting.isCombatActive()** — blocks during active combat events
+
+All three respect the `TargetBot.isCaveBotActionAllowed()` override, which lure/pull systems set via `TargetBot.allowCaveBot()`. The `closeLure` path now checks ASM state before allowing CaveBot — preventing walk-during-combat when monsters are nearby.
+
 ---
 
 ## 🎥 Recorder
@@ -463,9 +473,10 @@ end
 
 1. Is CaveBot **enabled** and **started** (`Ctrl+Z`)?
 2. Is TargetBot's Pull System pausing navigation?
-3. Are the waypoint coordinates reachable from your current position?
-4. Is there a door or obstacle blocking the path?
-5. Check for field tiles — enable "Ignore fields" if needed.
+3. Is the AttackStateMachine active (ENGAGING/LOCKED)? CaveBot blocks during attacks.
+4. Are the waypoint coordinates reachable from your current position?
+5. Is there a door or obstacle blocking the path?
+6. Check for field tiles — enable "Ignore fields" if needed.
 
 ### Stuck at a door
 

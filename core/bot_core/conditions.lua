@@ -9,9 +9,7 @@
 
 local ConditionChecker = {}
 
--- ============================================================================
 -- PURE COMPARISON FUNCTIONS
--- ============================================================================
 
 -- Compare value with sign (pure function)
 local function compare(current, sign, target)
@@ -27,9 +25,7 @@ local function compare(current, sign, target)
   return false
 end
 
--- ============================================================================
 -- PUBLIC API
--- ============================================================================
 
 -- Check single condition against stats cache
 -- origin: "HP%", "HP", "MP%", "MP", "burst"
@@ -120,9 +116,7 @@ function ConditionChecker.hasMana(amount, stats)
   return false
 end
 
--- ============================================================================
 -- CONDITION ENTRY EVALUATION
--- ============================================================================
 
 -- Evaluate a heal/attack entry condition
 -- entry: { origin, sign, value, enabled, cost, ... }

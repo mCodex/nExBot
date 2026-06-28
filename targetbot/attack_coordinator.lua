@@ -1,6 +1,7 @@
 -- TargetBot Attack Coordinator Module
 -- Main attack loop, walk/chase/reposition, lure/pull system
 
+local zChanging = nExBot.zChanging or function() return false end
 local getClient = nExBot.Shared.getClient
 local SC = SafeCreature or {}
 local Dirs = Directions
@@ -19,8 +20,6 @@ local delayFrom = nil
 local dynamicLureDelay = false
 local smartPullState = { lastEval = 0, lowStreak = 0, highStreak = 0, active = false, lastChange = 0 }
 local dynamicLureState = { lastTrigger = 0 }
-
-local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 
 local function countMonstersByRange(range)
   local specs = CreatureCache.getNearby(range, range)
@@ -162,7 +161,10 @@ local function evaluateLureAndPull(creature, config, targets)
     end
     if config.closeLure and config.closeLureAmount then
       if safeGetMonsters(1) >= config.closeLureAmount then
-        TargetBot.allowCaveBot(250)
+        local asmActive = AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive()
+        if not asmActive then
+          TargetBot.allowCaveBot(250)
+        end
         return true
       end
     end
@@ -221,7 +223,7 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     ChaseController.syncMode()
   elseif (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode) then
     local desiredMode = useNativeChase and 1 or 0
-    local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or -1
+    local currentMode = ClientService.getChaseMode() or -1
     if currentMode ~= desiredMode then
       if Client and Client.setChaseMode then Client.setChaseMode(desiredMode)
       elseif g_game and g_game.setChaseMode then g_game.setChaseMode(desiredMode) end
@@ -229,7 +231,16 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     end
   end
   TargetBot.usingNativeChase = useNativeChase
-  if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.validateTarget then
+  -- Skip reachability check if ASM is already locked on this target — the attack is working
+  local creatureId = nil
+  pcall(function() creatureId = creature:getId() end)
+  local asmAlreadyAttacking = AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive()
+  local asmTargetId = nil
+  if asmAlreadyAttacking then
+    pcall(function() asmTargetId = AttackStateMachine.getTargetId and AttackStateMachine.getTargetId() end)
+  end
+  local sameTarget = asmAlreadyAttacking and creatureId == asmTargetId
+  if not sameTarget and MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.validateTarget then
     if TargetBot then
       TargetBot.UnreachableTracker = TargetBot.UnreachableTracker or {
         entries = {}, ttl = 800, lastCleanup = 0, cleanupInterval = 2000
@@ -238,8 +249,6 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     local tracker = TargetBot and TargetBot.UnreachableTracker or nil
     local timeNow = now or (os.time() * 1000)
     local isValid, reason, path = MonsterAI.Reachability.validateTarget(creature)
-    local creatureId = nil
-    pcall(function() creatureId = creature:getId() end)
     if isValid and tracker and creatureId then tracker.entries[creatureId] = nil end
     if not isValid then
       if reason == "no_path" or reason == "blocked_tile" then
@@ -271,7 +280,7 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
       end
     end
   end
-  local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+  local currentTarget = ClientService.getAttackingCreature()
   local currentTargetId = nil
   local wantedTargetId = nil
   pcall(function() currentTargetId = currentTarget and currentTarget:getId() end)
@@ -292,7 +301,7 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     end
     if EventBus then pcall(function() EventBus.emit("targetbot/target_acquired", creature, creaturePos) end) end
     schedule(200, function()
-      local atk = g_game.getAttackingCreature and g_game.getAttackingCreature() or nil
+      local atk = ClientService.getAttackingCreature()
     end)
   end
   local lureTriggered = evaluateLureAndPull(creature, config, targets)
@@ -326,7 +335,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
     local hasSetChaseMode = (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode)
     local hasGetChaseMode = (Client and Client.getChaseMode) or (g_game and g_game.getChaseMode)
     if hasSetChaseMode and hasGetChaseMode then
-      local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode())
+      local currentMode = ClientService.getChaseMode()
       if currentMode == 1 then
         if Client and Client.setChaseMode then Client.setChaseMode(0)
         elseif g_game and g_game.setChaseMode then g_game.setChaseMode(0) end
@@ -336,17 +345,16 @@ TargetBot.Creature.walk = function(creature, config, targets)
     local hasCancelFollow = (Client and Client.cancelFollow) or (g_game and g_game.cancelFollow)
     local hasGetFollowingCreature = (Client and Client.getFollowingCreature) or (g_game and g_game.getFollowingCreature)
     if hasCancelFollow and hasGetFollowingCreature then
-      local currentFollow = (Client and Client.getFollowingCreature) and Client.getFollowingCreature() or (g_game and g_game.getFollowingCreature and g_game.getFollowingCreature())
+      local currentFollow = ClientService.getFollowingCreature()
       if currentFollow then
-        if Client and Client.cancelFollow then Client.cancelFollow()
-        elseif g_game and g_game.cancelFollow then g_game.cancelFollow() end
+        ClientService.cancelFollow()
       end
     end
   elseif config.chase then
     local hasSetChaseMode = (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode)
     local hasGetChaseMode = (Client and Client.getChaseMode) or (g_game and g_game.getChaseMode)
     if hasSetChaseMode and hasGetChaseMode then
-      local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode())
+      local currentMode = ClientService.getChaseMode()
       if currentMode ~= 1 then
         if Client and Client.setChaseMode then Client.setChaseMode(1)
         elseif g_game and g_game.setChaseMode then g_game.setChaseMode(1) end
@@ -483,8 +491,8 @@ TargetBot.Creature.walk = function(creature, config, targets)
     local hasGetChaseMode = (Client2 and Client2.getChaseMode) or (g_game and g_game.getChaseMode)
     local hasIsAttacking = (Client2 and Client2.isAttacking) or (g_game and g_game.isAttacking)
     if hasGetChaseMode and hasIsAttacking then
-      local isAttacking = (Client2 and Client2.isAttacking) and Client2.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
-      local chaseMode = (Client2 and Client2.getChaseMode) and Client2.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode())
+      local isAttacking = ClientService.isAttacking()
+      local chaseMode = ClientService.getChaseMode()
       nativeChaseMayWork = isAttacking and chaseMode == 1
     end
     local anchorValid = true
@@ -555,8 +563,8 @@ TargetBot.Creature.walk = function(creature, config, targets)
       local hasGetChaseMode = (Client and Client.getChaseMode) or (g_game and g_game.getChaseMode)
       local hasIsAttacking = (Client and Client.isAttacking) or (g_game and g_game.isAttacking)
       if hasGetChaseMode and hasIsAttacking then
-        local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
-        local chaseMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode())
+        local isAttacking = ClientService.isAttacking()
+        local chaseMode = ClientService.getChaseMode()
         nativeChaseMayWork = isAttacking and chaseMode == 1
       end
       if nativeChaseMayWork then return true end
@@ -610,7 +618,7 @@ if EventBus then
     end
   end, 15)
   EventBus.on("monster:disappear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     local monsterCount = 0
     if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
@@ -620,7 +628,7 @@ if EventBus then
     pcall(function() EventBus.emit("targetbot/target_count_change", monsterCount, monsterCount + 1) end)
   end, 18)
   EventBus.on("monster:appear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     local playerPos = player and player:getPosition()
     local creaturePos = creature:getPosition()
@@ -637,7 +645,7 @@ if EventBus then
   end, 18)
   local lastPullState = false
   EventBus.on("targetbot/combat_start", function(creature, data)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     schedule(100, function()
       if TargetBot and TargetBot.smartPullActive ~= lastPullState then
         lastPullState = TargetBot.smartPullActive
@@ -646,7 +654,7 @@ if EventBus then
     end)
   end, 12)
   EventBus.on("targetbot/combat_end", function()
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if lastPullState then
       lastPullState = false
       pcall(function() EventBus.emit("targetbot/pull_inactive") end)

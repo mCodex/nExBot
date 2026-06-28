@@ -29,11 +29,9 @@ Label
   text:
 ]], quiverSlot)
 
-
 function getQuiverAmount()
     -- old tibia
     if g_game.getClientVersion() < 1000 then return end
-
 
     local isQuiverEquipped = getRight() and getRight():isContainer() or false
     local quiver = isQuiverEquipped and getContainerByItem(getRight():getId())
