@@ -56,6 +56,11 @@ Panel
   end
 
   local config = HealBotConfig[panelName]
+  -- Legacy typo migration: old profiles saved "curePosion" instead of "curePoison"
+  if config.curePosion ~= nil and config.curePoison == nil then
+    config.curePoison = config.curePosion
+    config.curePosion = nil
+  end
 
   ui.title:setOn(config.enabled)
   ui.title.onClick = function(widget)

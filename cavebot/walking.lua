@@ -373,11 +373,13 @@ CaveBot.walkTo = function(dest, maxDist, params)
         local smoothed = PS().smoothDirection(dir, true) or dir
         if canWalkDirection(smoothed) then
           PS().walkStep(smoothed)
+          return true
         elseif canWalkDirection(dir) then
           PS().walkStep(dir)
+          return true
         end
       end
-      return true
+      return false
     else
       -- Far: guarded autoWalk
       local isSafe = PS().nativePathIsSafe(playerPos, walkDest, {ignoreNonPathable = true})

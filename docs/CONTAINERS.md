@@ -188,8 +188,8 @@ The `onAddItem` handler queues new container items for opening, and `onContainer
 
 ### "Schedule execution error" or nil function errors
 
-This usually means a partial or outdated `Containers.lua` file. Replace it with the latest version and restart the client.
+This usually means a partial or outdated `Containers.lua` file. Replace it with the latest version and restart the client. If the error persists after restart, the server may have reached its open container limit (~20) — close some backpacks manually and re-open them via the "Reopen All" button.
 
 ### Containers closing immediately after opening
 
-The server has a limit of ~20 open containers. The bot enforces a guard at 19 — when the limit is reached, BFS pauses and resumes when a container closes. If containers keep closing, check that you don't have too many backpacks assigned.
+The server has a limit of ~20 open containers. The bot enforces a safety margin at 19 — when the limit is reached, BFS pauses and resumes when a container closes. Keep your assigned containers under 15-18 to leave room for loot bags and other dynamically opened containers.

@@ -38,7 +38,8 @@ if voc() == 2 or voc() == 12 then
     
     -- Find ammo item in OPEN containers only (simple and reliable)
     local function findAmmoItem(ammoIds)
-        local containers = nExBot.Shared.getContainers()
+        local containers = nExBot.Shared and nExBot.Shared.getContainers and nExBot.Shared.getContainers()
+        if not containers then return nil end
         for _, container in pairs(containers) do
             local cname = container:getName():lower()
             if not cname:find("quiver") then

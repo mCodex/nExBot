@@ -430,7 +430,11 @@ local function attributeDamageSource(damage)
   -- Cache spectator list for 200ms to avoid repeated API calls
   local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
   if not _damageAttrCachedCreatures or (nowt - _damageAttrCacheTime) > _damageAttrCacheTTL then
-    _damageAttrCachedCreatures = BotCore.Creatures.getNearby(radius) or {}
+    if BotCore and BotCore.Creatures and BotCore.Creatures.getNearby then
+      _damageAttrCachedCreatures = BotCore.Creatures.getNearby(radius) or {}
+    else
+      _damageAttrCachedCreatures = {}
+    end
     _damageAttrCacheTime = nowt
   end
 
@@ -687,7 +691,7 @@ if onWalk then
         local pending = _creatureMovePending and _creatureMovePending[cId]
         if pending then
           _creatureMovePending[cId] = nil
-          _creatureMoveLastEmit[cId] = nowMs5
+          _creatureMoveLastEmit[cId] = now or (os.time() * 1000)
           EventBus.emit("creature:move", pending.creature, pending.oldPos)
         end
       end)

@@ -633,13 +633,12 @@ local function executeRecovery()
   if #targetFloors > 0 then
     local fcTile = findNearestFloorChangeTile(playerPos, targetFloors)
     if fcTile then
-      -- Walk to the floor-change tile directly; Z-change handler will take over after floor transition
+      -- Walk to the floor-change tile; Z-change handler at top of macro will
+      -- transition to NORMAL after the actual floor change fires. Don't
+      -- transition here — if the walk stalls we stay in RECOVERING.
       print("[CaveBot] Recovery: walking to floor-change tile at " .. fcTile.x .. "," .. fcTile.y .. "," .. fcTile.z)
-      local walked = CaveBot.walkTo(fcTile, 20, { allowFloorChange = true, precision = 0 })
-      if walked then
-        transitionTo("NORMAL")
-        return true
-      end
+      CaveBot.walkTo(fcTile, 20, { allowFloorChange = true, precision = 0 })
+      return true  -- stay in RECOVERING until Z-change handler fires
     end
   end
 

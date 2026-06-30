@@ -49,7 +49,7 @@ CC.SCENARIO_DETECT_INTERVAL = 200  -- Scenario re-detect throttle (ms)
 
 -- PriorityEngine
 CC.PRIORITY_SCALE          = 1000  -- config.priority * this = base score
--- ponytail: stickiness now defined in target_coordinator.lua with proper values
+
 CC.SWITCH_GATE_PENALTY     = 0     -- Hard-blocked targets get score = 0 (absolute gate)
 CC.RECALC_IDLE_INTERVAL    = 2000  -- Full recalc when stable + no new creatures (ms)
 CC.RECALC_ACTIVE_INTERVAL  = 150   -- Full recalc during active combat (ms)

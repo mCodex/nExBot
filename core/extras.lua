@@ -178,6 +178,7 @@ if true then
 
   -- Window title handler function
   local function windowTitleHandler()
+    if settings._titleDisabled then return end
     local ok, err
     if settings.title then
       if hppercent() > 0 then
@@ -191,6 +192,8 @@ if true then
     if not ok and err then
       warn("[Extras] setTitle failed: " .. tostring(err))
       settings.title = false
+
+      settings._titleDisabled = true
     end
   end
 

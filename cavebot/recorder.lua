@@ -117,7 +117,7 @@ end
 local function setup()
   onPlayerPositionChange(function(newPos, oldPos)
     -- Floor change / teleport detection runs BEFORE zChanging() guard
-    -- ponytail: direct z-check prevents race with EventBus setting _zBlocked
+    
     if newPos and oldPos and (newPos.z ~= oldPos.z or math.abs(oldPos.x - newPos.x) > 1 or math.abs(oldPos.y - newPos.y) > 1) then
       if not lastPos then
         addPosition(oldPos)

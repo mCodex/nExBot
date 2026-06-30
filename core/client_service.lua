@@ -94,7 +94,7 @@ local function makeDelegate(methodName, source, default, opts)
     end
     if source == "callback" then
       local globalFn = rawget(_G, methodName)
-      if globalFn then
+      if type(globalFn) == "function" then
         return globalFn(...)
       end
     end
@@ -102,10 +102,10 @@ local function makeDelegate(methodName, source, default, opts)
       -- Callbacks use acl.callbacks first, then global
       if acl then
         local cb = acl.callbacks and acl.callbacks[methodName]
-        if cb then return cb(...) end
+        if type(cb) == "function" then return cb(...) end
       end
       local globalFn = rawget(_G, methodName)
-      if globalFn then return globalFn(...) end
+      if type(globalFn) == "function" then return globalFn(...) end
     end
     return default
   end

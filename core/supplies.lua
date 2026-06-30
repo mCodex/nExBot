@@ -86,7 +86,16 @@ end
 SuppliesWindow = UI.createWindow("SuppliesWindow")
 SuppliesWindow:hide()
 
-local function clearEmptyPanels() end
+local function clearEmptyPanels()
+  local parent = SuppliesWindow.items
+  if not parent then return end
+  for i = parent:getChildCount(), 1, -1 do
+    local child = parent:getChildByIndex(i)
+    if child and child:getId() == "blank" then
+      parent:removeChild(child)
+    end
+  end
+end
 
 function addItemPanel()
   local parent = SuppliesWindow.items
@@ -115,7 +124,7 @@ function addItemPanel()
       return
     end
 
-    if config[tostring(id)] then
+    if config.items[tostring(id)] then
       warn("nExBot[Drop Tracker]: Item already added!")
       widget:setItemId(0)
       return

@@ -1601,20 +1601,21 @@ end
 
 function hourVal(v)
   v = v or 0
+  if not uptime or uptime <= 0 then return 0 end
   return (v/uptime)*3600
 end
 
 function avgTable(t)
   if type(t) ~= 'table' then return 0 end
-  local val = 0
-  for i,v in pairs(t) do
-    val = val + v
+  local val, count = 0, 0
+  for _,v in pairs(t) do
+    if type(v) == 'number' then
+      val = val + v
+      count = count + 1
+    end
   end
-  if #t == 0 then
-    return 0
-  else
-    return val/#t
-  end
+  if count == 0 then return 0 end
+  return val / count
 end
 
 function damageHour()

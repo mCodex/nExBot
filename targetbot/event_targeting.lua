@@ -143,7 +143,7 @@ local creatureCache = {
   entries = {},           -- {id -> {creature, path, pathTime, priority, config, lastSeen}}
   count = 0,
   accessOrder = {},       -- LRU tracking (array)
-  posMap = {},            -- ponytail: O(1) LRU — id -> index in accessOrder
+  posMap = {},
   lastCleanup = 0,
   CLEANUP_INTERVAL = 1500
 }
@@ -287,7 +287,7 @@ end
 
 -- UTILITY FUNCTIONS
 
--- ponytail: reuse canonical chebyshev from target_pathfinding
+
 local chebyshev = nExBot.target_pathfinding.chebyshev
 
 -- Manhattan distance (O(1))

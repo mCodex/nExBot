@@ -6,7 +6,7 @@ local cavebotAllowance = 0
 local lureEnabled = true
 local recalculateBestTarget  -- forward declaration: defined at ~L2054, used by EventBus closures above it
 
--- ponytail: priority bonus for current attack target prevents same-priority ping-pong
+
 -- Values based on PRIORITY_SCALE = 1000 (config priority 1 = 1000 base)
 local STICKY_BONUS = 800       -- ~80% of one config priority level
 local STICKY_BONUS_FINISH = 1200  -- extra bonus when target is low HP
@@ -128,7 +128,7 @@ local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
 local SafeCall = SafeCall or require("core.safe_call")
 
--- ponytail: SafeCreature alias — reuses pcall wrapper in utils/safe_creature.lua
+
 local SC = SafeCreature or {}
 
 -- Compatibility: robust safe unpack (works when neither table.unpack nor unpack exist)
@@ -245,7 +245,7 @@ local monsterCache = {
   CLEANUP_INTERVAL = 1500,
   -- LRU eviction
   accessOrder = {},       -- Array of IDs in access order
-  posMap = {},            -- ponytail: O(1) LRU — id -> index in accessOrder
+  posMap = {},
   maxSize = 50            -- Max cached creatures
 }
 
@@ -1249,7 +1249,7 @@ recalculateBestTarget = function()
   
   -- v2.2: If current target is still valid, ensure it's not replaced by a marginally better target
   -- This implements "target stickiness" at the recalculation level
-  -- ponytail: sticky bonus in getAdjustedPriority handles same-priority retarget prevention
+
   -- threshold approach kept as safety net for edge cases
   if currentTargetStillValid and currentTargetParams and bestTarget then
     local currentHP = currentAttackTarget:getHealthPercent()
@@ -1539,7 +1539,7 @@ targetbotMacro = macro(250, function()
   
   -- Get best target (uses cache when possible)
     local bestTarget, targetCount, totalDanger
-    -- ponytail: skip recalculate if we just engaged a target (< 1500ms)
+
     local Client_g = getClient()
     local currentAttack_g = ClientService.getAttackingCreature()
     if currentAttack_g and not currentAttack_g:isDead() and (now - lastEngagementAt) < 1500 then

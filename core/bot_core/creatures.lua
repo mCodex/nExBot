@@ -41,7 +41,9 @@ local SPECTATORS_CACHE_TTL = 200
 local function getCachedSpectators(...)
   local args = {...}
   local nargs = #args
-  local key = nargs .. ":" .. tostring(args[1])
+  local keyParts = {tostring(nargs)}
+  for i = 1, nargs do keyParts[#keyParts + 1] = tostring(args[i]) end
+  local key = table.concat(keyParts, ":")
   local t = now or (os.time() * 1000)
   if _spectatorsCache and _spectatorsCacheKey == key and (t - _spectatorsCacheTime) < SPECTATORS_CACHE_TTL then
     return _spectatorsCache
@@ -380,11 +382,15 @@ function Creatures.getNearby(rangeX, rangeY)
   rangeX = rangeX or 14
   rangeY = rangeY or rangeX
   local specs = getSpectators(rangeX <= 14 and rangeY <= 11 and false or nil) or {}
-  -- ponytail: full range query, getCachedSpectators already tick-caches
   local result = {}
+  local ppos = pos()
+  local rx2, ry2 = rangeX, rangeY
   for _, spec in pairs(specs) do
     if not spec:isLocalPlayer() then
-      result[#result + 1] = spec
+      local spos = spec:getPosition()
+      if spos and math.abs(spos.x - ppos.x) <= rx2 and math.abs(spos.y - ppos.y) <= ry2 then
+        result[#result + 1] = spec
+      end
     end
   end
   return result

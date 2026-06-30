@@ -11,7 +11,7 @@ local DIRECTIONS = (Dirs and Dirs.ADJACENT_OFFSETS) or {
 }
 local DIR_VECTORS = Directions.DIR_TO_OFFSET
 
--- ponytail: shared tile-safe check (DRY — was 2 duplicated inline lambdas)
+
 local function isTileSafe(pos)
   if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe then
     return TargetCore.PathSafety.isTileSafe(pos)
@@ -610,7 +610,7 @@ if EventBus then
           local playerPos = player and player:getPosition()
           if playerPos then
             MovementCoordinator.Intent.register(MovementCoordinator.CONSTANTS.INTENT.LURE, playerPos, eligibility.confidence, "lure_event", { triggered = "target_count", targets = newCount, deficit = eligibility.deficit })
-            -- ponytail: LURE intent uses player pos, Execute.move short-circuits.
+
             -- Call allowCaveBot directly so CaveBot stays blocked during lure.
             if TargetBot.allowCaveBot then TargetBot.allowCaveBot(150) end
           end

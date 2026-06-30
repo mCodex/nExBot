@@ -110,7 +110,7 @@ end
 -- CONTAINER ACCESS (DRY: was duplicated in 6+ files with Client/g_game fallback)
 
 --- Get open containers with cross-client fallback.
--- ponytail: single source of truth for the Client/g_game.getContainers pattern.
+
 -- @return table (array of containers, never nil)
 function Shared.getContainers()
   local Client = Shared.getClient()
