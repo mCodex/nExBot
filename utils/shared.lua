@@ -107,6 +107,34 @@ function Shared.properCase(str)
   return table.concat(words, " ")
 end
 
+-- CONTAINER ACCESS (DRY: was duplicated in 6+ files with Client/g_game fallback)
+
+--- Get open containers with cross-client fallback.
+-- ponytail: single source of truth for the Client/g_game.getContainers pattern.
+-- @return table (array of containers, never nil)
+function Shared.getContainers()
+  local Client = Shared.getClient()
+  if Client and Client.getContainers then return Client.getContainers() end
+  if g_game and g_game.getContainers then return g_game.getContainers() end
+  return {}
+end
+
+-- TILE SAFETY (DRY: was duplicated as inline lambdas in attack_coordinator.lua)
+
+--- Check if a tile is walkable and has no creatures.
+-- @param pos table {x, y, z}
+-- @return boolean
+function Shared.isTileSafe(pos)
+  if not pos then return false end
+  local Client = Shared.getClient()
+  local t = (Client and Client.getTile) and Client.getTile(pos)
+            or (g_map and g_map.getTile and g_map.getTile(pos))
+  if not t then return false end
+  if not t:isWalkable() then return false end
+  if t.hasCreature and t:hasCreature() then return false end
+  return true
+end
+
 -- COOLDOWN UTILITIES (shared healing/potion cooldown checks)
 
 --- Check if healing group cooldown is active.

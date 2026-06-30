@@ -608,7 +608,9 @@ local function getQuiverItem()
     local player = g_game.getLocalPlayer()
     if not player then return nil, nil end
 
-    local rightSlot = InventorySlotRight or 6
+    -- Right hand slot (quiver is equipped here for paladins)
+    -- OTClient: InventorySlotRight = 5 (not 6 — slot 6 is left hand)
+    local rightSlot = 5
     if player.getInventoryItem then
         local ok, item = pcall(function() return player:getInventoryItem(rightSlot) end)
         if ok and item then
@@ -624,6 +626,7 @@ local function getQuiverItem()
         end
     end
 
+    -- Ammo slot (some quiver types go here)
     local ammoSlot = InventorySlotAmmo or 10
     if player.getInventoryItem then
         local ok, item = pcall(function() return player:getInventoryItem(ammoSlot) end)
@@ -639,6 +642,24 @@ local function getQuiverItem()
             if okC and isC then return item, "ammo_global" end
         end
     end
+
+    -- Fallback: scan all inventory slots for quiver by item ID range
+    local QUIVER_IDS = { [35847]=true, [35848]=true, [35849]=true, [35850]=true,
+        [35851]=true, [35852]=true, [35853]=true, [35854]=true,
+        [35855]=true, [35856]=true, [35857]=true, [35858]=true,
+        [35859]=true, [35860]=true }
+    if player.getInventoryItem then
+        for slot = 0, 10 do
+            local ok, item = pcall(function() return player:getInventoryItem(slot) end)
+            if ok and item then
+                local okId, itemId = pcall(function() return item:getId() end)
+                if okId and QUIVER_IDS[itemId] then
+                    return item, "slot_" .. slot
+                end
+            end
+        end
+    end
+
     return nil, nil
 end
 
@@ -1014,6 +1035,13 @@ onContainerOpen(function(container, previousContainer)
 
     if sortingMacro and not isLootLocked() then sortingMacro:setOn() end
 
+    -- When BFS is opening main backpack, try quiver once backpack is confirmed open
+    if ContainerBFS.isActive() and ContainerBFS.state == "OPENING_MAIN" then
+        if not isQuiverOpen() then
+            schedule(100, function() openQuiverWithRetry(3) end)
+        end
+    end
+
     if ContainerBFS.isActive() then
         local containerItem = container:getContainerItem()
         local itemId = containerItem and containerItem:getId() or 0
@@ -1097,7 +1125,7 @@ function reopenBackpacks(onComplete)
             end)
         end
 
-        schedule(400, function() openQuiverWithRetry(5) end)
+        schedule(600, function() openQuiverWithRetry(5) end)
 
         ContainerBFS.reset()
         ContainerBFS.state = "OPENING_MAIN"

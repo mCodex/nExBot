@@ -47,8 +47,8 @@ CaveBot.Extensions.BuySupplies.setup = function()
       table.insert(possibleItems, v.id)
     end
 
-    for id, values in pairs(Supplies.getItemsData()) do
-      id = tonumber(id)
+    for key, values in pairs(Supplies.getItemsData()) do
+      local id = tonumber(key)
       if table.find(possibleItems, id) then
         local max = values.max
         local current = player:getItemsCount(id)

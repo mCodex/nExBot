@@ -1371,18 +1371,6 @@ macro(500, function()
     end
 end)
 
-function getPanelHeight(panel)
-
-  local elements = panel.List:getChildCount()
-  if elements == 0 then
-    return 0
-  else
-    local rows = math.ceil(elements/5)
-    local height = rows * 35
-    return height
-  end
-end
-
 function refreshLoot()
 
     lootItems:destroyChildren()
@@ -1559,12 +1547,6 @@ onTextMessage(function(mode, text)
     refreshWaste()
   end
 end)
-
-function hourVal(v)
-  v = v or 0
-  return (v/uptime)*3600
-end
-
 function bottingStats()
   lootWorth = 0
   wasteWorth = 0
@@ -1612,17 +1594,27 @@ function bottingLabels(lootWorth, wasteWorth, balance)
   return balanceDesc, hourDesc
 end
 
-function reportStats()
+function getHuntingData()
   local lootWorth, wasteWorth, balance = bottingStats()
-  local balanceDesc, hourDesc = bottingLabels(lootWorth, wasteWorth, balance)
+  return totalDmg, totalHeal, lootWorth, wasteWorth, balance
+end
 
-  local a, b, c
+function hourVal(v)
+  v = v or 0
+  return (v/uptime)*3600
+end
 
-  a = "Session Time: " .. sessionTime() .. ", Exp Gained: " .. format_thousand(expGained()) .. ", Exp/h: " .. expPerHour()
-  b = " | Balance: " .. balanceDesc .. " (" .. hourDesc .. ")"
-  c = a..b
-
-  return c
+function avgTable(t)
+  if type(t) ~= 'table' then return 0 end
+  local val = 0
+  for i,v in pairs(t) do
+    val = val + v
+  end
+  if #t == 0 then
+    return 0
+  else
+    return val/#t
+  end
 end
 
 function damageHour()
@@ -1656,26 +1648,6 @@ function lootHour()
     return lootWorth
   else
     return hourVal(lootWorth)
-  end
-end
-
-function getHuntingData()
-  local lootWorth, wasteWorth, balance = bottingStats()
-  return totalDmg, totalHeal, lootWorth, wasteWorth, balance
-end
-
-function avgTable(t)
-  if type(t) ~= 'table' then return 0 end
-  local val = 0
-
-  for i,v in pairs(t) do
-    val = val + v
-  end
-
-  if #t == 0 then
-    return 0
-  else
-    return val/#t
   end
 end
 

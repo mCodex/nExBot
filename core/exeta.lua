@@ -85,7 +85,7 @@ if voc == 1 or voc == 11 then
 
       -- Check for nearby monsters (radius 1)
       local monstersNearby = 0
-      local creatures = CreatureCache.getNearby(1, 1) or {}
+      local creatures = BotCore.Creatures.getNearby(1, 1) or {}
       for i = 1, #creatures do
         local c = creatures[i]
         if c and c:isMonster() and not c:isDead() then
@@ -97,7 +97,7 @@ if voc == 1 or voc == 11 then
 
       -- Check for nearby players (radius 6)
       local playersNearby = 0
-      local spects = CreatureCache.getNearby(6, 6) or {}
+      local spects = BotCore.Creatures.getNearby(6, 6) or {}
       for i = 1, #spects do
         local c = spects[i]
         if c and c:isPlayer() and not c:isLocalPlayer() then
@@ -212,7 +212,7 @@ if voc == 1 or voc == 11 then
         if (now - lastExetaAmp) < 6000 then return end
         
         -- Get nearby monsters from cache or fallback to map scan
-        local monsters = CreatureCache.getNearby(7) or {}
+        local monsters = BotCore.Creatures.getNearby(7) or {}
         
         if not monsters then return end
         
@@ -324,7 +324,7 @@ if voc == 1 or voc == 11 then
         local playerPos = player and player:getPosition()
         if not playerPos then return end
         
-        local creatures = CreatureCache.getNearby(7) or {}
+        local creatures = BotCore.Creatures.getNearby(7) or {}
         
         if not creatures then return end
         

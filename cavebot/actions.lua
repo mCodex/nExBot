@@ -454,8 +454,36 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     CaveBot.ensureNavigatorRoute(playerPos.z)
   end
 
+  -- ========== FLOOR-CHANGE TILE DETECTION (before floor check) ==========
+  -- Allow goto to target floor-change tiles on different floors — the bot walks
+  -- there, steps on the tile, and waits for the Z transition. This is how the bot
+  -- recovers when stuck on the wrong floor (e.g. fell down a hole).
+  local Client = getClient()
+  local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(destPos) or (g_map and g_map.getMinimapColor(destPos)) or 0
+  local isFloorChange = (FloorItems and FloorItems.isFloorChangeTile) and FloorItems.isFloorChangeTile(destPos) or false
+
+  local expectedFloorAfterChange = nil
+  if isFloorChange then
+    precision = 0
+    if minimapColor == 210 or minimapColor == 211 then
+      expectedFloorAfterChange = destPos.z - 1
+    elseif minimapColor == 212 or minimapColor == 213 then
+      expectedFloorAfterChange = destPos.z + 1
+    end
+    if expectedFloorAfterChange == nil then
+      expectedFloorAfterChange = destPos.z
+      local warnKey = destPos.x .. "," .. destPos.y .. "," .. destPos.z .. ":" .. tostring(minimapColor)
+      if not warnedUnknownFloor[warnKey] then
+        warnedUnknownFloor[warnKey] = true
+        warn("[CaveBot] Floor-change tile at " .. destPos.x .. "," .. destPos.y .. "," .. destPos.z .. " has unknown minimap color " .. tostring(minimapColor) .. "; defaulting expectedFloor to " .. destPos.z)
+      end
+    end
+  end
+
   -- ========== FLOOR CHECK ==========
-  if destPos.z ~= playerPos.z then
+  -- Non-floor-change WPs on a different floor → instantFail.
+  -- Floor-change WPs on a different floor → allowed (walk there, wait for Z change).
+  if destPos.z ~= playerPos.z and not isFloorChange then
     return false, true
   end
 
@@ -469,31 +497,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     if waypointIdx and WaypointNavigator.hasPassedWaypoint(playerPos, waypointIdx, destPos) then
       CaveBot.clearWaypointTarget()
       return true
-    end
-  end
-
-  -- ========== FLOOR-CHANGE TILE DETECTION ==========
-  local Client = getClient()
-  local minimapColor = (Client and Client.getMinimapColor) and Client.getMinimapColor(destPos) or (g_map and g_map.getMinimapColor(destPos)) or 0
-  local isFloorChange = (FloorItems and FloorItems.isFloorChangeTile) and FloorItems.isFloorChangeTile(destPos) or false
-
-  local expectedFloorAfterChange = nil
-  if isFloorChange then
-    precision = 0
-    if minimapColor == 210 or minimapColor == 211 then
-      expectedFloorAfterChange = destPos.z - 1
-    elseif minimapColor == 212 or minimapColor == 213 then
-      expectedFloorAfterChange = destPos.z + 1
-    end
-    -- Fallback: if minimap color didn't match known floor-change colors,
-    -- default to destPos.z so downstream logic always has a value
-    if expectedFloorAfterChange == nil then
-      expectedFloorAfterChange = destPos.z
-      local warnKey = destPos.x .. "," .. destPos.y .. "," .. destPos.z .. ":" .. tostring(minimapColor)
-      if not warnedUnknownFloor[warnKey] then
-        warnedUnknownFloor[warnKey] = true
-        warn("[CaveBot] Floor-change tile at " .. destPos.x .. "," .. destPos.y .. "," .. destPos.z .. " has unknown minimap color " .. tostring(minimapColor) .. "; defaulting expectedFloor to " .. destPos.z)
-      end
     end
   end
 

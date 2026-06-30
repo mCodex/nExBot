@@ -127,7 +127,7 @@ function S.detectScenario()
   S.state.lastUpdate = nowt
 
   local monsters, totalDanger, mc = {}, 0, 0
-  local creatures = CreatureCache.getNearby(14) or {}
+  local creatures = BotCore.Creatures.getNearby(14) or {}
 
   for _, cr in ipairs(creatures) do
     if cr and isValidAliveMonster(cr) then

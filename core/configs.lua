@@ -53,24 +53,16 @@ local function loadCharacterProfiles()
 end
 loadCharacterProfiles()
 
--- Save character profiles mapping
-function saveCharacterProfiles()
+local function saveCharacterProfiles()
   local status, result = pcall(function()
-    return json.encode(CharacterProfiles, 2)
+    return json.encode(CharacterProfiles)
   end)
   if status then
     g_resources.writeFileContents(charProfileFile, result)
   end
 end
 
--- Get current character name (with safety check)
-function getCharacterName()
-  -- Try global player first (OTClient bot framework provides this)
-  if player and player.getName then
-    local status, name = pcall(function() return player:getName() end)
-    if status and name then return name end
-  end
-  -- Fallback to g_game.getLocalPlayer()
+local function getCharacterName()
   local localPlayer = g_game.getLocalPlayer()
   return localPlayer and localPlayer:getName() or nil
 end

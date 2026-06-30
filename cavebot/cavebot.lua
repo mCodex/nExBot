@@ -596,6 +596,53 @@ local function executeRecovery()
     return true
   end
 
+  -- Floor-change tile recovery: find nearest stair/rope/ladder on current floor
+  -- that leads to a floor with waypoints. Scans minimap colors for floor-change tiles.
+  local function findNearestFloorChangeTile(pPos, targetFloors)
+    local getMinimapColor = g_map and g_map.getMinimapColor
+    if not getMinimapColor then return nil end
+    local FC_COLORS = { [210]=true, [211]=true, [212]=true, [213]=true }
+    local best, bestDist = nil, math.huge
+    -- Scan 8-tile radius around player
+    for dx = -8, 8 do
+      for dy = -8, 8 do
+        local tilePos = {x = pPos.x + dx, y = pPos.y + dy, z = pPos.z}
+        local ok, color = pcall(getMinimapColor, tilePos)
+        if ok and FC_COLORS[color] then
+          local d = math.abs(dx) + math.abs(dy)
+          if d < bestDist then
+            bestDist = d
+            best = tilePos
+          end
+        end
+      end
+    end
+    return best
+  end
+
+  -- Determine which floors have WPs
+  local floorsWithWPs = {}
+  for _, wp in pairs(waypointPositionCache) do
+    if wp.isGoto then floorsWithWPs[wp.z] = true end
+  end
+  local targetFloors = {}
+  for floorZ in pairs(floorsWithWPs) do
+    if floorZ ~= playerPos.z then targetFloors[#targetFloors + 1] = floorZ end
+  end
+
+  if #targetFloors > 0 then
+    local fcTile = findNearestFloorChangeTile(playerPos, targetFloors)
+    if fcTile then
+      -- Walk to the floor-change tile directly; Z-change handler will take over after floor transition
+      print("[CaveBot] Recovery: walking to floor-change tile at " .. fcTile.x .. "," .. fcTile.y .. "," .. fcTile.z)
+      local walked = CaveBot.walkTo(fcTile, 20, { allowFloorChange = true, precision = 0 })
+      if walked then
+        transitionTo("NORMAL")
+        return true
+      end
+    end
+  end
+
   -- Cross-floor fallback (adjacent floors ±1)
   child, idx = findReachableWaypoint(playerPos, { maxCandidates = 30, searchAllFloors = true })
   if child then
@@ -1286,11 +1333,6 @@ local function parseWaypointPosition(text)
 end
 
 -- Legacy: parseGotoPosition for backward compatibility
-local function parseGotoPosition(text)
-  if not text or not string.starts(text, "goto:") then return nil end
-  return parseWaypointPosition(text)
-end
-
 -- Distance functions: delegate to SSoT (constants/directions.lua)
 -- chebyshevDist is already resolved at forward-declaration above.
 

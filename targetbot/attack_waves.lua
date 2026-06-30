@@ -331,7 +331,7 @@ end
 local function avoidWaveAttacks()
   local currentTime = now
   local playerPos = player:getPosition()
-  local creatures = CreatureCache.getNearby(7) or {}
+  local creatures = BotCore.Creatures.getNearby(7) or {}
   local monsters = {}
   for i = 1, #creatures do
     local c = creatures[i]
@@ -392,7 +392,7 @@ local function rePosition(minTiles, config)
     end
   end
   if currentWalkable >= minTiles and not immediateThreat then return end
-  local creatures = CreatureCache.getNearby(5) or {}
+  local creatures = BotCore.Creatures.getNearby(5) or {}
   local monsters = {}
   for i = 1, #creatures do
     local c = creatures[i]
@@ -518,7 +518,7 @@ if EventBus then
         local inArc, arcDist = isInFrontArc(playerPos, monsterPos, newDir, 5, 1)
         if inArc then
           local monsters = {}
-          local creatures = CreatureCache.getNearby(7) or {}
+          local creatures = BotCore.Creatures.getNearby(7) or {}
           for _, c in ipairs(creatures) do
             if SC.isMonster(c) and not SC.isDead(c) then monsters[#monsters + 1] = c end
           end
@@ -550,7 +550,7 @@ if EventBus then
       local walkable = countWalkableTiles(playerPos)
       if walkable < 5 then
         local monsters = {}
-        local creatures = CreatureCache.getNearby(5) or {}
+        local creatures = BotCore.Creatures.getNearby(5) or {}
         for _, c in ipairs(creatures) do
           if SC.isMonster(c) and not SC.isDead(c) then monsters[#monsters + 1] = c end
         end

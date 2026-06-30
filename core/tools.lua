@@ -41,8 +41,7 @@ end
 
 -- Pure function: Find first exchangeable item in all containers
 local function findExchangeableItem()
-  local Client = getClient()
-  local containers = (Client and Client.getContainers) and Client.getContainers() or (g_game and g_game.getContainers and g_game.getContainers()) or {}
+  local containers = nExBot.Shared.getContainers()
   if not containers then return nil end
   
   for _, container in pairs(containers) do

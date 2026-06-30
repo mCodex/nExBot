@@ -721,24 +721,7 @@ local cachedLocalPlayer = nil
 local lastPlayerCheck = 0
 local PLAYER_CHECK_INTERVAL = 1000  -- Revalidate player reference every 1s
 
--- Get cached local player (with periodic revalidation)
-local function getLocalPlayerCached()
-  if not cachedLocalPlayer or (now - lastPlayerCheck) > PLAYER_CHECK_INTERVAL then
-    cachedLocalPlayer = ClientService.getLocalPlayer()
-    lastPlayerCheck = now
-  end
-  return cachedLocalPlayer
-end
-
 -- Update stats (delegates to BotCore if available)
-local function updateCachedStats()
-  if BotCore and BotCore.Stats then
-    BotCore.Stats.update()
-    return
-  end
-  -- Fallback handled by getStats()
-end
-
 -- Analytics helpers (redirect to BotCore.Analytics if available)
 local function appendLog(entry)
   if BotCore and BotCore.Analytics then
@@ -1206,8 +1189,7 @@ if rootW then
     clearAllyFields()
   end
 
-  -- Validation helper
-  local function validateAlly(widget, category)
+local function validateAlly(widget, category)
     local list = widget:getParent()
     local label = list:getParent().title
     category = category or 0
@@ -1234,6 +1216,7 @@ if rootW then
     end
   end
 
+
   local function bindAllyConditionCheckbox(widget, conditionKey, category)
     widget:setChecked(allyConfig.conditions[conditionKey])
     widget.onClick = function(w)
@@ -1247,55 +1230,7 @@ if rootW then
     end
   end
 
-  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.knights, "knights", 2)
-  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.paladins, "paladins", 2)
-  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.druids, "druids", 2)
-  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.sorcerers, "sorcerers", 2)
-  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.monks, "monks", 2)
 
-  bindAllyConditionCheckbox(allyTargetSettings.groups.box.friends, "friends")
-  bindAllyConditionCheckbox(allyTargetSettings.groups.box.party, "party")
-  bindAllyConditionCheckbox(allyTargetSettings.groups.box.guild, "guild")
-
-  validateAlly(allyTargetSettings.vocations.box.knights)
-  validateAlly(allyTargetSettings.groups.box.friends)
-  validateAlly(allyTargetSettings.vocations.box.sorcerers, 2)
-
-  -- Conditions settings
-  for i, setting in ipairs(allyConfig.settings) do
-    local widget = UI.createWidget(setting.type, allyConditions.box)
-    local text = setting.text
-    local val = setting.value
-    widget.text:setText(text)
-
-    if setting.type == "HealScroll" then
-        widget.text:setText(widget.text:getText()..val)
-        if not (text:find("Range") or text:find("Mas Res")) then
-            widget.text:setText(widget.text:getText().."%")
-        end
-        widget.scroll:setValue(val)
-        widget.scroll.onValueChange = function(scroll, value)
-            setting.value = value
-            widget.text:setText(text..value)
-            if not (text:find("Range") or text:find("Mas Res")) then
-                widget.text:setText(widget.text:getText().."%")
-            end
-            updateAllyBotCoreConfig()
-        end
-        if text:find("Range") or text:find("Mas Res") then
-            widget.scroll:setMaximum(10)
-        end
-    else
-        widget.item:setItemId(val)
-        widget.item:setShowCount(false)
-        widget.item.onItemChange = function(w)
-            setting.value = w:getItemId()
-            updateAllyBotCoreConfig()
-        end
-    end
-  end
-
-  -- Priority list
   local function setAllyCrementalButtons()
     local children = allyPriority.list:getChildren()
     local count = #children
@@ -1310,6 +1245,7 @@ if rootW then
         end
     end
   end
+
 
   local function createAllyPriorityWidget(action, index)
     local widget = UI.createWidget("PriorityEntry", allyPriority.list)
@@ -1368,6 +1304,54 @@ if rootW then
     end
 
     return widget
+  end
+
+  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.knights, "knights", 2)
+  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.paladins, "paladins", 2)
+  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.druids, "druids", 2)
+  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.sorcerers, "sorcerers", 2)
+  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.monks, "monks", 2)
+
+  bindAllyConditionCheckbox(allyTargetSettings.groups.box.friends, "friends")
+  bindAllyConditionCheckbox(allyTargetSettings.groups.box.party, "party")
+  bindAllyConditionCheckbox(allyTargetSettings.groups.box.guild, "guild")
+
+  validateAlly(allyTargetSettings.vocations.box.knights)
+  validateAlly(allyTargetSettings.groups.box.friends)
+  validateAlly(allyTargetSettings.vocations.box.sorcerers, 2)
+
+  -- Conditions settings
+  for i, setting in ipairs(allyConfig.settings) do
+    local widget = UI.createWidget(setting.type, allyConditions.box)
+    local text = setting.text
+    local val = setting.value
+    widget.text:setText(text)
+
+    if setting.type == "HealScroll" then
+        widget.text:setText(widget.text:getText()..val)
+        if not (text:find("Range") or text:find("Mas Res")) then
+            widget.text:setText(widget.text:getText().."%")
+        end
+        widget.scroll:setValue(val)
+        widget.scroll.onValueChange = function(scroll, value)
+            setting.value = value
+            widget.text:setText(text..value)
+            if not (text:find("Range") or text:find("Mas Res")) then
+                widget.text:setText(widget.text:getText().."%")
+            end
+            updateAllyBotCoreConfig()
+        end
+        if text:find("Range") or text:find("Mas Res") then
+            widget.scroll:setMaximum(10)
+        end
+    else
+        widget.item:setItemId(val)
+        widget.item:setShowCount(false)
+        widget.item.onItemChange = function(w)
+            setting.value = w:getItemId()
+            updateAllyBotCoreConfig()
+        end
+    end
   end
 
   for i, action in ipairs(allyConfig.priorities) do

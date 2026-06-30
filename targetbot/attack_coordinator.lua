@@ -11,6 +11,14 @@ local DIRECTIONS = (Dirs and Dirs.ADJACENT_OFFSETS) or {
 }
 local DIR_VECTORS = Directions.DIR_TO_OFFSET
 
+-- ponytail: shared tile-safe check (DRY — was 2 duplicated inline lambdas)
+local function isTileSafe(pos)
+  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe then
+    return TargetCore.PathSafety.isTileSafe(pos)
+  end
+  return nExBot.Shared.isTileSafe(pos)
+end
+
 local targetBotLure = false
 local targetCount = 0
 local delayValue = 0
@@ -22,7 +30,7 @@ local smartPullState = { lastEval = 0, lowStreak = 0, highStreak = 0, active = f
 local dynamicLureState = { lastTrigger = 0 }
 
 local function countMonstersByRange(range)
-  local specs = CreatureCache.getNearby(range, range)
+  local specs = BotCore.Creatures.getNearby(range, range)
   if not specs then return 0 end
   local count = 0
   for i = 1, #specs do
@@ -322,7 +330,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
   if TargetBot.isForceFollowActive and TargetBot.isForceFollowActive() then return end
   if config.anchor and not anchorPosition then anchorPosition = pos end
   local useCoordinator = MovementCoordinator and MovementCoordinator.Intent
-  local creatures = CreatureCache.getNearby(7) or {}
+  local creatures = BotCore.Creatures.getNearby(7) or {}
   local monsters = {}
   for i = 1, #creatures do
     local c = creatures[i]
@@ -454,14 +462,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
         for dy = -2, 2 do
           if dx ~= 0 or dy ~= 0 then
             local checkPos = {x = pos.x + dx, y = pos.y + dy, z = pos.z}
-            local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
-              and TargetCore.PathSafety.isTileSafe(checkPos)
-              or (function()
-                local C = getClient()
-                local t = (C and C.getTile) and C.getTile(checkPos) or (g_map and g_map.getTile and g_map.getTile(checkPos))
-                local hasCreature = t and t.hasCreature and t:hasCreature()
-                return t and t:isWalkable() and not hasCreature
-              end)()
+            local tileSafe = isTileSafe(checkPos)
             if tileSafe then
               local anchorValid = true
               if config.anchor and anchorPosition then
@@ -530,14 +531,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
         {x = pos.x + dx, y = pos.y, z = pos.z}, {x = pos.x, y = pos.y + dy, z = pos.z}
       }
       for i = 1, 2 do
-        local tileSafe = (TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isTileSafe)
-          and TargetCore.PathSafety.isTileSafe(candidates[i])
-          or (function()
-            local C = getClient()
-            local t = (C and C.getTile) and C.getTile(candidates[i]) or (g_map and g_map.getTile and g_map.getTile(candidates[i]))
-            local hasCreature = t and t.hasCreature and t:hasCreature()
-            return t and t:isWalkable() and not hasCreature
-          end)()
+        local tileSafe = isTileSafe(candidates[i])
         if tileSafe then
           local anchorValid = true
           if config.anchor and anchorPosition then

@@ -27,38 +27,25 @@ local targetPathfinding = nExBot.target_pathfinding
 -- Provides: batch pathfinding, line-of-sight detection, pattern-based AoE
 -- ═══════════════════════════════════════════════════════════════════════════
 local OpenTibiaBRTargeting = nil
-local function loadOpenTibiaBRTargeting()
-  if OpenTibiaBRTargeting then return OpenTibiaBRTargeting end
-  local ok, result = pcall(function()
-    return dofile("nExBot/targetbot/opentibiabr_targeting.lua")
-  end)
-  if ok and result then
-    OpenTibiaBRTargeting = result
-    print("[TargetBot] OpenTibiaBR targeting enhancements loaded")
-  end
-  return OpenTibiaBRTargeting
-end
 
--- Lazy-load on first use
 local function getOpenTibiaBRTargeting()
-  if OpenTibiaBRTargeting == nil then
-    loadOpenTibiaBRTargeting()
+  if OpenTibiaBRTargeting ~= nil then return OpenTibiaBRTargeting end
+  if nExBot and nExBot.OpenTibiaBRTargeting then
+    OpenTibiaBRTargeting = nExBot.OpenTibiaBRTargeting
+    return OpenTibiaBRTargeting
   end
-  return OpenTibiaBRTargeting
+  return nil
 end
 
--- Check if OpenTibiaBR batch pathfinding is available
-local function hasBatchPathfinding()
-  local otbr = getOpenTibiaBRTargeting()
-  return otbr and otbr.features and otbr.features.findEveryPath
-end
-
--- Check if OpenTibiaBR sight spectators is available
 local function hasSightSpectators()
   local otbr = getOpenTibiaBRTargeting()
-  return otbr and otbr.features and otbr.features.getSightSpectators
+  return otbr and otbr.getVisibleCreatures ~= nil
 end
 
+local function hasBatchPathfinding()
+  local otbr = getOpenTibiaBRTargeting()
+  return otbr and otbr.batchPath ~= nil
+end
 -- Load PathUtils if available (shared module for creature validation)
 local PathUtils = nil
 local SharedHelpers = nExBot.SharedHelpers or {}
@@ -145,28 +132,6 @@ local SafeCall = SafeCall or require("core.safe_call")
 local SC = SafeCreature or {}
 
 -- Compatibility: robust safe unpack (works when neither table.unpack nor unpack exist)
-local function _unpack(tbl)
-  if not tbl then return end
-  if table and table.unpack then return table.unpack(tbl) end
-  if unpack then return unpack(tbl) end
-  local n = #tbl
-  if n == 0 then return end
-  if n == 1 then return tbl[1] end
-  if n == 2 then return tbl[1], tbl[2] end
-  if n == 3 then return tbl[1], tbl[2], tbl[3] end
-  if n == 4 then return tbl[1], tbl[2], tbl[3], tbl[4] end
-  if n == 5 then return tbl[1], tbl[2], tbl[3], tbl[4], tbl[5] end
-  if n == 6 then return tbl[1], tbl[2], tbl[3], tbl[4], tbl[5], tbl[6] end
-  if n == 7 then return tbl[1], tbl[2], tbl[3], tbl[4], tbl[5], tbl[6], tbl[7] end
-  if n == 8 then return tbl[1], tbl[2], tbl[3], tbl[4], tbl[5], tbl[6], tbl[7], tbl[8] end
-  if n == 9 then return tbl[1], tbl[2], tbl[3], tbl[4], tbl[5], tbl[6], tbl[7], tbl[8], tbl[9] end
-  if n == 10 then return tbl[1], tbl[2], tbl[3], tbl[4], tbl[5], tbl[6], tbl[7], tbl[8], tbl[9], tbl[10] end
-  if n == 11 then return tbl[1], tbl[2], tbl[3], tbl[4], tbl[5], tbl[6], tbl[7], tbl[8], tbl[9], tbl[10], tbl[11] end
-  if n == 12 then return tbl[1], tbl[2], tbl[3], tbl[4], tbl[5], tbl[6], tbl[7], tbl[8], tbl[9], tbl[10], tbl[11], tbl[12] end
-  -- Fallback: return first 12 elements
-  return tbl[1], tbl[2], tbl[3], tbl[4], tbl[5], tbl[6], tbl[7], tbl[8], tbl[9], tbl[10], tbl[11], tbl[12]
-end
-
 -- Attack watchdog to recover from indecision (rate-limited)
 local attackWatchdog = {
   lastForce = 0,
@@ -280,6 +245,7 @@ local monsterCache = {
   CLEANUP_INTERVAL = 1500,
   -- LRU eviction
   accessOrder = {},       -- Array of IDs in access order
+  posMap = {},            -- ponytail: O(1) LRU — id -> index in accessOrder
   maxSize = 50            -- Max cached creatures
 }
 
@@ -345,30 +311,37 @@ local SharedHelpers = nExBot.SharedHelpers or {}
   end)
 end
 
--- LRU eviction helper: move ID to end of access order
+-- LRU eviction helper: move ID to end of access order — O(1) via posMap
 local function touchCreature(id)
   local order = monsterCache.accessOrder
-  -- Remove existing position
-  for i = #order, 1, -1 do
-    if order[i] == id then
-      table.remove(order, i)
-      break
+  local pmap = monsterCache.posMap
+  local oldIdx = pmap[id]
+  if oldIdx then
+    local last = #order
+    if oldIdx ~= last then
+      local movedId = order[last]
+      order[oldIdx] = movedId
+      pmap[movedId] = oldIdx
     end
+    order[last] = id
+    pmap[id] = last
+  else
+    order[#order + 1] = id
+    pmap[id] = #order
   end
-  -- Add to end (most recently used)
-  order[#order + 1] = id
 end
 
 -- LRU eviction: remove oldest entries when over capacity
 local function evictOldestCreatures()
   local order = monsterCache.accessOrder
+  local pmap = monsterCache.posMap
   while #order > monsterCache.maxSize do
     local oldestId = order[1]
-    -- Shift array left by 1
-    for i = 1, #order - 1 do
-      order[i] = order[i + 1]
-    end
-    order[#order] = nil
+    local last = #order
+    order[1] = order[last]
+    pmap[order[1]] = 1
+    order[last] = nil
+    pmap[oldestId] = nil
     if monsterCache.monsters[oldestId] then
       monsterCache.monsters[oldestId] = nil
       monsterCache.monsterCount = monsterCache.monsterCount - 1
@@ -385,6 +358,7 @@ local function cleanupCache()
   local cutoff = now - 3000  -- Reduced from 5s to 3s for faster cleanup
   local newMonsters = {}
   local newOrder = {}
+  local newPmap = {}
   local count = 0
   
   -- Keep only recent entries in access order
@@ -393,13 +367,15 @@ local function cleanupCache()
     local data = monsterCache.monsters[id]
     if data and data.lastUpdate > cutoff and data.creature and not data.creature:isDead() then
       newMonsters[id] = data
-      newOrder[#newOrder + 1] = id
       count = count + 1
+      newOrder[count] = id
+      newPmap[id] = count
     end
   end
   
   monsterCache.monsters = newMonsters
   monsterCache.accessOrder = newOrder
+  monsterCache.posMap = newPmap
   monsterCache.monsterCount = count
   monsterCache.lastCleanup = now
   invalidateCache()
@@ -417,12 +393,18 @@ local function updateCreatureInCache(creature)
     if id and monsterCache.monsters[id] then
       monsterCache.monsters[id] = nil
       monsterCache.monsterCount = monsterCache.monsterCount - 1
-      -- Remove from access order
-      for i = #monsterCache.accessOrder, 1, -1 do
-        if monsterCache.accessOrder[i] == id then
-          table.remove(monsterCache.accessOrder, i)
-          break
+      -- Remove from access order — O(1) via posMap
+      local idx = monsterCache.posMap[id]
+      if idx then
+        local order = monsterCache.accessOrder
+        local last = #order
+        if idx ~= last then
+          local movedId = order[last]
+          order[idx] = movedId
+          monsterCache.posMap[movedId] = idx
         end
+        order[last] = nil
+        monsterCache.posMap[id] = nil
       end
     end
     invalidateCache()
@@ -453,11 +435,17 @@ local function updateCreatureInCache(creature)
     if monsterCache.monsters[id] then
       monsterCache.monsters[id] = nil
       monsterCache.monsterCount = monsterCache.monsterCount - 1
-      for i = #monsterCache.accessOrder, 1, -1 do
-        if monsterCache.accessOrder[i] == id then
-          table.remove(monsterCache.accessOrder, i)
-          break
+      local idx = monsterCache.posMap[id]
+      if idx then
+        local order = monsterCache.accessOrder
+        local last = #order
+        if idx ~= last then
+          local movedId = order[last]
+          order[idx] = movedId
+          monsterCache.posMap[movedId] = idx
         end
+        order[last] = nil
+        monsterCache.posMap[id] = nil
       end
     end
     return
@@ -580,7 +568,7 @@ TargetBot.hasTargetableMonstersOnScreen = function()
   if not p then return false end
   
   -- Get all creatures in detection range
-  local creatures = CreatureCache.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
+  local creatures = BotCore.Creatures.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
   
   if not creatures or #creatures == 0 then return false end
   
@@ -655,14 +643,8 @@ end
 -- Flag is now persisted to storage to survive reloads
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Central flag: when true, NO automatic enabling is allowed (recovery, events, etc.)
--- v2.5: Load persisted state from storage to survive reloads
 local function loadExplicitlyDisabledState()
-  -- Check storage for persisted state
-  if UnifiedStorage then
-    local stored = UnifiedStorage.get("targetbot.explicitlyDisabled")
-    if stored == true then return true end
-  end
+  local storage = type(nExBotStorageGet) == "function" and nExBotStorageGet("targetbot") or nil
   if storage and storage.targetbotExplicitlyDisabled == true then
     return true
   end
@@ -766,6 +748,8 @@ TargetBot.setOff = function(val)
   monsterCache.bestTarget = nil
   monsterCache.bestPriority = 0
   monsterCache.dirty = false
+  monsterCache.accessOrder = {}
+  monsterCache.posMap = {}
   
   -- Notify MonsterAI and other modules
   if EventBus then
@@ -926,101 +910,69 @@ end
 -- Uses EventBus-driven cache for reduced CPU usage and better accuracy
 -- Only recalculates when cache is dirty (events occurred)
 
--- Helper: process a creature into target params (returns params, path) - pure helper to reduce duplication
--- IMPROVED v2.2: More lenient path validation to prevent "leaving monsters behind"
--- PERFORMANCE: Uses path cache to avoid expensive recalculations
+-- Process a single candidate creature for targeting
 local function processCandidate(creature, pos, isCurrentTarget, batchPaths)
   if not creature or creature:isDead() or not targetPathfinding.isTargetableCreature(creature) then return nil, nil end
   local cpos = creature:getPosition()
   if not cpos then return nil, nil end
-  
-  -- Get creature ID for path caching
-  local creatureId = SC.getId(creature)
-  
-  -- v2.2: Calculate distance first - adjacent creatures should ALWAYS be targetable
+
+  local okId, creatureId = pcall(function() return creature:getId() end)
+  creatureId = okId and creatureId or nil
+
   local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
-  
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- ADJACENCY CHECK (v2.2): Adjacent creatures are ALWAYS reachable
-  -- This prevents the common issue of skipping monsters that are right next to us
-  -- ═══════════════════════════════════════════════════════════════════════════
+
   if dist <= 1 then
-    -- Creature is adjacent - it's definitely reachable
-    local params = TargetBot.Creature.calculateParams(creature, {1})  -- Fake minimal path
+    local params = TargetBot.Creature.calculateParams(creature, {1})
     if params and params.config then
-      return params, {1}  -- Return simple path
+      return params, {1}
     end
   end
-  
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- REACHABILITY CHECK (v3.1): Enhanced with OpenTibiaBR batch pathfinding
-  -- PERFORMANCE: Check batch paths first, then cache, then calculate new
-  -- ═══════════════════════════════════════════════════════════════════════════
-  
+
   local path = nil
-  local isReachable = true
-  
-  -- OPENTIBIABR ENHANCEMENT: Check batch paths first (fastest)
+
   if creatureId and batchPaths and batchPaths[creatureId] then
     path = batchPaths[creatureId].path
     if path and #path > 0 then
-      -- Cache this path for future use
       targetPathfinding.setCachedPath(creatureId, path, pos, cpos)
     end
   end
-  
-  -- PERFORMANCE: Try cached path if no batch path
+
   if not path and creatureId then
     path = targetPathfinding.getCachedPath(creatureId, pos, cpos)
   end
-  
-  -- If no cached path, calculate new one
+
   if not path then
-    -- Use MonsterAI.Reachability if available (but don't let it block adjacent/current targets)
     if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable and not isCurrentTarget then
       local reachResult, reason, cachedPath = MonsterAI.Reachability.isReachable(creature)
       if reachResult and cachedPath then
         path = cachedPath
       elseif not reachResult and dist > 3 then
-        -- Only skip if truly far and blocked
         return nil, nil
       end
     end
-    
-    -- If we don't have a path yet, try pathfinding
+
     if not path then
-      -- PERFORMANCE: Use only one strategy for non-current targets
       local maxStrategies = isCurrentTarget and 2 or 1
       local pathStrategies = {
-        -- Strategy 1: Standard path params
         {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = true, precision = 1},
-        -- Strategy 2: More relaxed (only for current target)
         {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = false, precision = 1}
       }
-      
       for strategyIdx = 1, maxStrategies do
         local params = pathStrategies[strategyIdx]
         path = findPath(pos, cpos, 12, params)
-        if path and #path > 0 then
-          break
-        end
+        if path and #path > 0 then break end
       end
     end
-    
-    -- Cache the path result
+
     if creatureId and path then
       targetPathfinding.setCachedPath(creatureId, path, pos, cpos)
     end
   end
-  
-  -- If still no path for nearby creatures, create a simple direction-based path
+
   if (not path or #path == 0) and dist <= 3 then
-    -- Create a simple path towards the creature
     local simplePath = {}
     local dx = cpos.x - pos.x
     local dy = cpos.y - pos.y
-    
-    -- Determine direction
     local dir = nil
     if dx > 0 and dy < 0 then dir = NorthEast or 4
     elseif dx > 0 and dy > 0 then dir = SouthEast or 5
@@ -1031,32 +983,23 @@ local function processCandidate(creature, pos, isCurrentTarget, batchPaths)
     elseif dy > 0 then dir = South or 2
     elseif dy < 0 then dir = North or 0
     end
-    
     if dir then
-      for i = 1, dist do
-        simplePath[i] = dir
-      end
+      for i = 1, dist do simplePath[i] = dir end
       path = simplePath
     end
   end
-  
+
   if not path or #path == 0 then
-    -- v2.2: Only mark as blocked if really far
-    if dist > 5 then
-      if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.markBlocked then
-        MonsterAI.Reachability.markBlocked(creature:getId(), "no_path")
-      end
+    if dist > 5 and MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.markBlocked then
+      MonsterAI.Reachability.markBlocked(creature:getId(), "no_path")
     end
     return nil, nil
   end
-  
-  -- v2.2: Skip excessive path validation for close targets
-  -- The original validation was too strict and caused targets to be skipped
+
   local pathLength = #path
   if pathLength > 20 and dist > 8 then
-    -- Only do strict validation for far targets with long paths
     local probe = {x = pos.x, y = pos.y, z = pos.z}
-    for i = 1, math.min(3, pathLength) do  -- Reduced from 5 to 3
+    for i = 1, math.min(3, pathLength) do
       local dir = path[i]
       local offset = nil
       if dir == North or dir == 0 then offset = {x = 0, y = -1}
@@ -1068,32 +1011,21 @@ local function processCandidate(creature, pos, isCurrentTarget, batchPaths)
       elseif dir == SouthWest or dir == 6 then offset = {x = -1, y = 1}
       elseif dir == NorthWest or dir == 7 then offset = {x = -1, y = -1}
       end
-      
       if offset then
         probe = {x = probe.x + offset.x, y = probe.y + offset.y, z = probe.z}
         local Client = getClient()
         local tile = (Client and Client.getTile) and Client.getTile(probe) or (g_map and g_map.getTile and g_map.getTile(probe))
         local hasCreature = tile and tile.hasCreature and tile:hasCreature()
         if tile and not tile:isWalkable() and not hasCreature then
-          -- Only fail if truly blocked (not just creature in the way)
           return nil, nil
         end
       end
     end
   end
-  
+
   local params = TargetBot.Creature.calculateParams(creature, path)
-  
-  -- v2.2: Be more lenient with priority check for close targets
-  if not params or not params.config then
-    return nil, nil
-  end
-  
-  -- Only require positive priority for far targets
-  if params.priority <= 0 and dist > 3 then
-    return nil, nil
-  end
-  
+  if not params or not params.config then return nil, nil end
+  if params.priority <= 0 and dist > 3 then return nil, nil end
   return params, path
 end
 
@@ -1107,10 +1039,11 @@ recalculateBestTarget = function()
   local function getAdjustedPriority(creature, params, dist)
     if not creature or not params then return (params and params.priority) or 0 end
     local base = params.priority or 0
-    local hp = SC.getHealthPercent(creature)
+    local okHp, hp = pcall(function() return creature:getHealthPercent() end)
+    hp = okHp and hp or 100
     if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.modifyPriority then
-      local id = SC.getId(creature)
-      if id then
+      local okId, id = pcall(function() return creature:getId() end)
+      if okId and id then
         base = MonsterAI.Scenario.modifyPriority(id, base, hp)
       end
     end
@@ -1118,15 +1051,9 @@ recalculateBestTarget = function()
       base = base + math.max(0, (8 - dist)) * 2
     end
     base = base + ((100 - hp) * 0.15)
-    -- ponytail: sticky bonus prevents retarget ping-pong
-    -- current target needs a full config priority level higher to be overridden
-    if currentTargetId and creature and creature:getId() == currentTargetId then
-      local hpVal = SC.getHealthPercent(creature)
-      base = base + (hpVal < 25 and STICKY_BONUS_FINISH or STICKY_BONUS)
-    end
     return base
   end
-  
+
   local bestTarget = nil
   local bestPriority = 0
   local totalDanger = 0
@@ -1180,7 +1107,7 @@ recalculateBestTarget = function()
   
   -- If still no creatures, do a fresh scan with standard methods
   if not creatures or #creatures == 0 then
-    creatures = CreatureCache.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
+    creatures = BotCore.Creatures.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
   end
   
   if not creatures then return nil, 0, 0 end
@@ -1368,19 +1295,16 @@ recalculateBestTarget = function()
   return bestTarget, reachableCount, totalDanger
 end
 
--- If we deferred enabling steps because core functions weren't ready, perform them now (with retries)
+local pendingEnable = false
+local pendingEnableDesired = nil
+local moduleInitialized = false
+
 local function performPendingEnableOnce()
-  if not pendingEnable then
-    -- Nothing to do
-    return true
-  end
+  if pendingEnable then return true end
   if type(recalculateBestTarget) ~= 'function' or not (targetbotMacro and (type(targetbotMacro) == 'function' or type(targetbotMacro.setOn) == 'function')) then
-    -- core not ready yet; will retry silently
     return false
   end
-  pendingEnable = false
-  -- performing deferred enable steps (core ready)
-  -- If user requested a particular enabled state, apply it
+  pendingEnable = true
   if pendingEnableDesired ~= nil then
     pcall(function()
       if targetbotMacro and type(targetbotMacro.setOn) == 'function' then
@@ -1394,9 +1318,37 @@ local function performPendingEnableOnce()
   invalidateCache()
   if debouncedInvalidateAndRecalc then debouncedInvalidateAndRecalc() end
   schedule(10, function() pcall(function() if type(recalculateBestTarget) == 'function' then recalculateBestTarget() end end) end)
-  -- DON'T force enable here - respect the user's choice from pendingEnableDesired or storage
-  -- The macro was already set in the block above if pendingEnableDesired was set
   return true
+end
+
+local function primeCreatureCache()
+  local pos = nil
+  local Client = getClient()
+  local p = Client and Client.getLocalPlayer and Client.getLocalPlayer()
+  if p then pos = p:getPosition() end
+  if not pos then return end
+  local creatures = getSpectators(pos, false, false, 8) or {}
+  local now = os.clock()
+  monsterCache.monsters = {}
+  monsterCache.monsterCount = 0
+  local snapshotCreatures = {}
+  for i = 1, #creatures do
+    local creature = creatures[i]
+    if targetPathfinding.isTargetableCreature and targetPathfinding.isTargetableCreature(creature) then
+      local id = creature:getId()
+      monsterCache.monsters[id] = {
+        creature = creature,
+        path = nil,
+        pathTime = 0,
+        lastUpdate = now
+      }
+      table.insert(snapshotCreatures, { id = id, pos = creature:getPosition(), creature = creature })
+      monsterCache.monsterCount = monsterCache.monsterCount + 1
+    end
+  end
+  monsterCache.lastFullUpdate = now
+  monsterCache.dirty = false
+  monsterCache.primeSnapshot = { ts = now, pos = pos, creatures = snapshotCreatures }
 end
 
 -- Schedule multiple retries with exponential backoff to cover different load timings
@@ -1413,37 +1365,6 @@ schedule(1500, function()
   -- Startup sanity log to confirm TargetBot module loaded
   -- warn("[TargetBot] module initialized. TargetBot._removed=" .. tostring(TargetBot and TargetBot._removed) .. ", TargetBot.isOn=" .. tostring(TargetBot and TargetBot.isOn and TargetBot.isOn()))
 end)
-
--- Prime the CreatureCache directly from current spectators (used when enabling targetbot)
-local function primeCreatureCache()
-  local p = player and player:getPosition()
-  if not p then return end
-  local creatures = CreatureCache.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
-  if not creatures or #creatures == 0 then
-    return
-  end
-
-  monsterCache.monsters = {}
-  monsterCache.monsterCount = 0
-  local snapshotCreatures = {}
-  for i = 1, #creatures do
-    local creature = creatures[i]
-    if targetPathfinding.isTargetableCreature(creature) then
-      local id = creature:getId()
-      monsterCache.monsters[id] = {
-        creature = creature,
-        path = nil,
-        pathTime = 0,
-        lastUpdate = now
-      }
-      table.insert(snapshotCreatures, { id = id, pos = creature:getPosition(), creature = creature })
-      monsterCache.monsterCount = monsterCache.monsterCount + 1
-    end
-  end
-  monsterCache.lastFullUpdate = now
-  monsterCache.dirty = false
-  monsterCache.primeSnapshot = { ts = now, pos = p, creatures = snapshotCreatures }
-end
 
 -- Follow player integration state (used by target_events.lua EventBus handlers)
 local followPlayerForceMode = false
@@ -1986,11 +1907,17 @@ local function removeCreatureFromCache(creature)
   if monsterCache.monsters[id] then
     monsterCache.monsters[id] = nil
     monsterCache.monsterCount = monsterCache.monsterCount - 1
-    for i = #monsterCache.accessOrder, 1, -1 do
-      if monsterCache.accessOrder[i] == id then
-        table.remove(monsterCache.accessOrder, i)
-        break
+    local idx = monsterCache.posMap[id]
+    if idx then
+      local order = monsterCache.accessOrder
+      local last = #order
+      if idx ~= last then
+        local movedId = order[last]
+        order[idx] = movedId
+        monsterCache.posMap[movedId] = idx
       end
+      order[last] = nil
+      monsterCache.posMap[id] = nil
     end
     invalidateCache()
   end

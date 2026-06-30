@@ -129,7 +129,7 @@ end
 
 -- Find food item in all open containers
 local function findFoodInContainers()
-  local containers = getContainers and getContainers() or (g_game and g_game.getContainers and g_game.getContainers())
+  local containers = nExBot.Shared.getContainers()
   if not containers then return nil end
   
   for _, container in pairs(containers) do

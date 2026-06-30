@@ -177,18 +177,6 @@ function EventBus.on(event, callback, priority)
   end
 end
 
--- Subscribe to an event (one-time only)
--- @param event string: Event name
--- @param callback function: Handler function
-function EventBus.once(event, callback)
-  local unsubscribe
-  unsubscribe = EventBus.on(event, function(...)
-    unsubscribe()
-    callback(...)
-  end)
-  return unsubscribe
-end
-
 -- Emit an event to all subscribers
 -- @param event string: Event name
 -- @param ... any: Arguments to pass to handlers
@@ -251,36 +239,7 @@ function EventBus.flush()
   processing = false
 end
 
--- Remove all listeners for an event
--- @param event string: Event name (optional, clears all if nil)
-function EventBus.clear(event)
-  if event then
-    listeners[event] = nil
-  else
-    listeners = {}
-  end
-end
-
--- Get listener count for debugging
--- @param event string: Event name (optional)
--- @return number: Listener count
-function EventBus.listenerCount(event)
-  if event then
-    return listeners[event] and #listeners[event] or 0
-  end
-  
-  local total = 0
-  for _, handlers in pairs(listeners) do
-    total = total + #handlers
-  end
-  return total
-end
-
 -- Get number of queued events currently waiting to be processed
-function EventBus.queueSize()
-  return math.max(0, eventQueue.tail - eventQueue.head + 1)
-end
-
 -- OTClient Native Event Registration
 -- Register once, dispatch through EventBus
 
@@ -334,10 +293,6 @@ local killedMonsters = {}  -- { [creatureId] = { pos, name, timestamp } }
 local KILLED_MONSTER_EXPIRY_MS = 15000  -- 15 seconds
 
 -- Public accessor for killed monsters list
-function EventBus.getKilledMonsters()
-  return killedMonsters
-end
-
 -- Clean up old killed monster entries + throttle tables
 local _cleanupCounter = 0
 local _creatureMoveLastEmit = {}
@@ -475,7 +430,7 @@ local function attributeDamageSource(damage)
   -- Cache spectator list for 200ms to avoid repeated API calls
   local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
   if not _damageAttrCachedCreatures or (nowt - _damageAttrCacheTime) > _damageAttrCacheTTL then
-    _damageAttrCachedCreatures = CreatureCache.getNearby(radius) or {}
+    _damageAttrCachedCreatures = BotCore.Creatures.getNearby(radius) or {}
     _damageAttrCacheTime = nowt
   end
 

@@ -259,8 +259,7 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   if waitTill > now then
     return true
   end
-  local Client = getClient()
-  local containers = (Client and Client.getContainers) and Client.getContainers() or (g_game and g_game.getContainers and g_game.getContainers())
+  local containers = nExBot.Shared.getContainers()
   local lootContainers = TargetBot.Looting.getLootContainers(containers)
 
   -- check if there's container for loot and has empty space for it

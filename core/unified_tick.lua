@@ -127,23 +127,6 @@ function UnifiedTick.register(name, config)
 end
 
 --[[
-  Unregister a tick handler
-  @param name string Handler name
-  @return boolean success
-]]
-function UnifiedTick.unregister(name)
-  if not handlers[name] then
-    return false
-  end
-  
-  handlers[name] = nil
-  stats.handlerStats[name] = nil
-  UnifiedTick._rebuildOrder()
-  
-  if UnifiedTick.DEBUG then
-    print("[UnifiedTick] Unregistered: " .. name)
-  end
-  
   return true
 end
 
@@ -158,37 +141,11 @@ function UnifiedTick.setEnabled(name, enabled)
   end
 end
 
---[[
-  Enable/disable all handlers in a group
-  @param group string Group name
-  @param enabled boolean
-]]
-function UnifiedTick.setGroupEnabled(group, enabled)
-  for name, handler in pairs(handlers) do
-    if handler.group == group then
-      handler.enabled = enabled
-    end
-  end
-end
-
---[[
-  Update handler interval at runtime
-  @param name string Handler name
-  @param interval number New interval (ms)
-]]
-function UnifiedTick.setInterval(name, interval)
-  if handlers[name] and interval > 0 then
-    handlers[name].interval = interval
-  end
-end
-
--- Rebuild sorted handler order by priority
 function UnifiedTick._rebuildOrder()
   handlerOrder = {}
   for name, _ in pairs(handlers) do
     handlerOrder[#handlerOrder + 1] = name
   end
-  
   table.sort(handlerOrder, function(a, b)
     return (handlers[a].priority or 0) > (handlers[b].priority or 0)
   end)
@@ -291,103 +248,7 @@ function UnifiedTick.start()
   print("[UnifiedTick] Started (interval=" .. UnifiedTick.MASTER_INTERVAL .. "ms)")
 end
 
---[[
-  Stop the unified tick system
-]]
-function UnifiedTick.stop()
-  if masterMacro then
-    -- In OTClient, macros can be disabled by setting enabled to false
-    -- or calling removeEvent if available
-    if type(masterMacro) == "table" and masterMacro.setEnabled then
-      masterMacro:setEnabled(false)
-    end
-    masterMacro = nil
-  end
-  
-  print("[UnifiedTick] Stopped")
-end
-
---[[
-  Pause the unified tick system temporarily
-]]
-function UnifiedTick.pause()
-  UnifiedTick.ENABLED = false
-end
-
---[[
-  Resume the unified tick system
-]]
-function UnifiedTick.resume()
-  UnifiedTick.ENABLED = true
-  lastTick = nowMs()
-end
-
 -- STATISTICS AND DEBUGGING
-
---[[
-  Get tick system statistics
-  @return table stats
-]]
-function UnifiedTick.getStats()
-  return {
-    enabled = UnifiedTick.ENABLED,
-    totalTicks = stats.totalTicks,
-    totalHandlerCalls = stats.totalHandlerCalls,
-    avgTickTime = stats.avgTickTime,
-    peakTickTime = stats.peakTickTime,
-    handlerCount = #handlerOrder,
-    handlers = stats.handlerStats
-  }
-end
-
---[[
-  Get list of registered handlers with their stats
-  @return array of handler info
-]]
-function UnifiedTick.getHandlers()
-  local result = {}
-  for i = 1, #handlerOrder do
-    local name = handlerOrder[i]
-    local handler = handlers[name]
-    if handler then
-      result[#result + 1] = {
-        name = name,
-        interval = handler.interval,
-        priority = handler.priority,
-        enabled = handler.enabled,
-        group = handler.group,
-        runCount = handler.runCount,
-        avgTime = handler.avgTime,
-        errors = handler.errors
-      }
-    end
-  end
-  return result
-end
-
---[[
-  Reset statistics
-]]
-function UnifiedTick.resetStats()
-  stats.totalTicks = 0
-  stats.totalHandlerCalls = 0
-  stats.avgTickTime = 0
-  stats.peakTickTime = 0
-  
-  for name, hs in pairs(stats.handlerStats) do
-    hs.calls = 0
-    hs.totalTime = 0
-    hs.avgTime = 0
-    hs.errors = 0
-  end
-  
-  for name, handler in pairs(handlers) do
-    handler.runCount = 0
-    handler.totalTime = 0
-    handler.avgTime = 0
-    handler.errors = 0
-  end
-end
 
 -- PRE-DEFINED HANDLER TEMPLATES
 -- Common handler patterns for easy migration
@@ -398,75 +259,30 @@ end
   @param checkFn function Condition check function
   @param interval number Check interval (default 500ms)
 ]]
-function UnifiedTick.registerConditionCheck(name, checkFn, interval)
-  return UnifiedTick.register(name, {
-    interval = interval or 500,
-    priority = UnifiedTick.Priority.NORMAL,
-    group = "conditions",
-    handler = checkFn
-  })
-end
-
 --[[
   Create a healing handler (high priority)
   @param name string Handler name
   @param healFn function Healing check function
   @param interval number Check interval (default 100ms)
 ]]
-function UnifiedTick.registerHealingHandler(name, healFn, interval)
-  return UnifiedTick.register(name, {
-    interval = interval or 100,
-    priority = UnifiedTick.Priority.CRITICAL,
-    group = "healing",
-    handler = healFn
-  })
-end
-
 --[[
   Create a targeting handler (high priority)
   @param name string Handler name
   @param targetFn function Targeting logic function
   @param interval number Check interval (default 200ms)
 ]]
-function UnifiedTick.registerTargetingHandler(name, targetFn, interval)
-  return UnifiedTick.register(name, {
-    interval = interval or 200,
-    priority = UnifiedTick.Priority.HIGH,
-    group = "targeting",
-    handler = targetFn
-  })
-end
-
 --[[
   Create a UI update handler (low priority)
   @param name string Handler name
   @param updateFn function UI update function
   @param interval number Update interval (default 300ms)
 ]]
-function UnifiedTick.registerUIHandler(name, updateFn, interval)
-  return UnifiedTick.register(name, {
-    interval = interval or 300,
-    priority = UnifiedTick.Priority.LOW,
-    group = "ui",
-    handler = updateFn
-  })
-end
-
 --[[
   Create an analytics handler (idle priority)
   @param name string Handler name
   @param analyticsFn function Analytics function
   @param interval number Update interval (default 1000ms)
 ]]
-function UnifiedTick.registerAnalyticsHandler(name, analyticsFn, interval)
-  return UnifiedTick.register(name, {
-    interval = interval or 1000,
-    priority = UnifiedTick.Priority.IDLE,
-    group = "analytics",
-    handler = analyticsFn
-  })
-end
-
 -- AUTO-START (Optional)
 -- Uncomment to auto-start when module is loaded
 

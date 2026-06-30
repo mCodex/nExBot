@@ -89,12 +89,6 @@ local function expForLevel(lvl)
 end
 
 -- Check if table has data (pure function)
-local function hasData(tbl)
-  if not tbl then return false end
-  for _ in pairs(tbl) do return true end
-  return false
-end
-
 -- Clamp value between min and max (pure function)
 local function clamp(value, min, max)
   return math.max(min, math.min(max, value))
@@ -273,24 +267,6 @@ local COIN_VALUES = {
 
 local function trim(s)
   return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
-end
-
--- Parse values like "1.2k" -> 1200, "2.5m" -> 2500000
-local function parseValue(str)
-  if not str then return 0 end
-  str = trim(str:lower())
-  local num, suffix = str:match("^([%d%.]+)([km]?)$")
-  if not num then
-    -- Try plain number
-    return tonumber(str) or 0
-  end
-  local value = tonumber(num) or 0
-  if suffix == "k" then
-    value = value * 1000
-  elseif suffix == "m" then
-    value = value * 1000000
-  end
-  return math.floor(value)
 end
 
 local function normalizeItemName(name)
@@ -676,10 +652,6 @@ local RUNE_ITEM_IDS = {
 
 -- Check if an item is a rune based on ID or name pattern
 local function isRune(itemId)
-  if RUNE_ITEM_IDS[itemId] then
-    return true, RUNE_ITEM_IDS[itemId], "attack"
-  end
-  
   -- Try to get item info from g_things
   if g_things and g_things.getThingType then
     local ok, thing = pcall(function() return g_things.getThingType(itemId, ThingCategoryItem) end)
@@ -802,7 +774,6 @@ local function weightedAverage(values, decayFactor)
   return weightSum > 0 and (sum / weightSum) or 0
 end
 
--- Calculate standard deviation (consistency measure)
 local function standardDeviation(values, mean)
   if not values or #values < 2 then return 0 end
   mean = mean or 0
@@ -817,21 +788,6 @@ end
 local function normalize(value, min, max)
   if max <= min then return 0.5 end
   return clamp((value - min) / (max - min), 0, 1)
-end
-
--- Calculate percentile rank
-local function percentileRank(value, thresholds)
-  for i, threshold in ipairs(thresholds) do
-    if value <= threshold then return (i - 1) / #thresholds end
-  end
-  return 1.0
-end
-
--- Sigmoid function for smooth scoring transitions
-local function sigmoid(x, midpoint, steepness)
-  midpoint = midpoint or 0
-  steepness = steepness or 1
-  return 1 / (1 + math.exp(-steepness * (x - midpoint)))
 end
 
 -- TREND TRACKING (Rolling Window Analysis)

@@ -71,205 +71,27 @@ MonsterAI.DPS_WINDOW = MonsterAI.DPS_WINDOW or 5000 -- ms window for DPS calcula
 MonsterAI.AUTO_TUNE_ENABLED = (MonsterAI.AUTO_TUNE_ENABLED == nil) and true or MonsterAI.AUTO_TUNE_ENABLED
 MonsterAI.TELEMETRY_INTERVAL = MonsterAI.TELEMETRY_INTERVAL or 200 -- ms between telemetry samples
 
--- VOLUME ADAPTATION MODULE (NEW in v2.2)
--- Automatically adjusts processing parameters based on monster count
--- Optimizes CPU usage while maintaining responsiveness
 
-MonsterAI.VolumeAdaptation = MonsterAI.VolumeAdaptation or {
-  -- Current adaptation state
-  currentVolume = "normal",  -- "low", "normal", "high", "extreme"
-  lastVolumeChange = 0,
-  
-  -- Volume thresholds
-  THRESHOLDS = {
-    LOW = 2,       -- 1-2 monsters = low volume
-    NORMAL = 5,    -- 3-5 monsters = normal
-    HIGH = 10,     -- 6-10 monsters = high
-    EXTREME = 15   -- 11+ monsters = extreme
-  },
-  
-  -- Adaptation parameters per volume level
-  PARAMS = {
-    low = {
-      description = "Few monsters - high precision mode",
-      telemetryInterval = 100,      -- ms (more frequent sampling)
-      threatCacheTTL = 50,          -- ms (fresher cache)
-      updatePriority = "precision", -- Focus on accuracy
-      ewmaAlpha = 0.35,             -- More responsive EWMA
-      minSamplesForPrediction = 3,
-      maxTrackedPerCycle = 10
-    },
-    normal = {
-      description = "Normal load - balanced mode",
-      telemetryInterval = 200,
-      threatCacheTTL = 100,
-      updatePriority = "balanced",
-      ewmaAlpha = 0.25,
-      minSamplesForPrediction = 5,
-      maxTrackedPerCycle = 8
-    },
-    high = {
-      description = "Many monsters - efficiency mode",
-      telemetryInterval = 350,
-      threatCacheTTL = 150,
-      updatePriority = "efficiency",
-      ewmaAlpha = 0.20,
-      minSamplesForPrediction = 7,
-      maxTrackedPerCycle = 6
-    },
-    extreme = {
-      description = "Overload - survival mode",
-      telemetryInterval = 500,
-      threatCacheTTL = 200,
-      updatePriority = "survival",
-      ewmaAlpha = 0.15,             -- Smoother, less CPU
-      minSamplesForPrediction = 10,
-      maxTrackedPerCycle = 4        -- Process fewer per cycle
-    }
-  },
-  
-  -- Performance metrics
-  metrics = {
-    volumeChanges = 0,
-    avgMonsterCount = 0,
-    peakMonsterCount = 0,
-    adaptationsSaved = 0   -- Estimated CPU cycles saved
-  }
-}
+-- ============================================================================
+-- REALTIME THREAT DETECTION MODULE
+-- Direction tracking, threat cache, prediction queue
+-- ============================================================================
 
--- Determine volume level from monster count
-function MonsterAI.VolumeAdaptation.getVolumeLevel(monsterCount)
-  local th = MonsterAI.VolumeAdaptation.THRESHOLDS
-  if monsterCount <= th.LOW then
-    return "low"
-  elseif monsterCount <= th.NORMAL then
-    return "normal"
-  elseif monsterCount <= th.HIGH then
-    return "high"
-  else
-    return "extreme"
-  end
-end
-
--- Get current adaptation parameters
-function MonsterAI.VolumeAdaptation.getParams()
-  local volume = MonsterAI.VolumeAdaptation.currentVolume
-  return MonsterAI.VolumeAdaptation.PARAMS[volume] or MonsterAI.VolumeAdaptation.PARAMS.normal
-end
-
--- Update volume state based on current monster count
-function MonsterAI.VolumeAdaptation.update()
-  local va = MonsterAI.VolumeAdaptation
-  local nowt = nowMs()
-  
-  -- Count currently tracked monsters
-  local monsterCount = 0
-  if MonsterAI.Tracker and MonsterAI.Tracker.monsters then
-    for _ in pairs(MonsterAI.Tracker.monsters) do
-      monsterCount = monsterCount + 1
-    end
-  end
-  
-  -- Update metrics
-  va.metrics.avgMonsterCount = (va.metrics.avgMonsterCount or 0) * 0.95 + monsterCount * 0.05
-  if monsterCount > (va.metrics.peakMonsterCount or 0) then
-    va.metrics.peakMonsterCount = monsterCount
-  end
-  
-  -- Determine new volume level
-  local newVolume = va.getVolumeLevel(monsterCount)
-  
-  -- Apply hysteresis to prevent rapid switching
-  -- Only change if we've been in current state for at least 500ms
-  if newVolume ~= va.currentVolume then
-    if (nowt - (va.lastVolumeChange or 0)) > 500 then
-      local oldVolume = va.currentVolume
-      va.currentVolume = newVolume
-      va.lastVolumeChange = nowt
-      va.metrics.volumeChanges = (va.metrics.volumeChanges or 0) + 1
-      
-      -- Apply new parameters
-      local params = va.PARAMS[newVolume]
-      if params then
-        -- Update global settings
-        MonsterAI.TELEMETRY_INTERVAL = params.telemetryInterval
-        
-        -- Update EWMA alpha in constants
-        if MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.EWMA then
-          MonsterAI.CONSTANTS.EWMA.ALPHA_DEFAULT = params.ewmaAlpha
-        end
-        
-        -- Update threat cache TTL
-        if MonsterAI.CONSTANTS and MonsterAI.CONSTANTS.EVENT_DRIVEN then
-          MonsterAI.CONSTANTS.EVENT_DRIVEN.THREAT_CACHE_TTL = params.threatCacheTTL
-        end
-      end
-      
-      -- Emit volume change event
-      if EventBus and EventBus.emit then
-        EventBus.emit("monsterai:volume_changed", {
-          oldVolume = oldVolume,
-          newVolume = newVolume,
-          monsterCount = monsterCount,
-          params = params
-        })
-      end
-      
-      if MonsterAI.DEBUG then
-        print(string.format("[MonsterAI] Volume adapted: %s -> %s (%d monsters) - %s",
-          oldVolume, newVolume, monsterCount, params and params.description or ""))
-      end
-    end
-  end
-  
-  return va.currentVolume, va.getParams()
-end
-
--- Check if we should process this monster in current cycle (load balancing)
-function MonsterAI.VolumeAdaptation.shouldProcessMonster(monsterId)
-  local va = MonsterAI.VolumeAdaptation
-  local params = va.getParams()
-  
-  -- In low/normal volume, always process
-  if va.currentVolume == "low" or va.currentVolume == "normal" then
-    return true
-  end
-  
-  -- In high/extreme, use round-robin based on monster ID
-  -- This distributes processing across multiple cycles
-  local cycleNumber = math.floor(nowMs() / 100) -- 100ms cycles
-  local hash = monsterId % (params.maxTrackedPerCycle * 2)
-  local slot = cycleNumber % (params.maxTrackedPerCycle * 2)
-  
-  return hash <= slot and hash > (slot - params.maxTrackedPerCycle)
-end
-
--- Get volume adaptation stats for UI
-function MonsterAI.VolumeAdaptation.getStats()
-  local va = MonsterAI.VolumeAdaptation
-  return {
-    currentVolume = va.currentVolume,
-    params = va.getParams(),
-    metrics = va.metrics
-  }
-end
-
--- REAL-TIME EVENT-DRIVEN STATE (O(1) lookups)
 MonsterAI.RealTime = MonsterAI.RealTime or {
   -- Direction tracking: id -> {dir, lastChangeTime, consecutiveChanges, turnRate}
   directions = {},
-  
+
   -- Threat level cache: refreshed on every direction/position change
   threatCache = {
     lastUpdate = 0,
     totalThreat = 0,
-    highThreatMonsters = {},  -- monsters facing player
-    immediateThreat = false   -- true if any monster about to attack
+    highThreatMonsters = {},
+    immediateThreat = false
   },
-  
+
   -- Attack prediction queue: sorted by predicted attack time
   predictedAttacks = {},
-  
+
   -- Performance metrics
   metrics = {
     eventsProcessed = 0,
@@ -770,49 +592,47 @@ end
 -- CONST alias for remaining code (full definition in monster_ai_core.lua)
 local CONST = MonsterAI.CONSTANTS
 
+-- ============================================================================
+-- REALTIME METHODS
+-- ============================================================================
+
 function MonsterAI.RealTime.onDirectionChange(creature, oldDir, newDir)
   if not creature then return end
   if not isCreatureValid(creature) then return end
   local id = safeGetId(creature)
   if not id then return end
-  
+
   local nowt = nowMs()
   local rt = MonsterAI.RealTime.directions[id]
-  
+
   if not rt then
     rt = { dir = newDir, lastChangeTime = nowt, consecutiveChanges = 0, turnRate = 0, positions = {} }
     MonsterAI.RealTime.directions[id] = rt
   end
-  
-  -- Calculate turn rate (changes per second)
+
   local dt = nowt - (rt.lastChangeTime or nowt)
   if dt > 0 and dt < CONST.EVENT_DRIVEN.TURN_RATE_WINDOW then
-    rt.turnRate = rt.turnRate * 0.7 + (1000 / dt) * 0.3  -- EWMA
+    rt.turnRate = rt.turnRate * 0.7 + (1000 / dt) * 0.3
     rt.consecutiveChanges = rt.consecutiveChanges + 1
   else
     rt.consecutiveChanges = 1
     rt.turnRate = 0
   end
-  
+
   rt.dir = newDir
   rt.lastChangeTime = nowt
-  
-  -- Check if now facing player (immediate threat signal)
+
   local playerPos = nil
   if player then
-    playerPos = SC.getPosition(player)
+    local okP, pPos = pcall(function() return player:getPosition() end)
+    if okP then playerPos = pPos end
   end
   local monsterPos = safeCreatureCall(creature, "getPosition", nil)
   if playerPos and monsterPos then
-    local isFacing = MonsterAI.Predictor.isFacingPosition(monsterPos, newDir, playerPos)
-    
+    local isFacing = MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition and MonsterAI.Predictor.isFacingPosition(monsterPos, newDir, playerPos)
     if isFacing then
-      -- Monster just turned to face player - potential attack incoming
       rt.facingPlayerSince = nowt
-      
-      -- High turn rate + now facing = high threat
       if rt.consecutiveChanges >= CONST.EVENT_DRIVEN.CONSECUTIVE_TURNS_ALERT then
-        -- Emit immediate threat event
         MonsterAI.RealTime.registerImmediateThreat(creature, "direction_lock", 0.75 + rt.turnRate * 0.05)
       else
         MonsterAI.RealTime.registerImmediateThreat(creature, "facing", 0.50)
@@ -821,49 +641,38 @@ function MonsterAI.RealTime.onDirectionChange(creature, oldDir, newDir)
       rt.facingPlayerSince = nil
     end
   end
-  
+
   MonsterAI.RealTime.metrics.eventsProcessed = (MonsterAI.RealTime.metrics.eventsProcessed or 0) + 1
 end
 
--- Register an immediate threat from a monster
 function MonsterAI.RealTime.registerImmediateThreat(creature, reason, confidence)
   if not creature then return end
   if not isCreatureValid(creature) then return end
   local id = safeGetId(creature)
   if not id then return end
-  
+
   local nowt = nowMs()
   local pos = safeCreatureCall(creature, "getPosition", nil)
   local dir = safeCreatureCall(creature, "getDirection", 0)
-  
-  -- Get learned cooldown for prediction
-  local data = MonsterAI.Tracker.monsters[id]
-  local pattern = MonsterAI.Patterns.get(safeCreatureCall(creature, "getName", "Unknown"))
+
+  local data = MonsterAI.Tracker and MonsterAI.Tracker.monsters and MonsterAI.Tracker.monsters[id]
+  local pattern = MonsterAI.Patterns and MonsterAI.Patterns.get and MonsterAI.Patterns.get(safeCreatureCall(creature, "getName", "Unknown"))
   local cooldown = (data and data.ewmaCooldown) or (pattern and pattern.waveCooldown) or 2000
-  
-  -- Calculate time to attack based on cooldown and last attack
+
   local lastAttack = (data and data.lastWaveTime) or (data and data.lastAttackTime) or 0
   local elapsed = nowt - lastAttack
   local timeToAttack = math.max(0, cooldown - elapsed)
-  
-  -- If cooldown is almost up and facing player, this is very high threat
+
   if timeToAttack < CONST.EVENT_DRIVEN.IMMEDIATE_THREAT_WINDOW then
     confidence = math.min(0.95, confidence + 0.25)
   end
-  
-  -- Add to prediction queue
+
   local prediction = {
-    id = id,
-    creature = creature,
-    pos = pos,
-    dir = dir,
-    reason = reason,
-    confidence = confidence,
-    predictedTime = nowt + timeToAttack,
-    registeredAt = nowt
+    id = id, creature = creature, pos = pos, dir = dir,
+    reason = reason, confidence = confidence,
+    predictedTime = nowt + timeToAttack, registeredAt = nowt
   }
-  
-  -- Insert sorted by predicted time
+
   local queue = MonsterAI.RealTime.predictedAttacks
   local inserted = false
   for i = 1, #queue do
@@ -873,40 +682,24 @@ function MonsterAI.RealTime.registerImmediateThreat(creature, reason, confidence
       break
     end
   end
-  if not inserted then
-    table.insert(queue, prediction)
-  end
-  
-  -- Cap queue size
-  while #queue > 20 do
-    table.remove(queue)
-  end
-  
-  -- Emit event for immediate avoidance
+  if not inserted then table.insert(queue, prediction) end
+
+  while #queue > 20 do table.remove(queue) end
+
   if confidence >= CONST.EVENT_DRIVEN.FACING_PLAYER_THRESHOLD and EventBus then
     pcall(function()
       EventBus.emit("monsterai/threat_detected", creature, {
-        reason = reason,
-        confidence = confidence,
-        timeToAttack = timeToAttack,
-        pos = pos,
-        dir = dir
+        reason = reason, confidence = confidence, timeToAttack = timeToAttack, pos = pos, dir = dir
       })
     end)
-    
-    -- Also register intent with MovementCoordinator if high confidence
     if confidence >= 0.65 and MovementCoordinator and MovementCoordinator.Intent then
       local playerPos = player and player:getPosition()
       if playerPos and pos then
-        -- Find safe tile away from attack arc
         local safeTile = MonsterAI.RealTime.findSafeTileFromArc(playerPos, pos, dir, pattern)
         if safeTile then
           MovementCoordinator.Intent.register(
-            MovementCoordinator.CONSTANTS.INTENT.WAVE_AVOIDANCE,
-            safeTile,
-            confidence,
-            "MonsterAI.RealTime",
-            { reason = reason, timeToAttack = timeToAttack, source = id }
+            MovementCoordinator.CONSTANTS.INTENT.WAVE_AVOIDANCE, safeTile, confidence,
+            "MonsterAI.RealTime", { reason = reason, timeToAttack = timeToAttack, source = id }
           )
         end
       end
@@ -914,139 +707,87 @@ function MonsterAI.RealTime.registerImmediateThreat(creature, reason, confidence
   end
 end
 
--- Find safe tile outside of monster's attack arc
 function MonsterAI.RealTime.findSafeTileFromArc(playerPos, monsterPos, monsterDir, pattern)
   if not playerPos or not monsterPos then return nil end
-  
   local range = (pattern and pattern.waveRange) or 5
   local width = (pattern and pattern.waveWidth) or 1
-  
-  -- Direction vectors
   local dirVecs = {
     [0] = {x=0, y=-1}, [1] = {x=1, y=-1}, [2] = {x=1, y=0}, [3] = {x=1, y=1},
     [4] = {x=0, y=1}, [5] = {x=-1, y=1}, [6] = {x=-1, y=0}, [7] = {x=-1, y=-1}
   }
-  
   local dirVec = dirVecs[monsterDir] or {x=0, y=0}
-  
-  -- Get perpendicular directions (safe directions)
   local perpX, perpY = -dirVec.y, dirVec.x
-  
   local candidates = {}
-  -- Check tiles perpendicular to attack direction
+
   for dist = 1, 2 do
     for _, mult in ipairs({1, -1}) do
-      local tile = {
-        x = playerPos.x + perpX * dist * mult,
-        y = playerPos.y + perpY * dist * mult,
-        z = playerPos.z
-      }
-      
-      -- Verify not in attack arc
-      if not MonsterAI.Predictor.isPositionInWavePath(tile, monsterPos, monsterDir, range, width) then
-        -- Check walkability
+      local tile = { x = playerPos.x + perpX * dist * mult, y = playerPos.y + perpY * dist * mult, z = playerPos.z }
+      local inWave = MonsterAI.Predictor and MonsterAI.Predictor.isPositionInWavePath and MonsterAI.Predictor.isPositionInWavePath(tile, monsterPos, monsterDir, range, width)
+      if not inWave then
+        local Client = getClient and getClient()
         local walkable = true
-        local Client = getClient()
         if Client and Client.isTileWalkable then
-          local ok, result = pcall(Client.isTileWalkable, tile)
-          walkable = ok and result
-        elseif Client and Client.getTile then
-          local ok, mapTile = pcall(Client.getTile, tile)
-          walkable = ok and mapTile and mapTile:isWalkable()
-        elseif g_map and g_map.isTileWalkable then
-          local ok, result = pcall(g_map.isTileWalkable, tile)
-          walkable = ok and result
+          local ok, r = pcall(Client.isTileWalkable, tile); walkable = ok and r
         elseif g_map and g_map.getTile then
-          local ok, mapTile = pcall(g_map.getTile, tile)
-          walkable = ok and mapTile and mapTile:isWalkable()
+          local ok, t = pcall(g_map.getTile, tile); walkable = ok and t and t:isWalkable()
         end
-        
         if walkable then
-          -- Score by distance from monster (further = safer)
-          local distFromMonster = math.abs(tile.x - monsterPos.x) + math.abs(tile.y - monsterPos.y)
-          table.insert(candidates, { pos = tile, score = distFromMonster })
+          table.insert(candidates, { pos = tile, score = math.abs(tile.x - monsterPos.x) + math.abs(tile.y - monsterPos.y) })
         end
       end
     end
   end
-  
-  -- Also try diagonal escapes
+
   for dx = -1, 1 do
     for dy = -1, 1 do
       if dx ~= 0 or dy ~= 0 then
         local tile = { x = playerPos.x + dx, y = playerPos.y + dy, z = playerPos.z }
-        if not MonsterAI.Predictor.isPositionInWavePath(tile, monsterPos, monsterDir, range, width) then
+        local inWave = MonsterAI.Predictor and MonsterAI.Predictor.isPositionInWavePath and MonsterAI.Predictor.isPositionInWavePath(tile, monsterPos, monsterDir, range, width)
+        if not inWave then
+          local Client2 = getClient and getClient()
           local walkable = true
-          local Client2 = getClient()
           if Client2 and Client2.getTile then
-            local ok, mapTile = pcall(Client2.getTile, tile)
-            walkable = ok and mapTile and mapTile:isWalkable()
+            local ok, t = pcall(Client2.getTile, tile); walkable = ok and t and t:isWalkable()
           elseif g_map and g_map.getTile then
-            local ok, mapTile = pcall(g_map.getTile, tile)
-            walkable = ok and mapTile and mapTile:isWalkable()
+            local ok, t = pcall(g_map.getTile, tile); walkable = ok and t and t:isWalkable()
           end
           if walkable then
-            local distFromMonster = math.abs(tile.x - monsterPos.x) + math.abs(tile.y - monsterPos.y)
-            table.insert(candidates, { pos = tile, score = distFromMonster + 0.5 })  -- Slight penalty vs perpendicular
+            table.insert(candidates, { pos = tile, score = math.abs(tile.x - monsterPos.x) + math.abs(tile.y - monsterPos.y) + 0.5 })
           end
         end
       end
     end
   end
-  
-  -- Sort by score (higher = better)
+
   table.sort(candidates, function(a, b) return a.score > b.score end)
-  
   return candidates[1] and candidates[1].pos or nil
 end
 
--- Update threat cache (called periodically or on significant events)
 function MonsterAI.RealTime.updateThreatCache()
   local nowt = nowMs()
   local cache = MonsterAI.RealTime.threatCache
-  
-  -- Skip if recently updated
-  if (nowt - cache.lastUpdate) < CONST.EVENT_DRIVEN.THREAT_CACHE_TTL then
-    return cache
-  end
-  
+  if (nowt - cache.lastUpdate) < CONST.EVENT_DRIVEN.THREAT_CACHE_TTL then return cache end
   local playerPos = player and player:getPosition()
   if not playerPos then return cache end
-  
-  cache.totalThreat = 0
-  cache.highThreatMonsters = {}
-  cache.immediateThreat = false
-  
-  -- Check all tracked directions for monsters facing player
+  cache.totalThreat = 0; cache.highThreatMonsters = {}; cache.immediateThreat = false
   for id, rt in pairs(MonsterAI.RealTime.directions) do
-    local data = MonsterAI.Tracker.monsters[id]
+    local data = MonsterAI.Tracker and MonsterAI.Tracker.monsters and MonsterAI.Tracker.monsters[id]
     if data and data.creature and not safeIsDead(data.creature) then
       local monsterPos = safeCreatureCall(data.creature, "getPosition", nil)
       if monsterPos and monsterPos.z == playerPos.z then
         local dist = math.max(math.abs(monsterPos.x - playerPos.x), math.abs(monsterPos.y - playerPos.y))
-        
-        if dist <= 7 then  -- Within threat range
-          local isFacing = MonsterAI.Predictor.isFacingPosition(monsterPos, rt.dir, playerPos)
+        if dist <= 7 then
+          local isFacing = MonsterAI.Predictor and MonsterAI.Predictor.isFacingPosition and MonsterAI.Predictor.isFacingPosition(monsterPos, rt.dir, playerPos)
           if isFacing then
-            local pattern = MonsterAI.Patterns.get(data.name or "")
+            local pattern = MonsterAI.Patterns and MonsterAI.Patterns.get and MonsterAI.Patterns.get(data.name or "")
             local cooldown = data.ewmaCooldown or (pattern and pattern.waveCooldown) or 2000
             local lastAttack = data.lastWaveTime or data.lastAttackTime or 0
             local elapsed = nowt - lastAttack
             local timeToAttack = math.max(0, cooldown - elapsed)
-            
-            local threat = {
-              id = id,
-              creature = data.creature,
-              timeToAttack = timeToAttack,
-              confidence = data.confidence or 0.5,
-              turnRate = rt.turnRate or 0
-            }
-            
+            local threat = { id = id, creature = data.creature, timeToAttack = timeToAttack, confidence = data.confidence or 0.5, turnRate = rt.turnRate or 0 }
             table.insert(cache.highThreatMonsters, threat)
-            
             if timeToAttack < CONST.EVENT_DRIVEN.IMMEDIATE_THREAT_WINDOW then
-              cache.immediateThreat = true
-              cache.totalThreat = cache.totalThreat + 1.5
+              cache.immediateThreat = true; cache.totalThreat = cache.totalThreat + 1.5
             else
               cache.totalThreat = cache.totalThreat + 0.5
             end
@@ -1055,33 +796,25 @@ function MonsterAI.RealTime.updateThreatCache()
       end
     end
   end
-  
-  cache.lastUpdate = nowt
-  return cache
+  cache.lastUpdate = nowt; return cache
 end
 
--- Clean up stale direction tracking
 function MonsterAI.RealTime.cleanup()
   local nowt = nowMs()
-  local staleThreshold = 10000  -- 10 seconds
-  
   for id, rt in pairs(MonsterAI.RealTime.directions) do
-    if (nowt - (rt.lastChangeTime or 0)) > staleThreshold then
+    if (nowt - (rt.lastChangeTime or 0)) > 10000 then
       MonsterAI.RealTime.directions[id] = nil
     end
   end
-  
-  -- Clean prediction queue
   local queue = MonsterAI.RealTime.predictedAttacks
   local i = 1
   while i <= #queue do
-    if (nowt - queue[i].registeredAt) > 5000 then
-      table.remove(queue, i)
-    else
-      i = i + 1
-    end
+    if (nowt - queue[i].registeredAt) > 5000 then table.remove(queue, i)
+    else i = i + 1 end
   end
 end
+
+MonsterAI.RealTime.getImmediateThreat = MonsterAI.getImmediateThreat
 
 -- GET IMMEDIATE THREAT (Pure function for wave avoidance integration)
 -- Returns a threat assessment suitable for instant decision-making
@@ -1156,7 +889,6 @@ function MonsterAI.getImmediateThreat()
 end
 
 -- Alias for backward compatibility
-MonsterAI.RealTime.getImmediateThreat = MonsterAI.getImmediateThreat
 
 if EventBus then
   -- Track monsters when they appear
@@ -1299,7 +1031,7 @@ if EventBus then
       return score, data
     end
 
-    local creatures = CreatureCache.getNearby(CONST.DAMAGE.CORRELATION_RADIUS) or {}
+    local creatures = BotCore.Creatures.getNearby(CONST.DAMAGE.CORRELATION_RADIUS) or {}
 
     local bestScore, bestData, bestMonster = 0, nil, nil
     for i = 1, #creatures do
@@ -1789,7 +1521,7 @@ function MonsterAI.updateAll()
     pcall(function() MonsterAI.VolumeAdaptation.update() end)
   end
 
-  local creatures = CreatureCache.getNearby(8) or {}
+  local creatures = BotCore.Creatures.getNearby(8) or {}
 
   if not creatures then
     return
@@ -1972,192 +1704,6 @@ nExBot.MonsterAI = MonsterAI
 -- ENHANCED PUBLIC API
 
 -- Get full statistics summary for UI or debugging
-function MonsterAI.getStatsSummary()
-  local nowt = nowMs()
-  local session = MonsterAI.Telemetry.session
-  local sessionDuration = (nowt - (session.startTime or nowt)) / 1000 -- seconds
-  
-  return {
-    version = MonsterAI.VERSION,
-    
-    -- Session stats
-    session = {
-      duration = sessionDuration,
-      monstersTracked = session.totalMonstersTracked or 0,
-      killCount = session.killCount or 0,
-      avgKillTime = session.avgKillTime or 0,
-      damageReceived = MonsterAI.Tracker.stats.totalDamageReceived or 0,
-      avgDPSReceived = sessionDuration > 0 and (MonsterAI.Tracker.stats.totalDamageReceived or 0) / sessionDuration or 0
-    },
-    
-    -- Prediction stats
-    predictions = MonsterAI.getPredictionStats(),
-    
-    -- Tracking stats
-    tracking = {
-      activeMonsters = 0,  -- Will be counted below
-      waveAttacksObserved = MonsterAI.Tracker.stats.waveAttacksObserved or 0,
-      areaAttacksObserved = MonsterAI.Tracker.stats.areaAttacksObserved or 0
-    },
-    
-    -- Auto-tuner stats
-    autoTuner = {
-      enabled = MonsterAI.AUTO_TUNE_ENABLED,
-      adjustmentsMade = MonsterAI.RealTime.metrics.autoTuneAdjustments or 0,
-      pendingSuggestions = 0  -- Will be counted below
-    },
-    
-    -- Telemetry stats
-    telemetry = {
-      samplesCollected = MonsterAI.RealTime.metrics.telemetrySamples or 0,
-      typesClassified = 0  -- Will be counted below
-    }
-  }
-end
-
--- Count active stats
-pcall(function()
-  local stats = MonsterAI.getStatsSummary()
-  local activeCount = 0
-  for id, _ in pairs(MonsterAI.Tracker.monsters) do activeCount = activeCount + 1 end
-  stats.tracking.activeMonsters = activeCount
-  
-  local suggestionCount = 0
-  for name, _ in pairs(MonsterAI.AutoTuner.suggestions) do suggestionCount = suggestionCount + 1 end
-  stats.autoTuner.pendingSuggestions = suggestionCount
-  
-  local classifiedCount = 0
-  for name, _ in pairs(MonsterAI.Classifier.cache) do classifiedCount = classifiedCount + 1 end
-  stats.telemetry.typesClassified = classifiedCount
-end)
-
--- Get all classifications
-function MonsterAI.getClassifications()
-  return MonsterAI.Classifier.cache
-end
-
--- Get classification for specific monster
-function MonsterAI.getClassification(name)
-  return MonsterAI.Classifier.get(name)
-end
-
--- Force classification of a monster
-function MonsterAI.classifyMonster(name, forceReclassify)
-  if not name then return nil end
-  
-  -- Find tracking data for this monster type
-  local targetData = nil
-  for id, data in pairs(MonsterAI.Tracker.monsters) do
-    if data.name and data.name:lower() == name:lower() then
-      targetData = data
-      break
-    end
-  end
-  
-  if not targetData then
-    -- No active tracking data, use stored patterns if available
-    local pattern = MonsterAI.Patterns.get(name)
-    if pattern then
-      -- Create minimal data from pattern
-      targetData = {
-        name = name,
-        movementSamples = 20, -- Minimum to trigger classification
-        stationaryCount = 0,
-        chaseCount = 10,
-        facingCount = 5,
-        waveCount = pattern.waveCount or 0,
-        avgSpeed = 0
-      }
-    end
-  end
-  
-  if targetData then
-    return MonsterAI.Classifier.classify(name, targetData)
-  end
-  
-  return nil
-end
-
--- Get danger suggestion for a monster
-function MonsterAI.getDangerSuggestion(name)
-  return MonsterAI.AutoTuner.suggestDanger(name)
-end
-
--- Apply danger suggestion
-function MonsterAI.applyDangerSuggestion(name, force)
-  return MonsterAI.AutoTuner.applyDangerSuggestion(name, force)
-end
-
--- Get all pending suggestions
-function MonsterAI.getPendingSuggestions()
-  return MonsterAI.AutoTuner.getSuggestions()
-end
-
--- Get telemetry for a creature by ID
-function MonsterAI.getTelemetry(creatureId)
-  return MonsterAI.Telemetry.snapshots[creatureId]
-end
-
--- Get type statistics
-function MonsterAI.getTypeStats(name)
-  return MonsterAI.Telemetry.getTypeSummary(name)
-end
-
--- Get all type statistics
-function MonsterAI.getAllTypeStats()
-  return MonsterAI.Telemetry.typeStats
-end
-
--- Reset session statistics
-function MonsterAI.resetSession()
-  MonsterAI.Telemetry.session = {
-    startTime = nowMs(),
-    totalMonstersTracked = 0,
-    totalDamageDealt = 0,
-    totalDamageReceived = 0,
-    killCount = 0,
-    deathCount = 0,
-    avgKillTime = 0,
-    avgDPSReceived = 0
-  }
-  
-  MonsterAI.Tracker.stats = {
-    waveAttacksObserved = 0,
-    areaAttacksObserved = 0,
-    totalDamageReceived = 0,
-    avoidanceSuccesses = 0,
-    avoidanceFailures = 0
-  }
-  
-  MonsterAI.RealTime.metrics = {
-    eventsProcessed = 0,
-    predictionsCorrect = 0,
-    predictionsMissed = 0,
-    avgPredictionAccuracy = 0,
-    telemetrySamples = 0,
-    autoTuneAdjustments = 0
-  }
-  
-  if MonsterAI.DEBUG then
-    print("[MonsterAI] Session statistics reset")
-  end
-end
-
--- ENHANCED EVENTBUS EMISSIONS
-
--- Emit periodic stats update for interested modules (gated by TargetBot state)
-if EventBus then
-  schedule(5000, function()
-    local function emitStatsUpdate()
-      if not TargetBot.isOff() and EventBus and EventBus.emit then
-        local stats = MonsterAI.getStatsSummary()
-        EventBus.emit("monsterai:stats_update", stats)
-      end
-      schedule(10000, emitStatsUpdate) -- Every 10 seconds
-    end
-    emitStatsUpdate()
-  end)
-end
 
 -- Enable automatic collection by default so Monster Insights shows data without console commands
 -- Collection is now gated by TargetBot.isOn() to prevent CPU waste when targeting is off

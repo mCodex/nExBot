@@ -344,8 +344,8 @@ CaveBot.walkTo = function(dest, maxDist, params)
     return true
   end
 
-  -- Floor mismatch
-  if dest.z ~= playerPos.z then return false end
+  -- Floor mismatch (allow floor-change WPs to pass through to special handling below)
+  if dest.z ~= playerPos.z and not allowFloorChange then return false end
 
   -- Reset anti-zigzag for short walks
   if PS() ~= NOOP_PS and math.max(distX, distY) <= 5 then PS().resetDirectionState() end
@@ -353,11 +353,21 @@ CaveBot.walkTo = function(dest, maxDist, params)
   -- ========== FLOOR-CHANGE PATH (special handling) ==========
   if allowFloorChange then
     if player:isWalking() then return true end
-    local manhattan = distX + distY
+
+    -- For cross-floor floor-change tiles, walk to the same XY on the CURRENT floor
+    -- (the stairs/rope hole exists here, stepping on it triggers the Z change)
+    local walkDest = dest
+    if dest.z ~= playerPos.z then
+      walkDest = {x = dest.x, y = dest.y, z = playerPos.z}
+    end
+
+    local fdX = math.abs(walkDest.x - playerPos.x)
+    local fdY = math.abs(walkDest.y - playerPos.y)
+    local manhattan = fdX + fdY
 
     if manhattan <= 3 then
       -- Close: precise keyboard steps
-      local fcPath = PS().findPath(playerPos, dest, {ignoreNonPathable = true, precision = 0})
+      local fcPath = PS().findPath(playerPos, walkDest, {ignoreNonPathable = true, precision = 0})
       if fcPath and #fcPath > 0 then
         local dir = fcPath[1]
         local smoothed = PS().smoothDirection(dir, true) or dir
@@ -370,11 +380,11 @@ CaveBot.walkTo = function(dest, maxDist, params)
       return true
     else
       -- Far: guarded autoWalk
-      local isSafe = PS().nativePathIsSafe(playerPos, dest, {ignoreNonPathable = true})
+      local isSafe = PS().nativePathIsSafe(playerPos, walkDest, {ignoreNonPathable = true})
       if isSafe then
-        PS().autoWalk(dest, maxDist, {precision = precision})
+        PS().autoWalk(walkDest, maxDist, {precision = precision})
       else
-        local dirToDest = getDirectionTo(playerPos, dest)
+        local dirToDest = getDirectionTo(playerPos, walkDest)
         if dirToDest and canWalkDirection(dirToDest) then
           local off = DIR_TO_OFFSET[dirToDest]
           local target = off and {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}

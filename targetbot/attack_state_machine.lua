@@ -426,7 +426,7 @@ local function handleIdle()
   if state.holdTargetId then
     local pPos = player and SC.getPosition(player)
     if pPos then
-      local ok, specs = pcall(CreatureCache.getNearby, 7, 5)
+      local ok, specs = pcall(BotCore.Creatures.getNearby, 7, 5)
       specs = ok and specs or {}
       for _, spec in ipairs(specs) do
         if cId(spec) == state.holdTargetId and not cDead(spec) then

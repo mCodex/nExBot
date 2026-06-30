@@ -142,7 +142,8 @@ applyClientTuning()
 local creatureCache = {
   entries = {},           -- {id -> {creature, path, pathTime, priority, config, lastSeen}}
   count = 0,
-  accessOrder = {},       -- LRU tracking
+  accessOrder = {},       -- LRU tracking (array)
+  posMap = {},            -- ponytail: O(1) LRU — id -> index in accessOrder
   lastCleanup = 0,
   CLEANUP_INTERVAL = 1500
 }
@@ -187,6 +188,7 @@ function EventTargeting.clearState()
   creatureCache.entries = {}
   creatureCache.count = 0
   creatureCache.accessOrder = {}
+  creatureCache.posMap = {}
   creatureCache.lastCleanup = 0
   
   -- Clear live monster state
@@ -246,7 +248,7 @@ function EventTargeting.getLiveMonsterCount()
   
   -- Get creatures from cache
   local range = CONST.LIVE_COUNT_RANGE
-  local creatures = CreatureCache.getNearby(range, range)
+  local creatures = BotCore.Creatures.getNearby(range, range)
   
   if not creatures then
     return liveMonsterState.count, liveMonsterState.creatures
@@ -277,11 +279,6 @@ function EventTargeting.getLiveMonsterCount()
 end
 
 -- Check if there are ANY monsters on screen (fast check)
-function EventTargeting.hasAnyMonsters()
-  local count = EventTargeting.getLiveMonsterCount()
-  return count > 0
-end
-
 -- Force refresh of live count (useful after events)
 function EventTargeting.refreshLiveCount()
   liveMonsterState.lastUpdate = 0
@@ -344,30 +341,40 @@ end
 
 -- CACHE MANAGEMENT
 
--- Touch entry (move to end of LRU)
+-- Touch entry (move to end of LRU) — O(1) via posMap
 local function touchEntry(id)
   local order = creatureCache.accessOrder
-  for i = #order, 1, -1 do
-    if order[i] == id then
-      table.remove(order, i)
-      break
+  local pmap = creatureCache.posMap
+  local oldIdx = pmap[id]
+  if oldIdx then
+    local last = #order
+    if oldIdx ~= last then
+      local movedId = order[last]
+      order[oldIdx] = movedId
+      pmap[movedId] = oldIdx
     end
+    order[last] = id
+    pmap[id] = last
+  else
+    order[#order + 1] = id
+    pmap[id] = #order
   end
-  order[#order + 1] = id
 end
 
 -- Evict oldest entries when over capacity
 local function evictOldEntries()
   local order = creatureCache.accessOrder
+  local pmap = creatureCache.posMap
+  local entries = creatureCache.entries
   while #order > CONST.CREATURE_CACHE_SIZE do
     local oldestId = order[1]
-    -- Shift array left
-    for i = 1, #order - 1 do
-      order[i] = order[i + 1]
-    end
-    order[#order] = nil
-    if creatureCache.entries[oldestId] then
-      creatureCache.entries[oldestId] = nil
+    local last = #order
+    order[1] = order[last]
+    pmap[order[1]] = 1
+    order[last] = nil
+    pmap[oldestId] = nil
+    if entries[oldestId] then
+      entries[oldestId] = nil
       creatureCache.count = creatureCache.count - 1
     end
   end
@@ -382,6 +389,7 @@ local function cleanupCache()
   local cutoff = now - CONST.CREATURE_CACHE_TTL
   local newEntries = {}
   local newOrder = {}
+  local newPmap = {}
   local count = 0
   
   for i = 1, #creatureCache.accessOrder do
@@ -392,14 +400,16 @@ local function cleanupCache()
       -- Safe dead check
       if creature and not SC.isDead(creature) then
         newEntries[id] = entry
-        newOrder[#newOrder + 1] = id
         count = count + 1
+        newOrder[count] = id
+        newPmap[id] = count
       end
     end
   end
   
   creatureCache.entries = newEntries
   creatureCache.accessOrder = newOrder
+  creatureCache.posMap = newPmap
   creatureCache.count = count
   creatureCache.lastCleanup = now
 end
@@ -1352,12 +1362,18 @@ if EventBus then
       creatureCache.entries[id] = nil
       creatureCache.count = creatureCache.count - 1
       
-      -- Remove from access order
-      for i = #creatureCache.accessOrder, 1, -1 do
-        if creatureCache.accessOrder[i] == id then
-          table.remove(creatureCache.accessOrder, i)
-          break
+      -- Remove from access order — O(1) via posMap
+      local idx = creatureCache.posMap[id]
+      if idx then
+        local order = creatureCache.accessOrder
+        local last = #order
+        if idx ~= last then
+          local movedId = order[last]
+          order[idx] = movedId
+          creatureCache.posMap[movedId] = idx
         end
+        order[last] = nil
+        creatureCache.posMap[id] = nil
       end
     end
     
@@ -1481,6 +1497,7 @@ if EventBus then
       updatePlayerRef()
       creatureCache.entries = {}
       creatureCache.accessOrder = {}
+      creatureCache.posMap = {}
       creatureCache.count = 0
       targetState.currentTarget = nil
       targetState.currentTargetId = nil
@@ -1541,7 +1558,7 @@ local function scanVisibleMonsters()
   
   -- Fallback: Use direct API if live count didn't work
   local range = CONST.DETECTION_RANGE
-  local creatures = CreatureCache.getNearby(range, range)
+  local creatures = BotCore.Creatures.getNearby(range, range)
   
   if not creatures or #creatures == 0 then return end
   
@@ -1623,40 +1640,6 @@ function EventTargeting.getCurrentTarget()
   return targetState.currentTarget
 end
 
--- Get cached creature count
-function EventTargeting.getCacheCount()
-  return creatureCache.count
-end
-
--- Force target acquisition
-function EventTargeting.forceAcquire(creature)
-  if creature and not creature:isDead() then
-    EventTargeting.TargetAcquisition.processCreature(creature)
-  end
-end
-
--- Get all reachable targets
-function EventTargeting.getReachableTargets()
-  local targets = {}
-  for id, entry in pairs(creatureCache.entries) do
-    if entry.reachable and entry.creature and not entry.creature:isDead() then
-      targets[#targets + 1] = {
-        creature = entry.creature,
-        priority = entry.priority,
-        distance = entry.distance,
-        path = entry.path
-      }
-    end
-  end
-  
-  -- Sort by priority
-  table.sort(targets, function(a, b)
-    return a.priority > b.priority
-  end)
-  
-  return targets
-end
-
 -- Debug: Print cache status (only outputs when DEBUG is true)
 function EventTargeting.debugStatus()
   if not EventTargeting.DEBUG then return end
@@ -1700,11 +1683,6 @@ function EventTargeting.isCombatActive()
 end
 
 -- Get authoritative monster count for external modules
-function EventTargeting.getMonsterCount()
-  local count = EventTargeting.getLiveMonsterCount()
-  return count
-end
-
 -- NATIVE OTCLIENT CALLBACK INTEGRATION
 -- Direct hook into OTClient's onCreatureAppear for fastest possible detection
 -- This bypasses EventBus for even faster high-priority monster switching

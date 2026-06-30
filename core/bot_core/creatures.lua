@@ -369,6 +369,87 @@ function Creatures.isSafe(range, multifloor, padding)
   return true
 end
 
+-- NEARBY CREATURE QUERIES (merged from creature_cache.lua)
+
+-- Get nearby creatures (replaces CreatureCache.getNearby)
+-- Returns creature objects from spectators, with tick-level caching
+-- @param rangeX: horizontal range (default 14)
+-- @param rangeY: vertical range (default 11)
+-- @return array of creature objects
+function Creatures.getNearby(rangeX, rangeY)
+  rangeX = rangeX or 14
+  rangeY = rangeY or rangeX
+  local specs = getSpectators(rangeX <= 14 and rangeY <= 11 and false or nil) or {}
+  -- ponytail: full range query, getCachedSpectators already tick-caches
+  local result = {}
+  for _, spec in pairs(specs) do
+    if not spec:isLocalPlayer() then
+      result[#result + 1] = spec
+    end
+  end
+  return result
+end
+
+-- Get nearest monster to a position (replaces CreatureCache.getNearestMonster)
+-- @param pos: center position {x, y, z}
+-- @param maxRange: maximum search range (default 50)
+-- @return creature, distance or nil
+function Creatures.getNearestMonster(pos, maxRange)
+  if not pos then return nil, nil end
+  maxRange = maxRange or 50
+
+  local nearest = nil
+  local nearestDist = maxRange + 1
+  local specs = getSpectators(false) or {}
+
+  for _, spec in pairs(specs) do
+    if spec:isMonster() and (isOldClient or spec:getType() < 3) then
+      local specPos = spec:getPosition()
+      if specPos then
+        local dist = math.max(
+          math.abs(specPos.x - pos.x),
+          math.abs(specPos.y - pos.y)
+        )
+        if dist < nearestDist then
+          nearestDist = dist
+          nearest = spec
+        end
+      end
+    end
+  end
+
+  return nearest, nearestDist
+end
+
+-- Get monsters within range of a position (replaces CreatureCache.getMonstersInRange)
+-- @param pos: center position {x, y, z}
+-- @param range: maximum distance (default 10)
+-- @return array of creature objects
+function Creatures.getMonstersInRange(pos, range)
+  if not pos then return {} end
+  range = range or 10
+
+  local result = {}
+  local specs = getSpectators(false) or {}
+
+  for _, spec in pairs(specs) do
+    if spec:isMonster() and (isOldClient or spec:getType() < 3) then
+      local specPos = spec:getPosition()
+      if specPos then
+        local dist = math.max(
+          math.abs(specPos.x - pos.x),
+          math.abs(specPos.y - pos.y)
+        )
+        if dist <= range then
+          result[#result + 1] = spec
+        end
+      end
+    end
+  end
+
+  return result
+end
+
 -- INITIALIZATION
 
 -- Log successful load

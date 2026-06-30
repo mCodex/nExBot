@@ -89,8 +89,7 @@ CaveBot.Extensions.DWithdraw.setup = function()
 
 		CaveBot.PingDelay(2)
 
-		local Client = getClient()
-		local containers = (Client and Client.getContainers) and Client.getContainers() or (g_game and g_game.getContainers()) or {}
+		local containers = nExBot.Shared.getContainers()
 		for i, container in pairs(containers) do
 			if string.find(container:getName():lower(), "depot box") then
 				for j, item in ipairs(container:getItems()) do

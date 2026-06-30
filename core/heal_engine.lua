@@ -77,10 +77,6 @@ end
 -- Optional potion debug mode (opt-in): when enabled, HealEngine will emit
 -- short diagnostics about why potions were/weren't selected or used.
 local _potionDebug = false
-function HealEngine.setPotionDebug(flag)
-  _potionDebug = not not flag
-end
-
 -- TIME UTILITIES (DRY via Shared)
 
 local nowMs = nExBot.Shared.nowMs
@@ -305,51 +301,13 @@ function HealEngine.setCustomPotions(potionList)
 end
 
 -- Debug helper: attempt to use a potion by id (returns true on success)
-function HealEngine.tryUsePotionById(itemId)
-  if not itemId or itemId <= 0 then return false end
-  local action = { kind = "potion", id = itemId, key = "potion_test_" .. tostring(itemId), cd = 1000, name = "potion_test", potionType = "mana" }
-  if _potionDebug then warn(string.format("[HealEngine][POTION_DEBUG] tryUsePotionById: attempting to use id=%d", itemId)) end
-  local ok = execute(action)
-  if _potionDebug then warn(string.format("[HealEngine][POTION_DEBUG] tryUsePotionById: result=%s", tostring(ok))) end
-  return ok
-end
-
-function HealEngine.setSelfSpellsEnabled(flag)
-  options.selfSpells = not not flag
-end
-
-function HealEngine.setPotionsEnabled(flag)
-  options.potions = not not flag
-end
-
 function HealEngine.setFriendHealingEnabled(flag)
   options.friendHeals = not not flag
 end
 
 -- Public status for debugging: returns current toggles and counts
-function HealEngine.getStatus()
-  return {
-    version = VERSION,
-    selfSpells = options.selfSpells,
-    potions = options.potions,
-    friendHeals = options.friendHeals,
-    spellsLoaded = #selfSpells,
-    potionsLoaded = #selfPotions,
-    healingGroupOnCooldown = isHealingGroupOnCooldown(),
-    potionOnCooldown = isPotionOnCooldown()
-  }
-end
-
 -- Get loaded spells for debugging
-function HealEngine.getLoadedSpells()
-  return selfSpells
-end
-
 -- Get loaded potions for debugging
-function HealEngine.getLoadedPotions()
-  return selfPotions
-end
-
 -- Select best self action based on snapshot
 -- CRITICAL: This is the main healing decision function!
 function HealEngine.planSelf(snap)
@@ -516,93 +474,6 @@ function HealEngine.planSelf(snap)
   logDebug("planSelf: no action selected")
   return nil
 end
-
--- Select best friend action; target must include name and hp
--- IMPORTANT: Shares cooldowns with self-healing via BotCore.Cooldown
--- v2.1: Added custom HP threshold support and improved spell selection
-function HealEngine.planFriend(snap, target)
-  if not options.friendHeals then 
-    logDebug("planFriend: friendHeals disabled")
-    return nil 
-  end
-  if not target or not target.name then 
-    logDebug("planFriend: no target or no target name")
-    return nil 
-  end
-  
-  local hp = target.hp or 100
-  local currentMana = snap.currentMana or getCurrentMana()
-  local inPz = snap.inPz
-  if inPz == nil then inPz = getInPz() end
-  
-  -- Don't heal friends in protection zone
-  if inPz then 
-    logDebug("planFriend: in protection zone, skipping")
-    return nil 
-  end
-  
-  -- Get custom HP threshold for this specific player (from UI config)
-  local customThreshold = target.customHp
-  
-  logDebug(string.format("planFriend: evaluating '%s' hp=%d%% customThreshold=%s mana=%d", 
-    target.name, hp, tostring(customThreshold), currentMana))
-  
-  -- Check if friend actually needs healing
-  -- Use custom threshold if set, otherwise use spell's built-in threshold
-  local needsHealing = false
-  if customThreshold then
-    needsHealing = hp <= customThreshold
-  end
-  
-  -- Select best spell (sorted by priority - strongest first)
-  for _, spell in ipairs(friendSpells) do
-    local spellThreshold = spell.hp or 0
-    local mpCost = spell.mpCost or spell.mana or spell.mp or 0
-    
-    -- Determine the effective threshold for this spell
-    -- Custom threshold overrides spell threshold, but only if friend HP is below it
-    local effectiveThreshold = spellThreshold
-    if customThreshold and customThreshold > spellThreshold then
-      -- For strong heals (gran sio), still require lower HP even with custom threshold
-      -- For normal heals (sio), use the custom threshold
-      if spell.prio == 1 then
-        -- Strong heal: use lower of custom/2 or spell threshold
-        effectiveThreshold = math.min(customThreshold / 2, spellThreshold)
-      else
-        effectiveThreshold = customThreshold
-      end
-    end
-    
-    -- Check if friend HP is at or below threshold
-    if hp <= effectiveThreshold or needsHealing then
-      -- CRITICAL: Check if we have enough mana to cast!
-      if currentMana >= mpCost then
-        -- Check cooldowns (shared with self-healing)
-        if healingGroupReady() and ready(spell.key, spell.cd or 1100) then
-          logDebug(string.format("planFriend: healing '%s' (hp=%d%%, threshold=%d) with %s", 
-            target.name, hp, effectiveThreshold, spell.name))
-          return {
-            kind = "spell",
-            name = string.format('%s "%s"', spell.name, target.name),
-            key = spell.key,
-            cd = spell.cd or 1100,
-            targetName = target.name,
-            targetHp = hp
-          }
-        else
-          logDebug(string.format("planFriend: cooldown not ready for %s", spell.name))
-        end
-      else
-        logDebug(string.format("planFriend: insufficient mana for %s (need %d, have %d)", 
-          spell.name, mpCost, currentMana))
-      end
-    end
-  end
-  
-  logDebug(string.format("planFriend: no suitable spell for '%s' at %d%% HP", target.name, hp))
-  return nil
-end
-
 -- Batch evaluate all spells for an ally and return the best action
 function HealEngine.evaluateAlly(ally, allyHp, spellList)
   if not ally or not allyHp then return nil end

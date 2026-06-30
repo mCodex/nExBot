@@ -223,7 +223,7 @@ function TBI.getSortedTargets(options)
   local ppos = player and player:getPosition()
   if not ppos then return targets end
   local maxR = options.maxRange or 10
-  local creatures = CreatureCache.getNearby(maxR) or {}
+  local creatures = BotCore.Creatures.getNearby(maxR) or {}
 
   for _, cr in ipairs(creatures) do
     if cr and isValidAliveMonster(cr) then
