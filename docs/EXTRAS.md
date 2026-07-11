@@ -1,193 +1,90 @@
-# 🛠️ Extras and Tools
+# Extras and Tools
 
-Additional utilities and quality-of-life features built into nExBot.
+Additional utilities beyond core modules.
 
----
+## Safety
 
-## 📖 Overview
+### Anti-RS
 
-Beyond the core HealBot, AttackBot, CaveBot, and TargetBot modules, nExBot includes a rich set of extra tools and utilities accessible from the **Extras** panel on the Main tab.
+Stops all combat on PvP flag change. Auto-unequips weapons. Can exit game. Configurable delays.
 
----
-
-## 🛡️ Safety Systems
-
-### Anti-RS (Rapid Skulling Protection)
-
-Protects you from accidentally attacking a player and getting a PK skull:
-
-- Detects PvP flag changes
-- Immediately stops all combat
-- Auto-unequips weapons
-- Can exit the game safely
-- Configurable reaction delays
-
-### Alarm System
-
-Configurable alarms for various game events:
+### Alarms
 
 | Alarm | Trigger |
 |-------|---------|
-| Player detected | Another player appears on screen |
-| Low health | HP drops below threshold |
-| Low mana | Mana drops below threshold |
-| Private message | You receive a PM |
+| Player detected | Player on screen |
+| Low health | HP below threshold |
+| Low mana | Mana below threshold |
+| Private message | PM received |
 | Disconnect | Connection lost |
-| Death | Your character dies |
+| Death | Character dies |
 
-Alarms can play sounds, flash the screen, or trigger custom actions.
+Play sounds, flash screen, or trigger custom actions.
 
 ### Spy Level
 
-Monitors nearby creatures and players on adjacent floors, providing awareness of threats you can't see on your current floor.
+Monitors creatures/players on adjacent floors.
 
----
-
-## 🧰 Equipment Management
+## Equipment
 
 ### Equipper
 
-Automatic equipment swapping based on combat conditions:
-
-- Swap rings (life ring, mana ring, etc.) based on HP/mana thresholds
-- Switch weapons for different combat situations
-- Equip amulets/necklaces conditionally
-- Belt slot management
+Swap rings, weapons, amulets based on HP/mana thresholds.
 
 ### Outfit Cloner
 
-Copies the outfit of another player. Useful for blending in on PvP servers.
+Copy another player's outfit.
 
 ### Dropper
 
-Automatically drops configured items from your inventory. Useful for clearing junk loot.
+Auto-drop configured items from inventory.
 
----
+## Combat
 
-## 💥 Push Max
+### Push Max
 
-Automated pushing system for team hunts:
+Push creatures into optimal positions for team hunts.
 
-- Pushes creatures into optimal positions
-- Configurable push targets and directions
-- Works with TargetBot's movement coordinator
+### Combo System
 
----
+Synchronized spell casting — coordinate timing, trigger AoE simultaneously, leader/follower mode.
 
-## 🎮 Combo System
+### Hold Target
 
-Synchronized spell casting for team hunts:
+Lock onto specific creature, prevent target switching.
 
-- Coordinate attack timing with party members
-- Trigger AoE combos simultaneously
-- Configurable combo chains
-- Leader/follower mode
+## Supplies Panel
 
----
+Real-time count of potions, runes, ammunition. Low-supply warnings. CaveBot supply check integration.
 
-## 🔒 Hold Target
+## Depositor Config
 
-Locks onto a specific creature and prevents target switching. Useful when you need to focus down a specific monster regardless of what else appears.
+Configure depot behavior: items to deposit/keep, stackable handling, OTCR stash integration.
 
----
+## NPC Talk
 
-## 🎒 Supplies Panel
+Automated NPC interaction — buy/sell, bank, quests, travel.
 
-The Supplies panel provides an overview of your current supply status:
+## In-Game Editor
 
-- Real-time count of potions, runes, and ammunition
-- Low-supply warnings
-- Integration with CaveBot's supply check waypoints
+Modify CaveBot waypoints and TargetBot configs in-client.
 
----
+## Cavebot Control Panel
 
-## 📦 Depositor Config
+Quick-access: start/stop, current waypoint, skip, pause/resume.
 
-Configure what happens when CaveBot reaches a depot:
+## OTCR-Exclusive
 
-- Set items to deposit
-- Set items to keep
-- Configure stackable item handling
-- Deposit-all vs. selective deposit
-- OTCR stash integration
+| Feature | Description |
+|---------|-------------|
+| Imbuing | Auto-apply imbuements at shrines |
+| Stash | Withdraw/deposit items |
+| Forge | Fuse items, refinement cores |
+| Prey | Prey system interaction |
 
----
+## Per-Character Profiles
 
-## 💬 NPC Talk
-
-Automated NPC interaction:
-
-- Predefined conversation flows for buying/selling
-- Bank operations (deposit gold, withdraw)
-- Quest NPC interactions
-- Travel NPC conversations
-
----
-
-## ✏️ In-Game Editor
-
-The in-game editor allows you to modify CaveBot waypoints and TargetBot configs directly within the client UI, without editing files manually.
-
----
-
-## 🎮 Cavebot Control Panel
-
-A quick-access panel for controlling CaveBot without opening the full editor:
-
-- Start/Stop buttons
-- Current waypoint indicator
-- Skip waypoint
-- Pause/Resume
-
----
-
-## ✨ OTCR-Exclusive Features
-
-These features are available only when running on OpenTibiaBR's OTCR client:
-
-### Imbuing
-
-Automate imbuement application at imbuing shrines:
-
-- Configure desired imbuements per equipment slot
-- Automatic shrine interaction
-- Protection charm support
-- Integrated into CaveBot waypoints
-
-### Stash Operations
-
-Interact with the OTCR stash system:
-
-- Withdraw items from stash
-- Deposit items to stash
-- Integrated with the depositor flow
-
-### Forge Operations
-
-Access OTCR's forge system:
-
-- Fuse items
-- Use refinement cores
-- All through the ACL adapter
-
-### Prey System
-
-Interact with OTCR's prey system through the adapter layer.
-
----
-
-## 👤 Per-Character Profiles
-
-nExBot saves separate profiles for each character:
-
-| Module | Profile Type | Storage |
-|--------|-------------|---------|
-| HealBot | Profile 1–5 | Numbered |
-| AttackBot | Profile 1–5 | Numbered |
-| CaveBot | Config name | String |
-| TargetBot | Config name | String |
-
-When you switch characters, their last-used profiles are automatically restored. Profiles are stored in `character_profiles.json`.
+Separate profiles per character, auto-restored on switch:
 
 ```json
 {
@@ -196,24 +93,16 @@ When you switch characters, their last-used profiles are automatically restored.
     "attackProfile": 3,
     "cavebotProfile": "Dragon_Darashia",
     "targetbotProfile": "Dragons"
-  },
-  "CharacterB": {
-    "healProfile": 1,
-    "attackProfile": 1,
-    "cavebotProfile": "Hydra_Oramond",
-    "targetbotProfile": "Hydras"
   }
 }
 ```
 
----
+Stored in `character_profiles.json`.
 
-## 🖼️ Multi-Client Support
+## Multi-Client
 
-nExBot supports running multiple OTClient instances simultaneously. Each character's configurations are independent — there is no conflict between running bots.
+Multiple OTClient instances supported. Configs independent per character.
 
----
+## macOS
 
-## 🍎 macOS Compatibility
-
-On macOS, `g_window.setTitle()` can throw a C++ exception. All `setTitle` calls in nExBot are wrapped in `pcall()` to prevent crashes. This is a known OTClient issue on macOS and does not affect functionality.
+`g_window.setTitle()` wrapped in `pcall()` to prevent C++ exception. Known OTClient issue.

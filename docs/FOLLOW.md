@@ -1,103 +1,42 @@
 # Follow Player
 
-Party hunt companion — keeps your bot near the party leader while attacking monsters.
-
----
-
-## Overview
-
-Follow Player is a single-purpose module: stay close to your party leader. When monsters appear, the bot attacks them but never walks past the leader to chase. If the leader moves beyond max distance, the bot catches up immediately.
-
-Key behaviors:
-
-- Attacks monsters on screen but stays within max distance of leader
-- Follows while attacking (parallel mode) — attack persists via ASM, movement uses forceWalk
-- When leader moves beyond threshold, cancels attack and catches up
-- Recovers to last known position if leader goes off-screen (10s window)
-- MovementCoordinator integration — FOLLOW intent (priority 95) beats CHASE (priority 35)
-
----
+Party hunt companion — stays near leader while attacking monsters.
 
 ## Quick Start
 
-1. Open the **Tools** tab.
-2. Find the **Auto Follow** section.
-3. Enter the party leader's **name** in the Target field.
-4. Toggle **Follow Player** ON (this is the macro toggle).
-5. Toggle **Follow While Attacking** ON (recommended).
-
----
+1. Open **Tools** tab → **Auto Follow**
+2. Enter leader's **name**
+3. Toggle **Follow Player** ON
+4. Toggle **Follow While Attacking** ON (recommended)
 
 ## Configuration
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **Title** | "Auto Follow" | Section header in Tools tab |
-| **Target** | "" | Player name to follow (shown as "Target:" label) |
-| **Follow Player** | OFF | Macro toggle — click to enable/disable following |
-| **Follow While Attacking** | ON | Walk toward leader while fighting monsters |
-| **Max Distance** | 3 | Tiles before bot catches up to leader |
-
----
+| Target | "" | Player name to follow |
+| Follow Player | OFF | Macro toggle |
+| Follow While Attacking | ON | Walk toward leader while fighting |
+| Max Distance | 3 | Tiles before catching up |
 
 ## How It Works
 
-### Priority System
+FOLLOW intent (priority 95) beats wave avoidance (90), finish kill (80), chase (35).
 
-The bot uses MovementCoordinator's FOLLOW intent (priority 95) which beats:
+**Parallel Mode:** Attack continues via ASM, bot walks toward leader using `forceWalk()`. Attack re-sends if dropped.
 
-| Intent | Priority | Result |
-|--------|----------|--------|
-| FOLLOW | 95 | Bot catches up to leader |
-| WAVE_AVOIDANCE | 90 | Dodge wave attacks |
-| FINISH_KILL | 80 | Chase wounded target |
-| CHASE | 35 | Close gap to monster |
-
-If the leader is beyond max distance, the bot stops chasing monsters and catches up. Monsters within max distance are attacked normally.
-
-### Parallel Mode
-
-When `followWhileAttacking` is ON and the bot is attacking:
-
-1. Attack continues via AttackStateMachine (server-maintained)
-2. MovementCoordinator registers FOLLOW intent
-3. Bot walks toward leader using `forceWalk()` (does not cancel attack)
-4. Attack re-sends automatically if dropped
-
-### Lost Leader Recovery
-
-If the leader goes off-screen:
-
-1. Bot walks to last known position for up to 10 seconds
-2. If leader reappears, resumes following immediately
-3. If 10s passes, stops and waits
-
----
+**Lost Leader Recovery:** Walks to last known position for 10s. If leader reappears, resumes. Otherwise stops.
 
 ## Troubleshooting
 
-### Bot walks away from leader to chase monsters
+**Walks away from leader:** Max distance too high? `followWhileAttacking` OFF?
 
-- Max distance is too high — lower it to 2-3
-- `followWhileAttacking` is OFF — enable it so bot walks while fighting
-- Check ASM state — attack must be active for parallel mode
+**Stutters:** Distance fluctuates around maxDistance. Lower by 1.
 
-### Bot stutters (follow, stop, follow)
+**Doesn't follow after login:** Re-enter name, toggle OFF then ON.
 
-- Leader distance fluctuates around maxDistance — lower maxDistance by 1
-- Native follow is conflicting with forceWalk — check `isFollowing()` state
-
-### Bot doesn't follow after login
-
-- Re-enter the leader name in the Target field
-- Toggle the Follow Player macro OFF then ON
-
----
-
-## Technical Details
+## Technical
 
 - Module: `core/follow.lua`
-- Macro interval: 75ms
-- Pathfinding: `g_map.findPath` with fallback to `findPath`
-- EventBus listeners: `creature:move`, `combat:end`
-- MovementCoordinator intent: `FOLLOW` (priority 95)
+- Interval: 75ms
+- Pathfinding: `g_map.findPath` with fallback
+- EventBus: `creature:move`, `combat:end`
