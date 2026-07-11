@@ -46,4 +46,5 @@ function M.ensureDefaults(config, panelName)
   end
 end
 
+HealConfig = M
 return M

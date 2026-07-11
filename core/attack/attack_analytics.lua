@@ -36,4 +36,5 @@ function M.resetAnalytics()
   analytics.log = {}
 end
 
+AttackAnalytics = M
 return M

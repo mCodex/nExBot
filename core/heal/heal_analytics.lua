@@ -24,4 +24,5 @@ function M.resetAnalytics()
   analytics.log = {}
 end
 
+HealAnalytics = M
 return M

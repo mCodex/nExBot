@@ -419,4 +419,5 @@ M.spellShapes = {
   }
 }
 
+AttackData = M
 return M

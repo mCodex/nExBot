@@ -1,6 +1,6 @@
 -- Panel name constant (must be defined before ensureCurrentSettings uses it)
 local healPanelName = "healbot"
-local heal_config = require("core.heal.heal_config")
+local heal_config = HealConfig or require("core.heal.heal_config")
 
 -- Safety: auto-restore currentSettings if nil
 local function ensureCurrentSettings()
@@ -52,8 +52,8 @@ if not HealEngine then
 end
 HealBot = HealBot or {}
 
-local spell_resolver = require("core.heal.spell_resolver")
-local heal_analytics = require("core.heal.heal_analytics")
+local spell_resolver = SpellResolver or require("core.heal.spell_resolver")
+local heal_analytics = HealAnalytics or require("core.heal.heal_analytics")
 
 local function convertSpellsToEngineFormat(spellTable)
   return spell_resolver.convertSpellsToEngineFormat(spellTable)

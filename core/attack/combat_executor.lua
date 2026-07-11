@@ -114,4 +114,5 @@ function M.executeAttack(entry, context, deps)
   return true
 end
 
+CombatExecutor = M
 return M

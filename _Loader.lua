@@ -434,6 +434,19 @@ loadCategory("architecture", {
 })
 
 -- ============================================================================
+-- PHASE 7.5: EXTRACTED MODULES (dofile, set globals)
+-- ============================================================================
+loadCategory("extracted_modules", {
+  "attack/attack_data",
+  "attack/attack_analytics",
+  "attack/attack_config",
+  "attack/combat_executor",
+  "heal/heal_config",
+  "heal/spell_resolver",
+  "heal/heal_analytics",
+})
+
+-- ============================================================================
 -- PHASE 8: LEGACY FEATURE MODULES
 -- ============================================================================
 loadCategory("features_legacy", {

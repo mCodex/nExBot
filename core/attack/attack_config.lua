@@ -57,4 +57,5 @@ function M.getActiveProfile(config, panelName)
   return config[panelName][n]
 end
 
+AttackConfig = M
 return M

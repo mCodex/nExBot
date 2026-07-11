@@ -22,8 +22,8 @@ local patternCategory = 1
 local pattern = 1
 local mainWindow
 
-local attack_analytics = require("core.attack.attack_analytics")
-local combat_executor = require("core.attack.combat_executor")
+local attack_analytics = AttackAnalytics or require("core.attack.attack_analytics")
+local combat_executor = CombatExecutor or require("core.attack.combat_executor")
 
 -- Record an attack action (delegates to BotCore.Analytics if available)
 local function recordAttackAction(cat, idOrFormula)
@@ -58,7 +58,7 @@ AttackBot.resetAnalytics = function()
   attack_analytics.resetAnalytics()
 end
 
-local attack_data = require("core.attack.attack_data")
+local attack_data = AttackData or require("core.attack.attack_data")
 local categories = attack_data.categories
 local patterns = attack_data.patterns
 local spellPatterns = attack_data.spellShapes
@@ -136,7 +136,7 @@ local posW = ek and [[
   00000000000
 ]]
 
-local attack_config = require("core.attack.attack_config")
+local attack_config = AttackConfig or require("core.attack.attack_config")
 
 attack_config.ensureDefaults(AttackBotConfig, panelName)
 

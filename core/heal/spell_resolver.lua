@@ -89,4 +89,5 @@ function M.convertPotionsToEngineFormat(itemTable, getItemNameFn)
   return converted
 end
 
+SpellResolver = M
 return M
