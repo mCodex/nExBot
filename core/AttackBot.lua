@@ -22,64 +22,39 @@ local patternCategory = 1
 local pattern = 1
 local mainWindow
 
--- BOTCORE INTEGRATION
-
--- Local analytics wrapper (for fallback if BotCore not available)
-local attackAnalytics = storage.attackAnalytics or {
-  spells = {},
-  runes = {},
-  empowerments = 0,
-  totalAttacks = 0,
-  log = {}
-}
-storage.attackAnalytics = attackAnalytics
+local attack_analytics = require("core.attack.attack_analytics")
 
 -- Record an attack action (delegates to BotCore.Analytics if available)
 local function recordAttackAction(cat, idOrFormula)
-  -- Use BotCore.Analytics if available
   if BotCore and BotCore.Analytics then
     BotCore.Analytics.recordAttack(cat, idOrFormula)
     return
   end
-  
-  -- Fallback to local analytics
-  attackAnalytics.totalAttacks = attackAnalytics.totalAttacks + 1
-  
+
   if cat == 1 or cat == 4 or cat == 5 then
-    local spellName = tostring(idOrFormula)
-    attackAnalytics.spells[spellName] = (attackAnalytics.spells[spellName] or 0) + 1
+    attack_analytics.recordSpellUse(idOrFormula)
     if cat == 4 then
-      attackAnalytics.empowerments = attackAnalytics.empowerments + 1
+      attack_analytics.recordBuffUse(idOrFormula)
     end
   elseif cat == 2 or cat == 3 then
-    -- Use string key for runeId to prevent sparse array issues in JSON serialization
-    local runeKey = tostring(tonumber(idOrFormula) or 0)
-    attackAnalytics.runes[runeKey] = (attackAnalytics.runes[runeKey] or 0) + 1
+    attack_analytics.recordRuneUse(idOrFormula)
   end
-  
-  local log = attackAnalytics.log
-  log[#log + 1] = { t = now, cat = cat, action = tostring(idOrFormula) }
-  TrimArray(log, 50)
 end
 
--- Public API for SmartHunt (redirects to BotCore.Analytics if available)
+-- Public API for SmartHunt
 AttackBot = AttackBot or {}
 AttackBot.getAnalytics = function()
   if BotCore and BotCore.Analytics then
     return BotCore.Analytics.AttackBot.getAnalytics()
   end
-  return attackAnalytics
+  return attack_analytics.getAnalytics()
 end
 AttackBot.resetAnalytics = function()
   if BotCore and BotCore.Analytics then
     BotCore.Analytics.AttackBot.resetAnalytics()
     return
   end
-  attackAnalytics.spells = {}
-  attackAnalytics.runes = {}
-  attackAnalytics.empowerments = 0
-  attackAnalytics.totalAttacks = 0
-  attackAnalytics.log = {}
+  attack_analytics.resetAnalytics()
 end
 
 local attack_data = require("core.attack.attack_data")
