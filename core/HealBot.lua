@@ -70,114 +70,31 @@ if not HealEngine then
 end
 HealBot = HealBot or {}
 
--- Convert HealBot spell format to HealEngine format
--- Must be defined before applyHealEngineToggles which uses it
-local function convertSpellsToEngineFormat(spellTable)
-  if not spellTable then return {} end
-  local converted = {}
-  local invalidSpells = {}
-  for i, spell in ipairs(spellTable) do
-    local valid = true
-    if spell.enabled == false or not spell.spell or spell.spell == "" then
-      valid = false
-      table.insert(invalidSpells, {reason = "Disabled or missing name", spell = spell})
-    end
-    -- Determine HP/MP trigger based on origin and sign
-    local hp, mp = nil, nil
-    local isBelow = spell.sign == "<" or spell.sign == nil  -- Default to "Below" if not set
-    if spell.origin == "HP" or spell.origin == "HP%" then
-      if isBelow then
-        hp = spell.value or 50
-      else
-        valid = false
-        table.insert(invalidSpells, {reason = "HP spell set to 'Above' (>) which is not supported", spell = spell})
-      end
-    elseif spell.origin == "MP" or spell.origin == "MP%" then
-      if isBelow then
-        mp = spell.value or 50
-      else
-        valid = false
-        table.insert(invalidSpells, {reason = "MP spell set to 'Above' (>) which is not supported", spell = spell})
-      end
-    else
-      valid = false
-      table.insert(invalidSpells, {reason = "Unknown origin", spell = spell})
-    end
-    if (not hp and not mp) then
-      valid = false
-      table.insert(invalidSpells, {reason = "Missing HP/MP trigger", spell = spell})
-    end
-    if valid then
-        table.insert(converted, {
-          name = spell.spell,
-          key = (spell.spell or ""):lower(),
-          hp = hp,
-          mp = mp,
-          op = spell.sign or "<",
-          mana = spell.cost or spell.mana or 0,
-          cd = 1100,
-          prio = #converted + 1
-        })
-    end
-  end
+local spell_resolver = require("core.heal.spell_resolver")
 
-  return converted
+local function convertSpellsToEngineFormat(spellTable)
+  return spell_resolver.convertSpellsToEngineFormat(spellTable)
 end
 
--- Convert HealBot potion format to HealEngine format
--- Must be defined before applyHealEngineToggles which uses it
 local function convertPotionsToEngineFormat(itemTable)
-  if not itemTable then return {} end
-  local converted = {}
-  for i, item in ipairs(itemTable) do
-    if item.enabled ~= false and item.item and item.item > 0 then
-      local hp, mp = nil, nil
-      local isBelow = item.sign == "<" or item.sign == nil
-      
-      if item.origin == "HP" or item.origin == "HP%" then
-        if isBelow then
-          hp = item.value or 50
+  local function getItemName(itemId)
+    if g_things and g_things.getThingType then
+      local thing = g_things.getThingType(itemId, ThingCategoryItem)
+      if thing and thing.getName then
+        local name = thing:getName()
+        if name and name ~= "" then
+          return name:lower()
         end
-      elseif item.origin == "MP" or item.origin == "MP%" then
-        if isBelow then
-          mp = item.value or 50
+      elseif thing and thing.getMarketData then
+        local marketData = thing:getMarketData()
+        if marketData and marketData.name and marketData.name ~= "" then
+          return marketData.name:lower()
         end
-      end
-      
-      -- Get the actual item name from the game data
-      local itemName = nil
-      if g_things and g_things.getThingType then
-        local thing = g_things.getThingType(item.item, ThingCategoryItem)
-        if thing and thing.getName then
-          local name = thing:getName()
-          if name and name ~= "" then
-            itemName = name:lower()
-          end
-        elseif thing and thing.getMarketData then
-          local marketData = thing:getMarketData()
-          if marketData and marketData.name and marketData.name ~= "" then
-            itemName = marketData.name:lower()
-          end
-        end
-      end
-      if not itemName then
-        itemName = "potion #" .. item.item
-      end
-      
-      if hp or mp then
-        table.insert(converted, {
-          id = item.item,
-          key = "potion_" .. item.item,
-          hp = hp,
-          mp = mp,
-          cd = 1000,
-          prio = #converted + 1,
-          name = itemName
-        })
       end
     end
+    return nil
   end
-  return converted
+  return spell_resolver.convertPotionsToEngineFormat(itemTable, getItemName)
 end
 
 local function applyHealEngineToggles()
