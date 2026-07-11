@@ -23,6 +23,7 @@ local pattern = 1
 local mainWindow
 
 local attack_analytics = require("core.attack.attack_analytics")
+local combat_executor = require("core.attack.combat_executor")
 
 -- Record an attack action (delegates to BotCore.Analytics if available)
 local function recordAttackAction(cat, idOrFormula)
@@ -688,83 +689,19 @@ local function confirmSpellCast(spellKey, beforeTs, onSuccess, onFail)
 end
 
 local function attemptSpellCast(entry, context)
-  local spellKey = getSpellKey(entry)
-  if spellKey == "" then return false end
-
-  -- For Absolute Sweep (category 5, pattern 8) respect rotation setting
-  if entry.category == 5 and entry.pattern == 8 and context and context._attackCache and context._attackCache.bestSweepDir and context.settings and context.settings.Rotate then
-    local desired = context._attackCache.bestSweepDir
-    if player:getDirection() ~= desired then
-      -- Prevent rapid oscillation by enforcing a small cooldown
-      if now - lastAutoRotate < rotationCooldown then
-        return true
-      end
-
-      -- Rotation attempt window and throttling (avoid starvation)
-      local cache = context._attackCache
-      if cache then
-        if cache.rotationAttemptsDir ~= desired then
-          cache.rotationAttemptsDir = desired
-          cache.rotationAttempts = 0
-          cache.rotationAttemptsStart = now
-        else
-          if cache.rotationAttemptsStart and now - cache.rotationAttemptsStart > 3000 then
-            cache.rotationAttempts = 0
-            cache.rotationAttemptsStart = now
-          end
-        end
-
-        local MAX_ROTATE_ATTEMPTS = 3
-        if (cache.rotationAttempts or 0) >= MAX_ROTATE_ATTEMPTS then
-          -- allow attack to proceed without rotating
-        else
-          -- Rotate towards best side and defer attack to next tick
-          turn(desired)
-          lastAutoRotate = now
-          cache.rotationAttempts = (cache.rotationAttempts or 0) + 1
-          return true
-        end
-      else
-        -- No cache available: rotate normally
-        turn(desired)
-        lastAutoRotate = now
-        return true
-      end
-    end
-  end
-
-  local state = getSpellState(spellKey)
-  local cdMs = toCooldownMs(entry.cooldown)
-
-  if context.settings.Cooldown and state and nowMs() < state.nextReadyAt then
-    return false
-  end
-
-  local canCastCaller = SafeCall.getCachedCaller("canCast")
-  if canCastCaller then
-    local ok = canCastCaller(spellKey, not currentSettings.ignoreMana, not currentSettings.Cooldown)
-    if ok == false then return false end
-  end
-
-  local beforeTs = SpellCastTable and SpellCastTable[spellKey] and SpellCastTable[spellKey].t or 0
-  if state then state.lastAttemptAt = nowMs() end
-
-  cast(spellKey, math.max(cdMs, 100))
-
-  confirmSpellCast(spellKey, beforeTs, function()
-    if state then
-      state.nextReadyAt = nowMs() + cdMs
-    end
-    applyGlobalBackoff(GLOBAL_CAST_BACKOFF)
-    recordAttackAction(entry.category, entry.spell)
-  end, function()
-    if context.settings.Cooldown and state then
-      state.nextReadyAt = math.max(state.nextReadyAt or 0, nowMs() + FAILED_CAST_BACKOFF)
-    end
-    applyGlobalBackoff(FAILED_CAST_BACKOFF)
-  end)
-
-  return true
+  local deps = {
+    cast = cast,
+    getSpellKey = getSpellKey,
+    getSpellState = getSpellState,
+    toCooldownMs = toCooldownMs,
+    nowMs = nowMs,
+    SafeCall = SafeCall,
+    confirmSpellCast = confirmSpellCast,
+    applyGlobalBackoff = applyGlobalBackoff,
+    recordAttackAction = recordAttackAction,
+    currentSettings = currentSettings,
+  }
+  return combat_executor.attemptSpellCast(entry, context, deps)
 end
 
 -- Check individual action cooldown
@@ -900,42 +837,14 @@ end
 -- Use rune on target - works even with closed backpack (hotkey-style)
 -- Uses BotCore.Items for consolidated item usage
 local function useRuneOnTarget(runeId, targetCreatureOrTile)
-  lastAttackTime = now -- Update attack time for non-blocking cooldown
-  local Client = getClient()
-  
-  -- Simplified like vBot for better OTCv8 compatibility
-  if useWith and targetCreatureOrTile then
-    local ok, res = pcall(useWith, runeId, targetCreatureOrTile)
-    if ok then return true end
-  end
-  
-  -- Fallback methods
-  if BotCore and BotCore.Items and BotCore.Items.useOn then
-    local ok, res = pcall(BotCore.Items.useOn, runeId, targetCreatureOrTile)
-    if ok and res then return true end
-  end
-  
-  -- Use ClientService if available
-  if Client and Client.useInventoryItemWith then
-    local ok, res = pcall(Client.useInventoryItemWith, runeId, targetCreatureOrTile)
-    if ok then return true end
-  elseif g_game and g_game.useInventoryItemWith then
-    local ok, res = pcall(g_game.useInventoryItemWith, runeId, targetCreatureOrTile)
-    if ok then return true end
-  end
-  
-  local rune = SafeCall.findItem(runeId)
-  if rune then
-    if Client and Client.useWith then
-      local ok, res = pcall(Client.useWith, rune, targetCreatureOrTile)
-      if ok then return true end
-    elseif g_game and g_game.useWith then
-      local ok, res = pcall(g_game.useWith, rune, targetCreatureOrTile)
-      if ok then return true end
-    end
-  end
-  
-  return false
+  lastAttackTime = now
+  local deps = {
+    useWith = useWith,
+    g_game = g_game,
+    SafeCall = SafeCall,
+    Client = getClient(),
+  }
+  return combat_executor.useRuneOnTarget(runeId, targetCreatureOrTile, deps)
 end
 
 function executeAttackBotAction(categoryOrPos, idOrFormula, cooldown)
@@ -1157,49 +1066,24 @@ end
 
 -- Pure function: Execute attack action
 local function executeAttack(entry, context)
-  -- Categories 1 (targeted spell), 4 (empowerment), 5 (absolute) are spell-based
-  if isSpellCategory(entry.category) then
-    return attemptSpellCast(entry, context)
-  end
-
-  local stampKey = entry.key or tostring(entry.itemId or entry.spell)
-  local actionId = entry.itemId > 100 and entry.itemId or entry.spell
-
-  if entry.category == 3 then
-    -- Targeted runes
-    local okTargeted = useRuneOnTarget(entry.itemId, context.target)
-    if okTargeted then
-      stamp(stampKey)
-      recordAttackAction(entry.category, actionId)
-      if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
-      return true
-    end
-    return false
-  elseif entry.category == 2 then
-    -- Area runes - prefer cached best tile when available
-    local pat = spellPatterns[entry.patternCategory][entry.pattern][context.settings.PvpSafe and 2 or 1]
-    local pKey = buildPatternKey(entry, context.settings.PvpSafe)
-    local data = context and context._attackCache and context._attackCache.bestTileByPattern and context._attackCache.bestTileByPattern[pKey]
-    if not data then
-      data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
-    end
-    if data and data.pos then
-      local Client = getClient()
-      local tile = (Client and Client.getTile) and Client.getTile(data.pos) or (g_map and g_map.getTile(data.pos))
-      if tile then
-        local okArea = useRuneOnTarget(entry.itemId, tile:getTopUseThing())
-        if okArea then
-          stamp(stampKey)
-          recordAttackAction(entry.category, actionId)
-          if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
-          return true
-        end
-      end
-    end
-    return false
-  end
-
-  return true
+  local deps = {
+    isSpellCategory = isSpellCategory,
+    getSpellKey = getSpellKey,
+    getSpellState = getSpellState,
+    toCooldownMs = toCooldownMs,
+    nowMs = nowMs,
+    SafeCall = SafeCall,
+    cast = cast,
+    confirmSpellCast = confirmSpellCast,
+    applyGlobalBackoff = applyGlobalBackoff,
+    recordAttackAction = recordAttackAction,
+    spellPatterns = spellPatterns,
+    buildPatternKey = buildPatternKey,
+    getBestTileByPattern = getBestTileByPattern,
+    getSpectators = getSpectators,
+    Client = getClient(),
+  }
+  return combat_executor.executeAttack(entry, context, deps)
 end
 
 -- Main attack function — AAA pattern (Arrange → Act → Assert)
