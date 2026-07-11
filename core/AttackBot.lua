@@ -62,7 +62,6 @@ local categories = attack_data.categories
 local patterns = attack_data.patterns
 local spellPatterns = attack_data.spellShapes
 
--- ponytail: data tables extracted to core/attack/attack_data.lua
 -- direction patterns
 local ek = (voc() == 1 or voc() == 11) and true
 
