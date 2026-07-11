@@ -20,7 +20,7 @@ function M.recordRuneUse(runeId)
   analytics.runes[key] = (analytics.runes[key] or 0) + 1
 end
 
-function M.recordBuffUse(name)
+function M.recordBuffUse()
   analytics.empowerments = analytics.empowerments + 1
 end
 
