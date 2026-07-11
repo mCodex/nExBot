@@ -2,24 +2,24 @@ local M = {}
 
 function M.useRuneOnTarget(runeId, target, deps)
   if deps.useWith and target then
-    local ok, res = pcall(deps.useWith, runeId, target)
-    if ok and res then return true end
+    local ok = pcall(deps.useWith, runeId, target)
+    if ok then return true end
   end
 
   if deps.g_game and deps.g_game.useInventoryItemWith then
-    local ok, res = pcall(deps.g_game.useInventoryItemWith, runeId, target)
-    if ok and res then return true end
+    local ok = pcall(deps.g_game.useInventoryItemWith, runeId, target)
+    if ok then return true end
   end
 
   if deps.SafeCall and deps.SafeCall.findItem then
     local rune = deps.SafeCall.findItem(runeId)
     if rune then
       if deps.Client and deps.Client.useWith then
-        local ok, res = pcall(deps.Client.useWith, rune, target)
-        if ok and res then return true end
+        local ok = pcall(deps.Client.useWith, rune, target)
+        if ok then return true end
       elseif deps.g_game and deps.g_game.useWith then
-        local ok, res = pcall(deps.g_game.useWith, rune, target)
-        if ok and res then return true end
+        local ok = pcall(deps.g_game.useWith, rune, target)
+        if ok then return true end
       end
     end
   end
@@ -44,22 +44,25 @@ function M.attemptSpellCast(entry, context, deps)
     if ok == false then return false end
   end
 
-  local beforeTs = 0
+  local beforeTs = deps.SpellCastTable and deps.SpellCastTable[spellKey] and deps.SpellCastTable[spellKey].t or 0
   if state then state.lastAttemptAt = deps.nowMs() end
 
   deps.cast(spellKey, math.max(cdMs, 100))
+
+  local globalBackoff = deps.GLOBAL_CAST_BACKOFF or 250
+  local failedBackoff = deps.FAILED_CAST_BACKOFF or 350
 
   deps.confirmSpellCast(spellKey, beforeTs, function()
     if state then
       state.nextReadyAt = deps.nowMs() + cdMs
     end
-    deps.applyGlobalBackoff(200)
+    deps.applyGlobalBackoff(globalBackoff)
     deps.recordAttackAction(entry.category, entry.spell)
   end, function()
     if context.settings.Cooldown and state then
-      state.nextReadyAt = math.max(state.nextReadyAt or 0, deps.nowMs() + 200)
+      state.nextReadyAt = math.max(state.nextReadyAt or 0, deps.nowMs() + failedBackoff)
     end
-    deps.applyGlobalBackoff(200)
+    deps.applyGlobalBackoff(failedBackoff)
   end)
 
   return true
@@ -70,10 +73,15 @@ function M.executeAttack(entry, context, deps)
     return M.attemptSpellCast(entry, context, deps)
   end
 
+  local stampKey = entry.key or tostring(entry.itemId or entry.spell)
+  local actionId = entry.itemId > 100 and entry.itemId or entry.spell
+
   if entry.category == 3 then
     local okTargeted = M.useRuneOnTarget(entry.itemId, context.target, deps)
     if okTargeted then
-      deps.recordAttackAction(entry.category, entry.itemId > 100 and entry.itemId or entry.spell)
+      if deps.stamp then deps.stamp(stampKey) end
+      deps.recordAttackAction(entry.category, actionId)
+      if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
       return true
     end
     return false
@@ -93,7 +101,9 @@ function M.executeAttack(entry, context, deps)
       if tile then
         local okArea = M.useRuneOnTarget(entry.itemId, tile:getTopUseThing(), deps)
         if okArea then
-          deps.recordAttackAction(entry.category, entry.itemId > 100 and entry.itemId or entry.spell)
+          if deps.stamp then deps.stamp(stampKey) end
+          deps.recordAttackAction(entry.category, actionId)
+          if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
           return true
         end
       end

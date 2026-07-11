@@ -29,6 +29,7 @@ describe("combat_executor", function()
       buildPatternKey = function() return "key" end,
       getBestTileByPattern = function() return nil end,
       getSpectators = function() return {} end,
+      stamp = function() end,
     }
   end)
 
@@ -45,7 +46,7 @@ describe("combat_executor", function()
   end)
 
   it("useRuneOnTarget falls back to g_game", function()
-    deps.useWith = nil
+    deps.useWith = function() error("not available") end
     local called = false
     deps.g_game.useInventoryItemWith = function(id, target)
       called = true
@@ -57,8 +58,8 @@ describe("combat_executor", function()
   end)
 
   it("useRuneOnTarget returns false when all methods fail", function()
-    deps.useWith = function() return false end
-    deps.g_game.useInventoryItemWith = function() return false end
+    deps.useWith = function() error("fail") end
+    deps.g_game.useInventoryItemWith = function() error("fail") end
     deps.SafeCall.findItem = function() return nil end
     local result = combat_executor.useRuneOnTarget(3160, "target", deps)
     assert.is_false(result)
@@ -79,11 +80,20 @@ describe("combat_executor", function()
   end)
 
   it("executeAttack returns false when rune fails", function()
-    deps.useWith = function() return false end
-    deps.g_game.useInventoryItemWith = function() return false end
+    deps.useWith = function() error("fail") end
+    deps.g_game.useInventoryItemWith = function() error("fail") end
     local entry = { category = 3, itemId = 3160, spell = "rune" }
     local context = { settings = { Cooldown = true, PvpSafe = false }, target = "target" }
     local result = combat_executor.executeAttack(entry, context, deps)
     assert.is_false(result)
+  end)
+
+  it("executeAttack calls stamp on success", function()
+    local stamped = nil
+    deps.stamp = function(key) stamped = key end
+    local entry = { category = 3, itemId = 3160, spell = "rune" }
+    local context = { settings = { Cooldown = true, PvpSafe = false }, target = "target" }
+    combat_executor.executeAttack(entry, context, deps)
+    assert.equals("3160", stamped)
   end)
 end)
