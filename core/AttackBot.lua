@@ -135,93 +135,15 @@ local posW = ek and [[
   00000000000
 ]]
 
--- AttackBotConfig
--- create blank profiles 
-if not AttackBotConfig[panelName] or not AttackBotConfig[panelName][1] or #AttackBotConfig[panelName] ~= 5 then
-  AttackBotConfig[panelName] = {
-    [1] = {
-      enabled = true,  -- Enable by default so user doesn't have to manually toggle
-      attackTable = {},
-      ignoreMana = true,
-      Kills = false,
-      Rotate = false,
-      name = "Profile #1",
-      Cooldown = true,
-      Visible = true,
-      pvpMode = false,
-      KillsAmount = 1,
-      PvpSafe = true,
-      BlackListSafe = false,
-      AntiRsRange = 5
-    },
-    [2] = {
-      enabled = false,
-      attackTable = {},
-      ignoreMana = true,
-      Kills = false,
-      Rotate = false,
-      name = "Profile #2",
-      Cooldown = true,
-      Visible = true,
-      pvpMode = false,
-      KillsAmount = 1,
-      PvpSafe = true,
-      BlackListSafe = false,
-      AntiRsRange = 5
-    },
-    [3] = {
-      enabled = false,
-      attackTable = {},
-      ignoreMana = true,
-      Kills = false,
-      Rotate = false,
-      name = "Profile #3",
-      Cooldown = true,
-      Visible = true,
-      pvpMode = false,
-      KillsAmount = 1,
-      PvpSafe = true,
-      BlackListSafe = false,
-      AntiRsRange = 5
-    },
-    [4] = {
-      enabled = false,
-      attackTable = {},
-      ignoreMana = true,
-      Kills = false,
-      Rotate = false,
-      name = "Profile #4",
-      Cooldown = true,
-      Visible = true,
-      pvpMode = false,
-      KillsAmount = 1,
-      PvpSafe = true,
-      BlackListSafe = false,
-      AntiRsRange = 5
-    },
-    [5] = {
-      enabled = false,
-      attackTable = {},
-      ignoreMana = true,
-      Kills = false,
-      Rotate = false,
-      name = "Profile #5",
-      Cooldown = true,
-      Visible = true,
-      pvpMode = false,
-      KillsAmount = 1,
-      PvpSafe = true,
-      BlackListSafe = false,
-      AntiRsRange = 5
-    },
-  }
-end
+local attack_config = require("core.attack.attack_config")
+
+attack_config.ensureDefaults(AttackBotConfig, panelName)
 
 -- Load character-specific profile if available
 local charProfile = getCharacterProfile("attackProfile")
 if charProfile and charProfile >= 1 and charProfile <= 5 then
   AttackBotConfig.currentBotProfile = charProfile
-elseif not AttackBotConfig.currentBotProfile or AttackBotConfig.currentBotProfile == 0 or AttackBotConfig.currentBotProfile > 5 then 
+elseif not AttackBotConfig.currentBotProfile or AttackBotConfig.currentBotProfile == 0 or AttackBotConfig.currentBotProfile > 5 then
   AttackBotConfig.currentBotProfile = 1
 end
 
@@ -234,10 +156,8 @@ end
 
 -- finding correct table, manual unfortunately
 local setActiveProfile = function()
-  local n = AttackBotConfig.currentBotProfile
-  currentSettings = AttackBotConfig[panelName][n]
-  -- Save character's profile preference
-  setCharacterProfile("attackProfile", n)
+  currentSettings = attack_config.getActiveProfile(AttackBotConfig, panelName)
+  setCharacterProfile("attackProfile", AttackBotConfig.currentBotProfile)
 end
 setActiveProfile()
 
