@@ -71,6 +71,7 @@ end
 HealBot = HealBot or {}
 
 local spell_resolver = require("core.heal.spell_resolver")
+local heal_analytics = require("core.heal.heal_analytics")
 
 local function convertSpellsToEngineFormat(spellTable)
   return spell_resolver.convertSpellsToEngineFormat(spellTable)
@@ -600,15 +601,7 @@ local function getStats()
 end
 
 -- Legacy analytics wrapper (redirects to BotCore.Analytics)
-local analytics = {
-  spellCasts = 0,
-  potionUses = 0,
-  potionWaste = 0,
-  manaWaste = 0,
-  spells = {},
-  potions = {},
-  log = {}
-}
+local analytics = heal_analytics.getAnalytics()
 
 -- Flag to trigger immediate heal check
 local needsHealCheck = true
@@ -722,7 +715,7 @@ HealBot.getAnalytics = function()
   if BotCore and BotCore.Analytics then
     return BotCore.Analytics.HealBot.getAnalytics()
   end
-  return analytics
+  return heal_analytics.getAnalytics()
 end
 
 HealBot.resetAnalytics = function()
@@ -730,13 +723,7 @@ HealBot.resetAnalytics = function()
     BotCore.Analytics.HealBot.resetAnalytics()
     return
   end
-  analytics.spellCasts = 0
-  analytics.potionUses = 0
-  analytics.potionWaste = 0
-  analytics.manaWaste = 0
-  analytics.spells = {}
-  analytics.potions = {}
-  analytics.log = {}
+  heal_analytics.resetAnalytics()
 end
 
 -- Subscribe to EventBus for instant reaction to stat changes

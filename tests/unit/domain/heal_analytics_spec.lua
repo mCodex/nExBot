@@ -1,0 +1,22 @@
+local heal_analytics = require("core.heal.heal_analytics")
+
+describe("heal_analytics", function()
+  before_each(function()
+    heal_analytics.resetAnalytics()
+  end)
+
+  it("starts with zero counts", function()
+    local stats = heal_analytics.getAnalytics()
+    assert.equals(0, stats.spellCasts)
+    assert.equals(0, stats.potionUses)
+  end)
+
+  it("resets analytics", function()
+    heal_analytics.resetAnalytics()
+    local stats = heal_analytics.getAnalytics()
+    assert.equals(0, stats.spellCasts)
+    assert.equals(0, stats.potionUses)
+    assert.equals(0, stats.potionWaste)
+    assert.equals(0, stats.manaWaste)
+  end)
+end)
