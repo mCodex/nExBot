@@ -30,117 +30,14 @@ local eventQueue = { head = 1, tail = 0 }
 local processing = false
 local FLUSH_BATCH = 100 -- max events processed per flush to avoid blocking
 
--- Z-change guard: frame-based burst detection + boolean block
--- During floor transitions, dozens of creature events fire in a single frame.
--- We count creature appear/disappear events per frame; 5+ = floor transition.
-nExBot = nExBot or {}
-local _zBlocked = false
-local _zCooldown = 150
-local _zLastLog = 0
-local _zLastKnown = nil
-local _burstFrame = 0
-local _burstCount = 0
-local _zGen = 0  -- generation token: prevents stale safety-valve from clearing a newer lock
+-- Z-change and tile burst guards: extracted to core/zchange_guard.lua
+-- Loaded in Phase 6 before event_bus.lua
+local ZChangeGuard = ZChangeGuard or {}
 
--- Ultra-fast guard: single boolean check (used by all external modules)
-function zChanging()
-  return _zBlocked
-end
-nExBot.zChanging = zChanging
-
--- Activate z-change block (idempotent)
-local function _zActivate()
-  if _zBlocked then return end
-  _zBlocked = true
-  _zGen = _zGen + 1
-  local myGen = _zGen
-  schedule(_zCooldown, function()
-    if _zGen ~= myGen then return end  -- superseded by a newer activation
-    _zBlocked = false
-    local ok, p = pcall(pos)
-    if ok and p then _zLastKnown = p.z end
-    EventBus.emit("player:z_change_settled")
-  end)
-  -- Safety valve: guarantee clear within 500ms even if primary schedule fails
-  schedule(500, function()
-    if _zBlocked and _zGen == myGen then
-      _zBlocked = false
-      EventBus.emit("player:z_change_settled")
-    end
-  end)
-end
-
--- Burst detector: counts creature appear/disappear events per frame.
--- 5+ in the same frame (same `now` value) triggers instant block.
-local function _zBurst()
-  if _zBlocked then return true end
-  if now ~= _burstFrame then
-    _burstFrame = now
-    _burstCount = 1
-  else
-    _burstCount = _burstCount + 1
-  end
-  if _burstCount >= 5 then
-    _zActivate()
-    return true
-  end
-  return false
-end
-
--- Called from onPlayerPositionChange on z-change
-local function _zSet(oldPos, newPos)
-  _zLastKnown = newPos.z
-  if (now - _zLastLog) >= 800 then
-    _zLastLog = now
-  end
-  _zActivate()
-end
-
-schedule(200, function()
-  local ok, p = pcall(pos)
-  if ok and p then _zLastKnown = p.z end
-end)
-
--- ═══════════════════════════════════════════════════════════════════════════
--- Tile-event burst guard: frame-based throttle for onAddThing / onRemoveThing
--- In crowded cities, 200-500+ tile events fire per second (player movement,
--- viewport scroll, NPC ground effects).  Each crossing the C++→Lua bridge.
--- We count tile events per frame; 12+ in one tick = burst → suppress 80ms.
--- ═══════════════════════════════════════════════════════════════════════════
-local _tileBlocked      = false
-local _tileBurstFrame   = 0
-local _tileBurstCount   = 0
-local _TILE_BURST_THRESHOLD = 12
-local _TILE_COOLDOWN_MS     = 80
-
--- Global guard for external modules (mirrors zChanging())
-function tileThrottled()
-  return _tileBlocked
-end
-
-local function _tileActivate()
-  if _tileBlocked then return end
-  _tileBlocked = true
-  schedule(_TILE_COOLDOWN_MS, function()
-    _tileBlocked = false
-  end)
-end
-
--- Returns true when the event should be suppressed.
-local function _tileBurst()
-  if _tileBlocked then return true end
-  if now ~= _tileBurstFrame then
-    _tileBurstFrame = now
-    _tileBurstCount = 1
-  else
-    _tileBurstCount = _tileBurstCount + 1
-  end
-  if _tileBurstCount >= _TILE_BURST_THRESHOLD then
-    _tileActivate()
-    return true
-  end
-  return false
-end
+-- Local aliases for performance (avoid repeated table lookups)
+local _zBurst = ZChangeGuard.checkBurst or function() return false end
+local _zSet = ZChangeGuard.onZChange or function() end
+local _tileBurst = ZChangeGuard.checkTileBurst or function() return false end
 
 -- Subscribe to an event
 -- @param event string: Event name (e.g., "creature:appear", "player:move")
@@ -288,21 +185,14 @@ setmetatable(creatureHealthCache, { __mode = "k" }) -- Weak keys for auto-cleanu
 local _monsterHealthThrottle = {}  -- { [creatureId] = lastEmitTime }
 local MONSTER_HEALTH_THROTTLE_MS = 150  -- 150ms between emits per creature
 
--- Track killed monsters with their positions for corpse access
-local killedMonsters = {}  -- { [creatureId] = { pos, name, timestamp } }
-local KILLED_MONSTER_EXPIRY_MS = 15000  -- 15 seconds
+-- Kill tracking: extracted to core/kill_tracker.lua
+local KillTracker = KillTracker or {}
 
--- Public accessor for killed monsters list
--- Clean up old killed monster entries + throttle tables
+-- Clean up old throttle tables periodically
 local _cleanupCounter = 0
 local _creatureMoveLastEmit = {}
-local function cleanupKilledMonsters()
+local function cleanupThrottleTables()
   local nowMs = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
-  for id, data in pairs(killedMonsters) do
-    if (nowMs - data.timestamp) > KILLED_MONSTER_EXPIRY_MS then
-      killedMonsters[id] = nil
-    end
-  end
   -- Prune throttle tables every ~10 calls (every ~5s at 500ms interval)
   _cleanupCounter = _cleanupCounter + 1
   if _cleanupCounter >= 10 then
@@ -352,19 +242,19 @@ if onCreatureHealthPercentChange then
         pcall(function() creaturePos = creature:getPosition() end)
         
         if creatureId and creaturePos then
-          local nowMs = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
-          killedMonsters[creatureId] = {
-            pos = { x = creaturePos.x, y = creaturePos.y, z = creaturePos.z },
-            name = creatureName or "Unknown",
-            timestamp = nowMs
-          }
+          -- Delegate to KillTracker (domain logic)
+          if KillTracker.recordKill then
+            KillTracker.recordKill(creatureId, creatureName, creaturePos)
+          end
           
           -- Emit monster:killed event with full info
           EventBus.emit("monster:killed", creature, creaturePos, creatureName)
         end
         
         -- Cleanup old entries periodically
-        cleanupKilledMonsters()
+        if KillTracker.cleanup then
+          KillTracker.cleanup()
+        end
       end
       
     elseif creature:isPlayer() and not creature:isLocalPlayer() then
@@ -633,7 +523,7 @@ if UnifiedTick and UnifiedTick.register then
     priority = UnifiedTick.Priority.IDLE,
     handler = function()
       EventBus.emit("tick:slow")
-      cleanupKilledMonsters()
+      cleanupThrottleTables()
     end,
     group = "eventbus"
   })
@@ -649,7 +539,7 @@ else
   
   macro(5000, function()
     EventBus.emit("tick:slow")
-    cleanupKilledMonsters()
+    cleanupThrottleTables()
   end)
 end
 

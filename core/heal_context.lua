@@ -40,15 +40,17 @@ local function snapshotOnce()
 
   -- Get current mana (absolute value) for spell cost checks
   local currentMana = 0
-  if mana then 
+  if BotCore and BotCore.Stats and BotCore.Stats.getMp then
+    currentMana = BotCore.Stats.getMp()
+  elseif mana then 
     currentMana = mana() or 0
   elseif player and player.getMana then 
     currentMana = player:getMana() or 0 
   end
 
   local snap = {
-    hp = hppercent(),
-    mp = manapercent(),
+    hp = (BotCore and BotCore.Stats and BotCore.Stats.getHpPercent) and BotCore.Stats.getHpPercent() or hppercent(),
+    mp = (BotCore and BotCore.Stats and BotCore.Stats.getMpPercent) and BotCore.Stats.getMpPercent() or manapercent(),
     currentMana = currentMana,  -- CRITICAL: Absolute mana value for spell cost checks
     monsters = (getMonsters and getMonsters()) or 0,
     players = (getPlayers and getPlayers()) or 0,

@@ -162,11 +162,14 @@ function Shared.isPotionOnCooldown()
   return false
 end
 
--- PLAYER STAT ACCESSORS (used across heal modules)
+-- PLAYER STAT ACCESSORS (delegate to BotCore.Stats as single source of truth)
 
 --- Get player HP percent safely.
 -- @return number (0-100)
 function Shared.getHpPercent()
+  if BotCore and BotCore.Stats and BotCore.Stats.getHpPercent then
+    return BotCore.Stats.getHpPercent()
+  end
   if hppercent then return hppercent() or 0 end
   if player and player.getHealthPercent then return player:getHealthPercent() or 0 end
   return 100
@@ -175,6 +178,9 @@ end
 --- Get player MP percent safely.
 -- @return number (0-100)
 function Shared.getMpPercent()
+  if BotCore and BotCore.Stats and BotCore.Stats.getMpPercent then
+    return BotCore.Stats.getMpPercent()
+  end
   if manapercent then return manapercent() or 0 end
   if player and player.getManaPercent then return player:getManaPercent() or 0 end
   return 100
@@ -183,6 +189,9 @@ end
 --- Get player current mana safely.
 -- @return number
 function Shared.getCurrentMana()
+  if BotCore and BotCore.Stats and BotCore.Stats.getMp then
+    return BotCore.Stats.getMp()
+  end
   if mana then return mana() or 0 end
   if player and player.getMana then return player:getMana() or 0 end
   return 0

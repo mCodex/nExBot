@@ -82,43 +82,15 @@ local _potionDebug = false
 local nowMs = nExBot.Shared.nowMs
 
 -- COOLDOWN MANAGEMENT (Unified with BotCore.Cooldown)
-
--- Check if healing group cooldown is active
-local function isHealingGroupOnCooldown()
-  if BotCore and BotCore.Cooldown and BotCore.Cooldown.isHealingOnCooldown then
-    return BotCore.Cooldown.isHealingOnCooldown()
-  end
-  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
-    return modules.game_cooldown.isGroupCooldownIconActive(2)
-  end
-  return false
-end
-
--- Alias for backwards compatibility
-local function healingGroupReady()
-  return not isHealingGroupOnCooldown()
-end
-
--- Check if potion exhaustion is active
-local function isPotionOnCooldown()
-  if BotCore and BotCore.Cooldown and BotCore.Cooldown.canUsePotion then
-    return not BotCore.Cooldown.canUsePotion()
-  end
-  if nExBot and nExBot.isUsingPotion then return true end
-  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
-    return modules.game_cooldown.isGroupCooldownIconActive(6)
-  end
-  return false
-end
-
--- Alias for backwards compatibility
-local function potionReady()
-  return not isPotionOnCooldown()
-end
+-- Local cooldown tracking is kept as fallback; primary path delegates to BotCore.Cooldown
 
 -- Check individual action cooldown
 local function ready(key, cd)
   if not key then return true end
+  -- Prefer BotCore.Cooldown for spell-level checks when available
+  if BotCore and BotCore.Cooldown and BotCore.Cooldown.isSpellOnCooldown then
+    return not BotCore.Cooldown.isSpellOnCooldown(key)
+  end
   local last = cooldowns[key] or 0
   return (nowMs() - last) >= (cd or 1000)
 end
@@ -128,6 +100,29 @@ local function stamp(key)
   if key then
     cooldowns[key] = nowMs()
   end
+end
+
+-- Healing group readiness (delegates to BotCore.Cooldown)
+local function healingGroupReady()
+  if BotCore and BotCore.Cooldown and BotCore.Cooldown.isHealingOnCooldown then
+    return not BotCore.Cooldown.isHealingOnCooldown()
+  end
+  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
+    return not modules.game_cooldown.isGroupCooldownIconActive(2)
+  end
+  return true
+end
+
+-- Potion readiness (delegates to BotCore.Cooldown)
+local function potionReady()
+  if BotCore and BotCore.Cooldown and BotCore.Cooldown.canUsePotion then
+    return BotCore.Cooldown.canUsePotion()
+  end
+  if nExBot and nExBot.isUsingPotion then return false end
+  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
+    return not modules.game_cooldown.isGroupCooldownIconActive(6)
+  end
+  return true
 end
 
 -- Mark healing action used (notify BotCore.Cooldown for FriendHealer sync)
@@ -144,21 +139,30 @@ local function markPotionUsed()
   end
 end
 
--- STAT ACCESSORS (Safe fallbacks)
+-- STAT ACCESSORS (delegate to BotCore.Stats)
 
 local function getHpPercent()
+  if BotCore and BotCore.Stats and BotCore.Stats.getHpPercent then
+    return BotCore.Stats.getHpPercent()
+  end
   if hppercent then return hppercent() or 0 end
   if player and player.getHealthPercent then return player:getHealthPercent() or 0 end
   return 100
 end
 
 local function getMpPercent()
+  if BotCore and BotCore.Stats and BotCore.Stats.getMpPercent then
+    return BotCore.Stats.getMpPercent()
+  end
   if manapercent then return manapercent() or 0 end
   if player and player.getManaPercent then return player:getManaPercent() or 0 end
   return 100
 end
 
 local function getCurrentMana()
+  if BotCore and BotCore.Stats and BotCore.Stats.getMp then
+    return BotCore.Stats.getMp()
+  end
   if mana then return mana() or 0 end
   if player and player.getMana then return player:getMana() or 0 end
   return 0

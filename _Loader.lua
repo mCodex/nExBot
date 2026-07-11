@@ -422,6 +422,8 @@ loadCategory("core", {
 -- PHASE 6: ARCHITECTURE LAYER
 -- ============================================================================
 loadCategory("architecture", {
+  "zchange_guard",
+  "kill_tracker",
   "event_bus",
   "unified_storage",
   "unified_tick",
