@@ -668,3 +668,17 @@ if UnifiedTick and UnifiedTick.start then
     end
   end)
 end
+
+-- ============================================================================
+-- BOT ANALYTICS
+-- ============================================================================
+local analyticsOk, analytics = pcall(dofile, "/core/analytics.lua")
+if analyticsOk and analytics and analytics.start then
+  pcall(analytics.start)
+  if onGameEnd then
+    onGameEnd(function()
+      pcall(analytics.stop)
+    end)
+  end
+end
+end
