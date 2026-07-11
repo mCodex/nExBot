@@ -112,6 +112,7 @@ Support: utamo vita @ 80% HP | utani hur (always)
 ## Technical Details
 
 Spell/potion conversion logic is in `core/heal/spell_resolver.lua` — pure functions, testable independently.
+Profile defaults and validation are in `core/heal/heal_config.lua` — pure functions.
 
 ## Integration
 

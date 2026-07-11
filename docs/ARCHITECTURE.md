@@ -93,7 +93,7 @@ Circular dependencies avoided by strict phase loading and deferred event subscri
 | BFS Traversal | Container opening/looting | ContainerOpener, Looting |
 | Engagement Lock | Anti-zigzag targeting | ScenarioManager |
 | Burst Detection | Z-change protection | EventBus + ZChangeGuard |
-| Extract Pure Functions | Testable domain logic | attack_data, spell_resolver |
+| Extract Pure Functions | Testable domain logic | attack_data, spell_resolver, heal_config, attack_config, combat_executor |
 | SafeCreature | Single pcall wrapper | All creature access via `SC.*` |
 | Table-Driven Delegation | 209 ACL methods | ClientService |
 | Unified Storage Engine | Single JSON backend | utils/storage_engine |

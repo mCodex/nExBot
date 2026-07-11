@@ -85,6 +85,8 @@ Evaluation order:
 
 Attack categories, patterns, and spell shapes are in `core/attack/attack_data.lua` — pure data, testable independently.
 Analytics recording is in `core/attack/attack_analytics.lua` — pure functions.
+Profile management is in `core/attack/attack_config.lua` — pure functions.
+Combat execution is in `core/attack/combat_executor.lua` — uses dependency injection.
 
 ## Performance
 
