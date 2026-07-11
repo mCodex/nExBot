@@ -1,30 +1,12 @@
 -- Panel name constant (must be defined before ensureCurrentSettings uses it)
 local healPanelName = "healbot"
+local heal_config = require("core.heal.heal_config")
 
 -- Safety: auto-restore currentSettings if nil
 local function ensureCurrentSettings()
   if not currentSettings then
     if not HealBotConfig then HealBotConfig = {} end
-    -- Ensure profile container exists and has 5 profiles
-    if not HealBotConfig[healPanelName] or type(HealBotConfig[healPanelName]) ~= "table" or #HealBotConfig[healPanelName] ~= 5 then
-      local profiles = {}
-      for i = 1, 5 do
-        profiles[i] = {
-          enabled = false,
-          spellTable = {},
-          itemTable = {},
-          name = "Profile #" .. i,
-          Visible = true,
-          Cooldown = true,
-          Interval = true,
-          Conditions = true,
-          Delay = true,
-          MessageDelay = false
-        }
-      end
-      HealBotConfig[healPanelName] = profiles
-      pcall(saveHeal)
-    end
+    heal_config.ensureDefaults(HealBotConfig, healPanelName)
     if not HealBotConfig.currentHealBotProfile or HealBotConfig.currentHealBotProfile < 1 or HealBotConfig.currentHealBotProfile > 5 then
       HealBotConfig.currentHealBotProfile = 1
     end
@@ -223,24 +205,7 @@ Panel
 ]])
 ui:setId(healPanelName)
 
-if not HealBotConfig[healPanelName] or not HealBotConfig[healPanelName][1] or #HealBotConfig[healPanelName] ~= 5 then
-  local profiles = {}
-  for i = 1, 5 do
-    profiles[i] = {
-      enabled = false,
-      spellTable = {},
-      itemTable = {},
-      name = "Profile #" .. i,
-      Visible = true,
-      Cooldown = true,
-      Interval = true,
-      Conditions = true,
-      Delay = true,
-      MessageDelay = false
-    }
-  end
-  HealBotConfig[healPanelName] = profiles
-end
+heal_config.ensureDefaults(HealBotConfig, healPanelName)
 
 -- Load character-specific profile if available
 local charProfile = getCharacterProfile("healProfile")
