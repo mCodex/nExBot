@@ -35,11 +35,14 @@ describe("attack_analytics", function()
     assert.equals(1, stats.runes["3161"])
   end)
 
-  it("records buff use", function()
+  it("records buff use without double-counting totalAttacks", function()
+    -- recordBuffUse is always called after recordSpellUse
+    attack_analytics.recordSpellUse("utito tempo")
     attack_analytics.recordBuffUse("utito tempo")
     local stats = attack_analytics.getAnalytics()
     assert.equals(1, stats.totalAttacks)
     assert.equals(1, stats.empowerments)
+    assert.equals(1, stats.spells["utito tempo"])
   end)
 
   it("resets analytics", function()

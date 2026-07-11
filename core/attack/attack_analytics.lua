@@ -21,7 +21,7 @@ function M.recordRuneUse(runeId)
 end
 
 function M.recordBuffUse(name)
-  analytics.totalAttacks = analytics.totalAttacks + 1
+  -- ponytail: totalAttacks already incremented by recordSpellUse caller
   analytics.empowerments = analytics.empowerments + 1
 end
 
