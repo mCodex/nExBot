@@ -4,8 +4,8 @@ max_line_length = 120
 -- OTClient runtime globals (read-only)
 read_globals = {
   -- OTClient core
-  "g_game", "g_map", "g_ui", "g_things", "g_clock", "g_resources", "g_platform",
-  "modules", "macro", "schedule", "dofile",
+  "g_game", "g_map", "g_ui", "g_things", "g_clock", "g_resources", "g_platform", "g_http", "HTTP",
+  "modules", "macro", "schedule", "dofile", "periodic",
 
   -- Player accessors
   "pos", "target", "player", "mana", "hppercent", "manapercent",
@@ -49,6 +49,8 @@ globals = {
   "MonsterAI", "AttackStateMachine", "MovementCoordinator",
   "HealBotConfig", "AttackBotConfig",
   "ZChangeGuard", "KillTracker",
+  "AttackData", "AttackAnalytics", "AttackConfig", "CombatExecutor",
+  "HealConfig", "SpellResolver", "HealAnalytics",
   "storage", "info", "warn",
 }
 

@@ -38,7 +38,7 @@ end
 
 local function httpGet(url)
   if type(g_http) == "table" and type(g_http.get) == "function" then
-    g_http.get(url, function(data, err)
+    g_http.get(url, function(_data, err)
       if err then
         warn("[Analytics] HTTP error: " .. tostring(err))
       end
@@ -46,7 +46,7 @@ local function httpGet(url)
     return true
   end
   if type(HTTP) == "table" and type(HTTP.get) == "function" then
-    HTTP.get(url, function(response, err)
+    HTTP.get(url, function(_response, err)
       if err then
         warn("[Analytics] HTTP error: " .. tostring(err))
       end
