@@ -2,10 +2,10 @@ local Readiness = dofile("core/containers/readiness.lua")
 local Registry = dofile("core/containers/registry.lua")
 
 describe("Readiness", function()
-  it("computes notStarted when empty", function()
+  it("computes ready when empty (nothing to do)", function()
     local reg = Registry.new()
     local r = Readiness.compute(reg, 1, false)
-    assert.equals("notStarted", r.status)
+    assert.equals("ready", r.status)
     assert.equals(1, r.generation)
   end)
 

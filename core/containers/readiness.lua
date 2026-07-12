@@ -10,7 +10,8 @@ function Readiness.compute(registry, generation, isPaladin)
   local status
   if failed > 0 and queued == 0 and opening == 0 then
     status = "degraded"
-  elseif inspected > 0 and queued == 0 and opening == 0 then
+  elseif queued == 0 and opening == 0 then
+    -- Nothing pending, nothing in flight: ready (even if empty)
     status = "ready"
   elseif queued > 0 or opening > 0 then
     status = "discovering"
