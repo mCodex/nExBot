@@ -73,21 +73,8 @@ if voc == 1 or voc == 11 then
     end
 
     -- Safe debounce factory
-    local function makeDebounce(ms, fn)
-      if nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
-        return nExBot.EventUtil.debounce(ms, fn)
-      end
-      local scheduled = false
-      return function(...)
-        if scheduled then return end
-        scheduled = true
-        local args = {...}
-        schedule(ms, function()
-          scheduled = false
-          pcall(fn, safe_unpack(args))
-        end)
-      end
-    end
+    local SharedHelpers = nExBot.SharedHelpers or {}
+    local makeDebounce = SharedHelpers.makeDebounce
 
     local function checkAndCastExeta()
       if not exetaIfPlayerMacro:isOn() then return end
@@ -98,16 +85,11 @@ if voc == 1 or voc == 11 then
 
       -- Check for nearby monsters (radius 1)
       local monstersNearby = 0
-      if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
-        monstersNearby = #MovementCoordinator.MonsterCache.getNearby(1)
-      else
-        local p = pos()
-        local creatures = g_map.getSpectatorsInRange(p, false, 1, 1)
-        for i = 1, #creatures do
-          local c = creatures[i]
-          if c and c:isMonster() and not c:isDead() then
-            monstersNearby = monstersNearby + 1
-          end
+      local creatures = BotCore.Creatures.getNearby(1, 1) or {}
+      for i = 1, #creatures do
+        local c = creatures[i]
+        if c and c:isMonster() and not c:isDead() then
+          monstersNearby = monstersNearby + 1
         end
       end
 
@@ -115,8 +97,7 @@ if voc == 1 or voc == 11 then
 
       -- Check for nearby players (radius 6)
       local playersNearby = 0
-      local ppos = pos()
-      local spects = g_map.getSpectatorsInRange(ppos, false, 6, 6)
+      local spects = BotCore.Creatures.getNearby(6, 6) or {}
       for i = 1, #spects do
         local c = spects[i]
         if c and c:isPlayer() and not c:isLocalPlayer() then
@@ -163,16 +144,7 @@ if voc == 1 or voc == 11 then
       -- ═══════════════════════════════════════════════════════════════════════
       
       -- Direction vectors for facing check
-      local DIR_VECTORS = {
-        [0] = {x = 0, y = -1},  -- North
-        [1] = {x = 1, y = 0},   -- East
-        [2] = {x = 0, y = 1},   -- South
-        [3] = {x = -1, y = 0},  -- West
-        [4] = {x = 1, y = -1},  -- NE
-        [5] = {x = 1, y = 1},   -- SE
-        [6] = {x = -1, y = 1},  -- SW
-        [7] = {x = -1, y = -1}, -- NW
-      }
+      local DIR_VECTORS = Directions.DIR_TO_OFFSET
       
       -- Helper: Check if a monster is facing the local player (i.e., attacking us)
       local function isMonsterFacingPlayer(creature)
@@ -240,15 +212,7 @@ if voc == 1 or voc == 11 then
         if (now - lastExetaAmp) < 6000 then return end
         
         -- Get nearby monsters from cache or fallback to map scan
-        local monsters = nil
-        if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
-          monsters = MovementCoordinator.MonsterCache.getNearby(7)
-        else
-          local ppos = pos()
-          if ppos then
-            monsters = g_map.getSpectatorsInRange(ppos, false, 7, 7)
-          end
-        end
+        local monsters = BotCore.Creatures.getNearby(7) or {}
         
         if not monsters then return end
         
@@ -323,16 +287,7 @@ if voc == 1 or voc == 11 then
     -- Fallback: polling-based check for environments without EventBus
     if not EventBus then
       -- Direction vectors for facing check (fallback)
-      local FB_DIR_VECTORS = {
-        [0] = {x = 0, y = -1},  -- North
-        [1] = {x = 1, y = 0},   -- East
-        [2] = {x = 0, y = 1},   -- South
-        [3] = {x = -1, y = 0},  -- West
-        [4] = {x = 1, y = -1},  -- NE
-        [5] = {x = 1, y = 1},   -- SE
-        [6] = {x = -1, y = 1},  -- SW
-        [7] = {x = -1, y = -1}, -- NW
-      }
+      local DIR_VECTORS = Directions.DIR_TO_OFFSET
       
       -- Helper: Check if monster is facing local player (fallback version)
       local function fbIsMonsterFacingPlayer(creature, playerPos)
@@ -343,7 +298,7 @@ if voc == 1 or voc == 11 then
         
         local dx = playerPos.x - cpos.x
         local dy = playerPos.y - cpos.y
-        local vec = FB_DIR_VECTORS[direction]
+        local vec = DIR_VECTORS[direction]
         if not vec then return false end
         
         if vec.x == 0 then
@@ -369,9 +324,7 @@ if voc == 1 or voc == 11 then
         local playerPos = player and player:getPosition()
         if not playerPos then return end
         
-        local creatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
-          and MovementCoordinator.MonsterCache.getNearby(7)
-          or g_map.getSpectatorsInRange(playerPos, false, 7, 7)
+        local creatures = BotCore.Creatures.getNearby(7) or {}
         
         if not creatures then return end
         

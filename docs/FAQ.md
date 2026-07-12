@@ -1,279 +1,90 @@
-# ❓ FAQ
+# FAQ
 
-Frequently asked questions and troubleshooting guide.
+## Installation
 
----
+**Where do I install?**
+Copy `nExBot/` into your client's `bot/` directory. vBot: `%APPDATA%/OTClientV8/<ServerName>/bot/nExBot`. OTCR: `~/.local/share/<otcr-data>/<ServerName>/bot/nExBot`.
 
-## 💻 Installation
+**Bot not loading:** Verify `_Loader.lua` is in root. Press `Ctrl+B` → Disable → Enable. Check console (`Ctrl+Shift+D`).
 
-### Where do I install nExBot?
+**Multiple servers?** Yes. Copy `nExBot/` to each server's `bot/`. Configs are per-server.
 
-Copy the `nExBot` folder into your OTClient's bot directory:
+**How to update?** Back up config folders → delete old `nExBot/` → copy new → restore configs.
 
-- **vBot (OTClientV8):** `%APPDATA%/OTClientV8/<ServerName>/bot/nExBot`
-- **OTCR (OpenTibiaBR):** `~/.local/share/<otcr-data>/<ServerName>/bot/nExBot`
+## HealBot
 
-See the full [Installing guide](INSTALLING.md) for detailed instructions.
+**Not healing:** Toggle enabled? Spells configured? Names correct? Enough mana? HP below threshold? On cooldown?
 
-### The bot isn't loading
+**Healing spells:** `exura` = small/fast, `exura vita` = medium, `exura gran` = large/slow. Use `exura vita` as main.
 
-1. Verify the folder path is correct and `_Loader.lua` is in the root
-2. Press `Ctrl+B` → Disable → Enable to reload
-3. Press `Ctrl+Shift+D` to check the console for error messages
-4. Try a fresh install (backup configs first)
+**Need potions with spells?** Yes. Spells cost mana. Potions as fallback when mana runs out.
 
-### Can I use nExBot on multiple servers?
+**Dying too fast:** Lower thresholds (60% not 50%). Add potion fallbacks. Add `utamo vita`. Check hunting area difficulty.
 
-Yes. Copy the `nExBot` folder to each server's bot directory. Configs are per-server, so each installation is independent.
+## CaveBot
 
-### How do I update?
+**How to create waypoints?** Cave tab → Show Editor → stand at position → Add Goto → walk → Add Goto → save. Or use Recorder.
 
-1. Back up `cavebot_configs/`, `targetbot_configs/`, and `nExBot_configs/`
-2. Delete the old `nExBot/` folder
-3. Copy the new release
-4. Restore your config folders
+**Stops moving:** Enabled? Started (`Ctrl+Z`)? Pull System pausing? Coordinates reachable? Door/field blocking?
 
----
+**Tile-by-tile walking:** autoWalk needs ≥5 tiles with ≤55% direction changes. Many tight turns → keyboard stepping. Space waypoints 5–15 tiles apart.
 
-## 💚 HealBot
+**Stuck at door:** Enable Auto Open Doors. Add `door` waypoint. Verify door item IDs.
 
-### HealBot isn't healing me
+**Multiple routes?** Yes. Each route saved as `.cfg` in `cavebot_configs/`.
 
-1. Is the toggle **enabled** (green light)?
-2. Spells configured? Check the Healing panel.
-3. Spell names spelled correctly? (`exura vita`, not `exuravita`)
-4. Enough mana for the spell?
-5. HP actually below the threshold? A spell at 50% only fires at ≤50% HP.
-6. Spell on cooldown? 1–2 second cooldowns are normal.
+## TargetBot
 
-**Quick fix:** Add a potion at 40% HP as a fallback.
+**How to add monsters?** Target tab → + → enter name → configure → Save.
 
-### What's the difference between healing spells?
+**Pattern matching:** `Dragon` = exact, `Dragon*` = starts with, `*, !Dragon` = except.
 
-| Spell | Healing | Mana Cost | Speed |
-|-------|---------|-----------|-------|
-| `exura` | Small (~200 HP) | Low (~20) | Fast |
-| `exura vita` | Medium (~300 HP) | Medium (~60) | Medium |
-| `exura gran` | Large (~600 HP) | High (~100) | Slow |
+**Not attacking:** Enabled? Creatures configured? On screen? Mana?
 
-Use `exura vita` as your main heal, `exura` as backup, and `exura gran` for emergencies.
+**Zigzag switching:** Engagement Lock prevents this. FEW (2–3 monsters) = 5s cooldown. Enable `MonsterAI.DEBUG`.
 
-### Do I need potions if I have spells?
+**Not looting:** Enabled? Containers open? Creature in range?
 
-Strongly recommended. Spells cost mana — when you run out, potions are your only healing. Always configure at least one potion as a fallback.
+## AttackBot
 
-### Why am I dying too fast?
+**Attacks not firing:** Enabled? Target exists? Off cooldown? Enough mana? Monster count met?
 
-- Thresholds too low — try healing at 60% instead of 50%
-- No potion fallback — add potions for when mana runs out
-- No support spells — `utamo vita` (mana shield) helps in dangerous areas
-- Wrong hunting area — the spot may be too hard for your level
+**AoE not triggering:** Threshold too high? Monsters in range? Creatures attackable?
 
----
+**Wasting runes:** Add `Monsters ≥ 2` condition. Separate AoE from single-target.
 
-## 🧭 CaveBot
+## Containers
 
-### How do I create waypoints?
+**Not opening:** Auto Open enabled? Assigned correctly? Wait a few seconds. Check console.
 
-1. Open the Cave tab → click **Show Editor**
-2. Stand at position → click **Add Goto**
-3. Walk to next position → click **Add Goto** again
-4. Repeat for the full route
-5. Save with a name
+**Quiver not refilling:** Arrows/bolts in supply? Quiver equipped? Correct type?
 
-Or use the **Recorder** — click Record, walk your route, stop recording.
+## Performance
 
-### CaveBot stops moving
+**Is nExBot fast?** HealBot 75ms, TargetBot 50ms, CaveBot 250ms. CPU ~3–5%, memory ~15–30MB.
 
-- Is CaveBot enabled and started (`Ctrl+Z`)?
-- Is TargetBot's Pull System pausing navigation?
-- Are waypoint coordinates reachable?
-- Is there a door or obstacle? Enable Auto Open Doors.
-- Field blocking the path? Enable "Ignore fields".
+**Reduce CPU:** Disable unused modules. Reduce TargetBot creatures. Increase CaveBot interval. Check for infinite loops in custom actions.
 
-### Bot walks tile-by-tile instead of smooth
+## Errors
 
-- autoWalk activates for paths of 5+ tiles with ≤55% direction changes. If your corridor has many tight turns, the bot uses keyboard stepping with 2-step pipelining instead.
-- Check that waypoints aren't all adjacent to floor-change tiles (pipelining is disabled near FC tiles).
-- For smoother movement, space waypoints 5-15 tiles apart — this is the sweet spot for autoWalk.
+**"Error loading config":** Corrupted. Delete and recreate. Don't edit `.cfg` manually.
 
-### Bot is stuck at a door
+**Stops randomly:** Died? Out of supplies? Anti-RS triggered? Condition blocking? Invalid waypoint?
 
-- Enable **Auto Open Doors** in CaveBot config
-- Add a manual `door` waypoint before the goto past the door
-- Verify the door item ID is recognized
+**"Not enough mana":** Add mana potion or use lower-cost spell.
 
-### Waypoints too far apart
+**"attempt to call global nil":** Module failed to load. Replace with latest version.
 
-Keep waypoints within 10–20 tiles of each other. autoWalk kicks in for paths of 5+ tiles (with ≤55% direction changes), making movement smooth. For paths >50 tiles, pathfinding is capped and recovery may trigger. Add intermediate waypoints for better control.
+## Advanced
 
-### Can I save multiple routes?
+**Custom scripts?** Place `.lua` in `private/` folder. Auto-loaded after core modules.
 
-Yes. Each route is saved as a `.cfg` file in `cavebot_configs/`. Load different configs for different hunting spots.
-
----
-
-## 🎯 TargetBot
-
-### How do I add monsters?
-
-Target tab → click **+** → enter monster name → configure spells and behavior → Save.
-
-### What's pattern matching?
-
-| Pattern | Effect |
-|---------|--------|
-| `Dragon` | Matches exactly "Dragon" |
-| `Dragon*` | Matches Dragon, Dragon Lord, etc. |
-| `*, !Dragon` | Everything except Dragons |
-| `#100-#110` | Creature IDs 100–110 |
-
-### TargetBot isn't attacking
-
-1. Is TargetBot enabled?
-2. Are creatures configured in the list?
-3. Are matching monsters on screen?
-4. Do you have mana for attack spells?
-
-### Target keeps switching between monsters
-
-The Engagement Lock should prevent this. If switches are happening:
-- Check that creature priorities are configured
-- With 2–3 monsters, the switch cooldown is 5 seconds
-- Enable `MonsterAI.DEBUG = true` to see why switches happen
-
-### Monsters not being looted
-
-- Is looting enabled in the Target tab?
-- Are loot containers open?
-- Is the creature within looting range?
-
----
-
-## ⚔️ AttackBot
-
-### Attacks not firing
-
-1. AttackBot enabled?
-2. Valid target selected by TargetBot?
-3. Spell on cooldown?
-4. Enough mana?
-5. Monster count conditions met?
-
-### AoE not triggering
-
-Lower the minimum monster count, check detection range, and verify creatures are attackable (not NPCs or summons).
-
-### Wasting runes on single targets
-
-Add a `Monsters ≥ 2` condition to area runes and separate AoE from single-target rules.
-
----
-
-## 📦 Containers
-
-### Containers not opening on login
-
-1. Is **Auto Open** enabled?
-2. Are containers correctly assigned?
-3. Wait a few seconds — there's a deliberate startup delay
-4. Check console for errors
-
-### Quiver not refilling
-
-1. Do you have arrows/bolts in a supply container?
-2. Is the quiver equipped?
-3. Are arrows the correct type for your weapon?
-
----
-
-## ⚡ Performance
-
-### Is nExBot fast?
-
-Yes. Typical performance:
-- HealBot: 75 ms response time
-- TargetBot: 50 ms target evaluation
-- CaveBot: 250 ms movement tick
-- CPU usage: ~3–5%
-- Memory: ~15–30 MB
-
-### How do I reduce CPU usage?
-
-1. Disable unused modules (Hunt Analyzer, Monster Inspector)
-2. Reduce TargetBot creature list
-3. Increase CaveBot interval (500 ms is fine)
-4. Avoid complex custom actions in CaveBot
-
-### Bot using too much CPU?
-
-- PathCursor preservation eliminates redundant A* calls per tick — fewer pathfinding operations overall
-- 4-entry LRU cache catches repeated pathfinding queries
-- Close heavy programs (browser, Discord)
-- Check for infinite loops in custom CaveBot actions
-- Enable `nExBot.printStartupProfile()` to find slow modules
-
----
-
-## 🚨 Errors
-
-### "Error loading config"
-
-Config file corrupted. Delete it and recreate from scratch. Don't edit `.cfg` files manually.
-
-### Bot stops randomly
-
-Common causes:
-1. Character died
-2. Out of supplies (potions, runes)
-3. Anti-RS triggered (PvP flag detected)
-4. Paralyze/condition handler blocking actions
-5. Invalid CaveBot waypoint coordinate
-
-Check the console with `Ctrl+Shift+D` for error messages.
-
-### "Not enough mana" spam
-
-The spell costs more mana than you have. Add a mana potion to your rotation, or use a lower-cost spell.
-
-### "attempt to call global nil" errors
-
-A module failed to load or is outdated. Replace the affected file with the latest version and restart the client.
-
----
-
-## 🔧 Advanced
-
-### Can I write custom scripts?
-
-Yes. Place `.lua` files in a `private/` folder inside `nExBot/`. They're auto-loaded after all core modules and have access to the full API.
-
-### CaveBot custom actions
-
-Use `action` waypoints for Lua code:
-
+**Debug mode:**
 ```lua
-action() function()
-  if player:getHealth() < 200 then
-    CaveBot.setOff()
-  end
-end
-```
-
-### How do I debug?
-
-```lua
--- Enable verbose logging
 nExBot.showDebug = true
 MonsterAI.DEBUG = true
-
--- View startup profile
 nExBot.printStartupProfile()
-
--- Check AttackStateMachine state
 print(AttackStateMachine.getState())
 ```
 
-### Can I run multiple bots?
-
-One bot per OTClient instance. Use multiple client windows for multi-boxing.
+**Multiple bots?** One per OTClient instance. Use multiple windows.

@@ -1,6 +1,8 @@
 setDefaultTab("Main")
+local zChanging = nExBot.zChanging or function() return false end
 local SafeCall = SafeCall or require("core.safe_call")
 local panelName = "combobot"
+
 local ui = setupUI([[
 Panel
   height: 19
@@ -34,29 +36,32 @@ if not storage[panelName] then
     followLeaderEnabled = false,
     attackLeaderTargetEnabled = false,
     attackSpellEnabled = false,
-    attackItemToggle = false,
+    attackItemEnabled = false,
     sayLeader = "",
     shootLeader = "",
     castLeader = "",
     sayPhrase = "",
     spell = "",
-    serverLeader = "",
     item = 3155,
     attack = "",
     follow = "",
     commandsEnabled = true,
-    serverEnabled = false,
-    serverLeaderTarget = false,
-    serverTriggers = true
   }
 end
 
 local config = storage[panelName]
 
+local function canUseAttackItem()
+  return config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item)
+end
+
+local leaderTarget = nil
+local startCombo = false
+
 ui.title:setOn(config.enabled)
 ui.title.onClick = function(widget)
-config.enabled = not config.enabled
-widget:setOn(config.enabled)
+  config.enabled = not config.enabled
+  widget:setOn(config.enabled)
 end
 
 ui.combos.onClick = function(widget)
@@ -70,14 +75,10 @@ if rootWidget then
   comboWindow = UI.createWindow('ComboWindow', rootWidget)
   comboWindow:hide()
 
-  -- bot item
-
   comboWindow.actions.attackItem:setItemId(config.item)
   comboWindow.actions.attackItem.onItemChange = function(widget)
     config.item = widget:getItemId()
   end
-
-  -- switches
 
   comboWindow.actions.commandsToggle:setOn(config.commandsEnabled)
   comboWindow.actions.commandsToggle.onClick = function(widget)
@@ -85,30 +86,9 @@ if rootWidget then
     widget:setOn(config.commandsEnabled)
   end
 
-  comboWindow.server.botServerToggle:setOn(config.serverEnabled)
-  comboWindow.server.botServerToggle.onClick = function(widget)
-    config.serverEnabled = not config.serverEnabled
-    widget:setOn(config.serverEnabled)
-  end
-
-  comboWindow.server.Triggers:setOn(config.serverTriggers)
-  comboWindow.server.Triggers.onClick = function(widget)
-    config.serverTriggers = not config.serverTriggers
-    widget:setOn(config.serverTriggers)
-  end
-
-  comboWindow.server.targetServerLeaderToggle:setOn(config.serverLeaderTarget)
-  comboWindow.server.targetServerLeaderToggle.onClick = function(widget)
-    config.serverLeaderTarget = not config.serverLeaderTarget
-    widget:setOn(config.serverLeaderTarget)
-  end  
-
-  -- buttons
   comboWindow.closeButton.onClick = function(widget)
     comboWindow:hide()
   end
-
-  -- combo boxes
 
   comboWindow.actions.followLeader:setOption(config.follow)
   comboWindow.actions.followLeader.onOptionChange = function(widget)
@@ -118,9 +98,13 @@ if rootWidget then
   comboWindow.actions.attackLeaderTarget:setOption(config.attack)
   comboWindow.actions.attackLeaderTarget.onOptionChange = function(widget)
     config.attack = widget:getCurrentOption().text
+    -- Auto-enable attack when LEADER TARGET is selected
+    if config.attack == "LEADER TARGET" then
+      config.attackLeaderTargetEnabled = true
+      comboWindow.actions.attackLeaderTargetToggle:setChecked(true)
+    end
   end
 
-  -- checkboxes
   comboWindow.trigger.onSayToggle:setChecked(config.onSayEnabled)
   comboWindow.trigger.onSayToggle.onClick = function(widget)
     config.onSayEnabled = not config.onSayEnabled
@@ -137,38 +121,37 @@ if rootWidget then
   comboWindow.trigger.onCastToggle.onClick = function(widget)
     config.onCastEnabled = not config.onCastEnabled
     widget:setChecked(config.onCastEnabled)
-  end  
+  end
 
   comboWindow.actions.followLeaderToggle:setChecked(config.followLeaderEnabled)
   comboWindow.actions.followLeaderToggle.onClick = function(widget)
     config.followLeaderEnabled = not config.followLeaderEnabled
     widget:setChecked(config.followLeaderEnabled)
   end
-  
+
   comboWindow.actions.attackLeaderTargetToggle:setChecked(config.attackLeaderTargetEnabled)
   comboWindow.actions.attackLeaderTargetToggle.onClick = function(widget)
     config.attackLeaderTargetEnabled = not config.attackLeaderTargetEnabled
     widget:setChecked(config.attackLeaderTargetEnabled)
-  end 
-  
+  end
+
   comboWindow.actions.attackSpellToggle:setChecked(config.attackSpellEnabled)
   comboWindow.actions.attackSpellToggle.onClick = function(widget)
     config.attackSpellEnabled = not config.attackSpellEnabled
     widget:setChecked(config.attackSpellEnabled)
   end
-  
+
   comboWindow.actions.attackItemToggle:setChecked(config.attackItemEnabled)
   comboWindow.actions.attackItemToggle.onClick = function(widget)
     config.attackItemEnabled = not config.attackItemEnabled
     widget:setChecked(config.attackItemEnabled)
   end
-  
-  -- text edits
+
   comboWindow.trigger.onSayLeader:setText(config.sayLeader)
   comboWindow.trigger.onSayLeader.onTextChange = function(widget, text)
     config.sayLeader = text
   end
-  
+
   comboWindow.trigger.onShootLeader:setText(config.shootLeader)
   comboWindow.trigger.onShootLeader.onTextChange = function(widget, text)
     config.shootLeader = text
@@ -183,268 +166,197 @@ if rootWidget then
   comboWindow.trigger.onSayPhrase.onTextChange = function(widget, text)
     config.sayPhrase = text
   end
-  
+
   comboWindow.actions.attackSpell:setText(config.spell)
   comboWindow.actions.attackSpell.onTextChange = function(widget, text)
     config.spell = text
   end
-
-  comboWindow.server.botServerLeader:setText(config.serverLeader)
-  comboWindow.server.botServerLeader.onTextChange = function(widget, text)
-    config.serverLeader = text
-  end  
 end
-
--- bot server
--- [[ join party made by Frosty ]] --
-
-local shouldCloseWindow = false
-local firstInvitee = true
-local isInComboTeam = false
-
--- Party window close handler (100ms)
-local function partyWindowHandler()
-  if shouldCloseWindow and config.serverEnabled and config.enabled then
-    local channelsWindow = modules.game_console.channelsWindow
-    if channelsWindow then
-      local child = channelsWindow:getChildById("buttonCancel")
-      if child then
-        child:onClick()
-        shouldCloseWindow = false
-        isInComboTeam = true
-      end
-    end
-  end
-end
-
--- Use UnifiedTick if available (reduces macro overhead)
-if UnifiedTick and UnifiedTick.register then
-  UnifiedTick.register("combo_party_window", {
-    interval = 100,
-    priority = UnifiedTick.Priority and UnifiedTick.Priority.LOW or 25,
-    handler = partyWindowHandler,
-    group = "combo"
-  })
-else
-  -- Fallback to traditional macro
-  macro(100, partyWindowHandler)
-end
-
-comboWindow.server.partyButton.onClick = function(widget)
-  if config.serverEnabled and config.enabled then 
-    if config.serverLeader:len() > 0 and storage.BotServerChannel:len() > 0 then 
-      talkPrivate(config.serverLeader, "request invite " .. storage.BotServerChannel)
-    else
-      error("Request failed. Lack of data.")
-    end
-  end
-end
-
-onTextMessage(function(mode, text)
-  if config.serverEnabled and config.enabled then
-    if mode == 20 then
-      if string.find(text, "invited you to") then
-        local regex = "[a-zA-Z]*"
-        local regexData = regexMatch(text, regex)
-        if regexData[1][1]:lower() == config.serverLeader:lower() then
-          local leader = SafeCall.getCreatureByName(regexData[1][1])
-          if leader then
-            g_game.partyJoin(leader:getId())
-            g_game.requestChannels()
-            g_game.joinChannel(1)
-            shouldCloseWindow = true
-          end
-        end
-      end
-    end
-  end
-end)
 
 onTalk(function(name, level, mode, text, channelId, pos)
-  if config.serverEnabled and config.enabled then
-    if mode == 4 then
-      if string.find(text, "request invite") then
-        local access = string.match(text, "%d.*")
-        if access and access == storage.BotServerChannel then
-          local minion = SafeCall.getCreatureByName(name)
-          if minion then
-            g_game.partyInvite(minion:getId())
-            if firstInvitee then
-              g_game.requestChannels()
-              g_game.joinChannel(1)
-              shouldCloseWindow = true
-              firstInvitee = false
-            end
+  if not config.enabled then return end
+
+  if name:lower() == config.sayLeader:lower() and config.sayPhrase and string.find(text, config.sayPhrase) and config.onSayEnabled then
+    startCombo = true
+  end
+  if config.castLeader and name:lower() == config.castLeader:lower() and isAttSpell and isAttSpell(text) and config.onCastEnabled then
+    startCombo = true
+  end
+
+  if config.commandsEnabled then
+    local isLeader = (config.shootLeader and name:lower() == config.shootLeader:lower())
+        or (config.sayLeader and name:lower() == config.sayLeader:lower())
+        or (config.castLeader and name:lower() == config.castLeader:lower())
+    if isLeader then
+      local textLower = text:lower()
+      if textLower == "ue" then
+        say(config.spell)
+      elseif textLower == "sd" then
+        local params = string.split(text, ",")
+        if #params == 2 then
+          local target = params[2]:trim()
+          local creature = SafeCall.getCreatureByName(target)
+          if creature and useWith then
+            useWith(config.item, creature)
           end
-        else
-          talkPrivate(name, "Incorrect access key!")
+        end
+      elseif textLower == "att" then
+        local attParams = string.split(text, ",")
+        if #attParams == 2 then
+          local atTarget = attParams[2]:trim()
+          local creature = SafeCall.getCreatureByName(atTarget)
+          if creature and config.attack == "COMMAND TARGET" and AttackStateMachine and AttackStateMachine.requestAttack then
+            AttackStateMachine.requestAttack(creature, 1000)
+          end
         end
       end
     end
   end
-  -- [[ End of Frosty's Code ]] -- 
-  if config.enabled and config.enabled then
-    if name:lower() == config.sayLeader:lower() and string.find(text, config.sayPhrase) and config.onSayEnabled then
-      startCombo = true
-    end
-    if (config.castLeader and name:lower() == config.castLeader:lower()) and isAttSpell and isAttSpell(text) and config.onCastEnabled then
-      startCombo = true
-    end
-  end
-  if config.enabled and config.commandsEnabled and (config.shootLeader and name:lower() == config.shootLeader:lower()) or (config.sayLeader and name:lower() == config.sayLeader:lower()) or (config.castLeader and name:lower() == config.castLeader:lower()) then
-    if string.find(text, "ue") then
-      say(config.spell)
-    elseif string.find(text, "sd") then
-      local params = string.split(text, ",")
-      if #params == 2 then
-        local target = params[2]:trim()
-        local creature = SafeCall.getCreatureByName(target)
-        if creature then
-          if useWith then useWith(3155, creature) end
-        end
-      end
-    elseif string.find(text, "att") then
-      local attParams = string.split(text, ",")
-      if #attParams == 2 then
-        local atTarget = attParams[2]:trim()
-        local creature = SafeCall.getCreatureByName(atTarget)
-        if creature and config.attack == "COMMAND TARGET" then
-          g_game.attack(creature)
-        end
-      end
-    end
-  end
-  if isAttSpell and isAttSpell(text) and config.enabled and config.serverEnabled then
-    BotServer.send("trigger", "start")
+
+  if isAttSpell and isAttSpell(text) and config.enabled and isLeader and config.onCastEnabled then
+    EventBus.emit("combo:trigger")
   end
 end)
 
 onMissle(function(missle)
   if zChanging() then return end
-  if config.enabled and config.onShootEnabled then 
-    if not config.shootLeader or config.shootLeader:len() == 0 then
-      return
+  if not config.enabled or not config.onShootEnabled then return end
+  if not config.shootLeader or config.shootLeader:len() == 0 then return end
+
+  local src = missle:getSource()
+  if src.z ~= posz() then return end
+
+  local from = g_map.getTile(src)
+  local to = g_map.getTile(missle:getDestination())
+  if not from or not to then return end
+
+  local fromCreatures = from:getCreatures()
+  local toCreatures = to:getCreatures()
+  if #fromCreatures == 0 or #toCreatures == 0 then return end
+
+  -- Find the leader among creatures on the source tile
+  local leader = nil
+  for _, c in ipairs(fromCreatures) do
+    if c:getName():lower() == config.shootLeader:lower() then
+      leader = c
+      break
     end
-    local src = missle:getSource()
-    if src.z ~= posz() then
-      return
+  end
+  if not leader then return end
+
+  -- Pick the target: prefer the first non-leader, non-local creature on destination tile
+  local player = g_game.getLocalPlayer()
+  local t1 = nil
+  for _, c in ipairs(toCreatures) do
+    if c ~= leader and (not player or c ~= player) then
+      t1 = c
+      break
     end
-    local from = g_map.getTile(src)
-    local to = g_map.getTile(missle:getDestination())
-    if not from or not to then
-      return
-    end
-    local fromCreatures = from:getCreatures()
-    local toCreatures = to:getCreatures()
-    if #fromCreatures ~= 1 or #toCreatures ~= 1 then
-      return
-    end
-    local c1 = fromCreatures[1]
-    local t1 = toCreatures[1]
-    leaderTarget = t1
-    if c1:getName():lower() == config.shootLeader:lower() then
-      if config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item) then
-        if useWith then useWith(config.item, t1) end
-      end
-      if config.attackSpellEnabled and config.spell:len() > 1 then
-        say(config.spell)
-      end 
-    end
+  end
+  if not t1 then return end
+
+  leaderTarget = t1
+  if canUseAttackItem() and useWith then
+    useWith(config.item, t1)
+  end
+  if config.attackSpellEnabled and config.spell and config.spell:len() > 1 then
+    say(config.spell)
+  end
+  if config.attack == "LEADER TARGET" and AttackStateMachine and AttackStateMachine.requestAttack then
+    AttackStateMachine.requestAttack(leaderTarget, 1000)
   end
 end)
 
--- Leader target attack handler (100ms)
 local function leaderTargetHandler()
-  if not config.enabled or not config.attackLeaderTargetEnabled then return end
-  if leaderTarget and config.attack == "LEADER TARGET" then
-    local target = SafeCall.getTarget()
-    if not target or target:getName() ~= leaderTarget:getName() then
-      g_game.attack(leaderTarget)
-    end
-  end
-  if config.enabled and config.serverEnabled and config.attack == "SERVER LEADER TARGET" and serverTarget then
-    local target = SafeCall.getTarget()
-    if serverTarget and not target or (target and target:getName() ~= serverTarget) then
-      g_game.attack(serverTarget)
+  if not config.enabled then return end
+  if not leaderTarget or config.attack ~= "LEADER TARGET" then return end
+
+  -- Clear stale target (creature left screen or died)
+  if not leaderTarget then return end
+  if not leaderTarget.getPosition then leaderTarget = nil; return end
+  local ltPos = leaderTarget:getPosition()
+  if not ltPos then leaderTarget = nil; return end
+
+  local target = SafeCall.getTarget()
+  if not target or target:getName() ~= leaderTarget:getName() then
+    if AttackStateMachine and AttackStateMachine.requestAttack then
+      AttackStateMachine.requestAttack(leaderTarget, 1000)
     end
   end
 end
 
-
-local toFollow
+local toFollow = nil
 local toFollowPos = {}
+local lastFollowPos = nil
 local lastFollowWalk = 0
 local FOLLOW_WALK_COOLDOWN = 100
 
--- Follow leader handler (100ms)
 local function followLeaderHandler()
-  toFollow = nil
-  if not config.enabled or not config.followLeaderEnabled then return end
-  if leaderTarget and config.follow == "LEADER TARGET" and leaderTarget:isPlayer() then
+  if not config.enabled or not config.followLeaderEnabled then
+    toFollow = nil
+    return
+  end
+  toFollow = nil  -- Clear before evaluating rules
+
+  if config.follow == "LEADER TARGET" and leaderTarget and leaderTarget:isPlayer() then
     toFollow = leaderTarget:getName()
-  elseif config.follow == "SERVER LEADER TARGET" and config.serverLeader:len() ~= 0 then
-    toFollow = serverTarget
-  elseif config.follow == "SERVER LEADER" and config.serverLeader:len() ~= 0 then
-    toFollow = config.serverLeader
   elseif config.follow == "LEADER" then
-    if config.onSayEnabled and config.sayLeader:len() ~= 0 then
+    if config.onSayEnabled and config.sayLeader and config.sayLeader:len() ~= 0 then
       toFollow = config.sayLeader
-    elseif config.onCastEnabled and config.castLeader:len() ~= 0 then
+    elseif config.onCastEnabled and config.castLeader and config.castLeader:len() ~= 0 then
       toFollow = config.castLeader
-    elseif config.onShootEnabled and config.shootLeader:len() ~= 0 then
+    elseif config.onShootEnabled and config.shootLeader and config.shootLeader:len() ~= 0 then
       toFollow = config.shootLeader
     end
   end
+
   if not toFollow then return end
+
   local target = SafeCall.getCreatureByName(toFollow)
   if target then
     local tpos = target:getPosition()
     toFollowPos[tpos.z] = tpos
   end
+
   if player:isWalking() then return end
   local p = toFollowPos[posz()]
   if not p then return end
-  
-  -- Non-blocking cooldown check
+
+  local posKey = p.x .. "," .. p.y .. "," .. p.z
+  if posKey == lastFollowPos then return end
   if (now - lastFollowWalk) < FOLLOW_WALK_COOLDOWN then return end
-  
+
   if CaveBot.walkTo(p, 20, {ignoreNonPathable=true, precision=1, ignoreStairs=false}) then
     lastFollowWalk = now
+    lastFollowPos = posKey
   end
 end
 
 onCreaturePositionChange(function(creature, oldPos, newPos)
   if zChanging() then return end
-  if creature:getName() == toFollow and newPos then
+  if toFollow and creature:getName() == toFollow and newPos then
     toFollowPos[newPos.z] = newPos
+    lastFollowPos = nil
   end
 end)
 
-local timeout = now
-
--- Combo trigger handler (100ms)
 local function comboTriggerHandler()
   if config.enabled and startCombo then
-    if config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item) then
+    if canUseAttackItem() and useWith then
       local target = SafeCall.getTarget()
-      if useWith and target then useWith(config.item, target) end
+      if target then useWith(config.item, target) end
     end
-    if config.attackSpellEnabled and config.spell:len() > 1 then
+    if config.attackSpellEnabled and config.spell and config.spell:len() > 1 then
       say(config.spell)
     end
     startCombo = false
   end
-  -- attack part / server
-  if BotServer._websocket and config.enabled and config.serverEnabled then
-    if target and target() and now - timeout > 500 then
-      targetPos = target():getName()
-      BotServer.send("target", targetPos)
-      timeout = now
-    end
-  end
 end
 
--- Use UnifiedTick if available (reduces macro overhead)
+EventBus.on("combo:trigger", function()
+  startCombo = true
+end)
+
 if UnifiedTick and UnifiedTick.register then
   UnifiedTick.register("combo_leader_target", {
     interval = 100,
@@ -452,14 +364,14 @@ if UnifiedTick and UnifiedTick.register then
     handler = leaderTargetHandler,
     group = "combo"
   })
-  
+
   UnifiedTick.register("combo_follow_leader", {
     interval = 100,
     priority = UnifiedTick.Priority and UnifiedTick.Priority.NORMAL or 50,
     handler = followLeaderHandler,
     group = "combo"
   })
-  
+
   UnifiedTick.register("combo_trigger", {
     interval = 100,
     priority = UnifiedTick.Priority and UnifiedTick.Priority.HIGH or 75,
@@ -467,39 +379,7 @@ if UnifiedTick and UnifiedTick.register then
     group = "combo"
   })
 else
-  -- Fallback to traditional macros
   macro(100, leaderTargetHandler)
   macro(100, followLeaderHandler)
   macro(100, comboTriggerHandler)
-end
-
-onUseWith(function(pos, itemId, target, subType)
-  if BotServer._websocket and itemId == 3155 then
-    BotServer.send("useWith", target:getPosition())
-  end
-end)
-
-if BotServer._websocket and config.enabled and config.serverEnabled then
-  BotServer.listen("trigger", function(name, message)
-    if message == "start" and name:lower() ~= player:getName():lower() and name:lower() == config.serverLeader:lower() and config.serverTriggers then
-      startCombo = true
-    end
-  end)
-  BotServer.listen("target", function(name, message)
-    if name:lower() ~= player:getName():lower() and name:lower() == config.serverLeader:lower() then
-      local msgCreature = SafeCall.getCreatureByName(message)
-      if not (target and target()) or (target and target():getName() == msgCreature) then
-        if config.serverLeaderTarget then
-          serverTarget = msgCreature
-          if g_game and g_game.attack then g_game.attack(msgCreature) end
-        end
-      end
-    end
-  end)
-  BotServer.listen("useWith", function(name, message)
-   local tile = g_map.getTile(message)
-   if config.serverTriggers and name:lower() ~= player:getName():lower() and name:lower() == config.serverLeader:lower() and config.attackItemEnabled and config.item and findItem and findItem(config.item) then
-    if useWith then useWith(config.item, tile:getTopUseThing()) end
-   end
-  end)
 end

@@ -13,18 +13,16 @@
 local H = MonsterAI._helpers
 local nowMs            = H.nowMs
 local safeGetId        = H.safeGetId
+
+local SC = SafeCreature or {}
 local safeIsDead       = H.safeIsDead
 
--- Guard: returns true when TargetBot is disabled
-local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 local safeIsRemoved    = H.safeIsRemoved
 local safeCreatureCall = H.safeCreatureCall
 local getClient        = H.getClient
 local isValidAliveMonster = H.isValidAliveMonster
 
--- ============================================================================
 -- STATE & CONFIG
--- ============================================================================
 
 MonsterAI.TargetBot = MonsterAI.TargetBot or {}
 local TBI = MonsterAI.TargetBot
@@ -47,9 +45,7 @@ TBI.config = {
   slowMonsterThreshold = 100
 }
 
--- ============================================================================
 -- PRIORITY CALCULATION (9-STAGE)
--- ============================================================================
 
 function TBI.calculatePriority(creature, options)
   if not creature then return 0, {} end
@@ -62,7 +58,7 @@ function TBI.calculatePriority(creature, options)
   local cid  = safeGetId(creature)
   local cname = safeCreatureCall(creature, "getName", "unknown")
   local cpos  = safeCreatureCall(creature, "getPosition", nil)
-  local ppos  = player and (function() local ok,p = pcall(function() return player:getPosition() end); return ok and p end)()
+  local ppos  = player and SC.getPosition(player) or nil
   if not ppos or not cpos then return 0, bk end
 
   local priority = 100 * cfg.baseWeight
@@ -195,9 +191,7 @@ function TBI.calculatePriority(creature, options)
   return priority, bk
 end
 
--- ============================================================================
 -- HELPERS
--- ============================================================================
 
 function TBI.isCreatureFacingPosition(cpos, dir, tpos)
   if not cpos or not dir or not tpos then return false end
@@ -221,9 +215,7 @@ function TBI.predictPosition(pos, dir, steps)
   return { x = pos.x + d[1]*steps, y = pos.y + d[2]*steps, z = pos.z }
 end
 
--- ============================================================================
 -- SORTED TARGETS
--- ============================================================================
 
 function TBI.getSortedTargets(options)
   options = options or {}
@@ -231,9 +223,7 @@ function TBI.getSortedTargets(options)
   local ppos = player and player:getPosition()
   if not ppos then return targets end
   local maxR = options.maxRange or 10
-  local C = getClient()
-  local creatures = (C and C.getSpectators) and C.getSpectators(ppos, false)
-    or (g_map and g_map.getSpectators and g_map.getSpectators(ppos, false)) or {}
+  local creatures = BotCore.Creatures.getNearby(maxR) or {}
 
   for _, cr in ipairs(creatures) do
     if cr and isValidAliveMonster(cr) then
@@ -257,9 +247,7 @@ function TBI.getBestTarget(options)
   return t[1]
 end
 
--- ============================================================================
 -- DANGER LEVEL
--- ============================================================================
 
 function TBI.getDangerLevel()
   local ppos = player and player:getPosition()
@@ -273,9 +261,7 @@ function TBI.getDangerLevel()
   return math.min(10, level), threats
 end
 
--- ============================================================================
 -- STATS / DEBUG
--- ============================================================================
 
 function TBI.getStats()
   local s = { config = TBI.config,
@@ -296,13 +282,11 @@ function TBI.debugCreature(creature)
   for k, v in pairs(bk) do print("  " .. k .. ": " .. tostring(v)) end
 end
 
--- ============================================================================
 -- EVENTBUS
--- ============================================================================
 
 if EventBus and EventBus.on then
   EventBus.on("targetbot:request_priority", function(creature, callback)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if creature and callback then
       local p, bk = TBI.calculatePriority(creature)
       callback(p, bk)

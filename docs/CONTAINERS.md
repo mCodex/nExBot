@@ -1,128 +1,104 @@
-# 📦 Containers
+# Containers
 
-Automated container management, auto-opening, and quiver handling.
+Automated container management with event-driven BFS, O(1) operations, and generation-based cancellation.
 
----
+## Quick Start
 
-## 📖 Overview
+1. Open **Containers** panel (Main tab)
+2. Assign roles: Slot 0 = Main BP, Slot 1 = Loot, Slot 2 = Supplies, Slot 3 = Runes
+3. Enable **Auto Open on Login**
 
-The Containers module manages your backpacks and their contents automatically. It opens containers on login, organizes items between backpacks, and handles quiver ammunition for paladins.
+## Container Roles
 
-Key capabilities:
+| Role | Purpose |
+|------|---------|
+| Main Backpack | Primary container holding others |
+| Loot Container | Monster drops during hunting |
+| Supplies Container | Potions, food, consumables |
+| Runes Container | Attack/utility runes |
 
-- Auto-open containers on login
-- Nested container traversal (BFS)
-- Quiver auto-refill for paladins
-- Container role assignments (loot, supplies, runes)
-- Pagination support for large containers
-- Deduplication to prevent opening a container twice
+## Architecture
 
----
+The container system runs as 10 focused modules under `core/containers/`:
 
-## 🚀 Quick Start
+| Module | Responsibility | Complexity |
+|--------|---------------|------------|
+| `identity.lua` | Physical container identity, generation tagging | O(1) |
+| `queue.lua` | Head/tail FIFO queue | O(1) enqueue/dequeue |
+| `state_machine.lua` | 13 explicit states, generation tracking | O(1) |
+| `registry.lua` | Container registry, incremental item index | O(1) lookup |
+| `bfs.lua` | Event-driven BFS traversal | O(C + I + P) |
+| `scheduler.lua` | UnifiedTick integration, priority scheduling | O(1) |
+| `readiness.lua` | Derived readiness snapshots | O(1) |
+| `client_adapter.lua` | OTClient API wrapper | O(1) |
+| `quiver.lua` | Quiver ownership, vocation detection | O(1) |
+| `discovery.lua` | Orchestrator | O(1) |
 
-1. Open the **Containers** panel from the Main tab.
-2. Assign roles to your container slots:
-   - Slot 0: Main Backpack
-   - Slot 1: Loot Container
-   - Slot 2: Supplies
-   - Slot 3: Runes
-3. Enable **Auto Open on Login**.
+### State Machine
 
----
+The discovery process follows 13 explicit states:
 
-## 🏷️ Container Roles
+```
+idle → waitingForSession → discoveringRoots → reconciling → traversing
+                                                        ↓
+                                              waitingForAcknowledgement
+                                                        ↓
+                                                 waitingForPage
+                                                        ↓
+                                                  completed
+```
 
-### Main Backpack
+Any state can transition to `cancelled` (relog) or `failed` (unrecoverable error).
 
-Your primary container that holds all other backpacks. It should be a large-capacity bag (e.g., a Golden Backpack or an Adventurer's Bag).
+### Generation Tracking
 
-### Loot Container
+Every login/reconnect increments a generation counter. All candidates, timers, and callbacks carry this generation. Old callbacks from generation N cannot mutate generation N+1.
 
-Where monster drops go during hunting. Use a large container (e.g. Beach Bag with 36 slots) to maximize hunting time between depot visits.
+### Event-Driven BFS
 
-### Supplies Container
+1. Discover roots (main backpack, quiver for paladins)
+2. Reconcile containers already open
+3. Process queue one container at a time
+4. On container opened: inspect contents, discover children
+5. Handle pages sequentially (not pre-scheduled)
+6. Complete when queue empty and no in-flight requests
 
-Holds your potions, food, and other consumables. HealBot and the food system search this container for items.
+### Identity
 
-### Runes Container
+Physical containers identified by:
+```
+generation:rootKind:parentIdentity:slotIndex:itemType:version
+```
 
-Holds your attack and utility runes. AttackBot pulls runes from here during combat.
+Three brown backpacks with the same item ID remain distinct physical instances.
 
----
+## Quiver Management
 
-## 🔓 Auto-Open System
+For Paladins — the quiver is an independent BFS root. One service owns opening and lifecycle. The quiver manager consumes readiness and indexed contents.
 
-The Container Opener (v12) uses a sophisticated BFS queue system:
+Non-Paladins: no quiver open attempts. Stale quiver state cleared on relog.
 
-1. On login, it waits for containers to load (500 ms delay)
-2. Opens assigned containers
-3. Scans for nested containers and queues them for opening
-4. Handles paginated containers automatically
-5. Emits `containers:open_all_complete` via EventBus when done
+## Configuration
 
-### Architecture
+| Setting | Default |
+|---------|---------|
+| Auto Open | OFF |
+| Auto Stack | ON |
+| Sort Containers | OFF |
+| Close Empty | OFF |
 
-| Component | Responsibility |
-|-----------|----------------|
-| **ContainerQueue** | Manages the BFS queue of containers to open |
-| **ContainerTracker** | Prevents duplicate opens (4-second grace period) |
-| **ContainerScanner** | Scans containers for nested containers |
-| **ContainerOpener** | Orchestrates the entire opening process |
+## Setup Examples
 
-### Deduplication
-
-The queue uses slot-based keys (`containerId:absoluteSlotIndex`) for robust deduplication. The `ContainerTracker` prevents re-opening the same slot within a 4-second grace period, even if events fire multiple times.
-
----
-
-## 🏹 Quiver Management
-
-For Paladins, the quiver system handles ammunition automatically:
-
-- Monitors equipped ammunition count
-- Detects when the quiver is running low
-- Refills from supplies container
-- Works with all arrow and bolt types
-
-### Supported Ammunition
-
-| Type | Examples |
-|------|----------|
-| **Arrows** | Arrows, Crystalline Arrows, Diamond Arrows, Spectral Arrows |
-| **Bolts** | Bolts, Power Bolts, Infernal Bolts, Prismatic Bolts, Spectral Bolts |
-
-Quiver management is enabled by default — no toggle needed.
-
----
-
-## ⚙️ Configuration
-
-| Setting | Description | Default |
-|---------|-------------|---------|
-| **Auto Open** | Open containers on login | OFF |
-| **Auto Stack** | Stack identical items | ON |
-| **Sort Containers** | Organize item positions | OFF |
-| **Close Empty** | Close empty containers | OFF |
-| **Auto Minimize** | Minimize opened containers | Configurable |
-| **Rename** | Rename containers with labels | Configurable |
-
----
-
-## 📐 Setup Examples
-
-### Knight
-
-```text
+**Knight:**
+```
 Main BP: Golden Backpack
 ├── Supplies: Beach Bag (potions)
 ├── Loot: Beach Bag (drops)
 └── Runes: Blue Backpack (SD / Magic Wall)
 ```
 
-### Paladin
-
-```text
+**Paladin:**
+```
 Main BP: Adventurer's Bag
 ├── Supplies: Beach Bag (potions)
 ├── Loot: Beach Bag (drops)
@@ -130,51 +106,48 @@ Main BP: Adventurer's Bag
 └── Quiver: Auto-managed
 ```
 
-### Mage
-
-```text
-Main BP: Jewelled Backpack
-├── Supplies: Beach Bag (mana potions)
-├── Loot: Beach Bag (drops)
-└── Runes: Blue Backpack (attack runes)
-```
-
----
-
-## 🔗 EventBus Integration
+## EventBus
 
 ```lua
--- Subscribe to container events
-EventBus.on("containers:open_all_complete", function()
-  print("All containers opened!")
+-- All containers opened
+EventBus.on("containers:open_all_complete", function(readiness)
+  print("Discovery complete:", readiness.status)
+end)
+
+-- Readiness changes
+EventBus.on("containers:readiness", function(readiness)
+  if readiness.status == "ready" then
+    -- containers available
+  end
+end)
+
+-- Container opened
+EventBus.on("container:open", function(container)
+  -- handle open
 end)
 ```
 
-The `onAddItem` handler queues new container items for opening, and `onContainerOpen` triggers scanning of newly opened containers.
+## Performance
 
----
+| Operation | Complexity |
+|-----------|------------|
+| Queue enqueue/dequeue | O(1) amortized |
+| Candidate lookup | O(1) |
+| Deduplication | O(1) |
+| Item lookup by type | O(1) |
+| Full discovery | O(C + I + P) |
+| Page traversal | Sequential, ack-driven |
 
-## ❓ Troubleshooting
+Benchmarks (10k operations): Queue <1ms, Registry <2ms.
 
-### Containers not opening on login
+## Troubleshooting
 
-1. Is **Auto Open** enabled in the panel?
-2. Are containers correctly assigned to slots?
-3. Wait a few seconds after login — the opener has a deliberate delay
-4. Check console for `containers:open_all_complete` event
+**Not opening:** Auto Open enabled? Containers assigned? Wait a few seconds. Check console.
 
-### Quiver not refilling
+**Quiver not refilling:** Arrows/bolts in supply container? Quiver equipped? Correct type?
 
-1. Do you have arrows/bolts in a supply container?
-2. Is the quiver equipped?
-3. Are the arrows the correct type for your weapon?
+**Items going wrong:** Verify slot order matches in-game layout.
 
-### Items going to wrong container
+**Closing immediately:** Server limit ~20. Bot enforces 19. Keep assigned under 15-18.
 
-1. Verify container role assignments
-2. Check slot order matches your in-game backpack layout
-3. Reset container configuration and re-assign
-
-### "Schedule execution error" or nil function errors
-
-This usually means a partial or outdated `Containers.lua` file. Replace it with the latest version and restart the client.
+**Discovery too slow:** Container discovery runs at LOW priority. Critical actions (healing, survival) always take precedence.

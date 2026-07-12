@@ -67,7 +67,6 @@ local parents =
   window.settingsList
 }
 
-
 -- type
 addAlarm = function(id, title, defaultValue, alarmType, parent, tooltip)
   local widget = UI.createWidget(widgets[alarmType], parents[parent])
@@ -124,7 +123,6 @@ UI.Separator(window.list)
 addAlarm("creatureDetected", "Creature Detected", false, 1, 1)
 addAlarm("playerDetected", "Player Detected", false, 1, 1)
 addAlarm("creatureName", "Creature Name:", "", 3, 1, "You can add a name or part of it, that if found in any visible creature name will trigger alert.\nYou can add many, just separate them by comma.")
-
 
 local lastCall = now
 local function alarm(file, windowText)

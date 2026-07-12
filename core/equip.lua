@@ -6,21 +6,13 @@ local scripts = 2 -- if you want more auto equip panels you can change 2 to high
 local lastEquipTime = 0
 local EQUIP_COOLDOWN = 1000
 
--- Profile storage helpers
-local function getProfileSetting(key)
-  if ProfileStorage then
-    return ProfileStorage.get(key)
-  end
-  return storage[key]
+local SharedHelpers = nExBot.SharedHelpers
+if not SharedHelpers then
+  warn("[equip] SharedHelpers not loaded")
+  return
 end
-
-local function setProfileSetting(key, value)
-  if ProfileStorage then
-    ProfileStorage.set(key, value)
-  else
-    storage[key] = value
-  end
-end
+local getProfileSetting = SharedHelpers.getProfileSetting
+local setProfileSetting = SharedHelpers.setProfileSetting
 
 -- script by kondrah, don't edit below unless you know what you are doing
 UI.Label("Auto equip")

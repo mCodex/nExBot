@@ -12,9 +12,7 @@
 
 local Interfaces = {}
 
--- =========================================================================
 -- INTERFACE DEFINITIONS (arrays for readability, converted to sets below)
--- =========================================================================
 
 local RAW = {}
 
@@ -81,9 +79,7 @@ RAW.IModules = {
   "getGameInterface", "getConsole", "getCooldown", "getBot", "getTerminal",
 }
 
--- =========================================================================
 -- Convert to Sets for O(1) lookup  +  expose arrays for iteration
--- =========================================================================
 
 for ifaceName, methods in pairs(RAW) do
   local set = {}
@@ -92,9 +88,7 @@ for ifaceName, methods in pairs(RAW) do
   Interfaces[ifaceName .. "_set"] = set    -- set form (O(1) lookup)
 end
 
--- =========================================================================
 -- VALIDATION
--- =========================================================================
 
 --- Validate one domain table against an interface.
 --- @param domain table  e.g. adapter.game

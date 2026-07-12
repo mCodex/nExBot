@@ -18,8 +18,6 @@ CaveBot.Config.setup = function()
   add("ping", "Server ping", 100)
   add("walkDelay", "Walk delay", 10)
   add("ignoreFields", "Ignore fields", true)  
-  add("walkingDebug", "Walking debug", false) -- Disabled by default for performance
-  add("skipBlocked", "Skip blocked path", false)
   add("mapClick", "Map click walking", true)
   add("useDelay", "Delay after use", 400)
   add("autoUseTools", "Auto use tools", true)
@@ -120,7 +118,3 @@ CaveBot.Config.set = function(id, value)
   end
 end
 
--- Convenience helper to toggle walking debug at runtime
-CaveBot.setWalkingDebug = function(enabled)
-  CaveBot.Config.set("walkingDebug", enabled)
-end

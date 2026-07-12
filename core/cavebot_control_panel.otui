@@ -1,0 +1,28 @@
+CaveBotControlPanel < Panel
+  margin-top: 5
+  layout:
+    type: verticalBox
+    fit-children: true
+
+  HorizontalSeparator
+  
+  Label
+    text-align: center
+    text: CaveBot Control Panel
+    font: verdana-11px-rounded
+    margin-top: 3
+
+  HorizontalSeparator
+    
+  Panel
+    id: buttons
+    margin-top: 2
+    layout:
+      type: grid
+      cell-size: 86 20
+      cell-spacing: 1
+      flow: true
+      fit-children: true
+
+  HorizontalSeparator
+    margin-top: 3

@@ -24,9 +24,7 @@
 
 local PathStrategy = {}
 
--- ============================================================================
 -- DEPENDENCIES (resolved lazily so load order is flexible)
--- ============================================================================
 
 local _PU           -- PathUtils, resolved once on first call
 local getClient    = nExBot and nExBot.Shared and nExBot.Shared.getClient
@@ -49,9 +47,7 @@ local function tick()
   return now or (os.clock() * 1000)
 end
 
--- ============================================================================
 -- CONSTANTS
--- ============================================================================
 
 -- Pathfinding flags (OTClient C++ enum Otc::PathFindFlags)
 local PF_ALLOW_NOT_SEEN      = 1
@@ -68,32 +64,12 @@ local JITTER_MIN   = -25
 local JITTER_MAX   =  40
 local JITTER_DIAG  =  15         -- extra jitter for diagonal moves
 
--- Direction constants
-local DIR_NORTH     = North     or 0
-local DIR_EAST      = East      or 1
-local DIR_SOUTH     = South     or 2
-local DIR_WEST      = West      or 3
-local DIR_NE        = NorthEast or 4
-local DIR_SE        = SouthEast or 5
-local DIR_SW        = SouthWest or 6
-local DIR_NW        = NorthWest or 7
+-- Direction tables
+local DIR_TO_OFFSET = Directions.DIR_TO_OFFSET
+local OPPOSITE      = Directions.OPPOSITE
+local SIMILAR       = Directions.ADJACENT
 
--- Direction tables: resolved lazily from Directions / PathUtils globals
--- (may not be set yet during Phase 3 file load)
-local DIR_TO_OFFSET, OPPOSITE, SIMILAR
-local function _ensureDirTables()
-  if DIR_TO_OFFSET then return end
-  local D = Directions
-  if D then
-    DIR_TO_OFFSET = D.DIR_TO_OFFSET
-    OPPOSITE      = D.OPPOSITE
-    SIMILAR       = D.ADJACENT
-  end
-end
-
--- ============================================================================
 -- INTERNAL HELPERS
--- ============================================================================
 
 -- Lazy-resolved PathUtils helpers
 local _posEq, _chebyshev, _directionTo
@@ -107,7 +83,6 @@ local function _ensureHelpers()
 end
 
 local function dirOffset(dir)
-  _ensureDirTables()
   return DIR_TO_OFFSET and DIR_TO_OFFSET[dir]
 end
 
@@ -127,9 +102,7 @@ local function jitter(diagonal)
   return math.floor(base)
 end
 
--- ============================================================================
 -- PATHFINDING — ACL-UNIFIED ENTRY POINT (one-time backend detection)
--- ============================================================================
 
 --- Build native flags from human-readable option table.
 -- Module-level 1-entry cache to avoid recomputation without mutating caller opts.
@@ -202,61 +175,7 @@ function PathStrategy.findPath(startPos, goalPos, opts)
   return _pathBackend(startPos, goalPos, maxSteps, flags, opts)
 end
 
---- Multi-attempt pathfinding with progressive relaxation.
--- @return path, wasRelaxed
-function PathStrategy.findPathRelaxed(startPos, goalPos, opts)
-  opts = opts or {}
-  local base = {
-    maxSteps          = opts.maxSteps or DEFAULT_MAX_STEPS,
-    ignoreCreatures   = opts.ignoreCreatures or false,
-    ignoreFields      = opts.ignoreFields or false,
-    precision         = opts.precision or 0,
-  }
-
-  -- Attempt 1: truly strict (no ignoreNonPathable — respects PZ, invisible walls)
-  local path = PathStrategy.findPath(startPos, goalPos, base)
-  if path then return path, false end
-
-  -- Attempt 2: allow non-pathable tiles (relaxes PZ borders, etc.)
-  _flagsCacheRef = nil
-  base.ignoreNonPathable = true
-  path = PathStrategy.findPath(startPos, goalPos, base)
-  if path then return path, false end
-
-  -- Attempt 3: ignore creatures
-  _flagsCacheRef = nil
-  base.ignoreCreatures = true
-  path = PathStrategy.findPath(startPos, goalPos, base)
-  if path then return path, false end
-
-  -- Early exit: for far destinations (>30 tiles), attempts 4+5 are unlikely to help
-  -- and just waste CPU. They only matter for close-range blocked tiles.
-  local dx = math.abs(goalPos.x - startPos.x)
-  local dy = math.abs(goalPos.y - startPos.y)
-  if (dx + dy) > 30 then
-    return nil, false
-  end
-
-  -- Attempt 4: allow unseen tiles
-  _flagsCacheRef = nil
-  base.allowUnseen = true
-  path = PathStrategy.findPath(startPos, goalPos, base)
-  if path then return path, false end
-
-  -- Attempt 5: ignore fields (relaxed)
-  if not opts.ignoreFields then
-    _flagsCacheRef = nil
-    base.ignoreFields = true
-    path = PathStrategy.findPath(startPos, goalPos, base)
-    if path then return path, true end
-  end
-
-  return nil, false
-end
-
--- ============================================================================
 -- HUMANISED STEP TIMING (DRY: raw duration from PathUtils, jitter added here)
--- ============================================================================
 
 --- Get humanised step duration (with jitter) for the local player.
 function PathStrategy.stepDuration(diagonal)
@@ -271,10 +190,8 @@ function PathStrategy.rawStepDuration(diagonal)
   return pu and pu.getStepDuration(diagonal) or (diagonal and 280 or 200)
 end
 
--- ============================================================================
 -- DIRECTION GUARD (sole anti-zigzag system — replaces all others)
 -- 3-entry ring buffer, 150ms opposite rejection, dampening after 3 rapid changes
--- ============================================================================
 
 local _dirRing = {nil, nil, nil}  -- 3 most recent directions
 local _dirRingHead = 1
@@ -287,14 +204,11 @@ local _dirDampenUntil = 0         -- timestamp: hold direction until this time
 -- Lazy wrappers since PathUtils may not be loaded yet at file scope
 function PathStrategy.isSimilar(a, b)
   _ensureHelpers()
-  _ensureDirTables()
-  -- Fast inline check using SIMILAR table as fallback
   if SIMILAR and SIMILAR[a] then return SIMILAR[a][b] == true end
   local pu = PU()
   return pu and pu.areSimilarDirections and pu.areSimilarDirections(a, b) or false
 end
 function PathStrategy.isOpposite(a, b)
-  _ensureDirTables()
   if OPPOSITE then return OPPOSITE[a] == b end
   local pu = PU()
   return pu and pu.areOppositeDirections and pu.areOppositeDirections(a, b) or false
@@ -370,9 +284,7 @@ function PathStrategy.resetDirectionState()
   _dirDampenUntil = 0
 end
 
--- ============================================================================
 -- PATH SMOOTHING — zigzag-to-diagonal conversion
--- ============================================================================
 
 -- Lazy wrapper for directionTo
 local function directionTo(from, to)
@@ -383,7 +295,6 @@ local function directionTo(from, to)
   local dy = to.y - from.y
   if dx ~= 0 then dx = dx > 0 and 1 or -1 end
   if dy ~= 0 then dy = dy > 0 and 1 or -1 end
-  _ensureDirTables()
   local key = dx .. "," .. dy
   local D = Directions
   return D and D.OFFSET_TO_DIR and D.OFFSET_TO_DIR[key]
@@ -454,9 +365,7 @@ function PathStrategy.smoothPath(path, startPos)
   return #smoothed > 0 and smoothed or path
 end
 
--- ============================================================================
 -- PATH CURSOR — lightweight iterator over a direction array
--- ============================================================================
 
 local Cursor = {
   path      = nil,
@@ -503,9 +412,7 @@ function PathStrategy.advanceCursor(steps, stepDur)
   Cursor.ttl = math.max(1200, math.min(3000, steps * (stepDur or 200) * 1.2))
 end
 
--- ============================================================================
 -- FLOOR-CHANGE SAFETY CHECK (native path verification)
--- ============================================================================
 
 local _isFC = nil -- lazy-init
 
@@ -545,6 +452,9 @@ function PathStrategy.nativePathIsSafe(startPos, goalPos, opts)
     if isFC(probe) then
       return false, nativePath, i
     end
+    if not PU().isTileWalkable(probe) then
+      return false, nativePath, i
+    end
   end
   return true, nativePath, nil
 end
@@ -562,9 +472,7 @@ function PathStrategy.safePrefixDest(startPos, nativePath, unsafeIdx)
   return dest, safeSteps
 end
 
--- ============================================================================
 -- FLOOR-CHANGE-AWARE CHUNKING
--- ============================================================================
 
 --- Scan a direction-array path for the number of safe steps before a floor
 -- change tile is reached.
@@ -593,32 +501,6 @@ function PathStrategy.safeStepCount(path, startPos, fromIdx)
   return safe
 end
 
---- Compute optimal chunk size based on path characteristics.
--- Short path → small chunk; long/straight → large chunk; zigzag → smaller.
-function PathStrategy.optimalChunk(path, safeSteps, maxChunk)
-  maxChunk = maxChunk or 40
-  local len = #path
-  local chunk = math.min(safeSteps, maxChunk)
-
-  if len <= 5 then
-    chunk = math.min(chunk, len)
-  elseif len <= 15 then
-    chunk = math.min(chunk, 12)
-  end
-
-  -- Penalise zigzag
-  local changes, last = 0, nil
-  for i = 1, math.min(chunk, len) do
-    if last and path[i] ~= last then changes = changes + 1 end
-    last = path[i]
-  end
-  if chunk >= 6 and changes > chunk * 0.6 then
-    chunk = math.max(4, math.floor(chunk * 0.65))
-  end
-
-  return chunk
-end
-
 --- Build the chunk destination position from cursor state.
 function PathStrategy.chunkDestination(path, startPos, fromIdx, steps)
   local dest = {x = startPos.x, y = startPos.y, z = startPos.z}
@@ -630,9 +512,7 @@ function PathStrategy.chunkDestination(path, startPos, fromIdx, steps)
   return dest
 end
 
--- ============================================================================
 -- MOVEMENT DISPATCH (ACL-aware)
--- ============================================================================
 
 --- Walk a single step in the given direction.
 function PathStrategy.walkStep(dir)
@@ -662,41 +542,8 @@ function PathStrategy.autoWalk(dest, maxSteps, opts)
   end
 end
 
---- Stop any ongoing autowalk.
-function PathStrategy.stopAutoWalk()
-  local pu = PU()
-  if pu and pu.stopAutoWalk then
-    return pu.stopAutoWalk()
-  end
-  if player and player.stopAutoWalk then
-    pcall(player.stopAutoWalk, player)
-  end
-end
-
---- Check if player is currently autowalking.
-function PathStrategy.isAutoWalking()
-  if player and player.isAutoWalking then
-    return player:isAutoWalking()
-  end
-  return false
-end
-
---- Check if player is walking at all.
-function PathStrategy.isWalking()
-  if player and player.isWalking then
-    return player:isWalking()
-  end
-  return false
-end
-
--- ============================================================================
 -- CONVENIENCE (DRY: lazy aliases to PathUtils / Directions SSoT)
 -- These are resolved on first access via __index so load order doesn't matter.
--- ============================================================================
-
-PathStrategy.dirOffset           = dirOffset
-PathStrategy.applyOffset         = applyOff
-PathStrategy.tick                = tick
 
 -- Set lazy-resolved aliases after first real call
 local _convenienceResolved = false
@@ -704,14 +551,6 @@ local function _resolveConvenience()
   if _convenienceResolved then return end
   _convenienceResolved = true
   _ensureHelpers()
-  _ensureDirTables()
-  local pu = PU()
-  if pu then
-    PathStrategy.posEquals        = pu.posEquals
-    PathStrategy.chebyshevDistance = pu.chebyshevDistance
-    PathStrategy.directionTo      = pu.getDirectionTo
-    PathStrategy.DIR_TO_OFFSET    = pu.DIR_TO_OFFSET
-  end
   local D = Directions
   if D then
     PathStrategy.OPPOSITE         = D.OPPOSITE
@@ -729,18 +568,14 @@ setmetatable(PathStrategy, {
   end
 })
 
--- ============================================================================
 -- FULL RESET (call on CaveBot.resetWalking)
--- ============================================================================
 
 function PathStrategy.fullReset()
   PathStrategy.resetCursor()
   PathStrategy.resetDirectionState()
 end
 
--- ============================================================================
 -- GLOBAL EXPORT
--- ============================================================================
 
 if _G then _G.PathStrategy = PathStrategy end
 if nExBot then nExBot.PathStrategy = PathStrategy end

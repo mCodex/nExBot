@@ -1,4 +1,5 @@
 CaveBot.Editor = {}
+local zChanging = nExBot.zChanging or function() return false end
 CaveBot.Editor.Actions = {}
 
 -- also works as registerAction(action, params), then text == action
@@ -176,7 +177,6 @@ end
 CaveBot.Editor.show = function()
   CaveBot.Editor.ui:show()
 end
-
 
 CaveBot.Editor.hide = function()
   CaveBot.Editor.ui:hide()

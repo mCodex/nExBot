@@ -30,116 +30,14 @@ local eventQueue = { head = 1, tail = 0 }
 local processing = false
 local FLUSH_BATCH = 100 -- max events processed per flush to avoid blocking
 
--- Z-change guard: frame-based burst detection + boolean block
--- During floor transitions, dozens of creature events fire in a single frame.
--- We count creature appear/disappear events per frame; 5+ = floor transition.
-nExBot = nExBot or {}
-local _zBlocked = false
-local _zCooldown = 150
-local _zLastLog = 0
-local _zLastKnown = nil
-local _burstFrame = 0
-local _burstCount = 0
-local _zGen = 0  -- generation token: prevents stale safety-valve from clearing a newer lock
+-- Z-change and tile burst guards: extracted to core/zchange_guard.lua
+-- Loaded in Phase 6 before event_bus.lua
+local ZChangeGuard = ZChangeGuard or {}
 
--- Ultra-fast guard: single boolean check (used by all external modules)
-function zChanging()
-  return _zBlocked
-end
-
--- Activate z-change block (idempotent)
-local function _zActivate()
-  if _zBlocked then return end
-  _zBlocked = true
-  _zGen = _zGen + 1
-  local myGen = _zGen
-  schedule(_zCooldown, function()
-    if _zGen ~= myGen then return end  -- superseded by a newer activation
-    _zBlocked = false
-    local ok, p = pcall(pos)
-    if ok and p then _zLastKnown = p.z end
-    EventBus.emit("player:z_change_settled")
-  end)
-  -- Safety valve: guarantee clear within 500ms even if primary schedule fails
-  schedule(500, function()
-    if _zBlocked and _zGen == myGen then
-      _zBlocked = false
-      EventBus.emit("player:z_change_settled")
-    end
-  end)
-end
-
--- Burst detector: counts creature appear/disappear events per frame.
--- 5+ in the same frame (same `now` value) triggers instant block.
-local function _zBurst()
-  if _zBlocked then return true end
-  if now ~= _burstFrame then
-    _burstFrame = now
-    _burstCount = 1
-  else
-    _burstCount = _burstCount + 1
-  end
-  if _burstCount >= 5 then
-    _zActivate()
-    return true
-  end
-  return false
-end
-
--- Called from onPlayerPositionChange on z-change
-local function _zSet(oldPos, newPos)
-  _zLastKnown = newPos.z
-  if (now - _zLastLog) >= 800 then
-    _zLastLog = now
-  end
-  _zActivate()
-end
-
-schedule(200, function()
-  local ok, p = pcall(pos)
-  if ok and p then _zLastKnown = p.z end
-end)
-
--- ═══════════════════════════════════════════════════════════════════════════
--- Tile-event burst guard: frame-based throttle for onAddThing / onRemoveThing
--- In crowded cities, 200-500+ tile events fire per second (player movement,
--- viewport scroll, NPC ground effects).  Each crossing the C++→Lua bridge.
--- We count tile events per frame; 12+ in one tick = burst → suppress 80ms.
--- ═══════════════════════════════════════════════════════════════════════════
-local _tileBlocked      = false
-local _tileBurstFrame   = 0
-local _tileBurstCount   = 0
-local _TILE_BURST_THRESHOLD = 12
-local _TILE_COOLDOWN_MS     = 80
-
--- Global guard for external modules (mirrors zChanging())
-function tileThrottled()
-  return _tileBlocked
-end
-
-local function _tileActivate()
-  if _tileBlocked then return end
-  _tileBlocked = true
-  schedule(_TILE_COOLDOWN_MS, function()
-    _tileBlocked = false
-  end)
-end
-
--- Returns true when the event should be suppressed.
-local function _tileBurst()
-  if _tileBlocked then return true end
-  if now ~= _tileBurstFrame then
-    _tileBurstFrame = now
-    _tileBurstCount = 1
-  else
-    _tileBurstCount = _tileBurstCount + 1
-  end
-  if _tileBurstCount >= _TILE_BURST_THRESHOLD then
-    _tileActivate()
-    return true
-  end
-  return false
-end
+-- Local aliases for performance (avoid repeated table lookups)
+local _zBurst = ZChangeGuard.checkBurst or function() return false end
+local _zSet = ZChangeGuard.onZChange or function() end
+local _tileBurst = ZChangeGuard.checkTileBurst or function() return false end
 
 -- Subscribe to an event
 -- @param event string: Event name (e.g., "creature:appear", "player:move")
@@ -174,18 +72,6 @@ function EventBus.on(event, callback, priority)
       end
     end
   end
-end
-
--- Subscribe to an event (one-time only)
--- @param event string: Event name
--- @param callback function: Handler function
-function EventBus.once(event, callback)
-  local unsubscribe
-  unsubscribe = EventBus.on(event, function(...)
-    unsubscribe()
-    callback(...)
-  end)
-  return unsubscribe
 end
 
 -- Emit an event to all subscribers
@@ -250,47 +136,26 @@ function EventBus.flush()
   processing = false
 end
 
--- Remove all listeners for an event
--- @param event string: Event name (optional, clears all if nil)
-function EventBus.clear(event)
-  if event then
-    listeners[event] = nil
-  else
-    listeners = {}
-  end
-end
-
--- Get listener count for debugging
--- @param event string: Event name (optional)
--- @return number: Listener count
-function EventBus.listenerCount(event)
-  if event then
-    return listeners[event] and #listeners[event] or 0
-  end
-  
-  local total = 0
-  for _, handlers in pairs(listeners) do
-    total = total + #handlers
-  end
-  return total
-end
-
 -- Get number of queued events currently waiting to be processed
-function EventBus.queueSize()
-  return math.max(0, eventQueue.tail - eventQueue.head + 1)
-end
-
---------------------------------------------------------------------------------
 -- OTClient Native Event Registration
 -- Register once, dispatch through EventBus
---------------------------------------------------------------------------------
 
 -- Creature events
+-- Throttle monster:appear events — 10 subscribers, expensive per-monster allocation
+local _monsterAppearThrottle = {}
+local MONSTER_APPEAR_THROTTLE_MS = 300
+
 if onCreatureAppear then
   onCreatureAppear(function(creature)
     if _zBurst() then return end
     if creature:isMonster() then
-      EventBus.emit("monster:appear", creature)
+      local cId = nil
+      pcall(function() cId = creature:getId() end)
+      local nowMs3 = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+      if not cId or not _monsterAppearThrottle[cId] or (nowMs3 - _monsterAppearThrottle[cId]) >= MONSTER_APPEAR_THROTTLE_MS then
+        if cId then _monsterAppearThrottle[cId] = nowMs3 end
+        EventBus.emit("monster:appear", creature)
+      end
     elseif creature:isPlayer() then
       EventBus.emit("player:appear", creature)
     elseif creature:isNpc() then
@@ -316,21 +181,30 @@ end
 local creatureHealthCache = {}
 setmetatable(creatureHealthCache, { __mode = "k" }) -- Weak keys for auto-cleanup
 
--- Track killed monsters with their positions for corpse access
-local killedMonsters = {}  -- { [creatureId] = { pos, name, timestamp } }
-local KILLED_MONSTER_EXPIRY_MS = 15000  -- 15 seconds
+-- Throttle monster:health events — too many subscribers, too frequent
+local _monsterHealthThrottle = {}  -- { [creatureId] = lastEmitTime }
+local MONSTER_HEALTH_THROTTLE_MS = 150  -- 150ms between emits per creature
 
--- Public accessor for killed monsters list
-function EventBus.getKilledMonsters()
-  return killedMonsters
-end
+-- Kill tracking: extracted to core/kill_tracker.lua
+local KillTracker = KillTracker or {}
 
--- Clean up old killed monster entries
-local function cleanupKilledMonsters()
+-- Clean up old throttle tables periodically
+local _cleanupCounter = 0
+local _creatureMoveLastEmit = {}
+local function cleanupThrottleTables()
   local nowMs = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
-  for id, data in pairs(killedMonsters) do
-    if (nowMs - data.timestamp) > KILLED_MONSTER_EXPIRY_MS then
-      killedMonsters[id] = nil
+  -- Prune throttle tables every ~10 calls (every ~5s at 500ms interval)
+  _cleanupCounter = _cleanupCounter + 1
+  if _cleanupCounter >= 10 then
+    _cleanupCounter = 0
+    for id, t in pairs(_monsterHealthThrottle) do
+      if (nowMs - t) > 5000 then _monsterHealthThrottle[id] = nil end
+    end
+    for id, t in pairs(_monsterAppearThrottle) do
+      if (nowMs - t) > 5000 then _monsterAppearThrottle[id] = nil end
+    end
+    for id, t in pairs(_creatureMoveLastEmit) do
+      if (nowMs - t) > 5000 then _creatureMoveLastEmit[id] = nil end
     end
   end
 end
@@ -341,15 +215,24 @@ if onCreatureHealthPercentChange then
     -- Get cached old HP (default to 100 if not tracked)
     local oldPercent = creatureHealthCache[creature] or 100
     creatureHealthCache[creature] = percent
-    
-    -- Emit with both old and new values for proper change detection
+
+    local nowMs2 = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+
+    -- Always emit creature:health (used by creature_cache, exeta, friend_healer — lightweight)
     EventBus.emit("creature:health", creature, percent, oldPercent)
-    
+
     if creature:isMonster() then
-      EventBus.emit("monster:health", creature, percent, oldPercent)
-      
+      -- Throttle monster:health — 9 subscribers, expensive work
+      local cId = nil
+      pcall(function() cId = creature:getId() end)
+      local isKill = percent <= 0 and oldPercent > 0
+      if isKill or not cId or not _monsterHealthThrottle[cId] or (nowMs2 - _monsterHealthThrottle[cId]) >= MONSTER_HEALTH_THROTTLE_MS then
+        if cId then _monsterHealthThrottle[cId] = nowMs2 end
+        EventBus.emit("monster:health", creature, percent, oldPercent)
+      end
+
       -- MONSTER KILLED: Detect when health drops to 0
-      if percent <= 0 and oldPercent > 0 then
+      if isKill then
         local creatureId = nil
         local creatureName = nil
         local creaturePos = nil
@@ -359,19 +242,19 @@ if onCreatureHealthPercentChange then
         pcall(function() creaturePos = creature:getPosition() end)
         
         if creatureId and creaturePos then
-          local nowMs = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
-          killedMonsters[creatureId] = {
-            pos = { x = creaturePos.x, y = creaturePos.y, z = creaturePos.z },
-            name = creatureName or "Unknown",
-            timestamp = nowMs
-          }
+          -- Delegate to KillTracker (domain logic)
+          if KillTracker.recordKill then
+            KillTracker.recordKill(creatureId, creatureName, creaturePos)
+          end
           
           -- Emit monster:killed event with full info
           EventBus.emit("monster:killed", creature, creaturePos, creatureName)
         end
         
         -- Cleanup old entries periodically
-        cleanupKilledMonsters()
+        if KillTracker.cleanup then
+          KillTracker.cleanup()
+        end
       end
       
     elseif creature:isPlayer() and not creature:isLocalPlayer() then
@@ -387,6 +270,9 @@ if onCreatureHealthPercentChange then
 end
 
 -- Player events
+local _playerMoveLastEmit = 0
+local PLAYER_MOVE_THROTTLE_MS = 80  -- Don't emit more than 12x/sec
+local _zCooldown = 150  -- ponytail: duplicated from zchange_guard.lua
 if onPlayerPositionChange then
   onPlayerPositionChange(function(newPos, oldPos)
     if newPos and oldPos and newPos.z ~= oldPos.z then
@@ -396,7 +282,11 @@ if onPlayerPositionChange then
         EventBus.emit("player:z_change_settled", newPos, oldPos)
       end)
     end
-    EventBus.emit("player:move", newPos, oldPos)
+    local nowMs4 = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+    if (nowMs4 - _playerMoveLastEmit) >= PLAYER_MOVE_THROTTLE_MS then
+      _playerMoveLastEmit = nowMs4
+      EventBus.emit("player:move", newPos, oldPos)
+    end
   end)
 end
 
@@ -431,9 +321,11 @@ local function attributeDamageSource(damage)
   -- Cache spectator list for 200ms to avoid repeated API calls
   local nowt = now or (g_clock and g_clock.millis and g_clock.millis()) or (os.time() * 1000)
   if not _damageAttrCachedCreatures or (nowt - _damageAttrCacheTime) > _damageAttrCacheTTL then
-    _damageAttrCachedCreatures = (MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby)
-      and MovementCoordinator.MonsterCache.getNearby(radius)
-      or g_map.getSpectatorsInRange(playerPos, false, radius, radius)
+    if BotCore and BotCore.Creatures and BotCore.Creatures.getNearby then
+      _damageAttrCachedCreatures = BotCore.Creatures.getNearby(radius) or {}
+    else
+      _damageAttrCachedCreatures = {}
+    end
     _damageAttrCacheTime = nowt
   end
 
@@ -603,10 +495,8 @@ local function checkEquipmentChanges()
   end
 end
 
--- ============================================================================
 -- UNIFIED TICK INTEGRATION
 -- Migrate polling macros to UnifiedTick for consolidated tick management
--- ============================================================================
 
 if UnifiedTick and UnifiedTick.register then
   -- Equipment check handler (200ms, LOW priority - UI updates)
@@ -634,7 +524,7 @@ if UnifiedTick and UnifiedTick.register then
     priority = UnifiedTick.Priority.IDLE,
     handler = function()
       EventBus.emit("tick:slow")
-      cleanupKilledMonsters()
+      cleanupThrottleTables()
     end,
     group = "eventbus"
   })
@@ -650,7 +540,7 @@ else
   
   macro(5000, function()
     EventBus.emit("tick:slow")
-    cleanupKilledMonsters()
+    cleanupThrottleTables()
   end)
 end
 
@@ -673,10 +563,30 @@ if onGroupSpellCooldown then
 end
 
 -- Creature walk events
+local CREATURE_MOVE_THROTTLE_MS = 100
 if onWalk then
   onWalk(function(creature, oldPos, newPos)
     if _zBlocked then return end
     EventBus.emit("creature:walk", creature, oldPos, newPos)
+    -- Throttle creature:move — 14 subscribers, fires every walk step
+    local cId = nil
+    pcall(function() cId = creature:getId() end)
+    local nowMs5 = now or (g_clock and g_clock.millis and g_clock.millis()) or 0
+    if not cId or not _creatureMoveLastEmit[cId] or (nowMs5 - _creatureMoveLastEmit[cId]) >= CREATURE_MOVE_THROTTLE_MS then
+      if cId then _creatureMoveLastEmit[cId] = nowMs5 end
+      EventBus.emit("creature:move", creature, oldPos)
+    elseif cId then
+      _creatureMovePending = _creatureMovePending or {}
+      _creatureMovePending[cId] = {creature = creature, oldPos = oldPos}
+      schedule(CREATURE_MOVE_THROTTLE_MS, function()
+        local pending = _creatureMovePending and _creatureMovePending[cId]
+        if pending then
+          _creatureMovePending[cId] = nil
+          _creatureMoveLastEmit[cId] = now or (os.time() * 1000)
+          EventBus.emit("creature:move", pending.creature, pending.oldPos)
+        end
+      end)
+    end
     if creature:isMonster() then
       EventBus.emit("monster:walk", creature, oldPos, newPos)
     elseif creature:isPlayer() then

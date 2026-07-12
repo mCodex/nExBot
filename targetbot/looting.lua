@@ -1,9 +1,8 @@
 -- Safe function calls to prevent "attempt to call global function (a nil value)" errors
+local zChanging = nExBot.zChanging or function() return false end
 local SafeCall = SafeCall or require("core.safe_call")
 
---------------------------------------------------------------------------------
 -- CLIENTSERVICE HELPERS (shared aliases)
---------------------------------------------------------------------------------
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
 
@@ -260,8 +259,7 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   if waitTill > now then
     return true
   end
-  local Client = getClient()
-  local containers = (Client and Client.getContainers) and Client.getContainers() or (g_game and g_game.getContainers and g_game.getContainers())
+  local containers = nExBot.Shared.getContainers()
   local lootContainers = TargetBot.Looting.getLootContainers(containers)
 
   -- check if there's container for loot and has empty space for it
@@ -623,21 +621,6 @@ TargetBot.Looting.getLootContainers = function(containers)
           return lootContainers
         end
       end
-    end
-  end
-  
-  -- ═══════════════════════════════════════════════════════════════════════
-  -- PHASE 5: Use ContainerOpener module if available (advanced opening)
-  -- ═══════════════════════════════════════════════════════════════════════
-  if ContainerOpener and ContainerOpener.ensureLootContainerSpace then
-    local containerIdList = {}
-    for id, _ in pairs(containersById) do
-      table.insert(containerIdList, id)
-    end
-    
-    if ContainerOpener.ensureLootContainerSpace(containerIdList) then
-      waitTill = now + 300
-      return lootContainers
     end
   end
   

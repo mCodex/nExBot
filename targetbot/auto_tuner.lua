@@ -15,9 +15,7 @@ local nowMs = H.nowMs
 
 local CONST = MonsterAI.CONSTANTS
 
--- ============================================================================
 -- CLASSIFIER
--- ============================================================================
 
 MonsterAI.Classifier = MonsterAI.Classifier or {
   THRESHOLDS = {
@@ -113,9 +111,7 @@ function MonsterAI.Classifier.get(name)
   return MonsterAI.Classifier.cache[name:lower()]
 end
 
--- ============================================================================
 -- AUTO-TUNER
--- ============================================================================
 
 MonsterAI.AutoTuner = MonsterAI.AutoTuner or {
   enabled      = true,

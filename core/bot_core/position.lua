@@ -17,9 +17,7 @@ local Position = {}
 local SafeCall = SafeCall or require("core.safe_call")
 BotCore.Position = Position
 
--- ============================================================================
 -- PRE-COMPUTED DATA
--- ============================================================================
 
 -- Direction offsets for adjacent tiles (8 directions)
 local NEAR_TILE_DIRS = {
@@ -40,9 +38,7 @@ local CARDINAL_DIRS = {
 -- Reusable position table
 local tempPos = {x = 0, y = 0, z = 0}
 
--- ============================================================================
 -- POSITION CREATION
--- ============================================================================
 
 -- Create a position table from coordinates
 -- @param x: x coordinate
@@ -72,9 +68,7 @@ function Position.playerXYZ()
   return p.x, p.y, p.z
 end
 
--- ============================================================================
 -- DISTANCE CALCULATIONS
--- ============================================================================
 
 -- Get distance between two positions (Chebyshev - max of dx, dy)
 -- @param pos1: first position
@@ -110,9 +104,7 @@ function Position.euclidean(pos1, pos2)
   return math.sqrt(dx * dx + dy * dy)
 end
 
--- ============================================================================
 -- TILE UTILITIES
--- ============================================================================
 
 -- Get tiles adjacent to a position (8 directions)
 -- @param centerPos: center position or creature
@@ -185,9 +177,7 @@ function Position.getTile(posOrXYZ, y, z)
   return g_map.getTile(posOrXYZ)
 end
 
--- ============================================================================
 -- TILE ANALYSIS
--- ============================================================================
 
 -- Check if tile is walkable
 -- @param tile: tile object
@@ -222,9 +212,7 @@ function Position.isStairs(tileOrPos)
   return color >= 210 and color <= 213
 end
 
--- ============================================================================
 -- BEST TILE FINDING
--- ============================================================================
 
 -- Find best tile for area spell/rune by creature count
 -- @param pattern: pattern string
@@ -261,9 +249,7 @@ function Position.getBestTileByPattern(pattern, creatureType, maxDist, safe)
   return best or false
 end
 
--- ============================================================================
 -- PATH UTILITIES
--- ============================================================================
 
 -- Check if path exists to target
 -- @param targetPos: target position
@@ -290,9 +276,7 @@ function Position.getPath(targetPos, maxNodes, options)
   return findPath(pos(), targetPos, maxNodes, options)
 end
 
--- ============================================================================
 -- POSITION COMPARISON
--- ============================================================================
 
 -- Check if two positions are equal
 -- @param pos1: first position
@@ -316,9 +300,7 @@ function Position.isInPz()
   return SafeCall.isInPz()
 end
 
--- ============================================================================
 -- INITIALIZATION
--- ============================================================================
 
 if logInfo then
   logInfo("[BotCore] Position module loaded")

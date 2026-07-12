@@ -10,9 +10,7 @@ FollowComboBoxPopupMenuButton < ComboBoxPopupMenuButton
 FollowComboBox < ComboBox
   @onSetup: |
     self:addOption("LEADER TARGET")
-    self:addOption("SERVER LEADER TARGET")    
     self:addOption("LEADER")
-    self:addOption("SERVER LEADER")
 
 ComboTrigger < Panel
   id: trigger
@@ -246,77 +244,9 @@ ComboActions < Panel
     text-wrap: true
     multiline: true
 
-BotServer < Panel 
-  id: server
-  image-source: /images/ui/panel_flat
-  image-border: 6
-  padding: 3
-  size: 220 100 
-
-  Label
-    id: labelX
-    anchors.left: parent.left
-    anchors.top: parent.top
-    text: Leader:
-    height: 15
-    color: #ffaa00 
-    margin-left: 3
-    margin-top: 5 
-
-  TextEdit
-    id: botServerLeader
-    anchors.left: prev.right
-    anchors.top: prev.top
-    anchors.right: parent.right
-    margin-right: 3
-    margin-left: 9
-    height: 15
-    font: cipsoftFont
-
-  Button
-    id: partyButton
-    anchors.left: labelX.left
-    anchors.top: botServerLeader.bottom
-    margin-top: 5
-    height: 30
-    text: Join Party
-    text-wrap: true
-    multiline: true
-
-  BotSwitch
-    id: botServerToggle
-    anchors.left: prev.right
-    anchors.top: botServerLeader.bottom
-    anchors.right: parent.right
-    height: 30
-    margin-left: 3
-    margin-right: 3
-    margin-top: 5
-    text: Server Enabled
-
-  BotSwitch
-    id: targetServerLeaderToggle
-    anchors.left: partyButton.left
-    anchors.top: partyButton.bottom
-    anchors.right: partyButton.right
-    margin-top: 3
-    height: 30
-    text: Leader Targets
-
-  BotSwitch
-    id: Triggers
-    anchors.left: prev.right
-    anchors.top: partyButton.bottom
-    anchors.right: parent.right
-    margin-top: 3
-    height: 30
-    margin-left: 3
-    margin-right: 3
-    text: Triggers  
-
 ComboWindow < MainWindow
   !text: tr('Combo Options')
-  size: 500 280
+  size: 480 280
   @onEscape: self:hide()
 
   ComboTrigger
@@ -333,7 +263,7 @@ ComboWindow < MainWindow
     text: Combo Trigger
     color: #ff7700
 
-  ComboActions    
+  ComboActions
     id: actions
     anchors.top: trigger.bottom
     anchors.left: trigger.left
@@ -346,21 +276,6 @@ ComboWindow < MainWindow
     margin-left: 10
     margin-top: 85
     text: Combo Actions
-    color: #ff7700   
-
-  BotServer    
-    id: server
-    anchors.top: actions.top
-    anchors.left: actions.right
-    margin-left: 10 
-
-  Label
-    id: title
-    anchors.top: parent.top
-    anchors.left: server.left
-    margin-left: 3
-    margin-top: 85
-    text: BotServer
     color: #ff7700
 
   HorizontalSeparator
@@ -368,7 +283,7 @@ ComboWindow < MainWindow
     anchors.right: parent.right
     anchors.left: parent.left
     anchors.bottom: closeButton.top
-    margin-bottom: 8    
+    margin-bottom: 8
 
   Button
     id: closeButton

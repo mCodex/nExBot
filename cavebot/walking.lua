@@ -14,13 +14,11 @@
     CaveBot.isNearFloorChangeTile
     CaveBot.getStepDuration(diagonal)
     CaveBot.isPlayerWalking()
-    CaveBot.doWalking()
 ]]
 
--- ============================================================================
 -- DEPENDENCIES
--- ============================================================================
 
+local zChanging = nExBot.zChanging or function() return false end
 local PathUtils    = PathUtils
 if not PathUtils then
   local ok, mod = pcall(require, "utils.path_utils")
@@ -45,9 +43,7 @@ if not CaveBot.fullResetWalking then CaveBot.fullResetWalking = function() end e
 
 local getClient = nExBot.Shared.getClient
 
--- ============================================================================
 -- DIRECTION & TILE UTILITIES (thin delegates)
--- ============================================================================
 
 local Dirs          = Directions or {}
 local DIR_TO_OFFSET = Dirs.DIR_TO_OFFSET or {}
@@ -106,9 +102,7 @@ local function stopAutoWalk()
   if g_game and g_game.stop then g_game.stop() end
 end
 
--- ============================================================================
 -- KEYBOARD NUDGE (fallback when pathfinding fails)
--- ============================================================================
 
 local ADJACENT_DIRS = {}
 if Directions and Directions.ADJACENT then
@@ -121,6 +115,7 @@ end
 
 local lastNudgeDir  = nil
 local lastNudgeTime = 0
+local lastStepTime  = 0
 
 --- Try a single keyboard step toward dest. Returns "nudge" or false.
 local function tryKeyboardNudge(playerPos, dest)
@@ -144,7 +139,7 @@ local function tryKeyboardNudge(playerPos, dest)
       local off = DIR_TO_OFFSET[d]
       if off then
         local target = {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}
-        if not isFloorChangeTile(target) then
+        if not isFloorChangeTile(target) and PathUtils.isTileWalkable(target) then
           PS().walkStep(d)
           lastNudgeDir  = d
           lastNudgeTime = now
@@ -156,19 +151,15 @@ local function tryKeyboardNudge(playerPos, dest)
   return false
 end
 
--- ============================================================================
 -- MODULE STATE (minimal)
--- ============================================================================
 
 local lastWalkZ   = nil
 local lastSafePos = nil
 local MAX_PATHFIND_DIST = 50
 
--- ============================================================================
 -- CORE: FIND A WALKABLE PATH
 -- Tries cached cursor first, then strict, then relaxed.
 -- Always validates first step against canWalkDirection before accepting.
--- ============================================================================
 
 --- Check if a direction (or its smoothed variant) is physically walkable.
 --- Returns the walkable direction, or nil.
@@ -228,13 +219,24 @@ local function findWalkablePath(playerPos, dest, opts)
     return path, false
   end
 
-  -- 3) RELAXED pathfinding (last resort, includes ignoreNonPathable)
-  local relaxedPath, wasRelaxed = PS().findPathRelaxed(playerPos, dest, {
+  -- 3) RELAXED pathfinding (last resort — respects walkability, allows creatures/unseen/fields)
+  local relaxedOpts = {
     maxSteps        = maxSteps,
-    ignoreCreatures = opts.ignoreCreatures or false,
+    ignoreCreatures = true,
     ignoreFields    = opts.ignoreFields or false,
     precision       = opts.precision or 0,
-  })
+  }
+  local relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
+
+  if not (relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1])) then
+    relaxedOpts.allowUnseen = true
+    relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
+  end
+
+  if not (relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1])) then
+    relaxedOpts.ignoreFields = true
+    relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
+  end
 
   if relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1]) then
     PS().setCursor(relaxedPath, dest)
@@ -244,18 +246,16 @@ local function findWalkablePath(playerPos, dest, opts)
       local cur = PS().getCursor()
       if cur then cur.path = relaxedPath end
     end
-    return relaxedPath, wasRelaxed
+    return relaxedPath, true
   end
 
   -- No walkable path found
   return nil, false
 end
 
--- ============================================================================
 -- DISPATCH: KEYBOARD STEP vs AUTOWALK
--- ============================================================================
 
-local KEYBOARD_THRESHOLD = 12
+local KEYBOARD_THRESHOLD = 2
 
 --- Walk a single keyboard step along the path. Returns true on success.
 local function keyboardStep(path, playerPos, curIdx)
@@ -265,8 +265,13 @@ local function keyboardStep(path, playerPos, curIdx)
   local walkDir = resolveWalkableDir(dir)
   if not walkDir then return false end
 
+  local isDiag = walkDir >= 4
+  local stepDur = PS().rawStepDuration(isDiag) or 180
+  if (now - lastStepTime) < stepDur then return "walking" end
+
   PS().walkStep(walkDir)
-  PS().advanceCursor(1, PS().rawStepDuration(walkDir >= 4))
+  lastStepTime = now
+  PS().advanceCursor(1, stepDur)
   return true
 end
 
@@ -298,14 +303,12 @@ local function autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist)
   end
 
   local precision = chunkSteps >= 10 and 1 or 0
-  PS().autoWalk(chunkDest, maxDist, {ignoreNonPathable = true, precision = precision})
+  PS().autoWalk(chunkDest, maxDist, {precision = precision})
   PS().advanceCursor(chunkSteps, PS().rawStepDuration(false))
   return true
 end
 
--- ============================================================================
 -- MAIN: CaveBot.walkTo
--- ============================================================================
 
 CaveBot.walkTo = function(dest, maxDist, params)
   local playerPos = pos()
@@ -341,8 +344,8 @@ CaveBot.walkTo = function(dest, maxDist, params)
     return true
   end
 
-  -- Floor mismatch
-  if dest.z ~= playerPos.z then return false end
+  -- Floor mismatch (allow floor-change WPs to pass through to special handling below)
+  if dest.z ~= playerPos.z and not allowFloorChange then return false end
 
   -- Reset anti-zigzag for short walks
   if PS() ~= NOOP_PS and math.max(distX, distY) <= 5 then PS().resetDirectionState() end
@@ -350,30 +353,46 @@ CaveBot.walkTo = function(dest, maxDist, params)
   -- ========== FLOOR-CHANGE PATH (special handling) ==========
   if allowFloorChange then
     if player:isWalking() then return true end
-    local manhattan = distX + distY
+
+    -- For cross-floor floor-change tiles, walk to the same XY on the CURRENT floor
+    -- (the stairs/rope hole exists here, stepping on it triggers the Z change)
+    local walkDest = dest
+    if dest.z ~= playerPos.z then
+      walkDest = {x = dest.x, y = dest.y, z = playerPos.z}
+    end
+
+    local fdX = math.abs(walkDest.x - playerPos.x)
+    local fdY = math.abs(walkDest.y - playerPos.y)
+    local manhattan = fdX + fdY
 
     if manhattan <= 3 then
       -- Close: precise keyboard steps
-      local fcPath = PS().findPath(playerPos, dest, {ignoreNonPathable = true, precision = 0})
+      local fcPath = PS().findPath(playerPos, walkDest, {ignoreNonPathable = true, precision = 0})
       if fcPath and #fcPath > 0 then
         local dir = fcPath[1]
         local smoothed = PS().smoothDirection(dir, true) or dir
         if canWalkDirection(smoothed) then
           PS().walkStep(smoothed)
+          return true
         elseif canWalkDirection(dir) then
           PS().walkStep(dir)
+          return true
         end
       end
-      return true
+      return false
     else
       -- Far: guarded autoWalk
-      local isSafe = PS().nativePathIsSafe(playerPos, dest, {ignoreNonPathable = true})
+      local isSafe = PS().nativePathIsSafe(playerPos, walkDest, {ignoreNonPathable = true})
       if isSafe then
-        PS().autoWalk(dest, maxDist, {ignoreNonPathable = true, precision = precision})
+        PS().autoWalk(walkDest, maxDist, {precision = precision})
       else
-        local dirToDest = getDirectionTo(playerPos, dest)
+        local dirToDest = getDirectionTo(playerPos, walkDest)
         if dirToDest and canWalkDirection(dirToDest) then
-          PS().walkStep(dirToDest)
+          local off = DIR_TO_OFFSET[dirToDest]
+          local target = off and {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}
+          if target and PathUtils.isTileWalkable(target) then
+            PS().walkStep(dirToDest)
+          end
         end
       end
       return true
@@ -470,9 +489,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
   end
 end
 
--- ============================================================================
 -- CONVENIENCE & PUBLIC API
--- ============================================================================
 
 CaveBot.safeWalkTo = function(dest, maxDist, params)
   params = params or {}
@@ -489,25 +506,6 @@ CaveBot.isPlayerWalking = function()
   return player and player.isWalking and player:isWalking()
 end
 
-CaveBot.getWalkWaitTime = function()
-  if not CaveBot.isPlayerWalking() then return 0 end
-  if PS() == NOOP_PS then return 200 end
-  return PS().rawStepDuration(false)
-end
-
-CaveBot.isPositionWalkable = function(checkPos, ignoreCreatures)
-  if PathUtils and PathUtils.isTileWalkable then
-    return PathUtils.isTileWalkable(checkPos, ignoreCreatures or false)
-  end
-  local Client = getClient()
-  local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
-  return tile and tile:isWalkable(ignoreCreatures or false) or false
-end
-
-CaveBot.doWalking = function()
-  return player and player:isWalking()
-end
-
 CaveBot.resetWalking = function()
   lastWalkZ = nil
   if PS() then PS().fullReset() end
@@ -522,9 +520,7 @@ CaveBot.stopAutoWalk          = stopAutoWalk
 CaveBot.isFloorChangeTile     = isFloorChangeTile
 CaveBot.isNearFloorChangeTile = isNearFloorChangeTile
 
--- ============================================================================
 -- EVENT: Position change (update safe pos, handle floor change)
--- ============================================================================
 
 onPlayerPositionChange(function(newPos, oldPos)
   if zChanging() then return end

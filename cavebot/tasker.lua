@@ -112,7 +112,6 @@ CaveBot.Extensions.Tasker.setup = function()
             return true
         end
 
-
     elseif marker == 3 then -- reporting task
         CaveBot.Conversation("hi", "report", "task")
         delay(talkDelay*3)

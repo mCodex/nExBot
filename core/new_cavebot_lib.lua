@@ -1,6 +1,5 @@
 CaveBot = {} -- global namespace
 
--------------------------------------------------------------------
 -- CaveBot lib 1.0 - Optimized version
 -- Contains a universal set of functions to be used in CaveBot
 
@@ -11,7 +10,6 @@ CaveBot = {} -- global namespace
 -- overall tips to creating extension:
 --   - functions return action(nil) or true(done)
 --   - extensions are controlled by retries var
--------------------------------------------------------------------
 
 -- Pre-built lookup tables for O(1) access
 local LOCKERS_LIST = {3497, 3498, 3499, 3500}
@@ -152,7 +150,9 @@ end
 -- @return boolean
 function CaveBot.HasLootItems()
     local lootSet = getLootItemsSet()
-    if not next(lootSet) then return false end
+    local hasItems = false
+    for _ in pairs(lootSet) do hasItems = true; break end
+    if not hasItems then return false end
     
     for _, container in pairs(getContainers()) do
         local name = container:getName():lower()

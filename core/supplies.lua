@@ -83,35 +83,16 @@ if not config then
     end
   end
 end
+SuppliesWindow = UI.createWindow("SuppliesWindow")
+SuppliesWindow:hide()
 
-function getEmptyItemPanels()
-  local panel = SuppliesWindow.items
-  local count = 0
-
-  for i, child in ipairs(panel:getChildren()) do
-    count = child:getId() == "blank" and count + 1 or count
-  end
-
-  return count
-end
-
-function deleteFirstEmptyPanel()
-  local panel = SuppliesWindow.items
-
-  for i, child in ipairs(panel:getChildren()) do
-    if child:getId() == "blank" then
-      child:destroy()
-      break
-    end
-  end
-end
-
-function clearEmptyPanels()
-  local panel = SuppliesWindow.items
-
-  if panel:getChildCount() > 1 then
-    if getEmptyItemPanels() > 1 then
-      deleteFirstEmptyPanel()
+local function clearEmptyPanels()
+  local parent = SuppliesWindow.items
+  if not parent then return end
+  for i = parent:getChildCount(), 1, -1 do
+    local child = parent:getChildByIndex(i)
+    if child and child:getId() == "blank" then
+      parent:removeChild(child)
     end
   end
 end
@@ -132,37 +113,30 @@ function addItemPanel()
     local id = widget:getItemId()
     local panelId = panel:getId()
 
-    -- empty, verify
     if id < 100 then
       config.items[panelId] = nil
       panel:setId("blank")
-      clearEmptyPanels() -- clear empty panels if any
+      clearEmptyPanels()
       return
     end
 
-    -- itemId was not changed, ignore
     if tonumber(panelId) == id then
       return
     end
 
-    -- check if isnt already added
-    if config[tostring(id)] then
+    if config.items[tostring(id)] then
       warn("nExBot[Drop Tracker]: Item already added!")
       widget:setItemId(0)
       return
     end
 
-    -- new item id
-    config.items[tostring(id)] = config.items[tostring(id)] or {} -- min, max, avg
+    config.items[tostring(id)] = config.items[tostring(id)] or {}
     panel:setId(id)
-    addItemPanel() -- add new panel
+    addItemPanel()
   end
 
   return panel
 end
-
-SuppliesWindow = UI.createWindow("SuppliesWindow")
-SuppliesWindow:hide()
 
 UI.Button(
   "Supply Settings",
@@ -272,7 +246,6 @@ local function refreshProfileList()
     end
   end
 end
-refreshProfileList()
 
 local function setProfileFocus()
   for i, v in ipairs(SuppliesWindow.profiles:getChildren()) do
@@ -417,8 +390,8 @@ end
 Supplies.hasEnough = function()
   local data = Supplies.getItemsData()
 
-  for id, values in pairs(data) do
-    id = tonumber(id)
+  for key, values in pairs(data) do
+    local id = tonumber(key)
     local minimum = values.min
     local current = player:getItemsCount(id) or 0
 

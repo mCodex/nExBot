@@ -27,7 +27,7 @@ Panel
   if not HealBotConfig[panelName] then
     HealBotConfig[panelName] = {
       enabled = false,
-      curePosion = false,
+      curePoison = false,
       poisonCost = 20,
       cureCurse = false,
       curseCost = 80,
@@ -56,6 +56,11 @@ Panel
   end
 
   local config = HealBotConfig[panelName]
+  -- Legacy typo migration: old profiles saved "curePosion" instead of "curePoison"
+  if config.curePosion ~= nil and config.curePoison == nil then
+    config.curePoison = config.curePosion
+    config.curePosion = nil
+  end
 
   ui.title:setOn(config.enabled)
   ui.title.onClick = function(widget)
@@ -69,8 +74,6 @@ Panel
     conditionsWindow:raise()
     conditionsWindow:focus()
   end
-
-
 
   local rootWidget = g_ui.getRootWidget()
   if rootWidget then

@@ -1,6 +1,7 @@
 ---@diagnostic disable: undefined-global
 setDefaultTab("Main")
 
+local zChanging = nExBot.zChanging or function() return false end
 local panelName = "pushmax"
 local ui = setupUI([[
 Panel
@@ -83,7 +84,6 @@ if rootWidget then
   end
   pushWindow.hotkey:setText(config.pushMaxKey)
 end
-
 
 -- variables for config
 local fieldTable = {2118, 105, 2122}

@@ -16,12 +16,10 @@
 
 local BaseAdapter = {}
 
--- =========================================================================
 -- PROXY FACTORY
 -- Creates a table whose __index transparently calls `backend.method(...)`
 -- with a nil-safe guard (returns `defaultRet` when the backend or method
 -- is absent).
--- =========================================================================
 
 local function createProxy(backend, defaultRet)
   local proxy = {}
@@ -49,10 +47,8 @@ local function createProxy(backend, defaultRet)
   return proxy
 end
 
--- =========================================================================
 -- DOMAIN TABLES
 -- Each resolves lazily against the corresponding OTClient global.
--- =========================================================================
 
 BaseAdapter.game    = createProxy(function() return g_game end, nil)
 BaseAdapter.map     = createProxy(function() return g_map end, nil)
@@ -77,9 +73,7 @@ function BaseAdapter.modules.getTerminal()
   return modules and modules.client_terminal or nil
 end
 
--- =========================================================================
 -- UTILS (pure functions — no state, no globals dependency)
--- =========================================================================
 
 BaseAdapter.utils = {}
 
@@ -101,9 +95,7 @@ function BaseAdapter.utils.isInRange(pos1, pos2, rangeX, rangeY)
      and pos1.z == pos2.z
 end
 
--- =========================================================================
 -- CALLBACKS (base registration — adapters override individual events)
--- =========================================================================
 
 BaseAdapter.callbacks = {}
 BaseAdapter._registeredCallbacks = {}
@@ -133,11 +125,9 @@ function BaseAdapter.callbacks.emit(eventType, ...)
   end
 end
 
--- =========================================================================
 -- CALLBACK WRAPPERS (generated from ICallbacks interface list)
 -- Each wraps the bot-sandbox native `onXxx` global if present, else
 -- falls back to internal registration.
--- =========================================================================
 
 local CALLBACK_NAMES = {
   "onTalk", "onTextMessage", "onLoginAdvice",
@@ -172,16 +162,12 @@ for _, name in ipairs(CALLBACK_NAMES) do
   end
 end
 
--- =========================================================================
 -- ADAPTER METADATA
--- =========================================================================
 
 BaseAdapter.NAME    = "Base"
 BaseAdapter.VERSION = "2.0.0"
 
--- =========================================================================
 -- GLOBAL EXPORT (sandbox workaround — dofile may not propagate return)
--- =========================================================================
 
 ACL_BaseAdapter = BaseAdapter
 

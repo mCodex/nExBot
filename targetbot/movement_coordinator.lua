@@ -32,21 +32,15 @@
   - MovementCoordinator.Scaling: Dynamic threshold scaling
 ]]
 
--- ============================================================================
 -- MODULE NAMESPACE
--- ============================================================================
 
 MovementCoordinator = MovementCoordinator or {}
 MovementCoordinator.VERSION = "1.0"
 
--- Guard: returns true when TargetBot is disabled (used by EventBus handlers)
-local function tbOff() return not TargetBot or not TargetBot.isOn or not TargetBot.isOn() end
 -- Toggle to enable movement coordinator debugging output
 MovementCoordinator.DEBUG = MovementCoordinator.DEBUG or false
 
--- ============================================================================
 -- CONSTANTS
--- ============================================================================
 
 MovementCoordinator.CONSTANTS = {
   -- Movement intent types (priority order)
@@ -60,7 +54,8 @@ MovementCoordinator.CONSTANTS = {
     CHASE = 7,               -- Close gap to target
     FACE_MONSTER = 8,        -- Diagonal correction
     LURE = 9,                -- Pull more monsters (CaveBot)
-    IDLE = 10                -- No movement needed
+    IDLE = 10,               -- No movement needed
+    FOLLOW = 11              -- Follow leader
   },
   
   -- Intent priorities (higher = more important)
@@ -74,7 +69,8 @@ MovementCoordinator.CONSTANTS = {
     [7] = 35,   -- CHASE
     [8] = 20,   -- FACE_MONSTER
     [9] = 15,   -- LURE
-    [10] = 0    -- IDLE
+    [10] = 0,   -- IDLE
+    [11] = 95   -- FOLLOW
   },
   
   -- Minimum confidence to execute movement (tuned for responsiveness)
@@ -88,7 +84,8 @@ MovementCoordinator.CONSTANTS = {
     [7] = 0.50,  -- CHASE: Lower for faster target acquisition
     [8] = 0.45,  -- FACE_MONSTER: Quick diagonal correction
     [9] = 0.50,  -- LURE: Responsive to lure needs
-    [10] = 1.0   -- IDLE: Never execute
+    [10] = 1.0,  -- IDLE: Never execute
+    [11] = 0.50  -- FOLLOW: Responsive to leader
   },
   
   -- Timing (tuned for responsiveness while preventing oscillation)
@@ -115,10 +112,8 @@ local PRIORITY = CONST.PRIORITY
 local THRESHOLDS = CONST.CONFIDENCE_THRESHOLDS
 local TIMING = CONST.TIMING
 
--- ============================================================================
 -- DYNAMIC SCALING
 -- Adjusts thresholds based on monster count for reactive behavior
--- ============================================================================
 
 MovementCoordinator.Scaling = {}
 
@@ -139,10 +134,6 @@ MovementCoordinator.MonsterCache = MovementCoordinator.MonsterCache or {
 }
 
 -- Expose simple stats getter
-function MovementCoordinator.MonsterCache.getStats()
-  return MovementCoordinator.MonsterCache.stats
-end
-
 -- Periodic cleanup of stale/dead entries (runs every 5s)
 local _lastCacheCleanup = 0
 local function cleanupMonsterCache()
@@ -201,26 +192,14 @@ end
 -- Subscribe to creature events to maintain a local monster cache (lower latency)
 if EventBus then
   -- Debounced updater to avoid storms
-  local function makeDebounce(ms, fn)
-    if nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
-      return nExBot.EventUtil.debounce(ms, fn)
-    end
-    -- Simple fallback debounce using schedule
-    local scheduled = false
-    return function()
-      if scheduled then return end
-      scheduled = true
-      schedule(ms, function()
-        scheduled = false
-        pcall(fn)
-      end)
-    end
-  end
+  local SharedHelpers = nExBot.SharedHelpers
+  if not SharedHelpers then return end
+  local makeDebounce = SharedHelpers.makeDebounce
 
   local debounceUpdate = makeDebounce(100, function() scalingCache.lastUpdate = 0 end)
 
   EventBus.on("creature:appear", function(c)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if c and c:isMonster() and not c:isDead() then
       updateMonsterCacheFromCreature(c)
       -- Notify WavePredictor if available (non-blocking)
@@ -232,7 +211,7 @@ if EventBus then
   end, 10)
 
   EventBus.on("creature:move", function(c, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if c and c:isMonster() and not c:isDead() then
       updateMonsterCacheFromCreature(c)
       -- Update WavePredictor about movement
@@ -244,7 +223,7 @@ if EventBus then
   end, 10)
 
   EventBus.on("monster:disappear", function(c)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     removeCreatureFromCache(c)
     
     -- IMPROVED: Also clean up MonsterAI tracker data for this creature
@@ -271,7 +250,7 @@ if EventBus then
   
   -- When our target moves, instantly register chase intent with walk prediction
   EventBus.on("creature:move", function(creature, oldPos)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     
     -- Check if this is our current attack target
@@ -344,7 +323,7 @@ if EventBus then
   
   -- When monster appears nearby, check for danger
   EventBus.on("monster:appear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     local playerPos = player and player:getPosition()
     local creaturePos = creature:getPosition()
@@ -363,7 +342,7 @@ if EventBus then
   
   -- When monster health changes to low, register finish kill intent
   EventBus.on("monster:health", function(creature, percent)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature or not percent then return end
     
     -- Check if this is our target
@@ -390,7 +369,7 @@ if EventBus then
   
   -- When player takes damage, consider emergency escape
   EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMax)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not health or not maxHealth then return end
     local percent = (health / maxHealth) * 100
     local oldPercent = oldHealth and oldMax and ((oldHealth / oldMax) * 100) or 100
@@ -435,13 +414,13 @@ if EventBus then
   
   -- Clear stale intents when combat ends
   EventBus.on("targetbot/combat_end", function()
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     MovementCoordinator.Intent.clear()
   end, 20)
   
   -- Clear chase intents when target dies
   EventBus.on("monster:disappear", function(creature)
-    if tbOff() then return end
+    if TargetBot.isOff() then return end
     if not creature then return end
     local attackingCreature = g_game and g_game.getAttackingCreature and g_game.getAttackingCreature()
     if attackingCreature and creature:getId() == attackingCreature:getId() then
@@ -475,6 +454,31 @@ function MovementCoordinator.Scaling.getMonsterCount()
   return count
 end
 
+function MovementCoordinator.Scaling.getFactor()
+  local monsterCount = MovementCoordinator.Scaling.getMonsterCount()
+  if monsterCount >= 7 then return 0.5
+  elseif monsterCount >= 5 then return 0.7
+  elseif monsterCount >= 3 then return 0.85
+  else return 1.0 end
+end
+
+function MovementCoordinator.Scaling.getThreshold(intentType)
+  local baseThreshold = THRESHOLDS[intentType] or 0.7
+  local scaleFactor = MovementCoordinator.Scaling.getFactor()
+  if intentType == INTENT.WAVE_AVOIDANCE or intentType == INTENT.EMERGENCY_ESCAPE then
+    return baseThreshold * scaleFactor
+  elseif intentType == INTENT.KEEP_DISTANCE or intentType == INTENT.REPOSITION then
+    return baseThreshold * (0.3 + scaleFactor * 0.7)
+  else
+    return baseThreshold * (0.15 + scaleFactor * 0.85)
+  end
+end
+
+function MovementCoordinator.Scaling.getHysteresis()
+  local scaleFactor = MovementCoordinator.Scaling.getFactor()
+  return TIMING.HYSTERESIS_BONUS * scaleFactor
+end
+
 -- Get list of nearby monsters within given chebyshev radius
 function MovementCoordinator.MonsterCache.getNearby(radius)
   radius = radius or 7
@@ -502,40 +506,19 @@ function MovementCoordinator.MonsterCache.getNearby(radius)
   return res
 end
 
--- ============================================================================
 -- WALK PREDICTION (OTClient API Enhancement)
 -- Predicts where a creature will be based on current walk state
--- ============================================================================
 
 MovementCoordinator.WalkPrediction = {}
 
 -- Direction vectors for walk prediction
-local DIR_VECTORS = {
-  [0] = {x = 0, y = -1},  -- North
-  [1] = {x = 1, y = 0},   -- East
-  [2] = {x = 0, y = 1},   -- South
-  [3] = {x = -1, y = 0},  -- West
-  [4] = {x = 1, y = -1},  -- NE
-  [5] = {x = 1, y = 1},   -- SE
-  [6] = {x = -1, y = 1},  -- SW
-  [7] = {x = -1, y = -1}, -- NW
-}
+local DIR_VECTORS = Directions.DIR_TO_OFFSET
 
 -- Predict where creature will be after its current step completes
 -- @param creature The creature to predict
 -- @return pos, isWalking, ticksLeft - predicted position, walk state, time until arrival
-function MovementCoordinator.WalkPrediction.predictPosition(creature)
-  if not creature then return nil, false, 0 end
-  
+local function predictPosition(creature)
   local currentPos = creature:getPosition()
-  if not currentPos then return nil, false, 0 end
-  
-  -- Check if creature has OTClient walk API
-  local isWalking = creature.isWalking and creature:isWalking() or false
-  if not isWalking then
-    return currentPos, false, 0
-  end
-  
   -- Get walk completion time
   local ticksLeft = creature.getStepTicksLeft and creature:getStepTicksLeft() or 0
   
@@ -563,53 +546,30 @@ function MovementCoordinator.WalkPrediction.predictPosition(creature)
   return currentPos, true, ticksLeft
 end
 
--- Calculate optimal intercept position for chasing a walking creature
--- @param creature The creature to intercept
--- @param playerPos Player's current position
--- @return interceptPos, confidence - best position to move to
+MovementCoordinator.WalkPrediction.predictPosition = predictPosition
+
 function MovementCoordinator.WalkPrediction.calculateIntercept(creature, playerPos)
   if not creature or not playerPos then return nil, 0 end
-  
-  local predictedPos, isWalking, ticksLeft = MovementCoordinator.WalkPrediction.predictPosition(creature)
+  local predictedPos, isWalking, ticksLeft = predictPosition(creature)
   if not predictedPos then return nil, 0 end
-  
-  -- If not walking, just chase to current position
-  if not isWalking then
-    return predictedPos, 0.8
-  end
-  
-  -- Get creature speed for prediction accuracy
+  if not isWalking then return predictedPos, 0.8 end
   local creatureSpeed = creature.getSpeed and creature:getSpeed() or 200
   local playerSpeed = player and player.getSpeed and player:getSpeed() or 220
-  
-  -- If we're faster, intercept at predicted position
   if playerSpeed >= creatureSpeed then
-    -- High confidence - we can catch up
     return predictedPos, 0.85
   else
-    -- Slower than target - try to cut them off
-    -- Calculate where creature will be after 2 steps
     local direction = creature.getDirection and creature:getDirection()
     if direction and DIR_VECTORS[direction] then
       local vec = DIR_VECTORS[direction]
-      local futurePos = {
-        x = predictedPos.x + vec.x,
-        y = predictedPos.y + vec.y,
-        z = predictedPos.z
-      }
-      -- Lower confidence since we're predicting further ahead
+      local futurePos = { x = predictedPos.x + vec.x, y = predictedPos.y + vec.y, z = predictedPos.z }
       return futurePos, 0.65
     end
   end
-  
   return predictedPos, 0.7
 end
 
--- Get walk state information for a creature
--- @return table with isWalking, progress, ticksLeft, speed
 function MovementCoordinator.WalkPrediction.getWalkState(creature)
   if not creature then return nil end
-  
   return {
     isWalking = creature.isWalking and creature:isWalking() or false,
     progress = creature.getStepProgress and creature:getStepProgress() or 0,
@@ -620,58 +580,7 @@ function MovementCoordinator.WalkPrediction.getWalkState(creature)
   }
 end
 
--- Calculate scaling factor based on monster count
--- More monsters = lower thresholds = more reactive movement
--- @return number between 0.5 (many monsters) and 1.0 (few monsters)
-function MovementCoordinator.Scaling.getFactor()
-  local monsterCount = MovementCoordinator.Scaling.getMonsterCount()
-  
-  -- Scale from 1.0 (few monsters) to 0.5 (many monsters)
-  -- 1-2 monsters: 1.0 (full conservative)
-  -- 3-4 monsters: 0.85 (slight reactivity)
-  -- 5-6 monsters: 0.7 (moderate reactivity)
-  -- 7+ monsters: 0.5 (maximum reactivity)
-  if monsterCount >= 7 then
-    return 0.5
-  elseif monsterCount >= 5 then
-    return 0.7
-  elseif monsterCount >= 3 then
-    return 0.85
-  else
-    return 1.0
-  end
-end
-
--- Get adjusted confidence threshold for an intent type
--- @param intentType: INTENT constant
--- @return adjusted threshold (lower when many monsters)
-function MovementCoordinator.Scaling.getThreshold(intentType)
-  local baseThreshold = THRESHOLDS[intentType] or 0.7
-  local scaleFactor = MovementCoordinator.Scaling.getFactor()
-  
-  -- WAVE_AVOIDANCE and EMERGENCY_ESCAPE scale more aggressively
-  if intentType == INTENT.WAVE_AVOIDANCE or intentType == INTENT.EMERGENCY_ESCAPE then
-    -- These can drop to 50% of base threshold when surrounded
-    return baseThreshold * scaleFactor
-  elseif intentType == INTENT.KEEP_DISTANCE or intentType == INTENT.REPOSITION then
-    -- These scale moderately (down to 70% of base)
-    return baseThreshold * (0.3 + scaleFactor * 0.7)
-  else
-    -- Other intents scale minimally (down to 85% of base)
-    return baseThreshold * (0.15 + scaleFactor * 0.85)
-  end
-end
-
--- Get adjusted hysteresis bonus (less sticky when surrounded)
-function MovementCoordinator.Scaling.getHysteresis()
-  local scaleFactor = MovementCoordinator.Scaling.getFactor()
-  -- Full hysteresis when few monsters, minimal when many
-  return TIMING.HYSTERESIS_BONUS * scaleFactor
-end
-
--- ============================================================================
 -- STATE
--- ============================================================================
 
 MovementCoordinator.State = {
   -- Current intents from each system
@@ -707,9 +616,7 @@ MovementCoordinator.State = {
 
 local State = MovementCoordinator.State
 
--- ============================================================================
 -- INTENT MANAGEMENT
--- ============================================================================
 
 MovementCoordinator.Intent = {}
 
@@ -801,32 +708,23 @@ function MovementCoordinator.Intent.getSorted()
   return sorted
 end
 
--- ============================================================================
 -- VOTING SYSTEM
 -- Multiple intents can vote for same/similar positions
--- ============================================================================
 
 MovementCoordinator.Vote = {}
 
--- Check if two positions are similar (within threshold)
 function MovementCoordinator.Vote.positionsAreSimilar(pos1, pos2, threshold)
   threshold = threshold or CONST.CONFLICT.SAME_POSITION_THRESHOLD
-  return math.abs(pos1.x - pos2.x) <= threshold and
-         math.abs(pos1.y - pos2.y) <= threshold
+  return math.abs(pos1.x - pos2.x) <= threshold and math.abs(pos1.y - pos2.y) <= threshold
 end
 
--- Check if two intents conflict (want to go opposite directions)
 function MovementCoordinator.Vote.intentsConflict(intent1, intent2)
   local playerPos = player:getPosition()
   if not playerPos then return false end
-  
-  -- Calculate direction vectors
   local dx1 = intent1.position.x - playerPos.x
   local dy1 = intent1.position.y - playerPos.y
   local dx2 = intent2.position.x - playerPos.x
   local dy2 = intent2.position.y - playerPos.y
-  
-  -- Dot product: negative means opposite directions
   local dot = dx1 * dx2 + dy1 * dy2
   return dot < 0
 end
@@ -907,11 +805,44 @@ function MovementCoordinator.Vote.aggregate()
   return nil, 0
 end
 
--- ============================================================================
 -- DECISION MAKER
--- ============================================================================
 
 MovementCoordinator.Decide = {}
+
+function MovementCoordinator.Decide.markCurrentAsSafe()
+  local playerPos = player:getPosition()
+  if playerPos then
+    State.safePosition = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
+    State.safePositionTime = now
+  end
+end
+
+function MovementCoordinator.Decide.isOscillating()
+  local cutoff = now - TIMING.OSCILLATION_WINDOW
+  local newMoves = {}
+  for i = 1, #State.recentMoves do
+    if State.recentMoves[i].time > cutoff then
+      table.insert(newMoves, State.recentMoves[i])
+    end
+  end
+  State.recentMoves = newMoves
+  if #State.recentMoves >= TIMING.MAX_OSCILLATIONS then
+    local positionCounts = {}
+    for i = 1, #State.recentMoves do
+      local pos = State.recentMoves[i].position
+      local key = math.floor(pos.x) .. "," .. math.floor(pos.y)
+      positionCounts[key] = (positionCounts[key] or 0) + 1
+    end
+    local uniqueCount = 0
+    local maxRevisits = 0
+    for _, count in pairs(positionCounts) do
+      uniqueCount = uniqueCount + 1
+      if count > maxRevisits then maxRevisits = count end
+    end
+    if uniqueCount <= 2 or maxRevisits >= 2 then return true end
+  end
+  return false
+end
 
 -- Make final movement decision with dynamic scaling
 -- @return decision { shouldMove, intent, confidence, blocked, reason }
@@ -1019,64 +950,7 @@ function MovementCoordinator.Decide.make()
   }
 end
 
--- Mark current position as safe (for hysteresis)
-function MovementCoordinator.Decide.markCurrentAsSafe()
-  local playerPos = player:getPosition()
-  if playerPos then
-    State.safePosition = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-    State.safePositionTime = now
-  end
-end
-
--- Check if player is oscillating (moving back and forth)
-function MovementCoordinator.Decide.isOscillating()
-  local cutoff = now - TIMING.OSCILLATION_WINDOW
-  
-  -- Clean old moves
-  local newMoves = {}
-  for i = 1, #State.recentMoves do
-    if State.recentMoves[i].time > cutoff then
-      table.insert(newMoves, State.recentMoves[i])
-    end
-  end
-  State.recentMoves = newMoves
-  
-  -- Check if too many moves in window (reduced from 4 to 3)
-  if #State.recentMoves >= TIMING.MAX_OSCILLATIONS then
-    -- Check if positions are similar (bouncing between same spots)
-    local uniquePositions = {}
-    local positionCounts = {}
-    
-    for i = 1, #State.recentMoves do
-      local pos = State.recentMoves[i].position
-      local key = math.floor(pos.x) .. "," .. math.floor(pos.y)
-      uniquePositions[key] = true
-      positionCounts[key] = (positionCounts[key] or 0) + 1
-    end
-    
-    local uniqueCount = 0
-    local maxRevisits = 0
-    for key, count in pairs(positionCounts) do
-      uniqueCount = uniqueCount + 1
-      if count > maxRevisits then
-        maxRevisits = count
-      end
-    end
-    
-    -- Oscillating if:
-    -- 1. Few unique positions (bouncing between 2-3 spots)
-    -- 2. OR any position visited multiple times
-    if uniqueCount <= 2 or maxRevisits >= 2 then
-      return true
-    end
-  end
-  
-  return false
-end
-
--- ============================================================================
 -- EXECUTION
--- ============================================================================
 
 MovementCoordinator.Execute = {}
 
@@ -1269,10 +1143,8 @@ function MovementCoordinator.Execute.move(decision)
   return success, success and "executed" or "execution_failed"
 end
 
--- ============================================================================
 -- INTEGRATION HELPERS
 -- Easy functions for other systems to register intents
--- ============================================================================
 
 -- Register wave avoidance intent
 function MovementCoordinator.avoidWave(safePos, confidence)
@@ -1282,12 +1154,6 @@ function MovementCoordinator.avoidWave(safePos, confidence)
 end
 
 -- Register chase intent
-function MovementCoordinator.chase(targetPos, confidence)
-  MovementCoordinator.Intent.register(
-    INTENT.CHASE, targetPos, confidence, "chase"
-  )
-end
-
 -- Register finish kill intent (high priority chase)
 function MovementCoordinator.finishKill(targetPos, confidence)
   MovementCoordinator.Intent.register(
@@ -1317,12 +1183,6 @@ function MovementCoordinator.reposition(betterPos, confidence)
 end
 
 -- Register lure intent
-function MovementCoordinator.lure(lurePos, confidence)
-  MovementCoordinator.Intent.register(
-    INTENT.LURE, lurePos, confidence, "lure"
-  )
-end
-
 -- Register face monster intent
 function MovementCoordinator.faceMonster(cardinalPos, confidence)
   MovementCoordinator.Intent.register(
@@ -1331,15 +1191,8 @@ function MovementCoordinator.faceMonster(cardinalPos, confidence)
 end
 
 -- Emergency escape disabled per user request (no-op)
-function MovementCoordinator.emergencyEscape(escapePos, confidence)
-
-  return
-end
-
--- ============================================================================
 -- MAIN TICK
 -- Call this from main TargetBot loop
--- ============================================================================
 
 function MovementCoordinator.tick()
   local decision = MovementCoordinator.Decide.make()
@@ -1351,149 +1204,7 @@ function MovementCoordinator.tick()
   return false, decision.reason
 end
 
--- TUNING utilities: analyze telemetry and suggest conservative adjustments
-MovementCoordinator.Tuning = {}
-
--- Analyze telemetry counters and return a list of human-friendly suggestions and raw counters
-function MovementCoordinator.Tuning.analyze()
-  local tele = nExBot and nExBot.Telemetry and nExBot.Telemetry.get and nExBot.Telemetry.get()
-  tele = tele or {}
-  local suggestions = {}
-
-  local executed = tele["movement.execution.success"] or 0
-  local failed = tele["movement.execution.failed"] or 0
-  local oscillations = tele["movement.oscillation"] or 0
-  local blocked_low = tele["movement.decision.blocked.low_confidence"] or 0
-  local totalBlocked = tele["movement.decision.blocked"] or 0
-  local registeredWave = tele["movement.intent.registered.WAVE_AVOIDANCE"] or 0
-
-  -- Heuristic: if oscillations are high relative to executed moves, suggest increasing hysteresis
-  if executed > 0 and (oscillations / math.max(1, executed)) > 0.15 then
-    table.insert(suggestions, "High oscillation rate: consider increasing TIMING.MAX_OSCILLATIONS by 1 or increasing HYSTERESIS_BONUS by ~0.05")
-  end
-
-  -- Heuristic: many low confidence blocks while wave predictions are frequent
-  if registeredWave > 0 and blocked_low > executed * 1.5 then
-    table.insert(suggestions, "Many low-confidence blocks for wave avoidance: consider lowering WAVE_AVOIDANCE threshold or reduce its scale factor")
-  end
-
-  -- Heuristic: many execution failures relative to attempts
-  local attempts = tele["movement.execution.attempt"] or 0
-  if attempts > 0 and (failed / attempts) > 0.25 then
-    table.insert(suggestions, "High execution failure rate: inspect pathing and consider raising EXECUTION_COOLDOWN or increasing PATH safety checks")
-  end
-
-  return suggestions, tele
-end
-
-function MovementCoordinator.Tuning.report()
-  local suggestions, tele = MovementCoordinator.Tuning.analyze()
-
-  for k,v in pairs(tele) do
-    -- data: k,v (silent)
-  end
-  if #suggestions == 0 then
-    -- No suggestions (metrics look healthy)
-  else
-    -- Suggestions available (silent)
-    for i,s in ipairs(suggestions) do
-      -- suggestion: s (silent)
-    end
-  end
-end
-
--- Run a short synthetic trace to generate representative telemetry for tuning
-function MovementCoordinator.Tuning.runSyntheticTrace()
-  if not (nExBot and nExBot.Telemetry and nExBot.Telemetry.increment) then
-    print("[MovementCoordinator][Tuning] telemetry not available; cannot run synthetic trace")
-    return false
-  end
-
-  -- Run synthetic trace (silent)
-  nExBot.Telemetry.increment("movement.execution.attempt", 100)
-  nExBot.Telemetry.increment("movement.execution.success", 70)
-  nExBot.Telemetry.increment("movement.execution.failed", 30)
-  nExBot.Telemetry.increment("movement.oscillation", 20)
-  nExBot.Telemetry.increment("movement.decision.blocked.low_confidence", 200)
-  nExBot.Telemetry.increment("movement.decision.blocked", 220)
-  nExBot.Telemetry.increment("movement.intent.registered.WAVE_AVOIDANCE", 20)
-
-  local suggestions, tele = MovementCoordinator.Tuning.analyze()
-  -- suggestions handled silently
-  if #suggestions > 0 then
-    MovementCoordinator.Tuning.applyRecommendations(suggestions)
-  end
-  return true
-end
-
--- Apply conservative adjustments based on analyzer suggestions
-function MovementCoordinator.Tuning.applyRecommendations(suggestions)
-  suggestions = suggestions or MovementCoordinator.Tuning.analyze()
-  if type(suggestions) == "table" and suggestions[1] then
-    suggestions = suggestions
-  else
-    -- If passed (suggestions, tele) pair
-    suggestions = suggestions
-  end
-
-  local applied = {}
-
-  for _, s in ipairs(suggestions) do
-    -- Oscillation suggestion: increase MAX_OSCILLATIONS by 1 and HYSTERESIS_BONUS by 0.05
-    if s:find("High oscillation rate") then
-      local old = TIMING.MAX_OSCILLATIONS
-      TIMING.MAX_OSCILLATIONS = math.max(1, TIMING.MAX_OSCILLATIONS + 1)
-      table.insert(applied, string.format("MAX_OSCILLATIONS: %d -> %d", old, TIMING.MAX_OSCILLATIONS))
-      local oldH = TIMING.HYSTERESIS_BONUS
-      TIMING.HYSTERESIS_BONUS = TIMING.HYSTERESIS_BONUS + 0.05
-      table.insert(applied, string.format("HYSTERESIS_BONUS: %.3f -> %.3f", oldH, TIMING.HYSTERESIS_BONUS))
-    end
-
-    -- Low-confidence/wave suggestion: reduce WAVE_AVOIDANCE threshold by 0.05 (clamped)
-    if s:find("lowering WAVE_AVOIDANCE") then
-      local old = THRESHOLDS[INTENT.WAVE_AVOIDANCE]
-      local newv = math.max(0.4, old - 0.05)
-      THRESHOLDS[INTENT.WAVE_AVOIDANCE] = newv
-      table.insert(applied, string.format("WAVE_AVOIDANCE threshold: %.2f -> %.2f", old, newv))
-    end
-
-    -- Execution failure suggestion: raise EXECUTION_COOLDOWN by +100ms
-    if s:find("High execution failure rate") then
-      local old = TIMING.EXECUTION_COOLDOWN
-      TIMING.EXECUTION_COOLDOWN = TIMING.EXECUTION_COOLDOWN + 100
-      table.insert(applied, string.format("EXECUTION_COOLDOWN: %d -> %d", old, TIMING.EXECUTION_COOLDOWN))
-    end
-  end
-
-  -- Additional conservative adjustments regardless of which suggestions matched
-  -- Slightly increase OSCILLATION_WINDOW to make detection a bit more forgiving
-  local oldWin = TIMING.OSCILLATION_WINDOW
-  TIMING.OSCILLATION_WINDOW = TIMING.OSCILLATION_WINDOW + 500
-  table.insert(applied, string.format("OSCILLATION_WINDOW: %d -> %d", oldWin, TIMING.OSCILLATION_WINDOW))
-
-  -- Print applied adjustments
-  print("[MovementCoordinator][Tuning] Applied adjustments:")
-  for _, a in ipairs(applied) do print("  - " .. a) end
-
-  -- Record telemetry for applied tuning ops
-  if nExBot and nExBot.Telemetry and nExBot.Telemetry.increment then
-    nExBot.Telemetry.increment("movement.tuning.applied")
-  end
-end
-
--- Get current state for debugging
-function MovementCoordinator.getState()
-  return {
-    intents = State.intents,
-    lastDecision = State.lastDecision,
-    recentMoves = #State.recentMoves,
-    stats = State.stats
-  }
-end
-
--- ============================================================================
 -- EXPORTS
--- ============================================================================
 
 nExBot = nExBot or {}
 nExBot.MovementCoordinator = MovementCoordinator

@@ -15,17 +15,39 @@ Be respectful, follow community standards, and open issues or PRs politely.
 - Use debug logs and inspect EventBus events.
 
 ## Tests & Checks
-- There is no formal test-suite yet. Manual QA is required:
-  - Start a client, enable the bot, replicate common flows (login, open containers, start cavebot) and monitor logs.
+
+Run the full quality gate before submitting:
+
+```bash
+make check    # lint + test
+make test     # busted tests/
+make lint     # luacheck .
+```
+
+Test framework: **Busted** (Lua BDD). Tests live in `tests/`.
+
+```bash
+# Run all tests
+busted tests/
+
+# Run specific module tests
+busted tests/unit/containers/
+
+# Run with verbose output
+busted tests/ -v
+```
 
 ## PR guidelines
 - Small, focused PRs are preferred
 - Include a short description, motivation, and test steps
+- Run `make check` before submitting
 - Update `CHANGELOG.md` for notable changes
 
 ## Style
 - Follow the existing Lua style (2-space indentation)
 - Use descriptive function and variable names
+- Keep functions small and focused
+- Write tests for new features
 
 ## Issues
 - Prefer opening an issue before a major change

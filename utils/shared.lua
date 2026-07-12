@@ -19,9 +19,7 @@
 
 local Shared = {}
 
---------------------------------------------------------------------------------
 -- CLIENT ACCESS (was duplicated in 20+ files)
---------------------------------------------------------------------------------
 
 --- Get the ClientService reference for cross-client compatibility.
 -- @return ClientService or nil
@@ -49,9 +47,7 @@ function Shared.isOldTibia()
   return Shared.getClientVersion() < 960
 end
 
---------------------------------------------------------------------------------
 -- TIME (was duplicated in 5+ files)
---------------------------------------------------------------------------------
 
 --- Get current time in milliseconds.
 -- @return number
@@ -61,9 +57,7 @@ function Shared.nowMs()
   return os.time() * 1000
 end
 
---------------------------------------------------------------------------------
 -- TABLE UTILITIES (deepClone was duplicated in 4 files)
---------------------------------------------------------------------------------
 
 --- Deep clone a table (recursive copy).
 -- @param t any - value to clone
@@ -113,9 +107,35 @@ function Shared.properCase(str)
   return table.concat(words, " ")
 end
 
---------------------------------------------------------------------------------
+-- CONTAINER ACCESS (DRY: was duplicated in 6+ files with Client/g_game fallback)
+
+--- Get open containers with cross-client fallback.
+
+-- @return table (array of containers, never nil)
+function Shared.getContainers()
+  local Client = Shared.getClient()
+  if Client and Client.getContainers then return Client.getContainers() end
+  if g_game and g_game.getContainers then return g_game.getContainers() end
+  return {}
+end
+
+-- TILE SAFETY (DRY: was duplicated as inline lambdas in attack_coordinator.lua)
+
+--- Check if a tile is walkable and has no creatures.
+-- @param pos table {x, y, z}
+-- @return boolean
+function Shared.isTileSafe(pos)
+  if not pos then return false end
+  local Client = Shared.getClient()
+  local t = (Client and Client.getTile) and Client.getTile(pos)
+            or (g_map and g_map.getTile and g_map.getTile(pos))
+  if not t then return false end
+  if not t:isWalkable() then return false end
+  if t.hasCreature and t:hasCreature() then return false end
+  return true
+end
+
 -- COOLDOWN UTILITIES (shared healing/potion cooldown checks)
---------------------------------------------------------------------------------
 
 --- Check if healing group cooldown is active.
 -- @return boolean
@@ -142,13 +162,14 @@ function Shared.isPotionOnCooldown()
   return false
 end
 
---------------------------------------------------------------------------------
--- PLAYER STAT ACCESSORS (used across heal modules)
---------------------------------------------------------------------------------
+-- PLAYER STAT ACCESSORS (delegate to BotCore.Stats as single source of truth)
 
 --- Get player HP percent safely.
 -- @return number (0-100)
 function Shared.getHpPercent()
+  if BotCore and BotCore.Stats and BotCore.Stats.getHpPercent then
+    return BotCore.Stats.getHpPercent()
+  end
   if hppercent then return hppercent() or 0 end
   if player and player.getHealthPercent then return player:getHealthPercent() or 0 end
   return 100
@@ -157,6 +178,9 @@ end
 --- Get player MP percent safely.
 -- @return number (0-100)
 function Shared.getMpPercent()
+  if BotCore and BotCore.Stats and BotCore.Stats.getMpPercent then
+    return BotCore.Stats.getMpPercent()
+  end
   if manapercent then return manapercent() or 0 end
   if player and player.getManaPercent then return player:getManaPercent() or 0 end
   return 100
@@ -165,6 +189,9 @@ end
 --- Get player current mana safely.
 -- @return number
 function Shared.getCurrentMana()
+  if BotCore and BotCore.Stats and BotCore.Stats.getMp then
+    return BotCore.Stats.getMp()
+  end
   if mana then return mana() or 0 end
   if player and player.getMana then return player:getMana() or 0 end
   return 0
@@ -177,9 +204,7 @@ function Shared.isInPz()
   return false
 end
 
---------------------------------------------------------------------------------
 -- SEMVER UTILITIES (used by updater)
---------------------------------------------------------------------------------
 
 --- Parse a semver string into {major, minor, patch}.
 -- @param str string - e.g. "3.0.0"

@@ -161,7 +161,6 @@ CROSS (4): Cardinal directions only (N/E/S/W).
     table.insert(values, {"smartPullShape", function() return widget.scroll:getValue() end})
   end
 
-
   addCheckBox("chase", "Chase", true, "Chase the target, walking towards it until adjacent.")
   addCheckBox("keepDistance", "Keep Distance", false, "Maintain a specific distance from the target (set in Keep Distance slider).")
   addCheckBox("anchor", "Anchoring", false, "Stay within a radius of your initial position (set in Anchoring Range slider).")

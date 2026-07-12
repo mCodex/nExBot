@@ -17,9 +17,7 @@ local TrimArray = TrimArray
 local H = MonsterAI._helpers
 local nowMs = H.nowMs
 
--- ============================================================================
 -- COMBAT FEEDBACK STATE
--- ============================================================================
 
 MonsterAI.CombatFeedback = MonsterAI.CombatFeedback or {
   predictions = {
@@ -53,9 +51,7 @@ MonsterAI.CombatFeedback = MonsterAI.CombatFeedback or {
   PREDICTION_WINDOW   = 2000
 }
 
--- ============================================================================
 -- RECORDING
--- ============================================================================
 
 function MonsterAI.CombatFeedback.recordPrediction(monsterId, monsterName, predictedTime, confidence)
   local nowt = nowMs()
@@ -107,9 +103,7 @@ function MonsterAI.CombatFeedback.recordDamage(amount, attributedMonsterId, attr
   fb.updateAccuracyMetrics()
 end
 
--- ============================================================================
 -- TIMEOUT CHECKS (false positives)
--- ============================================================================
 
 function MonsterAI.CombatFeedback.checkTimeouts()
   local nowt = nowMs()
@@ -129,9 +123,7 @@ function MonsterAI.CombatFeedback.checkTimeouts()
   end
 end
 
--- ============================================================================
 -- ACCURACY METRICS (EWMA)
--- ============================================================================
 
 function MonsterAI.CombatFeedback.updateAccuracyMetrics()
   local fb    = MonsterAI.CombatFeedback
@@ -158,9 +150,7 @@ function MonsterAI.CombatFeedback.updateAccuracyMetrics()
   end
 end
 
--- ============================================================================
 -- TARGET SELECTION FEEDBACK
--- ============================================================================
 
 function MonsterAI.CombatFeedback.recordTargetSelection(selectedId, wasOptimal)
   local fb = MonsterAI.CombatFeedback
@@ -177,9 +167,7 @@ function MonsterAI.CombatFeedback.recordTargetSelection(selectedId, wasOptimal)
   end
 end
 
--- ============================================================================
 -- ACCESSORS
--- ============================================================================
 
 function MonsterAI.CombatFeedback.getWeights()   return MonsterAI.CombatFeedback.weights   end
 function MonsterAI.CombatFeedback.getAccuracy()   return MonsterAI.CombatFeedback.accuracy  end
@@ -195,9 +183,7 @@ function MonsterAI.CombatFeedback.getSummary()
   }
 end
 
--- ============================================================================
 -- RESET (new hunting session)
--- ============================================================================
 
 function MonsterAI.CombatFeedback.reset()
   local fb = MonsterAI.CombatFeedback

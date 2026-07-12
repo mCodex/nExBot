@@ -34,9 +34,7 @@
 -- Module namespace (set as global by _Loader)
 WaypointNavigator = WaypointNavigator or {}
 
--- ============================================================================
 -- PRIVATE STATE
--- ============================================================================
 
 -- Route: ordered list of segments between consecutive goto waypoints
 local route = {
@@ -85,9 +83,7 @@ local function getNow()
   return now or (os.clock() * 1000)
 end
 
--- ============================================================================
 -- SEGMENT PROJECTION MATH
--- ============================================================================
 
 --- Project point P onto line segment A->B using dot product.
 -- Returns: projectedX, projectedY, t (0-1 parameter), distance from P to projected point
@@ -112,20 +108,13 @@ local function projectPointOnSegment(px, py, ax, ay, bx, by)
   return projX, projY, t, dist
 end
 
---- Chebyshev distance between two positions (matches CaveBot's distance metric).
-local function chebyshevDist(a, b)
-  return math.max(math.abs(a.x - b.x), math.abs(a.y - b.y))
-end
-
 --- Euclidean distance between two positions.
 local function euclideanDist(a, b)
   local dx, dy = a.x - b.x, a.y - b.y
   return math.sqrt(dx * dx + dy * dy)
 end
 
--- ============================================================================
 -- ROUTE BUILDING
--- ============================================================================
 
 --- Build the route from the waypointPositionCache.
 -- Filters to goto waypoints on the specified floor, builds segments between
@@ -241,9 +230,7 @@ function WaypointNavigator.buildRoute(waypointPositionCache, playerFloor)
   route.built = true
 end
 
--- ============================================================================
 -- ROUTE PROJECTION
--- ============================================================================
 
 --- Project player position onto the nearest segment.
 -- Phase 1: bounding-box filter to skip far-away segments (Chebyshev, no sqrt).
@@ -309,9 +296,7 @@ function WaypointNavigator.projectOntoRoute(playerPos)
   return 0, nil, math.huge, 0
 end
 
--- ============================================================================
 -- FORWARD-ONLY WAYPOINT RESOLUTION
--- ============================================================================
 
 --- Get the correct next waypoint for the player to walk to.
 -- Uses distance-based advance: advances when <4 tiles from segment end,
@@ -345,9 +330,7 @@ function WaypointNavigator.getNextWaypoint(playerPos)
   return seg.toIdx, seg.toPos
 end
 
--- ============================================================================
 -- PURE PURSUIT LOOKAHEAD
--- ============================================================================
 
 --- Compute a Pure Pursuit lookahead target on the route.
 -- Uses precomputed cumulative distances and binary search for O(log n)
@@ -544,9 +527,7 @@ function WaypointNavigator.getPursuitConfig()
   }
 end
 
--- ============================================================================
 -- CORRIDOR ENFORCEMENT
--- ============================================================================
 
 --- Check if the player is within the route corridor.
 -- Returns a status string, distance from centerline, and recovery info if outside.
@@ -641,9 +622,7 @@ function WaypointNavigator.getRecoveryTarget(playerPos)
   return seg.toIdx, seg.toPos, distFromRoute
 end
 
--- ============================================================================
 -- DRIFT CHECK (simplified interface for WaypointEngine)
--- ============================================================================
 
 --- Check if player has drifted off-route beyond the given threshold.
 -- @param playerPos table {x, y, z}
@@ -658,9 +637,7 @@ function WaypointNavigator.checkDrift(playerPos, threshold)
   return distFromRoute > threshold, distFromRoute
 end
 
--- ============================================================================
 -- CORRIDOR CONFIGURATION
--- ============================================================================
 
 --- Set the corridor width dynamically.
 -- @param width number  Inner corridor width (tiles from centerline)
@@ -687,9 +664,7 @@ function WaypointNavigator.getCorridorConfig()
   }
 end
 
--- ============================================================================
 -- CACHE INVALIDATION
--- ============================================================================
 
 --- Invalidate the route (called when waypoint cache changes).
 function WaypointNavigator.invalidate()
@@ -709,9 +684,7 @@ function WaypointNavigator.invalidate()
   tracking.softBoundaryStart = nil
 end
 
--- ============================================================================
 -- DEBUG / TELEMETRY
--- ============================================================================
 
 --- Get current tracking state (for debug logging).
 function WaypointNavigator.getCurrentSegment()

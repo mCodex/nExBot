@@ -30,17 +30,13 @@
   Dependencies: CombatConstants, MonsterAI (optional), ASM (optional).
 ]]
 
--- ============================================================================
 -- MODULE
--- ============================================================================
 
 PriorityEngine = PriorityEngine or {}
 PriorityEngine.VERSION = "1.0"
 PriorityEngine.DEBUG   = false
 
--- ============================================================================
 -- LAZY DEPS
--- ============================================================================
 
 local CC -- CombatConstants
 
@@ -48,9 +44,7 @@ local function ensureDeps()
   if not CC then CC = CombatConstants or {} end
 end
 
--- ============================================================================
 -- HELPERS
--- ============================================================================
 
 local nowMs = nExBot.Shared.nowMs
 
@@ -101,7 +95,7 @@ end
 
 local player
 local function getPlayer()
-  if not player or not pcall(function() return player:getPosition() end) then
+  if not player or not (SC and SC.getPosition and SC.getPosition(player)) then
     local C = getClient()
     player = (C and C.getLocalPlayer and C.getLocalPlayer())
           or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
@@ -122,9 +116,7 @@ local function gameTarget()
   return nil
 end
 
--- ============================================================================
 -- CONSTANTS (tuning knobs)
--- ============================================================================
 
 local SCORE = {
   -- Config priority scaling (user-set 1-10 × this = dominant factor)
@@ -197,9 +189,7 @@ local SCORE = {
 
 PriorityEngine.SCORE = SCORE
 
--- ============================================================================
 -- SUB-SCORERS (pure functions)
--- ============================================================================
 
 -- 1. Config base score
 local function baseScore(config)
@@ -558,9 +548,7 @@ local function mobilityScore(creature, config)
   return s
 end
 
--- ============================================================================
 -- MAIN ENTRY POINT
--- ============================================================================
 
 --- Calculate total priority for a creature.
 --- @param creature  userdata — the creature object
@@ -603,9 +591,7 @@ function PriorityEngine.calculate(creature, config, path)
   return math.max(0, total)
 end
 
--- ============================================================================
 -- SWITCH GATE (called by ASM v3.0)
--- ============================================================================
 
 --- Evaluate whether a target switch should be allowed.
 --- @return boolean, string (allowed, reason)
@@ -637,9 +623,7 @@ function PriorityEngine.shouldAllowSwitch(newId, newPriority, newHp)
   return true, "allowed"
 end
 
--- ============================================================================
 -- EVENTBUS
--- ============================================================================
 
 if EventBus and EventBus.on then
   EventBus.on("priority_engine:recalibrate", function(overrides)

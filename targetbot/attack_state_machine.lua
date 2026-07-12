@@ -44,17 +44,13 @@
     DRY — Uses SafeCreature + CombatConstants.  No local wrappers.
 ]]
 
--- ============================================================================
 -- MODULE
--- ============================================================================
 
 AttackStateMachine = AttackStateMachine or {}
 AttackStateMachine.VERSION = "3.1"
 AttackStateMachine.DEBUG   = false
 
--- ============================================================================
 -- STATES
--- ============================================================================
 
 local STATE = {
   IDLE      = "IDLE",
@@ -63,9 +59,7 @@ local STATE = {
 }
 AttackStateMachine.STATE = STATE
 
--- ============================================================================
 -- DEPENDENCIES (resolved lazily — may not exist at load time)
--- ============================================================================
 
 local SC   -- SafeCreature (utils/safe_creature.lua)
 local CC   -- CombatConstants (targetbot/combat_constants.lua)
@@ -79,7 +73,7 @@ local function ensureDeps()
       -- Inline minimal defaults so ASM works standalone during boot
       CC = {
         TICK_INTERVAL = 100, COMMAND_COOLDOWN = 350, CONFIRM_TIMEOUT = 1200,
-        GRACE_PERIOD = 1500, KEEPALIVE_INTERVAL = 2000, STOP_DEBOUNCE = 150,
+        GRACE_PERIOD = 1500, STOP_DEBOUNCE = 150,
         REAFFIRM_RETRY_MAX = 5, ENGAGE_BACKOFF_BASE = 1500,
         ENGAGE_BACKOFF_GROWTH = 1.5, SWITCH_COOLDOWN = 2500,
         CONFIG_SWITCH_COOLDOWN = 400, CRITICAL_HP = 25,
@@ -89,9 +83,7 @@ local function ensureDeps()
   end
 end
 
--- ============================================================================
 -- CLIENT + CREATURE HELPERS (single source: SafeCreature / ClientService)
--- ============================================================================
 
 local nowMs = nExBot.Shared.nowMs
 
@@ -129,9 +121,7 @@ local function cName(c)
   return ok and v or "?"
 end
 
--- ============================================================================
 -- INTERNAL STATE
--- ============================================================================
 
 local state = {
   current         = STATE.IDLE,
@@ -169,16 +159,13 @@ local state = {
     kills      = 0,
     switches   = 0,
     skips      = 0,
-    reaffirms  = 0,
   },
 }
 
 local player   = nil
 local lastTick = 0
 
--- ============================================================================
 -- LOGGING
--- ============================================================================
 
 local function log(msg)
   if AttackStateMachine.DEBUG then print("[ASM] " .. msg) end
@@ -190,9 +177,7 @@ local function logTransition(to, reason)
   end
 end
 
--- ============================================================================
 -- STATE TRANSITION
--- ============================================================================
 
 local function transition(to, reason)
   if state.current == to then return end
@@ -213,12 +198,10 @@ local function transition(to, reason)
   end
 end
 
--- ============================================================================
 -- GAME INTERACTION
--- ============================================================================
 
 local function updatePlayer()
-  if not player or not pcall(function() return player:getPosition() end) then
+  if not player or not (SC and SC.getPosition and SC.getPosition(player)) then
     local C = getClient()
     player = (C and C.getLocalPlayer and C.getLocalPlayer())
           or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer())
@@ -307,9 +290,7 @@ local function cancelAttack()
   end
 end
 
--- ============================================================================
 -- TARGET MANAGEMENT
--- ============================================================================
 
 local function clearTarget()
   -- Save hold-target memory before clearing
@@ -345,9 +326,7 @@ local function setTarget(creature, priority, reason)
   sendAttack(creature, "engage_immediate")
 end
 
--- ============================================================================
 -- SWITCH EVALUATION (simplified — no MonsterAI coupling)
--- ============================================================================
 
 local function getConfigPriority(creature)
   if not (TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs) then return 0 end
@@ -411,9 +390,7 @@ local function shouldSwitch(newCreature, newPriority)
   return false, "insufficient"
 end
 
--- ============================================================================
 -- PATH-BLOCKED SKIP LIST (external filter — SRP)
--- ============================================================================
 
 function AttackStateMachine.isSkipped(creatureId)
   if not creatureId then return false end
@@ -438,9 +415,7 @@ function AttackStateMachine.getSkippedCount()
   return n
 end
 
--- ============================================================================
 -- STATE HANDLERS
--- ============================================================================
 
 --- IDLE: No target.  Hold-target re-scan + passive game sync.
 local function handleIdle()
@@ -449,19 +424,10 @@ local function handleIdle()
 
   -- Hold-target: re-scan for previously attacked creature
   if state.holdTargetId then
-    local C = getClient()
-    local pPos = player and pcall(function() return player:getPosition() end) and player:getPosition()
+    local pPos = player and SC.getPosition(player)
     if pPos then
-      local specs
-      if C and C.getSpectatorsInRange then
-        local ok, s = pcall(C.getSpectatorsInRange, pPos, 7, 5, false)
-        specs = ok and s or {}
-      elseif g_map and g_map.getSpectatorsInRange then
-        local ok, s = pcall(g_map.getSpectatorsInRange, pPos, 7, 5, false)
-        specs = ok and s or {}
-      else
-        specs = {}
-      end
+      local ok, specs = pcall(BotCore.Creatures.getNearby, 7, 5)
+      specs = ok and specs or {}
       for _, spec in ipairs(specs) do
         if cId(spec) == state.holdTargetId and not cDead(spec) then
           log("Hold-target re-acquired: " .. cName(spec))
@@ -571,13 +537,15 @@ local function handleLocked()
   -- Confirmation check with grace window
   if isConfirmed() then
     state.lastConfirmedAt = nowMs()
-  elseif (nowMs() - state.lastConfirmedAt) > CC.GRACE_PERIOD then
-    -- Attack genuinely lost → re-engage with backoff
-    log("Attack lost after " .. CC.GRACE_PERIOD .. "ms grace")
-    state.retries = 0
-    state.currentTimeout = 0  -- reset backoff for fresh ENGAGING
-    transition(STATE.ENGAGING, "grace_expired")
-    return
+  else
+    sendAttack(state.creature, "lock_recover")
+    if (nowMs() - state.lastConfirmedAt) > CC.GRACE_PERIOD then
+      log("Attack lost after " .. CC.GRACE_PERIOD .. "ms grace")
+      state.retries = 0
+      state.currentTimeout = 0
+      transition(STATE.ENGAGING, "grace_expired")
+      return
+    end
   end
 
   -- Process pending switch
@@ -593,21 +561,10 @@ local function handleLocked()
     return
   end
 
-  -- Periodic keepalive: only re-send if attack appears lost.
-  -- sendAttack's toggle guard provides secondary protection, but
-  -- skipping the call entirely when confirmed saves the overhead.
-  if (nowMs() - state.lastCommandAt) > CC.KEEPALIVE_INTERVAL then
-    if not isConfirmed() then
-      sendAttack(state.creature, "keepalive")
-    else
-      state.lastCommandAt = nowMs()  -- confirmed & alive, just reset timer
-    end
-  end
+  -- No keepalive: g_game.attack() is persistent — server handles it.
 end
 
--- ============================================================================
 -- UPDATE LOOP
--- ============================================================================
 
 local function update()
   ensureDeps()
@@ -647,9 +604,7 @@ local function update()
   end
 end
 
--- ============================================================================
 -- PUBLIC API
--- ============================================================================
 
 function AttackStateMachine.getState()    return state.current end
 function AttackStateMachine.getTarget()   return state.creature end
@@ -681,31 +636,13 @@ function AttackStateMachine.requestAttack(creature, priority)
 
   local id = cId(creature)
 
-  -- REAFFIRM path: same target in ENGAGING → reset retries, keep going
+  -- Same target → just update priority if higher, no-op otherwise.
+  -- g_game.attack() is persistent — no reaffirm needed.
   if id == state.targetId then
-    if state.current == STATE.ENGAGING then
-      -- Refresh creature ref (may be newer object)
-      state.creature = creature
-      state.stats.reaffirms = state.stats.reaffirms + 1
-      -- Only actively re-send if game doesn't show us attacking yet.
-      -- sendAttack's toggle guard also prevents this, but being
-      -- explicit avoids resetting backoff counters unnecessarily.
-      if not isConfirmed() then
-        state.retries  = 0
-        state.currentTimeout = 0
-        state.enteredAt = nowMs()
-        log("Reaffirm in ENGAGING: " .. cName(creature))
-        sendAttack(creature, "reaffirm")
-      else
-        log("Reaffirm skip (confirmed): " .. cName(creature))
-      end
-      return true
-    end
-    -- LOCKED or same target → update priority, no-op otherwise
     if priority and priority > state.priority then
       state.priority = priority
     end
-    return true  -- "accepted" — we're already on it
+    return true
   end
 
   -- New target
@@ -768,7 +705,7 @@ function AttackStateMachine.reset()
   state.holdTargetId    = nil
   state.holdTargetName  = nil
   state.skipList        = {}
-  state.stats = { commands = 0, confirms = 0, kills = 0, switches = 0, skips = 0, reaffirms = 0 }
+  state.stats = { commands = 0, confirms = 0, kills = 0, switches = 0, skips = 0 }
   log("Reset")
 end
 
@@ -805,9 +742,7 @@ AttackStateMachine.forceSwitch   = AttackStateMachine.forceAttack
 function AttackStateMachine.isPathBlocked() return false end
 function AttackStateMachine.findBestTarget() return nil, 0 end
 
--- ============================================================================
 -- EVENTBUS INTEGRATION
--- ============================================================================
 
 if EventBus then
   -- Game combat target changed
@@ -860,9 +795,7 @@ if EventBus then
   end, 100)
 end
 
--- ============================================================================
 -- TICK & INIT
--- ============================================================================
 
 AttackStateMachine.update = update
 

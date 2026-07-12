@@ -22,488 +22,46 @@ local patternCategory = 1
 local pattern = 1
 local mainWindow
 
--- ============================================================================
--- BOTCORE INTEGRATION
--- ============================================================================
-
--- Local analytics wrapper (for fallback if BotCore not available)
-local attackAnalytics = storage.attackAnalytics or {
-  spells = {},
-  runes = {},
-  empowerments = 0,
-  totalAttacks = 0,
-  log = {}
-}
-storage.attackAnalytics = attackAnalytics
+local attack_analytics = AttackAnalytics or require("core.attack.attack_analytics")
+local combat_executor = CombatExecutor or require("core.attack.combat_executor")
 
 -- Record an attack action (delegates to BotCore.Analytics if available)
 local function recordAttackAction(cat, idOrFormula)
-  -- Use BotCore.Analytics if available
   if BotCore and BotCore.Analytics then
     BotCore.Analytics.recordAttack(cat, idOrFormula)
     return
   end
-  
-  -- Fallback to local analytics
-  attackAnalytics.totalAttacks = attackAnalytics.totalAttacks + 1
-  
+
   if cat == 1 or cat == 4 or cat == 5 then
-    local spellName = tostring(idOrFormula)
-    attackAnalytics.spells[spellName] = (attackAnalytics.spells[spellName] or 0) + 1
+    attack_analytics.recordSpellUse(idOrFormula)
     if cat == 4 then
-      attackAnalytics.empowerments = attackAnalytics.empowerments + 1
+      attack_analytics.recordBuffUse(idOrFormula)
     end
   elseif cat == 2 or cat == 3 then
-    -- Use string key for runeId to prevent sparse array issues in JSON serialization
-    local runeKey = tostring(tonumber(idOrFormula) or 0)
-    attackAnalytics.runes[runeKey] = (attackAnalytics.runes[runeKey] or 0) + 1
+    attack_analytics.recordRuneUse(idOrFormula)
   end
-  
-  local log = attackAnalytics.log
-  log[#log + 1] = { t = now, cat = cat, action = tostring(idOrFormula) }
-  TrimArray(log, 50)
 end
 
--- Public API for SmartHunt (redirects to BotCore.Analytics if available)
+-- Public API for SmartHunt
 AttackBot = AttackBot or {}
 AttackBot.getAnalytics = function()
   if BotCore and BotCore.Analytics then
     return BotCore.Analytics.AttackBot.getAnalytics()
   end
-  return attackAnalytics
+  return attack_analytics.getAnalytics()
 end
 AttackBot.resetAnalytics = function()
   if BotCore and BotCore.Analytics then
     BotCore.Analytics.AttackBot.resetAnalytics()
     return
   end
-  attackAnalytics.spells = {}
-  attackAnalytics.runes = {}
-  attackAnalytics.empowerments = 0
-  attackAnalytics.totalAttacks = 0
-  attackAnalytics.log = {}
+  attack_analytics.resetAnalytics()
 end
 
--- label library
-
-local categories = {
-  "Targeted Spell (exori hur, exori flam, etc)",
-  "Area Rune (avalanche, great fireball, etc)",
-  "Targeted Rune (sudden death, icycle, etc)",
-  "Empowerment (utito tempo, etc)",
-  "Absolute Spell (exori, hells core, etc)",
-}
-
-local patterns = {
-  -- targeted spells
-  {
-    "1 Sqm Range (exori ico)",
-    "2 Sqm Range",
-    "3 Sqm Range (strike spells)",
-    "4 Sqm Range (exori san)",
-    "5 Sqm Range (exori hur)",
-    "6 Sqm Range",
-    "7 Sqm Range (exori con)",
-    "8 Sqm Range",
-    "9 Sqm Range",
-    "10 Sqm Range"
-  },
-  -- area runes
-  {
-    "Cross (explosion)",
-    "Bomb (fire bomb)",
-    "Ball (gfb, avalanche)"
-  },
-  -- empowerment/targeted rune
-  {
-    "1 Sqm Range",
-    "2 Sqm Range",
-    "3 Sqm Range",
-    "4 Sqm Range",
-    "5 Sqm Range",
-    "6 Sqm Range",
-    "7 Sqm Range",
-    "8 Sqm Range",
-    "9 Sqm Range",
-    "10 Sqm Range",
-  },
-  -- absolute
-  {
-    "Adjacent (exori, exori gran)",
-    "3x3 Wave (vis hur, tera hur)", 
-    "Small Area (mas san, exori mas)",
-    "Medium Area (mas flam, mas frigo)",
-    "Large Area (mas vis, mas tera)",
-    "Short Beam (vis lux)", 
-    "Large Beam (gran vis lux)", 
-    "Sweep (exori min)", -- 8
-    "Small Wave (gran frigo hur)",
-    "Big Wave (flam hur, frigo hur)",
-    "Huge Wave (gran flam hur)",
-  }
-}
-
-  -- spellPatterns[category][pattern][1 - normal, 2 - safe]
-local spellPatterns = {
-  {}, -- blank, wont be used
-  -- Area Runes,
-  { 
-    {     -- cross
-     [[ 
-      010
-      111
-      010
-     ]],
-     -- cross SAFE
-     [[
-       01110
-       01110
-       11111
-       11111
-       11111
-       01110
-       01110
-     ]]
-    },
-    { -- bomb
-      [[
-        111
-        111
-        111
-      ]],
-      -- bomb SAFE
-      [[
-        11111
-        11111
-        11111
-        11111
-        11111
-      ]]
-    },
-    { -- ball
-      [[
-        0011100
-        0111110
-        1111111
-        1111111
-        1111111
-        0111110
-        0011100
-      ]],
-      -- ball SAFE
-      [[
-        000111000
-        001111100
-        011111110
-        111111111
-        111111111
-        111111111
-        011111110
-        001111100
-        000111000
-      ]]
-    },
-  },
-  {}, -- blank, wont be used
-  -- Absolute
-  {
-    {-- adjacent
-      [[
-        111
-        111
-        111
-      ]],
-      -- adjacent SAFE
-      [[
-        11111
-        11111
-        11111
-        11111
-        11111
-      ]]
-    },
-    { -- 3x3 Wave
-      [[
-        0000NNN0000
-        0000NNN0000
-        0000NNN0000
-        00000N00000
-        WWW00N00EEE
-        WWWWW0EEEEE
-        WWW00S00EEE
-        00000S00000
-        0000SSS0000
-        0000SSS0000
-        0000SSS0000
-      ]],
-      -- 3x3 Wave SAFE
-      [[
-        0000NNNNN0000
-        0000NNNNN0000
-        0000NNNNN0000
-        0000NNNNN0000
-        WWWW0NNN0EEEE
-        WWWWWNNNEEEEE
-        WWWWWW0EEEEEE
-        WWWWWSSSEEEEE
-        WWWW0SSS0EEEE
-        0000SSSSS0000
-        0000SSSSS0000
-        0000SSSSS0000
-        0000SSSSS0000
-      ]]
-    },
-    { -- small area
-      [[
-        0011100
-        0111110
-        1111111
-        1111111
-        1111111
-        0111110
-        0011100
-      ]],
-      -- small area SAFE
-      [[
-        000111000
-        001111100
-        011111110
-        111111111
-        111111111
-        111111111
-        011111110
-        001111100
-        000111000
-      ]]
-    },
-    { -- medium area
-      [[
-        00000100000
-        00011111000
-        00111111100
-        01111111110
-        01111111110
-        11111111111
-        01111111110
-        01111111110
-        00111111100
-        00001110000
-        00000100000
-      ]],
-      -- medium area SAFE
-      [[
-        0000011100000
-        0000111110000
-        0001111111000
-        0011111111100
-        0111111111110
-        0111111111110
-        1111111111111
-        0111111111110
-        0111111111110
-        0011111111100
-        0001111111000
-        0000111110000
-        0000011100000
-      ]]
-    },
-    { -- large area
-      [[
-        0000001000000
-        0000011100000
-        0000111110000
-        0001111111000
-        0011111111100
-        0111111111110
-        1111111111111
-        0111111111110
-        0011111111100
-        0001111111000
-        0000111110000
-        0000011100000
-        0000001000000
-      ]],
-      -- large area SAFE
-      [[
-        000000010000000
-        000000111000000
-        000001111100000
-        000011111110000
-        000111111111000
-        001111111111100
-        011111111111110
-        111111111111111
-        011111111111110
-        001111111111100
-        000111111111000
-        000011111110000
-        000001111100000
-        000000111000000
-        000000010000000
-      ]]
-    },
-    { -- short beam
-      [[
-        00000N00000
-        00000N00000
-        00000N00000
-        00000N00000
-        00000N00000
-        WWWWW0EEEEE
-        00000S00000
-        00000S00000
-        00000S00000
-        00000S00000
-        00000S00000
-      ]],
-      -- short beam SAFE
-      [[
-        00000NNN00000
-        00000NNN00000
-        00000NNN00000
-        00000NNN00000
-        00000NNN00000
-        WWWWWNNNEEEEE
-        WWWWWW0EEEEEE
-        00000SSS00000
-        00000SSS00000
-        00000SSS00000
-        00000SSS00000
-        00000SSS00000
-        00000SSS00000
-      ]]
-    },
-    { -- large beam
-      [[
-        0000000N0000000
-        0000000N0000000
-        0000000N0000000
-        0000000N0000000
-        0000000N0000000
-        0000000N0000000
-        0000000N0000000
-        WWWWWWW0EEEEEEE
-        0000000S0000000
-        0000000S0000000
-        0000000S0000000
-        0000000S0000000
-        0000000S0000000
-        0000000S0000000
-        0000000S0000000
-      ]],
-      -- large beam SAFE
-      [[
-        0000000NNN0000000
-        0000000NNN0000000
-        0000000NNN0000000
-        0000000NNN0000000
-        0000000NNN0000000
-        0000000NNN0000000
-        0000000NNN0000000
-        WWWWWWWNNNEEEEEEE
-        WWWWWWWW0EEEEEEEE
-        WWWWWWWSSSEEEEEEE
-        0000000SSS0000000
-        0000000SSS0000000
-        0000000SSS0000000
-        0000000SSS0000000
-        0000000SSS0000000
-        0000000SSS0000000
-        0000000SSS0000000
-      ]],
-    },
-    {}, -- sweep, wont be used
-    { -- small wave
-      [[
-        00NNN00
-        00NNN00
-        WW0N0EE
-        WWW0EEE
-        WW0S0EE
-        00SSS00
-        00SSS00
-      ]],
-      -- small wave SAFE
-      [[
-        00NNNNN00
-        00NNNNN00
-        WWNNNNNEE
-        WWWWNEEEE
-        WWWW0EEEE
-        WWWWSEEEE
-        WWSSSSSEE
-        00SSSSS00
-        00SSSSS00
-      ]]
-    },
-    { -- large wave
-      [[
-        000NNNNN000
-        000NNNNN000
-        0000NNN0000
-        WW00NNN00EE
-        WWWW0N0EEEE
-        WWWWW0EEEEE
-        WWWW0S0EEEE
-        WW00SSS00EE
-        0000SSS0000
-        000SSSSS000
-        000SSSSS000
-      ]],
-      [[
-        000NNNNNNN000
-        000NNNNNNN000
-        000NNNNNNN000
-        WWWWNNNNNEEEE
-        WWWWNNNNNEEEE
-        WWWWWNNNEEEEE
-        WWWWWW0EEEEEE
-        WWWWWSSSEEEEE
-        WWWWSSSSSEEEE
-        WWWWSSSSSEEEE
-        000SSSSSSS000
-        000SSSSSSS000
-        000SSSSSSS000
-      ]]
-    },
-    { -- huge wave
-      [[
-        0000NNNNN0000
-        0000NNNNN0000
-        00000NNN00000
-        00000NNN00000
-        WW0000N0000EE
-        WWWW00N00EEEE
-        WWWWWW0EEEEEE
-        WWWW00S00EEEE
-        WW0000S0000EE
-        00000SSS00000
-        00000SSS00000
-        0000SSSSS0000
-        0000SSSSS0000
-      ]],
-      [[
-        0000000NNN0000000
-        0000000NNN0000000
-        0000000NNN0000000
-        0000000NNN0000000
-        0000000NNN0000000
-        0000000NNN0000000
-        0000000NNN0000000
-        WWWWWWWNNNEEEEEEE
-        WWWWWWWW0EEEEEEEE
-        WWWWWWWSSSEEEEEEE
-        0000000SSS0000000
-        0000000SSS0000000
-        0000000SSS0000000
-        0000000SSS0000000
-        0000000SSS0000000
-        0000000SSS0000000
-        0000000SSS0000000
-      ]]
-    }
-  }
-}
+local attack_data = AttackData or require("core.attack.attack_data")
+local categories = attack_data.categories
+local patterns = attack_data.patterns
+local spellPatterns = attack_data.spellShapes
 
 -- direction patterns
 local ek = (voc() == 1 or voc() == 11) and true
@@ -578,93 +136,15 @@ local posW = ek and [[
   00000000000
 ]]
 
--- AttackBotConfig
--- create blank profiles 
-if not AttackBotConfig[panelName] or not AttackBotConfig[panelName][1] or #AttackBotConfig[panelName] ~= 5 then
-  AttackBotConfig[panelName] = {
-    [1] = {
-      enabled = true,  -- Enable by default so user doesn't have to manually toggle
-      attackTable = {},
-      ignoreMana = true,
-      Kills = false,
-      Rotate = false,
-      name = "Profile #1",
-      Cooldown = true,
-      Visible = true,
-      pvpMode = false,
-      KillsAmount = 1,
-      PvpSafe = true,
-      BlackListSafe = false,
-      AntiRsRange = 5
-    },
-    [2] = {
-      enabled = false,
-      attackTable = {},
-      ignoreMana = true,
-      Kills = false,
-      Rotate = false,
-      name = "Profile #2",
-      Cooldown = true,
-      Visible = true,
-      pvpMode = false,
-      KillsAmount = 1,
-      PvpSafe = true,
-      BlackListSafe = false,
-      AntiRsRange = 5
-    },
-    [3] = {
-      enabled = false,
-      attackTable = {},
-      ignoreMana = true,
-      Kills = false,
-      Rotate = false,
-      name = "Profile #3",
-      Cooldown = true,
-      Visible = true,
-      pvpMode = false,
-      KillsAmount = 1,
-      PvpSafe = true,
-      BlackListSafe = false,
-      AntiRsRange = 5
-    },
-    [4] = {
-      enabled = false,
-      attackTable = {},
-      ignoreMana = true,
-      Kills = false,
-      Rotate = false,
-      name = "Profile #4",
-      Cooldown = true,
-      Visible = true,
-      pvpMode = false,
-      KillsAmount = 1,
-      PvpSafe = true,
-      BlackListSafe = false,
-      AntiRsRange = 5
-    },
-    [5] = {
-      enabled = false,
-      attackTable = {},
-      ignoreMana = true,
-      Kills = false,
-      Rotate = false,
-      name = "Profile #5",
-      Cooldown = true,
-      Visible = true,
-      pvpMode = false,
-      KillsAmount = 1,
-      PvpSafe = true,
-      BlackListSafe = false,
-      AntiRsRange = 5
-    },
-  }
-end
+local attack_config = AttackConfig or require("core.attack.attack_config")
+
+attack_config.ensureDefaults(AttackBotConfig, panelName)
 
 -- Load character-specific profile if available
 local charProfile = getCharacterProfile("attackProfile")
 if charProfile and charProfile >= 1 and charProfile <= 5 then
   AttackBotConfig.currentBotProfile = charProfile
-elseif not AttackBotConfig.currentBotProfile or AttackBotConfig.currentBotProfile == 0 or AttackBotConfig.currentBotProfile > 5 then 
+elseif not AttackBotConfig.currentBotProfile or AttackBotConfig.currentBotProfile == 0 or AttackBotConfig.currentBotProfile > 5 then
   AttackBotConfig.currentBotProfile = 1
 end
 
@@ -677,10 +157,8 @@ end
 
 -- finding correct table, manual unfortunately
 local setActiveProfile = function()
-  local n = AttackBotConfig.currentBotProfile
-  currentSettings = AttackBotConfig[panelName][n]
-  -- Save character's profile preference
-  setCharacterProfile("attackProfile", n)
+  currentSettings = attack_config.getActiveProfile(AttackBotConfig, panelName)
+  setCharacterProfile("attackProfile", AttackBotConfig.currentBotProfile)
 end
 setActiveProfile()
 
@@ -800,12 +278,8 @@ end
       setPatternText()
       setCategoryText()
     end
-    panel.previousSource.onClick = function()
-      warn("[AttackBot] TODO, reserved for future use.")
-    end
-    panel.nextSource.onClick = function()
-      warn("[AttackBot] TODO, reserved for future use.")
-    end
+    panel.previousSource.onClick = function() end
+    panel.nextSource.onClick = function() end
     panel.previousRange.onClick = function()
       local t = patterns[patternCategory]
       if pattern == 1 then
@@ -882,7 +356,6 @@ end
         end
       end
     end
-
 
     -- refreshing values
     function refreshAttacks()
@@ -1031,7 +504,6 @@ end
     currentSettings.AntiRsRange = value
   end
 
-
    -- window elements
   mainWindow.closeButton.onClick = function()
     showSettings = false
@@ -1152,9 +624,7 @@ end
       mainWindow:focus()
     end
 
--- ============================================================================
 -- COOLDOWN MANAGEMENT (use ClientHelper for DRY)
--- ============================================================================
 
 local cooldowns = {}
 
@@ -1219,83 +689,19 @@ local function confirmSpellCast(spellKey, beforeTs, onSuccess, onFail)
 end
 
 local function attemptSpellCast(entry, context)
-  local spellKey = getSpellKey(entry)
-  if spellKey == "" then return false end
-
-  -- For Absolute Sweep (category 5, pattern 8) respect rotation setting
-  if entry.category == 5 and entry.pattern == 8 and context and context._attackCache and context._attackCache.bestSweepDir and context.settings and context.settings.Rotate then
-    local desired = context._attackCache.bestSweepDir
-    if player:getDirection() ~= desired then
-      -- Prevent rapid oscillation by enforcing a small cooldown
-      if now - lastAutoRotate < rotationCooldown then
-        return true
-      end
-
-      -- Rotation attempt window and throttling (avoid starvation)
-      local cache = context._attackCache
-      if cache then
-        if cache.rotationAttemptsDir ~= desired then
-          cache.rotationAttemptsDir = desired
-          cache.rotationAttempts = 0
-          cache.rotationAttemptsStart = now
-        else
-          if cache.rotationAttemptsStart and now - cache.rotationAttemptsStart > 3000 then
-            cache.rotationAttempts = 0
-            cache.rotationAttemptsStart = now
-          end
-        end
-
-        local MAX_ROTATE_ATTEMPTS = 3
-        if (cache.rotationAttempts or 0) >= MAX_ROTATE_ATTEMPTS then
-          -- allow attack to proceed without rotating
-        else
-          -- Rotate towards best side and defer attack to next tick
-          turn(desired)
-          lastAutoRotate = now
-          cache.rotationAttempts = (cache.rotationAttempts or 0) + 1
-          return true
-        end
-      else
-        -- No cache available: rotate normally
-        turn(desired)
-        lastAutoRotate = now
-        return true
-      end
-    end
-  end
-
-  local state = getSpellState(spellKey)
-  local cdMs = toCooldownMs(entry.cooldown)
-
-  if context.settings.Cooldown and state and nowMs() < state.nextReadyAt then
-    return false
-  end
-
-  local canCastCaller = SafeCall.getCachedCaller("canCast")
-  if canCastCaller then
-    local ok = canCastCaller(spellKey, not currentSettings.ignoreMana, not currentSettings.Cooldown)
-    if ok == false then return false end
-  end
-
-  local beforeTs = SpellCastTable and SpellCastTable[spellKey] and SpellCastTable[spellKey].t or 0
-  if state then state.lastAttemptAt = nowMs() end
-
-  cast(spellKey, math.max(cdMs, 100))
-
-  confirmSpellCast(spellKey, beforeTs, function()
-    if state then
-      state.nextReadyAt = nowMs() + cdMs
-    end
-    applyGlobalBackoff(GLOBAL_CAST_BACKOFF)
-    recordAttackAction(entry.category, entry.spell)
-  end, function()
-    if context.settings.Cooldown and state then
-      state.nextReadyAt = math.max(state.nextReadyAt or 0, nowMs() + FAILED_CAST_BACKOFF)
-    end
-    applyGlobalBackoff(FAILED_CAST_BACKOFF)
-  end)
-
-  return true
+  local deps = {
+    cast = cast,
+    getSpellKey = getSpellKey,
+    getSpellState = getSpellState,
+    toCooldownMs = toCooldownMs,
+    nowMs = nowMs,
+    SafeCall = SafeCall,
+    confirmSpellCast = confirmSpellCast,
+    applyGlobalBackoff = applyGlobalBackoff,
+    recordAttackAction = recordAttackAction,
+    currentSettings = currentSettings,
+  }
+  return combat_executor.attemptSpellCast(entry, context, deps)
 end
 
 -- Check individual action cooldown
@@ -1318,7 +724,6 @@ function getPattern(category, pattern, safe)
 
   return spellPatterns[category][pattern][safe]
 end
-
 
 function getMonstersInArea(category, posOrCreature, pattern, minHp, maxHp, safePattern, monsterNamesTable)
   -- monsterNamesTable can be nil
@@ -1432,42 +837,14 @@ end
 -- Use rune on target - works even with closed backpack (hotkey-style)
 -- Uses BotCore.Items for consolidated item usage
 local function useRuneOnTarget(runeId, targetCreatureOrTile)
-  lastAttackTime = now -- Update attack time for non-blocking cooldown
-  local Client = getClient()
-  
-  -- Simplified like vBot for better OTCv8 compatibility
-  if useWith and targetCreatureOrTile then
-    local ok, res = pcall(useWith, runeId, targetCreatureOrTile)
-    if ok then return true end
-  end
-  
-  -- Fallback methods
-  if BotCore and BotCore.Items and BotCore.Items.useOn then
-    local ok, res = pcall(BotCore.Items.useOn, runeId, targetCreatureOrTile)
-    if ok and res then return true end
-  end
-  
-  -- Use ClientService if available
-  if Client and Client.useInventoryItemWith then
-    local ok, res = pcall(Client.useInventoryItemWith, runeId, targetCreatureOrTile)
-    if ok then return true end
-  elseif g_game and g_game.useInventoryItemWith then
-    local ok, res = pcall(g_game.useInventoryItemWith, runeId, targetCreatureOrTile)
-    if ok then return true end
-  end
-  
-  local rune = SafeCall.findItem(runeId)
-  if rune then
-    if Client and Client.useWith then
-      local ok, res = pcall(Client.useWith, rune, targetCreatureOrTile)
-      if ok then return true end
-    elseif g_game and g_game.useWith then
-      local ok, res = pcall(g_game.useWith, rune, targetCreatureOrTile)
-      if ok then return true end
-    end
-  end
-  
-  return false
+  lastAttackTime = now
+  local deps = {
+    useWith = useWith,
+    g_game = g_game,
+    SafeCall = SafeCall,
+    Client = getClient(),
+  }
+  return combat_executor.useRuneOnTarget(runeId, targetCreatureOrTile, deps)
 end
 
 function executeAttackBotAction(categoryOrPos, idOrFormula, cooldown)
@@ -1514,9 +891,7 @@ else
   end)
 end
 
--- ============================================================================
 -- SIMPLIFIED ATTACKBOT - HIGH PERFORMANCE & ACCURACY
--- ============================================================================
 
 -- Per-tick cache for expensive computations
 local lastAutoRotate = 0
@@ -1691,49 +1066,24 @@ end
 
 -- Pure function: Execute attack action
 local function executeAttack(entry, context)
-  -- Categories 1 (targeted spell), 4 (empowerment), 5 (absolute) are spell-based
-  if isSpellCategory(entry.category) then
-    return attemptSpellCast(entry, context)
-  end
-
-  local stampKey = entry.key or tostring(entry.itemId or entry.spell)
-  local actionId = entry.itemId > 100 and entry.itemId or entry.spell
-
-  if entry.category == 3 then
-    -- Targeted runes
-    local okTargeted = useRuneOnTarget(entry.itemId, context.target)
-    if okTargeted then
-      stamp(stampKey)
-      recordAttackAction(entry.category, actionId)
-      if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
-      return true
-    end
-    return false
-  elseif entry.category == 2 then
-    -- Area runes - prefer cached best tile when available
-    local pat = spellPatterns[entry.patternCategory][entry.pattern][context.settings.PvpSafe and 2 or 1]
-    local pKey = buildPatternKey(entry, context.settings.PvpSafe)
-    local data = context and context._attackCache and context._attackCache.bestTileByPattern and context._attackCache.bestTileByPattern[pKey]
-    if not data then
-      data = getBestTileByPattern(pat, entry.minHp, entry.maxHp, context.settings.PvpSafe, entry.monsters)
-    end
-    if data and data.pos then
-      local Client = getClient()
-      local tile = (Client and Client.getTile) and Client.getTile(data.pos) or (g_map and g_map.getTile(data.pos))
-      if tile then
-        local okArea = useRuneOnTarget(entry.itemId, tile:getTopUseThing())
-        if okArea then
-          stamp(stampKey)
-          recordAttackAction(entry.category, actionId)
-          if context and context._attackCache then context._attackCache.rotationAttempts = 0 end
-          return true
-        end
-      end
-    end
-    return false
-  end
-
-  return true
+  local deps = {
+    isSpellCategory = isSpellCategory,
+    getSpellKey = getSpellKey,
+    getSpellState = getSpellState,
+    toCooldownMs = toCooldownMs,
+    nowMs = nowMs,
+    SafeCall = SafeCall,
+    cast = cast,
+    confirmSpellCast = confirmSpellCast,
+    applyGlobalBackoff = applyGlobalBackoff,
+    recordAttackAction = recordAttackAction,
+    spellPatterns = spellPatterns,
+    buildPatternKey = buildPatternKey,
+    getBestTileByPattern = getBestTileByPattern,
+    getSpectators = getSpectators,
+    Client = getClient(),
+  }
+  return combat_executor.executeAttack(entry, context, deps)
 end
 
 -- Main attack function — AAA pattern (Arrange → Act → Assert)

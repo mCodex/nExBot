@@ -25,6 +25,7 @@
 
 CaveBot.Recorder = {}
 
+local zChanging = nExBot.zChanging or function() return false end
 local isEnabled = nil
 local lastPos = nil           -- last RECORDED position (the waypoint)
 local prevStepPos = nil       -- position on the previous step (for direction tracking)
@@ -34,9 +35,7 @@ local pendingCorner = nil     -- position to record when a turn is confirmed
 local pendingTurnDir = nil    -- direction of the pending turn {x, y}
 local pendingTurnCount = 0    -- steps taken in pending direction (for turnConfirmSteps)
 
--- ============================================================================
 -- CONFIGURATION
--- ============================================================================
 
 local config = {
   -- Adaptive distance thresholds (Euclidean)
@@ -49,9 +48,7 @@ local config = {
   collinearTolerance = 0.15,  -- ~8.6 degrees (dot product threshold: cos(8.6°) ≈ 0.989)
 }
 
--- ============================================================================
 -- GEOMETRY HELPERS
--- ============================================================================
 
 --- Euclidean distance between two positions.
 local function euclideanDist(a, b)
@@ -88,9 +85,7 @@ end
 -- Track up to 2 previously recorded positions for collinear checks
 local prevRecorded = nil      -- position recorded before lastPos
 
--- ============================================================================
 -- RECORDING LOGIC
--- ============================================================================
 
 local function addPosition(pos)
   -- Collinear check: if lastPos sits on the line from prevRecorded to pos,
@@ -121,27 +116,37 @@ end
 
 local function setup()
   onPlayerPositionChange(function(newPos, oldPos)
-    if zChanging() then return end
-    if CaveBot.isOn() or not isEnabled then return end
-
-    -- ======== FIRST STEP ========
-    if not lastPos then
-      addPosition(oldPos)
+    -- Floor change / teleport detection runs BEFORE zChanging() guard
+    
+    if newPos and oldPos and (newPos.z ~= oldPos.z or math.abs(oldPos.x - newPos.x) > 1 or math.abs(oldPos.y - newPos.y) > 1) then
+      if not lastPos then
+        addPosition(oldPos)
+        prevStepPos = newPos
+        prevDirection = nil
+        pendingCorner = nil
+        pendingTurnDir = nil
+        pendingTurnCount = 0
+        lastPos = oldPos
+      end
+      addStairs(oldPos)
+      -- Force-record landing tile (bypass collinearity check)
+      CaveBot.addAction("goto", newPos.x .. "," .. newPos.y .. "," .. newPos.z .. ",0", true)
+      prevRecorded = newPos
+      lastPos = newPos
+      stepsSinceLast = 0
       prevStepPos = newPos
-      prevDirection = nil
       pendingCorner = nil
       pendingTurnDir = nil
       pendingTurnCount = 0
       return
     end
 
-    -- ======== FLOOR CHANGE / TELEPORT ========
-    if newPos.z ~= oldPos.z or math.abs(oldPos.x - newPos.x) > 1 or math.abs(oldPos.y - newPos.y) > 1 then
-      -- Record the pre-floor-change position with precision=0
-      addStairs(oldPos)
-      -- Anchor destination: record newPos so the route has a starting point
-      -- on the new floor (floor change) or after the jump (same-floor teleport)
-      addPosition(newPos)
+    if zChanging() then return end
+    if CaveBot.isOn() or not isEnabled then return end
+
+    -- ======== FIRST STEP ========
+    if not lastPos then
+      addPosition(oldPos)
       prevStepPos = newPos
       prevDirection = nil
       pendingCorner = nil
@@ -227,9 +232,7 @@ local function setup()
   end)
 end
 
--- ============================================================================
 -- PUBLIC API
--- ============================================================================
 
 CaveBot.Recorder.isOn = function()
   return isEnabled

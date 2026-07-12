@@ -9,9 +9,7 @@
 
 local Actions = {}
 
--- ============================================================================
 -- SPELL EXECUTION
--- ============================================================================
 
 -- Cast a spell with optional delay tracking
 -- spell: spell words (string)
@@ -50,9 +48,7 @@ function Actions.castSpell(spell, delay, options)
   return true
 end
 
--- ============================================================================
 -- ITEM/POTION EXECUTION
--- ============================================================================
 
 -- Use an item like a hotkey (works without open backpack)
 -- itemId: item ID to use
@@ -130,9 +126,7 @@ function Actions.useRune(runeId, target)
   return false
 end
 
--- ============================================================================
 -- ITEM VISIBILITY
--- ============================================================================
 
 -- Check if item is visible (in open container)
 function Actions.isItemVisible(itemId)
@@ -157,9 +151,7 @@ function Actions.canUseItem(itemId, requireVisible)
   return true
 end
 
--- ============================================================================
 -- UNIFIED ACTION EXECUTION
--- ============================================================================
 
 -- Execute an action (spell or item)
 -- action: { type = "spell"|"potion"|"rune", id = ..., target = ... }
@@ -179,9 +171,7 @@ function Actions.execute(action)
   return false
 end
 
--- ============================================================================
 -- ATTACK BOT SPECIFIC
--- ============================================================================
 
 -- Execute attack action with category handling
 -- category: 1=targeted spell, 2=area rune, 3=targeted rune, 4=empowerment, 5=absolute spell

@@ -73,21 +73,13 @@ Panel
 ]])
 edit:hide()
 
--- Profile storage helpers
-local function getProfileSetting(key)
-  if ProfileStorage then
-    return ProfileStorage.get(key)
-  end
-  return storage[key]
+local SharedHelpers = nExBot.SharedHelpers
+if not SharedHelpers then
+  warn("[Dropper] SharedHelpers not loaded")
+  return
 end
-
-local function setProfileSetting(key, value)
-  if ProfileStorage then
-    ProfileStorage.set(key, value)
-  else
-    storage[key] = value
-  end
-end
+local getProfileSetting = SharedHelpers.getProfileSetting
+local setProfileSetting = SharedHelpers.setProfileSetting
 
 -- Load dropper config from profile storage
 local config = getProfileSetting("dropper") or {

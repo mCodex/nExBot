@@ -19,9 +19,7 @@
 
 local ChaseController = {}
 
--- ============================================================================
 -- CLIENT SERVICE ABSTRACTION (shared alias)
--- ============================================================================
 
 local getClient = nExBot.Shared.getClient
 
@@ -29,9 +27,7 @@ local function getGame()
   return ClientHelper and ClientHelper.getGame() or ((getClient() and getClient().g_game) or g_game)
 end
 
--- ============================================================================
 -- STATE
--- ============================================================================
 
 local state = {
   -- Desired chase mode (what TargetBot config wants)
@@ -51,9 +47,7 @@ local state = {
   usingNativeChase = false,
 }
 
--- ============================================================================
 -- CORE API
--- ============================================================================
 
 -- Set the desired chase mode (from TargetBot config)
 function ChaseController.setDesiredChase(enabled)
@@ -166,9 +160,7 @@ function ChaseController.getCurrentMode()
   return state.currentMode
 end
 
--- ============================================================================
 -- CONVENIENCE METHODS
--- ============================================================================
 
 -- Enable chase mode
 function ChaseController.enableChase()
@@ -204,9 +196,7 @@ function ChaseController.clearPrecisionHolds()
   ChaseController.syncMode()
 end
 
--- ============================================================================
 -- AUTO-WALK STATE MANAGEMENT
--- ============================================================================
 
 -- Stop any active auto-walk (uses native API)
 function ChaseController.stopAutoWalk()
@@ -246,9 +236,7 @@ function ChaseController.isAutoWalking()
   return false
 end
 
--- ============================================================================
 -- ATTACK INTEGRATION
--- ============================================================================
 
 -- Called before attacking a new target
 function ChaseController.onTargetChange(creature, config)
@@ -277,9 +265,7 @@ function ChaseController.onAttackCancelled()
   ChaseController.stopAutoWalk()
 end
 
--- ============================================================================
 -- INITIALIZATION
--- ============================================================================
 
 -- Hook into EventBus if available
 if EventBus then
@@ -320,9 +306,7 @@ if EventBus then
   end, 100)
 end
 
--- ============================================================================
 -- MODULE EXPORT
--- ============================================================================
 
 -- Make ChaseController globally available (OTClient doesn't have _G)
 ChaseController = ChaseController  -- This makes it globally accessible

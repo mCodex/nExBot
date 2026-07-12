@@ -47,9 +47,7 @@ local TILE_ACTIONS = {
   },
 }
 
---------------------------------------------------------------------------------
 -- Public API
---------------------------------------------------------------------------------
 
 -- Get a tool item ID (reads from storage.extras)
 function GlobalConfig.getTool(toolName)
@@ -74,9 +72,7 @@ function GlobalConfig.getToolDelay()
   return 500
 end
 
---------------------------------------------------------------------------------
 -- Tile Detection Helpers
---------------------------------------------------------------------------------
 
 -- Check if a tile requires a specific tool
 -- @param tileId number: The tile/item ID to check
@@ -130,9 +126,7 @@ function GlobalConfig.isDoor(itemId)
   return false
 end
 
---------------------------------------------------------------------------------
 -- Tool Usage Functions
---------------------------------------------------------------------------------
 
 local lastToolUse = 0
 local TOOL_DELAY = 500

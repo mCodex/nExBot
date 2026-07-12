@@ -329,7 +329,6 @@ do
 
   if not nExBot._clientPrinted then
     nExBot._clientPrinted = true
-    print("[nExBot] Client detected: " .. tostring(nExBot.clientName) .. " (" .. tostring(nExBot.clientType) .. ")")
   end
 end
 
@@ -349,7 +348,6 @@ local function autoDetectClient(attempt, maxAttempts)
       nExBot.isOpenTibiaBR = acl.isOpenTibiaBR()
 
       if newType ~= prevType or nExBot.clientName ~= prevName then
-        print("[nExBot] Client detected (late): " .. tostring(nExBot.clientName) .. " (" .. tostring(newType) .. ")")
       end
 
       if nExBot.isOpenTibiaBR then
@@ -366,7 +364,6 @@ local function autoDetectClient(attempt, maxAttempts)
                 table.insert(keys, k)
               end
             end
-            print("[nExBot] Client signals: signals=" .. table.concat(keys, ","))
           end
         end
         return
@@ -393,6 +390,8 @@ loadCategory("constants", {
 -- ============================================================================
 loadCategory("utils", {
   "utils/shared",
+  "utils/shared_helpers",
+  "utils/storage_engine",
   "utils/ring_buffer",
   "utils/client_helper",
   "utils/safe_creature",
@@ -423,6 +422,8 @@ loadCategory("core", {
 -- PHASE 6: ARCHITECTURE LAYER
 -- ============================================================================
 loadCategory("architecture", {
+  "zchange_guard",
+  "kill_tracker",
   "event_bus",
   "unified_storage",
   "unified_tick",
@@ -430,6 +431,19 @@ loadCategory("architecture", {
   "door_items",
   "global_config",
   "bot_core/init",
+})
+
+-- ============================================================================
+-- PHASE 7.5: EXTRACTED MODULES (dofile, set globals)
+-- ============================================================================
+loadCategory("extracted_modules", {
+  "attack/attack_data",
+  "attack/attack_analytics",
+  "attack/attack_config",
+  "attack/combat_executor",
+  "heal/heal_config",
+  "heal/spell_resolver",
+  "heal/heal_analytics",
 })
 
 -- ============================================================================
@@ -444,7 +458,6 @@ loadCategory("features_legacy", {
   "pushmax",
   "combo",
   "HealBot",
-  "new_healer",
   "AttackBot",
 })
 
@@ -455,7 +468,6 @@ loadCategory("tools_legacy", {
   "ingame_editor",
   "Dropper",
   "Containers",
-  "container_opener",
   "quiver_manager",
   "quiver_label",
   "tools",
@@ -655,4 +667,17 @@ if UnifiedTick and UnifiedTick.start then
       print("[nExBot] UnifiedTick master loop activated")
     end
   end)
+end
+
+-- ============================================================================
+-- BOT ANALYTICS
+-- ============================================================================
+local analyticsOk, analytics = pcall(dofile, "/core/analytics.lua")
+if analyticsOk and analytics and analytics.start then
+  pcall(analytics.start)
+  if onGameEnd then
+    onGameEnd(function()
+      pcall(analytics.stop)
+    end)
+  end
 end

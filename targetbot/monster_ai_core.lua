@@ -24,17 +24,14 @@
                                  updateAll, public API, tick registration)
 ]]
 
--- ============================================================================
 -- MODULE NAMESPACE
--- ============================================================================
 
 MonsterAI = MonsterAI or {}
 MonsterAI.VERSION = "3.0"
 
--- ============================================================================
 -- CLIENT SERVICE HELPERS (shared aliases)
--- ============================================================================
 
+local SC = SafeCreature or {}
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
 
@@ -45,23 +42,24 @@ local nowMs = ClientHelper and ClientHelper.nowMs or function()
   return os.time() * 1000
 end
 
--- ============================================================================
 -- SAFE CREATURE VALIDATION (Prevents C++ crashes)
 -- The OTClient C++ layer can crash even when methods exist if the creature
 -- object is in an invalid internal state. These helpers prevent that.
--- ============================================================================
 
 -- Cache for recently validated creatures to reduce overhead
 local validatedCreatures = {}
 local validatedCreaturesTTL = 100 -- ms
+
+-- Safely get creature ID (must be defined before isCreatureValid)
+local safeGetId = SafeCreature.getId
 
 -- Check if a creature is valid and safe to call methods on
 local function isCreatureValid(creature)
   if not creature then return false end
   if type(creature) ~= "userdata" and type(creature) ~= "table" then return false end
   
-  local ok, id = pcall(function() return creature:getId() end)
-  if not ok or not id then return false end
+  local id = safeGetId(creature)
+  if not id then return false end
   
   -- Check validation cache
   local nowt = nowMs()
@@ -71,8 +69,8 @@ local function isCreatureValid(creature)
   end
   
   -- Perform full validation
-  local okPos, pos = pcall(function() return creature:getPosition() end)
-  local valid = okPos and pos ~= nil
+  local pos = SafeCreature.getPosition(creature)
+  local valid = pos ~= nil
   
   -- Cache result
   validatedCreatures[id] = { valid = valid, time = nowt }
@@ -106,50 +104,27 @@ local function safeCreatureCall(creature, methodName, default)
   end
 end
 
--- Safely get creature ID
-local function safeGetId(creature)
-  if not creature then return nil end
-  local ok, id = pcall(function() return creature:getId() end)
-  return ok and id or nil
-end
-
 -- Safely check if creature is dead
-local function safeIsDead(creature)
-  if not creature then return true end
-  local ok, dead = pcall(function() return creature:isDead() end)
-  return ok and dead or true
-end
+local safeIsDead = SafeCreature.isDead
 
 -- Safely check if creature is a monster
-local function safeIsMonster(creature)
-  if not creature then return false end
-  local ok, monster = pcall(function() return creature:isMonster() end)
-  return ok and monster or false
-end
+local safeIsMonster = SafeCreature.isMonster
 
 -- Safely check if creature is removed
 local function safeIsRemoved(creature)
   if not creature then return true end
-  local ok, removed = pcall(function() return creature:isRemoved() end)
-  if not ok then return true end
+  local removed = SafeCreature.isRemoved(creature)
   return removed or false
 end
 
 -- Combined safe check: is the creature a valid, alive monster?
 local function isValidAliveMonster(creature)
-  if not creature then return false end
-  
-  local ok, result = pcall(function()
-    return creature:isMonster() and not creature:isDead() and not creature:isRemoved()
-  end)
-  
-  return ok and result or false
+  if not creature or not SC then return false end
+  return SC.isMonster(creature) and not SC.isDead(creature) and not SC.isRemoved(creature)
 end
 
--- ============================================================================
 -- EXPORT HELPERS AS MODULE-LEVEL GLOBALS FOR OTHER MonsterAI FILES
 -- These are used by monster_tracking, monster_prediction, etc.
--- ============================================================================
 
 MonsterAI._helpers = {
   getClient = getClient,
@@ -164,9 +139,7 @@ MonsterAI._helpers = {
   isValidAliveMonster = isValidAliveMonster,
 }
 
--- ============================================================================
 -- CONSTANTS (Shared across all subsystems)
--- ============================================================================
 
 MonsterAI.CONSTANTS = {
   -- Behavior analysis window (in ms)
@@ -234,9 +207,7 @@ MonsterAI.CONSTANTS = {
   }
 }
 
--- ============================================================================
 -- CONFIGURATION FLAGS
--- ============================================================================
 
 MonsterAI.COLLECT_EXTENDED = (MonsterAI.COLLECT_EXTENDED == nil) and true or MonsterAI.COLLECT_EXTENDED
 MonsterAI.DPS_WINDOW = MonsterAI.DPS_WINDOW or 5000

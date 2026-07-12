@@ -6,6 +6,7 @@
 nExBot = nExBot or {} -- global namespace for bot variables
 
 -- Get ClientService reference (may not be loaded yet, lazy load in functions)
+local zChanging = nExBot.zChanging or function() return false end
 local function getClient()
   return ClientService
 end
@@ -105,33 +106,6 @@ end
 function containerIsFull(c)
     if not c then return false end
     return c:getCapacity() <= #c:getItems()
-end
-
-function dropItem(idOrObject)
-    if type(idOrObject) == "number" then
-        idOrObject = findItem(idOrObject)
-    end
-    if not idOrObject then return end
-
-    local Client = getClient()
-    if Client and Client.move then
-        Client.move(idOrObject, pos(), idOrObject:getCount())
-    elseif g_game and g_game.move then
-        g_game.move(idOrObject, pos(), idOrObject:getCount())
-    end
-end
-
--- if using index as table element, this can be used to properly assign new idex to all values
--- table needs to contain "index" as value
--- if no index in tables, it will create one
-function reindexTable(t)
-    if not t or type(t) ~= "table" then return end
-
-    local i = 0
-    for _, e in pairs(t) do
-        i = i + 1
-        e.index = i
-    end
 end
 
 -- supports only new tibia, ver 10+
@@ -249,7 +223,6 @@ end
 -- exctracts data about spell from gamelib SpellInfo table
 -- returns table
 -- ie:['Spell Name'] = {id, words, exhaustion, premium, type, icon, mana, level, soul, group, vocations}
--- cooldown detection module
 function getSpellData(spell)
     if not spell then return false end
     spell = spell:lower()
@@ -589,12 +562,10 @@ local function getClientVersion()
 end
 local isOldTibia = getClientVersion() < 960
 
---------------------------------------------------------------------------------
 -- SHAPE-BASED CREATURE COUNTING
 -- Delegates to BotCore.Creatures when available; provides standalone fallback.
 -- Shape constants and isInShape are the single source of truth here.
 -- BotCore.Creatures reuses these via nExBot.SHAPE / nExBot.isInShape.
---------------------------------------------------------------------------------
 
 local SHAPE = {
   SQUARE = 1, CIRCLE = 2, DIAMOND = 3, CROSS = 4, CONE = 5
@@ -777,13 +748,6 @@ end
 -- self explanatory
 -- a is item to use on 
 -- b is item to use a on
-function useOnInvertoryItem(a, b)
-    local item = findItem(b)
-    if not item then return end
-
-    return SafeCall.useWith(a, item)
-end
-
 -- Pre-computed direction offsets (static, never changes)
 local NEAR_TILE_DIRS = {
     {-1, 1}, {0, 1}, {1, 1}, {-1, 0}, {1, 0}, {-1, -1}, {0, -1}, {1, -1}
@@ -818,98 +782,6 @@ function getNearTiles(pos)
     return tiles
 end
 
--- self explanatory
--- use along with delay, it will only call action
-function useGroundItem(id)
-    if not id then return false end
-
-    local dest = nil
-    local Client = getClient()
-    local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
-    for i, tile in ipairs(tiles) do
-        for j, item in ipairs(tile:getItems()) do
-            if item:getId() == id then
-                dest = item
-                break
-            end
-        end
-    end
-
-    if dest then
-        return use(dest)
-    else
-        return false
-    end
-end
-
--- self explanatory
--- use along with delay, it will only call action
-function reachGroundItem(id)
-    if not id then return false end
-
-    local dest = nil
-    local iPos = nil
-    local Client = getClient()
-    local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
-    for i, tile in ipairs(tiles) do
-        for j, item in ipairs(tile:getItems()) do
-            iPos = item:getPosition()
-            local iId = item:getId()
-            if iId == id then
-                if findPath(pos(), iPos, 20,
-                            {ignoreNonPathable = true, precision = 1}) then
-                    dest = item
-                    break
-                end
-            end
-        end
-    end
-
-    if dest and iPos then
-        return autoWalk(iPos, 20, {ignoreNonPathable = true, precision = 1})
-    else
-        return false
-    end
-end
-
--- self explanatory
--- returns object
-function findItemOnGround(id)
-    local Client = getClient()
-    local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
-    for i, tile in ipairs(tiles) do
-        for j, item in ipairs(tile:getItems()) do
-            if item:getId() == id then return item end
-        end
-    end
-end
-
--- self explanatory
--- use along with delay, it will only call action
-function useOnGroundItem(a, b)
-    if not b then return false end
-    local item = findItem(a)
-    if not item then return false end
-
-    local dest = nil
-    local Client = getClient()
-    local tiles = (Client and Client.getTiles) and Client.getTiles(posz()) or (g_map and g_map.getTiles(posz())) or {}
-    for i, tile in ipairs(tiles) do
-        for j, tileItem in ipairs(tile:getItems()) do
-            if tileItem:getId() == b then
-                dest = tileItem
-                break
-            end
-        end
-    end
-
-    if dest then
-        return SafeCall.useWith(item, dest)
-    else
-        return false
-    end
-end
-
 -- returns target creature
 function target()
     local Client = getClient()
@@ -919,9 +791,6 @@ function target()
     end
     return (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
 end
-
--- returns target creature
-function getTarget() return target() end
 
 -- dist is boolean
 -- returns target position/distance from player
@@ -936,55 +805,6 @@ function targetPos(dist)
     else
         return t:getPosition()
     end
-end
-
--- for gunzodus/ezodus only
--- it will reopen loot bag, necessary for depositer
-function reopenPurse()
-    local Client = getClient()
-    local containers = (Client and Client.getContainers) and Client.getContainers() or getContainers()
-    for i, c in pairs(containers) do
-        if c:getName():lower() == "loot bag" or c:getName():lower() ==
-            "store inbox" then 
-            if Client and Client.close then
-                Client.close(c)
-            elseif g_game and g_game.close then
-                g_game.close(c)
-            end
-        end
-    end
-    schedule(100, function()
-        local Client = getClient()
-        local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer())
-        if player then
-            local purseItem = player:getInventoryItem(InventorySlotPurse)
-            if purseItem then
-                if Client and Client.use then
-                    Client.use(purseItem)
-                elseif g_game and g_game.use then
-                    g_game.use(purseItem)
-                end
-            end
-        end
-    end)
-    schedule(1400, function()
-        local Client = getClient()
-        local containers = (Client and Client.getContainers) and Client.getContainers() or getContainers()
-        for i, c in pairs(containers) do
-            if c:getName():lower() == "store inbox" then
-                for _, item in pairs(c:getItems()) do
-                    if item:getId() == 23721 then
-                        if Client and Client.open then
-                            Client.open(item, c)
-                        elseif g_game and g_game.open then
-                            g_game.open(item, c)
-                        end
-                    end
-                end
-            end
-        end
-    end)
-    return CaveBot.delay(1500)
 end
 
 -- getSpectator patterns

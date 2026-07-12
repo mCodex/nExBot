@@ -10,9 +10,7 @@
   - findPath via g_map.findPath(start, goal, maxSteps, maxComplexity)
 ]]
 
--- =========================================================================
 -- LOAD BASE (pcall-guarded — sandbox dofile may not propagate returns)
--- =========================================================================
 
 local BaseAdapter
 do
@@ -20,9 +18,7 @@ do
   BaseAdapter = (ok and type(res) == "table" and res) or ACL_BaseAdapter or {}
 end
 
--- =========================================================================
 -- ADAPTER TABLE — inherits everything from Base via metatable
--- =========================================================================
 
 local A = {}
 
@@ -50,9 +46,7 @@ A._registeredCallbacks = BaseAdapter._registeredCallbacks or {}
 A.NAME    = "OTCv8"
 A.VERSION = "2.0.0"
 
--- =========================================================================
 -- OTCv8-SPECIFIC GAME OVERRIDES
--- =========================================================================
 
 function A.game.moveRaw(thing, toPosition, count)
   if g_game and g_game.moveRaw then
@@ -71,9 +65,7 @@ function A.game.autoWalk(destination, maxSteps, options)
   return false
 end
 
--- =========================================================================
 -- OTCv8-SPECIFIC MAP OVERRIDES
--- =========================================================================
 
 function A.map.getSpectators(pos, multifloor)
   if not g_map then return {} end
@@ -103,9 +95,7 @@ function A.map.findPath(startPos, goalPos, options)
   return nil
 end
 
--- =========================================================================
 -- COOLDOWN
--- =========================================================================
 
 function A.cooldown.isCooldownIconActive(iconId)
   local m = modules.game_cooldown
@@ -117,9 +107,7 @@ function A.cooldown.isGroupCooldownIconActive(groupId)
   return m and m.isGroupCooldownIconActive and m.isGroupCooldownIconActive(groupId) or false
 end
 
--- =========================================================================
 -- BOT
--- =========================================================================
 
 function A.bot.getConfigName()
   local bm = modules.game_bot
@@ -136,9 +124,7 @@ function A.bot.getConfigPath()
   return name and ("/bot/" .. name) or nil
 end
 
--- =========================================================================
 -- UTILS (inherits base, adds OTCv8 specifics)
--- =========================================================================
 
 function A.utils.getCreatureByName(name, caseSensitive)
   local p = g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()
@@ -196,9 +182,7 @@ function A.utils.itemAmount(itemId, subType)
   return count
 end
 
--- =========================================================================
 -- INIT
--- =========================================================================
 
 function A.init()
   if nExBot and nExBot.showDebug then

@@ -10,9 +10,7 @@ if serviceLoadOk and serviceResult then
     EquipperService = serviceResult
 end
 
--- ============================================================================
 -- UI SETUP
--- ============================================================================
 
 local ui = setupUI([[
 Panel
@@ -37,9 +35,7 @@ Panel
 ]])
 ui:setId(panelName)
 
--- ============================================================================
 -- STORAGE & STATE (Per-Character with CharacterDB)
--- ============================================================================
 
 -- Default config structure
 local DEFAULT_CONFIG = {
@@ -159,9 +155,7 @@ local EquipState = {
     INVENTORY_CACHE_TTL = 300,  -- ms before inventory cache expires
 }
 
--- ============================================================================
 -- CACHE MANAGEMENT
--- ============================================================================
 
 -- Invalidate rules cache when rules change
 local function invalidateRulesCache()
@@ -180,9 +174,7 @@ local function getCachedRules()
   return EquipState.rulesCache
 end
 
--- ============================================================================
 -- RULE NORMALIZATION (precompute slot plans)
--- ============================================================================
 
 -- Delegate normalization to EquipperService for testability and clarity
 local function normalizeRule(rule)
@@ -241,9 +233,7 @@ local function getEnabledRules()
     return out
 end
 
--- ============================================================================
 -- UI SWITCH SYNC (Per-Character State)
--- ============================================================================
 
 -- Sync switch state with config (call on init and when CharacterDB becomes ready)
 local function syncSwitchState()
@@ -622,9 +612,7 @@ local function loadRuleToSlots(data)
     end
 end
 
--- ============================================================================
 -- RULES LIST UI (Fixed - proper sync between UI and config.rules)
--- ============================================================================
 
 -- Forward declare refreshRules
 local refreshRules
@@ -896,8 +884,6 @@ bossPanel.add.onClick = function()
     saveConfig()  -- Persist to CharacterDB
 end
 
-
-
 local function finalCheck(first,relation,second)
     if relation == "-" then
         return first
@@ -908,9 +894,7 @@ local function finalCheck(first,relation,second)
     end
 end
 
--- ============================================================================
 -- SLOT / INVENTORY HELPERS (pure-ish, cached per tick)
--- ============================================================================
 
 -- Delegate slot/inventory/context helpers to EquipperService when available
 local SLOT_MAP = (EquipperService and EquipperService.SLOT_MAP) or {
@@ -1032,9 +1016,7 @@ local function equipSlot(slotIdx, itemId)
     return slotHasItemId(slotIdx, itemId) or ok2
 end
 
--- ============================================================================
 -- CONDITIONS (table-driven)
--- ============================================================================
 
 -- Delegate condition evaluation to EquipperService when available, fallback to local map
 local LOCAL_CONDITIONS = {
@@ -1082,10 +1064,7 @@ local function rulePasses(rule, ctx)
     return mainOk
 end
 
--- ============================================================================
--- ============================================================================
 -- ACTION PLANNING (pure decision-making)
--- ============================================================================
 
 local function computeAction(rule, ctx, inventoryIndex)
     -- Delegate pure decision making to service for testability/consistency
@@ -1144,7 +1123,6 @@ local function computeAction(rule, ctx, inventoryIndex)
     return nil, missing
 end
 
-
 local function markChild(child)
     if mainWindow:isVisible() then
         local children = listPanel.list:getChildren()
@@ -1158,9 +1136,7 @@ local function markChild(child)
     end
 end
 
--- ============================================================================
 -- EVENT SUBSCRIPTIONS - Listen for condition changes
--- ============================================================================
 
 -- Helper to trigger equipment re-check (just sets flag, no immediate processing)
 local function triggerEquipCheck()
@@ -1252,10 +1228,8 @@ else
     if onStatesChange then onStatesChange(function() triggerEquipCheck() end) end
 end
 
--- ============================================================================
 -- MAIN EQUIPMENT MACRO
 -- Single point of equipment checking - runs throttled checks
--- ============================================================================
 
 EquipManager = macro(300, function()
     if not config.enabled then return end
@@ -1264,10 +1238,8 @@ EquipManager = macro(300, function()
     throttledEquipCheck()
 end)
 
--- ============================================================================
 -- EVENT-DRIVEN EQUIPMENT MANAGEMENT
 -- Listen to equipment changes to invalidate cache
--- ============================================================================
 
 if EventBus then
     EventBus.on("equipment:change", function(slotId, slotName, currentId, lastId, item)

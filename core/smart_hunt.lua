@@ -25,10 +25,9 @@
 
 setDefaultTab("Main")
 
--- ============================================================================
 -- CONSTANTS & CONFIGURATION
--- ============================================================================
 
+local zChanging = nExBot.zChanging or function() return false end
 local SEVERITY = { INFO = "INFO", TIP = "TIP", WARNING = "WARN", CRITICAL = "CRIT" }
 
 local SKILL_NAMES = {
@@ -45,9 +44,7 @@ local CONDITION_MAP = {
   { check = "isInFight", key = "timeInCombat", name = "inCombat" }
 }
 
--- ============================================================================
 -- PURE UTILITY FUNCTIONS
--- ============================================================================
 
 -- Safe get with default value
 local function safeGet(fn, default)
@@ -92,19 +89,12 @@ local function expForLevel(lvl)
 end
 
 -- Check if table has data (pure function)
-local function hasData(tbl)
-  if not tbl then return false end
-  return next(tbl) ~= nil
-end
-
 -- Clamp value between min and max (pure function)
 local function clamp(value, min, max)
   return math.max(min, math.min(max, value))
 end
 
--- ============================================================================
 -- PLAYER DATA ACCESSORS (Single Responsibility)
--- ============================================================================
 
 local Player = {}
 
@@ -181,9 +171,7 @@ function Player.levelProgress()
   return { level = lvl, percent = pct, xpNeeded = xpNeeded, xpRemaining = xpNext - currentXp }
 end
 
--- ============================================================================
 -- STORAGE & SESSION (Single Responsibility)
--- ============================================================================
 
 local DEFAULT_METRICS = {
   tilesWalked = 0, kills = 0, spellsCast = 0, potionsUsed = 0, runesUsed = 0,
@@ -269,9 +257,7 @@ local function startSession()
   if EventBus then EventBus.emit("analytics:session:start") end
 end
 
--- ============================================================================
 -- LOOT PARSING (Server message listener)
--- ============================================================================
 
 local COIN_VALUES = {
   ["gold coin"] = 1,
@@ -281,24 +267,6 @@ local COIN_VALUES = {
 
 local function trim(s)
   return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
-end
-
--- Parse values like "1.2k" -> 1200, "2.5m" -> 2500000
-local function parseValue(str)
-  if not str then return 0 end
-  str = trim(str:lower())
-  local num, suffix = str:match("^([%d%.]+)([km]?)$")
-  if not num then
-    -- Try plain number
-    return tonumber(str) or 0
-  end
-  local value = tonumber(num) or 0
-  if suffix == "k" then
-    value = value * 1000
-  elseif suffix == "m" then
-    value = value * 1000000
-  end
-  return math.floor(value)
 end
 
 local function normalizeItemName(name)
@@ -425,7 +393,8 @@ local function recordLoot(entry)
     if nameKey then
       local bucket = analytics.lootItems[nameKey] or {count = 0, value = 0}
       bucket.count = bucket.count + (itm.count or 0)
-      local itemValue = (itm.price or 0) * (itm.count or 0)
+      local unitPrice = COIN_VALUES[nameKey] or (itm.price or 0)
+      local itemValue = unitPrice * (itm.count or 0)
       bucket.value = bucket.value + itemValue
       analytics.lootItems[nameKey] = bucket
       -- Track gold from coins
@@ -450,9 +419,7 @@ local function endSession()
   if EventBus then EventBus.emit("analytics:session:end") end
 end
 
--- ============================================================================
 -- EVENT HANDLERS (Metrics Collection)
--- ============================================================================
 
 onWalk(function(creature)
   if zChanging() then return end
@@ -516,10 +483,8 @@ onPlayerHealthChange(function(healthPercent)
   lastHP, lastHpPercent = currentHP, healthPercent
 end)
 
--- ============================================================================
 -- CONSUMPTION TRACKING API
 -- Provides functions for HealBot and TargetBot to report spell/potion/rune usage
--- ============================================================================
 
 local Analytics = {}
 
@@ -653,9 +618,7 @@ end
 -- Expose Analytics API globally for HealBot/TargetBot integration
 HuntAnalytics = Analytics
 
--- ============================================================================
 -- GLOBAL RUNE TRACKING HOOK
--- ============================================================================
 -- This hooks into ALL useWith calls to track rune usage automatically,
 -- regardless of whether runes are used via TargetBot, combo, hotkey, etc.
 
@@ -689,10 +652,6 @@ local RUNE_ITEM_IDS = {
 
 -- Check if an item is a rune based on ID or name pattern
 local function isRune(itemId)
-  if RUNE_ITEM_IDS[itemId] then
-    return true, RUNE_ITEM_IDS[itemId], "attack"
-  end
-  
   -- Try to get item info from g_things
   if g_things and g_things.getThingType then
     local ok, thing = pcall(function() return g_things.getThingType(itemId, ThingCategoryItem) end)
@@ -742,9 +701,7 @@ onUseWith(function(pos, itemId, target, subType)
   end
 end)
 
--- ============================================================================
 -- PERIODIC UPDATES
--- ============================================================================
 
 local lastConditionCheck = 0
 
@@ -787,10 +744,8 @@ local function updateTracking()
   end
 end
 
--- ============================================================================
 -- INSIGHTS ENGINE (Analysis)
 -- Uses: Weighted scoring, trend analysis, statistical methods, correlation
--- ============================================================================
 
 local Insights = {}
 
@@ -804,9 +759,7 @@ local function addInsight(results, severity, category, message, confidence)
   })
 end
 
--- ============================================================================
 -- STATISTICAL HELPERS (Pure Functions)
--- ============================================================================
 
 -- Calculate weighted average with time decay (recent data matters more)
 local function weightedAverage(values, decayFactor)
@@ -821,7 +774,6 @@ local function weightedAverage(values, decayFactor)
   return weightSum > 0 and (sum / weightSum) or 0
 end
 
--- Calculate standard deviation (consistency measure)
 local function standardDeviation(values, mean)
   if not values or #values < 2 then return 0 end
   mean = mean or 0
@@ -838,24 +790,7 @@ local function normalize(value, min, max)
   return clamp((value - min) / (max - min), 0, 1)
 end
 
--- Calculate percentile rank
-local function percentileRank(value, thresholds)
-  for i, threshold in ipairs(thresholds) do
-    if value <= threshold then return (i - 1) / #thresholds end
-  end
-  return 1.0
-end
-
--- Sigmoid function for smooth scoring transitions
-local function sigmoid(x, midpoint, steepness)
-  midpoint = midpoint or 0
-  steepness = steepness or 1
-  return 1 / (1 + math.exp(-steepness * (x - midpoint)))
-end
-
--- ============================================================================
 -- TREND TRACKING (Rolling Window Analysis)
--- ============================================================================
 
 local trendData = {
   xpPerHour = {},
@@ -904,9 +839,7 @@ local function calculateTrend(values)
   return direction, changePercent
 end
 
--- ============================================================================
 -- ADVANCED METRICS CALCULATION
--- ============================================================================
 
 local function calculateMetrics()
   local m = analytics.metrics
@@ -987,9 +920,7 @@ local function calculateMetrics()
   return metrics
 end
 
--- ============================================================================
 -- INSIGHTS ANALYSIS
--- ============================================================================
 
 function Insights.analyze()
   local results = {}
@@ -1432,9 +1363,7 @@ function Insights.scoreBar(score)
   return string.format("[%s%s] %d/100 (%s)", string.rep("#", filled), string.rep("-", 10 - filled), score, rating)
 end
 
--- ============================================================================
 -- SUMMARY BUILDER (Template Pattern)
--- ============================================================================
 
 local function addSection(lines, title, content)
   table.insert(lines, "[" .. title .. "]")
@@ -1674,9 +1603,7 @@ local function buildSummary()
   return table.concat(lines, "\n")
 end
 
--- ============================================================================
 -- UI
--- ============================================================================
 
 local analyticsWindow = nil
 
@@ -1773,9 +1700,7 @@ local function showAnalytics()
   startLiveUpdates()
 end
 
--- ============================================================================
 -- MACROS (Hidden - runs automatically in background)
--- ============================================================================
 
 -- Background tracking (no visible button)
 macro(5000, function()
@@ -1790,9 +1715,7 @@ end)
 
 macro(1000, function() updateTracking() end)
 
--- ============================================================================
 -- UI BUTTON
--- ============================================================================
 
 UI.Separator();
 
@@ -1830,9 +1753,7 @@ local monsterBtn = UI.Button("Monster Insights", function()
 end)
 if monsterBtn then monsterBtn:setTooltip("View learned monster patterns and samples") end
 
--- ============================================================================
 -- PUBLIC API
--- ============================================================================
 
 nExBot.Analytics = {
   start = startSession,

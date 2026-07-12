@@ -3,7 +3,7 @@ local minimap = modules and modules.game_minimap and modules.game_minimap.minima
 
 -- Early exit if minimap not available
 if not minimap then
-  print("[Minimap] Minimap widget not available, skipping minimap integration")
+  warn("[Minimap] Minimap widget not available, skipping minimap integration")
   return
 end
 
@@ -11,19 +11,15 @@ end
 local function safeAddCaveBotWaypoint(x, y, z)
   -- Check all required CaveBot components exist
   if not CaveBot then
-    print("[Minimap] CaveBot not loaded")
     return false
   end
   if not CaveBot.addAction then
-    print("[Minimap] CaveBot.addAction not available")
     return false
   end
   if not CaveBot.actionList then
-    print("[Minimap] CaveBot.actionList not initialized yet")
     return false
   end
   if not CaveBot.save then
-    print("[Minimap] CaveBot.save not available")
     return false
   end
   
@@ -33,10 +29,9 @@ local function safeAddCaveBotWaypoint(x, y, z)
   end)
   
   if success then
-    print("[CaveBot] Added goto: " .. x .. "," .. y .. "," .. z)
     return true
   else
-    print("[Minimap] Error adding waypoint: " .. tostring(err))
+    warn("[Minimap] Error adding waypoint: " .. tostring(err))
     return false
   end
 end
