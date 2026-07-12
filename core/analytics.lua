@@ -27,11 +27,8 @@ local function getBotId()
 end
 
 local function getVersion()
-  local f = io.open("version.txt", "r")
-  if f then
-    local v = f:read("*a"):gsub("%s+", "")
-    f:close()
-    return v
+  if nExBot and nExBot.version then
+    return nExBot.version
   end
   return "unknown"
 end
