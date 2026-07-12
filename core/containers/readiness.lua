@@ -22,7 +22,7 @@ function Readiness.compute(registry, generation, isPaladin)
   return {
     generation = generation,
     status = status,
-    mainBackpackReady = inspected > 0,
+    mainBackpackReady = status == "ready" or status == "degraded",
     quiverRequired = isPaladin,
     quiverReady = false,
     queuedCount = queued,
