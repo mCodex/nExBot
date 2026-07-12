@@ -1,6 +1,6 @@
 # Containers
 
-Automated container management, auto-opening, quiver handling.
+Automated container management with event-driven BFS, O(1) operations, and generation-based cancellation.
 
 ## Quick Start
 
@@ -17,31 +17,66 @@ Automated container management, auto-opening, quiver handling.
 | Supplies Container | Potions, food, consumables |
 | Runes Container | Attack/utility runes |
 
-## Auto-Open System
+## Architecture
 
-BFS queue with re-scan on timeout:
+The container system runs as 10 focused modules under `core/containers/`:
 
-1. Wait 500ms for containers to load
-2. Open assigned containers
-3. Scan for nested containers, queue for opening
-4. Handle paginated containers
-5. Re-scan parent on safety timeout
-6. Skip monster corpses (dead, remains, body of)
-7. Enforce server limit (max 19 open)
-8. Emit `containers:open_all_complete`
+| Module | Responsibility | Complexity |
+|--------|---------------|------------|
+| `identity.lua` | Physical container identity, generation tagging | O(1) |
+| `queue.lua` | Head/tail FIFO queue | O(1) enqueue/dequeue |
+| `state_machine.lua` | 13 explicit states, generation tracking | O(1) |
+| `registry.lua` | Container registry, incremental item index | O(1) lookup |
+| `bfs.lua` | Event-driven BFS traversal | O(C + I + P) |
+| `scheduler.lua` | UnifiedTick integration, priority scheduling | O(1) |
+| `readiness.lua` | Derived readiness snapshots | O(1) |
+| `client_adapter.lua` | OTClient API wrapper | O(1) |
+| `quiver.lua` | Quiver ownership, vocation detection | O(1) |
+| `discovery.lua` | Orchestrator | O(1) |
 
-### Architecture
+### State Machine
 
-| Component | Responsibility |
-|-----------|----------------|
-| ContainerBFS | BFS queue with O(1) pop |
-| ContainerTracker | Prevent duplicate opens (4s grace) |
-| ContainerScanner | Scan for nested containers |
-| `getCachedContainers()` | Per-tick cache |
+The discovery process follows 13 explicit states:
+
+```
+idle → waitingForSession → discoveringRoots → reconciling → traversing
+                                                        ↓
+                                              waitingForAcknowledgement
+                                                        ↓
+                                                 waitingForPage
+                                                        ↓
+                                                  completed
+```
+
+Any state can transition to `cancelled` (relog) or `failed` (unrecoverable error).
+
+### Generation Tracking
+
+Every login/reconnect increments a generation counter. All candidates, timers, and callbacks carry this generation. Old callbacks from generation N cannot mutate generation N+1.
+
+### Event-Driven BFS
+
+1. Discover roots (main backpack, quiver for paladins)
+2. Reconcile containers already open
+3. Process queue one container at a time
+4. On container opened: inspect contents, discover children
+5. Handle pages sequentially (not pre-scheduled)
+6. Complete when queue empty and no in-flight requests
+
+### Identity
+
+Physical containers identified by:
+```
+generation:rootKind:parentIdentity:slotIndex:itemType:version
+```
+
+Three brown backpacks with the same item ID remain distinct physical instances.
 
 ## Quiver Management
 
-For Paladins — monitors ammo count, refills from supplies container. Works with all arrow/bolt types. Enabled by default.
+For Paladins — the quiver is an independent BFS root. One service owns opening and lifecycle. The quiver manager consumes readiness and indexed contents.
+
+Non-Paladins: no quiver open attempts. Stale quiver state cleared on relog.
 
 ## Configuration
 
@@ -74,10 +109,36 @@ Main BP: Adventurer's Bag
 ## EventBus
 
 ```lua
-EventBus.on("containers:open_all_complete", function()
-  print("All containers opened!")
+-- All containers opened
+EventBus.on("containers:open_all_complete", function(readiness)
+  print("Discovery complete:", readiness.status)
+end)
+
+-- Readiness changes
+EventBus.on("containers:readiness", function(readiness)
+  if readiness.status == "ready" then
+    -- containers available
+  end
+end)
+
+-- Container opened
+EventBus.on("container:open", function(container)
+  -- handle open
 end)
 ```
+
+## Performance
+
+| Operation | Complexity |
+|-----------|------------|
+| Queue enqueue/dequeue | O(1) amortized |
+| Candidate lookup | O(1) |
+| Deduplication | O(1) |
+| Item lookup by type | O(1) |
+| Full discovery | O(C + I + P) |
+| Page traversal | Sequential, ack-driven |
+
+Benchmarks (10k operations): Queue <1ms, Registry <2ms.
 
 ## Troubleshooting
 
@@ -87,4 +148,6 @@ end)
 
 **Items going wrong:** Verify slot order matches in-game layout.
 
-**Closing immediately:** Server limit ~20. Bot enforces 19. Keep assigned under 15–18.
+**Closing immediately:** Server limit ~20. Bot enforces 19. Keep assigned under 15-18.
+
+**Discovery too slow:** Container discovery runs at LOW priority. Critical actions (healing, survival) always take precedence.

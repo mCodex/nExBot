@@ -14,8 +14,9 @@ Technical reference for nExBot internals.
 | 4 | Core libraries (lib, items, configs, database, updater) |
 | 5 | EventBus, UnifiedTick, UnifiedStorage, CreatureCache, ZChangeGuard, KillTracker |
 | 6 | Legacy features (CaveBot, TargetBot, HealBot, AttackBot, Combo, Extras) |
-| 7 | Legacy tools (Containers, Dropper, antiRs, Tools, Equip, EatFood) |
-| 8 | Analytics (Analyzer, HuntAnalyzer, SpyLevel, Supplies, NPC Talk, HoldTarget) |
+| 7 | **Container modules** (queue, identity, state_machine, registry, client_adapter, readiness, bfs, scheduler, quiver, discovery) |
+| 8 | Legacy tools (Containers, Dropper, antiRs, Tools, Equip, EatFood) |
+| 9 | Analytics (Analyzer, HuntAnalyzer, SpyLevel, Supplies, NPC Talk, HoldTarget) |
 
 Each module loads inside `pcall()`. Failures are logged but don't crash other modules.
 
@@ -82,19 +83,21 @@ Circular dependencies avoided by strict phase loading and deferred event subscri
 |---------|---------|-------|
 | Event-Driven | Efficient reactivity | EventBus, HealBot, TargetBot |
 | State Machine | Deterministic attacks | AttackStateMachine |
-| State Machine | Stuck detection | CaveBot WaypointEngine (NORMAL↔RECOVERING) |
+| State Machine | Container discovery (13 states) | Containers state_machine |
+| State Machine | Stuck detection | CaveBot WaypointEngine |
 | Intent Voting | Conflict-free movement | MovementCoordinator |
 | LRU Cache | Bounded memory | Creature configs, pathfinding |
 | Negative Cache | Skip unreachable paths | PathUtils (500ms TTL) |
 | PathCursor Preservation | Avoid redundant A* | Walking engine |
-| Step Pipelining | Smooth keyboard walking | Walking engine (2-step lookahead) |
-| Adaptive Blacklist Decay | Prevent cascading exclusion | CaveBot recovery (15s base, 120s cap) |
+| Step Pipelining | Smooth keyboard walking | Walking engine |
+| Adaptive Blacklist Decay | Prevent cascading exclusion | CaveBot recovery |
 | EWMA | Smooth statistics | Monster tracking, cooldowns |
-| BFS Traversal | Container opening/looting | ContainerOpener, Looting |
+| BFS Traversal | Container opening | Container discovery |
+| Head/Tail Queue | O(1) FIFO operations | Container queue |
+| Generation Tracking | Cancel stale work on relog | Container state machine |
 | Engagement Lock | Anti-zigzag targeting | ScenarioManager |
 | Burst Detection | Z-change protection | EventBus + ZChangeGuard |
-| Extract Pure Functions | Testable domain logic | attack_data, spell_resolver, heal_config, attack_config, combat_executor |
-| SafeCreature | Single pcall wrapper | All creature access via `SC.*` |
+| Extract Pure Functions | Testable domain logic | attack_data, spell_resolver, containers |
 | Table-Driven Delegation | 209 ACL methods | ClientService |
 | Unified Storage Engine | Single JSON backend | utils/storage_engine |
 

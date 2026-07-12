@@ -109,6 +109,23 @@ View: `nExBot.printStartupProfile()`
 | TargetBot | Target evaluation | ~50ms |
 | Hunt Analyzer | Metric calculation | ~20ms |
 | Monster AI | Behavior prediction | ~10ms |
+| **Container Queue** | 10k enqueue/dequeue | <1ms |
+| **Container Registry** | 1k add + lookup | <2ms |
+| **Container State** | 1k transitions | <1ms |
+
+## Container System
+
+Event-driven BFS with O(1) operations:
+
+| Operation | Before | After |
+|-----------|--------|-------|
+| Dequeue | O(n) | O(1) |
+| Candidate lookup | O(n) scan | O(1) |
+| Deduplication | O(n) scan | O(1) |
+| Item lookup | O(C*I) full scan | O(1) |
+| Full discovery | O(C*I) | O(C+I+P) |
+
+Container discovery runs at LOW priority (25) on UnifiedTick. Critical actions always take precedence.
 
 ## Troubleshooting
 

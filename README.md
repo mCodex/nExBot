@@ -1,6 +1,6 @@
 # nExBot
 
-![Version](https://img.shields.io/badge/version-3.6.2-blue)
+![Version](https://img.shields.io/badge/version-4.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Lua](https://img.shields.io/badge/Lua-5.1-purple)
 
@@ -25,18 +25,29 @@ Install paths:
 | **CaveBot** | Waypoint navigation, floor-change safety, supply refills, 50+ pre-built routes |
 | **TargetBot** | 9-stage priority targeting, Monster Insights AI, movement coordination |
 | **Hunt Analyzer** | Session analytics — kills/hr, XP/hr, profit, Hunt Score |
-| **Containers** | Auto-open, quiver management, container roles |
+| **Containers** | Event-driven BFS, O(1) operations, generation tracking, quiver management 🎒 |
 | **Follow Player** | Party hunt — stays near leader while attacking |
 | **Extras** | Anti-RS, alarms, equipment swap, combo system, push max |
 
 ## Architecture
 
 ```
-_Loader.lua (entry)
+ Loader.lua (entry)
 ├── ACL (vBot/OTCR detection + adapter)
 ├── EventBus (event-driven communication)
 ├── UnifiedTick (single 50ms master timer)
 ├── UnifiedStorage (per-character JSON persistence)
+│
+├── Containers 🎒
+│   ├── identity (physical container identity)
+│   ├── queue (head/tail FIFO, O(1) dequeue)
+│   ├── state_machine (13 states, generation tracking)
+│   ├── registry (O(1) lookups, incremental item index)
+│   ├── bfs (event-driven traversal)
+│   ├── scheduler (UnifiedTick integration)
+│   ├── readiness (derived snapshots)
+│   ├── quiver (paladin ownership)
+│   └── discovery (orchestrator)
 │
 ├── HealBot ←── player:health events
 │   └── spell_resolver (conversion functions)
@@ -71,7 +82,7 @@ _Loader.lua (entry)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Test on multiple servers. Follow existing Lua style (2-space indentation).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Run `make check` before submitting. Follow existing Lua style (2-space indentation).
 
 ## License
 
