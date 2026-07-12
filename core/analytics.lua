@@ -5,7 +5,7 @@
   Uses g_http.get for OTClient compatibility (no POST support).
   
   Heartbeat sent after game starts + every 5 minutes.
-  Shutdown signal sent on game end.
+  Last-seen state is retained after game end.
 ]]
 
 local Analytics = {}
@@ -59,12 +59,6 @@ local function sendHeartbeat()
   httpGet(url)
 end
 
-local function sendShutdown()
-  local id = getBotId()
-  local url = API_URL .. "?id=" .. id .. "&delete=true"
-  httpGet(url)
-end
-
 local function startHeartbeat()
   if started then return end
   started = true
@@ -87,7 +81,6 @@ function Analytics.stop()
     removeEvent(heartbeatEvent)
     heartbeatEvent = nil
   end
-  sendShutdown()
 end
 
 nExBot.Analytics = Analytics
