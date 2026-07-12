@@ -4,7 +4,7 @@
   Reports bot usage to nexbot.cc API.
   Uses g_http.get for OTClient compatibility (no POST support).
   
-  Heartbeat sent on startup + every 5 minutes.
+  Heartbeat sent after game starts + every 5 minutes.
   Shutdown signal sent on game end.
 ]]
 
@@ -13,7 +13,8 @@ local Analytics = {}
 local API_URL = "https://www.nexbot.cc/api/track"
 local HEARTBEAT_INTERVAL = 300000 -- 5 minutes in ms
 local botId = nil
-local heartbeatTimer = nil
+local heartbeatEvent = nil
+local started = false
 
 local function getBotId()
   if botId then return botId end
@@ -35,18 +36,14 @@ end
 
 local function httpGet(url)
   if type(g_http) == "table" and type(g_http.get) == "function" then
-    g_http.get(url, function(_data, err)
-      if err then
-        warn("[Analytics] HTTP error: " .. tostring(err))
-      end
+    g_http.get(url, function(data, err)
+      print("[Analytics] g_http resp: data=" .. tostring(data) .. " err=" .. tostring(err))
     end)
     return true
   end
   if type(HTTP) == "table" and type(HTTP.get) == "function" then
-    HTTP.get(url, function(_response, err)
-      if err then
-        warn("[Analytics] HTTP error: " .. tostring(err))
-      end
+    HTTP.get(url, function(response, err)
+      print("[Analytics] HTTP resp: data=" .. tostring(response) .. " err=" .. tostring(err))
     end)
     return true
   end
@@ -57,9 +54,9 @@ local function sendHeartbeat()
   local id = getBotId()
   local version = getVersion()
   local url = API_URL .. "?id=" .. id .. "&version=" .. version
-  if not httpGet(url) then
-    warn("[Analytics] No HTTP backend available")
-  end
+  print("[Analytics] Sending: " .. url)
+  print("[Analytics] g_http=" .. type(g_http) .. " HTTP=" .. type(HTTP))
+  httpGet(url)
 end
 
 local function sendShutdown()
@@ -68,19 +65,29 @@ local function sendShutdown()
   httpGet(url)
 end
 
-function Analytics.start()
+local function startHeartbeat()
+  if started then return end
+  started = true
   sendHeartbeat()
-  heartbeatTimer = periodic(HEARTBEAT_INTERVAL, function()
-    sendHeartbeat()
-  end)
+  local function scheduleNext()
+    heartbeatEvent = schedule(HEARTBEAT_INTERVAL, function()
+      sendHeartbeat()
+      scheduleNext()
+    end)
+  end
+  scheduleNext()
+end
+
+function Analytics.start()
+  schedule(3000, startHeartbeat)
 end
 
 function Analytics.stop()
-  if heartbeatTimer then
-    heartbeatTimer:cancel()
-    heartbeatTimer = nil
+  if heartbeatEvent then
+    removeEvent(heartbeatEvent)
+    heartbeatEvent = nil
   end
   sendShutdown()
 end
 
-return Analytics
+nExBot.Analytics = Analytics

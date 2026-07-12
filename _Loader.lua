@@ -672,8 +672,9 @@ end
 -- ============================================================================
 -- BOT ANALYTICS
 -- ============================================================================
-local analyticsOk, analytics = pcall(dofile, "/core/analytics.lua")
-if analyticsOk and analytics and analytics.start then
+pcall(dofile, "/core/analytics.lua")
+local analytics = nExBot.Analytics
+if analytics and analytics.start then
   pcall(analytics.start)
   if onGameEnd then
     onGameEnd(function()
