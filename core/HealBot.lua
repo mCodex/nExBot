@@ -895,41 +895,35 @@ local function saveAllyCustomPlayers()
   end
 end
 
--- Build config for BotCore
+-- Build config for BotCore (translates UI config → BotCore.FriendHealer shape)
+local PRIORITY_FLAG_MAP = {
+  strong = "useGranSio", medium = "useTioSio", normal = "useSio",
+  area = "useMasRes", health = "useHealthItem", mana = "useManaItem",
+}
+
 local function buildAllyBotCoreConfig()
   local bcConfig = {
     enabled = allyConfig.enabled,
     customPlayers = allyConfig.customPlayers or {},
     conditions = allyConfig.conditions or {},
     settings = {
-            manaItem = getAllySettingValue(1, 268),
-            itemRange = getAllySettingValue(2, 6),
-            healthItem = getAllySettingValue(3, 3160),
-            masResPlayers = getAllySettingValue(4, 2),
-            healAt = getAllySettingValue(5, 80),
-            granSioAt = getAllySettingValue(6, 40),
-            tioSioAt = getAllySettingValue(7, 65),
-            minPlayerHp = getAllySettingValue(8, 80),
-            minPlayerMp = getAllySettingValue(9, 50),
+      manaItem = getAllySettingValue(1, 268), itemRange = getAllySettingValue(2, 6),
+      healthItem = getAllySettingValue(3, 3160), masResPlayers = getAllySettingValue(4, 2),
+      healAt = getAllySettingValue(5, 80), granSioAt = getAllySettingValue(6, 40),
+      tioSioAt = getAllySettingValue(7, 65), minPlayerHp = getAllySettingValue(8, 80),
+      minPlayerMp = getAllySettingValue(9, 50),
     },
-    useSio = false,
-    useGranSio = false,
-    useTioSio = false,
-    useMasRes = false,
-    useHealthItem = false,
-    useManaItem = false,
-    customSpell = false,
-    customSpellName = nil
+    useSio = false, useGranSio = false, useTioSio = false,
+    useMasRes = false, useHealthItem = false, useManaItem = false,
+    customSpell = false, customSpellName = nil,
   }
   for _, p in ipairs(allyConfig.priorities or {}) do
     if p.enabled then
-      if p.strong then bcConfig.useGranSio = true end
-      if p.medium then bcConfig.useTioSio = true end
-      if p.normal then bcConfig.useSio = true end
-      if p.area then bcConfig.useMasRes = true end
-      if p.health then bcConfig.useHealthItem = true end
-      if p.mana then bcConfig.useManaItem = true end
-      if p.custom then
+      local flag = PRIORITY_FLAG_MAP[p.strong and "strong" or p.medium and "medium"
+        or p.normal and "normal" or p.area and "area" or p.health and "health"
+        or p.mana and "mana"]
+      if flag then bcConfig[flag] = true end
+      if p.custom and p.name then
         bcConfig.customSpell = true
         bcConfig.customSpellName = p.name
       end
@@ -938,44 +932,25 @@ local function buildAllyBotCoreConfig()
   return bcConfig
 end
 
-local function initAllyBotCoreHealer()
-  if BotCore and BotCore.FriendHealer and BotCore.FriendHealer.init then
-    local bcConfig = buildAllyBotCoreConfig()
-    BotCore.FriendHealer.init(bcConfig)
-    if BotCore.FriendHealer.setEnabled then
-      BotCore.FriendHealer.setEnabled(allyConfig.enabled)
-    end
-    return true
+local friendHealerMacro  -- forward declaration (assigned inside rootW block)
+
+local function syncAllyBotCore()
+  if not (BotCore and BotCore.FriendHealer) then return end
+  if BotCore.FriendHealer.init then
+    BotCore.FriendHealer.init(buildAllyBotCoreConfig())
   end
-  return false
-end
-
-local function updateAllyBotCoreConfig()
-  if BotCore and BotCore.FriendHealer and BotCore.FriendHealer.init then
-    local bcConfig = buildAllyBotCoreConfig()
-    BotCore.FriendHealer.init(bcConfig)
-    if BotCore.FriendHealer.syncHealEngineSpells then
-      BotCore.FriendHealer.syncHealEngineSpells()
-    end
+  if BotCore.FriendHealer.setEnabled then
+    BotCore.FriendHealer.setEnabled(allyConfig.enabled)
   end
-end
-
--- FriendHealer window
-local friendHealerMacro = nil
-
-local function syncAllyHealerState()
-    if BotCore and BotCore.FriendHealer and BotCore.FriendHealer.setEnabled then
-        BotCore.FriendHealer.setEnabled(allyConfig.enabled)
-        if BotCore.FriendHealer.syncHealEngineSpells then
-            BotCore.FriendHealer.syncHealEngineSpells()
-        end
-    end
-    if HealEngine and HealEngine.setFriendHealingEnabled then
-        HealEngine.setFriendHealingEnabled(allyConfig.enabled)
-    end
-    if friendHealerMacro and friendHealerMacro.setOn then
-        friendHealerMacro:setOn(allyConfig.enabled)
-    end
+  if BotCore.FriendHealer.syncHealEngineSpells then
+    BotCore.FriendHealer.syncHealEngineSpells()
+  end
+  if HealEngine and HealEngine.setFriendHealingEnabled then
+    HealEngine.setFriendHealingEnabled(allyConfig.enabled)
+  end
+  if friendHealerMacro and friendHealerMacro.setOn then
+    friendHealerMacro:setOn(allyConfig.enabled)
+  end
 end
 
 local rootW = g_ui.getRootWidget()
@@ -988,8 +963,7 @@ if rootW then
     friendHealerWindow:hide()
   end
 
-  initAllyBotCoreHealer()
-  syncAllyHealerState()
+  syncAllyBotCore()
 
   local allyConditions = friendHealerWindow.conditions
   local allyTargetSettings = friendHealerWindow.targetSettings
@@ -1003,7 +977,7 @@ if rootW then
         allyConfig.customPlayers[name] = nil
         widget:destroy()
         saveAllyCustomPlayers()
-        updateAllyBotCoreConfig()
+        syncAllyBotCore()
     end
     widget:setText("["..health.."%]  "..name)
     return widget
@@ -1053,7 +1027,7 @@ if rootW then
         allyConfig.customPlayers[name] = health
         createAllyPlayerEntry(name, health)
         saveAllyCustomPlayers()
-        updateAllyBotCoreConfig()
+        syncAllyBotCore()
     end
     clearAllyFields()
   end
@@ -1092,7 +1066,7 @@ local function validateAlly(widget, category)
       allyConfig.conditions[conditionKey] = not allyConfig.conditions[conditionKey]
       w:setChecked(allyConfig.conditions[conditionKey])
       validateAlly(w, category or 0)
-      updateAllyBotCoreConfig()
+      syncAllyBotCore()
       if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
         CharacterDB.set("friendHealer.conditions", allyConfig.conditions)
       end
@@ -1127,7 +1101,7 @@ local function validateAlly(widget, category)
         allyPriority.list:moveChildToIndex(widget, idx-1)
         tbl[idx], tbl[idx-1] = tbl[idx-1], tbl[idx]
         setAllyCrementalButtons()
-        updateAllyBotCoreConfig()
+        syncAllyBotCore()
     end
     widget.decrement.onClick = function()
         local idx = allyPriority.list:getChildIndex(widget)
@@ -1136,7 +1110,7 @@ local function validateAlly(widget, category)
         allyPriority.list:moveChildToIndex(widget, idx+1)
         tbl[idx], tbl[idx+1] = tbl[idx+1], tbl[idx]
         setAllyCrementalButtons()
-        updateAllyBotCoreConfig()
+        syncAllyBotCore()
     end
     widget.enabled:setChecked(action.enabled)
     widget:setColor(action.enabled and "#98BF64" or "#dfdfdf")
@@ -1145,7 +1119,7 @@ local function validateAlly(widget, category)
         widget:setColor(action.enabled and "#98BF64" or "#dfdfdf")
         widget.enabled:setChecked(action.enabled)
         validateAlly(widget, 1)
-        updateAllyBotCoreConfig()
+        syncAllyBotCore()
     end
 
     if action.custom then
@@ -1156,7 +1130,7 @@ local function validateAlly(widget, category)
             widget:destroy()
             setAllyCrementalButtons()
             validateAlly(allyPriority.list:getFirstChild(), 1)
-            updateAllyBotCoreConfig()
+            syncAllyBotCore()
         end
         widget.onDoubleClick = function()
             local window = modules.client_textedit.show(widget, {title = "Custom Spell", description = "Enter below formula for a custom healing spell"})
@@ -1167,7 +1141,7 @@ local function validateAlly(widget, category)
         end
         widget.onTextChange = function(w, text)
             action.name = text
-            updateAllyBotCoreConfig()
+            syncAllyBotCore()
         end
         widget:setTooltip("Double click to edit. X to remove.")
     end
@@ -1208,7 +1182,7 @@ local function validateAlly(widget, category)
             if not (text:find("Range") or text:find("Mas Res")) then
                 widget.text:setText(widget.text:getText().."%")
             end
-            updateAllyBotCoreConfig()
+            syncAllyBotCore()
         end
         if text:find("Range") or text:find("Mas Res") then
             widget.scroll:setMaximum(10)
@@ -1218,7 +1192,7 @@ local function validateAlly(widget, category)
         widget.item:setShowCount(false)
         widget.item.onItemChange = function(w)
             setting.value = w:getItemId()
-            updateAllyBotCoreConfig()
+            syncAllyBotCore()
         end
     end
   end
@@ -1241,7 +1215,7 @@ local function validateAlly(widget, category)
     table.insert(allyConfig.priorities, newSpell)
     local widget = createAllyPriorityWidget(newSpell, #allyConfig.priorities)
     setAllyCrementalButtons()
-    updateAllyBotCoreConfig()
+    syncAllyBotCore()
 
     schedule(100, function()
         local window = modules.client_textedit.show(widget, {title = "Custom Spell", description = "Enter below formula for a custom healing spell"})
@@ -1254,8 +1228,8 @@ local function validateAlly(widget, category)
 
   -- Sync HealEngine friend spells from config
   schedule(100, function()
-    initAllyBotCoreHealer()
-    syncAllyHealerState()
+    syncAllyBotCore()
+    syncAllyBotCore()
     if HealEngine and HealEngine.setFriendSpells then
       local friendSpells = {}
       local healAt = getAllySettingValue(5, 80)
@@ -1309,84 +1283,56 @@ local function validateAlly(widget, category)
     end
   end)
 
-  -- Legacy macro for friend healing (only when BotCore unavailable)
+  -- Friend healing macro (delegates to BotCore.FriendHealer)
   friendHealerMacro = macro(100, function()
     if not allyConfig.enabled then return end
-
-    local useBotCore = BotCore and BotCore.FriendHealer
-    if useBotCore and BotCore.FriendHealer then
-        local actionTaken = BotCore.FriendHealer.tick()
-        if actionTaken then return end
-    end
-    if useBotCore then return end
-
-    if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive(2) then
-        return
-    end
-
-    local minHp = getAllySettingValue(8, 80)
-    local minMp = getAllySettingValue(9, 50)
-    if hppercent() <= minHp or manapercent() <= minMp then return end
-
-    local healTarget = {creature=nil, hp=100}
-    local inMasResRange = 0
-
-    local spectators = {}
-    if getSpectators then
-        local ok, specs = pcall(getSpectators)
-        if ok and specs then spectators = specs end
-    end
-
-    for _, spec in ipairs(spectators) do
-        if spec:isPlayer() and not spec:isLocalPlayer() and spec:canShoot() then
-            local name = spec:getName()
-            local curHp = spec:getHealthPercent()
-            local dist = distanceFromPlayer and distanceFromPlayer(spec:getPosition()) or 99
-
-            if curHp and curHp < 100 then
-                local isCustom = allyConfig.customPlayers and allyConfig.customPlayers[name]
-                if not (isCustom and curHp > isCustom) then
-                    if dist then
-                        inMasResRange = (dist <= 3) and inMasResRange + 1 or inMasResRange
-                        if curHp < healTarget.hp then
-                            healTarget = {creature = spec, hp = curHp}
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    if healTarget.creature then
-        -- Delegate to HealEngine for spell selection
-        if HealEngine and HealEngine.evaluateAlly then
-          local spellList = {}
-          local healAt = getAllySettingValue(5, 80)
-          if allyConfig.priorities then
-            for _, action in ipairs(allyConfig.priorities) do
-              if action.enabled then
-                if action.strong then
-                  table.insert(spellList, {name="exura gran sio", hp=getAllySettingValue(6, 40), mpCost=140, cd=1100, prio=1})
-                elseif action.medium then
-                  table.insert(spellList, {name="exura tio sio", hp=getAllySettingValue(7, 65), mpCost=120, cd=1100, prio=2})
-                elseif action.normal then
-                  table.insert(spellList, {name="exura sio", hp=healAt, mpCost=100, cd=1100, prio=3})
-                elseif action.custom and action.name then
-                  table.insert(spellList, {name=action.name, hp=healAt, mpCost=50, cd=1100, prio=3})
-                end
-              end
-            end
-          end
-          local engineAction = HealEngine.evaluateAlly(healTarget.creature, healTarget.hp, spellList)
-          if engineAction then
-            HealEngine.execute(engineAction)
-            return
-          end
-        end
+    if BotCore and BotCore.FriendHealer and BotCore.FriendHealer.tick then
+      BotCore.FriendHealer.tick()
     end
   end)
 
-  syncAllyHealerState()
+  syncAllyBotCore()
 end
+
+setDefaultTab("Main")
+local fhUI = setupUI([[
+Panel
+  height: 19
+
+  BotSwitch
+    id: title
+    anchors.top: parent.top
+    anchors.left: parent.left
+    text-align: center
+    width: 130
+    !text: tr('Friend Healer')
+
+  Button
+    id: settings
+    anchors.top: prev.top
+    anchors.left: prev.right
+    margin-left: 3
+    height: 17
+    text: Setup
+]])
+if fhUI and fhUI.title then
+  fhUI.title:setOn(allyConfig.enabled)
+  fhUI.title.onClick = function(widget)
+    allyConfig.enabled = not allyConfig.enabled
+    widget:setOn(allyConfig.enabled)
+    syncAllyBotCore()
+  end
+end
+
+if fhUI and fhUI.settings then
+  fhUI.settings.onClick = function()
+    if friendHealerWindow then
+      friendHealerWindow:show()
+      friendHealerWindow:raise()
+      friendHealerWindow:focus()
+    end
+  end
+end
+setDefaultTab("HP")
 
 UI.Separator()

@@ -78,206 +78,101 @@ local RUNE_IDS = {
 -- PRIVATE STATE
 
 local _state = {
-  -- Cached friend list { name = { creature, lastHp, lastUpdate, priority } }
   friends = {},
-  
-  -- Last action timestamps
-  lastHeal = 0,
-  lastPotion = 0,
-  lastRune = 0,
-  lastSpell = 0,
   lastScan = 0,
-  
-  -- Best target from last scan
   bestTarget = nil,
-  
-  -- Configuration
   config = nil,
-  
-  -- Event subscriptions
   subscriptions = {},
-  
-  -- Enabled state (DEFAULT: true for hotkey-style friend healing)
   enabled = true,
-  
-  -- Statistics
   healCount = 0,
   potionCount = 0,
   runeCount = 0,
   spellCount = 0
 }
 
--- COOLDOWN INTEGRATION
+-- COOLDOWN INTEGRATION (delegates to BotCore.Cooldown — single source of truth)
 
--- Check if healing group cooldown is active (group 2)
 local function isHealingGroupOnCooldown()
   if BotCore.Cooldown and BotCore.Cooldown.isHealingOnCooldown then
     return BotCore.Cooldown.isHealingOnCooldown()
   end
-  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
-    return modules.game_cooldown.isGroupCooldownIconActive(2)
+  return false
+end
+
+local function isPotionOnCooldown()
+  if BotCore.Cooldown and BotCore.Cooldown.canUsePotion then
+    return not BotCore.Cooldown.canUsePotion()
   end
   return false
 end
 
--- Check if potion exhaustion is active (group 6)
-local function isPotionOnCooldown()
-  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
-    return modules.game_cooldown.isGroupCooldownIconActive(6)
-  end
-  local currentTime = now or os.time() * 1000
-  return currentTime < _state.lastPotion + POTION_COOLDOWN_MS
-end
-
--- Check if rune exhaustion is active
+-- ponytail: rune cooldown reuses potion group (group 6) — BotCore.Cooldown
+-- doesn't expose a rune-specific check yet; add if rune cooldowns diverge.
 local function isRuneOnCooldown()
-  if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
-    return modules.game_cooldown.isGroupCooldownIconActive(6)
-  end
-  local currentTime = now or os.time() * 1000
-  return currentTime < _state.lastRune + RUNE_COOLDOWN_MS
+  return isPotionOnCooldown()
 end
 
--- Check if can use action with custom delay
-local function canUseAction(lastTime, delay)
-  local currentTime = now or os.time() * 1000
-  return currentTime >= lastTime + (delay or HEAL_COOLDOWN_MS)
-end
-
--- Mark healing action used
 local function markHealingUsed()
-  local currentTime = now or os.time() * 1000
-  _state.lastHeal = currentTime
-  
-  -- Update BotCore cooldown if available
   if BotCore.Cooldown and BotCore.Cooldown.markHealingUsed then
     BotCore.Cooldown.markHealingUsed(SPELL_COOLDOWN_MS)
   end
 end
 
--- HOTKEY-STYLE ITEM USAGE
+-- HOTKEY-STYLE ITEM USAGE (delegates to BotCore.Items)
 
--- Use potion on friend using hotkey-style API
--- @param potionId: potion item ID
--- @param friend: creature to heal
--- @return boolean success
-local function usePotionOnFriend(potionId, friend)
-  if not potionId or not friend then return false end
+local function useItemOnFriend(itemId, friend)
+  if not itemId or not friend then return false end
   if isPotionOnCooldown() then return false end
-  
-  -- Use BotCore.Items if available
-  if BotCore.Items and BotCore.Items.useOn then
-    local success = BotCore.Items.useOn(potionId, friend, 0)
-    if success then
-      _state.lastPotion = now or os.time() * 1000
-      _state.potionCount = _state.potionCount + 1
-      return true
-    end
-    return false
-  end
-  
-  -- Fallback: Direct implementation
-  if g_game.getClientVersion() >= 780 and g_game.useInventoryItemWith then
-    g_game.useInventoryItemWith(potionId, friend, 0)
-    _state.lastPotion = now or os.time() * 1000
-    _state.potionCount = _state.potionCount + 1
-    return true
-  end
-  
-  -- Legacy fallback
-  if g_game.findPlayerItem then
-    local item = g_game.findPlayerItem(potionId, 0)
-    if item then
-      g_game.useWith(item, friend, 0)
-      _state.lastPotion = now or os.time() * 1000
-      _state.potionCount = _state.potionCount + 1
-      return true
-    end
-  end
-  
-  return false
-end
 
--- Use healing rune on friend using hotkey-style API
--- @param runeId: rune item ID
--- @param friend: creature to heal
--- @return boolean success
-local function useRuneOnFriend(runeId, friend)
-  if not runeId or not friend then return false end
-  if isRuneOnCooldown() then return false end
-  
-  -- Use BotCore.Items if available
   if BotCore.Items and BotCore.Items.useOn then
-    local success = BotCore.Items.useOn(runeId, friend, 0)
-    if success then
-      _state.lastRune = now or os.time() * 1000
-      _state.runeCount = _state.runeCount + 1
-      return true
-    end
-    return false
+    return BotCore.Items.useOn(itemId, friend, 0)
   end
-  
-  -- Fallback: Direct implementation
-  if g_game.getClientVersion() >= 780 and g_game.useInventoryItemWith then
-    g_game.useInventoryItemWith(runeId, friend, 0)
-    _state.lastRune = now or os.time() * 1000
-    _state.runeCount = _state.runeCount + 1
+
+  -- ponytail: fallback for when BotCore.Items isn't loaded yet
+  if g_game and g_game.useInventoryItemWith then
+    g_game.useInventoryItemWith(itemId, friend, 0)
     return true
   end
-  
   return false
 end
 
 -- Cast healing spell on friend
--- @param spellName: spell name (e.g., "exura sio")
--- @param friendName: friend's name
--- @param manaCost: mana cost of spell
--- @return boolean success
 local function castHealSpellOnFriend(spellName, friendName, manaCost)
   if not spellName or not friendName then return false end
   if isHealingGroupOnCooldown() then return false end
-  
-  -- Check mana
+
   manaCost = manaCost or 0
-  local currentMana = mana and mana() or (player and player:getMana() or 0)
+  local currentMana = (BotCore.Stats and BotCore.Stats.getMp) and BotCore.Stats.getMp()
+    or (mana and mana()) or 0
   if currentMana < manaCost then return false end
-  
-  -- Cast the spell
+
   local fullSpell = string.format('%s "%s"', spellName, friendName)
   if say then
     say(fullSpell)
-    _state.lastSpell = now or os.time() * 1000
-    _state.spellCount = _state.spellCount + 1
     markHealingUsed()
-    
-    -- Track for analytics
     if HuntAnalytics and HuntAnalytics.trackHealSpell then
       HuntAnalytics.trackHealSpell(fullSpell, manaCost)
     end
-    
     return true
   end
-  
   return false
 end
 
--- PURE FUNCTIONS: Targeting
+-- PURE FUNCTIONS: Targeting (delegates to BotCore.Stats)
 
--- Get self HP percent
 local function getSelfHpPercent()
-  if hppercent then return hppercent() end
   if BotCore.Stats and BotCore.Stats.getHpPercent then
     return BotCore.Stats.getHpPercent()
   end
+  if hppercent then return hppercent() end
   return 100
 end
 
--- Get self mana percent
 local function getSelfMpPercent()
-  if manapercent then return manapercent() end
   if BotCore.Stats and BotCore.Stats.getMpPercent then
     return BotCore.Stats.getMpPercent()
   end
+  if manapercent then return manapercent() end
   return 100
 end
 
@@ -424,6 +319,24 @@ end
 --   config.settings.minPlayerHp - Min self HP% to help friends
 --   config.settings.minPlayerMp - Min self MP% to help friends
 --
+-- Build ally spell list from config flags
+local function buildAllySpellList(config, healAt, granSioAt, tioSioAt, distance)
+  local list = {}
+  if config.customSpell and config.customSpellName and distance <= 7 then
+    list[#list + 1] = {name = config.customSpellName, key = config.customSpellName:lower(), hp = healAt, mpCost = 100, cd = 1100, prio = 1}
+  end
+  if config.useGranSio and distance <= 7 then
+    list[#list + 1] = {name = "exura gran sio", key = "exura_gran_sio", hp = granSioAt, mpCost = 140, cd = 1100, prio = 2}
+  end
+  if config.useTioSio and distance <= 7 then
+    list[#list + 1] = {name = "exura tio sio", key = "exura_tio_sio", hp = tioSioAt, mpCost = 120, cd = 1100, prio = 3}
+  end
+  if config.useSio and distance <= 7 then
+    list[#list + 1] = {name = "exura sio", key = "exura_sio", hp = healAt, mpCost = 100, cd = 1100, prio = 4}
+  end
+  return list
+end
+
 function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
   if not friend or not config then return nil end
   
@@ -463,20 +376,7 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
   -- ========== DELEGATE SPELL SELECTION TO HEALENGINE ==========
   -- Build spell list from config priorities and let HealEngine pick the best
   if HealEngine and HealEngine.evaluateAlly then
-    local spellList = {}
-    if config.customSpell and config.customSpellName and friendHp < healAt and distance <= 7 then
-      table.insert(spellList, {name = config.customSpellName, key = config.customSpellName:lower(), hp = healAt, mpCost = 100, cd = 1100, prio = 1})
-    end
-    if config.useGranSio and friendHp < granSioAt and distance <= 7 then
-      table.insert(spellList, {name = "exura gran sio", key = "exura_gran_sio", hp = granSioAt, mpCost = 140, cd = 1100, prio = 2})
-    end
-    if config.useTioSio and friendHp < tioSioAt and distance <= 7 then
-      table.insert(spellList, {name = "exura tio sio", key = "exura_tio_sio", hp = tioSioAt, mpCost = 120, cd = 1100, prio = 3})
-    end
-    if config.useSio and friendHp < healAt and distance <= 7 then
-      table.insert(spellList, {name = "exura sio", key = "exura_sio", hp = healAt, mpCost = 100, cd = 1100, prio = 4})
-    end
-
+    local spellList = buildAllySpellList(config, healAt, granSioAt, tioSioAt, distance)
     if #spellList > 0 then
       local engineAction = HealEngine.evaluateAlly(friend, friendHp, spellList)
       if engineAction then
@@ -549,22 +449,20 @@ function FriendHealerEnhanced.executeAction(action)
   if not action then return false end
   
   if action.type == "rune" then
-    -- Hotkey-style UH rune on friend
-    local success = useRuneOnFriend(action.runeId, action.target)
+    local success = useItemOnFriend(action.runeId, action.target)
     if success then
       markHealingUsed()
-      _state.healCount = (_state.healCount or 0) + 1
+      _state.healCount = _state.healCount + 1
       if EventBus then
         EventBus.emit("friend:heal_rune", action.name, action.runeId, action.source)
       end
     end
     return success
-    
+
   elseif action.type == "potion" or action.type == "mana_potion" then
-    -- Hotkey-style potion on friend
-    local success = usePotionOnFriend(action.potionId, action.target)
+    local success = useItemOnFriend(action.potionId, action.target)
     if success then
-      _state.potionCount = (_state.potionCount or 0) + 1
+      _state.potionCount = _state.potionCount + 1
       if EventBus then
         EventBus.emit("friend:heal_potion", action.name, action.potionId, action.source)
       end
@@ -583,27 +481,20 @@ function FriendHealerEnhanced.executeAction(action)
     return success
     
   elseif action.type == "area_spell" then
-    -- Area heal spell (exura gran mas res) - no target needed
     if isHealingGroupOnCooldown() then return false end
-    
-    local currentMana = mana and mana() or 0
+    local currentMana = (BotCore.Stats and BotCore.Stats.getMp) and BotCore.Stats.getMp()
+      or (mana and mana()) or 0
     if currentMana < action.manaCost then return false end
-    
     if say then
       say(action.spell)
-      _state.lastSpell = now or os.time() * 1000
-      _state.spellCount = (_state.spellCount or 0) + 1
+      _state.spellCount = _state.spellCount + 1
       markHealingUsed()
-      
-      -- Track for analytics
       if HuntAnalytics and HuntAnalytics.trackHealSpell then
         HuntAnalytics.trackHealSpell(action.spell, action.manaCost)
       end
-      
       if EventBus then
         EventBus.emit("friend:area_heal", action.spell, action.friendCount, action.source)
       end
-      
       return true
     end
     return false
