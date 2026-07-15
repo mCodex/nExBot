@@ -71,96 +71,7 @@ local function detectFeatures()
   return true
 end
 
--- BATCH PATH CALCULATION
--- Calculate paths to multiple destinations at once (much faster than one by one)
-
--- Cache for batch path results
-local batchPathCache = {
-  results = {},           -- destination key -> path
-  timestamp = 0,          -- When cache was last updated
-  ttl = 200,              -- Cache TTL in ms
-  playerPos = nil         -- Player position when cache was generated
-}
-
--- Calculate paths to all monster positions at once
-function OpenTibiaBRTargeting.calculateBatchPaths(playerPos, monsters, maxSteps, flags)
-  if not OpenTibiaBRTargeting.features.findEveryPath then
-    return nil  -- Feature not available
-  end
-  
-  if not playerPos or not monsters or #monsters == 0 then
-    return {}
-  end
-  
-  local currentTime = now or (os.time() * 1000)
-  
-  -- Check cache validity
-  if batchPathCache.playerPos and 
-     batchPathCache.playerPos.x == playerPos.x and
-     batchPathCache.playerPos.y == playerPos.y and
-     batchPathCache.playerPos.z == playerPos.z and
-     (currentTime - batchPathCache.timestamp) < batchPathCache.ttl then
-    return batchPathCache.results
-  end
-  
-  -- Build destinations array
-  local destinations = {}
-  local destToMonster = {}  -- Map destination index to monster
-  
-  for i, monster in ipairs(monsters) do
-    local ok, pos = pcall(function() return monster:getPosition() end)
-    if ok and pos then
-      destinations[#destinations + 1] = pos
-      destToMonster[#destinations] = monster
-    end
-  end
-  
-  if #destinations == 0 then
-    return {}
-  end
-  
-  -- Call OpenTibiaBR's batch pathfinding
-  local ok, pathResults = pcall(function()
-    return g_map.findEveryPath(playerPos, destinations, maxSteps or 50, flags or 0)
-  end)
-  
-  if not ok or not pathResults then
-    log("findEveryPath failed")
-    return nil
-  end
-  
-  -- Process results and map back to monsters
-  local results = {}
-  for i, path in pairs(pathResults) do
-    local monster = destToMonster[i]
-    if monster and path and #path > 0 then
-      local monsterId = nil
-      pcall(function() monsterId = monster:getId() end)
-      if monsterId then
-        results[monsterId] = {
-          path = path,
-          length = #path,
-          monster = monster
-        }
-      end
-    end
-  end
-  
-  -- Update cache
-  batchPathCache.results = results
-  batchPathCache.timestamp = currentTime
-  batchPathCache.playerPos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-  
-  log("Batch calculated " .. tostring(#destinations) .. " paths, " .. tostring(#results) .. " valid")
-  
-  return results
-end
-
--- Get cached path for a specific monster
-function OpenTibiaBRTargeting.getCachedPath(monsterId)
-  local data = batchPathCache.results[monsterId]
-  return data and data.path or nil
-end
+-- Creature reachability and its cache are owned by TargetReachability.
 
 -- LINE-OF-SIGHT TARGETING
 -- Only get creatures that are in direct line of sight (no obstacles)
@@ -412,10 +323,7 @@ function OpenTibiaBRTargeting.integrate()
     return false
   end
   
-  -- Export batch path function for use in target.lua
   TargetBot.OpenTibiaBR = TargetBot.OpenTibiaBR or {}
-  TargetBot.OpenTibiaBR.calculateBatchPaths = OpenTibiaBRTargeting.calculateBatchPaths
-  TargetBot.OpenTibiaBR.getCachedPath = OpenTibiaBRTargeting.getCachedPath
   TargetBot.OpenTibiaBR.getVisibleCreatures = OpenTibiaBRTargeting.getVisibleCreatures
   TargetBot.OpenTibiaBR.getCreatureById = OpenTibiaBRTargeting.getCreatureById
   TargetBot.OpenTibiaBR.isCreatureValid = OpenTibiaBRTargeting.isCreatureValid

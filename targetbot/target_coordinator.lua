@@ -24,7 +24,7 @@ local targetPathfinding = nExBot.target_pathfinding
 -- ═══════════════════════════════════════════════════════════════════════════
 -- OPENTIBIABR TARGETING ENHANCEMENTS (v3.1)
 -- Load enhanced targeting module for OpenTibiaBR-specific optimizations
--- Provides: batch pathfinding, line-of-sight detection, pattern-based AoE
+-- Provides line-of-sight detection and pattern-based AoE helpers.
 -- ═══════════════════════════════════════════════════════════════════════════
 local OpenTibiaBRTargeting = nil
 
@@ -42,10 +42,6 @@ local function hasSightSpectators()
   return otbr and otbr.getVisibleCreatures ~= nil
 end
 
-local function hasBatchPathfinding()
-  local otbr = getOpenTibiaBRTargeting()
-  return otbr and otbr.batchPath ~= nil
-end
 -- Load PathUtils if available (shared module for creature validation)
 local PathUtils = nil
 local SharedHelpers = nExBot.SharedHelpers or {}
@@ -911,117 +907,29 @@ end
 -- Only recalculates when cache is dirty (events occurred)
 
 -- Process a single candidate creature for targeting
-local function processCandidate(creature, pos, isCurrentTarget, batchPaths)
+local function processCandidate(creature, pos, isCurrentTarget)
   if not creature or creature:isDead() or not targetPathfinding.isTargetableCreature(creature) then return nil, nil end
   local cpos = creature:getPosition()
   if not cpos then return nil, nil end
-
-  local okId, creatureId = pcall(function() return creature:getId() end)
-  creatureId = okId and creatureId or nil
-
   local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
+  if not TargetReachability or not TargetReachability.evaluate then return nil, nil end
+  if TargetReachability.isQuarantined and TargetReachability.isQuarantined(creature) then return nil, nil end
 
-  if dist <= 1 then
-    local params = TargetBot.Creature.calculateParams(creature, {1})
-    if params and params.config then
-      return params, {1}
-    end
-  end
-
-  local path = nil
-
-  if creatureId and batchPaths and batchPaths[creatureId] then
-    path = batchPaths[creatureId].path
-    if path and #path > 0 then
-      targetPathfinding.setCachedPath(creatureId, path, pos, cpos)
-    end
-  end
-
-  if not path and creatureId then
-    path = targetPathfinding.getCachedPath(creatureId, pos, cpos)
-  end
-
-  if not path then
-    if MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.isReachable and not isCurrentTarget then
-      local reachResult, reason, cachedPath = MonsterAI.Reachability.isReachable(creature)
-      if reachResult and cachedPath then
-        path = cachedPath
-      elseif not reachResult and dist > 3 then
-        return nil, nil
-      end
-    end
-
-    if not path then
-      local maxStrategies = isCurrentTarget and 2 or 1
-      local pathStrategies = {
-        {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = true, precision = 1},
-        {ignoreLastCreature = true, ignoreNonPathable = true, ignoreCost = true, ignoreCreatures = true, allowOnlyVisibleTiles = false, precision = 1}
-      }
-      for strategyIdx = 1, maxStrategies do
-        local params = pathStrategies[strategyIdx]
-        path = findPath(pos, cpos, 12, params)
-        if path and #path > 0 then break end
-      end
-    end
-
-    if creatureId and path then
-      targetPathfinding.setCachedPath(creatureId, path, pos, cpos)
-    end
-  end
-
-  if (not path or #path == 0) and dist <= 3 then
-    local simplePath = {}
-    local dx = cpos.x - pos.x
-    local dy = cpos.y - pos.y
-    local dir = nil
-    if dx > 0 and dy < 0 then dir = NorthEast or 4
-    elseif dx > 0 and dy > 0 then dir = SouthEast or 5
-    elseif dx < 0 and dy > 0 then dir = SouthWest or 6
-    elseif dx < 0 and dy < 0 then dir = NorthWest or 7
-    elseif dx > 0 then dir = East or 1
-    elseif dx < 0 then dir = West or 3
-    elseif dy > 0 then dir = South or 2
-    elseif dy < 0 then dir = North or 0
-    end
-    if dir then
-      for i = 1, dist do simplePath[i] = dir end
-      path = simplePath
-    end
-  end
-
-  if not path or #path == 0 then
-    if dist > 5 and MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.markBlocked then
-      MonsterAI.Reachability.markBlocked(creature:getId(), "no_path")
-    end
+  local configs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(creature)
+  local config = configs and configs[1] or nil
+  local mode = config and (config.keepDistance or (config.distance or 1) > 1) and "ranged" or "melee"
+  local evaluated = TargetReachability.evaluate(creature, {
+    source = isCurrentTarget and "current_candidate" or "candidate",
+    mode = mode,
+    config = config,
+    minDistance = mode == "ranged" and 1 or 1,
+    maxDistance = mode == "ranged" and ((config and config.distance) or 7) or 1,
+  })
+  if not evaluated.attackable then
+    TargetReachability.quarantine(creature, evaluated)
     return nil, nil
   end
-
-  local pathLength = #path
-  if pathLength > 20 and dist > 8 then
-    local probe = {x = pos.x, y = pos.y, z = pos.z}
-    for i = 1, math.min(3, pathLength) do
-      local dir = path[i]
-      local offset = nil
-      if dir == North or dir == 0 then offset = {x = 0, y = -1}
-      elseif dir == East or dir == 1 then offset = {x = 1, y = 0}
-      elseif dir == South or dir == 2 then offset = {x = 0, y = 1}
-      elseif dir == West or dir == 3 then offset = {x = -1, y = 0}
-      elseif dir == NorthEast or dir == 4 then offset = {x = 1, y = -1}
-      elseif dir == SouthEast or dir == 5 then offset = {x = 1, y = 1}
-      elseif dir == SouthWest or dir == 6 then offset = {x = -1, y = 1}
-      elseif dir == NorthWest or dir == 7 then offset = {x = -1, y = -1}
-      end
-      if offset then
-        probe = {x = probe.x + offset.x, y = probe.y + offset.y, z = probe.z}
-        local Client = getClient()
-        local tile = (Client and Client.getTile) and Client.getTile(probe) or (g_map and g_map.getTile and g_map.getTile(probe))
-        local hasCreature = tile and tile.hasCreature and tile:hasCreature()
-        if tile and not tile:isWalkable() and not hasCreature then
-          return nil, nil
-        end
-      end
-    end
-  end
+  local path = evaluated.path
 
   local params = TargetBot.Creature.calculateParams(creature, path)
   if not params or not params.config then return nil, nil end
@@ -1116,28 +1024,6 @@ recalculateBestTarget = function()
   -- OPENTIBIABR ENHANCEMENT: Pre-calculate batch paths to all monsters
   -- Instead of calculating paths one by one, batch them for ~30-50% speedup
   -- ═══════════════════════════════════════════════════════════════════════════
-  local batchPaths = nil
-  if hasBatchPathfinding() then
-    local otbr = getOpenTibiaBRTargeting()
-    if otbr then
-      -- Filter to only targetable monsters first
-      local targetableMonsters = {}
-      for i = 1, #creatures do
-        local creature = creatures[i]
-        if creature and targetPathfinding.isTargetableCreature(creature) then
-          local cpos = SC.getPosition(creature)
-          if cpos and cpos.z == pos.z then
-            targetableMonsters[#targetableMonsters + 1] = creature
-          end
-        end
-      end
-      -- Calculate all paths at once
-      if #targetableMonsters > 0 then
-        batchPaths = otbr.calculateBatchPaths(pos, targetableMonsters, 50, 0)
-      end
-    end
-  end
-  
   -- Rebuild cache from live creatures
   monsterCache.monsters = {}
   monsterCache.monsterCount = 0
@@ -1161,28 +1047,10 @@ recalculateBestTarget = function()
         local isCurrentTarget = (currentTargetId and id == currentTargetId)
         
         -- Calculate path and params (pass isCurrentTarget for enhanced path finding)
-        -- v3.1: Pass batchPaths for OpenTibiaBR optimization
         local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
-        local params, path = processCandidate(creature, pos, isCurrentTarget, batchPaths)
+        local params, path = processCandidate(creature, pos, isCurrentTarget)
         
-        -- For current target, try harder to find a path if initial attempt failed
-        if isCurrentTarget and (not path or not params or not params.config) then
-          -- Try with relaxed path params
-          local relaxedPath = findPath(pos, cpos, 12, {
-            ignoreLastCreature = true,
-            ignoreNonPathable = true,
-            ignoreCost = true,
-            ignoreCreatures = true,
-            allowOnlyVisibleTiles = false  -- More relaxed
-          })
-          if relaxedPath and #relaxedPath > 0 then
-            path = relaxedPath
-            params = TargetBot.Creature.calculateParams(creature, path)
-          end
-        end
-        
-        -- IMPROVED: Track all creatures, not just those with perfect paths
-        -- Creatures with blocked paths can still be targeted if they're close
+        -- Current and new targets share the same authoritative validation.
         if path and params and params.config then
           params.priority = getAdjustedPriority(creature, params, dist)
           -- Creature is reachable - add to cache
@@ -1208,36 +1076,6 @@ recalculateBestTarget = function()
           if params.priority > bestPriority then
             bestPriority = params.priority
             bestTarget = params
-          end
-        elseif isCurrentTarget and not creature:isDead() then
-          -- v2.2: Current target has no path but is not dead
-          -- Still add it to cache to prevent "losing" the target
-          local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
-          if dist <= 2 then
-            -- Very close - might just be blocked by other creatures, keep targeting
-            local fallbackParams = TargetBot.Creature.calculateParams(creature, {1})  -- Fake short path
-            if fallbackParams and fallbackParams.config then
-              fallbackParams.priority = getAdjustedPriority(creature, fallbackParams, dist)
-              monsterCache.monsters[id] = {
-                creature = creature,
-                path = nil,
-                pathTime = now,
-                lastUpdate = now,
-                reachable = false,
-                closeButBlocked = true
-              }
-              monsterCache.monsterCount = monsterCache.monsterCount + 1
-              currentTargetStillValid = true
-              currentTargetParams = fallbackParams
-              
-              -- Give it a slightly reduced priority but don't abandon it
-              if fallbackParams.priority * 0.8 > bestPriority then
-                bestPriority = fallbackParams.priority * 0.8
-                bestTarget = fallbackParams
-              end
-            end
-          else
-            unreachableCount = unreachableCount + 1
           end
         else
           -- Creature has blocked path - don't add to active targeting
@@ -1588,29 +1426,6 @@ targetbotMacro = macro(250, function()
     liveMonsterCount = monsterCache.monsterCount or 0
   end
 
-  -- HARD STICKY: If we already attack a valid nearby monster on screen, keep it
-  -- Only applies when current target is within 3 tiles (allow switching to adjacent when far)
-  -- Use ACL-safe client getter instead of raw g_game (respects ACL pattern)
-  local Client_hs = getClient()
-  local currentAttack = ClientService.getAttackingCreature()
-  if currentAttack and not currentAttack:isDead() then
-    local okPos, cpos = pcall(function() return currentAttack:getPosition() end)
-    if okPos and cpos and cpos.z == pos.z then
-      local dist = getDistanceBetween(pos, cpos)
-      if dist and dist <= 3 then
-        local cfgs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(currentAttack)
-        if cfgs and cfgs[1] then
-          bestTarget = {
-            config = cfgs[1],
-            creature = currentAttack,
-            danger = cfgs[1].danger or 0,
-            priority = cfgs[1].priority or 1
-          }
-        end
-      end
-    end
-  end
-  
   if not bestTarget then
     setWidgetTextSafe(ui.target.right, "-")
     setWidgetTextSafe(ui.danger.right, "0")

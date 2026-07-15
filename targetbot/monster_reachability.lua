@@ -1,241 +1,356 @@
---[[
-  Monster Reachability Module v3.0
-  
-  Single Responsibility: Smart detection of unreachable creatures
-  to prevent "Creature not reachable" errors. Uses pathfinding,
-  line-of-sight, and tile analysis with aggressive caching.
-  
-  Depends on: monster_ai_core.lua
-  Populates: MonsterAI.Reachability
-]]
+-- Authoritative TargetBot reachability, path cache and quarantine service.
 
-local zChanging = nExBot.zChanging or function() return false end
-local H = MonsterAI._helpers
-local nowMs            = H.nowMs
-local safeGetId        = H.safeGetId
-local safeIsDead       = H.safeIsDead
-local safeIsRemoved    = H.safeIsRemoved
+TargetReachability = TargetReachability or {}
+local R = TargetReachability
+R.VERSION = "4.0"
+R.DEBUG = R.DEBUG or false
 
-local safeIsMonster    = H.safeIsMonster
-local safeCreatureCall = H.safeCreatureCall
-local getClient        = H.getClient
-local isCreatureValid  = H.isCreatureValid
+local cache = {}
+local quarantine = {}
+local stats = { evaluations = 0, cacheHits = 0, pathCalls = 0, rejected = 0 }
+local MAX_ENTRIES = 128
+local CACHE_TTL = 300
+local TEMP_COOLDOWN = 1000
+local HARD_COOLDOWN = 4000
+local HARD_COOLDOWN_MAX = 30000
 
--- STATE
+local function debugEvent(name, data)
+  if not R.DEBUG then return end
+  if EventBus and EventBus.emit then pcall(EventBus.emit, name, data) end
+  if type(print) == "function" then print("[TargetReachability] " .. name .. " " .. tostring(data and data.reason or "")) end
+end
 
-MonsterAI.Reachability = MonsterAI.Reachability or {}
-local R = MonsterAI.Reachability
+local function nowMs()
+  if nExBot and nExBot.Shared and nExBot.Shared.nowMs then return nExBot.Shared.nowMs() end
+  return now or os.time() * 1000
+end
 
-R.cache            = {}
-R.cacheTime        = {}
-R.CACHE_TTL        = 1500
-R.BLOCKED_COOLDOWN = 5000
-R.blockedCreatures = {}
+local function call(object, method, fallback)
+  if not object or type(object[method]) ~= "function" then return fallback end
+  local ok, value = pcall(object[method], object)
+  return ok and value or fallback
+end
 
-R.stats = {
-  checksPerformed = 0, cacheHits = 0, blocked = 0, reachable = 0,
-  byReason = { no_path = 0, blocked_tile = 0, elevation = 0, too_far = 0, no_los = 0 }
+local function creatureId(creature)
+  if SafeCreature and SafeCreature.getId then return SafeCreature.getId(creature) end
+  return call(creature, "getId")
+end
+
+local function creaturePos(creature)
+  if SafeCreature and SafeCreature.getPosition then return SafeCreature.getPosition(creature) end
+  return call(creature, "getPosition")
+end
+
+local function playerPos()
+  local p = player
+  if not p and g_game and g_game.getLocalPlayer then p = g_game.getLocalPlayer() end
+  if SafeCreature and SafeCreature.getPosition then return SafeCreature.getPosition(p) end
+  return call(p, "getPosition")
+end
+
+local function isDead(creature)
+  if not creature then return true end
+  if SafeCreature and SafeCreature.isDead and SafeCreature.isDead(creature) then return true end
+  if SafeCreature and SafeCreature.isRemoved and SafeCreature.isRemoved(creature) then return true end
+  return call(creature, "isDead", false) or call(creature, "isRemoved", false)
+end
+
+local function posKey(p)
+  return p and (tostring(p.x) .. "," .. tostring(p.y) .. "," .. tostring(p.z)) or "?"
+end
+
+local function modeFor(context)
+  context = context or {}
+  if context.mode then return context.mode end
+  local config = context.config or {}
+  if config.keepDistance or config.ranged or (config.distance or 1) > 1 then return "ranged" end
+  return "melee"
+end
+
+local function profileFor(context)
+  context = context or {}
+  local mode = modeFor(context)
+  local config = context.config or {}
+  local minDistance = mode == "melee" and 1 or (context.minDistance or context.marginMin or config.minDistance or 1)
+  local maxDistance = mode == "melee" and 1 or (context.maxDistance or context.marginMax or context.distance or config.distance or 7)
+  return {
+    name = context.profile or (mode == "melee" and "melee_attack_position" or "ranged_attack_position"),
+    mode = mode,
+    marginMin = minDistance,
+    marginMax = maxDistance,
+    ignoreLastCreature = true,
+    ignoreCreatures = context.ignoreCreatures == true,
+    ignoreNonPathable = false,
+    ignoreNonWalkable = false,
+    ignoreCost = false,
+    allowOnlyVisibleTiles = context.allowOnlyVisibleTiles ~= false,
+    precision = 0,
+  }
+end
+
+local function profileKey(p)
+  return table.concat({ p.name, p.mode, p.marginMin, p.marginMax,
+    p.ignoreCreatures and 1 or 0, p.allowOnlyVisibleTiles and 1 or 0 }, ":")
+end
+
+local function makeKey(id, pp, cp, profile)
+  return table.concat({ id, posKey(pp), posKey(cp), profileKey(profile) }, "|")
+end
+
+local function classificationFor(reason)
+  if reason == "creature_blocked" or reason == "incomplete_map" or reason == "no_path_api" then
+    return "temporarily_blocked"
+  end
+  if reason == "different_floor" then return "different_floor" end
+  if reason == "no_line_of_sight" then return "no_line_of_sight" end
+  if reason == "no_attack_position" then return "hard_unreachable" end
+  return "insufficient_information"
+end
+
+local function result(id, pp, cp, profile, attackable, reason, path, capability)
+  return {
+    creatureId = id,
+    reachable = attackable,
+    attackable = attackable,
+    path = path,
+    attackPosition = nil,
+    reason = reason,
+    classification = attackable and "confirmed" or classificationFor(reason),
+    playerPosition = pp,
+    creaturePosition = cp,
+    evaluatedAt = nowMs(),
+    capability = capability or "none",
+    profile = profile.name,
+  }
+end
+
+local OFFSETS = {
+  [0] = { 0, -1 }, [1] = { 1, 0 }, [2] = { 0, 1 }, [3] = { -1, 0 },
+  [4] = { 1, -1 }, [5] = { 1, 1 }, [6] = { -1, 1 }, [7] = { -1, -1 },
 }
 
-local DIR_OFFSETS = Directions.DIR_TO_OFFSET
+local function pathEnd(start, path)
+  local endpoint = { x = start.x, y = start.y, z = start.z }
+  for i = 1, #path do
+    local offset = OFFSETS[path[i]]
+    if not offset then return nil end
+    endpoint.x, endpoint.y = endpoint.x + offset[1], endpoint.y + offset[2]
+  end
+  return endpoint
+end
 
--- CORE CHECK
-
-function R.isReachable(creature, forceRecheck)
-  if not creature then return false, "invalid", nil end
-  if safeIsDead(creature) or safeIsRemoved(creature) then return false, "invalid", nil end
-
-  local id = safeGetId(creature)
-  if not id then return false, "invalid", nil end
-  local nowt = nowMs()
-
-  -- Cache
-  if not forceRecheck then
-    local cr = R.cache[id]
-    local ct = R.cacheTime[id] or 0
-    if cr ~= nil and (nowt - ct) < R.CACHE_TTL then
-      R.stats.cacheHits = R.stats.cacheHits + 1
-      return cr.reachable, cr.reason, cr.path
+local function findPathToRing(pp, cp, maxSteps, profile)
+  local currentDistance = math.max(math.abs(pp.x - cp.x), math.abs(pp.y - cp.y))
+  if currentDistance >= profile.marginMin and currentDistance <= profile.marginMax then
+    return {}, { x = pp.x, y = pp.y, z = pp.z }, "already_in_attack_position"
+  end
+  local fn = type(findPath) == "function" and findPath or nil
+  local capability = fn and "findPath_wrapper" or nil
+  if not fn and PathUtils and type(PathUtils.findPath) == "function" then
+    fn, capability = PathUtils.findPath, "PathUtils.findPath"
+  end
+  if fn then
+    stats.pathCalls = stats.pathCalls + 1
+    local ok, path = pcall(fn, pp, cp, maxSteps, profile)
+    if ok and type(path) == "table" and #path > 0 then
+      return path, pathEnd(pp, path), capability
     end
-    local bl = R.blockedCreatures[id]
-    if bl and (nowt - bl.blockedTime) < R.BLOCKED_COOLDOWN then
-      if bl.attempts < 3 then bl.attempts = bl.attempts + 1
-      else R.stats.cacheHits = R.stats.cacheHits + 1; return false, bl.reason, nil end
-    end
+    return nil, nil, capability, "no_attack_position"
   end
 
-  R.stats.checksPerformed = R.stats.checksPerformed + 1
-
-  local playerPos = player and SafeCreature.getPosition(player) or nil
-  local creaturePos = safeCreatureCall(creature, "getPosition", nil)
-  if not playerPos or not creaturePos then return R.cacheResult(id, false, "no_position", nil) end
-
-  -- Same floor
-  if creaturePos.z ~= playerPos.z then
-    R.stats.byReason.elevation = R.stats.byReason.elevation + 1
-    return R.cacheResult(id, false, "elevation", nil)
-  end
-
-  -- Distance
-  local dist = math.max(math.abs(creaturePos.x - playerPos.x), math.abs(creaturePos.y - playerPos.y))
-  if dist > 15 then
-    R.stats.byReason.too_far = R.stats.byReason.too_far + 1
-    return R.cacheResult(id, false, "too_far", nil)
-  end
-
-  -- Pathfinding
-  local ok, result = pcall(function()
-    return findPath(playerPos, creaturePos, 12, {
-      ignoreCreatures = true, ignoreNonPathable = false, ignoreCost = true, precision = 1
-    })
-  end)
-  if not ok or not result or #result == 0 then
-    R.stats.byReason.no_path = R.stats.byReason.no_path + 1
-    R.markBlocked(id, "no_path")
-    return R.cacheResult(id, false, "no_path", nil)
-  end
-
-  -- Validate first few tiles
-  local probe = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-  for i = 1, math.min(5, #result) do
-    local off = DIR_OFFSETS[result[i]]
-    if off then
-      probe = {x = probe.x + off.x, y = probe.y + off.y, z = probe.z}
-      local C = getClient()
-      local tile = (C and C.getTile) and C.getTile(probe) or (g_map and g_map.getTile and g_map.getTile(probe))
-      if tile then
-        if tile.isWalkable and not tile:isWalkable() then
-          R.stats.byReason.blocked_tile = R.stats.byReason.blocked_tile + 1
-          R.markBlocked(id, "blocked_tile")
-          return R.cacheResult(id, false, "blocked_tile", nil)
-        end
-        local items = tile.getItems and tile:getItems()
-        if items then
-          for _, item in ipairs(items) do
-            if item.isNotWalkable and item:isNotWalkable() then
-              R.stats.byReason.blocked_tile = R.stats.byReason.blocked_tile + 1
-              R.markBlocked(id, "blocked_tile")
-              return R.cacheResult(id, false, "blocked_tile", nil)
-            end
+  -- Last-resort native API has no margin support; probe the small attack ring.
+  if g_map and type(g_map.findPath) == "function" then
+    local bestPath, bestPosition
+    for dx = -profile.marginMax, profile.marginMax do
+      for dy = -profile.marginMax, profile.marginMax do
+        local distance = math.max(math.abs(dx), math.abs(dy))
+        if distance >= profile.marginMin and distance <= profile.marginMax then
+          local candidate = { x = cp.x + dx, y = cp.y + dy, z = cp.z }
+          stats.pathCalls = stats.pathCalls + 1
+          local ok, path, code = pcall(g_map.findPath, pp, candidate, maxSteps, 0)
+          if ok and code == 0 and type(path) == "table" and #path > 0
+            and (not bestPath or #path < #bestPath) then
+            bestPath, bestPosition = path, candidate
           end
         end
       end
     end
+    if bestPath then return bestPath, bestPosition, "g_map.findPath" end
+    return nil, nil, "g_map.findPath", "no_attack_position"
   end
-
-  -- Line of sight (soft)
-  local hasLOS = true
-  if dist <= 7 then
-    local ok2, los = pcall(function()
-      local C = getClient()
-      if C and C.isSightClear then return C.isSightClear(playerPos, creaturePos)
-      elseif g_map and g_map.isSightClear then return g_map.isSightClear(playerPos, creaturePos) end
-      return true
-    end)
-    if ok2 then hasLOS = los end
-  end
-
-  R.stats.reachable = R.stats.reachable + 1
-  R.clearBlocked(id)
-  return R.cacheResult(id, true, hasLOS and "clear" or "no_los_melee_ok", result)
+  return nil, nil, "none", "no_path_api"
 end
 
--- CACHE / BLOCKED MANAGEMENT
-
-function R.cacheResult(id, reachable, reason, path)
-  R.cache[id]     = { reachable = reachable, reason = reason, path = path }
-  R.cacheTime[id] = nowMs()
-  if not reachable then R.stats.blocked = R.stats.blocked + 1 end
-  return reachable, reason, path
+local function hasShot(pp, cp, maxDistance)
+  if g_map and type(g_map.isSightClear) == "function" then
+    local ok, clear = pcall(g_map.isSightClear, pp, cp)
+    if ok then return clear == true, "g_map.isSightClear" end
+  end
+  if g_map and type(g_map.getTile) == "function" then
+    local okTile, tile = pcall(g_map.getTile, cp)
+    if okTile and tile and type(tile.canShoot) == "function" then
+      local ok, clear = pcall(tile.canShoot, tile, maxDistance)
+      if ok then return clear == true, "tile.canShoot" end
+    end
+  end
+  return false, "shoot_api_unavailable"
 end
 
+local function prune(tableValue)
+  local count, oldestKey, oldestAt = 0, nil, math.huge
+  for key, entry in pairs(tableValue) do
+    count = count + 1
+    local at = entry.evaluatedAt or entry.blockedAt or 0
+    if at < oldestAt then oldestKey, oldestAt = key, at end
+  end
+  if count >= MAX_ENTRIES and oldestKey then tableValue[oldestKey] = nil end
+end
+
+function R.evaluate(creature, context)
+  context = context or {}
+  if not context.config and TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
+    local ok, configs = pcall(TargetBot.Creature.getConfigs, creature)
+    if ok and configs then context.config = configs[1] end
+  end
+  local id = creatureId(creature)
+  local pp, cp = playerPos(), creaturePos(creature)
+  local profile = profileFor(context)
+  if not id or isDead(creature) or not pp or not cp then
+    return result(id, pp, cp, profile, false, "invalid_target")
+  end
+  if pp.z ~= cp.z then return result(id, pp, cp, profile, false, "different_floor") end
+
+  local key = makeKey(id, pp, cp, profile)
+  local cached = cache[key]
+  if not context.force and cached and nowMs() - cached.evaluatedAt <= CACHE_TTL then
+    stats.cacheHits = stats.cacheHits + 1
+    cached.cacheHit = true
+    debugEvent("target_path_cache_hit", cached)
+    return cached
+  end
+
+  stats.evaluations = stats.evaluations + 1
+  local path, attackPosition, capability, failure = findPathToRing(pp, cp, context.maxSteps or 15, profile)
+  local evaluated
+  if not path then
+    if failure == "no_attack_position" and not profile.ignoreCreatures then
+      local optimistic = {}
+      for key, value in pairs(profile) do optimistic[key] = value end
+      optimistic.ignoreCreatures = true
+      local probe = findPathToRing(pp, cp, context.maxSteps or 15, optimistic)
+      if probe then failure = "creature_blocked" end
+    end
+    evaluated = result(id, pp, cp, profile, false, failure, nil, capability)
+  elseif profile.mode == "ranged" then
+    local clear, shotCapability = hasShot(attackPosition or pp, cp, profile.marginMax)
+    evaluated = result(id, pp, cp, profile, clear, clear and "reachable" or "no_line_of_sight", path,
+      capability .. "+" .. shotCapability)
+  else
+    evaluated = result(id, pp, cp, profile, true, "reachable", path, capability)
+  end
+  evaluated.attackPosition = attackPosition
+
+  if not evaluated.attackable then stats.rejected = stats.rejected + 1 end
+  prune(cache)
+  cache[key] = evaluated
+  debugEvent("target_reachability_evaluated", evaluated)
+  if not evaluated.attackable then debugEvent("target_candidate_rejected", evaluated) end
+  return evaluated
+end
+
+function R.quarantine(creature, evaluated)
+  local id = creatureId(creature)
+  if not id or not evaluated or evaluated.attackable then return end
+  local previous = quarantine[id]
+  local failures = previous and previous.failureCount + 1 or 1
+  local temporary = evaluated.classification == "temporarily_blocked"
+  local cooldown = temporary and TEMP_COOLDOWN or math.min(HARD_COOLDOWN * (2 ^ (failures - 1)), HARD_COOLDOWN_MAX)
+  prune(quarantine)
+  quarantine[id] = {
+    creatureId = id,
+    reason = evaluated.reason,
+    classification = evaluated.classification,
+    blockedAt = nowMs(),
+    retryAt = nowMs() + cooldown,
+    playerPosition = evaluated.playerPosition,
+    creaturePosition = evaluated.creaturePosition,
+    failureCount = failures,
+    cooldown = cooldown,
+  }
+  debugEvent("target_quarantined", quarantine[id])
+  return quarantine[id]
+end
+
+function R.isQuarantined(creature)
+  local id = type(creature) == "number" and creature or creatureId(creature)
+  local entry = id and quarantine[id]
+  if not entry then return false end
+  if nowMs() >= entry.retryAt then quarantine[id] = nil; return false end
+  return true, entry
+end
+
+function R.invalidate(creatureIdValue)
+  if creatureIdValue then quarantine[creatureIdValue] = nil else quarantine = {} end
+  cache = {}
+end
+
+function R.release(creature, evaluated)
+  R.quarantine(creature, evaluated)
+  R.invalidateCache()
+end
+
+function R.invalidateCache()
+  cache = {}
+  debugEvent("target_path_cache_invalidated", { reason = "explicit" })
+end
+function R.clearCache() R.invalidateCache() end
+function R.clearBlocked(id) if id then quarantine[id] = nil end end
 function R.markBlocked(id, reason)
-  local e = R.blockedCreatures[id]
-  if e then e.attempts = e.attempts + 1; e.reason = reason
-  else R.blockedCreatures[id] = { blockedTime = nowMs(), attempts = 1, reason = reason } end
+  if not id then return end
+  R.quarantine({ getId = function() return id end }, {
+    attackable = false, reason = reason or "no_attack_position", classification = classificationFor(reason)
+  })
 end
 
-function R.clearBlocked(id) R.blockedCreatures[id] = nil end
-function R.clearCache()      R.cache = {}; R.cacheTime = {} end
+function R.isReachable(creature, force)
+  local evaluated = R.evaluate(creature, { force = force == true })
+  return evaluated.attackable, evaluated.reason, evaluated.path, evaluated
+end
 
+function R.validateTarget(creature, context)
+  local evaluated = R.evaluate(creature, context)
+  return evaluated.attackable, evaluated.reason, evaluated.path, evaluated
+end
+
+function R.isBlocked(id) return R.isQuarantined(id) end
+function R.getCachedPath(id)
+  for _, entry in pairs(cache) do if entry.creatureId == id then return entry.path end end
+end
 function R.cleanup()
-  local nowt   = nowMs()
-  local expiry = R.BLOCKED_COOLDOWN * 2
-  for id, d in pairs(R.blockedCreatures) do
-    if (nowt - d.blockedTime) > expiry then R.blockedCreatures[id] = nil end
-  end
-  for id, t in pairs(R.cacheTime) do
-    if (nowt - t) > R.CACHE_TTL * 3 then R.cache[id] = nil; R.cacheTime[id] = nil end
-  end
+  local t = nowMs()
+  for key, entry in pairs(cache) do if t - entry.evaluatedAt > CACHE_TTL * 3 then cache[key] = nil end end
+  for id, entry in pairs(quarantine) do if t >= entry.retryAt then quarantine[id] = nil end end
 end
-
--- BATCH & ACCESSORS
-
-function R.filterReachable(creatures)
-  local reach, unreach = {}, {}
-  for _, c in ipairs(creatures) do
-    local ok, reason = R.isReachable(c)
-    if ok then reach[#reach+1] = c else unreach[#unreach+1] = { creature = c, reason = reason } end
-  end
-  return reach, unreach
-end
-
-function R.getCachedPath(cid) local c = R.cache[cid]; return c and c.path or nil end
-
-function R.isBlocked(cid)
-  local b = R.blockedCreatures[cid]
-  if not b then return false end
-  if (nowMs() - b.blockedTime) > R.BLOCKED_COOLDOWN then R.blockedCreatures[cid] = nil; return false end
-  return true, b.reason, b.attempts
-end
-
-function R.validateTarget(creature)
-  if not creature then return false, "no_creature" end
-  local ok, reason, path = R.isReachable(creature)
-  if not ok and EventBus and EventBus.emit then EventBus.emit("reachability:blocked", creature, reason) end
-  return ok, reason, path
-end
-
 function R.getStats()
-  local bc, cc = 0, 0
-  for _ in pairs(R.blockedCreatures) do bc = bc + 1 end
-  for _ in pairs(R.cache) do cc = cc + 1 end
-  return { checksPerformed = R.stats.checksPerformed, cacheHits = R.stats.cacheHits,
-           blocked = R.stats.blocked, reachable = R.stats.reachable,
-           byReason = R.stats.byReason, blockedCount = bc, cacheSize = cc }
+  local q = 0
+  for _ in pairs(quarantine) do q = q + 1 end
+  return { evaluations = stats.evaluations, cacheHits = stats.cacheHits, pathCalls = stats.pathCalls,
+    rejected = stats.rejected, quarantined = q }
 end
 
--- TICK REGISTRATION
+MonsterAI = MonsterAI or {}
+MonsterAI.Reachability = R
+
+if EventBus and EventBus.on then
+  EventBus.on("player:position", function() R.invalidateCache() end)
+  EventBus.on("creature:move", function(creature) R.invalidate(creatureId(creature), "creature_moved") end)
+  EventBus.on("monster:disappear", function(creature) R.invalidate(creatureId(creature), "disappeared") end)
+end
 
 if UnifiedTick and UnifiedTick.register then
-  UnifiedTick.register({ id = "monsterai_reachability_cleanup", interval = 10000,
-    priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.IDLE or 10,
-    callback = function() pcall(R.cleanup) end })
-else
-  macro(10000, function()
-    if zChanging() then
-      return
-    end
-    pcall(R.cleanup)
-  end)
+  UnifiedTick.register({ id = "target_reachability_cleanup", interval = 5000, priority = 10, callback = R.cleanup })
+elseif type(macro) == "function" then
+  macro(5000, R.cleanup)
 end
 
--- EventBus hooks
-if EventBus and EventBus.on then
-  EventBus.on("player:position", function(newPos, oldPos)
-    if TargetBot.isOff() then return end
-    if oldPos then
-      local d = math.max(math.abs(newPos.x - oldPos.x), math.abs(newPos.y - oldPos.y))
-      if d > 2 then R.clearCache() end
-    end
-  end)
-  EventBus.on("creature:move", function(creature)
-    if TargetBot.isOff() then return end
-    if creature and safeIsMonster(creature) then
-      local id = safeGetId(creature)
-      if id and R.blockedCreatures[id] then R.clearBlocked(id); R.cache[id] = nil; R.cacheTime[id] = nil end
-    end
-  end)
-end
-
-if MonsterAI.DEBUG then print("[MonsterAI] Reachability module v3.0 loaded") end
+return R

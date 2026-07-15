@@ -21,40 +21,10 @@ local RELAXED_PATH_PARAMS = {
   precision = 1
 }
 
-local PathCache = {
-  entries = {},
-  TTL = 400
-}
-
-local function cleanupPathCache()
-  local currentTime = now or (os.time() * 1000)
-  local cutoff = currentTime - PathCache.TTL * 2
-  for id, entry in pairs(PathCache.entries) do
-    if entry.time < cutoff then
-      PathCache.entries[id] = nil
-    end
-  end
-end
-
-local function getCachedPath(creatureId, playerPos, creaturePos)
-  local entry = PathCache.entries[creatureId]
-  local currentTime = now or (os.time() * 1000)
-  if entry and (currentTime - entry.time) < PathCache.TTL then
-    if entry.playerZ == playerPos.z and entry.creatureZ == creaturePos.z then
-      return entry.path
-    end
-  end
-  return nil
-end
-
-local function setCachedPath(creatureId, path, playerPos, creaturePos)
-  PathCache.entries[creatureId] = {
-    path = path,
-    time = now or (os.time() * 1000),
-    playerZ = playerPos.z,
-    creatureZ = creaturePos.z
-  }
-end
+-- Creature path caching lives exclusively in TargetReachability.
+local function cleanupPathCache() end
+local function getCachedPath() return nil end
+local function setCachedPath() end
 
 local function findPathInternal(pos, cpos, maxDist, params)
   return findPath(pos, cpos, maxDist, params)
@@ -131,7 +101,6 @@ nExBot.target_pathfinding = {
   getCachedPath = getCachedPath,
   setCachedPath = setCachedPath,
   cleanupPathCache = cleanupPathCache,
-  PathCache = PathCache,
   PATH_PARAMS = PATH_PARAMS,
   RELAXED_PATH_PARAMS = RELAXED_PATH_PARAMS,
   findPath = findPathInternal,
