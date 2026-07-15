@@ -144,6 +144,8 @@ local state = {
   lastStopAt      = 0,
   lastSwitchAt    = 0,
   pendingSwitch   = nil,   -- { creature, priority } or nil
+  boundaryFailure = nil,
+  progress        = nil,
 
   -- Hold-target memory (replaces core/hold_target.lua)
   holdTargetId    = nil,
@@ -191,6 +193,7 @@ local function transition(to, reason)
     state.lastStopAt = nowMs()
     state.retries = 0
     state.currentTimeout = 0
+    state.progress = nil
   end
 
   if EventBus and EventBus.emit then
@@ -237,6 +240,20 @@ end
 local function sendAttack(creature, reason)
   if not creature or cDead(creature) then return false end
   ensureDeps()
+
+  -- Final bot-owned attack boundary. Every initial send and retry routes here.
+  if TargetReachability and TargetReachability.evaluate then
+    local evaluated = TargetReachability.evaluate(creature, { source = "attack_boundary" })
+    if not evaluated.attackable then
+      state.boundaryFailure = evaluated
+      if TargetReachability.quarantine then TargetReachability.quarantine(creature, evaluated) end
+      if state.holdTargetId == cId(creature) then
+        state.holdTargetId, state.holdTargetName = nil, nil
+      end
+      log("Attack blocked: " .. tostring(evaluated.reason))
+      return false
+    end
+  end
 
   local t = nowMs()
   if (t - state.lastCommandAt) < CC.COMMAND_COOLDOWN then return false end
@@ -292,11 +309,13 @@ end
 
 -- TARGET MANAGEMENT
 
-local function clearTarget()
+local function clearTarget(rememberHold)
   -- Save hold-target memory before clearing
-  if state.targetId and state.creature and not cDead(state.creature) then
+  if rememberHold ~= false and state.targetId and state.creature and not cDead(state.creature) then
     state.holdTargetId   = state.targetId
     state.holdTargetName = cName(state.creature)
+  elseif rememberHold == false then
+    state.holdTargetId, state.holdTargetName = nil, nil
   end
   state.creature    = nil
   state.targetId    = nil
@@ -315,6 +334,7 @@ local function setTarget(creature, priority, reason)
   state.pendingSwitch  = nil
   state.lastSwitchAt   = nowMs()
   state.currentTimeout = 0
+  state.boundaryFailure = nil
   state.stats.switches = state.stats.switches + 1
 
   -- Update hold memory
@@ -323,7 +343,12 @@ local function setTarget(creature, priority, reason)
 
   transition(STATE.ENGAGING, reason or "new_target")
   -- Fire attack immediately (saves 100-250ms vs waiting for next tick)
-  sendAttack(creature, "engage_immediate")
+  if not sendAttack(creature, "engage_immediate") then
+    clearTarget(false)
+    transition(STATE.IDLE, "reachability_blocked")
+    return false
+  end
+  return true
 end
 
 -- SWITCH EVALUATION (simplified — no MonsterAI coupling)
@@ -429,7 +454,9 @@ local function handleIdle()
       local ok, specs = pcall(BotCore.Creatures.getNearby, 7, 5)
       specs = ok and specs or {}
       for _, spec in ipairs(specs) do
-        if cId(spec) == state.holdTargetId and not cDead(spec) then
+        local quarantined = TargetReachability and TargetReachability.isQuarantined
+          and TargetReachability.isQuarantined(spec)
+        if cId(spec) == state.holdTargetId and not cDead(spec) and not quarantined then
           log("Hold-target re-acquired: " .. cName(spec))
           setTarget(spec, state.priority, "hold_reacquire")
           return
@@ -446,6 +473,9 @@ local function handleIdle()
   -- Passive sync: adopt game's current target
   local gt = gameTarget()
   if gt and not cDead(gt) then
+    -- Manual client attacks stay client-controlled; only adopt targets the bot can validate.
+    if TargetReachability and TargetReachability.evaluate
+      and not TargetReachability.evaluate(gt, { source = "passive_sync" }).attackable then return end
     state.creature      = gt
     state.targetId      = cId(gt)
     state.hp            = cHp(gt)
@@ -465,7 +495,7 @@ local function handleEngaging()
   -- Target died?
   if not state.creature or cDead(state.creature) then
     state.stats.kills = state.stats.kills + 1
-    clearTarget()
+    clearTarget(false)
     transition(STATE.IDLE, "target_died")
     return
   end
@@ -500,7 +530,14 @@ local function handleEngaging()
     state.retries = state.retries + 1
     if state.retries >= CC.REAFFIRM_RETRY_MAX then
       log("Engage failed after " .. state.retries .. " retries (backoff)")
-      clearTarget()
+      if TargetReachability and TargetReachability.evaluate then
+        local failed = TargetReachability.evaluate(state.creature, { source = "engage_timeout" })
+        failed = { attackable = false, reachable = false, reason = "attack_unconfirmed",
+          classification = "temporarily_blocked", playerPosition = failed.playerPosition,
+          creaturePosition = failed.creaturePosition }
+        TargetReachability.quarantine(state.creature, failed)
+      end
+      clearTarget(false)
       transition(STATE.IDLE, "timeout")
       return
     end
@@ -515,7 +552,10 @@ local function handleEngaging()
   end
 
   -- Send attack command (rate-limited by COMMAND_COOLDOWN internally)
-  sendAttack(state.creature, "engage")
+  if not sendAttack(state.creature, "engage") and state.boundaryFailure then
+    clearTarget(false)
+    transition(STATE.IDLE, "reachability_blocked")
+  end
 end
 
 --- LOCKED: Attack confirmed.  Grace-based nil tolerance + keepalive.
@@ -538,7 +578,11 @@ local function handleLocked()
   if isConfirmed() then
     state.lastConfirmedAt = nowMs()
   else
-    sendAttack(state.creature, "lock_recover")
+    if not sendAttack(state.creature, "lock_recover") and state.boundaryFailure then
+      clearTarget(false)
+      transition(STATE.IDLE, "reachability_blocked")
+      return
+    end
     if (nowMs() - state.lastConfirmedAt) > CC.GRACE_PERIOD then
       log("Attack lost after " .. CC.GRACE_PERIOD .. "ms grace")
       state.retries = 0
@@ -572,7 +616,7 @@ local function update()
   -- TargetBot must be enabled
   if TargetBot and TargetBot.isOn and not TargetBot.isOn() then
     if state.current ~= STATE.IDLE then
-      clearTarget()
+      clearTarget(false)
       transition(STATE.IDLE, "targetbot_off")
     end
     return
@@ -593,6 +637,35 @@ local function update()
 
   updatePlayer()
   if not player then return end
+
+  -- Active targets can become unreachable after either endpoint or the map changes.
+  if state.creature and TargetReachability and TargetReachability.evaluate then
+    local evaluated = TargetReachability.evaluate(state.creature, { source = "active_monitor" })
+    if not evaluated.attackable then
+      TargetReachability.quarantine(state.creature, evaluated)
+      cancelAttack()
+      clearTarget(false)
+      transition(STATE.IDLE, "target_became_unreachable")
+      return
+    end
+    local pp, cp = evaluated.playerPosition, evaluated.creaturePosition
+    local signature = pp and cp and table.concat({ pp.x, pp.y, pp.z, cp.x, cp.y, cp.z,
+      #(evaluated.path or {}), cHp(state.creature), isConfirmed() and 1 or 0 }, ":")
+    if signature and state.progress and state.progress.signature == signature
+      and nowMs() - state.progress.at >= 5000 and not isConfirmed() then
+      local stalled = {}
+      for key, value in pairs(evaluated) do stalled[key] = value end
+      stalled.attackable, stalled.reachable = false, false
+      stalled.reason, stalled.classification = "movement_stalled", "temporarily_blocked"
+      TargetReachability.quarantine(state.creature, stalled)
+      cancelAttack()
+      clearTarget(false)
+      transition(STATE.IDLE, "stuck_detected")
+      return
+    elseif signature and (not state.progress or state.progress.signature ~= signature) then
+      state.progress = { signature = signature, at = nowMs() }
+    end
+  end
 
   -- Dispatch
   if state.current == STATE.IDLE then
@@ -634,6 +707,14 @@ function AttackStateMachine.requestAttack(creature, priority)
   ensureDeps()
   if (nowMs() - state.lastStopAt) < CC.STOP_DEBOUNCE then return false end
 
+  if TargetReachability and TargetReachability.evaluate then
+    local evaluated = TargetReachability.evaluate(creature, { source = "request" })
+    if not evaluated.attackable then
+      if TargetReachability.quarantine then TargetReachability.quarantine(creature, evaluated) end
+      return false
+    end
+  end
+
   local id = cId(creature)
 
   -- Same target → just update priority if higher, no-op otherwise.
@@ -647,8 +728,7 @@ function AttackStateMachine.requestAttack(creature, priority)
 
   -- New target
   if state.current == STATE.IDLE then
-    setTarget(creature, priority, "request")
-    return true
+    return setTarget(creature, priority, "request")
   end
 
   -- ENGAGING or LOCKED with different target → queue for switch eval
@@ -660,19 +740,25 @@ end
 function AttackStateMachine.forceAttack(creature)
   if not creature or cDead(creature) then return false end
 
+  if TargetReachability and TargetReachability.evaluate then
+    local evaluated = TargetReachability.evaluate(creature, { source = "force" })
+    if not evaluated.attackable then
+      if TargetReachability.quarantine then TargetReachability.quarantine(creature, evaluated) end
+      return false
+    end
+  end
+
   local id = cId(creature)
   if id == state.targetId and state.current ~= STATE.IDLE then
     -- Already targeting — just refresh
     state.creature = creature
     state.retries  = 0
     state.currentTimeout = 0
-    sendAttack(creature, "force_refresh")
-    return true
+    return sendAttack(creature, "force_refresh")
   end
 
   state.lastStopAt = 0
-  setTarget(creature, getConfigPriority(creature) * 100, "force")
-  return true
+  return setTarget(creature, getConfigPriority(creature) * 100, "force")
 end
 
 --- Stop attacking.
@@ -702,6 +788,8 @@ function AttackStateMachine.reset()
   state.lastStopAt      = 0
   state.lastSwitchAt    = 0
   state.pendingSwitch   = nil
+  state.boundaryFailure = nil
+  state.progress        = nil
   state.holdTargetId    = nil
   state.holdTargetName  = nil
   state.skipList        = {}
@@ -753,6 +841,8 @@ if EventBus then
     if id == state.targetId then
       state.lastConfirmedAt = nowMs()
     elseif state.current ~= STATE.IDLE then
+      if TargetReachability and TargetReachability.evaluate
+        and not TargetReachability.evaluate(creature, { source = "external_sync" }).attackable then return end
       -- External override (player click, party sync)
       state.creature      = creature
       state.targetId      = id
@@ -773,7 +863,7 @@ if EventBus then
       state.hp = percent or 0
       if percent and percent <= 0 then
         state.stats.kills = state.stats.kills + 1
-        clearTarget()
+        clearTarget(false)
         transition(STATE.IDLE, "health_zero")
       end
     end
@@ -784,7 +874,7 @@ if EventBus then
     if not creature then return end
     if cId(creature) == state.targetId then
       state.stats.kills = state.stats.kills + 1
-      clearTarget()
+      clearTarget(false)
       transition(STATE.IDLE, "disappeared")
     end
   end, 50)

@@ -817,26 +817,22 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   local playerPos = player:getPosition()
   local creaturePos = creature:getPosition()
   if not playerPos or not creaturePos then return end
-  
   local dist = chebyshev(playerPos, creaturePos)
-  
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- PATH VALIDATION: Never attack unreachable targets
-  -- Verify path exists before attacking (prevents attacking through walls, etc.)
-  -- ═══════════════════════════════════════════════════════════════════════════
-  if dist > 1 then
-    -- Re-validate path if not provided or stale
-    if not path then
-      local validatedPath, pathLen, reachable = EventTargeting.PathValidator.validate(playerPos, creaturePos)
-      if not reachable then
-        if EventTargeting.DEBUG then
-          print("[EventTargeting] BLOCKED: " .. creature:getName() .. " is unreachable (no path)")
-        end
-        return  -- Do NOT attack unreachable targets
-      end
-      path = validatedPath
-    end
+
+  -- Supplied paths are hints only; authoritative metadata-aware validation cannot be bypassed.
+  if not TargetReachability or not TargetReachability.evaluate then return end
+  local configs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(creature)
+  local config = configs and configs[1] or nil
+  local mode = config and (config.keepDistance or (config.distance or 1) > 1) and "ranged" or "melee"
+  local evaluated = TargetReachability.evaluate(creature, {
+    source = "event_acquisition", mode = mode, config = config,
+    maxDistance = mode == "ranged" and ((config and config.distance) or 7) or 1,
+  })
+  if not evaluated.attackable then
+    TargetReachability.quarantine(creature, evaluated)
+    return
   end
+  path = evaluated.path
   
   -- ═══════════════════════════════════════════════════════════════════════════
   -- SET CHASE MODE BEFORE ATTACKING (Critical for OTClient)
