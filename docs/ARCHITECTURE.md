@@ -102,7 +102,7 @@ Normal container discovery (priority 25) cannot starve critical actions (priorit
 | 6 | Feature modules (CaveBot, TargetBot, HealBot, AttackBot, Combo, Extras) |
 | 7 | **Container modules** (queue, identity, state_machine, registry, client_adapter, readiness, bfs, scheduler, quiver, discovery) |
 | 8 | Legacy tools (Containers, Dropper, antiRs, Tools, Equip, EatFood) |
-| 9 | Analytics (Analyzer, HuntAnalyzer, SpyLevel, Supplies, NPC Talk, HoldTarget) |
+| 9 | Analytics (Tactical Intelligence, SpyLevel, Supplies, NPC Talk, HoldTarget) |
 
 Each module loads inside `pcall()`. Failures are logged but don't crash other modules.
 
@@ -125,7 +125,7 @@ Central event dispatcher. Modules subscribe without interfering with each other.
 |-------|--------|-----------|
 | `creature:appear` | Native callback | TargetBot, Monster AI |
 | `creature:disappear` | Native callback | TargetBot, Looting |
-| `creature:health` | Native callback | TargetBot, Hunt Analyzer |
+| `creature:health` | Native callback | TargetBot, Tactical Intelligence |
 | `player:health` | Native callback | HealBot |
 | `player:position` | Native callback | CaveBot, Spy Level |
 | `effect:missile` | Native callback | Monster AI Spell Tracker |

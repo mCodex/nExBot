@@ -105,7 +105,7 @@ Combat execution is in `core/attack/combat_executor.lua` — uses dependency inj
 
 ## Analytics
 
-Reports to Hunt Analyzer: spell counts, rune counts, empowerment buffs, total attacks.
+Reports to Tactical Intelligence: spell counts, rune counts, empowerment buffs, total attacks.
 
 ## Troubleshooting
 

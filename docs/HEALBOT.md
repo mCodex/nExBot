@@ -118,4 +118,4 @@ Profile defaults and validation are in `core/heal/heal_config.lua` — pure func
 
 - **CaveBot:** Keeps you alive during walks. Critical HP pauses navigation.
 - **TargetBot:** Responds to combat damage. Support spells enhance survivability.
-- **Hunt Analyzer:** Every cast/use reported for analytics.
+- **Tactical Intelligence:** Every cast/use reported for analytics.

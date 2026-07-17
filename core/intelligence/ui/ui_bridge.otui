@@ -21,23 +21,19 @@ IntelligenceConsoleWindow < MainWindow
     margin-top: 8
     margin-bottom: 8
 
-  ScrollablePanel
-    id: content
+  MultilineTextEdit
+    id: contentText
     anchors.top: section.bottom
     anchors.left: parent.left
     anchors.right: scroll.left
     anchors.bottom: buttons.top
     margin: 8
     vertical-scrollbar: scroll
-
-    Label
-      id: text
-      anchors.top: parent.top
-      anchors.left: parent.left
-      anchors.right: parent.right
-      text-wrap: true
-      text-auto-resize: true
-      font: verdana-11px-monochrome
+    text-wrap: true
+    selectable: true
+    editable: false
+    font: verdana-11px-monochrome
+    color: #c0c0c0
 
   Panel
     id: buttons

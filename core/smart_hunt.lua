@@ -254,7 +254,9 @@ local function startSession()
   
   if HealBot and HealBot.resetAnalytics then HealBot.resetAnalytics() end
   if AttackBot and AttackBot.resetAnalytics then AttackBot.resetAnalytics() end
-  if EventBus then EventBus.emit("analytics:session:start") end
+  if EventBus then
+  EventBus.emit("analytics:session_started")
+  end
 end
 
 -- LOOT PARSING (Server message listener)
@@ -416,7 +418,9 @@ end)
 
 local function endSession()
   analytics.session.active = false
-  if EventBus then EventBus.emit("analytics:session:end") end
+  if EventBus then
+  EventBus.emit("analytics:session_ended")
+  end
 end
 
 -- EVENT HANDLERS (Metrics Collection)
@@ -448,7 +452,7 @@ if onPlayerHealthChange then
   onPlayerHealthChange(function(healthPercent)
     if healthPercent and healthPercent > 0 and not isSessionActive() then
       startSession()
-      print("[HuntAnalyzer] New session started on relogin")
+      print("[Analytics] New session started on relogin")
     end
   end)
 end
@@ -1603,103 +1607,6 @@ local function buildSummary()
   return table.concat(lines, "\n")
 end
 
--- UI
-
-local analyticsWindow = nil
-
--- Live update flag for analytics window (must be defined before showAnalytics)
-local liveUpdatesActive = false
-local lastSummaryText = ""
-
-local function stopLiveUpdates()
-  liveUpdatesActive = false
-end
-
-local function doLiveUpdate()
-  if not liveUpdatesActive then return end
-  
-  if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
-    pcall(function()
-      local newText = buildSummary()
-      if newText ~= lastSummaryText then
-        analyticsWindow.content.textContent:setText(newText)
-        lastSummaryText = newText
-      end
-    end)
-    -- Schedule next update
-    schedule(1000, doLiveUpdate)
-  else
-    -- Window closed, stop live updates
-    liveUpdatesActive = false
-  end
-end
-
-local function startLiveUpdates()
-  if liveUpdatesActive then return end  -- Already running
-  liveUpdatesActive = true
-  -- Start the update loop
-  schedule(1000, doLiveUpdate)
-end
-
-local function showAnalytics()
-  if analyticsWindow then 
-    stopLiveUpdates()  -- Stop any existing live updates
-    pcall(function() analyticsWindow:destroy() end)
-    analyticsWindow = nil 
-  end
-  
-  -- Auto-start session if not active
-  if not isSessionActive() then
-    startSession()
-  end
-  
-  -- Try to create window, fall back to console output
-  local ok, win = pcall(function() return UI.createWindow('HuntAnalyzerWindow') end)
-  if not ok or not win then 
-    print(buildSummary()) 
-    return 
-  end
-  
-  analyticsWindow = win
-  
-  -- Safely access window elements
-  if analyticsWindow.content and analyticsWindow.content.textContent then
-    analyticsWindow.content.textContent:setText(buildSummary())
-  end
-  
-  if analyticsWindow.buttons then
-    if analyticsWindow.buttons.refreshButton then
-      -- Keep refresh button for manual refresh, but it's less needed now
-      analyticsWindow.buttons.refreshButton.onClick = function() 
-        if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
-          analyticsWindow.content.textContent:setText(buildSummary()) 
-        end
-      end
-    end
-    if analyticsWindow.buttons.closeButton then
-      analyticsWindow.buttons.closeButton.onClick = function() 
-        stopLiveUpdates()  -- Stop live updates when closing
-        if analyticsWindow then pcall(function() analyticsWindow:destroy() end) end
-        analyticsWindow = nil 
-      end
-    end
-    if analyticsWindow.buttons.resetButton then
-      analyticsWindow.buttons.resetButton.onClick = function() 
-        startSession() 
-        if analyticsWindow and analyticsWindow.content and analyticsWindow.content.textContent then
-          analyticsWindow.content.textContent:setText(buildSummary()) 
-        end
-      end
-    end
-  end
-  
-  -- Safely show window
-  pcall(function() analyticsWindow:show():raise():focus() end)
-  
-  -- Start live updates
-  startLiveUpdates()
-end
-
 -- MACROS (Hidden - runs automatically in background)
 
 -- Background tracking (no visible button)
@@ -1714,46 +1621,6 @@ macro(5000, function()
 end)
 
 macro(1000, function() updateTracking() end)
-
--- UI BUTTON
-
-UI.Separator();
-
-UI.Label("Statistics:")
-
---[[
-  local ok, err = pcall(showAnalytics)
-  if not ok then warn("[HuntAnalyzer] " .. tostring(err)) print(buildSummary()) end
-end)
-if btn then btn:setTooltip("View hunting analytics") end
-
--- legacy monster-inspection block removed
-local monsterBtn = UI.Button("Tactical Intelligence", function()
-  -- unified window is loaded elsewhere
-  if not MonsterInspectorWindow then
-    if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.showWindow then
-      nExBot.MonsterInspector.showWindow()
-    else
-      -- Try to load it manually
-      pcall(function() end)
-      if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.showWindow then
-        nExBot.MonsterInspector.showWindow()
-      end
-    end
-  else
-    MonsterInspectorWindow:setVisible(not MonsterInspectorWindow:isVisible())
-    if MonsterInspectorWindow:isVisible() then
-      if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.refreshPatterns then
-        nExBot.MonsterInspector.refreshPatterns()
-      elseif refreshPatterns then
-        refreshPatterns()
-      end
-    end
-  end
-end)
-if monsterBtn then monsterBtn:setTooltip("View learned monster patterns and samples") end
-
-]]
 
 -- PUBLIC API
 
@@ -1780,4 +1647,4 @@ nExBot.Analytics = {
   end
 }
 
-print("[HuntAnalyzer] v1.0 loaded")
+print("[Analytics] v1.0 loaded")

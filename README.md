@@ -23,8 +23,8 @@ Install paths:
 | **HealBot** | Spell/potion healing at configurable HP thresholds. 75ms response. |
 | **AttackBot** | Attack spell/rune rotation with AoE optimization |
 | **CaveBot** | Waypoint navigation, floor-change safety, supply refills, 50+ pre-built routes |
-| **TargetBot** | 9-stage priority targeting, Monster Insights AI, movement coordination |
-| **Hunt Analyzer** | Session analytics — kills/hr, XP/hr, profit, Hunt Score |
+| **TargetBot** | 9-stage priority targeting, Tactical Intelligence integration, movement coordination |
+| **Tactical Intelligence** | Unified session analytics, monster intelligence, targeting history, resources, routes |
 | **Containers** | Event-driven BFS, O(1) operations, generation tracking, reconnect recovery coordinator, multi-level readiness, quiver management 🎒 |
 | **Follow Player** | Party hunt — stays near leader while attacking |
 | **Extras** | Anti-RS, alarms, equipment swap, combo system, push max |
@@ -76,10 +76,7 @@ Open **nExBot Tactical Intelligence** from the Main tab to inspect lifecycle, ta
 ├── CaveBot ←─── 250ms waypoint engine
 ├── TargetBot ←─ creature events + Monster AI
 │   ├── AttackStateMachine (sole attack issuer)
-│   ├── Monster Insights (12 AI modules)
-│   └── MovementCoordinator (intent voting)
-│
-└── Hunt Analyzer ←─ passive analytics
+│   └── Tactical Intelligence ←─ unified analytics + learning
 ```
 
 ## Documentation
@@ -90,10 +87,10 @@ Open **nExBot Tactical Intelligence** from the Main tab to inspect lifecycle, ta
 | [HealBot](docs/HEALBOT.md) | Healing spells, potions, conditions |
 | [AttackBot](docs/ATTACKBOT.md) | Attack spells, runes, AoE optimization |
 | [CaveBot](docs/CAVEBOT.md) | Navigation, waypoints, supply management |
-| [TargetBot](docs/TARGETBOT.md) | Combat AI, Monster Insights, movement |
+| [TargetBot](docs/TARGETBOT.md) | Combat AI, Tactical Intelligence, movement |
 | [Follow Player](docs/FOLLOW.md) | Party hunt companion |
 | [Containers](docs/CONTAINERS.md) | Container management, quiver system |
-| [Hunt Analyzer](docs/SMARTHUNT.md) | Session analytics |
+| [Tactical Intelligence](docs/INTELLIGENCE.md) | Unified analytics, learning, diagnostics, UI |
 | [Extras](docs/EXTRAS.md) | Safety, equipment, utilities |
 | [Architecture](docs/ARCHITECTURE.md) | Technical design |
 | [Performance](docs/PERFORMANCE.md) | Optimization and tuning |

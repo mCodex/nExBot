@@ -286,18 +286,38 @@ for _, section in ipairs(sections) do
   window.section:addOption(section)
 end
 
+local contentText = assert(window:recursiveGetChildById("contentText"), "Tactical Intelligence content widget is missing")
+
 local selected = sections[1]
 
-local function render()
-  local view = TacticalIntelligence:view({
-    width = window:getWidth(),
-    platform = "desktop",
-    touch = false,
-  }) or {}
-  local text = renderSection(view, selected)
-  if window.content and window.content.text then
-    window.content.text:setText(text)
+local function resolveSectionName(option)
+  if type(option) == "string" then
+    return option
   end
+  if type(option) == "table" then
+    if type(option.getText) == "function" then
+      local text = option:getText()
+      if text and text ~= "" then
+        return text
+      end
+    end
+    if type(option.text) == "string" and option.text ~= "" then
+      return option.text
+    end
+  end
+  return selected
+end
+
+local function render()
+  local ok, text = pcall(function()
+    local view = TacticalIntelligence:view({
+      width = window:getWidth(),
+      platform = "desktop",
+      touch = false,
+    }) or {}
+    return renderSection(view, resolveSectionName(selected))
+  end)
+  contentText:setText(ok and (text or "") or "Tactical Intelligence render failed:\n" .. tostring(text))
 end
 
 local function showWindow()
@@ -313,7 +333,7 @@ local function showWindow()
 end
 
 window.section.onOptionChange = function(_, option)
-  selected = option
+  selected = resolveSectionName(option)
   render()
 end
 

@@ -57,7 +57,7 @@ end
 
 function Model:predict()
   local total = self.state.successes + self.state.failures
-  local probability = self.state.successes / total
+  local probability = total > 0 and (self.state.successes / total) or 0.5
   local evidence = self.state.samples
   local confidence = math.min(1, evidence / self.minSamples)
   return { probability = probability, confidence = confidence, evidence = evidence,

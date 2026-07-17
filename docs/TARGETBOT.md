@@ -75,7 +75,7 @@ IDLE → ENGAGING → LOCKED → IDLE
 | Switch Cooldown | 5000ms |
 | Loss Grace | 450ms |
 
-## Monster Insights
+## Monster Intelligence
 
 12-module AI subsystem. Runs in background, feeds targeting + movement.
 
@@ -153,7 +153,7 @@ See [Adaptive Intelligence](INTELLIGENCE.md) for model controls and diagnostics.
 - BFS container traversal for nested loot
 - Configurable loot filters
 - Loot-to-container assignment
-- Hunt Analyzer integration
+- Tactical Intelligence integration
 
 **Eat Food:** Consumes food from corpses. "You are full" → pause 60s. Standalone mode (no loot items needed).
 

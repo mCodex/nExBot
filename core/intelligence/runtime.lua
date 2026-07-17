@@ -187,7 +187,7 @@ if not Intelligence.lifecycle then
     local generation = Intelligence.lifecycle:advance("snapshot")
     syncGenerations()
     Intelligence.currentSnapshot = Intelligence.snapshots:build({ generation = generation })
-    Intelligence.events:publish("WorldSnapshotCreated", { generation = generation }, {
+    Intelligence.events:publish("analytics:snapshot", { generation = generation }, {
       source = "SnapshotBuilder",
       snapshotGeneration = generation,
     })
@@ -230,37 +230,59 @@ if not Intelligence.lifecycle then
     end)
     local function runeUsed() Intelligence.resources:observe({ runes = 1 }, metadata("rune")) end
     EventBus.on("attack:aoe_rune", runeUsed)
-    EventBus.on("attack:single_rune", runeUsed)
-    EventBus.on("loot:received", function(monsterName, items)
-      local observed = metadata("loot")
-      observed.monsterId, observed.itemsAvailable, observed.itemsCaptured = monsterName, items ~= "" and 1 or 0, items ~= "" and 1 or 0
-      Intelligence.loot:observe(observed)
-    end)
-    EventBus.on("attacksm:state_changed", function(state, previous, reason)
-      local eventType = state == "ENGAGING" and "AttackStarted"
-        or state == "LOCKED" and "AttackCompleted"
-        or reason == "target_killed" and "TargetKilled"
-        or "AttackCancelled"
-      Intelligence.events:publish(eventType, { state = state, previous = previous, reason = reason }, {
-        source = "AttackStateMachine",
-        combatGeneration = Intelligence.lifecycle:generation("combat"),
-      })
-      if Intelligence.optionalEnabled("replay") then
-        Intelligence.replay:record({ outcome = { type = eventType, reason = reason } })
-      end
-      if eventType == "AttackCompleted" or eventType == "TargetKilled" then
-        observeModels({ "MonsterBehaviorModel", "TargetUtilityModel", "TargetSwitchModel" }, true)
-      elseif eventType == "AttackCancelled" and reason then
-        observeModels({ "MonsterBehaviorModel", "TargetUtilityModel", "TargetSwitchModel" }, false)
-      end
-      if Intelligence.optionalEnabled("learning") and eventType == "TargetKilled" and Intelligence.activeCombatContext then
-        Intelligence.contextAdjustments:observe(Intelligence.activeCombatContext, true, nExBot.Shared.nowMs())
-      elseif Intelligence.optionalEnabled("learning") and eventType == "AttackCancelled" and Intelligence.activeCombatContext
-          and (reason == "unreachable" or reason == "path_failed" or reason == "retry_exhausted") then
-        Intelligence.contextAdjustments:observe(Intelligence.activeCombatContext, false, nExBot.Shared.nowMs())
-      end
-    end, 100)
-    EventBus.on("movement:outcome", function(success, reason, intent)
+    EventBus.on("attack:single_rune", runeUsed) EventBus.on("analytics:session:start", function() Intelligence.events:publish("analytics:session_started", { active = true, sourceEvent = "analytics:session:start" }, { source = "TacticalIntelligence" }) end) EventBus.on("analytics:session_started", function() Intelligence.events:publish("analytics:session_started", { active = true, sourceEvent = "analytics:session_started" }, { source = "TacticalIntelligence" }) end) EventBus.on("analytics:session:end", function() Intelligence.events:publish("analytics:session_ended", { active = false, sourceEvent = "analytics:session:end" }, { source = "TacticalIntelligence" }) end) EventBus.on("analytics:session_ended", function() Intelligence.events:publish("analytics:session_ended", { active = false, sourceEvent = "analytics:session_ended" }, { source = "TacticalIntelligence" }) end)
+    local function onLootObserved(monsterName, items)
+  local observed = metadata("loot")
+  observed.monsterId = monsterName
+  observed.itemsAvailable = items ~= "" and 1 or 0
+  observed.itemsCaptured = items ~= "" and 1 or 0
+  Intelligence.loot:observe(observed)
+  Intelligence.events:publish("analytics:loot_observed", observed, {
+    source = "loot:received",
+    snapshotGeneration = Intelligence.lifecycle:generation("snapshot"),
+    combatGeneration = Intelligence.lifecycle:generation("combat"),
+  })
+end
+
+local function classifyAttackTransition(state, previous, reason)
+  if reason == "target_killed" then
+    return "TargetKilled"
+  elseif reason == "unreachable" or reason == "path_failed" or reason == "retry_exhausted" then
+    return "AttackCancelled"
+  elseif state == "ENGAGING" then
+    return "AttackStarted"
+  elseif state == "LOCKED" then
+    return "AttackCompleted"
+  end
+  return "AttackCancelled"
+end
+
+EventBus.on("loot:received", onLootObserved)
+EventBus.on("analytics:loot_observed", onLootObserved)
+EventBus.on("attacksm:state_changed", function(state, previous, reason)
+ local eventType = classifyAttackTransition(state, previous, reason)
+ Intelligence.events:publish(eventType, { state = state, previous = previous, reason = reason }, {
+ source = "AttackStateMachine",
+ combatGeneration = Intelligence.lifecycle:generation("combat"),
+ })
+ if Intelligence.optionalEnabled("replay") then
+ Intelligence.replay:record({ outcome = { type = eventType, reason = reason } })
+ end
+ if eventType == "TargetKilled" then
+ observeModels({ "MonsterBehaviorModel", "TargetUtilityModel" }, true)
+ elseif eventType == "AttackCompleted" then
+ observeModels({ "MonsterBehaviorModel", "TargetUtilityModel", "TargetSwitchModel" }, true)
+ elseif eventType == "AttackCancelled" and reason then
+ observeModels({ "MonsterBehaviorModel", "TargetUtilityModel", "TargetSwitchModel" }, false)
+ end
+ if Intelligence.optionalEnabled("learning") and eventType == "TargetKilled" and Intelligence.activeCombatContext then
+ Intelligence.contextAdjustments:observe(Intelligence.activeCombatContext, true, nExBot.Shared.nowMs())
+ elseif Intelligence.optionalEnabled("learning") and eventType == "AttackCancelled" and Intelligence.activeCombatContext and (reason == "unreachable" or reason == "path_failed" or reason == "retry_exhausted") then
+ Intelligence.contextAdjustments:observe(Intelligence.activeCombatContext, false, nExBot.Shared.nowMs())
+ end
+end)
+
+EventBus.on("movement:outcome", function(success, reason, intent)
       Intelligence.events:publish(success and "MovementCompleted" or "MovementInterrupted", {
         reason = reason,
         intent = intent,

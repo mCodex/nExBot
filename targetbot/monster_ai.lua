@@ -1705,7 +1705,7 @@ nExBot.MonsterAI = MonsterAI
 
 -- Get full statistics summary for UI or debugging
 
--- Enable automatic collection by default so Monster Insights shows data without console commands
+-- Enable automatic collection by default so Tactical Intelligence gets live data without console commands
 -- Collection is now gated by TargetBot.isOn() to prevent CPU waste when targeting is off
 MonsterAI.COLLECT_ENABLED = (MonsterAI.COLLECT_ENABLED == nil) and true or MonsterAI.COLLECT_ENABLED
 

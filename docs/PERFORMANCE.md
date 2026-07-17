@@ -11,7 +11,7 @@ Optimization reference for nExBot.
 | HealBot | `onHealthChange` |
 | TargetBot | `creature:appear/disappear` |
 | AttackBot | TargetBot tick |
-| Hunt Analyzer | Kill/spell/potion events |
+| Tactical Intelligence | Kill/spell/potion events |
 
 **UnifiedTick:** Single 50ms master tick replaces 30+ timers.
 
@@ -111,7 +111,7 @@ The Adaptive Intelligence runtime selects idle, route, combat, and emergency sna
 | HealBot | Health check → cast | ~75ms |
 | CaveBot | Pathfinding + walk | ~100ms |
 | TargetBot | Target evaluation | ~50ms |
-| Hunt Analyzer | Metric calculation | ~20ms |
+| Tactical Intelligence | Metric calculation | ~20ms |
 | Monster AI | Behavior prediction | ~10ms |
 | **Container Queue** | 10k enqueue/dequeue | <1ms |
 | **Container Registry** | 1k add + lookup | <2ms |

@@ -174,36 +174,48 @@ end
 
 local function monsterSnapshot()
   local patterns = UnifiedStorage and UnifiedStorage.get and UnifiedStorage.get("targetbot.monsterPatterns") or {}
+  local telemetry = UnifiedStorage and UnifiedStorage.get and UnifiedStorage.get("targetbot.monsterMetrics.typeStats") or {}
+  local monsterKeys = {}
+  for monsterKey in pairs(patterns) do monsterKeys[monsterKey] = true end
+  for monsterKey in pairs(telemetry) do monsterKeys[monsterKey] = true end
   local profiles = {}
-  for monsterKey, pattern in pairs(patterns or {}) do
+  for monsterKey in pairs(monsterKeys) do
+    local pattern = patterns[monsterKey] or {}
+    local stats = telemetry[monsterKey] or {}
+    local samples = math.max(tonumber(pattern.samples) or countKeys(pattern.samplesByKey), tonumber(stats.sampleCount) or 0)
+    local kills = tonumber(stats.killCount) or 0
+    local confidence = tonumber(pattern.confidence) or 0
+    local dataSources = copy(pattern.dataSources or {})
+    if next(pattern) then dataSources[#dataSources + 1] = "MonsterPatterns" end
+    if next(stats) then dataSources[#dataSources + 1] = "MonsterAI.Telemetry" end
     profiles[#profiles + 1] = {
       monsterKey = monsterKey,
-      displayName = pattern.displayName or pattern.name or monsterKey,
-      samples = pattern.samples or countKeys(pattern.samplesByKey),
-      lastSeenAt = pattern.lastSeen or 0,
-      confidence = pattern.confidence or 0,
-      averageSpeed = pattern.averageSpeed or 0,
+      displayName = pattern.displayName or pattern.name or stats.name or monsterKey,
+      samples = samples,
+      lastSeenAt = math.max(tonumber(pattern.lastSeen) or 0, tonumber(stats.lastSeen) or 0),
+      confidence = confidence,
+      averageSpeed = pattern.averageSpeed or stats.avgSpeed or 0,
       preferredDistance = pattern.preferredDistance or 0,
       chaseProbability = pattern.chaseProbability or 0,
       retreatProbability = pattern.retreatProbability or 0,
       observedAttacks = pattern.observedAttacks or 0,
       estimatedAttackIntervalMs = pattern.attackIntervalMs or 0,
-      waveSamples = pattern.waveSamples or 0,
+      waveSamples = pattern.waveSamples or stats.waveAttackCount or 0,
       waveProbability = pattern.waveProbability or 0,
       estimatedWaveCooldownMs = pattern.waveCooldown or 0,
       waveVariance = pattern.waveVariance or 0,
       damageSamples = pattern.damageSamples or 0,
-      estimatedDps = pattern.estimatedDps or 0,
-      averageTtkMs = pattern.averageTtkMs or 0,
+      estimatedDps = pattern.estimatedDps or stats.avgDPS or 0,
+      averageTtkMs = pattern.averageTtkMs or (kills > 0 and (tonumber(stats.totalKillTime) or 0) / kills or 0),
       reachabilitySamples = pattern.reachabilitySamples or 0,
       reachabilityRate = pattern.reachabilityRate or 0,
       targetSelections = pattern.targetSelections or 0,
       successfulEngagements = pattern.successfulEngagements or 0,
       cancelledEngagements = pattern.cancelledEngagements or 0,
-      dataSources = pattern.dataSources or {},
-      evidence = pattern.evidence or 0,
+      dataSources = dataSources,
+      evidence = pattern.evidence or samples,
       observationQuality = pattern.observationQuality or 0,
-      state = (pattern.samples or 0) > 0 and "LEARNING" or "NO_DATA",
+      state = confidence >= 0.8 and "CONFIDENT" or samples > 0 and "LEARNING" or next(pattern) and "INSUFFICIENT_EVIDENCE" or "NO_DATA",
     }
   end
 
@@ -250,6 +262,9 @@ local function diagnosticSnapshot(intelligence, state)
     replayVersion = IntelligenceReplay and IntelligenceReplay.SCHEMA_VERSION or 1,
     pipeline = state and state.pipeline or nil,
     models = state and state.models or nil,
+    monsters = state and state.monsters or nil,
+    session = state and state.session or nil,
+    elapsedMs = state and state.session and state.session.elapsedMs or 0,
   }) or {}
   local issues = IntelligenceBotDoctor and IntelligenceBotDoctor.inspect and IntelligenceBotDoctor.inspect(capture) or {}
   return {

@@ -28,6 +28,18 @@ describe("tactical intelligence facade", function()
               waveCooldown = 1200,
             },
           }
+        elseif key == "targetbot.monsterMetrics.typeStats" then
+          return {
+            ["dragon lord"] = {
+              name = "Dragon Lord",
+              sampleCount = 125,
+              killCount = 9,
+              avgSpeed = 84,
+              avgDPS = 42,
+              totalKillTime = 18000,
+              lastSeen = 950,
+            },
+          }
         end
       end,
     }
@@ -181,5 +193,28 @@ describe("tactical intelligence facade", function()
     assert.equals(overview.sessionId, models.sessionId)
     assert.is_truthy(overview.updatedAt)
     assert.equals("active", overview.lifecycle)
+  end)
+
+  it("projects persisted Monster AI telemetry as learned profiles", function()
+    local monsters = Tactical:getMonsterProfilesSnapshot()
+    local dragonLord
+    for _, profile in ipairs(monsters.profiles) do
+      if profile.monsterKey == "dragon lord" then
+        dragonLord = profile
+      end
+    end
+
+    assert.is_truthy(dragonLord)
+    assert.equals(125, dragonLord.samples)
+    assert.equals(42, dragonLord.estimatedDps)
+    assert.equals(2000, dragonLord.averageTtkMs)
+    assert.equals("LEARNING", dragonLord.state)
+  end)
+
+  it("passes session and monster projection health to Bot Doctor", function()
+    local diagnostics = Tactical:getDiagnosticsSnapshot()
+
+    assert.equals(60000, diagnostics.capture.session.elapsedMs)
+    assert.equals(1, diagnostics.capture.monsters.liveMonsters)
   end)
 end)
