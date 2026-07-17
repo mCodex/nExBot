@@ -205,8 +205,8 @@ onTalk(function(name, level, mode, text, channelId, pos)
         if #attParams == 2 then
           local atTarget = attParams[2]:trim()
           local creature = SafeCall.getCreatureByName(atTarget)
-          if creature and config.attack == "COMMAND TARGET" and AttackStateMachine and AttackStateMachine.requestAttack then
-            AttackStateMachine.requestAttack(creature, 1000)
+          if creature and config.attack == "COMMAND TARGET" and TargetBot and TargetBot.requestAttack then
+            TargetBot.requestAttack(creature, "ComboCommand")
           end
         end
       end
@@ -262,8 +262,8 @@ onMissle(function(missle)
   if config.attackSpellEnabled and config.spell and config.spell:len() > 1 then
     say(config.spell)
   end
-  if config.attack == "LEADER TARGET" and AttackStateMachine and AttackStateMachine.requestAttack then
-    AttackStateMachine.requestAttack(leaderTarget, 1000)
+  if config.attack == "LEADER TARGET" and TargetBot and TargetBot.requestAttack then
+    TargetBot.requestAttack(leaderTarget, "ComboLeader")
   end
 end)
 
@@ -279,8 +279,8 @@ local function leaderTargetHandler()
 
   local target = SafeCall.getTarget()
   if not target or target:getName() ~= leaderTarget:getName() then
-    if AttackStateMachine and AttackStateMachine.requestAttack then
-      AttackStateMachine.requestAttack(leaderTarget, 1000)
+    if TargetBot and TargetBot.requestAttack then
+      TargetBot.requestAttack(leaderTarget, "ComboLeader")
     end
   end
 end

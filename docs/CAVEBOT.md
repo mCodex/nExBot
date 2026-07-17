@@ -58,7 +58,7 @@ Waypoint navigation, supply management, hunting route automation.
 | `tasker` | — | Task NPC interaction |
 | `withdraw` | — | Withdraw from depot/inbox |
 
-## Walking Engine v4.0
+## Walking Engine
 
 ### Floor-Change Prevention
 
@@ -92,6 +92,8 @@ Cursor preserved across ticks for same waypoint. Only resets when destination ch
 ### Stuck Detection
 
 3 consecutive goto failures → RECOVERING state. Progressive escalation: ignoreCreatures → ignoreFields → blocker attack.
+
+The intelligence route state records route generation, current waypoint, pause reason, path failure, recovery success, and recovery failure. CaveBot still executes its validated waypoint path directly. Combat interruptions pause route dispatch without discarding the destination.
 
 ### Pathfinding Strategy
 
@@ -133,6 +135,14 @@ TTL = 15s * 2^(fail_count - 1), capped at 120s
 
 `recordSuccess()` clears all blacklists. 5-minute safety valve clears everything.
 
+### Learned Navigation Costs
+
+Movement outcomes add bounded, decaying penalties to recovery candidates. Models in `SHADOW` record these costs but do not change waypoint ranking. An `ACTIVE` NavigationCostModel can add at most 10 percent of the deterministic distance score. Native path validation still decides whether a tile or waypoint is reachable, and learning cannot replace the configured waypoint order.
+
+### Combat Pause and Resume
+
+Dynamic Lure, Pull, and active combat can pause CaveBot through the shared route state. Each pause carries a reason and generation. Completion resumes the same route when the generation still matches; stale callbacks cannot resume a replaced route.
+
 ## Supply Management
 
 ```text
@@ -173,3 +183,5 @@ label:depot
 **Stuck at door:** Enable Auto Open Doors, add `door` waypoint, verify door item IDs.
 
 **Wrong floor after teleport:** Add waypoint on each floor.
+
+**Route stays paused:** Open **nExBot Tactical Intelligence**, select **CaveBot Intelligence**, and check the route state and pause reason. Bot Doctor reports disconnected lifecycle or ownership state under **Diagnostics**.

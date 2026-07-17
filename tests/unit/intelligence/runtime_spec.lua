@@ -1,0 +1,79 @@
+describe("intelligence runtime", function()
+  it("loads after its dependencies and before legacy features", function()
+    local file = assert(io.open("_Loader.lua", "r"))
+    local source = file:read("*a")
+    file:close()
+    local storage = assert(source:find('"unified_storage"', 1, true))
+    local runtime = assert(source:find('"intelligence/runtime"', 1, true))
+    local legacy = assert(source:find('loadCategory("features_legacy"', 1, true))
+    assert.is_true(storage < runtime and runtime < legacy)
+  end)
+
+  it("initializes once and advances lifecycle on logout", function()
+    _G.nExBot = { Shared = { nowMs = function() return 100 end } }
+    _G.g_clock = { millis = function() return 100 end }
+    _G.g_game = { getLocalPlayer = function() return {} end }
+    _G.g_map = { getSpectators = function() return {} end }
+    _G.EventBus = { on = function() return function() end end }
+    local registered
+    _G.UnifiedTick = {
+      Priority = { HIGH = 75 },
+      register = function(name, config) registered = { name = name, config = config } end,
+    }
+    _G.onGameStart = function(callback) _G.startIntelligence = callback end
+    _G.onGameEnd = function(callback) _G.stopIntelligence = callback end
+    dofile("core/intelligence/foundation/lifecycle.lua")
+    dofile("core/intelligence/foundation/event_aggregator.lua")
+    dofile("core/intelligence/foundation/tactical_blackboard.lua")
+    dofile("core/intelligence/foundation/snapshot_builder.lua")
+    dofile("core/intelligence/foundation/feature_pipeline.lua")
+    dofile("core/intelligence/decisions/safety_envelope.lua")
+    dofile("core/intelligence/decisions/default_safety.lua")
+    dofile("core/intelligence/decisions/decision_engine.lua")
+    dofile("core/intelligence/decisions/cavebot_route_state.lua")
+    dofile("core/intelligence/learning/model_registry.lua")
+    dofile("core/intelligence/foundation/feature_flags.lua")
+    dofile("core/intelligence/learning/model_catalog.lua")
+    dofile("core/intelligence/observability/replay.lua")
+    dofile("core/intelligence/learning/calibration.lua")
+    dofile("core/intelligence/foundation/performance_budget.lua")
+    dofile("core/intelligence/decisions/dynamic_lure_state.lua")
+    dofile("core/intelligence/decisions/pull_state.lua")
+    dofile("core/intelligence/decisions/wave_beam_state.lua")
+    dofile("core/intelligence/learning/navigation_cost.lua")
+    dofile("core/intelligence/learning/tactical_memory.lua")
+    dofile("core/intelligence/learning/context_adjustment.lua")
+    dofile("core/intelligence/learning/latency_classifier.lua")
+    dofile("core/intelligence/learning/observation_quality.lua")
+    dofile("core/intelligence/learning/horizon_counters.lua")
+    dofile("core/intelligence/observability/resource_observer.lua")
+    dofile("core/intelligence/observability/loot_observer.lua")
+    dofile("core/intelligence/learning/reward_model.lua")
+    dofile("core/intelligence/foundation/metrics.lua")
+    dofile("core/intelligence/observability/bot_doctor.lua")
+    dofile("core/intelligence/foundation/adaptive_scheduler.lua")
+    dofile("core/intelligence/ui/ui_presenter.lua")
+    dofile("core/intelligence/runtime.lua")
+
+    assert.is_true(nExBot.Intelligence.lifecycle.active)
+    assert.is_table(nExBot.Intelligence.decisions)
+    assert.is_table(nExBot.Intelligence.route)
+    assert.is_table(nExBot.Intelligence.models)
+    assert.is_table(nExBot.Intelligence.replay)
+    assert.equals("intelligence_orchestrator", registered.name)
+    registered.config.handler()
+    assert.equals(1, nExBot.Intelligence.currentSnapshot.generation)
+    assert.is_true(nExBot.Intelligence.optionalEnabled("replay"))
+    local navigation = nExBot.Intelligence.models:get("NavigationCostModel")
+    nExBot.Intelligence.navigationCosts:observe("1:2:7", 5, 1, 100)
+    assert.equals(0, nExBot.Intelligence.navigationPenalty({ x = 1, y = 2, z = 7 }, 100, 5))
+    navigation.mode = IntelligenceModelRegistry.ACTIVE
+    assert.equals(0.5, nExBot.Intelligence.navigationPenalty({ x = 1, y = 2, z = 7 }, 100, 5))
+    local generation = nExBot.Intelligence.lifecycle:generation("lifecycle")
+    startIntelligence()
+    assert.equals(generation, nExBot.Intelligence.lifecycle:generation("lifecycle"))
+    stopIntelligence()
+    assert.is_false(nExBot.Intelligence.lifecycle.active)
+    assert.equals(generation + 1, nExBot.Intelligence.lifecycle:generation("lifecycle"))
+  end)
+end)

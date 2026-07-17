@@ -1,0 +1,27 @@
+local Metrics = dofile("core/intelligence/foundation/metrics.lua")
+
+describe("intelligence metrics", function()
+  it("keeps counters, gauges, and samples bounded", function()
+    local metrics = Metrics.new(2)
+    metrics:increment("combat.attacks")
+    metrics:increment("combat.attacks", 2)
+    metrics:gauge("navigation.distance", 7)
+    metrics:sample("performance.tickMs", 4)
+    metrics:sample("performance.tickMs", 8)
+    metrics:sample("performance.tickMs", 12)
+
+    local snapshot = metrics:snapshot()
+    assert.equals(3, snapshot.counters["combat.attacks"])
+    assert.equals(7, snapshot.gauges["navigation.distance"])
+    assert.same({ 8, 12 }, snapshot.samples["performance.tickMs"])
+    assert.equals(10, snapshot.averages["performance.tickMs"])
+    snapshot.samples["performance.tickMs"][1] = 99
+    assert.same({ 8, 12 }, metrics:snapshot().samples["performance.tickMs"])
+  end)
+
+  it("rejects invalid observations", function()
+    local metrics = Metrics.new()
+    assert.has_error(function() metrics:increment("x", -1) end)
+    assert.has_error(function() metrics:gauge("x", 0 / 0) end)
+  end)
+end)

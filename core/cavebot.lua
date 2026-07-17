@@ -89,11 +89,13 @@ dofile("/targetbot/monster_tbi.lua")            -- 9-stage TargetBot Intelligenc
 
 -- Load AI orchestrator (wires EventBus → subsystems, updateAll, public API)
 dofile("/targetbot/monster_ai.lua")           -- Monster AI orchestrator / glue (v3.0)
+dofile("/targetbot/chase_controller.lua")     -- Native chase owner (must precede movement coordinator)
 dofile("/targetbot/movement_coordinator.lua") -- Coordinated movement system
 
 -- Load AttackStateMachine for linear, consistent targeting (before creature.lua)
 dofile("/targetbot/combat_constants.lua")      -- Shared timing constants for attack pipeline
 dofile("/targetbot/attack_state_machine.lua") -- State machine for attack persistence
+dofile("/targetbot/target_proposal.lua")      -- intelligence combat proposal adapter
 
 -- Load TargetBot modules
 dofile("/targetbot/creature.lua")

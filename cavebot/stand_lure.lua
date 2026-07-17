@@ -97,10 +97,10 @@ CaveBot.Extensions.StandLure.setup = function()
                             if path then
                                 creature:setMarked('#00FF00')
                                 local attackingCreature = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature())
-                                if attackingCreature ~= creature then
-                                  attack(creature)
+                                if attackingCreature ~= creature and TargetBot and TargetBot.requestAttack then
+                                  TargetBot.requestAttack(creature, "StandLure")
                                 end
-                                if Client and Client.setChaseMode then Client.setChaseMode(1) elseif g_game then g_game.setChaseMode(1) end
+                                if MovementCoordinator then MovementCoordinator.setChaseMode(true) end
                                 resetRetries = true -- reset retries, we are trying to unclog the cavebot
                                 delay(100)
                                 return "retry"

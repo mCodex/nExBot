@@ -29,11 +29,7 @@ local function holdTargetHandler()
 
                 if sameFloor and oldTarget then
                     -- Route through ASM to prevent competing attack commands
-                    if AttackStateMachine and AttackStateMachine.forceAttack then
-                        AttackStateMachine.forceAttack(spec)
-                    else
-                        attack(spec)  -- Fallback if ASM not loaded
-                    end
+                    if TargetBot and TargetBot.requestAttack then TargetBot.requestAttack(spec, "HoldTarget") end
                     return
                 end
             end

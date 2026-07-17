@@ -1,6 +1,6 @@
 # nExBot
 
-![Version](https://img.shields.io/badge/version-4.0.0-blue)
+![Version](https://img.shields.io/badge/version-5.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Lua](https://img.shields.io/badge/Lua-5.1-purple)
 
@@ -29,6 +29,19 @@ Install paths:
 | **Follow Player** | Party hunt — stays near leader while attacking |
 | **Extras** | Anti-RS, alarms, equipment swap, combo system, push max |
 
+## Adaptive Intelligence
+
+nExBot shares combat and navigation context through one bounded intelligence runtime:
+
+- TargetBot evaluates candidates through deterministic proposal arbitration and a hard safety envelope.
+- Dynamic Lure, Pull, and wave avoidance use explicit state machines.
+- CaveBot preserves route intent across combat pauses, path failures, and recovery.
+- Twelve local models learn in `SHADOW` mode without changing actions.
+- Replay, calibration, resource tracking, learned navigation costs, and Bot Doctor diagnostics use bounded storage.
+- Adaptive tick rates reduce background work while combat and safety paths keep their priority.
+
+Open **nExBot Tactical Intelligence** from the Main tab to inspect lifecycle, targeting, routes, models, replay, resources, and diagnostics.
+
 ## Architecture
 
 ```
@@ -37,6 +50,11 @@ Install paths:
 ├── EventBus (event-driven communication)
 ├── UnifiedTick (single 50ms master timer)
 ├── UnifiedStorage (per-character JSON persistence)
+├── Adaptive Intelligence
+│   ├── immutable world snapshot + feature pipeline
+│   ├── proposal arbitration + hard safety envelope
+│   ├── bounded SHADOW models, replay, calibration, and diagnostics
+│   └── adaptive tick and optional-work budgets
 │
 ├── Containers 🎒
 │   ├── identity (physical container identity)
@@ -78,6 +96,7 @@ Install paths:
 | [Extras](docs/EXTRAS.md) | Safety, equipment, utilities |
 | [Architecture](docs/ARCHITECTURE.md) | Technical design |
 | [Performance](docs/PERFORMANCE.md) | Optimization and tuning |
+| [Adaptive Intelligence](docs/INTELLIGENCE.md) | Arbitration, learning, replay, diagnostics, and UI |
 | [FAQ](docs/FAQ.md) | Troubleshooting |
 
 ## Contributing

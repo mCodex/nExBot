@@ -111,7 +111,6 @@ local INTENT = CONST.INTENT
 local PRIORITY = CONST.PRIORITY
 local THRESHOLDS = CONST.CONFIDENCE_THRESHOLDS
 local TIMING = CONST.TIMING
-
 -- DYNAMIC SCALING
 -- Adjusts thresholds based on monster count for reactive behavior
 
@@ -637,6 +636,9 @@ function MovementCoordinator.Intent.register(intentType, targetPos, confidence, 
   -- CRITICAL SAFETY: Validate target position for floor changes
   -- Prevent accidental Z-level changes during wave avoidance, chase, follow, etc.
   local currentPos = player and player:getPosition()
+  if currentPos and currentPos.x == targetPos.x and currentPos.y == targetPos.y and currentPos.z == targetPos.z then
+    return false, "already_at_position"
+  end
   if currentPos and TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isPositionSafeForMovement then
     if not TargetCore.PathSafety.isPositionSafeForMovement(targetPos, currentPos) then
       -- Log blocked unsafe intent (for debugging)
@@ -954,6 +956,12 @@ end
 
 MovementCoordinator.Execute = {}
 
+function MovementCoordinator.setChaseMode(enabled)
+  if not ChaseController then return false end
+  ChaseController.setDesiredChase(enabled == true)
+  return true
+end
+
 -- Execute a movement decision safely
 -- @param decision: result from Decide.make()
 -- @return success, message
@@ -1023,7 +1031,11 @@ function MovementCoordinator.Execute.move(decision)
   end
   
   -- Use appropriate movement method based on intent type
-  if intent.type == INTENT.LURE then
+  if intent.type == INTENT.FACE_MONSTER then
+    local dx, dy = targetPos.x - playerPos.x, targetPos.y - playerPos.y
+    local direction = math.abs(dx) >= math.abs(dy) and (dx >= 0 and 1 or 3) or (dy >= 0 and 2 or 0)
+    success = turn(direction) ~= false
+  elseif intent.type == INTENT.LURE then
     -- Delegate to CaveBot
     if TargetBot and TargetBot.allowCaveBot then
       TargetBot.allowCaveBot(150)
@@ -1059,10 +1071,8 @@ function MovementCoordinator.Execute.move(decision)
     -- Chase is only active if enabled AND keepDistance is disabled
     local useNativeChase = chaseEnabled and not keepDistanceEnabled
     
-    if useNativeChase and ChaseController then
-      ChaseController.setDesiredChase(true)
-    elseif useNativeChase and g_game.setChaseMode then
-      g_game.setChaseMode(1) -- ChaseOpponent
+    if useNativeChase then
+      MovementCoordinator.setChaseMode(true)
       if TargetCore and TargetCore.Native then
         TargetCore.Native.lastChaseMode = 1
       end
@@ -1070,11 +1080,7 @@ function MovementCoordinator.Execute.move(decision)
     elseif not useNativeChase then
       -- Chase disabled or keepDistance enabled - don't set chase mode
       -- But don't block execution - let other movement systems handle it
-      if ChaseController then
-        ChaseController.setDesiredChase(false)
-      elseif g_game.setChaseMode then
-        g_game.setChaseMode(0) -- DontChase
-      end
+      MovementCoordinator.setChaseMode(false)
       TargetBot.usingNativeChase = false
       -- For FINISH_KILL, still allow movement via walkTo (low HP chase)
       if intent.type == INTENT.FINISH_KILL then
@@ -1196,12 +1202,28 @@ end
 
 function MovementCoordinator.tick()
   local decision = MovementCoordinator.Decide.make()
-  
+  local success, reason
   if decision.shouldMove then
-    return MovementCoordinator.Execute.move(decision)
+    success, reason = MovementCoordinator.Execute.move(decision)
+  else
+    success, reason = false, decision.reason
   end
-  
-  return false, decision.reason
+  if EventBus and EventBus.emit then EventBus.emit("movement:outcome", success, reason, decision.intent) end
+  return success, reason
+end
+
+function MovementCoordinator.executeTactical(proposal)
+  if not proposal then return false, "invalid_proposal" end
+  local success = false
+  if proposal.action == "lure" then
+    success = TargetBot and TargetBot.allowCaveBot and TargetBot.allowCaveBot(250) ~= false
+  elseif proposal.action == "pull" then
+    success = true -- Pull holds CaveBot while normal target movement keeps the participant engaged.
+  else
+    return false, "unsupported_tactical_action"
+  end
+  if EventBus and EventBus.emit then EventBus.emit("movement:outcome", success, proposal.action, proposal) end
+  return success
 end
 
 -- EXPORTS

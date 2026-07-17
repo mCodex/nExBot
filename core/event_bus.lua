@@ -74,6 +74,13 @@ function EventBus.on(event, callback, priority)
   end
 end
 
+function EventBus.listenerCount(event)
+  if event then return #(listeners[event] or {}) end
+  local count = 0
+  for _, entries in pairs(listeners) do count = count + #entries end
+  return count
+end
+
 -- Emit an event to all subscribers
 -- @param event string: Event name
 -- @param ... any: Arguments to pass to handlers

@@ -440,7 +440,9 @@ function RingBuffer.createBoundedArray(maxSize)
 end
 
 -- Export globally for easy access across codebase (no _G in OTClient sandbox)
+nExBot = nExBot or {}
 if not BoundedPush then BoundedPush = RingBuffer.boundedPush end
 if not TrimArray then TrimArray = RingBuffer.trimArray end
+nExBot.RingBuffer = RingBuffer
 
 return RingBuffer

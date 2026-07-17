@@ -12,8 +12,8 @@ Technical reference for nExBot internals.
 | 2 | Constants (floor items, food, directions) |
 | 3 | Utils (shared, shared_helpers, storage_engine, safe_creature, path_utils, path_strategy) |
 | 4 | Core libraries (lib, items, configs, database, updater) |
-| 5 | EventBus, UnifiedTick, UnifiedStorage, CreatureCache, ZChangeGuard, KillTracker |
-| 6 | Legacy features (CaveBot, TargetBot, HealBot, AttackBot, Combo, Extras) |
+| 5 | UnifiedTick, EventBus, UnifiedStorage, Adaptive Intelligence, CreatureCache, ZChangeGuard, KillTracker |
+| 6 | Feature modules (CaveBot, TargetBot, HealBot, AttackBot, Combo, Extras) |
 | 7 | **Container modules** (queue, identity, state_machine, registry, client_adapter, readiness, bfs, scheduler, quiver, discovery) |
 | 8 | Legacy tools (Containers, Dropper, antiRs, Tools, Equip, EatFood) |
 | 9 | Analytics (Analyzer, HuntAnalyzer, SpyLevel, Supplies, NPC Talk, HoldTarget) |
@@ -53,9 +53,13 @@ Floor transitions fire hundreds of creature events per frame. EventBus detects b
 Single 50ms master tick replaces 30+ individual timers:
 
 ```lua
-UnifiedTick.register("myModule", 250, function()
-  -- runs every 250ms
-end)
+UnifiedTick.register("myModule", {
+  interval = 250,
+  priority = UnifiedTick.Priority.NORMAL,
+  handler = function()
+    -- runs every 250ms
+  end,
+})
 ```
 
 ## UnifiedStorage
@@ -76,6 +80,40 @@ Three mechanisms:
 3. **Shared state** — `nExBot` global namespace
 
 Circular dependencies avoided by strict phase loading and deferred event subscriptions.
+
+## Adaptive Intelligence
+
+The code follows feature-based boundaries under `core/intelligence/`:
+
+| Folder | Responsibility |
+|--------|----------------|
+| `foundation/` | Lifecycle, snapshots, events, blackboard, features, scheduling, configuration |
+| `decisions/` | Arbitration, hard safety, CaveBot route state, lure, pull, wave/beam states |
+| `learning/` | Model registry, calibration, memory, latency, navigation costs, reward calculation |
+| `observability/` | Replay, metrics inputs, resource/loot observation, Bot Doctor |
+| `ui/` | Shared presenter and OTClient Tactical Intelligence window |
+| `runtime.lua` | Wires the feature folders to EventBus, UnifiedTick, UnifiedStorage, TargetBot, and CaveBot |
+
+`UnifiedTick` invokes the intelligence runtime. It creates one generation-tagged immutable snapshot and one indexed feature source. Tactical modules submit proposals. The Decision Engine rejects stale or invalid proposals, runs the hard safety envelope, resolves conflicts, and forwards the selected intent to its application service.
+
+```text
+native callbacks -> EventBus -> Intelligence Event Aggregator
+                              -> immutable snapshot -> feature pipeline
+feature modules -> proposals -> Decision Engine -> Safety Envelope
+                                           |-> MovementCoordinator -> walk/chase executors
+                                           `-> AttackStateMachine -> native attack API
+outcomes -> bounded replay, metrics, calibration, and SHADOW learning
+```
+
+`MovementCoordinator` arbitrates TargetBot tactical movement. CaveBot owns deterministic waypoint execution and pauses its route while combat owns movement. `ChaseController` is the sole native chase-mode writer. `AttackStateMachine` is the sole autonomous native attack issuer. User clicks and explicitly user-authored example scripts are outside tactical arbitration.
+
+TargetBot loads `ChaseController` before `MovementCoordinator`, AttackStateMachine, and EventTargeting. This order guarantees that a chase-enabled monster profile can apply native chase mode before the attack request reaches the client.
+
+Models start in `SHADOW`: they observe, predict, and record evidence but cannot change actions. `ACTIVE` requires the registry promotion gates. Budget overruns disable optional diagnostics, replay, learning, neural inference, and route alternatives in that order; safety and execution are never disabled.
+
+User configuration is the primary decision tier. The Decision Engine compares configured target priority before computed priority, confidence, utility, or learned context adjustment. Route and monster context needs 30 observations and 0.7 confidence before it can contribute, and the contribution stays within 10 percent. Native reachability and hard safety still accept or reject the final candidate.
+
+See [Adaptive Intelligence](INTELLIGENCE.md) for operating modes, model behavior, replay, diagnostics, and configuration migration.
 
 ## Design Patterns
 

@@ -59,20 +59,7 @@ local function ensurePathUtils()
 end
 ensurePathUtils()
 
--- Load ChaseController if available (OTClient compatible)
-local ChaseController = ChaseController  -- Try existing global
-local function ensureChaseController()
-  if ChaseController then return ChaseController end
-  local success = pcall(function()
-    dofile("nExBot/targetbot/chase_controller.lua")
-  end)
-  -- After dofile, ChaseController should be global
-  if success then
-    ChaseController = ChaseController  -- Re-check global after dofile
-  end
-  return ChaseController
-end
-ensureChaseController()
+local ChaseController = ChaseController
 
 -- CONSTANTS (Tunable for performance)
 
@@ -866,42 +853,7 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   
   -- Chase is only active if enabled AND keepDistance is disabled (they're mutually exclusive)
   local useNativeChase = chaseEnabled and not keepDistanceEnabled
-  local Client = getClient()
-  
-  if ChaseController then
-    ChaseController.setDesiredChase(useNativeChase)
-  else
-    if useNativeChase then
-      local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
-      if currentMode ~= 1 then
-        if Client and Client.setChaseMode then
-          Client.setChaseMode(1)
-        elseif g_game and g_game.setChaseMode then
-          g_game.setChaseMode(1)
-        end
-        -- Update cache for other modules
-        if TargetCore and TargetCore.Native then
-          TargetCore.Native.lastChaseMode = 1
-        end
-        if TargetBot then
-          TargetBot.usingNativeChase = true
-        end
-      end
-    elseif not useNativeChase then
-      -- Chase is disabled OR keepDistance is enabled - use Stand mode
-      local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
-      if currentMode ~= 0 then
-        if Client and Client.setChaseMode then
-          Client.setChaseMode(0)
-        elseif g_game and g_game.setChaseMode then
-          g_game.setChaseMode(0)
-        end
-        if TargetBot then
-          TargetBot.usingNativeChase = false
-        end
-      end
-    end
-  end
+  MovementCoordinator.setChaseMode(useNativeChase)
   
   -- Scenario gate: avoid illegal switches (anti-zigzag)
   if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
@@ -941,22 +893,14 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   local throttleSameTarget = (targetState.lastRequestId == id) and ((currentTime - (targetState.lastRequestTime or 0)) < CONST.REQUEST_COOLDOWN)
   local smTargetId = AttackStateMachine and AttackStateMachine.getTargetId and AttackStateMachine.getTargetId()
   
-  -- Use AttackStateMachine directly (always available - loaded as default)
   local smPriority = priorityHint or EventTargeting.TargetAcquisition.calculatePriority(creature, path)
-  if AttackStateMachine and AttackStateMachine.requestSwitch then
-    if smTargetId and smTargetId == id then
-      sent = true
-    elseif not throttleSameTarget then
-      sent = AttackStateMachine.requestSwitch(creature, smPriority)
-    end
+  if smTargetId and smTargetId == id then
+    sent = true
+  elseif not throttleSameTarget and TargetBot.submitSelection then
+    sent = TargetBot.submitSelection({ creature = creature, config = config, priority = smPriority },
+      EventTargeting.getLiveMonsterCount and EventTargeting.getLiveMonsterCount() or 1, "EventTargeting")
     if sent and EventTargeting.DEBUG then
-      print("[EventTargeting] Delegated to AttackStateMachine: " .. creature:getName())
-    end
-  else
-    -- v3.0: No fallback — AttackStateMachine is the SOLE attack issuer.
-    -- If ASM is not loaded, we simply do not attack (prevents competing issuers).
-    if EventTargeting.DEBUG then
-      print("[EventTargeting] AttackStateMachine unavailable — skipping attack")
+      print("[EventTargeting] Delegated to intelligence arbitration: " .. creature:getName())
     end
   end
 
@@ -1768,16 +1712,14 @@ if onCreatureAppear then
               end
             end
 
-            -- Immediate attack (rate-limited to prevent spam)
-            -- v3.0: Route ALL attacks through AttackStateMachine (sole issuer)
+            -- Immediate intelligence proposal (rate-limited to prevent spam)
             local sent = false
-            if AttackStateMachine and AttackStateMachine.requestSwitch then
-              local priority = EventTargeting.TargetAcquisition
-                and EventTargeting.TargetAcquisition.calculatePriority
-                and EventTargeting.TargetAcquisition.calculatePriority(creature) or 100
-              sent = AttackStateMachine.requestSwitch(creature, priority + 10) -- +10 tiebreaker for new creature
-            elseif TargetBot and TargetBot.requestAttack then
-              sent = TargetBot.requestAttack(creature, "event_high_priority")
+            local priority = EventTargeting.TargetAcquisition
+              and EventTargeting.TargetAcquisition.calculatePriority
+              and EventTargeting.TargetAcquisition.calculatePriority(creature) or 100
+            if TargetBot.submitSelection then
+              sent = TargetBot.submitSelection({ creature = creature, config = configs[1], priority = priority + 10 },
+                EventTargeting.getLiveMonsterCount and EventTargeting.getLiveMonsterCount() or 1, "EventHighPriority")
             end
           
             -- If attack was throttled and we are not already attacking this creature, bail

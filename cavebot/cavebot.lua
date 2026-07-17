@@ -756,6 +756,11 @@ if EventBus then
   end, 5)  -- High priority
 end
 
+local function pauseIntelligenceRoute(reason)
+  local route = nExBot and nExBot.Intelligence and nExBot.Intelligence.route
+  if route then route:pause(reason) end
+end
+
 cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   -- Guard: forward-declared functions may not be assigned yet during reload
   if not buildWaypointCache then return end
@@ -815,6 +820,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if targetBotIsActive and targetBotIsActive() then
     if targetBotIsCaveBotAllowed and not targetBotIsCaveBotAllowed() then
       safeResetWalking()
+      pauseIntelligenceRoute("targetbot")
       WaypointEngine.wasTargetBotBlocking = true
       return
     end
@@ -822,6 +828,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     -- PULL SYSTEM PAUSE: If smartPull is active, pause waypoint walking
     if TargetBot.smartPullActive then
       safeResetWalking()
+      pauseIntelligenceRoute("pull")
       WaypointEngine.wasTargetBotBlocking = true
       return
     end
@@ -833,6 +840,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     if TargetBot.shouldWaitForMonsters and TargetBot.shouldWaitForMonsters() then
       if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
         safeResetWalking()
+        pauseIntelligenceRoute("monsters")
         WaypointEngine.wasTargetBotBlocking = true
         return
       end
@@ -842,6 +850,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
       if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
         safeResetWalking()
+        pauseIntelligenceRoute("attack")
         WaypointEngine.wasTargetBotBlocking = true
         return
       end
@@ -851,11 +860,15 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     if EventTargeting and EventTargeting.isCombatActive and EventTargeting.isCombatActive() then
       if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
         safeResetWalking()
+        pauseIntelligenceRoute("combat")
         WaypointEngine.wasTargetBotBlocking = true
         return
       end
     end
   end
+
+  local intelligenceRoute = nExBot and nExBot.Intelligence and nExBot.Intelligence.route
+  if intelligenceRoute and intelligenceRoute.state == "paused" then intelligenceRoute:resume() end
   
   -- DRIFT DETECTION: Proactive nearest-WP refocus
   -- Trigger 1: Combat just ended (TargetBot was blocking, now allows CaveBot)
@@ -949,6 +962,10 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     currentAction = uiList:getFirstChild()
   end
   if not currentAction then return end
+  if intelligenceRoute and intelligenceRoute.state ~= "paused" and intelligenceRoute:currentWaypoint() ~= currentAction then
+    intelligenceRoute:start({ currentAction })
+    nExBot.Intelligence.advanceGeneration("route")
+  end
 
   -- Z-MISMATCH GUARD: If focused WP is a goto on a different floor than player,
   -- scan forward to the next same-floor goto (wraps around to WP1).
@@ -1040,6 +1057,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     local retryLimit = (actionType == "goto") and 16 or 8
     if actionRetries > retryLimit then
       recordFailure()
+      if intelligenceRoute then intelligenceRoute:applyOutcome(intelligenceRoute.generation, "path_failed") end
     end
     return
   end
@@ -1047,6 +1065,7 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   -- Track success/failure for stuck detection
   if result == true then
     recordSuccess()
+    if intelligenceRoute then intelligenceRoute:applyOutcome(intelligenceRoute.generation, "waypoint_reached") end
   else
     recordFailure()
     -- Instant failure (wrong floor, too far): pump extra failures for fast recovery
@@ -1474,7 +1493,7 @@ findReachableWaypoint = function(playerPos, options)
     if dist > maxDist * 1.5 then goto continue end
 
     candidates[#candidates + 1] = {
-      index = i, dist = dist, child = wp.child,
+      index = i, dist = dist, score = dist + (nExBot.Intelligence and nExBot.Intelligence.navigationPenalty and nExBot.Intelligence.navigationPenalty(wp, nil, dist) or 0), child = wp.child,
       x = wp.x, y = wp.y, z = wp.z,
       isGoto = wp.isGoto, withinRange = (dist <= maxDist)
     }
@@ -1486,7 +1505,10 @@ findReachableWaypoint = function(playerPos, options)
   end
 
   -- Sort by distance
-  table.sort(candidates, function(a, b) return a.dist < b.dist end)
+  table.sort(candidates, function(a, b)
+    if a.score ~= b.score then return a.score < b.score end
+    return a.index < b.index
+  end)
 
   -- Path-validate top candidates (max 5 strict A* calls, bounded cost)
   -- This prevents selecting WPs behind walls during recovery.

@@ -27,7 +27,7 @@
 ]]
 
 local zChanging = nExBot.zChanging or function() return false end
-local UnifiedTick = {}
+UnifiedTick = {}
 
 -- CONFIGURATION
 
@@ -139,6 +139,16 @@ function UnifiedTick.setEnabled(name, enabled)
   if handlers[name] then
     handlers[name].enabled = enabled
   end
+end
+
+function UnifiedTick.getDiagnostics()
+  local registered, enabled = 0, 0
+  for _, handler in pairs(handlers) do
+    registered = registered + 1
+    if handler.enabled then enabled = enabled + 1 end
+  end
+  return { registered = registered, enabled = enabled, avgTickTime = stats.avgTickTime,
+    peakTickTime = stats.peakTickTime, hasMaster = masterMacro ~= nil }
 end
 
 function UnifiedTick._rebuildOrder()

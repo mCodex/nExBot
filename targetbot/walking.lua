@@ -1,10 +1,10 @@
 --[[
-  TargetBot Walking Module - Optimized Pathfinding v5.0.0
+  TargetBot Walking Module - Optimized Pathfinding intelligence.0.0
   
   Uses path caching and progressive pathfinding for better performance.
   Integrates with TargetBot's creature cache for efficient walking.
   
-  v5.0.0: Integrated PathUtils for DRY, added anti-zigzag, native API optimization
+  intelligence.0.0: Integrated PathUtils for DRY, added anti-zigzag, native API optimization
 ]]
 
 local getClient = nExBot.Shared.getClient
@@ -142,8 +142,9 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
   -- IMMEDIATE WALK: Execute first step right away instead of waiting for next tick
   -- This fixes the timing issue where TargetBot.walk() was called before walkTo()
   if dest and not player:isWalking() then
-    TargetBot.walk()
+    return TargetBot.walk()
   end
+  return true
 end
 
 -- Called every 100ms if targeting or looting is active
@@ -206,9 +207,9 @@ TargetBot.walk = function()
     end
     
     -- Use cached path - take first step
-    walk(nextDir)
+    local moved = walk(nextDir) ~= false
     WalkCache.idx = WalkCache.idx + 1
-    return
+    return moved
   end
   
   -- Calculate new path
@@ -238,12 +239,15 @@ TargetBot.walk = function()
     WalkCache.idx = 1
     
     -- Take first step
-    walk(firstDir)
+    local moved = walk(path[1]) ~= false
     WalkCache.idx = WalkCache.idx + 1
+    dest = nil
+    return moved
   end
   
   -- Clear destination after attempting walk
   dest = nil
+  return false
 end
 
 -- Clear walking state

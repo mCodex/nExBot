@@ -102,6 +102,10 @@ View: `nExBot.printStartupProfile()`
 
 ## Benchmarks
 
+Run the intelligence pipeline benchmark with `lua tests/performance/intelligence_pipeline_benchmark.lua`. On the recorded arm64 Lua 5.5 baseline, mean snapshot, features, and arbitration time measured 0.006521 ms for one creature and 0.435285 ms for 100 creatures over 1,000 iterations. Tactical memory and metric samples retained their configured 100-entry bound after 1,000 writes.
+
+The Adaptive Intelligence runtime selects idle, route, combat, and emergency snapshot rates. A 5 ms measured budget degrades optional work in a fixed order; hard safety and execution stay enabled.
+
 | Component | Operation | Speed |
 |-----------|-----------|-------|
 | HealBot | Health check → cast | ~75ms |

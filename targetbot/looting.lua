@@ -301,12 +301,9 @@ TargetBot.Looting.process = function(targets, dangerLevel)
   local tile = (Client and Client.getTile) and Client.getTile(loot.pos) or (g_map and g_map.getTile and g_map.getTile(loot.pos))
   if dist >= 3 or not tile then
     loot.tries = loot.tries + 1
-    if nExBot and nExBot.MovementCoordinator and nExBot.MovementCoordinator.canMove then
-      if nExBot.MovementCoordinator.canMove() then
-        TargetBot.walkTo(loot.pos, 20, { ignoreNonPathable = true, precision = 2 })
-      end
-    else
-      TargetBot.walkTo(loot.pos, 20, { ignoreNonPathable = true, precision = 2 })
+    if MovementCoordinator and MovementCoordinator.canMove() then
+      MovementCoordinator.reposition(loot.pos, 0.7)
+      MovementCoordinator.tick()
     end
     return true
   end

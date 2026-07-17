@@ -1,0 +1,68 @@
+IntelligenceConsoleWindow < MainWindow
+  text: nExBot Tactical Intelligence
+  width: 460
+  height: 500
+  @onEscape: self:hide()
+
+  ComboBox
+    id: section
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    margin-top: 6
+    margin-left: 6
+    margin-right: 6
+
+  VerticalScrollBar
+    id: scroll
+    anchors.top: section.bottom
+    anchors.bottom: buttons.top
+    anchors.right: parent.right
+    margin-top: 8
+    margin-bottom: 8
+
+  ScrollablePanel
+    id: content
+    anchors.top: section.bottom
+    anchors.left: parent.left
+    anchors.right: scroll.left
+    anchors.bottom: buttons.top
+    margin: 8
+    vertical-scrollbar: scroll
+
+    Label
+      id: text
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      text-wrap: true
+      text-auto-resize: true
+      font: verdana-11px-monochrome
+
+  Panel
+    id: buttons
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    height: 32
+
+    Button
+      id: shadow
+      text: Shadow mode
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      width: 100
+
+    Button
+      id: refresh
+      text: Refresh
+      anchors.horizontalCenter: parent.horizontalCenter
+      anchors.verticalCenter: parent.verticalCenter
+      width: 80
+
+    Button
+      id: close
+      text: Close
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      width: 80

@@ -571,14 +571,10 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     if blocker then
       local Client = getClient()
       local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
-      if currentTarget ~= blocker then
-        attack(blocker)
+      if currentTarget ~= blocker and TargetBot and TargetBot.requestAttack then
+        TargetBot.requestAttack(blocker, "CaveBotBlocker")
       end
-      if Client and Client.setChaseMode then
-        Client.setChaseMode(1)
-      else
-        g_game.setChaseMode(1)
-      end
+      if MovementCoordinator then MovementCoordinator.setChaseMode(true) end
       CaveBot.delay(100)
       return "retry"
     end

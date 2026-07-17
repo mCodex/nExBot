@@ -1,0 +1,17 @@
+local Calibration = dofile("core/intelligence/learning/calibration.lua")
+
+describe("intelligence calibration", function()
+  it("groups predictions into bounded confidence buckets", function()
+    local calibration = Calibration.new(4)
+    calibration:observe(0, false)
+    calibration:observe(0.24, true)
+    calibration:observe(0.50, true)
+    calibration:observe(1, true)
+
+    local buckets = calibration:report()
+    assert.same({ count = 2, predicted = 0.12, actual = 0.5, error = 0.38 }, buckets[1])
+    assert.equals(1, buckets[3].count)
+    assert.equals(1, buckets[4].count)
+    assert.has_error(function() calibration:observe(1.1, true) end)
+  end)
+end)

@@ -348,7 +348,9 @@ if EventBus and EventBus.on then
 end
 
 if UnifiedTick and UnifiedTick.register then
-  UnifiedTick.register({ id = "target_reachability_cleanup", interval = 5000, priority = 10, callback = R.cleanup })
+  UnifiedTick.register("target_reachability_cleanup", {
+    interval = 5000, priority = UnifiedTick.Priority.IDLE, handler = R.cleanup,
+  })
 elseif type(macro) == "function" then
   macro(5000, R.cleanup)
 end

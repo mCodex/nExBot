@@ -17,7 +17,7 @@
   - ChaseController.isChasing() -- Check if native chase is active
 ]]
 
-local ChaseController = {}
+ChaseController = {}
 
 -- CLIENT SERVICE ABSTRACTION (shared alias)
 
@@ -294,21 +294,18 @@ if EventBus then
       if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
         return  -- ASM still managing a target — transient nil, ignore
       end
-      ChaseController.onAttackCancelled()
+      if MovementCoordinator then MovementCoordinator.setChaseMode(false) end
     end)
   end, 100)  -- High priority
   
   EventBus.on("player:health", function(hp, maxHp)
     -- On death/relogin, reset state
     if hp <= 0 then
-      ChaseController.onAttackCancelled()
+      if MovementCoordinator then MovementCoordinator.setChaseMode(false) end
     end
   end, 100)
 end
 
 -- MODULE EXPORT
-
--- Make ChaseController globally available (OTClient doesn't have _G)
-ChaseController = ChaseController  -- This makes it globally accessible
 
 return ChaseController

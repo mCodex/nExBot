@@ -172,33 +172,12 @@ TargetBot.AttackController = AttackController
 -- ═══════════════════════════════════════════════════════════════════════════
 TargetBot.requestAttack = function(creature, reason, force)
   if not creature then return false end
-  
-  -- OPTIMIZED: Use isCreatureDead helper (single pcall)
   if isCreatureDead(creature) then return false end
-  
-  local Client = getClient()
-  if not (Client and Client.attack) and not (g_game and g_game.attack) then return false end
-
-  -- OPTIMIZED: Use getCreatureId helper (single pcall)
-  local id = getCreatureId(creature)
-  if not id then return false end
-
-  -- Calculate priority for this creature
-  -- v2.4: Config priority scaled by 1000x for consistency with creature_priority.lua
-  local priority = 1000  -- Base priority (config priority 1)
-  if TargetBot.Creature and TargetBot.Creature.getConfigs then
-    local cfgs = TargetBot.Creature.getConfigs(creature)
-    if cfgs and cfgs[1] then
-      priority = (cfgs[1].priority or 1) * 1000
-    end
-  end
-
-  -- Use AttackStateMachine directly (always loaded as default)
-  if force then
-    return AttackStateMachine.forceSwitch(creature)
-  else
-    return AttackStateMachine.requestSwitch(creature, priority)
-  end
+  local cfgs = TargetBot.Creature and TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(creature)
+  local config = cfgs and cfgs[1] or { name = "intelligence_runtime", priority = 1, chase = true }
+  if not TargetBot.submitSelection then return false end
+  return TargetBot.submitSelection({ creature = creature, config = config, priority = (config.priority or 1) * 1000 },
+    1, reason or "TargetBotRequest")
 end
 
 -- Use TargetBotCore if available (DRY principle)
@@ -1232,6 +1211,44 @@ TargetBot.ActiveMovementConfig = TargetBot.ActiveMovementConfig or {
   anchorRange = 5
 }
 
+local function executeIntelligenceSelection(selection, targetCount, source)
+  local Intelligence = nExBot and nExBot.Intelligence
+  if not Intelligence or not TargetProposal then return false end
+  local proposal = TargetProposal.fromSelection(selection, {
+    now = now,
+    generations = Intelligence.lifecycle.generations,
+  })
+  if not proposal then return false end
+  Intelligence.applyContextAdjustment(proposal, selection)
+  Intelligence.activeCombatContext = proposal.contextKey
+  proposal.source = source or proposal.source
+  Intelligence.events:publish("TargetCandidateEvaluated", proposal, { source = proposal.source })
+  local maxHealth = player and player.getMaxHealth and player:getMaxHealth() or 0
+  local selected, rejected = Intelligence.decisions:select({ proposal }, Intelligence.lifecycle.generations, {
+    healthRatio = maxHealth > 0 and player:getHealth() / maxHealth or 0,
+    targetValid = selection.creature and not selection.creature:isDead(),
+  })
+  local features = Intelligence.features:extractCombat(Intelligence.currentSnapshot, { targetId = proposal.targetId })
+  features.predictions = { targetUtility = Intelligence.models:predict("TargetUtilityModel", features) }
+  if not Intelligence.optionalEnabled or Intelligence.optionalEnabled("replay") then
+    Intelligence.replay:record({
+      snapshotRef = Intelligence.currentSnapshot and Intelligence.currentSnapshot.generation,
+      features = features,
+      proposals = { proposal },
+      selected = selected,
+      rejected = rejected,
+    })
+  end
+  if not selected then
+    Intelligence.events:publish("TargetRejected", { proposal = proposal, rejected = rejected }, { source = "IntelligenceDecisionEngine" })
+    return false
+  end
+  Intelligence.events:publish("TargetSelected", selected, { source = "IntelligenceDecisionEngine" })
+  TargetBot.Creature.attack(selection, targetCount, false)
+  return true
+end
+TargetBot.submitSelection = executeIntelligenceSelection
+
 -- Main TargetBot loop - optimized with EventBus caching
 -- PERFORMANCE: 250ms macro interval balances responsiveness and CPU usage
 local lastRecalcTime = 0
@@ -1277,45 +1294,12 @@ targetbotMacro = macro(250, function()
     local eventTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
     if eventTarget and not eventTarget:isDead() then
       -- EventTargeting is handling combat - ensure we're attacking AND chase mode is set
-      local Client = getClient()
-      local currentAttack = ClientService.getAttackingCreature()
-      
       -- CRITICAL: Chase is only active if enabled AND keepDistance is disabled
       local chaseEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
       local keepDistanceEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.keepDistance
       local useNativeChase = chaseEnabled and not keepDistanceEnabled
       
-      if ChaseController then
-        ChaseController.setDesiredChase(useNativeChase)
-      else
-        if useNativeChase then
-          local currentMode = ClientService.getChaseMode() or 0
-          if currentMode ~= 1 then
-            if Client and Client.setChaseMode then
-              Client.setChaseMode(1)
-            elseif g_game and g_game.setChaseMode then
-              g_game.setChaseMode(1)
-            end
-            if TargetBot then TargetBot.usingNativeChase = true end
-          end
-        elseif not useNativeChase then
-          -- Chase disabled OR keepDistance enabled - ensure Stand mode
-          local currentMode = ClientService.getChaseMode() or 0
-          if currentMode ~= 0 then
-            if Client and Client.setChaseMode then
-              Client.setChaseMode(0)
-            elseif g_game and g_game.setChaseMode then
-              g_game.setChaseMode(0)
-            end
-            if TargetBot then TargetBot.usingNativeChase = false end
-          end
-        end
-      end
-      
-      if not currentAttack or currentAttack:getId() ~= eventTarget:getId() then
-        -- Sync our attack target with EventTargeting's choice
-        pcall(function() TargetBot.requestAttack(eventTarget, "event_sync") end)
-      end
+      MovementCoordinator.setChaseMode(useNativeChase)
       
       -- CRITICAL FIX: Still run creature_attack logic for movement features
       -- (avoidAttacks, keepDistance, dynamicLure, smartPull, rePosition, etc.)
@@ -1339,7 +1323,7 @@ targetbotMacro = macro(250, function()
           end
         end
         -- Run the full attack/walk logic with proper config
-        pcall(function() TargetBot.Creature.attack(params, targetCount, false) end)
+        pcall(executeIntelligenceSelection, params, targetCount, "EventTargeting")
       end
       
       setStatusRight("Targeting (Event)")
@@ -1437,7 +1421,7 @@ targetbotMacro = macro(250, function()
     local unreachableCount = monsterCache.unreachableCount or 0
     local reachableOnScreen = monsterCache.monsterCount or 0
     
-    -- v5.0: Also check AttackStateMachine for skipped creatures
+    -- intelligence.0: Also check AttackStateMachine for skipped creatures
     local smSkippedCount = 0
     if AttackStateMachine and AttackStateMachine.getSkippedCount then
       smSkippedCount = AttackStateMachine.getSkippedCount()
@@ -1522,34 +1506,7 @@ targetbotMacro = macro(250, function()
     local okId, id = pcall(function() return bestTarget.creature:getId() end)
     
     if okId and id then
-      -- Use AttackStateMachine for all attack management
       local smState = AttackStateMachine.getState()
-      local smTargetId = AttackStateMachine.getTargetId()
-      local allowSync = true
-
-      if EventTargeting and EventTargeting.isInCombat and EventTargeting.isInCombat() then
-        local evtTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
-        if evtTarget then
-          local okEvtId, evtId = pcall(function() return evtTarget:getId() end)
-          if okEvtId and evtId and evtId ~= id then
-            allowSync = false
-          end
-        end
-      end
-      
-      if allowSync then
-        local smTargetId = AttackStateMachine.getTargetId()
-        if not smTargetId or bestTarget.creature:getId() ~= smTargetId then
-          AttackStateMachine.requestAttack(bestTarget.creature, 1000)
-          lastEngagementAt = now
-        else
-          local gameTarget = ClientService.getAttackingCreature()
-          if not gameTarget then
-            AttackStateMachine.forceAttack(bestTarget.creature)
-            lastEngagementAt = now
-          end
-        end
-      end
 
       -- Update AttackController based on state machine status
       if smState == "LOCKED" then
@@ -1566,7 +1523,7 @@ targetbotMacro = macro(250, function()
     -- Delegate to unified attack/walk logic from creature_attack
     -- This ensures chase, positioning, avoidance and AttackBot integration run correctly
     -- DynamicLure/SmartPull will call allowCaveBot() if lure conditions are met
-    pcall(function() TargetBot.Creature.attack(bestTarget, targetCount, false) end)
+    pcall(executeIntelligenceSelection, bestTarget, targetCount, "TargetBot")
   else
     setWidgetTextSafe(ui.target.right, "-")
     setWidgetTextSafe(ui.config.right, "-")

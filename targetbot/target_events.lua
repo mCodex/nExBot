@@ -225,13 +225,9 @@ if EventBus then
     local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
     if not isAttacking then CME.enabled = false; return end
     CME.enabled = true
-    local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
-    if currentMode ~= desiredMode then
-      if Client and Client.setChaseMode then Client.setChaseMode(desiredMode); CME.lastEnforcedMode = desiredMode; CME.lastEnforceTime = currentTime
-        if EventBus then pcall(function() EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand") end) end
-      elseif g_game and g_game.setChaseMode then g_game.setChaseMode(desiredMode); CME.lastEnforcedMode = desiredMode; CME.lastEnforceTime = currentTime
-        if EventBus then pcall(function() EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand") end) end
-      end
+    if MovementCoordinator.setChaseMode(desiredMode == 1) then
+      CME.lastEnforcedMode = desiredMode; CME.lastEnforceTime = currentTime
+      if EventBus then pcall(function() EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand") end) end
     end
   end
   EventBus.on("targetbot/target_acquired", function(creature, creaturePos)

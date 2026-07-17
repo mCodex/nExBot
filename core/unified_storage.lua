@@ -12,7 +12,9 @@ local engine = StorageEngine.new({
   debounceMs = 300,
   maxFileSize = 10 * 1024 * 1024,
   defaults = {
-    version = 1, characterName = "", createdAt = 0, lastModified = 0,
+    version = 5, characterName = "", createdAt = 0, lastModified = 0,
+    intelligence = { migrated = false, models = { defaultMode = "SHADOW" },
+      flags = { replay = true, diagnostics = true, learning = true, neuralModel = false } },
     targetbot = {
       enabled = false, selectedConfig = "",
       priority = { enabled = true, emergencyHP = 25, combatTimeout = 12, scanRadius = 2 },

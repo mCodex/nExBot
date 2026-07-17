@@ -38,6 +38,12 @@ Each creature scored by:
 
 Highest score becomes active target.
 
+### Proposal Arbitration
+
+Both TargetBot selection loops submit the same normalized proposal. The intelligence Decision Engine checks generation, expiry, target validity, hard safety, priority, confidence, and utility before TargetBot requests an attack. Rejected proposals include a reason for replay and diagnostics.
+
+`TargetReachability` owns reachable, temporarily unreachable, and hard-unreachable state. TargetBot can switch candidates after a bounded failure instead of remaining trapped on one creature.
+
 ## Attack State Machine
 
 All attacks go through **AttackStateMachine** (ASM). No other module calls `g_game.attack()` directly.
@@ -111,6 +117,24 @@ Intent-based voting. Highest confidence intent executes per tick.
 
 Dynamic scaling with monster count (1–2: 1.0x, 3–4: 0.85x, 5–6: 0.70x, 7+: 0.50x).
 
+MovementCoordinator owns autonomous movement arbitration. `ChaseController` writes the native chase mode, while the TargetBot walker executes approved paths. Loot repositioning, keep-distance, chase, lure, pull, and wave avoidance use the same intent boundary.
+
+## Dynamic Lure and Pull
+
+Dynamic Lure uses target counts, configured minimums and maximums, delay, confidence, and current route generation. Its state machine moves through collection, holding, completion, or abort without issuing movement itself.
+
+Pull selects one participant, applies distance and timeout hysteresis, and pauses CaveBot through the shared route state. CaveBot resumes through an explicit transition when the pull completes or aborts.
+
+## Wave and Beam Avoidance
+
+Wave observations combine direction, timing, and confidence. The state machine waits for its entry threshold, keeps the avoidance state through a lower exit threshold, and rejects unsafe tiles. Approved safe-tile proposals go through MovementCoordinator. Outcomes feed replay and calibration.
+
+## Learning Modes
+
+TargetBot models start in `SHADOW`. They record target utility, switching, monster behavior, lure safety, pull continuation, and wave outcomes without affecting combat. Configured monster priority ranks first. Route and monster context needs 30 outcomes and 0.7 confidence before it can adjust a candidate within a 10 percent bound. It cannot change chase, keep-distance, lure, reachability, or safety configuration. Promotion to `ACTIVE` requires evidence, confidence, calibration, performance, safety, XP, path-failure, and target-thrashing gates.
+
+See [Adaptive Intelligence](INTELLIGENCE.md) for model controls and diagnostics.
+
 ## Engagement Lock
 
 | Scenario | Monsters | Switch Cooldown | Stickiness |
@@ -164,6 +188,7 @@ print(MonsterAI.getStatsSummary())
 print(MonsterAI.getClassification("Dragon Lord"))
 print(MonsterAI.Scenario.getStats())
 print(AttackStateMachine.getState(), AttackStateMachine.getTargetId())
+print(nExBot.Intelligence.models:get("TargetUtilityModel").mode)
 MonsterAI.DEBUG = true
 ```
 
