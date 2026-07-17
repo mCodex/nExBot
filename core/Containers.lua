@@ -1405,3 +1405,82 @@ sortingMacro = macro(300, function(m)
     m:setOff()
     cachedContainers = nil
 end)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Discovery Service Bridge
+-- Wires the modular core/containers/discovery.lua into the legacy Containers.lua
+-- lifecycle events and native container callbacks.
+-- ─────────────────────────────────────────────────────────────────────────────
+do
+  local ok, Discovery = pcall(dofile, "core/containers/discovery.lua")
+  if not ok then
+    warn("[nExBot/Containers] Failed to load discovery module: " .. tostring(Discovery))
+    Discovery = nil
+  end
+
+  if Discovery then
+    -- Singleton discovery instance exposed globally for diagnostics.
+    nExBot.ContainerDiscovery = Discovery.new()
+    local disc = nExBot.ContainerDiscovery
+
+    -- Sync configuration from legacy config into the new discovery instance.
+    disc:setConfig({
+      autoOpen                 = config.autoOpenOnLogin or false,
+      pauseTargetBotOnRecovery = true,
+      pauseCaveBotOnRecovery   = true,
+    })
+
+    -- Forward game lifecycle events.
+    if EventBus then
+      EventBus.on("player:login", function()
+        disc:setConfig({ autoOpen = config.autoOpenOnLogin or false })
+        disc:onGameStart()
+      end, 100)
+
+      EventBus.on("player:logout", function()
+        disc:onGameEnd()
+      end, 100)
+    end
+
+    -- Hook into native container-open callback.
+    onContainerOpen(function(container, previousContainer)
+      if not container then return end
+
+      -- Build event from the opened container.
+      local itemType = 0
+      local ci = container.getContainerItem and container:getContainerItem()
+      if ci then pcall(function() itemType = ci:getId() end) end
+
+      local items = {}
+      pcall(function() items = container:getItems() or {} end)
+
+      disc:onContainerOpened({
+        containerId = container:getId(),
+        itemType    = itemType,
+        items       = items,
+        itemCount   = #items,
+      })
+
+      -- Also fire item indexing.
+      disc:onContainerItems({
+        identity    = disc.bfs.inFlight and disc.bfs.inFlight.identity or ("open:" .. tostring(container:getId())),
+        containerId = container:getId(),
+        items       = items,
+        pageIndex   = 0,
+      })
+    end)
+
+    -- Expose readiness check for other modules.
+    nExBot.isContainerReady = function(level)
+      return disc:isReadyFor(level or "COMBAT_READY")
+    end
+
+    nExBot.getContainerReadiness = function()
+      return disc:getReadiness()
+    end
+
+    nExBot.getContainerMetrics = function()
+      return disc:getMetrics()
+    end
+  end
+end

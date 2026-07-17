@@ -25,7 +25,7 @@ Install paths:
 | **CaveBot** | Waypoint navigation, floor-change safety, supply refills, 50+ pre-built routes |
 | **TargetBot** | 9-stage priority targeting, Monster Insights AI, movement coordination |
 | **Hunt Analyzer** | Session analytics — kills/hr, XP/hr, profit, Hunt Score |
-| **Containers** | Event-driven BFS, O(1) operations, generation tracking, quiver management 🎒 |
+| **Containers** | Event-driven BFS, O(1) operations, generation tracking, reconnect recovery coordinator, multi-level readiness, quiver management 🎒 |
 | **Follow Player** | Party hunt — stays near leader while attacking |
 | **Extras** | Anti-RS, alarms, equipment swap, combo system, push max |
 
@@ -57,15 +57,16 @@ Open **nExBot Tactical Intelligence** from the Main tab to inspect lifecycle, ta
 │   └── adaptive tick and optional-work budgets
 │
 ├── Containers 🎒
-│   ├── identity (physical container identity)
+│   ├── identity (physical container identity — generation+path+slot+type)
 │   ├── queue (head/tail FIFO, O(1) dequeue)
-│   ├── state_machine (13 states, generation tracking)
-│   ├── registry (O(1) lookups, incremental item index)
-│   ├── bfs (event-driven traversal)
-│   ├── scheduler (UnifiedTick integration)
-│   ├── readiness (derived snapshots)
-│   ├── quiver (paladin ownership)
-│   └── discovery (orchestrator)
+│   ├── state_machine (23 states, generation tracking, transition log)
+│   ├── registry (O(1) lookups, slot-level item index, role assignments)
+│   ├── bfs (event-driven traversal, retry counting, deduplication)
+│   ├── scheduler (priority queue, ack timeout, exhaustion backoff)
+│   ├── readiness (10-level derived snapshots)
+│   ├── client_adapter (OTClient/vBot abstraction)
+│   ├── quiver (paladin ownership, fixed slot detection)
+│   └── discovery (orchestrator + reconnect recovery coordinator)
 │
 ├── HealBot ←── player:health events
 │   └── spell_resolver (conversion functions)

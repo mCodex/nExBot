@@ -55,9 +55,58 @@ Copy `nExBot/` into your client's `bot/` directory. vBot: `%APPDATA%/OTClientV8/
 
 ## Containers
 
-**Not opening:** Auto Open enabled? Assigned correctly? Wait a few seconds. Check console.
+**Not opening all backpacks**
+1. Is Auto Open enabled in the Containers panel?
+2. Are roles assigned in the Roles subtab?
+3. Wait 3–5 seconds — discovery runs at low priority.
+4. Check the Diagnostics subtab for failed nodes.
+5. If the main backpack is in the equipped back slot, it is detected automatically. If not, assign the role manually.
 
-**Quiver not refilling:** Arrows/bolts in supply? Quiver equipped? Correct type?
+**Repeated backpack types — wrong one opens**
+The bot tracks physical identity (generation + path + slot + item type), not just item type. Two identical brown backpacks remain distinct. If role assignment is ambiguous, the Roles subtab shows an ambiguity warning. Identify each container manually once and the selector persists through reconnects.
+
+**Discovery runs but stops partway through**
+A server exhaustion event likely triggered backoff. Check Diagnostics → exhaustion count. The bot retries automatically (up to 3 attempts per node). If all retries fail, that node shows as "failed" and discovery continues with the others, completing in DEGRADED mode. Use the **Retry Failed** button to attempt recovery.
+
+**Quiver not detected**
+1. Is the character a Paladin? (vocation IDs 2 or 12 are detected automatically)
+2. Is the quiver actually equipped in the ammo/arrow slot (slot 10)?
+3. Check the Quiver & Ammo subtab for detection status.
+4. Some custom servers use non-standard quiver item IDs — add them to `QUIVER_ITEM_IDS` in `core/containers/quiver.lua`.
+5. Check console for errors.
+
+**Ammo not transferred to quiver**
+1. Is compatible ammo configured in the Quiver & Ammo subtab?
+2. Is the ammo reserve container assigned the `AMMO_RESERVE` role?
+3. Is the quiver already full? (Check current count vs capacity in the subtab)
+4. Was the ammo reserve container discovered? Check the Container Graph subtab.
+5. Refill moves are serialized — they won't run during active container discovery.
+
+**Recovery stuck at SURVIVAL_ONLY after reconnect**
+1. Check that `autoOpen` is enabled.
+2. Check whether root discovery succeeded — open the Containers panel → Overview subtab.
+3. If the main backpack is not in the back slot, detection falls back to the first open container. Make sure at least one container is open.
+4. Check console for load errors — if `discovery.lua` failed to load, recovery won't start.
+5. Use **Safely Reset Runtime State** in the Overview subtab and re-enable Auto Open.
+
+**TargetBot resumed attacking before containers were ready**
+The reconnect recovery coordinator (`discovery.lua`) emits `recovery:resume_targetbot` only when `COMBAT_READY` is reached. If TargetBot resumed early:
+1. Check that `pauseTargetBotOnRecovery = true` in container config.
+2. TargetBot must subscribe to `recovery:pause_targetbot` and `recovery:resume_cavebot` events — verify in diagnostics.
+3. Check for stale EventBus subscriptions left from a previous session.
+
+**Container open window limit reached**
+The bot defaults to a maximum of 19 simultaneously open containers. If your inventory exceeds this:
+1. Switch to `PIN_CRITICAL_AND_TRAVERSE` window mode — keeps critical containers open, closes non-critical ones after scanning.
+2. Or use `ROLE_CONTAINERS_ONLY` — opens only role-assigned containers.
+3. Check server documentation for the actual limit and configure `maxOpenWindows` accordingly.
+
+**Performance: bot slows during discovery**
+- Container discovery runs at priority 25 (LOW). Healing (priority 0–1) always takes precedence.
+- Check if another module is issuing competing open/move requests — all inventory actions must go through the scheduler.
+- Increase `cooldownMs` in Advanced settings for high-latency servers.
+
+
 
 ## Performance
 

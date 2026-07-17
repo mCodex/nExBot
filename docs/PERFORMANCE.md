@@ -119,17 +119,54 @@ The Adaptive Intelligence runtime selects idle, route, combat, and emergency sna
 
 ## Container System
 
-Event-driven BFS with O(1) operations:
+Event-driven BFS with O(1) operations and adaptive backoff:
 
-| Operation | Before | After |
-|-----------|--------|-------|
-| Dequeue | O(n) | O(1) |
-| Candidate lookup | O(n) scan | O(1) |
-| Deduplication | O(n) scan | O(1) |
-| Item lookup | O(C*I) full scan | O(1) |
-| Full discovery | O(C*I) | O(C+I+P) |
+| Operation | Complexity | Note |
+|-----------|------------|------|
+| Queue enqueue/dequeue | O(1) amortized | Head/tail FIFO, bounded capacity |
+| Candidate lookup | O(1) | Hash map by physical identity |
+| Deduplication | O(1) | Visited set in BFS |
+| Item lookup by type | O(1) | itemTypeSlots index |
+| Role lookup | O(1) | roleIndex hash map |
+| Full discovery | O(C + I + P) | C=containers, I=items, P=pages |
+| Page traversal | Sequential, ack-driven | One open in flight |
 
-Container discovery runs at LOW priority (25) on UnifiedTick. Critical actions always take precedence.
+Benchmarks (10k operations): Queue <1ms, Registry add+lookup <2ms, State transitions <1ms.
+
+### Reconnect Recovery Performance
+
+| Milestone | Typical time | Conditions |
+|-----------|-------------|-----------|
+| SURVIVAL_ONLY entered | 0ms | Immediate on `onGameStart` |
+| Root discovery starts | 1.2s | Inventory stability wait |
+| ROOTS_READY | 1.5–3s | Main BP opens |
+| SURVIVAL_READY | 2–4s | Healing supplies indexed |
+| QUIVER_READY (paladin) | 2–5s | Quiver opens |
+| AMMO_READY (paladin) | 3–8s | Ammo reserve scanned |
+| COMBAT_READY | 3–8s | TargetBot/CaveBot resume |
+| FULLY_DISCOVERED | 5–30s | Depends on inventory depth |
+
+Times measured on a typical low-latency server (≤100ms round-trip). High-latency servers may be 2–3× longer due to adaptive cooldown and ack timeout.
+
+### Scheduler Adaptive Cooldown
+
+The scheduler tracks EWMA acknowledgement latency (α=0.25) and adapts the action cooldown:
+```
+cooldownMs = cooldownMs * 0.9 + (latencyMs * 0.5) * 0.1
+```
+Bounded between 200ms and 2000ms. Prevents both flooding and unnecessary slowdown.
+
+### Exhaustion Backoff
+
+```
+attempt 1:  base × 1   + jitter (0–20%)
+attempt 2:  base × 2   + jitter
+attempt 3:  base × 4   + jitter
+attempt 4+: base × 8   + jitter  (capped at 30s)
+```
+base = 1000ms default. Reset to ×1 on successful acknowledgement.
+
+Container discovery runs at priority 25 on UnifiedTick. Critical actions (healing, survival) always take precedence.
 
 ## Troubleshooting
 

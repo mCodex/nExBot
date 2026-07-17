@@ -69,7 +69,7 @@ TargetBot = {} -- global namespace
 importStyle("/targetbot/looting.otui")
 importStyle("/targetbot/target.otui")
 importStyle("/targetbot/creature_editor.otui")
-importStyle("/targetbot/monster_inspector.otui")
+-- legacy Monster Inspector style removed
 
 -- Load TargetBot core module first (shared utilities)
 dofile("/targetbot/core.lua")
@@ -104,7 +104,7 @@ dofile("/targetbot/creature.lua")
 dofile("/targetbot/event_targeting.lua")      -- High-performance EventBus targeting
 
 -- Monster inspector UI (visualize learned patterns)
-dofile("/targetbot/monster_inspector.lua")
+-- legacy Monster Inspector loader removed
 dofile("/targetbot/creature_attack.lua")
 dofile("/targetbot/priority_engine.lua")      -- Unified priority scoring engine
 dofile("/targetbot/creature_editor.lua")

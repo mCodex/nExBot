@@ -2,9 +2,95 @@
 
 Technical reference for nExBot internals.
 
-## Loading Order
+## Container System
 
-`_Loader.lua` initializes in phases:
+Container modules load in Phase 7 under `core/containers/`. The orchestrator (`discovery.lua`) doubles as the reconnect recovery coordinator.
+
+### Modules
+
+| Module | Responsibility | Complexity |
+|--------|---------------|------------|
+| `identity.lua` | Physical container identity strings | O(1) |
+| `queue.lua` | Head/tail FIFO, bounded capacity | O(1) |
+| `state_machine.lua` | 23 explicit states, transition log, generation tracking | O(1) |
+| `registry.lua` | Container registry, role index, slot-level item index | O(1) lookup |
+| `bfs.lua` | Event-driven BFS, deduplication, retry counting | O(C+I+P) |
+| `scheduler.lua` | Serialized opens, ack timeout, exhaustion backoff, priority | O(1) |
+| `readiness.lua` | Derived readiness levels from registry state | O(1) |
+| `client_adapter.lua` | OTClient / vBot API abstraction | O(1) |
+| `quiver.lua` | Quiver detection, vocation check, equipped-slot access | O(1) |
+| `discovery.lua` | Orchestrator + reconnect recovery coordinator | O(1) dispatch |
+
+### Recovery Coordinator (inside discovery.lua)
+
+`Discovery` acts as the reconnect recovery coordinator. It owns the **policy state** which controls whether TargetBot, CaveBot, and looting are allowed to run.
+
+Policy states:
+
+```
+DISABLED                  → Bot not running
+SURVIVAL_ONLY             → Healing/escape only; all combat paused
+CONTAINER_CRITICAL_RECOVERY → Critical containers being opened
+COMBAT_DEGRADED           → Combat cautiously allowed; full inventory not ready
+COMBAT_READY              → Full combat enabled; TargetBot and CaveBot resume
+FULLY_READY               → All containers discovered; all features enabled
+```
+
+Transition sequence on reconnect:
+
+```
+onGameStart
+  → SURVIVAL_ONLY (pause TargetBot and CaveBot)
+  → CONTAINER_CRITICAL_RECOVERY (root discovery starts)
+  → COMBAT_READY (emit recovery:resume_targetbot / recovery:resume_cavebot)
+  → FULLY_READY (background traversal complete)
+```
+
+### Readiness Levels
+
+Consumers declare the readiness they require. `Readiness.meetsLevel(status, required)` returns true when the current status satisfies the required level.
+
+```
+FAILED < DEGRADED < SESSION_READY < ROOTS_READY < SURVIVAL_READY
+  < QUIVER_READY < AMMO_READY < COMBAT_READY < LOOT_READY < FULLY_DISCOVERED
+```
+
+### Generation Tracking
+
+`StateMachine.generation` increments on every cancel, reconnect, and bot reload. All BFS candidates, scheduler actions, and callbacks carry their generation. Stale callbacks from generation N are silently rejected in generation N+1.
+
+### EventBus Contracts
+
+| Event | Published by | Payload |
+|-------|-------------|---------|
+| `containers:readiness` | `Discovery` | Readiness snapshot |
+| `containers:open_all_complete` | `Discovery` | Final readiness snapshot |
+| `container:open` | Native client callback → `Discovery` | Container info |
+| `containers:recovery_policy` | `Discovery` | `{state, generation, ts}` |
+| `recovery:pause_targetbot` | `Discovery` | `{reason, generation}` |
+| `recovery:resume_targetbot` | `Discovery` | `{reason, generation, freshState}` |
+| `recovery:pause_cavebot` | `Discovery` | `{reason, generation}` |
+| `recovery:resume_cavebot` | `Discovery` | `{reason, generation, recalculate}` |
+
+TargetBot and CaveBot subscribe to `recovery:pause_*` and `recovery:resume_*`. They must invalidate stale state before resuming and must not accept resume signals from a previous generation.
+
+### Scheduler Priority Classes
+
+```lua
+Scheduler.Priority = {
+  EMERGENCY_SURVIVAL   = 0,
+  CRITICAL_HEAL        = 1,
+  EMERGENCY_ESCAPE     = 2,
+  CRITICAL_AMMO_REFILL = 3,
+  CRITICAL_CONTAINER   = 4,
+  COMBAT_SUPPORT       = 5,
+  NORMAL_DISCOVERY     = 25,
+  LOOT_SORTING         = 50,
+  MAINTENANCE          = 100,
+}
+```
+
+Normal container discovery (priority 25) cannot starve critical actions (priority 0–5).
 
 | Phase | Modules |
 |-------|---------|

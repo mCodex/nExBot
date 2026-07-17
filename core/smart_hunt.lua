@@ -1,5 +1,5 @@
 --[[
-  Hunt Analyzer Module v2.0
+  Tactical Intelligence Analytics Module v2.0
   
   Features:
   - Statistical analysis (standard deviation, trends, confidence)
@@ -1721,21 +1721,21 @@ UI.Separator();
 
 UI.Label("Statistics:")
 
-local btn = UI.Button("Hunt Analyzer", function()
+--[[
   local ok, err = pcall(showAnalytics)
   if not ok then warn("[HuntAnalyzer] " .. tostring(err)) print(buildSummary()) end
 end)
 if btn then btn:setTooltip("View hunting analytics") end
 
--- Monster Insights button below Hunt Analyzer
-local monsterBtn = UI.Button("Monster Insights", function()
-  -- Ensure monster inspector is loaded and window exists
+-- legacy monster-inspection block removed
+local monsterBtn = UI.Button("Tactical Intelligence", function()
+  -- unified window is loaded elsewhere
   if not MonsterInspectorWindow then
     if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.showWindow then
       nExBot.MonsterInspector.showWindow()
     else
       -- Try to load it manually
-      pcall(function() dofile("/targetbot/monster_inspector.lua") end)
+      pcall(function() end)
       if nExBot and nExBot.MonsterInspector and nExBot.MonsterInspector.showWindow then
         nExBot.MonsterInspector.showWindow()
       end
@@ -1752,6 +1752,8 @@ local monsterBtn = UI.Button("Monster Insights", function()
   end
 end)
 if monsterBtn then monsterBtn:setTooltip("View learned monster patterns and samples") end
+
+]]
 
 -- PUBLIC API
 

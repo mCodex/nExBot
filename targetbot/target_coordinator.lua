@@ -1722,3 +1722,45 @@ TargetBot.__internals = {
 }
 
 -- End of TargetBot module
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Container Recovery Coordination
+-- Subscribe to recovery:pause/resume events emitted by Discovery.
+-- Prevents stale target acquisition during reconnect recovery.
+-- ─────────────────────────────────────────────────────────────────────────────
+if EventBus then
+  local _recoveryPausedGen = nil
+
+  EventBus.on("recovery:pause_targetbot", function(payload)
+    local gen = payload and payload.generation
+    if _recoveryPausedGen == gen then return end
+    _recoveryPausedGen = gen
+    -- Pause macro ticks if TargetBot is on.
+    if TargetBot.isOn and TargetBot.isOn() then
+      if targetbotMacro and targetbotMacro.setOn then
+        pcall(function() targetbotMacro.setOn(false) end)
+      end
+    end
+  end, 0)
+
+  EventBus.on("recovery:resume_targetbot", function(payload)
+    local gen = payload and payload.generation
+    if _recoveryPausedGen ~= gen then return end
+    _recoveryPausedGen = nil
+    -- Invalidate stale target state before resuming.
+    if payload and payload.freshState then
+      if TargetBot.__internals and TargetBot.__internals.invalidateCache then
+        pcall(TargetBot.__internals.invalidateCache)
+      end
+      if TargetBot.__internals and TargetBot.__internals.clearPaths then
+        pcall(TargetBot.__internals.clearPaths)
+      end
+    end
+    -- Re-enable macro only if TargetBot is configured on.
+    if TargetBot.isOn and TargetBot.isOn() then
+      if targetbotMacro and targetbotMacro.setOn then
+        pcall(function() targetbotMacro.setOn(true) end)
+      end
+    end
+  end, 0)
+end

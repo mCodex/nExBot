@@ -1928,3 +1928,48 @@ end
 
 -- Note: Profile restoration is handled early in configs.lua
 -- before Config.setup() is called, so the dropdown loads correctly
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Container Recovery Coordination
+-- Subscribe to recovery:pause/resume events emitted by Discovery.
+-- These are issued during reconnect to prevent stale waypoint execution.
+-- ─────────────────────────────────────────────────────────────────────────────
+if EventBus then
+  -- Track whether CaveBot is paused due to container recovery.
+  local _recoveryPausedGeneration = nil
+
+  EventBus.on("recovery:pause_cavebot", function(payload)
+    local gen = payload and payload.generation
+    if _recoveryPausedGeneration == gen then return end  -- already paused this gen
+    _recoveryPausedGeneration = gen
+    -- Pause waypoint engine if CaveBot is on.
+    if CaveBot.isOn() then
+      if intelligenceRoute and intelligenceRoute.pause then
+        pcall(function() intelligenceRoute:pause("container_recovery") end)
+      end
+    end
+  end, 0)
+
+  EventBus.on("recovery:resume_cavebot", function(payload)
+    local gen = payload and payload.generation
+    -- Only resume if the pause came from the same generation.
+    if _recoveryPausedGeneration ~= gen then return end
+    _recoveryPausedGeneration = nil
+    if CaveBot.isOn() then
+      -- Resume with recalculated route from current position.
+      if intelligenceRoute and intelligenceRoute.resume then
+        pcall(function() intelligenceRoute:resume() end)
+      end
+      -- Invalidate stale path so CaveBot recalculates.
+      if WaypointEngine then
+        pcall(function()
+          WaypointEngine.stuckWaypoints = {}
+          WaypointEngine.failureCount    = 0
+        end)
+      end
+    end
+    if payload and payload.recalculate and CaveBot.resetWaypointEngine then
+      pcall(CaveBot.resetWaypointEngine)
+    end
+  end, 0)
+end
