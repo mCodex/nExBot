@@ -127,10 +127,6 @@ function UnifiedTick.register(name, config)
 end
 
 --[[
-  return true
-end
-
---[[
   Enable/disable a handler
   @param name string Handler name
   @param enabled boolean
@@ -259,43 +255,5 @@ function UnifiedTick.start()
 end
 
 -- STATISTICS AND DEBUGGING
-
--- PRE-DEFINED HANDLER TEMPLATES
--- Common handler patterns for easy migration
-
---[[
-  Create a condition check handler
-  @param name string Handler name
-  @param checkFn function Condition check function
-  @param interval number Check interval (default 500ms)
-]]
---[[
-  Create a healing handler (high priority)
-  @param name string Handler name
-  @param healFn function Healing check function
-  @param interval number Check interval (default 100ms)
-]]
---[[
-  Create a targeting handler (high priority)
-  @param name string Handler name
-  @param targetFn function Targeting logic function
-  @param interval number Check interval (default 200ms)
-]]
---[[
-  Create a UI update handler (low priority)
-  @param name string Handler name
-  @param updateFn function UI update function
-  @param interval number Update interval (default 300ms)
-]]
---[[
-  Create an analytics handler (idle priority)
-  @param name string Handler name
-  @param analyticsFn function Analytics function
-  @param interval number Update interval (default 1000ms)
-]]
--- AUTO-START (Optional)
--- Uncomment to auto-start when module is loaded
-
--- UnifiedTick.start()
 
 return UnifiedTick

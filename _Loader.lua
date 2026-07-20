@@ -347,25 +347,11 @@ local function autoDetectClient(attempt, maxAttempts)
       nExBot.isOTCv8 = acl.isOTCv8()
       nExBot.isOpenTibiaBR = acl.isOpenTibiaBR()
 
-      if newType ~= prevType or nExBot.clientName ~= prevName then
-      end
-
       if nExBot.isOpenTibiaBR then
         return
       end
 
       if attempt >= maxAttempts then
-        if acl.getDetectionInfo then
-          local info = acl.getDetectionInfo()
-          if info and info.signals then
-            local keys = {}
-            for k, v in pairs(info.signals) do
-              if v then
-                table.insert(keys, k)
-              end
-            end
-          end
-        end
         return
       end
     end
@@ -459,7 +445,7 @@ loadCategory("architecture", {
   "intelligence/learning/reward_model",
   "intelligence/foundation/metrics",
   "intelligence/observability/bot_doctor",
-"intelligence/foundation/adaptive_scheduler",
+  "intelligence/foundation/adaptive_scheduler",
   "intelligence/foundation/hunt_metrics",
   "intelligence/foundation/telemetry_client",
   "intelligence/foundation/state_enums",
@@ -615,84 +601,84 @@ end
 local PRIVATE_DOFILE_PATH = "/private"
 
 local function collectLuaFiles(folderPath, dofileBase, collected)
-    collected = collected or {}
-    
-    local status, items = pcall(function()
-        return g_resources.listDirectoryFiles(folderPath, false, false)
-    end)
-    
-    if not status or not items then
-        return collected
-    end
-    
-    for i = 1, #items do
-        local item = items[i]
-        local fullPath = folderPath .. "/" .. item
-        local dofilePath = dofileBase .. "/" .. item
-        
-        if item:match("%.lua$") then
-            collected[#collected + 1] = {
-                name = item,
-                path = dofilePath
-            }
-        elseif not item:match("%.") then
-            local subStatus, subItems = pcall(function()
-                return g_resources.listDirectoryFiles(fullPath, false, false)
-            end)
-            if subStatus and subItems then
-                collectLuaFiles(fullPath, dofilePath, collected)
-            end
-        end
-    end
-    
+  collected = collected or {}
+
+  local status, items = pcall(function()
+    return g_resources.listDirectoryFiles(folderPath, false, false)
+  end)
+
+  if not status or not items then
     return collected
+  end
+
+  for i = 1, #items do
+    local item = items[i]
+    local fullPath = folderPath .. "/" .. item
+    local dofilePath = dofileBase .. "/" .. item
+
+    if item:match("%.lua$") then
+      collected[#collected + 1] = {
+        name = item,
+        path = dofilePath
+      }
+    elseif not item:match("%.") then
+      local subStatus, subItems = pcall(function()
+        return g_resources.listDirectoryFiles(fullPath, false, false)
+      end)
+      if subStatus and subItems then
+        collectLuaFiles(fullPath, dofilePath, collected)
+      end
+    end
+  end
+
+  return collected
 end
 
 local function loadPrivateScripts()
-    local status, items = pcall(function()
-        return g_resources.listDirectoryFiles(P.private, false, false)
+  local status, items = pcall(function()
+    return g_resources.listDirectoryFiles(P.private, false, false)
+  end)
+
+  if not status or not items or #items == 0 then
+    return
+  end
+
+  local privateStart = os.clock()
+  local luaFiles = collectLuaFiles(P.private, PRIVATE_DOFILE_PATH)
+
+  if #luaFiles == 0 then
+    return
+  end
+
+  table.sort(luaFiles, function(a, b) return a.path < b.path end)
+
+  local loadedCount = 0
+
+  for i = 1, #luaFiles do
+    local file = luaFiles[i]
+    local scriptStart = os.clock()
+
+    local loadStatus, err = pcall(function()
+      dofile(file.path)
     end)
-    
-    if not status or not items or #items == 0 then
-        return
+
+    local elapsed = math.floor((os.clock() - scriptStart) * 1000)
+
+    if loadStatus then
+      loadedCount = loadedCount + 1
+      loadTimes["private:" .. file.name] = elapsed
+    else
+      warn("[Private] Failed to load '" .. file.path .. "': " .. tostring(err))
+      nExBot.loadErrors = nExBot.loadErrors or {}
+      nExBot.loadErrors["private:" .. file.name] = tostring(err)
     end
-    
-    local privateStart = os.clock()
-    local luaFiles = collectLuaFiles(P.private, PRIVATE_DOFILE_PATH)
-    
-    if #luaFiles == 0 then
-        return
-    end
-    
-    table.sort(luaFiles, function(a, b) return a.path < b.path end)
-    
-    local loadedCount = 0
-    
-    for i = 1, #luaFiles do
-        local file = luaFiles[i]
-        local scriptStart = os.clock()
-        
-        local loadStatus, err = pcall(function()
-            dofile(file.path)
-        end)
-        
-        local elapsed = math.floor((os.clock() - scriptStart) * 1000)
-        
-        if loadStatus then
-            loadedCount = loadedCount + 1
-            loadTimes["private:" .. file.name] = elapsed
-        else
-            warn("[Private] Failed to load '" .. file.path .. "': " .. tostring(err))
-            nExBot.loadErrors = nExBot.loadErrors or {}
-            nExBot.loadErrors["private:" .. file.name] = tostring(err)
-        end
-    end
-    
-    loadTimes["_private_total"] = math.floor((os.clock() - privateStart) * 1000)
-    
-    if loadedCount > 0 then
-        info("[nExBot] Loaded " .. loadedCount .. " private script(s)")
-    end
+  end
+
+  loadTimes["_private_total"] = math.floor((os.clock() - privateStart) * 1000)
+
+  if loadedCount > 0 then
+    info("[nExBot] Loaded " .. loadedCount .. " private script(s)")
+  end
 end
 
 loadPrivateScripts()
