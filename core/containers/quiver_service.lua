@@ -158,6 +158,16 @@ function QuiverService:tick()
   -- Schedule the move through the action scheduler.
   self:_scheduleMove(source, quiverContainer, needed)
   self.lastReason = QuiverService.Reason.MOVE_SCHEDULED
+
+  -- Emit refill event for consumers (e.g. spear_fallback)
+  if _G.EventBus and _G.EventBus.emit then
+    _G.EventBus.emit("quiver:refill_started", {
+      needed = needed,
+      ammoType = ammoType == ARROW_SET and "arrow" or "bolt",
+      generation = self.generation,
+    })
+  end
+
   return self.lastReason
 end
 
@@ -283,9 +293,22 @@ function QuiverService:_scheduleMove(source, destContainer, count)
           if not ok then
             self_.moveInFlight = false
             self_.moveRetries  = self_.moveRetries + 1
+            if _G.EventBus and _G.EventBus.emit then
+              _G.EventBus.emit("quiver:refill_failed", {
+                reason = "move_failed",
+                retries = self_.moveRetries,
+                generation = gen,
+              })
+            end
           end
         else
           self_.moveInFlight = false
+          if _G.EventBus and _G.EventBus.emit then
+            _G.EventBus.emit("quiver:refill_failed", {
+              reason = "no_dest_position",
+              generation = gen,
+            })
+          end
         end
       end,
     })
@@ -305,6 +328,12 @@ function QuiverService:onMoveAck()
   self.moveInFlight = false
   self.moveRetries  = 0
   self.lastMoveMs   = os.clock() * 1000
+
+  if _G.EventBus and _G.EventBus.emit then
+    _G.EventBus.emit("quiver:refill_completed", {
+      generation = self.generation,
+    })
+  end
 end
 
 return QuiverService

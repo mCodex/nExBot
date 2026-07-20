@@ -185,3 +185,36 @@ label:depot
 **Wrong floor after teleport:** Add waypoint on each floor.
 
 **Route stays paused:** Open **nExBot Tactical Intelligence**, select **CaveBot Intelligence**, and check the route state and pause reason. Bot Doctor reports disconnected lifecycle or ownership state under **Diagnostics**.
+
+## Profile Switching
+
+CaveBot profile selection is **atomic** and **preserves desired enabled state**:
+
+- Selecting a new profile while **ON** → new profile + ON after successful apply
+- Selecting a new profile while **OFF** → new profile + OFF
+- Failed validation → previous profile + previous desired state unchanged
+- Internal suspension uses inhibitor, not `setOff()` / `setOn()` (does not touch user preference)
+
+### Algorithm
+
+```
+1. Validate & canonicalize requested profile name
+2. Reject traversal, separators, invalid extension, unsupported chars
+3. Resolve exact config file under active root profile
+4. Read & parse into temporary model
+5. Validate schema & required fields BEFORE touching runtime
+6. Capture current selected, desired, effective state
+7. Add PROFILE_APPLY inhibitor (no desired-state mutation)
+8. Apply config data silently to module + UI
+9. Update selected profile in ONE state transaction
+10. Flush committed selection
+11. Remove PROFILE_APPLY inhibitor
+12. Reconcile effective state from desired state
+13. Emit ONE consolidated profile-changed event
+14. On ANY failure: restore previous validated profile + state
+```
+
+The selected profile and desired state are stored in UnifiedStorage per-character:
+- `cavebot.selectedConfig` — profile name
+- `cavebot.desiredEnabled` — boolean
+- `cavebot.revision` — incremented per change

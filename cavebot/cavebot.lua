@@ -1214,7 +1214,13 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
     storage.cavebotEnabled = enabled
   end
   
-  cavebotMacro.setOn(finalEnabled)
+  -- Use inhibitor instead of setOff/setOn to preserve desired state during profile apply
+  if CaveBot._profileApplying then
+    -- Profile is being applied programmatically, don't change desired state
+    CaveBot._profileApplying = false
+  else
+    cavebotMacro.setOn(finalEnabled)
+  end
   cavebotMacro.delay = nil
   if lastConfig == name then 
     -- restore focused child on the action list
@@ -1259,6 +1265,8 @@ CaveBot.setOn = function(val)
   if val == false then  
     return CaveBot.setOff(true)
   end
+  -- Skip if profile is being applied programmatically
+  if CaveBot._profileApplying then return end
   -- Save enabled state to UnifiedStorage
   if UnifiedStorage and UnifiedStorage.set then
     UnifiedStorage.set("cavebot.enabled", true)
@@ -1270,6 +1278,8 @@ CaveBot.setOff = function(val)
   if val == false then  
     return CaveBot.setOn(true)
   end
+  -- Skip if profile is being applied programmatically
+  if CaveBot._profileApplying then return end
   -- Save enabled state to UnifiedStorage
   if UnifiedStorage and UnifiedStorage.set then
     UnifiedStorage.set("cavebot.enabled", false)
@@ -1839,7 +1849,11 @@ CaveBot.setCurrentProfile = function(name)
   if not g_resources.fileExists("/bot/"..botConfigName.."/cavebot_configs/"..name..".cfg") then
     return warn("there is no cavebot profile with that name!")
   end
-  CaveBot.setOff()
+  
+  -- Atomic profile switch: preserve desired enabled state
+  local wasEnabled = CaveBot.isOn()
+  CaveBot._profileApplying = true
+  
   storage._configs.cavebot_configs.selected = name
   -- Persist to UnifiedStorage for character isolation
   if UnifiedStorage and UnifiedStorage.set then
@@ -1853,7 +1867,9 @@ CaveBot.setCurrentProfile = function(name)
   if EventBus and EventBus.emit then
     pcall(function() EventBus.emit("cavebot:configChanged", name) end)
   end
-  CaveBot.setOn()
+  
+  -- Restore previous enabled state after config loads
+  CaveBot.setOn(wasEnabled)
 end
 
 CaveBot.delay = function(value)

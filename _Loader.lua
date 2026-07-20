@@ -416,6 +416,7 @@ loadCategory("core", {
   "configs",
   "bot_database",
   "character_db",
+  "client_lifecycle",
 })
 
 -- ============================================================================
@@ -458,7 +459,16 @@ loadCategory("architecture", {
   "intelligence/learning/reward_model",
   "intelligence/foundation/metrics",
   "intelligence/observability/bot_doctor",
-  "intelligence/foundation/adaptive_scheduler",
+"intelligence/foundation/adaptive_scheduler",
+  "intelligence/foundation/hunt_metrics",
+  "intelligence/foundation/telemetry_client",
+  "intelligence/foundation/state_enums",
+  "intelligence/foundation/character_context",
+  "intelligence/foundation/character_profile_coordinator",
+  "intelligence/foundation/silent_restore",
+  "intelligence/foundation/control_state_registry",
+  "intelligence/foundation/otclient_adapter",
+  "client_lifecycle",
   "intelligence/ui/ui_presenter",
   "intelligence/runtime",
   "creature_cache",
@@ -705,15 +715,14 @@ if UnifiedTick and UnifiedTick.start then
 end
 
 -- ============================================================================
--- BOT ANALYTICS
+-- TELEMETRY CLIENT (started in architecture phase)
 -- ============================================================================
-pcall(dofile, "/core/analytics.lua")
-local analytics = nExBot.Analytics
-if analytics and analytics.start then
-  pcall(analytics.start)
+local telemetry = nExBot.TelemetryClient
+if telemetry and telemetry.start then
+  pcall(telemetry.start)
   if onGameEnd then
     onGameEnd(function()
-      pcall(analytics.stop)
+      pcall(telemetry.stop)
     end)
   end
 end

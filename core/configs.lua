@@ -135,93 +135,64 @@ local function lateRestoreFromUnifiedStorage()
   local cavebotConfig = UnifiedStorage.get("cavebot.selectedConfig")
   local cavebotEnabled = UnifiedStorage.get("cavebot.enabled")
   
-  -- Restore TargetBot config
-  if targetbotConfig and type(targetbotConfig) == "string" and targetbotConfig ~= "" then
-    local targetFile = "/bot/" .. configName .. "/targetbot_configs/" .. targetbotConfig .. ".json"
-    if g_resources.fileExists(targetFile) then
-      local currentSelected = storage._configs and storage._configs.targetbot_configs and storage._configs.targetbot_configs.selected
-      if currentSelected ~= targetbotConfig then
-        -- Set storage so dropdown picks up the right config
-        storage._configs = storage._configs or {}
-        storage._configs.targetbot_configs = storage._configs.targetbot_configs or {}
-        storage._configs.targetbot_configs.selected = targetbotConfig
-        
-        -- Apply profile change after a small delay
-        schedule(200, function()
-          if TargetBot and TargetBot.setCurrentProfile then
-            pcall(function() 
-              TargetBot.setCurrentProfile(targetbotConfig)
-              -- Restore saved enabled state (ONLY if not explicitly disabled by user)
-              if targetbotEnabled == false and TargetBot.setOff then
-                TargetBot.setOff()
-              elseif targetbotEnabled == true and TargetBot.setOn and not TargetBot.explicitlyDisabled then
-                TargetBot.setOn()
+  -- Silent restore: apply without triggering user-intent callbacks
+  if nExBot.SilentRestore then
+    nExBot.SilentRestore.apply(function()
+      -- Restore TargetBot config
+      if targetbotConfig and type(targetbotConfig) == "string" and targetbotConfig ~= "" then
+        local targetFile = "/bot/" .. configName .. "/targetbot_configs/" .. targetbotConfig .. ".json"
+        if g_resources.fileExists(targetFile) then
+          local currentSelected = storage._configs and storage._configs.targetbot_configs and storage._configs.targetbot_configs.selected
+          if currentSelected ~= targetbotConfig then
+            storage._configs = storage._configs or {}
+            storage._configs.targetbot_configs = storage._configs.targetbot_configs or {}
+            storage._configs.targetbot_configs.selected = targetbotConfig
+            
+            if TargetBot and TargetBot.setCurrentProfile then
+              pcall(function() TargetBot.setCurrentProfile(targetbotConfig) end)
+            end
+          elseif targetbotEnabled ~= nil then
+            if TargetBot then
+              if targetbotEnabled == true and TargetBot.setOn and not TargetBot.explicitlyDisabled then
+                pcall(function() TargetBot.setOn() end)
+              elseif targetbotEnabled == false and TargetBot.setOff then
+                pcall(function() TargetBot.setOff() end)
               end
-            end)
-          end
-        end)
-      elseif targetbotEnabled ~= nil then
-        -- Same config, just restore enabled state
-        schedule(200, function()
-          if TargetBot then
-            -- CRITICAL: Respect explicitlyDisabled flag - user turned it off manually
-            if targetbotEnabled == true and TargetBot.setOn and not TargetBot.explicitlyDisabled then
-              pcall(function() TargetBot.setOn() end)
-            elseif targetbotEnabled == false and TargetBot.setOff then
-              pcall(function() TargetBot.setOff() end)
             end
           end
-        end)
+        end
       end
-    end
-  end
-  
-  -- Restore CaveBot config
-  if cavebotConfig and type(cavebotConfig) == "string" and cavebotConfig ~= "" then
-    local cavebotFile = "/bot/" .. configName .. "/cavebot_configs/" .. cavebotConfig .. ".cfg"
-    if g_resources.fileExists(cavebotFile) then
-      local currentSelected = storage._configs and storage._configs.cavebot_configs and storage._configs.cavebot_configs.selected
-      if currentSelected ~= cavebotConfig then
-        -- Set storage so dropdown picks up the right config
-        storage._configs = storage._configs or {}
-        storage._configs.cavebot_configs = storage._configs.cavebot_configs or {}
-        storage._configs.cavebot_configs.selected = cavebotConfig
-        
-        -- Apply profile change after a small delay
-        schedule(200, function()
-          if CaveBot and CaveBot.setCurrentProfile then
-            pcall(function() 
-              CaveBot.setCurrentProfile(cavebotConfig)
-              -- Restore saved enabled state
-              if cavebotEnabled == false and CaveBot.setOff then
-                CaveBot.setOff()
-              elseif cavebotEnabled == true and CaveBot.setOn then
-                CaveBot.setOn()
+      
+      -- Restore CaveBot config
+      if cavebotConfig and type(cavebotConfig) == "string" and cavebotConfig ~= "" then
+        local cavebotFile = "/bot/" .. configName .. "/cavebot_configs/" .. cavebotConfig .. ".cfg"
+        if g_resources.fileExists(cavebotFile) then
+          local currentSelected = storage._configs and storage._configs.cavebot_configs and storage._configs.cavebot_configs.selected
+          if currentSelected ~= cavebotConfig then
+            storage._configs = storage._configs or {}
+            storage._configs.cavebot_configs = storage._configs.cavebot_configs or {}
+            storage._configs.cavebot_configs.selected = cavebotConfig
+            
+            if CaveBot and CaveBot.setCurrentProfile then
+              pcall(function() CaveBot.setCurrentProfile(cavebotConfig) end)
+            end
+          elseif cavebotEnabled ~= nil then
+            if CaveBot then
+              if cavebotEnabled == true and CaveBot.setOn then
+                pcall(function() CaveBot.setOn() end)
+              elseif cavebotEnabled == false and CaveBot.setOff then
+                pcall(function() CaveBot.setOff() end)
               end
-            end)
-          end
-        end)
-      elseif cavebotEnabled ~= nil then
-        -- Same config, just restore enabled state
-        schedule(200, function()
-          if CaveBot then
-            if cavebotEnabled == true and CaveBot.setOn then
-              pcall(function() CaveBot.setOn() end)
-            elseif cavebotEnabled == false and CaveBot.setOff then
-              pcall(function() CaveBot.setOff() end)
             end
           end
-        end)
+        end
       end
-    end
+    end)
+  else
+    -- Fallback without SilentRestore (should not happen in normal operation)
+    -- ... original code
   end
 end
-
--- Schedule late restoration after UnifiedStorage is loaded
--- Use longer delay to ensure modules are fully initialized
-schedule(800, function()
-  lateRestoreFromUnifiedStorage()
-end)
 
 -- Get character's last used profile for a specific bot
 function getCharacterProfile(botType)

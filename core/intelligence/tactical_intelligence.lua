@@ -1,4 +1,5 @@
-local Presenter = dofile("core/intelligence/ui/ui_presenter.lua")
+local _presenterOk, _presenterResult = pcall(dofile, "core/intelligence/ui/ui_presenter.lua")
+local Presenter = (_presenterOk and type(_presenterResult) == "table") and _presenterResult or IntelligenceUiPresenter
 
 nExBot = nExBot or {}
 
@@ -38,6 +39,117 @@ local function countKeys(value)
   return count
 end
 
+local function hasEntries(value)
+  if type(value) ~= "table" then
+    return false
+  end
+  for _ in pairs(value) do
+    return true
+  end
+  return false
+end
+
+-- Dirty section tracking for incremental projections
+local SectionTracker = {}
+SectionTracker.__index = SectionTracker
+
+function SectionTracker.new()
+  local self = setmetatable({
+    dirty = {},
+    lastUpdate = 0,
+    generations = {},
+  }, SectionTracker)
+  return self
+end
+
+function SectionTracker:markDirty(section)
+  self.dirty[section] = true
+end
+
+function SectionTracker:isDirty(section)
+  return self.dirty[section] == true
+end
+
+function SectionTracker:clearDirty(section)
+  self.dirty[section] = nil
+end
+
+function SectionTracker:clearAll()
+  for k in pairs(self.dirty) do self.dirty[k] = nil end
+end
+
+function SectionTracker:getGeneration(section)
+  return self.generations[section] or 0
+end
+
+function SectionTracker:setGeneration(section, gen)
+  self.generations[section] = gen
+end
+
+function SectionTracker:incrementGeneration(section)
+  local gen = (self.generations[section] or 0) + 1
+  self.generations[section] = gen
+  return gen
+end
+
+local sectionTracker = SectionTracker.new()
+
+-- EventBus integration for dirty tracking
+if EventBus then
+  EventBus.on("player:health", function()
+    sectionTracker:markDirty("overview")
+    sectionTracker:markDirty("hunt")
+  end)
+  
+  EventBus.on("player:mana", function()
+    sectionTracker:markDirty("overview")
+    sectionTracker:markDirty("hunt")
+  end)
+  
+  EventBus.on("creature:appear", function()
+    sectionTracker:markDirty("monsters")
+    sectionTracker:markDirty("targeting")
+  end)
+  
+  EventBus.on("creature:disappear", function()
+    sectionTracker:markDirty("monsters")
+    sectionTracker:markDirty("targeting")
+  end)
+  
+  EventBus.on("monster:health", function()
+    sectionTracker:markDirty("monsters")
+    sectionTracker:markDirty("targeting")
+  end)
+  
+  EventBus.on("combat:target", function()
+    sectionTracker:markDirty("targeting")
+    sectionTracker:markDirty("overview")
+  end)
+  
+  EventBus.on("player:damage", function()
+    sectionTracker:markDirty("hunt")
+    sectionTracker:markDirty("overview")
+  end)
+  
+  EventBus.on("container:update", function()
+    sectionTracker:markDirty("resources")
+  end)
+  
+  EventBus.on("intelligence:pipelineEvent", function()
+    sectionTracker:markDirty("pipeline")
+    sectionTracker:markDirty("overview")
+  end)
+  
+  EventBus.on("intelligence:modelUpdate", function()
+    sectionTracker:markDirty("models")
+  end)
+  
+  EventBus.on("cavebot:waypoint_arrived", function()
+    sectionTracker:markDirty("routes")
+    sectionTracker:markDirty("overview")
+  end)
+end
+
 local function tail(values, limit)
   local result = {}
   if type(values) ~= "table" then
@@ -51,15 +163,16 @@ local function tail(values, limit)
 end
 
 local function getAnalytics()
-  local analytics = nExBot.Analytics
-  if type(analytics) ~= "table" then
+  local huntMetrics = nExBot.HuntMetrics
+  if not huntMetrics then
     return { active = false, elapsedMs = 0, metrics = {}, trends = {} }
   end
+  local instance = huntMetrics.instance or huntMetrics
   return {
-    active = analytics.isActive and analytics.isActive() or false,
-    elapsedMs = analytics.getElapsed and analytics.getElapsed() or 0,
-    metrics = analytics.getMetrics and copy(analytics.getMetrics()) or {},
-    trends = analytics.getTrends and copy(analytics.getTrends()) or {},
+    active = instance.isActive and instance.isActive() or false,
+    elapsedMs = instance.getElapsed and instance:getElapsed() or 0,
+    metrics = instance.getMetrics and instance:getMetrics() or {},
+    trends = instance.getTrends and instance:getTrends() or {},
   }
 end
 
@@ -186,8 +299,8 @@ local function monsterSnapshot()
     local kills = tonumber(stats.killCount) or 0
     local confidence = tonumber(pattern.confidence) or 0
     local dataSources = copy(pattern.dataSources or {})
-    if next(pattern) then dataSources[#dataSources + 1] = "MonsterPatterns" end
-    if next(stats) then dataSources[#dataSources + 1] = "MonsterAI.Telemetry" end
+    if hasEntries(pattern) then dataSources[#dataSources + 1] = "MonsterPatterns" end
+    if hasEntries(stats) then dataSources[#dataSources + 1] = "MonsterAI.Telemetry" end
     profiles[#profiles + 1] = {
       monsterKey = monsterKey,
       displayName = pattern.displayName or pattern.name or stats.name or monsterKey,
@@ -215,7 +328,7 @@ local function monsterSnapshot()
       dataSources = dataSources,
       evidence = pattern.evidence or samples,
       observationQuality = pattern.observationQuality or 0,
-      state = confidence >= 0.8 and "CONFIDENT" or samples > 0 and "LEARNING" or next(pattern) and "INSUFFICIENT_EVIDENCE" or "NO_DATA",
+      state = confidence >= 0.8 and "CONFIDENT" or samples > 0 and "LEARNING" or hasEntries(pattern) and "INSUFFICIENT_EVIDENCE" or "NO_DATA",
     }
   end
 
@@ -274,14 +387,13 @@ local function diagnosticSnapshot(intelligence, state)
   }
 end
 
-local function buildState()
+local function buildState(forceFull)
+  forceFull = forceFull or false
   local intelligence = nExBot.Intelligence or {}
   local analytics = getAnalytics()
   local lifecycle = intelligence.lifecycle or {}
   local route = intelligence.route or {}
-  local models = modelSnapshots(intelligence)
-  local resources = resourceSnapshot(intelligence)
-  local monsters = monsterSnapshot()
+  
   local state = {
     revision = type(lifecycle.generation) == "function" and lifecycle:generation("snapshot") or 0,
     generatedAt = nowMs(),
@@ -303,8 +415,8 @@ local function buildState()
       kills = analytics.metrics.kills or 0,
       killsPerHour = analytics.metrics.killsPerHour or 0,
       combatUptime = analytics.metrics.combatUptime or 0,
-      modelCount = models.summary.total,
-      actionableModels = models.summary.actionable,
+      modelCount = 0,
+      actionableModels = 0,
       lastEvent = nil,
       pipelineHealth = nil,
     },
@@ -333,29 +445,58 @@ local function buildState()
         potionsPerHour = analytics.metrics.potionsPerHour or 0,
         runesPerHour = analytics.metrics.runesPerHour or 0,
         manaPerHour = analytics.metrics.manaSpentPerHour or 0,
-        resourcesPerKill = (analytics.metrics.kills or 0) > 0 and ((resources.totals.hpPotions or 0) + (resources.totals.manaPotions or 0) + (resources.totals.runes or 0)) / analytics.metrics.kills or 0,
-        resourcesPer1000Xp = (analytics.metrics.xpGained or 0) > 0 and (((resources.totals.hpPotions or 0) + (resources.totals.manaPotions or 0) + (resources.totals.runes or 0)) / analytics.metrics.xpGained) * 1000 or 0,
       },
     },
-    monsters = monsters,
-    models = models,
-    targeting = targetingSnapshot(intelligence),
-    resources = resources,
     routes = {
       state = route.state,
       generation = route.generation,
       waypointIndex = route.waypointIndex,
       currentObjective = getBlackboardValue(intelligence, "currentRouteObjective"),
     },
-    replay = replaySnapshot(intelligence),
     pipeline = nil,
     diagnostics = nil,
   }
-
-  state.pipeline = pipelineSnapshot(intelligence, models.summary.total)
-  state.overview.lastEvent = state.pipeline.lastEvent and state.pipeline.lastEvent.type or nil
-  state.overview.pipelineHealth = state.pipeline.health
-  state.diagnostics = diagnosticSnapshot(intelligence, state)
+  
+  -- Only build sections that are dirty or forced
+  if forceFull or sectionTracker:isDirty("models") then
+    state.models = modelSnapshots(intelligence)
+    state.overview.modelCount = state.models.summary.total
+    state.overview.actionableModels = state.models.summary.actionable
+    sectionTracker:clearDirty("models")
+  end
+  
+  if forceFull or sectionTracker:isDirty("resources") then
+    state.resources = resourceSnapshot(intelligence)
+    sectionTracker:clearDirty("resources")
+  end
+  
+  if forceFull or sectionTracker:isDirty("monsters") then
+    state.monsters = monsterSnapshot()
+    sectionTracker:clearDirty("monsters")
+  end
+  
+  if forceFull or sectionTracker:isDirty("targeting") then
+    state.targeting = targetingSnapshot(intelligence)
+    sectionTracker:clearDirty("targeting")
+  end
+  
+  if forceFull or sectionTracker:isDirty("replay") then
+    state.replay = replaySnapshot(intelligence)
+    sectionTracker:clearDirty("replay")
+  end
+  
+  if forceFull or sectionTracker:isDirty("pipeline") then
+    state.pipeline = pipelineSnapshot(intelligence, state.models and state.models.summary.total or 0)
+    state.overview.lastEvent = state.pipeline.lastEvent and state.pipeline.lastEvent.type or nil
+    state.overview.pipelineHealth = state.pipeline.health
+    sectionTracker:clearDirty("pipeline")
+  end
+  
+  if forceFull or sectionTracker:isDirty("diagnostics") then
+    state.diagnostics = diagnosticSnapshot(intelligence, state)
+    sectionTracker:clearDirty("diagnostics")
+  end
+  
   state.overview.lastPersistenceSave = intelligence.lastPersistAt
 
   return state
@@ -388,7 +529,11 @@ end
 
 function Tactical:view(viewport)
   if not self.presenter then
-    self.presenter = Presenter.new({
+    local P = Presenter or IntelligenceUiPresenter
+    if not P then
+      return self:refresh()
+    end
+    self.presenter = P.new({
       state = self:refresh(),
       nowMs = nowMs,
       refreshMs = 200,
@@ -396,6 +541,18 @@ function Tactical:view(viewport)
   end
   self.presenter.state = self:refresh()
   return self.presenter:view(viewport)
+end
+
+-- Mark section dirty for incremental update
+function Tactical:markDirty(section)
+  sectionTracker:markDirty(section)
+end
+
+-- Force full rebuild
+function Tactical:invalidate()
+  sectionTracker:clearAll()
+  self.cached = nil
+  self.cachedAt = 0
 end
 
 local function sectionSnapshot(self, section)
@@ -459,6 +616,25 @@ function Tactical:unsubscribe(token)
   if self.listeners then
     self.listeners[token] = nil
   end
+end
+
+-- Event-driven dirty marking
+if EventBus then
+  EventBus.on("player:health", function() Tactical:markDirty("hunt") end)
+  EventBus.on("player:mana", function() Tactical:markDirty("hunt") end)
+  EventBus.on("creature:health", function() Tactical:markDirty("monsters") end)
+  EventBus.on("monster:appear", function() Tactical:markDirty("monsters") end)
+  EventBus.on("monster:disappear", function() Tactical:markDirty("monsters") end)
+  EventBus.on("container:update", function() Tactical:markDirty("resources") end)
+  EventBus.on("container:addItem", function() Tactical:markDirty("resources") end)
+  EventBus.on("container:removeItem", function() Tactical:markDirty("resources") end)
+  EventBus.on("combat:target", function() Tactical:markDirty("targeting") end)
+  EventBus.on("TargetCandidateEvaluated", function() Tactical:markDirty("pipeline") end)
+  EventBus.on("TargetSelected", function() Tactical:markDirty("pipeline") end)
+  EventBus.on("TargetRejected", function() Tactical:markDirty("pipeline") end)
+  EventBus.on("model:diagnostics", function() Tactical:markDirty("diagnostics") end)
+  EventBus.on("replay:recorded", function() Tactical:markDirty("replay") end)
+  EventBus.on("route:stateChanged", function() Tactical:markDirty("targeting") end)
 end
 
 nExBot.TacticalIntelligence = Tactical

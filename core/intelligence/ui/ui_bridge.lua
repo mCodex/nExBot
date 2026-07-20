@@ -310,7 +310,11 @@ end
 
 local function render()
   local ok, text = pcall(function()
-    local view = TacticalIntelligence:view({
+    local ti = TacticalIntelligence or nExBot.TacticalIntelligence
+    if not ti then
+      return "Tactical Intelligence is not available."
+    end
+    local view = ti:view({
       width = window:getWidth(),
       platform = "desktop",
       touch = false,

@@ -1,6 +1,6 @@
 # nExBot
 
-![Version](https://img.shields.io/badge/version-5.0.0-blue)
+![Version](https://img.shields.io/badge/version-5.1.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Lua](https://img.shields.io/badge/Lua-5.1-purple)
 
@@ -15,6 +15,23 @@ Modular Tibia bot for OTClientV8 and OTCR. Auto-detects client at startup.
 Install paths:
 - **vBot:** `%APPDATA%/OTClientV8/<ServerName>/bot/nExBot`
 - **OTCR:** `~/.local/share/<otcr-data>/<ServerName>/bot/nExBot`
+
+## v5.1.0 — Tactical Intelligence, Profile Reconnect & Character-Bound State Remediation
+
+This release delivers a comprehensive remediation of state management, persistence, and tactical intelligence:
+
+- **Atomic profile switching** — CaveBot/TargetBot profile changes preserve desired ON/OFF state, commit in single transaction
+- **Character-bound state** — Per-character, per-root-profile UnifiedStorage files (schema v6), full isolation
+- **Tactical Intelligence crash safety** — `next = nil` sandbox handled, section isolation, incremental projections
+- **Analytics contract separation** — `TelemetryClient` (outbound), `HuntMetrics` (local), `ClientTelemetry` (OTClient signals)
+- **Desired vs Effective state** — Explicit inhibitors, runtime state never overwrites user preference
+- **Explicit origins** — Every mutation carries `USER`/`INITIAL_RESTORE`/`RECONNECT_RESTORE`/etc.
+- **Silent restoration** — UI restores without triggering persistence callbacks
+- **Control registry** — All toggles declaratively registered with explicit scopes
+- **Lifecycle adapter** — `onGameStart`/`onGameEnd` drive state coordinator, generation guards on all async work
+- **Performance** — ≥70% Tactical CPU reduction target, no-change projection p95 <2ms
+
+See [Release Notes](docs/RELEASE_NOTES.md) and [Remediation Summary](docs/REMEDIATION_SUMMARY.md) for details.
 
 ## Modules
 

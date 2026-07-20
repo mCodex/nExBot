@@ -235,3 +235,144 @@ See [Adaptive Intelligence](INTELLIGENCE.md) for operating modes, model behavior
 ## Private Scripts
 
 Place `.lua` files in `private/` folder. Auto-loaded after all core modules, full API access. Discovered recursively, sorted alphabetically.
+
+---
+
+## v5 Remediation Architecture
+
+### CharacterProfileStateCoordinator
+
+Single application service owning all persisted module selection and desired on/off states.
+
+**Lifecycle State Machine:**
+```
+UNBOUND → WAITING_FOR_CHARACTER → BINDING → LOADING → MIGRATING → APPLYING_SILENTLY → READY → FLUSHING → ERROR_RECOVERABLE
+```
+
+**Transitions:**
+- `onGameStart` → capture context → increment generation → bind storage → load authoritative snapshot → migrate once → validate configs → apply selection/desired state silently → mark READY → reconcile effective states
+- `onGameEnd` → preserve context → inhibit effective modules with `DISCONNECTED` → sync flush committed desired state → cancel generation-bound timers → unbind after flush or bounded failure
+
+**Context (immutable bound):**
+```lua
+{
+  schemaVersion = 1,
+  sessionGeneration = 42,
+  clientFamily = "otcr",
+  clientProfileKey = "main-bot-profile",
+  serverKey = "stable-non-secret-server-identity",
+  worldKey = "world-name-if-available",
+  characterKey = "normalized-character-name",
+  displayName = "OriginalCaseName",
+  boundAtMs = 0,
+}
+```
+
+### UnifiedStorage Context API (v6 Schema)
+
+```lua
+{
+  schemaVersion = 6,
+  migrationVersion = 1,
+  revision = 0,
+  updatedAtMs = 0,
+  context = { clientProfileKey, serverKey, worldKey, characterKey },
+  modules = {
+    cavebot = { selectedConfig, desiredEnabled, updatedAtMs, revision },
+    targetbot = { selectedConfig, desiredEnabled, explicitlyDisabledByUser, updatedAtMs, revision },
+    healbot = { desiredEnabled, updatedAtMs, revision },
+    attackbot = { desiredEnabled, updatedAtMs, revision },
+  },
+  controls = {},
+}
+```
+
+**New API:**
+- `Storage:bind(context)` — idempotent
+- `Storage:isBoundTo(context)` — boolean
+- `Storage:load(context)` — authoritative snapshot
+- `Storage:transaction(context, fn)` — atomic in-memory update + single change event
+- `Storage:flush(context)` — atomic write (temp file → rename)
+- `Storage:unbind(context)` — idempotent
+- `Storage:getRevision(context)` — integer
+- `Storage:onReady(context, cb)` — fires once per bind
+
+### Explicit State-Change Origins
+
+Every mutation carries an `Origin`:
+```lua
+USER, INITIAL_RESTORE, RECONNECT_RESTORE, CHARACTER_SWITCH,
+ROOT_PROFILE_SWITCH, MODULE_PROFILE_SWITCH, MIGRATION,
+SAFETY_INHIBIT, DEPENDENCY_INHIBIT, RECOVERY, TEST
+```
+
+**Rules:**
+- Only `USER` changes durable desired state by default
+- `MODULE_PROFILE_SWITCH` changes selected config, preserves desired state
+- `INITIAL_RESTORE` / `RECONNECT_RESTORE` apply without writing back
+- `SAFETY_INHIBIT` / `DEPENDENCY_INHIBIT` change effective state only
+
+### Desired vs Effective State Separation
+
+```lua
+{
+  desiredEnabled = true,    -- persisted user preference
+  effectiveEnabled = false, -- current runtime state
+  inhibitors = { DISCONNECTED = true }, -- runtime reasons
+}
+```
+
+**Effective = desired ∧ moduleReady ∧ ¬blockingInhibitor ∧ activeContextCurrent**
+
+### Atomic Profile Switching
+
+**Algorithm:**
+1. Validate & canonicalize requested profile name
+2. Reject traversal, separators, invalid extension, unsupported chars
+3. Resolve exact config file under active root profile
+4. Read & parse into temporary model
+5. Validate schema & required fields BEFORE touching runtime
+6. Capture current selected, desired, effective state
+7. Add `PROFILE_APPLY` inhibitor (no desired-state mutation)
+8. Apply config data silently to module + UI
+9. Update selected profile in ONE state transaction
+10. Flush committed selection
+11. Remove `PROFILE_APPLY` inhibitor
+12. Reconcile effective state from desired state
+13. Emit ONE consolidated `profileChanged` event
+14. On ANY failure: restore previous validated profile + state
+
+### Silent Restore & UI Binding
+
+```lua
+StateCoordinator:applySilently(function()
+  -- update widgets and module configuration
+end)
+```
+
+During silent application: no persistence, no user-intent events, no explicit-disable changes, no recursive switches, no macros before full context.
+
+### Control State Registry
+
+```lua
+ControlStateRegistry:register({
+  id = "cavebot.enabled",
+  scope = Scope.CHARACTER_ROOT_PROFILE,
+  defaultValue = false,
+  apply = function(value, context) ... end,
+  readEffective = function(context) ... end,
+  validate = function(value) return type(value) == "boolean" end,
+})
+```
+
+**Explicit Scopes:** `GLOBAL`, `CLIENT_PROFILE`, `CHARACTER`, `CHARACTER_ROOT_PROFILE`, `CHARACTER_MODULE_PROFILE`, `SESSION_ONLY`
+
+### Tactical Intelligence Incremental Projections
+
+- `SectionTracker` with dirty sections + generation counters
+- EventBus marks sections dirty on relevant events
+- `buildState(forceFull)` only rebuilds dirty sections
+- `Replay:tail(limit)` instead of full export
+- Cached sorted monster summaries by generation/filter/sort/page
+- Visibility-aware UI updates
+- No network from rendering/inference

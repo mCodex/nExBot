@@ -639,6 +639,11 @@ TargetBot.setOn = function(val, force)
     return TargetBot.setOff(true)
   end
   
+  -- During programmatic profile application, don't modify explicitlyDisabled
+  if TargetBot._profileApplying then
+    TargetBot._profileApplying = false
+  end
+  
   -- CRITICAL: If explicitly disabled and this is NOT a forced (user-initiated) call, block it
   if TargetBot.explicitlyDisabled and not force then
     -- Don't enable - user explicitly turned it off
@@ -676,6 +681,11 @@ end
 TargetBot.setOff = function(val)
   if val == false then  
     return TargetBot.setOn(true)
+  end
+  
+  -- During programmatic profile application, don't set explicitlyDisabled
+  if TargetBot._profileApplying then
+    TargetBot._profileApplying = false
   end
   
   -- SET the explicit disable flag - user wants it OFF, prevent ALL auto-enable
@@ -764,8 +774,11 @@ TargetBot.setCurrentProfile = function(name)
   if not g_resources.fileExists("/bot/"..botConfigName.."/targetbot_configs/"..name..".json") then
     return warn("there is no targetbot profile with that name!")
   end
-  local wasOn = TargetBot.isOn()
-  TargetBot.setOff()
+  
+  -- Atomic profile switch: preserve desired enabled state
+  local wasEnabled = TargetBot.isOn()
+  TargetBot._profileApplying = true
+  
   storage._configs.targetbot_configs.selected = name
   -- Save to UnifiedStorage for per-character persistence
   if UnifiedStorage then
@@ -778,10 +791,10 @@ TargetBot.setCurrentProfile = function(name)
   if setCharacterProfile then
     setCharacterProfile("targetbotProfile", name)
   end
-  -- Only restore enabled state if not explicitly disabled by user
-  if wasOn and not TargetBot.explicitlyDisabled then
-    TargetBot.setOn()
-  end
+  
+  -- Restore previous enabled state after config loads
+  -- Note: explicitlyDisabled is NOT set during programmatic profile apply
+  TargetBot.setOn(wasEnabled)
 end
 
 TargetBot.delay = function(value)
@@ -1556,9 +1569,14 @@ pcall(function() performPendingEnableOnce() end)
 -- Config setup (moved here so macro/recalc are defined before callback runs)
 config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
   -- Track if this callback was triggered by user clicking the switch
-  -- The 'enabled' parameter comes from the UI switch state
-  local isUserToggle = (TargetBot._initialized == true)  -- After init, changes are user-driven
+  -- During programmatic profile application, don't treat as user toggle
+  local isUserToggle = TargetBot._initialized and not TargetBot._profileApplying
   
+  -- Clear profile applying flag if it was set
+  if TargetBot._profileApplying then
+    TargetBot._profileApplying = false
+  end
+
   -- Save character's profile preference when profile changes (multi-client support)
   if enabled and name and name ~= "" then
     if setCharacterProfile then

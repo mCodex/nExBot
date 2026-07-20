@@ -116,7 +116,21 @@ Open **nExBot Tactical Intelligence** from the Main tab. The window includes:
 
 The presenter uses one-column touch layout on small screens and the same state model on desktop, mobile, and web builds.
 
-## Persistence and migration
+## Incremental Projections & Performance
+
+Tactical Intelligence uses `SectionTracker` with dirty sections + generation counters for incremental projections:
+
+- EventBus marks sections dirty on relevant events (`player:health`, `creature:health`, `container:update`, `combat:target`, `TargetCandidateEvaluated`, `TargetSelected`, `model:diagnostics`, `replay:recorded`, `route:stateChanged`)
+- `buildState(forceFull)` only rebuilds dirty sections
+- `Replay:tail(limit)` instead of full export
+- Cached sorted monster summaries by generation/filter/sort/page
+- Visibility-aware UI updates
+- No network from rendering/inference
+
+**Performance controls:**
+- Adaptive tick intervals reduce background work while combat and safety paths keep priority
+- When a measured tick exceeds budget, optional work disables in order: Diagnostics → Replay → Learning → Neural inference → Route alternatives
+- Hard safety and command execution remain enabled
 
 UnifiedStorage keeps settings under `intelligence`. Migration copies the selected TargetBot JSON profile and preserves the CaveBot CFG as raw content. It excludes transient combat, current target, current path, replay, diagnostics, and old learned runtime state. Migration runs once per character and keeps existing user settings. New context learning persists bounded route and monster summaries separately from user configuration.
 

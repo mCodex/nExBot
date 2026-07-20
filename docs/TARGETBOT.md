@@ -201,3 +201,49 @@ MonsterAI.DEBUG = true
 **Zigzag switching:** Check scenario (FEW = 5s cooldown). Enable `MonsterAI.DEBUG`.
 
 **Not looting:** Enabled? Containers open? Creature in range?
+
+## Profile Switching
+
+TargetBot profile selection is **atomic** and **preserves desired enabled state**:
+
+- Selecting a new profile while **ON** → new profile + ON after successful apply
+- Selecting a new profile while **manually OFF** → new profile + OFF (explicit disable preserved)
+- Failed validation → previous profile + previous desired state unchanged
+- Programmatic suspension uses inhibitor, not `setOff()` (does not set `explicitlyDisabled`)
+- User explicit ON clears `explicitlyDisabled` in single transaction
+
+### Algorithm
+
+```
+1. Validate & canonicalize requested profile name
+2. Reject traversal, separators, invalid extension, unsupported chars
+3. Resolve exact config file under active root profile
+4. Read & parse into temporary model
+5. Validate schema & required fields BEFORE touching runtime
+6. Capture current selected, desired, effective state
+7. Add PROFILE_APPLY inhibitor (no desired-state mutation)
+8. Apply config data silently to module + UI
+9. Update selected profile in ONE state transaction
+10. Flush committed selection
+11. Remove PROFILE_APPLY inhibitor
+12. Reconcile effective state from desired state
+13. Emit ONE consolidated profile-changed event
+14. On ANY failure: restore previous validated profile + state
+```
+
+### Explicit User Disable
+
+`explicitlyDisabledByUser` **only changes on real manual OFF action**:
+
+- Manual OFF → `explicitlyDisabled = true`, persists to storage
+- Manual ON → `explicitlyDisabled = false`, persists to storage
+- Safety pause (combat, dependency, pull) → does NOT touch `explicitlyDisabled`
+- Programmatic profile apply → does NOT touch `explicitlyDisabled`
+
+Reconnect restores `effectiveEnabled` from `desiredEnabled` after dependencies ready. Manual OFF stays OFF. Safety OFF never becomes manual OFF.
+
+The selected profile, desired state, and explicit disable flag are stored in UnifiedStorage per-character:
+- `targetbot.selectedConfig` — profile name
+- `targetbot.desiredEnabled` — boolean
+- `targetbot.explicitlyDisabledByUser` — boolean
+- `targetbot.revision` — incremented per change
