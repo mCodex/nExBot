@@ -29,6 +29,26 @@ if not Intelligence.lifecycle then
   Intelligence.waveBeam = IntelligenceWaveBeamState.new()
   Intelligence.navigationCosts = IntelligenceNavigationCost.new()
   Intelligence.memory = IntelligenceTacticalMemory.new()
+  Intelligence.sessionId = ""
+  Intelligence.huntId = ""
+  local EpisodeBase = nExBot.IntelligenceEpisodeBase or dofile("core/intelligence/episodes/episode_base.lua")
+  local EncounterTracker = nExBot.IntelligenceEncounterTracker or dofile("core/intelligence/episodes/encounter_tracker.lua")
+  local LootEpisodeTracker = nExBot.IntelligenceLootEpisodeTracker or dofile("core/intelligence/episodes/loot_episode_tracker.lua")
+  local RouteSegmentTracker = nExBot.IntelligenceRouteSegmentTracker or dofile("core/intelligence/episodes/route_segment_tracker.lua")
+  local HuntTracker = nExBot.IntelligenceHuntTracker or dofile("core/intelligence/episodes/hunt_tracker.lua")
+  Intelligence.episodeBase = EpisodeBase.new({})
+  Intelligence.encounterTracker = EncounterTracker.new({
+    episodeBase = Intelligence.episodeBase,
+  })
+  Intelligence.lootEpisodeTracker = LootEpisodeTracker.new({
+    episodeBase = Intelligence.episodeBase,
+  })
+  Intelligence.routeSegmentTracker = RouteSegmentTracker.new({
+    episodeBase = Intelligence.episodeBase,
+  })
+  Intelligence.huntTracker = HuntTracker.new({
+    episodeBase = Intelligence.episodeBase,
+  })
   Intelligence.contextAdjustments = IntelligenceContextAdjustment.new()
   Intelligence.latency = IntelligenceLatencyClassifier.new()
   Intelligence.horizons = IntelligenceHorizonCounters.new()
@@ -230,7 +250,37 @@ if not Intelligence.lifecycle then
     end)
     local function runeUsed() Intelligence.resources:observe({ runes = 1 }, metadata("rune")) end
     EventBus.on("attack:aoe_rune", runeUsed)
-    EventBus.on("attack:single_rune", runeUsed) EventBus.on("analytics:session:start", function() Intelligence.events:publish("analytics:session_started", { active = true, sourceEvent = "analytics:session:start" }, { source = "TacticalIntelligence" }) end) EventBus.on("analytics:session_started", function() Intelligence.events:publish("analytics:session_started", { active = true, sourceEvent = "analytics:session_started" }, { source = "TacticalIntelligence" }) end) EventBus.on("analytics:session:end", function() Intelligence.events:publish("analytics:session_ended", { active = false, sourceEvent = "analytics:session:end" }, { source = "TacticalIntelligence" }) end) EventBus.on("analytics:session_ended", function() Intelligence.events:publish("analytics:session_ended", { active = false, sourceEvent = "analytics:session_ended" }, { source = "TacticalIntelligence" }) end)
+    EventBus.on("attack:single_rune", runeUsed)
+    EventBus.on("analytics:session:start", function(data)
+      Intelligence.sessionId = data and data.sessionId or tostring(os.time())
+      Intelligence.events:publish("analytics:session_started", { active = true, sourceEvent = "analytics:session:start" }, { source = "TacticalIntelligence" })
+    end)
+    EventBus.on("analytics:session:end", function()
+      Intelligence.sessionId = ""
+      Intelligence.huntId = ""
+      Intelligence.events:publish("analytics:session_ended", { active = false, sourceEvent = "analytics:session:end" }, { source = "TacticalIntelligence" })
+    end)
+    EventBus.on("combat:target_changed", function(data)
+      if Intelligence.optionalEnabled("learning") then
+        Intelligence.encounterTracker:start({
+          encounterId = data.encounterId,
+          sessionId = Intelligence.sessionId,
+          huntId = Intelligence.huntId,
+          targetInstanceId = data.targetInstanceId,
+        })
+      end
+    end)
+    EventBus.on("loot:received", function(data)
+      if Intelligence.optionalEnabled("learning") then
+        Intelligence.lootEpisodeTracker:start({
+          lootEpisodeId = data.lootEpisodeId,
+          sessionId = Intelligence.sessionId,
+          huntId = Intelligence.huntId,
+          corpseId = data.corpseId,
+          encounterId = data.encounterId,
+        })
+      end
+    end)
     local function onLootObserved(monsterName, items)
   local observed = metadata("loot")
   observed.monsterId = monsterName
@@ -258,7 +308,6 @@ local function classifyAttackTransition(state, previous, reason)
 end
 
 EventBus.on("loot:received", onLootObserved)
-EventBus.on("analytics:loot_observed", onLootObserved)
 EventBus.on("attacksm:state_changed", function(state, previous, reason)
  local eventType = classifyAttackTransition(state, previous, reason)
  Intelligence.events:publish(eventType, { state = state, previous = previous, reason = reason }, {
