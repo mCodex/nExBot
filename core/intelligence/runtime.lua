@@ -63,6 +63,21 @@ if not Intelligence.lifecycle then
   Intelligence.rewardNormalizer = RewardNormalizer.new({
     windowSize = 1000,
   })
+  local AdjustmentBounds = nExBot.IntelligenceAdjustmentBounds or dofile("core/intelligence/guardrails/adjustment_bounds.lua")
+  local RollbackMonitor = nExBot.IntelligenceRollbackMonitor or dofile("core/intelligence/guardrails/rollback_monitor.lua")
+  local KillSwitch = IntelligenceKillSwitch or dofile("core/intelligence/guardrails/kill_switch.lua")
+  local TargetSwitchGuard = nExBot.IntelligenceTargetSwitchGuard or dofile("core/intelligence/guardrails/target_switch_guard.lua")
+  local ModelInterfaceV2 = nExBot.IntelligenceModelInterfaceV2 or dofile("core/intelligence/learning/model_interface_v2.lua")
+  local ConservativeReranker = nExBot.IntelligenceConservativeReranker or dofile("core/intelligence/learning/conservative_reranker.lua")
+  Intelligence.adjustmentBounds = AdjustmentBounds.new({ bounds = {} })
+  Intelligence.rollbackMonitor = RollbackMonitor.new({})
+  Intelligence.killSwitch = KillSwitch.new({})
+  Intelligence.targetSwitchGuard = TargetSwitchGuard.new({})
+  Intelligence.modelInterfaceV2 = ModelInterfaceV2.new({})
+  Intelligence.conservativeReranker = ConservativeReranker.new({
+    adjustmentBounds = Intelligence.adjustmentBounds,
+    modelInterface = Intelligence.modelInterfaceV2,
+  })
   Intelligence.contextAdjustments = IntelligenceContextAdjustment.new()
   Intelligence.latency = IntelligenceLatencyClassifier.new()
   Intelligence.horizons = IntelligenceHorizonCounters.new()
@@ -282,6 +297,17 @@ if not Intelligence.lifecycle then
           huntId = Intelligence.huntId,
           targetInstanceId = data.targetInstanceId,
         })
+      end
+    end)
+    EventBus.on("combat:target_changed", function(data)
+      if Intelligence.optionalEnabled("learning") then
+        if Intelligence.killSwitch:isEnabled("global") then
+          return
+        end
+        if not Intelligence.targetSwitchGuard:canSwitch(data) then
+          return
+        end
+        Intelligence.targetSwitchGuard:recordSwitch()
       end
     end)
     EventBus.on("loot:received", function(data)
