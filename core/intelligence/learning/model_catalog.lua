@@ -19,8 +19,8 @@ Model.__index = Model
 local function copyState(state)
   return { successes = state.successes, failures = state.failures, samples = state.samples,
     evaluations = state.evaluations, correct = state.correct,
-    features = state.features and { table.unpack(state.features) } or nil,
-    predictions = state.predictions and { table.unpack(state.predictions) } or nil }
+    features = state.features and { unpack(state.features) } or nil,
+    predictions = state.predictions and { unpack(state.predictions) } or nil }
 end
 
 function Model:initialize(saved)
@@ -176,7 +176,7 @@ function Ensemble:reset()
 end
 function Ensemble:serialize()
   local s = copyState(self.state)
-  s.predictions = self.state.predictions and { table.unpack(self.state.predictions) } or {}
+  s.predictions = self.state.predictions and { unpack(self.state.predictions) } or {}
   return s
 end
 function Ensemble:deserialize(saved)
