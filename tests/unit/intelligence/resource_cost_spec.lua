@@ -1,0 +1,42 @@
+local Cost = dofile("core/intelligence/learning/resource_cost.lua")
+
+describe("intelligence resource cost", function()
+  it("returns cost for known actions", function()
+    local cost = Cost.new({ initialCosts = { attack = 10, heal = 5 } })
+    assert.equals(10, cost:getCost("attack"))
+    assert.equals(5, cost:getCost("heal"))
+  end)
+
+  it("returns 0 for unknown actions", function()
+    local cost = Cost.new({ initialCosts = { attack = 10 } })
+    assert.equals(0, cost:getCost("unknown"))
+  end)
+
+  it("handles empty cost table", function()
+    local cost = Cost.new({})
+    assert.equals(0, cost:getCost("anything"))
+  end)
+
+  it("handles missing initialCosts", function()
+    local cost = Cost.new()
+    assert.equals(0, cost:getCost("anything"))
+  end)
+
+  it("records and averages costs", function()
+    local cost = Cost.new({ initialCosts = { attack = 10 } })
+    cost:recordCost("attack", 12)
+    cost:recordCost("attack", 8)
+    assert.equals(10, cost:getAverage("attack"))
+  end)
+
+  it("returns 0 average for unrecorded actions", function()
+    local cost = Cost.new({})
+    assert.equals(0, cost:getAverage("unknown"))
+  end)
+
+  it("context can modify cost", function()
+    local cost = Cost.new({ initialCosts = { spell = 20 } })
+    assert.equals(20, cost:getCost("spell"))
+    assert.equals(10, cost:getCost("spell", { costMultiplier = 0.5 }))
+  end)
+end)
