@@ -85,6 +85,8 @@ if not Intelligence.lifecycle then
     modelInterface = Intelligence.modelInterfaceV2,
     itemValueProvider = Intelligence.itemValueProvider,
   })
+  local DecisionExplainer = nExBot.IntelligenceDecisionExplainer or dofile("core/intelligence/observability/decision_explainer.lua")
+  Intelligence.decisionExplainer = DecisionExplainer.new({})
   Intelligence.contextAdjustments = IntelligenceContextAdjustment.new()
   Intelligence.latency = IntelligenceLatencyClassifier.new()
   Intelligence.horizons = IntelligenceHorizonCounters.new()
@@ -335,6 +337,12 @@ if not Intelligence.lifecycle then
         end
         local prioritized = Intelligence.lootPriority:prioritize(data.actions, data.context)
         data.actions = prioritized
+      end
+    end)
+    EventBus.on("intelligence:decision_selected", function(data)
+      if Intelligence.optionalEnabled("learning") then
+        local explanation = Intelligence.decisionExplainer:explain(data.decision)
+        data.explanation = explanation
       end
     end)
     EventBus.on("intelligence:encounter_closed", function(data)
