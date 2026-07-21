@@ -6,10 +6,12 @@ LootObserver.__index = LootObserver
 
 local METADATA = { "timestamp", "latencyClass", "observationQuality", "confidence", "correlationId" }
 
-function LootObserver.new(maxObservations, maxItems)
+function LootObserver.new(maxObservations, maxItems, eventFactory, eventContext)
   return setmetatable({
     history = RingBuffer.new(maxObservations or 500),
     maxItems = maxItems or 100,
+    _factory = eventFactory,
+    _context = eventContext,
   }, LootObserver)
 end
 
@@ -43,7 +45,34 @@ function LootObserver:observe(observation)
   end
   for _, name in ipairs(METADATA) do normalized[name] = observation[name] end
   self.history:push(normalized)
+
+  if self._factory and observation.lootEpisodeId then
+    for _, item in ipairs(normalized.items) do
+      self._factory:create("loot_item_observed", {
+        lootEpisodeId = observation.lootEpisodeId,
+        itemId = item.id,
+      }, self._context)
+    end
+  end
+
   return normalized
+end
+
+function LootObserver:moveAttempted(lootEpisodeId, itemId)
+  if not self._factory then return nil end
+  return self._factory:create("loot_move_attempted", {
+    lootEpisodeId = lootEpisodeId,
+    itemId = itemId,
+  }, self._context)
+end
+
+function LootObserver:moveVerified(lootEpisodeId, itemId, captured)
+  if not self._factory then return nil end
+  return self._factory:create("loot_move_verified", {
+    lootEpisodeId = lootEpisodeId,
+    itemId = itemId,
+    captured = captured,
+  }, self._context)
 end
 
 function LootObserver:recent()
@@ -58,5 +87,8 @@ function LootObserver:captureRate()
   end
   return available > 0 and captured / available or 0
 end
+
+nExBot = nExBot or {}
+nExBot.IntelligenceLootObserver = LootObserver
 
 return LootObserver
