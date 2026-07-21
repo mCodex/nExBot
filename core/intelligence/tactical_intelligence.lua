@@ -618,17 +618,14 @@ function Tactical:unsubscribe(token)
   end
 end
 
--- Event-driven dirty marking
+-- Event-driven dirty marking (unique events only — player:health, player:mana,
+-- container:update, combat:target already handled by sectionTracker block above)
 if EventBus then
-  EventBus.on("player:health", function() Tactical:markDirty("hunt") end)
-  EventBus.on("player:mana", function() Tactical:markDirty("hunt") end)
   EventBus.on("creature:health", function() Tactical:markDirty("monsters") end)
   EventBus.on("monster:appear", function() Tactical:markDirty("monsters") end)
   EventBus.on("monster:disappear", function() Tactical:markDirty("monsters") end)
-  EventBus.on("container:update", function() Tactical:markDirty("resources") end)
   EventBus.on("container:addItem", function() Tactical:markDirty("resources") end)
   EventBus.on("container:removeItem", function() Tactical:markDirty("resources") end)
-  EventBus.on("combat:target", function() Tactical:markDirty("targeting") end)
   EventBus.on("TargetCandidateEvaluated", function() Tactical:markDirty("pipeline") end)
   EventBus.on("TargetSelected", function() Tactical:markDirty("pipeline") end)
   EventBus.on("TargetRejected", function() Tactical:markDirty("pipeline") end)
