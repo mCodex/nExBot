@@ -78,6 +78,13 @@ if not Intelligence.lifecycle then
     adjustmentBounds = Intelligence.adjustmentBounds,
     modelInterface = Intelligence.modelInterfaceV2,
   })
+  local ItemValueProvider = nExBot.IntelligenceItemValueProvider or dofile("core/intelligence/learning/item_value_provider.lua")
+  Intelligence.itemValueProvider = ItemValueProvider.new({ valueTable = {} })
+  local LootPriority = nExBot.IntelligenceLootPriority or dofile("core/intelligence/learning/loot_priority.lua")
+  Intelligence.lootPriority = LootPriority.new({
+    modelInterface = Intelligence.modelInterfaceV2,
+    itemValueProvider = Intelligence.itemValueProvider,
+  })
   Intelligence.contextAdjustments = IntelligenceContextAdjustment.new()
   Intelligence.latency = IntelligenceLatencyClassifier.new()
   Intelligence.horizons = IntelligenceHorizonCounters.new()
@@ -319,6 +326,15 @@ if not Intelligence.lifecycle then
           corpseId = data.corpseId,
           encounterId = data.encounterId,
         })
+      end
+    end)
+    EventBus.on("loot:eligible", function(data)
+      if Intelligence.optionalEnabled("learning") then
+        if Intelligence.killSwitch:isEnabled("global") then
+          return
+        end
+        local prioritized = Intelligence.lootPriority:prioritize(data.actions, data.context)
+        data.actions = prioritized
       end
     end)
     EventBus.on("intelligence:encounter_closed", function(data)
