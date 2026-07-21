@@ -56,6 +56,18 @@ describe("intelligence model registry", function()
     assert.is_false(registry:promote("hit", metrics))
   end)
 
+  it("CANARY runs predictions without influencing decisions", function()
+    local registry = Registry.new()
+    local entry = registry:declare(declaration({ mode = Registry.CANARY }))
+    assert.equals(Registry.CANARY, entry.mode)
+
+    entry.model:update(true)
+    local result = registry:predict("hit")
+    assert.is_not_nil(result)
+    assert.is_false(result.actionable)
+    assert.equals("hit", result.model)
+  end)
+
   it("restores only matching persistence versions", function()
     local registry = Registry.new()
     local entry = registry:declare(declaration())

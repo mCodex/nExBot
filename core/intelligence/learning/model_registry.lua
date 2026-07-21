@@ -1,10 +1,10 @@
 IntelligenceModelRegistry = {}
 local Registry = IntelligenceModelRegistry
 
-Registry.OFF, Registry.OBSERVE, Registry.SHADOW, Registry.ACTIVE =
-  "OFF", "OBSERVE", "SHADOW", "ACTIVE"
+Registry.OFF, Registry.OBSERVE, Registry.SHADOW, Registry.ACTIVE, Registry.CANARY =
+  "OFF", "OBSERVE", "SHADOW", "ACTIVE", "CANARY"
 
-local modes = { OFF = true, OBSERVE = true, SHADOW = true, ACTIVE = true }
+local modes = { OFF = true, OBSERVE = true, SHADOW = true, ACTIVE = true, CANARY = true }
 local required = { "name", "schemaVersion", "featureVersion", "model", "predict",
   "serialize", "deserialize" }
 
