@@ -12,7 +12,7 @@ describe("tactical intelligence facade", function()
 
     _G.IntelligenceModelCatalog = {
       names = function()
-        return { "MonsterBehaviorModel", "LatencyModel" }
+        return { "TargetValueModel", "TimingModel" }
       end,
     }
 
@@ -146,21 +146,21 @@ describe("tactical intelligence facade", function()
       },
       models = {
         entries = {
-          MonsterBehaviorModel = {
+          TargetValueModel = {
             mode = "SHADOW",
             definition = { minEvidence = 1 },
             model = {
               diagnostics = function()
-                return { samples = 3, pending = 0, confidence = 0.75, capability = "monster_behavior" }
+                return { samples = 3, pending = 0, confidence = 0.75, capability = "target_value" }
               end,
             },
           },
-          LatencyModel = {
+          TimingModel = {
             mode = "OFF",
             definition = { minEvidence = 1 },
             model = {
               diagnostics = function()
-                return { samples = 0, pending = 0, confidence = 0, capability = "latency" }
+                return { samples = 0, pending = 0, confidence = 0, capability = "timing" }
               end,
             },
           },

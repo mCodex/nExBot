@@ -66,7 +66,7 @@ describe("intelligence runtime", function()
     registered.config.handler()
     assert.equals(1, nExBot.Intelligence.currentSnapshot.generation)
     assert.is_true(nExBot.Intelligence.optionalEnabled("replay"))
-    local navigation = nExBot.Intelligence.models:get("NavigationCostModel")
+    local navigation = nExBot.Intelligence.models:get("RouteReliabilityModel")
     nExBot.Intelligence.navigationCosts:observe("1:2:7", 5, 1, 100)
     assert.equals(0, nExBot.Intelligence.navigationPenalty({ x = 1, y = 2, z = 7 }, 100, 5))
     navigation.mode = IntelligenceModelRegistry.ACTIVE
