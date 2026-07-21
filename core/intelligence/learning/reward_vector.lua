@@ -69,4 +69,7 @@ function RewardVector:validate(reward)
   return true
 end
 
+nExBot = nExBot or {}
+nExBot.IntelligenceRewardVector = RewardVector
+
 return RewardVector

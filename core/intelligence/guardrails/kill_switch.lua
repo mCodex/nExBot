@@ -24,4 +24,7 @@ function IntelligenceKillSwitch:getStatus()
   return result
 end
 
+nExBot = nExBot or {}
+nExBot.IntelligenceKillSwitch = IntelligenceKillSwitch
+
 return IntelligenceKillSwitch

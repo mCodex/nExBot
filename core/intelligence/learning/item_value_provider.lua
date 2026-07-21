@@ -24,4 +24,7 @@ function Provider:getAllValues()
   return copy
 end
 
+nExBot = nExBot or {}
+nExBot.IntelligenceItemValueProvider = Provider
+
 return IntelligenceItemValueProvider
