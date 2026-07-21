@@ -49,6 +49,20 @@ if not Intelligence.lifecycle then
   Intelligence.huntTracker = HuntTracker.new({
     episodeBase = Intelligence.episodeBase,
   })
+  local RewardVector = nExBot.IntelligenceRewardVector or dofile("core/intelligence/learning/reward_vector.lua")
+  local RewardNormalizer = nExBot.IntelligenceRewardNormalizer or dofile("core/intelligence/learning/reward_normalizer.lua")
+  Intelligence.rewardVector = RewardVector.new({
+    componentNames = {
+      "xpEfficiency", "lootCaptureRate", "lootValueEfficiency",
+      "resourceEfficiency", "survivalSafety", "routeReliability",
+      "timeEfficiency", "manualInterventionPenalty", "targetThrashPenalty",
+      "stuckPenalty", "corpseAbandonmentPenalty", "downtimePenalty",
+      "uncertaintyPenalty",
+    },
+  })
+  Intelligence.rewardNormalizer = RewardNormalizer.new({
+    windowSize = 1000,
+  })
   Intelligence.contextAdjustments = IntelligenceContextAdjustment.new()
   Intelligence.latency = IntelligenceLatencyClassifier.new()
   Intelligence.horizons = IntelligenceHorizonCounters.new()
@@ -279,6 +293,26 @@ if not Intelligence.lifecycle then
           corpseId = data.corpseId,
           encounterId = data.encounterId,
         })
+      end
+    end)
+    EventBus.on("intelligence:encounter_closed", function(data)
+      if Intelligence.optionalEnabled("learning") then
+        local reward = Intelligence.rewardVector:create({
+          xpEfficiency = data.xpDelta or 0,
+          lootCaptureRate = data.lootCaptureRate or 0,
+          lootValueEfficiency = data.lootValue or 0,
+          resourceEfficiency = data.resourceEfficiency or 0,
+          survivalSafety = data.survivalSafety or 0,
+          routeReliability = 1.0,
+          timeEfficiency = data.timeEfficiency or 0,
+          manualInterventionPenalty = data.manualIntervention and 1.0 or 0,
+          targetThrashPenalty = data.targetThrashPenalty or 0,
+          stuckPenalty = data.stuckPenalty or 0,
+          corpseAbandonmentPenalty = 0,
+          downtimePenalty = data.downtimePenalty or 0,
+          uncertaintyPenalty = 0,
+        })
+        Intelligence.rewardNormalizer:updateStats(reward)
       end
     end)
     local function onLootObserved(monsterName, items)
