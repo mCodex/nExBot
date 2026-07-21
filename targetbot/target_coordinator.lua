@@ -1242,7 +1242,7 @@ local function executeIntelligenceSelection(selection, targetCount, source)
     targetValid = selection.creature and not selection.creature:isDead(),
   })
   local features = Intelligence.features:extractCombat(Intelligence.currentSnapshot, { targetId = proposal.targetId })
-  features.predictions = { targetUtility = Intelligence.models:predict("TargetUtilityModel", features) }
+  features.predictions = { targetUtility = Intelligence.models:predict("TargetValueModel", features) }
   if not Intelligence.optionalEnabled or Intelligence.optionalEnabled("replay") then
     Intelligence.replay:record({
       snapshotRef = Intelligence.currentSnapshot and Intelligence.currentSnapshot.generation,

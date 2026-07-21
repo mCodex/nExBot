@@ -196,7 +196,7 @@ if not Intelligence.lifecycle then
   end
 
   function Intelligence.navigationPenalty(position, timestamp, baseCost)
-    local entry = Intelligence.models:get("NavigationCostModel")
+    local entry = Intelligence.models:get("RouteReliabilityModel")
     local key = Intelligence.navigationKey(position)
     if not key or entry.mode ~= IntelligenceModelRegistry.ACTIVE or type(baseCost) ~= "number" then return 0 end
     return math.min(Intelligence.navigationCosts:get(key, timestamp or nExBot.Shared.nowMs()), math.max(0, baseCost) * 0.1)
@@ -402,11 +402,11 @@ EventBus.on("attacksm:state_changed", function(state, previous, reason)
  Intelligence.replay:record({ outcome = { type = eventType, reason = reason } })
  end
  if eventType == "TargetKilled" then
- observeModels({ "MonsterBehaviorModel", "TargetUtilityModel" }, true)
+  observeModels({ "TargetValueModel" }, true)
  elseif eventType == "AttackCompleted" then
- observeModels({ "MonsterBehaviorModel", "TargetUtilityModel", "TargetSwitchModel" }, true)
+  observeModels({ "TargetValueModel", "RiskAssessmentModel" }, true)
  elseif eventType == "AttackCancelled" and reason then
- observeModels({ "MonsterBehaviorModel", "TargetUtilityModel", "TargetSwitchModel" }, false)
+  observeModels({ "TargetValueModel", "RiskAssessmentModel" }, false)
  end
  if Intelligence.optionalEnabled("learning") and eventType == "TargetKilled" and Intelligence.activeCombatContext then
  Intelligence.contextAdjustments:observe(Intelligence.activeCombatContext, true, nExBot.Shared.nowMs())
@@ -420,11 +420,11 @@ EventBus.on("movement:outcome", function(success, reason, intent)
         reason = reason,
         intent = intent,
       }, { source = "MovementCoordinator" })
-      local models = { "RouteReliabilityModel", "NavigationCostModel" }
+      local models = { "RouteReliabilityModel" }
       local action = intent and (intent.action or (intent.data and intent.data.action))
-      if action == "lure" then models[#models + 1] = "LureSafetyModel"
-      elseif action == "pull" then models[#models + 1] = "PullContinuationModel"
-      elseif action == "wave" then models[#models + 1] = "WavePredictionModel" end
+      if action == "lure" then models[#models + 1] = "RiskAssessmentModel"
+      elseif action == "pull" then models[#models + 1] = "ResourceEfficiencyModel"
+      elseif action == "wave" then models[#models + 1] = "TimingModel" end
       observeModels(models, success == true)
       local position = intent and (intent.position or (intent.data and intent.data.destination))
       local key = Intelligence.navigationKey(position)
