@@ -292,7 +292,7 @@ function UnifiedStorage.migrate(data)
     migrated = true
   end
 
-  if data.targetbot and not data.modules then
+  if data.targetbot and ((data.modules and not data.modules.targetbot) or not data.modules) then
     data.modules = data.modules or {}
     data.modules.targetbot = {
       selectedConfig = data.targetbot.selectedConfig or "",
@@ -304,7 +304,7 @@ function UnifiedStorage.migrate(data)
     migrated = true
   end
 
-  if data.healbot and not data.modules then
+  if data.healbot and ((data.modules and not data.modules.healbot) or not data.modules) then
     data.modules = data.modules or {}
     data.modules.healbot = {
       desiredEnabled = data.healbot.enabled or false,
@@ -314,7 +314,7 @@ function UnifiedStorage.migrate(data)
     migrated = true
   end
 
-  if data.attackbot and not data.modules then
+  if data.attackbot and ((data.modules and not data.modules.attackbot) or not data.modules) then
     data.modules = data.modules or {}
     data.modules.attackbot = {
       desiredEnabled = data.attackbot.enabled or false,

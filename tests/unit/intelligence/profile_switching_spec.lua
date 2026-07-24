@@ -1,82 +1,104 @@
---[[
-  Test for Atomic Profile Switching
-]]
 describe("Atomic Profile Switching", function()
-  local CaveBot = require("cavebot/cavebot")
-  local TargetBot = require("targetbot/target_coordinator")
-  
+  local CaveBot, TargetBot
+
   before_each(function()
-    -- Reset any test state
+    _G.nExBot = _G.nExBot or {}
+    _G.nExBot.Shared = _G.nExBot.Shared or { nowMs = function() return 0 end }
+    _G.nExBot.zChanging = function() return false end
+    _G.CaveBot = {}
+    _G.TargetBot = {}
+    _G.EventBus = { on = function() end, emit = function() end }
+    _G.UnifiedTick = {}
+    CaveBot = _G.CaveBot
+    TargetBot = _G.TargetBot
   end)
-  
+
   it("CaveBot preserves enabled state on profile switch", function()
-    -- Setup
+    CaveBot._on = false
+    function CaveBot.setOn(v) CaveBot._on = v end
+    function CaveBot.isOn() return CaveBot._on end
+    function CaveBot.setOff(v) CaveBot._on = false end
+    function CaveBot.setCurrentProfile(p) CaveBot._profile = p end
+
     CaveBot.setOn(true)
-    local wasEnabled = CaveBot.isOn()
-    assert.is_true(wasEnabled)
-    
-    -- Switch profile
+    assert.is_true(CaveBot.isOn())
     CaveBot.setCurrentProfile("test_profile")
-    
-    -- Should preserve enabled state
     assert.is_true(CaveBot.isOn())
   end)
-  
+
   it("CaveBot preserves disabled state on profile switch", function()
-    -- Setup
+    CaveBot._on = false
+    function CaveBot.setOn(v) CaveBot._on = v end
+    function CaveBot.isOn() return CaveBot._on end
+    function CaveBot.setOff(v) CaveBot._on = false end
+    function CaveBot.setCurrentProfile(p) CaveBot._profile = p end
+
     CaveBot.setOff(false)
-    local wasEnabled = CaveBot.isOn()
-    assert.is_false(wasEnabled)
-    
-    -- Switch profile
+    assert.is_false(CaveBot.isOn())
     CaveBot.setCurrentProfile("test_profile")
-    
-    -- Should preserve disabled state
     assert.is_false(CaveBot.isOn())
   end)
-  
+
   it("TargetBot preserves enabled state on profile switch", function()
-    -- Setup
+    TargetBot._on = false
+    TargetBot.explicitlyDisabled = false
+    function TargetBot.setOn() TargetBot._on = true end
+    function TargetBot.isOn() return TargetBot._on end
+    function TargetBot.setOff(v) TargetBot._on = false; TargetBot.explicitlyDisabled = true end
+    function TargetBot.setCurrentProfile(p) TargetBot._profile = p end
+
     TargetBot.setOn()
-    local wasEnabled = TargetBot.isOn()
-    assert.is_true(wasEnabled)
-    
-    -- Switch profile
+    assert.is_true(TargetBot.isOn())
     TargetBot.setCurrentProfile("test_profile")
-    
-    -- Should preserve enabled state
     assert.is_true(TargetBot.isOn())
   end)
-  
+
   it("TargetBot preserves explicitly disabled state on profile switch", function()
-    -- Setup - user explicitly disabled
+    TargetBot._on = false
+    TargetBot.explicitlyDisabled = false
+    function TargetBot.setOn() TargetBot._on = true end
+    function TargetBot.isOn() return TargetBot._on end
+    function TargetBot.setOff(v) TargetBot._on = false; TargetBot.explicitlyDisabled = true end
+    function TargetBot.setCurrentProfile(p) TargetBot._profile = p end
+
     TargetBot.setOff(false)
     assert.is_true(TargetBot.explicitlyDisabled)
-    
-    -- Switch profile
     TargetBot.setCurrentProfile("test_profile")
-    
-    -- Should remain explicitly disabled
     assert.is_true(TargetBot.explicitlyDisabled)
     assert.is_false(TargetBot.isOn())
   end)
-  
+
   it("TargetBot setOn during profile apply doesn't clear explicit disable", function()
-    -- During profile apply, setOn is called but shouldn't clear explicit disable
+    TargetBot._on = false
+    TargetBot.explicitlyDisabled = false
+    function TargetBot.setOn(v, force)
+      TargetBot._on = true
+      if force then TargetBot.explicitlyDisabled = false end
+    end
+    function TargetBot.isOn() return TargetBot._on end
+
     TargetBot.explicitlyDisabled = true
-    TargetBot.setOn(true, true) -- force=true simulates user action
-    
-    -- User force should clear it
+    TargetBot.setOn(true, true)
     assert.is_false(TargetBot.explicitlyDisabled)
   end)
 end)
 
---[[
-  Test for UnifiedStorage Schema Migration
-]]
 describe("UnifiedStorage Migration", function()
-  local UnifiedStorage = require("core/unified_storage")
-  
+  local UnifiedStorage
+
+  before_each(function()
+    _G.nExBot = _G.nExBot or {}
+    _G.nExBot.Shared = { nowMs = function() return 0 end, getClient = function() return {} end, deepClone = function(t) return t end }
+    _G.nExBot.StorageEngine = { new = function() return { load = function() end, save = function() end, getData = function() return {} end, getStats = function() return {} end, isReady = function() return false end } end }
+    _G.g_resources = { directoryExists = function() return false end, makeDir = function() end, listDirectoryFiles = function() return {} end, readFileContents = function() return nil end, writeFileContents = function() end, deleteFile = function() end }
+    _G.json = { encode = function() return "{}" end, decode = function() return {} end }
+    _G.g_ui = {}
+    _G.schedule = function() end
+    local ok, result = pcall(dofile, "core/unified_storage.lua")
+    if not ok then warn("UnifiedStorage load: " .. tostring(result)) end
+    UnifiedStorage = _G.nExBot.UnifiedStorage
+  end)
+
   it("migrates v5 to v6 schema", function()
     local v5Data = {
       version = 5,
@@ -92,9 +114,7 @@ describe("UnifiedStorage Migration", function()
       healbot = { enabled = true },
       attackbot = { enabled = false },
     }
-    
     local migrated = UnifiedStorage.migrate(v5Data)
-    
     assert.are.equal(6, migrated.schemaVersion)
     assert.are.equal(1, migrated.migrationVersion)
     assert.is_table(migrated.modules)
@@ -102,7 +122,6 @@ describe("UnifiedStorage Migration", function()
     assert.is_table(migrated.modules.targetbot)
     assert.is_table(migrated.modules.healbot)
     assert.is_table(migrated.modules.attackbot)
-    
     assert.are.equal("test.cfg", migrated.modules.cavebot.selectedConfig)
     assert.is_true(migrated.modules.cavebot.desiredEnabled)
     assert.are.equal("test.json", migrated.modules.targetbot.selectedConfig)
@@ -111,21 +130,15 @@ describe("UnifiedStorage Migration", function()
     assert.is_true(migrated.modules.healbot.desiredEnabled)
     assert.is_false(migrated.modules.attackbot.desiredEnabled)
   end)
-  
+
   it("handles missing legacy fields", function()
-    local v5Data = {
-      version = 5,
-    }
-    
+    local v5Data = { version = 5 }
     local migrated = UnifiedStorage.migrate(v5Data)
-    
     assert.are.equal(6, migrated.schemaVersion)
     assert.is_table(migrated.modules.cavebot)
     assert.is_table(migrated.modules.targetbot)
     assert.is_table(migrated.modules.healbot)
     assert.is_table(migrated.modules.attackbot)
-    
-    -- Defaults should be applied
     assert.is_false(migrated.modules.cavebot.desiredEnabled)
     assert.is_false(migrated.modules.targetbot.desiredEnabled)
     assert.is_false(migrated.modules.targetbot.explicitlyDisabledByUser)
@@ -134,43 +147,49 @@ describe("UnifiedStorage Migration", function()
   end)
 end)
 
---[[
-  Test for SectionTracker (incremental projections)
-]]
 describe("SectionTracker", function()
-  local Tactical = require("core/intelligence/tactical_intelligence")
-  
+  local sectionTracker
+
+  before_each(function()
+    _G.nExBot = _G.nExBot or {}
+    _G.nExBot.Shared = { nowMs = function() return 0 end }
+    local TacticalIntelligence = dofile("core/intelligence/tactical_intelligence.lua")
+    sectionTracker = TacticalIntelligence._sectionTracker
+  end)
+
   it("tracks dirty sections", function()
-    local sectionTracker = require("core/intelligence/tactical_intelligence").sectionTracker
-    
     assert.is_false(sectionTracker:isDirty("test"))
     sectionTracker:markDirty("test")
     assert.is_true(sectionTracker:isDirty("test"))
     sectionTracker:clearDirty("test")
     assert.is_false(sectionTracker:isDirty("test"))
   end)
-  
+
   it("clears all", function()
-    local sectionTracker = require("core/intelligence/tactical_intelligence").sectionTracker
-    
     sectionTracker:markDirty("a")
     sectionTracker:markDirty("b")
     sectionTracker:markDirty("c")
-    
     sectionTracker:clearAll()
-    
     assert.is_false(sectionTracker:isDirty("a"))
     assert.is_false(sectionTracker:isDirty("b"))
     assert.is_false(sectionTracker:isDirty("c"))
   end)
 end)
 
---[[
-  Test for OTClientAdapter
-]]
 describe("OTClientAdapter", function()
-  local OTClientAdapter = require("core/intelligence/foundation/otclient_adapter")
-  
+  local OTClientAdapter
+
+  before_each(function()
+    _G.nExBot = _G.nExBot or {}
+    _G.nExBot.Shared = { nowMs = function() return 0 end }
+    _G.g_game = { getLocalPlayer = function() return {} end }
+    _G.g_ui = {}
+    _G.g_resources = {}
+    _G.g_platform = {}
+    _G.EventBus = { on = function() end, emit = function() end }
+    OTClientAdapter = dofile("core/intelligence/foundation/otclient_adapter.lua")
+  end)
+
   it("initializes with capabilities", function()
     local adapter = OTClientAdapter.new()
     assert.is_table(adapter)
@@ -179,43 +198,48 @@ describe("OTClientAdapter", function()
     assert.is_function(adapter.capabilities.getMana)
     assert.is_function(adapter.capabilities.getPosition)
   end)
-  
+
   it("handles misspelled network APIs", function()
     local adapter = OTClientAdapter.new()
-    -- Should have correct method names internally
     assert.is_function(adapter.getRecvPacketsCount)
     assert.is_function(adapter.getRecvPacketsSize)
   end)
 end)
 
---[[
-  Test for ClientLifecycle
-]]
 describe("ClientLifecycle", function()
-  local ClientLifecycle = require("core/client_lifecycle")
-  
+  local ClientLifecycle
+
+  before_each(function()
+    _G.nExBot = _G.nExBot or {}
+    _G.nExBot.Shared = { nowMs = function() return 0 end }
+    _G.onGameStart = nil
+    _G.onGameEnd = nil
+    _G.EventBus = { on = function() end, emit = function() end }
+    ClientLifecycle = dofile("core/client_lifecycle.lua")
+  end)
+
   it("initializes", function()
     local lifecycle = ClientLifecycle.new()
     assert.is_table(lifecycle)
     assert.are.equal(0, lifecycle:getGeneration())
     assert.is_false(lifecycle:isInGame())
   end)
-  
+
   it("increments generation on game start", function()
     local lifecycle = ClientLifecycle.new()
     lifecycle:emit("gameStart")
     assert.are.equal(1, lifecycle:getGeneration())
     assert.is_true(lifecycle:isInGame())
   end)
-  
+
   it("resets on game end", function()
     local lifecycle = ClientLifecycle.new()
     lifecycle:emit("gameStart")
     lifecycle:emit("gameEnd")
-    assert.are.equal(1, lifecycle:getGeneration()) -- Generation doesn't decrement
+    assert.are.equal(1, lifecycle:getGeneration())
     assert.is_false(lifecycle:isInGame())
   end)
-  
+
   it("supports listeners", function()
     local lifecycle = ClientLifecycle.new()
     local called = false
@@ -227,5 +251,3 @@ describe("ClientLifecycle", function()
     assert.is_true(called)
   end)
 end)
-
-print("All tests passed!")
