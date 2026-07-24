@@ -44,7 +44,7 @@ describe("tactical intelligence facade", function()
       end,
     }
 
-    _G.nExBot.Analytics = {
+    _G.nExBot.HuntMetrics = { instance = {
       isActive = function()
         return true
       end,
@@ -82,7 +82,7 @@ describe("tactical intelligence facade", function()
           potionsPerHour = { 1, 2 },
         }
       end,
-    }
+    } }
 
     _G.nExBot.MonsterAI = {
       Tracker = { monsters = { [1] = { name = "Cyclops" } } },

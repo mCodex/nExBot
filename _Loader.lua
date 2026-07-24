@@ -153,12 +153,12 @@ local function sanitizeStorage()
     end
     idx = stopAt + 1
     if idx <= #keys then
-      schedule(50, processChunk)
+      if schedule then schedule(50, processChunk) end
     else
       loadTimes["sanitize"] = math.floor((os.clock() - sanitizeStart) * 1000)
     end
   end
-  schedule(1, processChunk)
+  if schedule then schedule(1, processChunk) end
 end
 
 sanitizeStorage()

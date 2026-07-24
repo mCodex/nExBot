@@ -41,6 +41,8 @@ local function deepCopy(tbl)
 end
 
 function HuntMetrics.new()
+  local lp = g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()
+  local startXp = lp and lp.getExperience and lp:getExperience() or 0
   local self = setmetatable({
     metrics = {},
     trends = {},
@@ -48,6 +50,7 @@ function HuntMetrics.new()
     lastSnapshotMs = 0,
     snapshotIntervalMs = 60000,
     loaded = false,
+    lastKnownXp = startXp,
   }, HuntMetrics)
   return self
 end
@@ -101,6 +104,12 @@ end
 
 function HuntMetrics:getMetrics()
   self:load()
+  local lp = g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()
+  local currentXp = lp and lp.getExperience and lp:getExperience() or 0
+  if currentXp > self.lastKnownXp then
+    self:recordXp(currentXp - self.lastKnownXp)
+    self.lastKnownXp = currentXp
+  end
   return deepCopy(self.metrics)
 end
 
@@ -196,6 +205,55 @@ if EventBus then
       HuntMetrics.instance:save()
     end
   end)
+  EventBus.on("monster:killed", function()
+    if HuntMetrics.instance then
+      HuntMetrics.instance:recordKill()
+    end
+  end)
+  EventBus.on("creature:health", function(creature, percent, oldPercent)
+    if HuntMetrics.instance and creature:isLocalPlayer() and percent ~= oldPercent then
+      local lp = g_game.getLocalPlayer()
+      local maxHp = lp and lp.getMaxHealth and lp:getMaxHealth() or 0
+      if maxHp > 0 then
+        if percent < oldPercent then
+          HuntMetrics.instance:recordDamageTaken((oldPercent - percent) / 100 * maxHp)
+        end
+      end
+    end
+  end)
+  local function onHealSpell(_, mana)
+    if HuntMetrics.instance then
+      local hm = HuntMetrics.instance
+      hm:load()
+      hm.metrics.healSpellsCast = (hm.metrics.healSpellsCast or 0) + 1
+      hm.metrics.manaSpent = (hm.metrics.manaSpent or 0) + (tonumber(mana) or 0)
+      hm:save()
+    end
+  end
+  local function onHealPotion(_, potionType)
+    if HuntMetrics.instance then
+      local hm = HuntMetrics.instance
+      hm:load()
+      if potionType == "mana" then
+        hm.metrics.manaPotionsUsed = (hm.metrics.manaPotionsUsed or 0) + 1
+      else
+        hm.metrics.hpPotionsUsed = (hm.metrics.hpPotionsUsed or 0) + 1
+      end
+      hm:save()
+    end
+  end
+  local function onRuneUsed()
+    if HuntMetrics.instance then
+      local hm = HuntMetrics.instance
+      hm:load()
+      hm.metrics.runesUsed = (hm.metrics.runesUsed or 0) + 1
+      hm:save()
+    end
+  end
+  EventBus.on("heal:spell", onHealSpell)
+  EventBus.on("heal:potion", onHealPotion)
+  EventBus.on("attack:aoe_rune", onRuneUsed)
+  EventBus.on("attack:single_rune", onRuneUsed)
 end
 
 nExBot = nExBot or {}

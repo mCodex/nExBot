@@ -291,22 +291,13 @@ local contentText = assert(window:recursiveGetChildById("contentText"), "Tactica
 local selected = sections[1]
 
 local function resolveSectionName(option)
-  if type(option) == "string" then
+  if type(option) == "string" and option ~= "" then
     return option
-  end
-  if type(option) == "table" then
-    if type(option.getText) == "function" then
-      local text = option:getText()
-      if text and text ~= "" then
-        return text
-      end
-    end
-    if type(option.text) == "string" and option.text ~= "" then
-      return option.text
-    end
   end
   return selected
 end
+
+local lastRendered = ""
 
 local function render()
   local ok, text = pcall(function()
@@ -321,7 +312,11 @@ local function render()
     }) or {}
     return renderSection(view, resolveSectionName(selected))
   end)
-  contentText:setText(ok and (text or "") or "Tactical Intelligence render failed:\n" .. tostring(text))
+  text = ok and (text or "") or "Tactical Intelligence render failed:\n" .. tostring(text)
+  if text ~= lastRendered then
+    lastRendered = text
+    contentText:setText(text)
+  end
 end
 
 local function showWindow()
@@ -351,17 +346,6 @@ if window.buttons and window.buttons.close then
   end
 end
 
-if window.buttons and window.buttons.shadow then
-  window.buttons.shadow.onClick = function()
-    if nExBot.Intelligence and nExBot.Intelligence.models and IntelligenceModelCatalog then
-      for _, name in ipairs(IntelligenceModelCatalog.names()) do
-        nExBot.Intelligence.models:setMode(name, "SHADOW")
-      end
-    end
-    render()
-  end
-end
-
 nExBot.TacticalIntelligence.showWindow = showWindow
 nExBot.TacticalIntelligence.hideWindow = function()
   window:hide()
@@ -369,6 +353,8 @@ end
 nExBot.TacticalIntelligence.renderWindow = render
 
 setDefaultTab("Main")
+UI.Separator()
+UI.Label("AI")
 UI.Button("Tactical Intelligence", showWindow):setTooltip("Open Tactical Intelligence")
 
 UnifiedTick.register("tactical_intelligence_ui", {

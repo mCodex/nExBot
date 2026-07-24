@@ -54,42 +54,11 @@ local SectionTracker = {}
 SectionTracker.__index = SectionTracker
 
 function SectionTracker.new()
-  local self = setmetatable({
-    dirty = {},
-    lastUpdate = 0,
-    generations = {},
-  }, SectionTracker)
-  return self
+  return setmetatable({ dirty = {} }, SectionTracker)
 end
 
 function SectionTracker:markDirty(section)
   self.dirty[section] = true
-end
-
-function SectionTracker:isDirty(section)
-  return self.dirty[section] == true
-end
-
-function SectionTracker:clearDirty(section)
-  self.dirty[section] = nil
-end
-
-function SectionTracker:clearAll()
-  for k in pairs(self.dirty) do self.dirty[k] = nil end
-end
-
-function SectionTracker:getGeneration(section)
-  return self.generations[section] or 0
-end
-
-function SectionTracker:setGeneration(section, gen)
-  self.generations[section] = gen
-end
-
-function SectionTracker:incrementGeneration(section)
-  local gen = (self.generations[section] or 0) + 1
-  self.generations[section] = gen
-  return gen
 end
 
 local sectionTracker = SectionTracker.new()
@@ -387,8 +356,7 @@ local function diagnosticSnapshot(intelligence, state)
   }
 end
 
-local function buildState(forceFull)
-  forceFull = forceFull or false
+local function buildState()
   local intelligence = nExBot.Intelligence or {}
   local analytics = getAnalytics()
   local lifecycle = intelligence.lifecycle or {}
@@ -457,46 +425,17 @@ local function buildState(forceFull)
     diagnostics = nil,
   }
   
-  -- Only build sections that are dirty or forced
-  if forceFull or sectionTracker:isDirty("models") then
-    state.models = modelSnapshots(intelligence)
-    state.overview.modelCount = state.models.summary.total
-    state.overview.actionableModels = state.models.summary.actionable
-    sectionTracker:clearDirty("models")
-  end
-  
-  if forceFull or sectionTracker:isDirty("resources") then
-    state.resources = resourceSnapshot(intelligence)
-    sectionTracker:clearDirty("resources")
-  end
-  
-  if forceFull or sectionTracker:isDirty("monsters") then
-    state.monsters = monsterSnapshot()
-    sectionTracker:clearDirty("monsters")
-  end
-  
-  if forceFull or sectionTracker:isDirty("targeting") then
-    state.targeting = targetingSnapshot(intelligence)
-    sectionTracker:clearDirty("targeting")
-  end
-  
-  if forceFull or sectionTracker:isDirty("replay") then
-    state.replay = replaySnapshot(intelligence)
-    sectionTracker:clearDirty("replay")
-  end
-  
-  if forceFull or sectionTracker:isDirty("pipeline") then
-    state.pipeline = pipelineSnapshot(intelligence, state.models and state.models.summary.total or 0)
-    state.overview.lastEvent = state.pipeline.lastEvent and state.pipeline.lastEvent.type or nil
-    state.overview.pipelineHealth = state.pipeline.health
-    sectionTracker:clearDirty("pipeline")
-  end
-  
-  if forceFull or sectionTracker:isDirty("diagnostics") then
-    state.diagnostics = diagnosticSnapshot(intelligence, state)
-    sectionTracker:clearDirty("diagnostics")
-  end
-  
+  state.models = modelSnapshots(intelligence)
+  state.overview.modelCount = state.models.summary.total
+  state.overview.actionableModels = state.models.summary.actionable
+  state.resources = resourceSnapshot(intelligence)
+  state.monsters = monsterSnapshot()
+  state.targeting = targetingSnapshot(intelligence)
+  state.replay = replaySnapshot(intelligence)
+  state.pipeline = pipelineSnapshot(intelligence, state.models and state.models.summary.total or 0)
+  state.overview.lastEvent = state.pipeline.lastEvent and state.pipeline.lastEvent.type or nil
+  state.overview.pipelineHealth = state.pipeline.health
+  state.diagnostics = diagnosticSnapshot(intelligence, state)
   state.overview.lastPersistenceSave = intelligence.lastPersistAt
 
   return state
@@ -544,13 +483,9 @@ function Tactical:view(viewport)
 end
 
 -- Mark section dirty for incremental update
-function Tactical:markDirty(section)
-  sectionTracker:markDirty(section)
-end
+function Tactical:markDirty(section) end
 
--- Force full rebuild
 function Tactical:invalidate()
-  sectionTracker:clearAll()
   self.cached = nil
   self.cachedAt = 0
 end

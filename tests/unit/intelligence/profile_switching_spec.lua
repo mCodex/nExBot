@@ -150,15 +150,6 @@ describe("SectionTracker", function()
     assert.is_false(sectionTracker:isDirty("test"))
   end)
   
-  it("tracks generations", function()
-    local sectionTracker = require("core/intelligence/tactical_intelligence").sectionTracker
-    
-    assert.are.equal(0, sectionTracker:getGeneration("test"))
-    sectionTracker:setGeneration("test", 5)
-    assert.are.equal(5, sectionTracker:getGeneration("test"))
-    assert.are.equal(6, sectionTracker:incrementGeneration("test"))
-  end)
-  
   it("clears all", function()
     local sectionTracker = require("core/intelligence/tactical_intelligence").sectionTracker
     
