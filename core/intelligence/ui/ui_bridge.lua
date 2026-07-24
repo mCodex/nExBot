@@ -44,6 +44,8 @@ local function limited(items, limit)
   return result
 end
 
+local nowMs = (nExBot.Shared and nExBot.Shared.nowMs) or function() return os.time() * 1000 end
+
 local function renderOverview(view)
   local overview = view.overview or {}
   local hunt = view.hunt and view.hunt.summary or {}
@@ -126,7 +128,7 @@ local function renderMonsters(view)
       tostring(profile.state or "NO_DATA"):sub(1, 10),
       formatNumber(profile.samples or 0),
       string.format("%.2f", tonumber(profile.confidence) or 0),
-      formatDuration(profile.lastSeenAt or 0)
+      formatDuration(math.max(0, nowMs() - (profile.lastSeenAt or 0)))
     )
   end
   return linesToText(lines)

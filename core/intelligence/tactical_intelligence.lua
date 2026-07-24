@@ -61,6 +61,18 @@ function SectionTracker:markDirty(section)
   self.dirty[section] = true
 end
 
+function SectionTracker:isDirty(section)
+  return self.dirty[section] == true
+end
+
+function SectionTracker:clearDirty(section)
+  self.dirty[section] = nil
+end
+
+function SectionTracker:clearAll()
+  self.dirty = {}
+end
+
 local sectionTracker = SectionTracker.new()
 
 -- EventBus integration for dirty tracking
@@ -483,7 +495,11 @@ function Tactical:view(viewport)
 end
 
 -- Mark section dirty for incremental update
-function Tactical:markDirty(section) end
+function Tactical:markDirty(section)
+  if section then sectionTracker:markDirty(section) end
+  self.cached = nil
+  self.cachedAt = 0
+end
 
 function Tactical:invalidate()
   self.cached = nil
@@ -570,5 +586,6 @@ if EventBus then
 end
 
 nExBot.TacticalIntelligence = Tactical
+Tactical._sectionTracker = sectionTracker
 
 return nExBot.TacticalIntelligence

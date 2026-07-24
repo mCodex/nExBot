@@ -298,7 +298,7 @@ if not Intelligence.lifecycle then
       Intelligence.huntId = ""
       Intelligence.events:publish("analytics:session_ended", { active = false, sourceEvent = "analytics:session:end" }, { source = "TacticalIntelligence" })
     end)
-    EventBus.on("combat:target_changed", function(data)
+    EventBus.on("combat:target", function(data)
       if Intelligence.optionalEnabled("learning") then
         Intelligence.encounterTracker:start({
           encounterId = data.encounterId,
@@ -308,7 +308,7 @@ if not Intelligence.lifecycle then
         })
       end
     end)
-    EventBus.on("combat:target_changed", function(data)
+    EventBus.on("combat:target", function(data)
       if Intelligence.optionalEnabled("learning") then
         if Intelligence.killSwitch:isEnabled("global") then
           return
@@ -319,14 +319,14 @@ if not Intelligence.lifecycle then
         Intelligence.targetSwitchGuard:recordSwitch()
       end
     end)
-    EventBus.on("loot:received", function(data)
+    EventBus.on("loot:received", function(monsterName, itemsStr, text)
       if Intelligence.optionalEnabled("learning") then
         Intelligence.lootEpisodeTracker:start({
-          lootEpisodeId = data.lootEpisodeId,
+          lootEpisodeId = tostring(monsterName) .. ":" .. tostring(os.time()),
           sessionId = Intelligence.sessionId,
           huntId = Intelligence.huntId,
-          corpseId = data.corpseId,
-          encounterId = data.encounterId,
+          corpseId = monsterName,
+          encounterId = monsterName,
         })
       end
     end)
@@ -339,10 +339,17 @@ if not Intelligence.lifecycle then
         data.actions = prioritized
       end
     end)
+    if EventBus and EventBus.emit then
+      local bridgePublish = Intelligence.events.publish
+      Intelligence.events.publish = function(self, typeName, data, metadata)
+        bridgePublish(self, typeName, data, metadata)
+        EventBus.emit("intelligence:" .. typeName, { type = typeName, data = data, metadata = metadata })
+      end
+    end
     EventBus.on("intelligence:decision_selected", function(data)
       if Intelligence.optionalEnabled("learning") then
-        local explanation = Intelligence.decisionExplainer:explain(data.decision)
-        data.explanation = explanation
+        local explanation = Intelligence.decisionExplainer:explain(data.data and data.data.decision or data)
+        if data.data then data.data.explanation = explanation end
       end
     end)
     EventBus.on("intelligence:encounter_closed", function(data)

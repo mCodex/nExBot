@@ -43,8 +43,11 @@ function Model:observe(observation)
   assert(type(success) == "boolean", "boolean observation label required")
   local weight = math.max(0, math.min(observation.weight or 1, self.maxWeight))
   local features = self:extractFeatures(observation)
-  self.pending[#self.pending + 1] = { success = success, weight = weight, features = features }
-  if #self.pending > self.maxPending then table.remove(self.pending, 1) end
+  self._pendingTail = self._pendingTail + 1
+  self._pendingQueue[self._pendingTail] = { success = success, weight = weight, features = features }
+  if self._pendingTail - self._pendingHead + 1 > self.maxPending then
+    self._pendingHead = self._pendingHead + 1
+  end
   return true
 end
 
@@ -53,26 +56,59 @@ function Model:extractFeatures(observation)
 end
 
 function Model:update()
-  if #self.pending == 0 then return false end
+  if self._pendingHead > self._pendingTail then return false end
   self.checkpoint = copyState(self.state)
-  for _, obs in ipairs(self.pending) do
+  for i = self._pendingHead, self._pendingTail do
+    local obs = self._pendingQueue[i]
     if obs.success then self.state.successes = self.state.successes + obs.weight
     else self.state.failures = self.state.failures + obs.weight end
     self.state.samples = self.state.samples + 1
     if obs.features and #self.state.features < 100 then
-      self.state.features[#self.state.features + 1] = obs.features
+      self.state.features[#self.state.features + 1] = { features = obs.features, success = obs.success }
     end
   end
-  self.pending = {}
+  self._pendingHead = 1
+  self._pendingTail = 0
   return true
 end
 
 function Model:predict()
-  local total = self.state.successes + self.state.failures
-  local probability = total > 0 and (self.state.successes / total) or 0.5
+  local alpha = self.state.successes + 1
+  local beta = self.state.failures + 1
+  local mean = alpha / (alpha + beta)
   local evidence = self.state.samples
-  local confidence = math.min(1, evidence / self.minSamples)
-  local explanation = string.format("%s: %.3f from %d observations", self.capability, probability, evidence)
+  local uncertainty = math.sqrt((alpha * beta) / ((alpha + beta)^2 * (alpha + beta + 1)))
+  local confidence = 1 - uncertainty
+  local probability = mean
+  if #self.state.features > 0 then
+    local lastEntry = self.state.features[#self.state.features]
+    local lastFeatures = lastEntry.features or lastEntry
+    local matches = {}
+    for i = 1, #self.state.features - 1 do
+      local entry = self.state.features[i]
+      local stored = entry.features or entry
+      local sim = 0
+      for k, v in pairs(lastFeatures) do
+        if v ~= 0 and stored[k] == v then sim = sim + 1 end
+      end
+      if sim > 0 then
+        matches[#matches + 1] = { sim = sim, success = entry.success or false }
+      end
+    end
+    table.sort(matches, function(a, b) return a.sim > b.sim end)
+    local N = math.min(5, #matches)
+    local localSum, localCount = 0, 0
+    for i = 1, N do
+      if matches[i].success then localSum = localSum + 1 end
+      localCount = localCount + 1
+    end
+    if localCount > 0 then
+      local localRate = localSum / localCount
+      probability = mean * 0.7 + localRate * 0.3
+    end
+  end
+  local explanation = string.format("%s: %.3f from %d observations (unc=%.3f)",
+    self.capability, probability, evidence, uncertainty)
   if #self.state.features > 0 then
     local lastFeatures = self.state.features[#self.state.features]
     local featureNames = {}
@@ -82,7 +118,7 @@ function Model:predict()
     end
   end
   return { probability = probability, confidence = confidence, evidence = evidence,
-    uncertainty = 1 - confidence, explanation = explanation }
+    uncertainty = uncertainty, explanation = explanation }
 end
 
 function Model:evaluate(success)
@@ -101,25 +137,34 @@ function Model:deserialize(saved)
     assert(type(saved[key]) == "number" and saved[key] >= 0, "invalid model state: " .. key)
   end
   self.state = copyState(saved)
-  self.pending, self.checkpoint = {}, nil
+  self._pendingQueue = {}
+  self._pendingHead = 1
+  self._pendingTail = 0
+  self.checkpoint = nil
   return true
 end
 
 function Model:reset()
   self.state = { successes = 1, failures = 1, samples = 0, evaluations = 0, correct = 0, features = {} }
-  self.pending, self.checkpoint = {}, nil
+  self._pendingQueue = {}
+  self._pendingHead = 1
+  self._pendingTail = 0
+  self.checkpoint = nil
   return true
 end
 
 function Model:rollback()
   if not self.checkpoint then return false end
-  self.state, self.checkpoint, self.pending = self.checkpoint, nil, {}
+  self.state, self.checkpoint = self.checkpoint, nil
+  self._pendingQueue = {}
+  self._pendingHead = 1
+  self._pendingTail = 0
   return true
 end
 
 function Model:diagnostics()
   return { name = self.name, capability = self.capability, samples = self.state.samples,
-    pending = #self.pending, confidence = self:predict().confidence,
+    pending = math.max(0, self._pendingTail - self._pendingHead + 1), confidence = self:predict().confidence,
     accuracy = self.state.evaluations == 0 and nil or self.state.correct / self.state.evaluations,
     memoryBudgetBytes = self.memoryBudgetBytes, cpuBudgetMicros = self.cpuBudgetMicros }
 end
@@ -198,14 +243,18 @@ function Ensemble:observe(obs)
   assert(type(success) == "boolean", "boolean observation label required")
   local weight = math.max(0, math.min(obs.weight or 1, self.maxWeight))
   local prediction = obs.prediction or 0.5
-  self.pending[#self.pending + 1] = { success = success, weight = weight, prediction = prediction }
-  if #self.pending > self.maxPending then table.remove(self.pending, 1) end
+  self._pendingTail = self._pendingTail + 1
+  self._pendingQueue[self._pendingTail] = { success = success, weight = weight, prediction = prediction }
+  if self._pendingTail - self._pendingHead + 1 > self.maxPending then
+    self._pendingHead = self._pendingHead + 1
+  end
   return true
 end
 function Ensemble:update()
-  if #self.pending == 0 then return false end
+  if self._pendingHead > self._pendingTail then return false end
   self.checkpoint = copyState(self.state)
-  for _, obs in ipairs(self.pending) do
+  for i = self._pendingHead, self._pendingTail do
+    local obs = self._pendingQueue[i]
     if obs.success then self.state.successes = self.state.successes + obs.weight
     else self.state.failures = self.state.failures + obs.weight end
     self.state.samples = self.state.samples + 1
@@ -213,14 +262,18 @@ function Ensemble:update()
     self.state.predictions[#self.state.predictions + 1] = obs.prediction
     if #self.state.predictions > 100 then table.remove(self.state.predictions, 1) end
   end
-  self.pending = {}
+  self._pendingHead = 1
+  self._pendingTail = 0
   return true
 end
 function Ensemble:predict()
   local total = self.state.successes + self.state.failures
   local probability = total > 0 and (self.state.successes / total) or 0.5
   local evidence = self.state.samples
-  local confidence = math.min(1, evidence / self.minSamples)
+  local alpha = self.state.successes + 1
+  local beta = self.state.failures + 1
+  local uncertainty = math.sqrt((alpha * beta) / ((alpha + beta)^2 * (alpha + beta + 1)))
+  local confidence = 1 - uncertainty
   local recentPredictions = {}
   local predictions = self.state.predictions or {}
   local start = math.max(1, #predictions - 9)
@@ -234,9 +287,9 @@ function Ensemble:predict()
     ensembleAverage = sum / #recentPredictions
   end
   return { probability = ensembleAverage, confidence = confidence, evidence = evidence,
-    uncertainty = 1 - confidence,
-    explanation = string.format("%s: ensemble_avg=%.3f base=%.3f from %d observations, %d recent predictions",
-      self.capability, ensembleAverage, probability, evidence, #recentPredictions) }
+    uncertainty = uncertainty,
+    explanation = string.format("%s: ensemble_avg=%.3f base=%.3f from %d observations, %d recent predictions (unc=%.3f)",
+      self.capability, ensembleAverage, probability, evidence, #recentPredictions, uncertainty) }
 end
 
 local models = {

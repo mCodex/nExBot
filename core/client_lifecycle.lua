@@ -7,7 +7,17 @@ function ClientLifecycle.new()
   local self = setmetatable({}, ClientLifecycle)
   self.listeners = {}
   self.initialized = false
+  self._generation = 0
+  self._inGame = false
   return self
+end
+
+function ClientLifecycle:getGeneration()
+  return self._generation
+end
+
+function ClientLifecycle:isInGame()
+  return self._inGame
 end
 
 function ClientLifecycle:initialize()
@@ -53,8 +63,14 @@ function ClientLifecycle:on(event, callback)
 end
 
 function ClientLifecycle:emit(event, ...)
+  if event == "gameStart" then
+    self._generation = self._generation + 1
+    self._inGame = true
+  elseif event == "gameEnd" or event == "logout" then
+    self._inGame = false
+  end
   for _, cb in ipairs(self.listeners[event] or {}) do
-    pcall(cb, ...)
+    pcall(cb, self._generation, ...)
   end
 end
 

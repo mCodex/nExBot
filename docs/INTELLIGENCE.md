@@ -40,22 +40,17 @@ These state machines submit proposals. They do not call native movement APIs.
 
 ## Local models
 
-nExBot registers twelve bounded models:
+nExBot registers seven bounded models:
 
 | Model | Learns |
 |-------|--------|
-| MonsterBehaviorModel | Creature behavior outcomes |
-| WavePredictionModel | Wave prediction success |
-| TargetUtilityModel | Target selection outcome |
-| TargetSwitchModel | Target-switch quality |
-| LureSafetyModel | Lure safety outcome |
-| PullContinuationModel | Pull completion outcome |
-| RouteReliabilityModel | Route movement success |
-| NavigationCostModel | Decaying route penalties |
-| ResourceEfficiencyModel | Resource cost per outcome |
-| CombatAreaModel | Area combat outcome |
-| ObservationQualityModel | Sample reliability |
-| LatencyModel | Latency class and confidence |
+| TargetValueModel | Target XP, loot, and difficulty value |
+| RouteReliabilityModel | Route movement success probability |
+| ResourceEfficiencyModel | Resource cost-to-gain efficiency |
+| TimingModel | Optimal timing for actions |
+| RiskAssessmentModel | Risk of death or near-death events |
+| LootOpportunityModel | Loot opportunity quality |
+| EnsembleMetaModel | Combined prediction from other models |
 
 ### Operating modes
 
