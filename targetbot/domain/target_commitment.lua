@@ -1,4 +1,4 @@
-local ReleaseReason = _G.ReleaseReason or dofile("targetbot/domain/release_reasons.lua")
+local ReleaseReason = ReleaseReason or dofile("targetbot/domain/release_reasons.lua")
 
 local TargetCommitmentManager = {}
 
