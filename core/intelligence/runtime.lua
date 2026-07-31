@@ -20,6 +20,10 @@ if not Intelligence.lifecycle then
   Intelligence.decisions = IntelligenceDecisionEngine.new({ safetyEnvelope = Intelligence.safety })
   Intelligence.route = IntelligenceCaveBotRouteState.new()
   Intelligence.models = IntelligenceModelCatalog.registerAll(IntelligenceModelRegistry.new())
+  if not Intelligence.contextualFeatures then
+    local ContextualFeatures = ContextualFeatures or dofile("targetbot/ml/contextual_features.lua")
+    Intelligence.contextualFeatures = ContextualFeatures.new()
+  end
   Intelligence.flags = IntelligenceFeatureFlags.new({ replay = true, diagnostics = true, learning = true, neuralModel = false, routeAlternatives = true })
   Intelligence.replay = IntelligenceReplay.new()
   Intelligence.calibration = IntelligenceCalibration.new()
@@ -298,22 +302,23 @@ if not Intelligence.lifecycle then
       Intelligence.huntId = ""
       Intelligence.events:publish("analytics:session_ended", { active = false, sourceEvent = "analytics:session:end" }, { source = "TacticalIntelligence" })
     end)
-    EventBus.on("combat:target", function(data)
-      if Intelligence.optionalEnabled("learning") then
+    EventBus.on("combat:target", function(creature)
+      if Intelligence.optionalEnabled("learning") and creature then
         Intelligence.encounterTracker:start({
-          encounterId = data.encounterId,
+          encounterId = creature:getId(),
           sessionId = Intelligence.sessionId,
           huntId = Intelligence.huntId,
-          targetInstanceId = data.targetInstanceId,
+          targetInstanceId = creature:getId(),
         })
       end
     end)
-    EventBus.on("combat:target", function(data)
+    EventBus.on("combat:target", function(creature)
       if Intelligence.optionalEnabled("learning") then
         if Intelligence.killSwitch:isEnabled("global") then
           return
         end
-        if not Intelligence.targetSwitchGuard:canSwitch(data) then
+        local context = { creatureId = creature and creature:getId(), timestamp = os.time() }
+        if not Intelligence.targetSwitchGuard:canSwitch(context) then
           return
         end
         Intelligence.targetSwitchGuard:recordSwitch()

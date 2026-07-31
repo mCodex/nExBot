@@ -331,47 +331,55 @@ end)
 ]]
 
 -- Check if path is blocked by attackable monster
+local _blockerCache = {}  -- "x:y:destX:destY" -> { t = timestamp, result = creature|nil }
 local function getBlockingMonster(playerPos, destPos, maxDist)
   -- Only check if we're close to destination
   local dist = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
   if dist > 5 then return nil end
-  
-  -- Try to find path ignoring creatures
+
+  -- Throttle: the retry loop calls this every 75ms tick; the native findPath
+  -- below costs 100ms+. Re-check at most every 300ms.
+  local key = playerPos.x .. ":" .. playerPos.y .. ":" .. destPos.x .. ":" .. destPos.y
+  local cached = _blockerCache[key]
+  if cached and (now - cached.t) < 300 then return cached.result end
+
+  local result = nil
   local path = findPath(playerPos, destPos, maxDist, {
     ignoreNonPathable = true,
     ignoreCreatures = true,
     precision = 1
   })
   
-  if not path or #path == 0 then return nil end
-  
-  -- Check first step for blocking monster
-  local dir = path[1]
-  local offset = DIR_MOD_LOOKUP[dir]
-  if not offset then return nil end
-  
-  local checkPos = {
-    x = playerPos.x + offset.x,
-    y = playerPos.y + offset.y,
-    z = playerPos.z
-  }
-  
-  local Client = getClient()
-  local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
-  if not tile then return nil end
-  if not tile.hasCreature or not tile:hasCreature() then return nil end
-  
-  local creatures = tile:getCreatures()
-  for _, creature in ipairs(creatures) do
-    if creature:isMonster() then
-      local hp = creature:getHealthPercent()
-      if hp and hp > 0 and (oldTibia or creature:getType() < 3) then
-        return creature
+  if path and #path > 0 then
+    -- Check first step for blocking monster
+    local dir = path[1]
+    local offset = DIR_MOD_LOOKUP[dir]
+    if offset then
+      local checkPos = {
+        x = playerPos.x + offset.x,
+        y = playerPos.y + offset.y,
+        z = playerPos.z
+      }
+
+      local Client = getClient()
+      local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
+      if tile and tile.hasCreature and tile:hasCreature() then
+        local creatures = tile:getCreatures()
+        for _, creature in ipairs(creatures) do
+          if creature:isMonster() then
+            local hp = creature:getHealthPercent()
+            if hp and hp > 0 and (oldTibia or creature:getType() < 3) then
+              result = creature
+              break
+            end
+          end
+        end
       end
     end
   end
-  
-  return nil
+
+  _blockerCache[key] = { t = now, result = result }
+  return result
 end
 
 -- Get Chebyshev distance to the next goto waypoint in the list

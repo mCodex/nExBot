@@ -100,13 +100,14 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local useNativeChase = config.chase and not config.keepDistance
   if MovementCoordinator then MovementCoordinator.setChaseMode(useNativeChase) end
   TargetBot.usingNativeChase = useNativeChase
+  local ASM = AttackFSM or AttackStateMachine
   -- Skip reachability check if ASM is already locked on this target — the attack is working
   local creatureId = nil
   pcall(function() creatureId = creature:getId() end)
-  local asmAlreadyAttacking = AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive()
+  local asmAlreadyAttacking = ASM and ASM.isActive and ASM.isActive()
   local asmTargetId = nil
   if asmAlreadyAttacking then
-    pcall(function() asmTargetId = AttackStateMachine.getTargetId and AttackStateMachine.getTargetId() end)
+    pcall(function() asmTargetId = ASM.getTargetId and ASM.getTargetId() end)
   end
   local sameTarget = asmAlreadyAttacking and creatureId == asmTargetId
   if not sameTarget and MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.validateTarget then
@@ -123,9 +124,10 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local needsAttack = (currentTargetId ~= wantedTargetId) or (not currentTarget)
   if needsAttack and wantedTargetId then
     local attackIssued = false
-    if AttackStateMachine and AttackStateMachine.requestSwitch then
+    local requestSwitch = ASM and (ASM.requestSwitch or ASM.requestAttack)
+    if requestSwitch then
       local priority = params.priority or (params.config and params.config.priority) or 100
-      attackIssued = AttackStateMachine.requestSwitch(creature, priority * 100)
+      attackIssued = requestSwitch(creature, priority * 100)
     else
       log("[TargetBot] AttackStateMachine unavailable — skipping attack (no fallback)")
     end

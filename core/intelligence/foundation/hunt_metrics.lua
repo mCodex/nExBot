@@ -164,16 +164,20 @@ function HuntMetrics:recordCombat(active)
   end
 end
 
+local RESOURCE_KEYS = {
+  hpPotion = "hpPotionsUsed",
+  manaPotion = "manaPotionsUsed",
+  rune = "runesUsed",
+  healSpell = "healSpellsCast",
+  attackSpell = "attackSpellsCast",
+  mana = "manaSpent",
+}
+
 function HuntMetrics:recordResource(resourceType, amount)
   self:load()
-  local key = resourceType .. "Used"
-  if key == "hpPotionsUsed" or key == "manaPotionsUsed" or key == "runesUsed" then
-    self.metrics[key] = (self.metrics[key] or 0) + (amount or 1)
-  elseif key == "healSpellsCast" or key == "attackSpellsCast" then
-    self.metrics[key] = (self.metrics[key] or 0) + (amount or 1)
-  elseif key == "manaSpent" then
-    self.metrics.manaSpent = (self.metrics.manaSpent or 0) + (amount or 0)
-  end
+  local key = RESOURCE_KEYS[resourceType]
+  if not key then return end
+  self.metrics[key] = (self.metrics[key] or 0) + (amount or 1)
   self:updateRates()
   self._dirty = true
 end

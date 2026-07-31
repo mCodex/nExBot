@@ -89,6 +89,9 @@ local st = {
   holdTargetId    = nil,
   holdTargetName  = nil,
 
+  _pendingSwitch  = nil,
+  _holdAcquiredAt = 0,
+
   stats = {
     commands   = 0,
     confirms   = 0,
@@ -186,6 +189,24 @@ local function clearTarget()
   st.hp          = 100
   st.priority    = 0
   st.currentTimeout = 0
+  st._pendingSwitch = nil
+end
+
+local function setTarget(creature, priority, reason)
+  st.creature    = creature
+  st.targetId    = cId(creature)
+  st.hp          = cHp(creature)
+  st.priority    = priority or 0
+  st.retries     = 0
+  st.currentTimeout = 0
+  st._pendingSwitch = nil
+  st.lastSwitchAt = nowMs()
+  st.stats.switches = st.stats.switches + 1
+  st.holdTargetId   = st.targetId
+  st.holdTargetName = cName(creature)
+  st._holdAcquiredAt = 0
+  transition(S.ACQUIRING, reason or "new_target")
+  return sendAttack(creature)
 end
 
 local function evaluateReachability(creature)
@@ -322,6 +343,34 @@ local function handleLocked()
   if isConfirmedInternal() then
     st.lastConfirmedAt = nowMs()
     return
+  end
+
+  if st._pendingSwitch then
+    local ps = st._pendingSwitch
+    st._pendingSwitch = nil
+    if TargetCandidateEvaluator and TargetCandidateEvaluator.compare then
+      local curScore = {
+        safetyTier = 2, commitmentTier = 0,
+        configuredPriority = st.priority, killCompletionScore = (100 - st.hp) / 100,
+        attackContinuityScore = 1.0, reachabilityConfidence = 1.0,
+        pathCost = 1, tacticalUtility = 0.5, learnedUtility = 0.5,
+      }
+      local candScore = {
+        safetyTier = 2, commitmentTier = 0,
+        configuredPriority = ps.priority, killCompletionScore = (100 - cHp(ps.creature)) / 100,
+        attackContinuityScore = 0.0, reachabilityConfidence = 1.0,
+        pathCost = 1, tacticalUtility = 0.5, learnedUtility = 0.5,
+      }
+      local winner = TargetCandidateEvaluator.compare(curScore, candScore)
+      if winner == "B" then
+        local blocked = TargetCommitmentManager and TargetCommitmentManager.blocksRelease
+          and TargetCommitmentManager.blocksRelease(st.targetId, "STRICT_FOLLOW_OVERRIDE")
+        if not blocked then
+          setTarget(ps.creature, ps.priority, "pending_switch")
+          return
+        end
+      end
+    end
   end
 
   local r = evaluateReachability(st.creature)
@@ -463,6 +512,26 @@ local function update()
   lastTick = t
 
   if st.current == S.IDLE then
+    if (t - st.lastStopAt) < CC.STOP_DEBOUNCE then return end
+
+    if st.holdTargetId then
+      if st._holdAcquiredAt == 0 then st._holdAcquiredAt = t end
+      local ok, specs = pcall(BotCore.Creatures.getNearby, 7, 5)
+      specs = ok and specs or {}
+      for _, spec in ipairs(specs) do
+        local quarantined = TargetReachability and TargetReachability.isQuarantined
+          and TargetReachability.isQuarantined(spec)
+        if cId(spec) == st.holdTargetId and not cDead(spec) and not quarantined then
+          setTarget(spec, st.priority, "hold_reacquire")
+          return
+        end
+      end
+      if (t - st._holdAcquiredAt) > 10000 then
+        st.holdTargetId   = nil
+        st.holdTargetName = nil
+        st._holdAcquiredAt = 0
+      end
+    end
   elseif st.current == S.ACQUIRING then
     handleAcquiring()
   elseif st.current == S.ATTACKING then
@@ -501,21 +570,11 @@ function AttackFSM.requestAttack(creature, priority)
   end
 
   if st.current == S.IDLE then
-    st.creature    = creature
-    st.targetId    = id
-    st.hp          = cHp(creature)
-    st.priority    = priority or 0
-    st.retries     = 0
-    st.currentTimeout = 0
-    st.lastSwitchAt = nowMs()
-    st.stats.switches = st.stats.switches + 1
-    st.holdTargetId   = id
-    st.holdTargetName = cName(creature)
-    transition(S.ACQUIRING, "request")
-    return true
+    return setTarget(creature, priority, "request")
   end
 
-  return false
+  st._pendingSwitch = { creature = creature, priority = priority or 0 }
+  return true
 end
 
 function AttackFSM.forceAttack(creature)
@@ -570,6 +629,8 @@ function AttackFSM.reset()
   st.lastSwitchAt    = 0
   st.holdTargetId    = nil
   st.holdTargetName  = nil
+  st._pendingSwitch  = nil
+  st._holdAcquiredAt = 0
   st.stats = { commands = 0, confirms = 0, kills = 0, switches = 0, cancellations = 0 }
 end
 

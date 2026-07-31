@@ -6,16 +6,11 @@ describe("intelligence OTClient UI bridge", function()
 
     for _, section in ipairs({
       "Overview",
-      "Hunt Analytics",
-      "Monster Intelligence",
-      "ML Models",
-      "Targeting Decisions",
-      "Resources",
-      "Routes & Navigation",
-      "Replay",
-      "Data Pipeline",
+      "Live Decisions",
+      "Monsters",
+      "Hunt Performance",
+      "Learning",
       "Diagnostics",
-      "Advanced",
     }) do
       assert.is_truthy(source:find('"' .. section .. '"', 1, true), section)
     end
@@ -24,15 +19,14 @@ describe("intelligence OTClient UI bridge", function()
     assert.is_truthy(source:find('UnifiedTick.register("tactical_intelligence_ui"', 1, true))
   end)
 
-  it("renders reports into a fixed read-only multiline widget", function()
+  it("renders into a panel-based layout with per-section child widgets", function()
     local file = assert(io.open("core/intelligence/ui/ui_bridge.otui", "r"))
     local source = file:read("*a")
     file:close()
 
-    assert.is_truthy(source:find("MultilineTextEdit", 1, true))
-    assert.is_truthy(source:find("id: contentText", 1, true))
-    assert.is_truthy(source:find("editable: false", 1, true))
-    assert.is_falsy(source:find("ScrollablePanel", 1, true))
+    assert.is_truthy(source:find("Panel", 1, true))
+    assert.is_truthy(source:find("id: contentPanel", 1, true))
+    assert.is_falsy(source:find("MultilineTextEdit", 1, true))
   end)
 
   it("shows render failures in the window instead of leaving it blank", function()
@@ -41,6 +35,6 @@ describe("intelligence OTClient UI bridge", function()
     file:close()
 
     assert.is_truthy(source:find("pcall", 1, true))
-    assert.is_truthy(source:find("Tactical Intelligence render failed", 1, true))
+    assert.is_truthy(source:find("Render failed:", 1, true))
   end)
 end)

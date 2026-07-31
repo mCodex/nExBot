@@ -408,6 +408,15 @@ loadCategory("core", {
 -- ============================================================================
 -- PHASE 6: ARCHITECTURE LAYER
 -- ============================================================================
+loadCategory("ml_models", {
+  "contextual_features",
+  "kill_completion_model",
+  "target_switch_risk_model",
+  "lure_success_model",
+  "pull_success_model",
+  "reposition_tile_model",
+}, "/targetbot/ml/")
+
 loadCategory("architecture", {
   "zchange_guard",
   "kill_tracker",

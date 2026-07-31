@@ -29,7 +29,7 @@ function SilentRestore.wrapCallback(originalCallback)
   return function(...)
     if SilentRestore.isActive() then
       -- During silent restore, don't persist or emit events
-      return originalCallback(..., { silent = true })
+      return
     end
     return originalCallback(...)
   end

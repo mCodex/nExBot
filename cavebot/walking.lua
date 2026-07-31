@@ -173,6 +173,9 @@ end
 
 --- Find a path whose first step is physically walkable.
 --- Returns path (dir array) or nil, wasRelaxed (bool)
+local FAIL_RETRY_MS = 500
+local _failCache = {}  -- "x:y:z:maxSteps" -> timestamp of last failed search
+
 local function findWalkablePath(playerPos, dest, opts)
   if PS() == NOOP_PS then return nil end
   -- 1) Try PathStrategy cursor cache
@@ -193,6 +196,16 @@ local function findWalkablePath(playerPos, dest, opts)
 
   local maxSteps = opts.maxSteps or MAX_PATHFIND_DIST
 
+  -- 2) FAILURE COOLDOWN: a failed A* search here costs 100ms+; the macro retries
+  -- every 75ms while stuck, so re-searching at that rate hammers the CPU.
+  -- Only re-attempt after the cooldown window (world state changes slowly).
+  local failKey = dest.x .. ":" .. dest.y .. ":" .. dest.z .. ":" .. maxSteps
+  local failedAt = _failCache[failKey]
+  local t = now
+  if failedAt and (t - failedAt) < FAIL_RETRY_MS then
+    return nil, false
+  end
+
   -- 2) STRICT pathfinding (no ignoreNonPathable -> won't path through walls)
   local strictOpts = {
     maxSteps        = maxSteps,
@@ -209,6 +222,7 @@ local function findWalkablePath(playerPos, dest, opts)
   end
 
   if path and #path > 0 and resolveWalkableDir(path[1]) then
+    _failCache[failKey] = nil
     PS().setCursor(path, dest)
     local sm = PS().smoothPath(path, playerPos)
     if sm and #sm > 0 and #sm <= #path then
@@ -239,6 +253,7 @@ local function findWalkablePath(playerPos, dest, opts)
   end
 
   if relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1]) then
+    _failCache[failKey] = nil
     PS().setCursor(relaxedPath, dest)
     local sm = PS().smoothPath(relaxedPath, playerPos)
     if sm and #sm > 0 and #sm <= #relaxedPath then
@@ -250,6 +265,7 @@ local function findWalkablePath(playerPos, dest, opts)
   end
 
   -- No walkable path found
+  _failCache[failKey] = t
   return nil, false
 end
 

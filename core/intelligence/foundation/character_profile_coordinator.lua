@@ -333,7 +333,11 @@ end
 
 function CharacterProfileStateCoordinator:setInhibitor(moduleId, inhibitor, active)
   self.inhibitors[moduleId] = self.inhibitors[moduleId] or {}
-  self.inhibitors[moduleId][inhibitor] = active
+  if active then
+    self.inhibitors[moduleId][inhibitor] = active
+  else
+    self.inhibitors[moduleId][inhibitor] = nil
+  end
   self:reconcileEffective()
 end
 

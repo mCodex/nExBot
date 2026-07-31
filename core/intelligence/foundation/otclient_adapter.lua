@@ -10,7 +10,7 @@ end
 
 function OTClientAdapter:resolveCapabilities()
   local C = g_game
-  local g = g_game
+  local g = g_game or {}  -- nil-safe: absent APIs fall through to defaults
   
   self.capabilities = {
     -- Player state

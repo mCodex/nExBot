@@ -1,5 +1,11 @@
 local Registry = IntelligenceModelRegistry or dofile("core/intelligence/learning/model_registry.lua")
 
+local KillCompletionModule = KillCompletionModel or dofile("targetbot/ml/kill_completion_model.lua")
+local TargetSwitchRiskModule = TargetSwitchRiskModel or dofile("targetbot/ml/target_switch_risk_model.lua")
+local LureSuccessModule = LureSuccessModel or dofile("targetbot/ml/lure_success_model.lua")
+local PullSuccessModule = PullSuccessModel or dofile("targetbot/ml/pull_success_model.lua")
+local RepositionTileModule = RepositionTileModel or dofile("targetbot/ml/reposition_tile_model.lua")
+
 IntelligenceModelCatalog = {}
 local Catalog = IntelligenceModelCatalog
 
@@ -11,6 +17,11 @@ local definitions = {
   { "RiskAssessmentModel", "risk_assessment", 20 },
   { "LootOpportunityModel", "loot_opportunity", 15 },
   { "EnsembleMetaModel", "ensemble_meta", 30 },
+  { "KillCompletionModel", "kill_completion", 20 },
+  { "TargetSwitchRiskModel", "target_switch_risk", 20 },
+  { "LureSuccessModel", "lure_success", 20 },
+  { "PullSuccessModel", "pull_success", 20 },
+  { "RepositionTileModel", "reposition_tile", 20 },
 }
 
 local Model = {}
@@ -292,6 +303,86 @@ function Ensemble:predict()
       self.capability, ensembleAverage, probability, evidence, #recentPredictions, uncertainty) }
 end
 
+local MLAdapter = {}
+MLAdapter.__index = MLAdapter
+
+local function newMLAdapter(module, name, capability, observeInner)
+  local inner = module.new()
+  return setmetatable({
+    name = name, capability = capability, inner = inner, observeInner = observeInner,
+    _samples = 0, _pending = 0, _checkpoint = nil,
+    updateIntervalMs = 1000, cpuBudgetMicros = 250, memoryBudgetBytes = 4096,
+  }, MLAdapter)
+end
+
+function MLAdapter:initialize()
+  return self
+end
+
+function MLAdapter:observe(observation)
+  local success = observation.success
+  if success == nil then success = observation.label end
+  assert(type(success) == "boolean", "boolean observation label required")
+  self.observeInner(self.inner, observation)
+  self._samples = self._samples + 1
+  self._pending = self._pending + 1
+  return true
+end
+
+function MLAdapter:update()
+  if self._pending == 0 then return false end
+  self._checkpoint = self._samples - self._pending
+  self._pending = 0
+  return true
+end
+
+function MLAdapter:predict(features)
+  local result = self.inner:predict(features or {})
+  local evidence = self.inner:getSampleCount()
+  return { probability = result.probability, confidence = result.confidence, evidence = evidence,
+    uncertainty = result.uncertainty or (1 - result.confidence),
+    explanation = string.format("%s: %.3f from %d observations", self.capability,
+      result.probability, evidence) }
+end
+
+function MLAdapter:evaluate()
+  return true
+end
+
+function MLAdapter:serialize()
+  return { samples = self._samples }
+end
+
+function MLAdapter:deserialize(saved)
+  self._samples = saved and saved.samples or 0
+  self.inner:reset()
+  self._pending = 0
+  return true
+end
+
+function MLAdapter:rollback()
+  if self._checkpoint == nil then return false end
+  self._samples = self._checkpoint
+  self._checkpoint = nil
+  self.inner:reset()
+  self._pending = 0
+  return true
+end
+
+function MLAdapter:reset()
+  self.inner:reset()
+  self._samples = 0
+  self._pending = 0
+  self._checkpoint = nil
+  return true
+end
+
+function MLAdapter:diagnostics()
+  return { name = self.name, capability = self.capability, samples = self._samples,
+    pending = self._pending, confidence = self:predict().confidence,
+    accuracy = nil, memoryBudgetBytes = self.memoryBudgetBytes, cpuBudgetMicros = self.cpuBudgetMicros }
+end
+
 local models = {
   TargetValueModel = TargetValue,
   RouteReliabilityModel = RouteReliability,
@@ -300,6 +391,16 @@ local models = {
   RiskAssessmentModel = RiskAssessment,
   LootOpportunityModel = LootOpportunity,
   EnsembleMetaModel = Ensemble,
+  KillCompletionModel = newMLAdapter(KillCompletionModule, "KillCompletionModel", "kill_completion",
+    function(m, obs) m:observe(obs.success, obs.features or {}) end),
+  TargetSwitchRiskModel = newMLAdapter(TargetSwitchRiskModule, "TargetSwitchRiskModel", "target_switch_risk",
+    function(m, obs) m:observe(obs.success, true, obs.features or {}) end),
+  LureSuccessModel = newMLAdapter(LureSuccessModule, "LureSuccessModel", "lure_success",
+    function(m, obs) m:observe(obs.success, obs.features or {}) end),
+  PullSuccessModel = newMLAdapter(PullSuccessModule, "PullSuccessModel", "pull_success",
+    function(m, obs) m:observe(obs.success, obs.features or {}) end),
+  RepositionTileModel = newMLAdapter(RepositionTileModule, "RepositionTileModel", "reposition_tile",
+    function(m, obs) m:observe(obs.success, obs.features or {}) end),
 }
 
 function Catalog.registerAll(registry)

@@ -964,7 +964,9 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   if not currentAction then return end
   if intelligenceRoute and intelligenceRoute.state ~= "paused" and intelligenceRoute:currentWaypoint() ~= currentAction then
     intelligenceRoute:start({ currentAction })
-    nExBot.Intelligence.advanceGeneration("route")
+    if nExBot.Intelligence.advanceGeneration then
+      nExBot.Intelligence.advanceGeneration("route")
+    end
   end
 
   -- Z-MISMATCH GUARD: If focused WP is a goto on a different floor than player,

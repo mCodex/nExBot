@@ -36,10 +36,7 @@ end
 describe("CharacterContext", function()
   it("normalizes character name correctly", function()
     local CharacterContext = dofile("core/intelligence/foundation/character_context.lua")
-    local ctx = CharacterContext.new()
-    local normalized = ctx.normalizeName and ctx:normalizeName("Test Name") or CharacterContext.normalizeName("Test Name")
-    -- normalizeName is local, test via capture
-    -- Just verify the module loads
+    -- normalizeName is module-local (not exported); verify the module loads and exports new()
     assertTrue(type(CharacterContext.new) == "function")
   end)
 
@@ -93,21 +90,29 @@ end)
 -- ============================================================================
 describe("HuntMetrics", function()
   it("records XP and calculates rate", function()
+    local fakeNow = os.time() * 1000
+    nExBot.Shared = { nowMs = function() return fakeNow end }
     local HuntMetrics = dofile("core/intelligence/foundation/hunt_metrics.lua")
     local hm = HuntMetrics.new()
     hm:recordXp(1000)
+    fakeNow = fakeNow + 3600000
+    hm:recordXp(0) -- triggers rate computation with a non-zero elapsed window
     local metrics = hm:getMetrics()
     assertEquals(metrics.xpGained, 1000)
     assertTrue(metrics.xpPerHour > 0)
   end)
 
   it("records kills and calculates rate", function()
+    local fakeNow = os.time() * 1000
+    nExBot.Shared = { nowMs = function() return fakeNow end }
     local HuntMetrics = dofile("core/intelligence/foundation/hunt_metrics.lua")
     local hm = HuntMetrics.new()
     hm:recordKill()
     hm:recordKill()
+    fakeNow = fakeNow + 3600000
+    hm:recordKill() -- triggers rate computation with a non-zero elapsed window
     local metrics = hm:getMetrics()
-    assertEquals(metrics.kills, 2)
+    assertEquals(metrics.kills, 3)
     assertTrue(metrics.killsPerHour > 0)
   end)
 
@@ -218,6 +223,11 @@ describe("ControlStateRegistry", function()
 
   it("filters by scope", function()
     local ControlStateRegistry = dofile("core/intelligence/foundation/control_state_registry.lua")
+    ControlStateRegistry.register({
+      id = "scope.test.session",
+      scope = ControlStateRegistry.getScope().SESSION_ONLY,
+      defaultValue = false,
+    })
     local sessionControls = ControlStateRegistry.getByScope(ControlStateRegistry.getScope().SESSION_ONLY)
     assertTrue(type(sessionControls) == "table")
     assertTrue(#sessionControls > 0)
@@ -270,20 +280,23 @@ end)
 -- ============================================================================
 describe("ClientLifecycle", function()
   it("initializes with generation 0", function()
-    local ClientLifecycle = dofile("core/client_lifecycle.lua")
+    dofile("core/client_lifecycle.lua")
+    local ClientLifecycle = nExBot.ClientLifecycle
     assertEquals(ClientLifecycle:getGeneration(), 0)
     assertFalse(ClientLifecycle:isInGame())
   end)
 
   it("increments generation on gameStart", function()
-    local ClientLifecycle = dofile("core/client_lifecycle.lua")
+    dofile("core/client_lifecycle.lua")
+    local ClientLifecycle = nExBot.ClientLifecycle
     ClientLifecycle:emit("gameStart")
     assertEquals(ClientLifecycle:getGeneration(), 1)
     assertTrue(ClientLifecycle:isInGame())
   end)
 
   it("resets on gameEnd", function()
-    local ClientLifecycle = dofile("core/client_lifecycle.lua")
+    dofile("core/client_lifecycle.lua")
+    local ClientLifecycle = nExBot.ClientLifecycle
     ClientLifecycle:emit("gameStart")
     assertEquals(ClientLifecycle:getGeneration(), 1)
     ClientLifecycle:emit("gameEnd")
@@ -291,7 +304,8 @@ describe("ClientLifecycle", function()
   end)
 
   it("registers listeners", function()
-    local ClientLifecycle = dofile("core/client_lifecycle.lua")
+    dofile("core/client_lifecycle.lua")
+    local ClientLifecycle = nExBot.ClientLifecycle
     local called = false
     local unsub = ClientLifecycle:on("gameStart", function()
       called = true
@@ -309,8 +323,17 @@ end)
 -- UnifiedStorage Migration Tests
 -- ============================================================================
 describe("UnifiedStorage Migration", function()
+  local function loadUnifiedStorage()
+    nExBot.StorageEngine = { new = function() return {} end }
+    nExBot.Shared = nExBot.Shared or {}
+    nExBot.Shared.getClient = function() return nil end
+    schedule = schedule or function() end
+    dofile("core/unified_storage.lua")
+    return nExBot.UnifiedStorage
+  end
+
   it("migrates v5 to v6 schema", function()
-    local UnifiedStorage = dofile("core/unified_storage.lua")
+    local UnifiedStorage = loadUnifiedStorage()
     local oldData = {
       version = 5,
       cavebot = { selectedConfig = "test.cfg", enabled = true },
@@ -330,7 +353,7 @@ describe("UnifiedStorage Migration", function()
   end)
 
   it("handles missing fields gracefully", function()
-    local UnifiedStorage = dofile("core/unified_storage.lua")
+    local UnifiedStorage = loadUnifiedStorage()
     local emptyData = {}
     local migrated = UnifiedStorage.migrate(emptyData)
     assertEquals(migrated.schemaVersion, 6)
@@ -339,7 +362,7 @@ describe("UnifiedStorage Migration", function()
   end)
 
   it("preserves false values", function()
-    local UnifiedStorage = dofile("core/unified_storage.lua")
+    local UnifiedStorage = loadUnifiedStorage()
     local data = {
       cavebot = { selectedConfig = "", enabled = false },
       targetbot = { selectedConfig = "", enabled = false, explicitlyDisabledByUser = false },

@@ -1285,9 +1285,7 @@ targetbotMacro = macro(250, function()
   end
 
   -- Update AttackStateMachine (only when TargetBot is ON)
-  if AttackStateMachine and AttackStateMachine.update then
-    pcall(AttackStateMachine.update)
-  end
+  pcall(function() local FSM = AttackFSM or AttackStateMachine; if FSM and FSM.update then FSM.update() end end)
 
   -- Prevent execution before login is complete to avoid freezing
   local Client = getClient()
@@ -1519,7 +1517,7 @@ targetbotMacro = macro(250, function()
     local okId, id = pcall(function() return bestTarget.creature:getId() end)
     
     if okId and id then
-      local smState = AttackStateMachine.getState()
+      local smState = (AttackFSM or AttackStateMachine).getState()
 
       -- Update AttackController based on state machine status
       if smState == "LOCKED" then

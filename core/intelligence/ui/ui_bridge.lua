@@ -1,17 +1,7 @@
 local TacticalIntelligence = nExBot.TacticalIntelligence or dofile("core/intelligence/tactical_intelligence.lua")
 
 local sections = {
-  "Overview",
-  "Hunt Analytics",
-  "Monster Intelligence",
-  "ML Models",
-  "Targeting Decisions",
-  "Resources",
-  "Routes & Navigation",
-  "Replay",
-  "Data Pipeline",
-  "Diagnostics",
-  "Advanced",
+  "Overview", "Live Decisions", "Monsters", "Hunt Performance", "Learning", "Diagnostics",
 }
 
 local function formatNumber(value)
@@ -31,8 +21,15 @@ local function formatDuration(ms)
   return string.format("%dm %02ds", minutes, seconds)
 end
 
-local function linesToText(lines)
-  return table.concat(lines, "\n")
+local function timeAgo(ms)
+  if not ms or ms <= 0 then return "never" end
+  local elapsed = math.max(0, nowMs() - ms)
+  local sec = math.floor(elapsed / 1000)
+  if sec < 5 then return "just now" end
+  if sec < 60 then return sec .. "s ago" end
+  local min = math.floor(sec / 60)
+  if min < 60 then return min .. "m ago" end
+  return formatDuration(elapsed) .. " ago"
 end
 
 local function limited(items, limit)
@@ -46,232 +43,163 @@ end
 
 local nowMs = (nExBot.Shared and nExBot.Shared.nowMs) or function() return os.time() * 1000 end
 
-local function renderOverview(view)
-  local overview = view.overview or {}
-  local hunt = view.hunt and view.hunt.summary or {}
-  local session = view.session or {}
-  local pipeline = view.pipeline or {}
-  local lines = {
-    "Session state: " .. tostring(overview.lifecycle or "stopped"),
-    "Session elapsed: " .. formatDuration(session.elapsedMs or hunt.elapsedMs or 0),
-    "XP gained: " .. formatNumber(hunt.xpGained or overview.xpGained),
-    "XP/hour: " .. formatNumber(hunt.xpPerHour or overview.xpPerHour),
-    "Kills: " .. formatNumber(hunt.kills or overview.kills),
-    "Kills/hour: " .. formatNumber(hunt.killsPerHour or overview.killsPerHour),
-    "Combat uptime: " .. formatNumber(hunt.combatUptime or overview.combatUptime) .. "%",
-    "Current target: " .. tostring((view.targeting and view.targeting.currentTarget and view.targeting.currentTarget.name) or "none"),
-    "Current monster context: " .. tostring((view.targeting and view.targeting.currentRouteObjective and view.targeting.currentRouteObjective.name) or "none"),
-    "Current route/waypoint: " .. tostring(overview.routeState or "idle") .. " / " .. tostring(overview.waypointIndex or 0),
-    "Resource rate: " .. formatNumber((hunt.potionsPerHour or 0) + (hunt.runesPerHour or 0)),
-    "Monsters learned: " .. formatNumber((view.monsters and view.monsters.summary and view.monsters.summary.persistedProfiles) or 0),
-    "Model observations: " .. formatNumber((view.models and view.models.summary and view.models.summary.samples) or 0),
-    "Models learning: " .. formatNumber((view.models and view.models.summary and (view.models.summary.shadow or 0) + (view.models.summary.observing or 0)) or 0),
-    "Models actionable: " .. formatNumber((view.models and view.models.summary and view.models.summary.actionable) or 0),
-    "Last intelligence event: " .. tostring(overview.lastEvent or "none"),
-    "Pipeline health: " .. tostring(overview.pipelineHealth or pipeline.health or "unknown"),
-    "Last persistence save: " .. tostring(overview.lastPersistenceSave or "unknown"),
-  }
-  return linesToText(lines)
-end
-
-local function renderHunt(view)
-  local hunt = view.hunt and view.hunt.summary or {}
-  local trends = view.hunt and view.hunt.trends or {}
-  local lines = {
-    "Current session",
-    "Elapsed: " .. formatDuration(hunt.elapsedMs or 0),
-    "XP gained: " .. formatNumber(hunt.xpGained or 0),
-    "XP/hour: " .. formatNumber(hunt.xpPerHour or 0),
-    "Kills: " .. formatNumber(hunt.kills or 0),
-    "Kills/hour: " .. formatNumber(hunt.killsPerHour or 0),
-    "Combat uptime: " .. formatNumber(hunt.combatUptime or 0) .. "%",
-    "Tiles walked: " .. formatNumber(hunt.tilesWalked or 0),
-    "Tiles/kill: " .. formatNumber(hunt.tilesPerKill or 0),
-    "Damage taken: " .. formatNumber(hunt.damageTaken or 0),
-    "Healing done: " .. formatNumber(hunt.healingDone or 0),
-    "Survivability index: " .. formatNumber(hunt.survivabilityIndex or 0),
-    "Near-death count: " .. formatNumber(hunt.nearDeathCount or 0),
-    "HP potions: " .. formatNumber(hunt.hpPotions or 0),
-    "Mana potions: " .. formatNumber(hunt.manaPotions or 0),
-    "Runes: " .. formatNumber(hunt.runes or 0),
-    "Healing spells: " .. formatNumber(hunt.healingSpells or 0),
-    "Attack spells: " .. formatNumber(hunt.attackSpells or 0),
-    "Mana spent: " .. formatNumber(hunt.manaSpent or 0),
-    "Potions/hour: " .. formatNumber(hunt.potionsPerHour or 0),
-    "Runes/hour: " .. formatNumber(hunt.runesPerHour or 0),
-    "Mana/hour: " .. formatNumber(hunt.manaPerHour or 0),
-    "Resources/kill: " .. formatNumber(hunt.resourcesPerKill or 0),
-    "Resources/1k XP: " .. formatNumber(hunt.resourcesPer1000Xp or 0),
-    "",
-    "Trends",
-    "XP trend: " .. tostring(trends.xpPerHour and #trends.xpPerHour or 0) .. " samples",
-    "Kill trend: " .. tostring(trends.killsPerHour and #trends.killsPerHour or 0) .. " samples",
-    "Resource trend: " .. tostring(trends.potionsPerHour and #trends.potionsPerHour or 0) .. " samples",
-  }
-  return linesToText(lines)
-end
-
-local function renderMonsters(view)
-  local monsters = view.monsters or {}
-  local lines = {
-    "Live monsters: " .. formatNumber(monsters.liveMonsters or 0),
-    "Profiles: " .. formatNumber(monsters.summary and monsters.summary.persistedProfiles or 0),
-    "Prediction accuracy: " .. formatNumber((monsters.summary and monsters.summary.predictionAccuracy or 0) * 100) .. "%",
-    "Wave accuracy: " .. formatNumber((monsters.summary and monsters.summary.waveAccuracy or 0) * 100) .. "%",
-    "",
-    string.format("%-20s %-10s %-8s %-8s %-8s", "Monster", "State", "Samples", "Conf", "Last seen"),
-  }
-  for _, profile in ipairs(limited(monsters.profiles or {}, 12)) do
-    lines[#lines + 1] = string.format(
-      "%-20s %-10s %-8s %-8s %-8s",
-      tostring(profile.displayName or profile.monsterKey or "unknown"):sub(1, 20),
-      tostring(profile.state or "NO_DATA"):sub(1, 10),
-      formatNumber(profile.samples or 0),
-      string.format("%.2f", tonumber(profile.confidence) or 0),
-      formatDuration(math.max(0, nowMs() - (profile.lastSeenAt or 0)))
-    )
+local function label(panel, id, text)
+  local widget = panel:recursiveGetChildById(id)
+  if not widget then
+    widget = g_ui.createWidget("Label", panel)
+    widget:setId(id)
+    widget:setFont("verdana-11px-monochrome")
+    widget:setColor("#c0c0c0")
+    widget:setMarginTop(1)
   end
-  return linesToText(lines)
-end
-
-local function renderModels(view)
-  local models = view.models or {}
-  local lines = {
-    string.format("%-22s %-12s %-8s %-8s %-8s %-8s", "Name", "Capability", "Mode", "Samples", "Conf", "Pending"),
-  }
-  for _, model in ipairs(models.items or {}) do
-    lines[#lines + 1] = string.format(
-      "%-22s %-12s %-8s %-8s %-8s %-8s",
-      tostring(model.name or "unknown"):sub(1, 22),
-      tostring(model.capability or "-"):sub(1, 12),
-      tostring(model.mode or "OFF"):sub(1, 8),
-      formatNumber(model.samples or 0),
-      string.format("%.2f", tonumber(model.confidence) or 0),
-      formatNumber(model.pending or 0)
-    )
-    lines[#lines + 1] = "  Accuracy: " .. tostring(model.accuracy ~= nil and string.format("%.2f", model.accuracy) or "n/a")
-    lines[#lines + 1] = "  Why not actionable: " .. tostring(model.whyNotActionable or "actionable")
+  if widget:getText() ~= text then
+    widget:setText(text)
   end
-  return linesToText(lines)
+  return widget
 end
 
-local function renderTargeting(view)
-  local targeting = view.targeting or {}
-  local lines = {
-    "Current target: " .. tostring((targeting.currentTarget and targeting.currentTarget.name) or "none"),
-    "Current route objective: " .. tostring((targeting.currentRouteObjective and targeting.currentRouteObjective.name) or "none"),
-    "Current movement intent: " .. tostring(targeting.currentMovementIntent and targeting.currentMovementIntent.action or "none"),
-    "Current attack intent: " .. tostring(targeting.currentAttackIntent and targeting.currentAttackIntent.action or "none"),
-    "",
-    "Recent decisions",
-  }
-  for _, item in ipairs(limited(targeting.recentDecisions or {}, 10)) do
-    lines[#lines + 1] = string.format("%s | %s <- %s", tostring(item.type or "event"), tostring(item.source or "source"), formatDuration(item.timestamp or 0))
+local function heading(panel, id, text)
+  local widget = label(panel, id, text)
+  widget:setColor("#ffcc00")
+  widget:setMarginTop(6)
+  widget:setFont("verdana-11px-monochrome")
+  return widget
+end
+
+local function clearPanel(panel)
+  local children = panel:getChildren()
+  for i = #children, 1, -1 do
+    children[i]:destroy()
   end
-  return linesToText(lines)
 end
 
-local function renderResources(view)
-  local resources = view.resources or {}
-  local totals = resources.totals or {}
-  local lines = {
-    "Totals",
-    "HP potions: " .. formatNumber(totals.hpPotions or 0),
-    "Mana potions: " .. formatNumber(totals.manaPotions or 0),
-    "Runes: " .. formatNumber(totals.runes or 0),
-    "Ammunition: " .. formatNumber(totals.ammunition or 0),
-    "Healing casts: " .. formatNumber(totals.healingCasts or 0),
-    "Damage taken: " .. formatNumber(totals.damageTaken or 0),
-    "",
-    "Recent resource observations: " .. formatNumber(#(resources.recent or {})),
-    "Recent loot observations: " .. formatNumber(#(resources.loot or {})),
-  }
-  return linesToText(lines)
+local function hasData(view)
+  return view and view.overview and (view.overview.xpGained or 0) + (view.overview.kills or 0) > 0
 end
 
-local function renderRoutes(view)
-  local route = view.routes or {}
-  return linesToText({
-    "Selected route: " .. tostring(route.currentObjective and route.currentObjective.name or "none"),
-    "Route state: " .. tostring(route.state or "idle"),
-    "Generation: " .. formatNumber(route.generation or 0),
-    "Waypoint index: " .. formatNumber(route.waypointIndex or 0),
-  })
-end
-
-local function renderReplay(view)
-  local replay = view.replay or {}
-  local lines = {
-    "Replay records: " .. formatNumber(replay.recordCount or 0),
-  }
-  for _, record in ipairs(limited(replay.records or {}, 8)) do
-    local outcome = record.outcome or {}
-    lines[#lines + 1] = string.format("%s | %s", tostring(outcome.type or "event"), tostring(outcome.reason or ""))
+local function renderOverview(view, panel)
+  if not hasData(view) then
+    label(panel, "coldstart", "No data yet — start hunting to populate.")
+    return
   end
-  return linesToText(lines)
+  local o = view.overview or {}
+  local s = view.session or {}
+  local p = view.pipeline or {}
+  heading(panel, "h_overview", "Session Overview")
+  label(panel, "r_lifecycle", "Session: " .. tostring(o.lifecycle or "stopped"))
+  label(panel, "r_elapsed", "Elapsed: " .. formatDuration(s.elapsedMs or o.lastSeenAt or 0))
+  label(panel, "r_xp", "XP: " .. formatNumber(o.xpGained or 0) .. " (" .. formatNumber(o.xpPerHour or 0) .. "/h)")
+  label(panel, "r_kills", "Kills: " .. formatNumber(o.kills or 0) .. " (" .. formatNumber(o.killsPerHour or 0) .. "/h)")
+  label(panel, "r_target", "Target: " .. tostring(view.targeting and view.targeting.currentTarget and view.targeting.currentTarget.name or "none"))
+  label(panel, "r_route", "Route: " .. tostring(o.routeState or "idle") .. " / wp " .. formatNumber(o.waypointIndex or 0))
+  label(panel, "r_combat", "Combat uptime: " .. formatNumber(o.combatUptime or 0) .. "%")
+  label(panel, "r_models", "Models: " .. formatNumber(o.actionableModels or 0) .. " actionable of " .. formatNumber(o.modelCount or 0))
+  label(panel, "r_pipeline", "Pipeline: " .. tostring(o.pipelineHealth or p.health or "unknown"))
+  label(panel, "r_save", "Last save: " .. timeAgo(o.lastPersistenceSave))
 end
 
-local function renderPipeline(view)
-  local pipeline = view.pipeline or {}
-  local lines = {
-    "Event count: " .. formatNumber(pipeline.eventCount or 0),
-    "Model count: " .. formatNumber(pipeline.modelCount or 0),
-    "Health: " .. tostring(pipeline.health or "unknown"),
-  }
-  for eventType, count in pairs(pipeline.eventCounts or {}) do
-    lines[#lines + 1] = eventType .. ": " .. formatNumber(count)
-  end
-  return linesToText(lines)
-end
-
-local function renderDiagnostics(view)
-  local diagnostics = view.diagnostics or {}
-  local issues = diagnostics.issues or {}
-  local lines = {
-    "Issue count: " .. formatNumber(diagnostics.issueCount or 0),
-  }
-  if #issues == 0 then
-    lines[#lines + 1] = "No reported issues"
-  else
-    for _, issue in ipairs(limited(issues, 12)) do
-      lines[#lines + 1] = string.format("%s | %s | %s", tostring(issue.code or "unknown"), tostring(issue.message or ""), tostring(issue.action or ""))
+local function renderDecisions(view, panel)
+  local t = view.targeting or {}
+  heading(panel, "h_decisions", "Live Decisions")
+  label(panel, "r_target", "Current target: " .. tostring((t.currentTarget and t.currentTarget.name) or "none"))
+  label(panel, "r_movement", "Movement: " .. tostring(t.currentMovementIntent and t.currentMovementIntent.action or "none"))
+  label(panel, "r_attack", "Attack: " .. tostring(t.currentAttackIntent and t.currentAttackIntent.action or "none"))
+  label(panel, "r_lure", "Lure: " .. tostring(t.currentLureState or "inactive"))
+  label(panel, "r_pull", "Pull: " .. tostring(t.currentPullState or "inactive"))
+  label(panel, "r_wave", "Wave prediction: " .. tostring(t.currentWavePrediction or "none"))
+  if t.recentDecisions and #t.recentDecisions > 0 then
+    label(panel, "h_recent", "Recent decisions")
+    for i, item in ipairs(limited(t.recentDecisions, 5)) do
+      label(panel, "rd_" .. i, "  " .. tostring(item.type or "event"))
     end
   end
-  return linesToText(lines)
 end
 
-local function renderAdvanced(view)
-  return linesToText({
-    "Revision: " .. formatNumber(view.revision or 0),
-    "Session ID: " .. tostring(view.sessionId or "unknown"),
-    "Updated at: " .. tostring(view.updatedAt or view.generatedAt or 0),
-  })
-end
-
-local function renderSection(view, section)
-  if section == "Overview" then
-    return renderOverview(view)
-  elseif section == "Hunt Analytics" then
-    return renderHunt(view)
-  elseif section == "Monster Intelligence" then
-    return renderMonsters(view)
-  elseif section == "ML Models" then
-    return renderModels(view)
-  elseif section == "Targeting Decisions" then
-    return renderTargeting(view)
-  elseif section == "Resources" then
-    return renderResources(view)
-  elseif section == "Routes & Navigation" then
-    return renderRoutes(view)
-  elseif section == "Replay" then
-    return renderReplay(view)
-  elseif section == "Data Pipeline" then
-    return renderPipeline(view)
-  elseif section == "Diagnostics" then
-    return renderDiagnostics(view)
+local function renderMonsters(view, panel)
+  local m = view.monsters or {}
+  local summary = m.summary or {}
+  heading(panel, "h_monsters", "Monsters")
+  label(panel, "r_live", "Live: " .. formatNumber(summary.liveMonsters or m.liveMonsters or 0))
+  label(panel, "r_profiles", "Profiles: " .. formatNumber(summary.persistedProfiles or 0))
+  if m.profiles and #m.profiles > 0 then
+    for i, profile in ipairs(limited(m.profiles, 10)) do
+      local elapsed = math.max(0, nowMs() - (profile.lastSeenAt or 0))
+      label(panel, "mp_" .. i, tostring(profile.displayName or profile.monsterKey or "?") .. " — " .. tostring(profile.state or "NO_DATA") .. " (" .. formatNumber(profile.samples or 0) .. " samples, conf " .. string.format("%.2f", tonumber(profile.confidence) or 0) .. ", seen " .. formatDuration(elapsed) .. " ago)")
+    end
   end
-  return renderAdvanced(view)
 end
+
+local function renderHunt(view, panel)
+  local h = view.hunt and view.hunt.summary or {}
+  local trends = view.hunt and view.hunt.trends or {}
+  heading(panel, "h_hunt", "Hunt Performance")
+  label(panel, "r_elapsed", "Elapsed: " .. formatDuration(h.elapsedMs or 0))
+  label(panel, "r_xp", "XP: " .. formatNumber(h.xpGained or 0) .. " (" .. formatNumber(h.xpPerHour or 0) .. "/h)")
+  label(panel, "r_kills", "Kills: " .. formatNumber(h.kills or 0) .. " (" .. formatNumber(h.killsPerHour or 0) .. "/h)")
+  label(panel, "r_combat", "Combat uptime: " .. formatNumber(h.combatUptime or 0) .. "%")
+  label(panel, "r_tiles", "Tiles walked: " .. formatNumber(h.tilesWalked or 0) .. " (" .. formatNumber(h.tilesPerKill or 0) .. "/kill)")
+  label(panel, "r_damage", "Damage taken: " .. formatNumber(h.damageTaken or 0))
+  label(panel, "r_healing", "Healing done: " .. formatNumber(h.healingDone or 0))
+  label(panel, "r_survivability", "Survivability: " .. formatNumber(h.survivabilityIndex or 0) .. "%")
+  label(panel, "r_near_death", "Near-death events: " .. formatNumber(h.nearDeathCount or 0))
+  label(panel, "", "")
+  label(panel, "r_hp_pots", "HP potions: " .. formatNumber(h.hpPotions or 0))
+  label(panel, "r_mana_pots", "Mana potions: " .. formatNumber(h.manaPotions or 0))
+  label(panel, "r_runes", "Runes: " .. formatNumber(h.runes or 0))
+  label(panel, "r_heal_spells", "Healing spells: " .. formatNumber(h.healingSpells or 0))
+  label(panel, "r_mana", "Mana spent: " .. formatNumber(h.manaSpent or 0))
+  if trends.xpPerHour and #trends.xpPerHour > 0 then
+    label(panel, "h_trends", "Trends")
+    label(panel, "r_xp_trend", "  XP samples: " .. #trends.xpPerHour)
+    label(panel, "r_kill_trend", "  Kill samples: " .. #trends.killsPerHour)
+  end
+end
+
+local function renderLearning(view, panel)
+  local models = view.models or {}
+  heading(panel, "h_learning", "Learning")
+  label(panel, "r_model_count", "Models: " .. formatNumber(models.summary and models.summary.total or 0) .. " total, " .. formatNumber(models.summary and models.summary.actionable or 0) .. " actionable")
+  label(panel, "r_obs", "Total observations: " .. formatNumber(models.summary and models.summary.samples or 0))
+  if models.items and #models.items > 0 then
+    for i, model in ipairs(limited(models.items, 15)) do
+      local line = tostring(model.name or "?") .. " [" .. tostring(model.mode or "OFF") .. "] " .. formatNumber(model.samples or 0) .. " obs, conf " .. string.format("%.2f", tonumber(model.confidence) or 0)
+      if model.accuracy ~= nil then
+        line = line .. ", acc " .. string.format("%.2f", model.accuracy)
+      end
+      label(panel, "md_" .. i, line)
+    end
+  end
+end
+
+local function renderDiagnostics(view, panel)
+  local d = view.diagnostics or {}
+  local p = view.pipeline or {}
+  heading(panel, "h_diag", "Diagnostics")
+  label(panel, "r_events", "Event count: " .. formatNumber(p.eventCount or 0))
+  label(panel, "r_health", "Health: " .. tostring(p.health or "unknown"))
+  if p.eventCounts then
+    for eventType, count in pairs(p.eventCounts) do
+      if count > 0 then
+        label(panel, "evt_" .. eventType, "  " .. tostring(eventType) .. ": " .. formatNumber(count))
+      end
+    end
+  end
+  label(panel, "r_issues", "Issues: " .. formatNumber(d.issueCount or 0))
+  if d.issues and #d.issues > 0 then
+    for i, issue in ipairs(limited(d.issues, 5)) do
+      label(panel, "iss_" .. i, "  " .. tostring(issue.code or "?") .. ": " .. tostring(issue.message or ""))
+    end
+  end
+end
+
+local renderers = {
+  Overview = renderOverview,
+  ["Live Decisions"] = renderDecisions,
+  Monsters = renderMonsters,
+  ["Hunt Performance"] = renderHunt,
+  Learning = renderLearning,
+  Diagnostics = renderDiagnostics,
+}
 
 local path = nExBot.paths.base .. "/core/intelligence/ui/ui_bridge.otui"
 local content = g_resources and g_resources.readFileContents and g_resources.readFileContents(path)
@@ -279,18 +207,30 @@ if not content then
   return
 end
 
-g_ui.loadUIFromString(content)
+local window, contentPanel, lastSection, selected = nil, nil, nil, sections[1]
+local ready = false
 
-local window = UI.createWindow("IntelligenceConsoleWindow")
-window:hide()
-window.section.onOptionChange = nil
-for _, section in ipairs(sections) do
-  window.section:addOption(section)
+local function init()
+  local ok, err = pcall(function()
+    g_ui.loadUIFromString(content)
+    local w = UI.createWindow("IntelligenceDashboardWindow")
+    w:hide()
+    w.section.onOptionChange = nil
+    for _, s in ipairs(sections) do
+      w.section:addOption(s)
+    end
+    window = w
+    contentPanel = window:recursiveGetChildById("contentPanel")
+  end)
+
+  if not ok then
+    if nExBot.warn then nExBot.warn("Intelligence dashboard window not available: " .. tostring(err)) end
+    return false
+  end
+  return true
 end
 
-local contentText = assert(window:recursiveGetChildById("contentText"), "Tactical Intelligence content widget is missing")
-
-local selected = sections[1]
+ready = init()
 
 local function resolveSectionName(option)
   if type(option) == "string" and option ~= "" then
@@ -299,29 +239,38 @@ local function resolveSectionName(option)
   return selected
 end
 
-local lastRendered = ""
-
 local function render()
-  local ok, text = pcall(function()
+  if not ready or not window or not contentPanel then return end
+  local currentSection = resolveSectionName(selected)
+  if currentSection ~= lastSection then
+    clearPanel(contentPanel)
+    lastSection = currentSection
+  end
+  local ok, err = pcall(function()
     local ti = TacticalIntelligence or nExBot.TacticalIntelligence
     if not ti then
-      return "Tactical Intelligence is not available."
+      clearPanel(contentPanel)
+      label(contentPanel, "err", "Tactical Intelligence is not available.")
+      return
     end
     local view = ti:view({
       width = window:getWidth(),
       platform = "desktop",
       touch = false,
     }) or {}
-    return renderSection(view, resolveSectionName(selected))
+    local renderer = renderers[currentSection]
+    if renderer then
+      renderer(view, contentPanel)
+    end
   end)
-  text = ok and (text or "") or "Tactical Intelligence render failed:\n" .. tostring(text)
-  if text ~= lastRendered then
-    lastRendered = text
-    contentText:setText(text)
+  if not ok then
+    clearPanel(contentPanel)
+    label(contentPanel, "err", "Render failed: " .. tostring(err))
   end
 end
 
 local function showWindow()
+  if not ready or not window then return end
   local root = g_ui.getRootWidget()
   if root then
     window:setWidth(math.max(260, math.min(640, root:getWidth() - 20)))
@@ -333,23 +282,28 @@ local function showWindow()
   render()
 end
 
-window.section.onOptionChange = function(_, option)
-  selected = resolveSectionName(option)
-  render()
-end
+if ready then
+  window.section.onOptionChange = function(_, option)
+    if not ready then return end
+    selected = resolveSectionName(option)
+    clearPanel(contentPanel)
+    render()
+  end
 
-if window.buttons and window.buttons.refresh then
-  window.buttons.refresh.onClick = render
-end
+  if window.buttons and window.buttons.refresh then
+    window.buttons.refresh.onClick = render
+  end
 
-if window.buttons and window.buttons.close then
-  window.buttons.close.onClick = function()
-    window:hide()
+  if window.buttons and window.buttons.close then
+    window.buttons.close.onClick = function()
+      window:hide()
+    end
   end
 end
 
 nExBot.TacticalIntelligence.showWindow = showWindow
 nExBot.TacticalIntelligence.hideWindow = function()
+  if not ready or not window then return end
   window:hide()
 end
 nExBot.TacticalIntelligence.renderWindow = render
@@ -364,7 +318,7 @@ UnifiedTick.register("tactical_intelligence_ui", {
   priority = UnifiedTick.Priority.LOW,
   group = "tactical_intelligence",
   handler = function()
-    if window:isVisible() then
+    if ready and window and window:isVisible() then
       render()
     end
   end,

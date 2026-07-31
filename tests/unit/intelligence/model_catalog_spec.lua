@@ -4,7 +4,7 @@ local Catalog = dofile("core/intelligence/learning/model_catalog.lua")
 describe("intelligence required model catalog", function()
   it("registers all capabilities in SHADOW with a bounded lifecycle", function()
     local registry = Catalog.registerAll()
-    assert.equals(7, #Catalog.names())
+    assert.equals(12, #Catalog.names())
 
     for _, name in ipairs(Catalog.names()) do
       local entry, model = registry:get(name), registry:get(name).model

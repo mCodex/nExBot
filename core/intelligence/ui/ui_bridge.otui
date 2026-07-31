@@ -1,7 +1,7 @@
-IntelligenceConsoleWindow < MainWindow
+IntelligenceDashboardWindow < MainWindow
   text: nExBot Tactical Intelligence
-  width: 460
-  height: 500
+  width: 520
+  height: 600
   @onEscape: self:hide()
 
   ComboBox
@@ -21,19 +21,14 @@ IntelligenceConsoleWindow < MainWindow
     margin-top: 8
     margin-bottom: 8
 
-  MultilineTextEdit
-    id: contentText
+  Panel
+    id: contentPanel
     anchors.top: section.bottom
     anchors.left: parent.left
     anchors.right: scroll.left
     anchors.bottom: buttons.top
     margin: 8
-    vertical-scrollbar: scroll
-    text-wrap: true
-    selectable: true
-    editable: false
-    font: verdana-11px-monochrome
-    color: #c0c0c0
+    margin-bottom: 4
 
   Panel
     id: buttons
@@ -41,13 +36,6 @@ IntelligenceConsoleWindow < MainWindow
     anchors.right: parent.right
     anchors.bottom: parent.bottom
     height: 32
-
-    Button
-      id: shadow
-      text: Shadow mode
-      anchors.left: parent.left
-      anchors.verticalCenter: parent.verticalCenter
-      width: 100
 
     Button
       id: refresh

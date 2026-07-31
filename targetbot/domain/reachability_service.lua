@@ -156,4 +156,18 @@ function S.reset()
   evidence = {}
 end
 
+if EventBus and EventBus.on then
+  pcall(EventBus.on, "player:position", function()
+    ReachabilityService.invalidateOnPlayerMove()
+  end)
+  pcall(EventBus.on, "creature:move", function(creature)
+    local id = creature and creature.getId and creature:getId()
+    if id then ReachabilityService.invalidateOnCreatureMove(id) end
+  end)
+  pcall(EventBus.on, "monster:disappear", function(creature)
+    local id = creature and creature.getId and creature:getId()
+    if id then ReachabilityService.invalidateOnCreatureMove(id) end
+  end)
+end
+
 return S
