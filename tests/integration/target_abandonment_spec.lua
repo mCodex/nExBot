@@ -131,11 +131,12 @@ describe("Target abandonment — regression tests", function()
     assert.equals(7, AttackStateMachine.getTargetId())
 
     monsterA:kill()
-    fx:tick(2)
+    fx:tick(6)
     AttackStateMachine.update()
 
+    fx:tick(3)
     AttackStateMachine.requestAttack(monsterB, 1000)
-    fx:tick(5)
+    fx:tick(6)
     AttackStateMachine.update()
     assert.equals(8, AttackStateMachine.getTargetId())
 

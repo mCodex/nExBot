@@ -342,7 +342,7 @@ MonsterAI = MonsterAI or {}
 MonsterAI.Reachability = R
 
 if EventBus and EventBus.on then
-  EventBus.on("player:position", function() R.invalidateCache() end)
+  EventBus.on("player:position", function() R.invalidateCache(); quarantine = {} end)
   EventBus.on("creature:move", function(creature) R.invalidate(creatureId(creature), "creature_moved") end)
   EventBus.on("monster:disappear", function(creature) R.invalidate(creatureId(creature), "disappeared") end)
 end

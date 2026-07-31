@@ -91,9 +91,21 @@ dofile("/targetbot/monster_ai.lua")           -- Monster AI orchestrator / glue 
 dofile("/targetbot/chase_controller.lua")     -- Native chase owner (must precede movement coordinator)
 dofile("/targetbot/movement_coordinator.lua") -- Coordinated movement system
 
+-- Domain layer (pure decision modules — must load before application layer)
+dofile("/targetbot/domain/release_reasons.lua")
+dofile("/targetbot/domain/reachability_states.lua")
+dofile("/targetbot/domain/reachability_service.lua")
+dofile("/targetbot/domain/target_commitment.lua")
+dofile("/targetbot/domain/target_evaluator.lua")
+
 -- Load AttackStateMachine for linear, consistent targeting (before creature.lua)
 dofile("/targetbot/combat_constants.lua")      -- Shared timing constants for attack pipeline
 dofile("/targetbot/attack_state_machine.lua") -- State machine for attack persistence
+
+-- Application layer (state machines — must load after domain + ASM)
+dofile("/targetbot/application/combat_frame.lua")
+dofile("/targetbot/application/attack_fsm.lua")
+
 dofile("/targetbot/target_proposal.lua")      -- intelligence combat proposal adapter
 
 -- Load TargetBot modules

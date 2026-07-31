@@ -188,12 +188,31 @@ function M.new()
     _G.g_map.getTile = function() return nil end
     _G.g_map.getMinimapColor = function() return 0 end
 
-    _G.EventBus = nil
+    local _eventHandlers = {}
+    _G.EventBus = {
+      on = function(event, handler, priority)
+        _eventHandlers[event] = _eventHandlers[event] or {}
+        _eventHandlers[event][#_eventHandlers[event] + 1] = handler
+      end,
+      emit = function(event, ...)
+        local handlers = _eventHandlers[event]
+        if handlers then
+          for _, handler in ipairs(handlers) do
+            pcall(handler, ...)
+          end
+        end
+      end,
+    }
     _G.UnifiedTick = nil
     _G.macro = function() end
     _G.TargetBot = _G.TargetBot or {}
     _G.TargetBot.isOn = function() return true end
     _G.MonsterAI = { _helpers = {} }
+    _G.BotCore = {
+      Creatures = {
+        getNearby = function() return {} end,
+      },
+    }
 
     return self
   end

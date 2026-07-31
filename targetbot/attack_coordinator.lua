@@ -112,12 +112,6 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   if not sameTarget and MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.validateTarget then
     local isValid = MonsterAI.Reachability.validateTarget(creature)
     if not isValid then
-      if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
-        pcall(AttackStateMachine.stop)
-      end
-      if MovementCoordinator and MovementCoordinator.executeTactical then
-        MovementCoordinator.executeTactical({ action = "lure", source = "TargetReachability" })
-      end
       return
     end
   end
