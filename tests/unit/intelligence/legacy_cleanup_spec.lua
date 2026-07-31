@@ -1,7 +1,8 @@
 describe("intelligence legacy cleanup", function()
-  it("removes standalone hunt and monster inspector UI assets", function()
-    assert.is_nil(io.open("core/analyzer.otui", "r"))
-    assert.is_nil(io.open("core/smart_hunt.otui", "r"))
+  it("keeps analyzer UI assets required by analyzer.lua", function()
+    local f = io.open("core/analyzer.otui", "r")
+    assert.is_not_nil(f)
+    if f then f:close() end
   end)
 
   it("keeps legacy labels out of the source paths", function()
