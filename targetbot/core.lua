@@ -18,6 +18,13 @@
 
 TargetCore = TargetCore or {}
 
+TargetBot = TargetBot or {}
+if not TargetBot.isOff then
+  TargetBot.isOff = function()
+    return not (TargetBot.isOn and TargetBot.isOn())
+  end
+end
+
 -- Use shared ClientHelper aliases (loaded by _Loader.lua)
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
