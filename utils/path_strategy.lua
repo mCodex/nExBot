@@ -436,9 +436,7 @@ end
 --- @return table|nil nativePath (dir array, only when isSafe==true)
 --- @return number|nil unsafeIdx  first unsafe step index (when isSafe==false)
 function PathStrategy.nativePathIsSafe(startPos, goalPos, opts)
-  local nativePath = PathStrategy.findPath(startPos, goalPos, opts or {
-    ignoreNonPathable = true,
-  })
+  local nativePath = PathStrategy.findPath(startPos, goalPos, opts or {})
   if not nativePath or #nativePath == 0 then
     return false, nil, nil   -- no path at all
   end

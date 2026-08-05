@@ -458,7 +458,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   local maxDist = CaveBot.getMaxGotoDistance()
 
   -- ========== ENSURE NAVIGATOR ROUTE IS BUILT ==========
-  if WaypointNavigator and CaveBot.ensureNavigatorRoute then
+  if nExBot.Navigation and CaveBot.ensureNavigatorRoute then
     CaveBot.ensureNavigatorRoute(playerPos.z)
   end
 
@@ -499,10 +499,10 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- If the navigator confirms the player has already passed this WP on the route,
   -- advance immediately. This handles smooth walk-through transitions where A* paths
   -- carry the player past a WP before the goto action's arrival check fires.
-  if WaypointNavigator and WaypointNavigator.hasPassedWaypoint then
+  if nExBot.Navigation and nExBot.Navigation.hasPassedWaypoint then
     local currentAction = ui and ui.list and ui.list:getFocusedChild()
     local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
-    if waypointIdx and WaypointNavigator.hasPassedWaypoint(playerPos, waypointIdx, destPos) then
+    if waypointIdx and nExBot.Navigation.hasPassedWaypoint(playerPos, waypointIdx, destPos) then
       CaveBot.clearWaypointTarget()
       return true
     end
@@ -554,8 +554,8 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- ========== TOO FAR ==========
   if dist > maxDist then
     -- If navigator knows the correct next WP and it's closer, advance
-    if WaypointNavigator and WaypointNavigator.isRouteBuilt and WaypointNavigator.isRouteBuilt() then
-      local nextWpIdx, nextWpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    if nExBot.Navigation and nExBot.Navigation.isRouteBuilt and nExBot.Navigation.isRouteBuilt() then
+      local nextWpIdx, nextWpPos = nExBot.Navigation.getNextWaypoint(playerPos)
       if nextWpIdx and nextWpPos then
         local nextDist = math.max(math.abs(nextWpPos.x - playerPos.x), math.abs(nextWpPos.y - playerPos.y))
         if nextDist < dist then

@@ -48,8 +48,23 @@ local getClient = nExBot.Shared.getClient
 local Dirs          = Directions or {}
 local DIR_TO_OFFSET = Dirs.DIR_TO_OFFSET or {}
 
+-- P0.1: unknown walkability MUST reject, never default to true. Delegates to
+-- the strict StepValidator (fail-closed on missing client capability).
+local _stepValidator = nil
 local function canWalkDirection(dir)
-  return (player.canWalk and player:canWalk(dir)) or true
+  if not _stepValidator then
+    local ok, mod = pcall(require, "navigation.step_validator")
+    if ok and mod then _stepValidator = mod end
+  end
+  if _stepValidator then
+    return _stepValidator.canWalkDirection(dir, {
+      player = player,
+      world = g_map,
+      getPosition = pos,
+    })
+  end
+  -- Last-resort legacy guard: only an explicit true is accepted.
+  return (player.canWalk and player:canWalk(dir)) == true
 end
 
 local function getDirectionTo(fromPos, toPos)
@@ -287,7 +302,10 @@ local function keyboardStep(path, playerPos, curIdx)
 
   PS().walkStep(walkDir)
   lastStepTime = now
-  PS().advanceCursor(1, stepDur)
+  -- P0.4: never advance the cursor optimistically on dispatch. The next
+  -- walkTo call re-paths from the player's OBSERVED position, so path[1] is
+  -- always the correct next step.
+  PS().resetCursor()
   return true
 end
 
@@ -320,7 +338,9 @@ local function autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist)
 
   local precision = chunkSteps >= 10 and 1 or 0
   PS().autoWalk(chunkDest, maxDist, {precision = precision})
-  PS().advanceCursor(chunkSteps, PS().rawStepDuration(false))
+  -- P0.4: no optimistic cursor advance; the path re-plans from the observed
+  -- position on the next walkTo call.
+  PS().resetCursor()
   return true
 end
 
@@ -383,7 +403,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
 
     if manhattan <= 3 then
       -- Close: precise keyboard steps
-      local fcPath = PS().findPath(playerPos, walkDest, {ignoreNonPathable = true, precision = 0})
+      local fcPath = PS().findPath(playerPos, walkDest, {precision = 0})
       if fcPath and #fcPath > 0 then
         local dir = fcPath[1]
         local smoothed = PS().smoothDirection(dir, true) or dir
@@ -398,7 +418,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
       return false
     else
       -- Far: guarded autoWalk
-      local isSafe = PS().nativePathIsSafe(playerPos, walkDest, {ignoreNonPathable = true})
+      local isSafe = PS().nativePathIsSafe(playerPos, walkDest)
       if isSafe then
         PS().autoWalk(walkDest, maxDist, {precision = precision})
       else
@@ -423,7 +443,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
       local alt = applyOffset(dest, off)
       if not isFloorChangeTile(alt) then
         local altPath = PS().findPath(playerPos, alt, {
-          ignoreNonPathable = true, ignoreCreatures = true, precision = 0,
+          ignoreCreatures = true, precision = 0,
         })
         if altPath and #altPath > 0 then dest = alt; break end
       end

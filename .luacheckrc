@@ -5,7 +5,8 @@ max_line_length = 120
 read_globals = {
   -- OTClient core
   "g_game", "g_map", "g_ui", "g_things", "g_clock", "g_resources", "g_platform", "g_http", "HTTP",
-  "modules", "macro", "schedule", "dofile", "periodic",
+  "modules", "macro", "schedule", "dofile", "periodic", "g_items",
+  "now", "autoWalk",
 
   -- Player accessors
   "pos", "target", "player", "mana", "hppercent", "manapercent",
@@ -23,6 +24,7 @@ read_globals = {
   -- Native callback registration (all optional, may not exist)
   "onCreatureAppear", "onCreatureDisappear", "onCreatureHealthPercentChange",
   "onPlayerPositionChange", "onManaChange", "onHealthChange",
+  "onPlayerZChange", "onPlayerWalkError",
   "onContainerOpen", "onContainerClose", "onContainerUpdateItem",
   "onAttackingCreatureChange", "onTextMessage", "onTalk",
   "onAddThing", "onRemoveThing", "onWalk", "onTurn", "onMissle",

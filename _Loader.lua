@@ -386,8 +386,87 @@ loadCategory("utils", {
   "utils/event_debouncer",
   "utils/path_utils",
   "utils/path_strategy",
-  "utils/waypoint_navigator",
 }, "/")
+
+-- ============================================================================
+-- PHASE 3.5: NAVIGATION BOUNDED CONTEXT
+-- Strict, ack-driven navigation domain (replaces WaypointNavigator internals).
+-- Loaded before core/cavebot so the lazy require() in cavebot/walking.lua and
+-- the legacy bridge wiring both resolve navigation.* modules deterministically.
+-- ============================================================================
+do
+  -- The OTClient sandbox exposes neither `package`, `require`, nor `_G`, and
+  -- its `dofile` DISCARDS chunk return values (the codebase communicates via
+  -- globals). Navigation modules are return-value modules, so they must be
+  -- loaded with loadfile()+call() to capture the module table.
+  nExBot.Nav = nExBot.Nav or {}
+
+  -- Load a Lua file and return its chunk result (works even where dofile
+  -- discards returns).
+  local function navLoad(path)
+    local chunk, err = loadfile(path)
+    if not chunk then error(tostring(err), 2) end
+    return chunk()
+  end
+
+  -- Registry-backed resolver: prefers the pre-loaded registry, falls back to
+  -- loadfile-based loading, cached into nExBot.Nav.
+  if type(require) ~= "function" or type(package) ~= "table" then
+    require = function(name)
+      if nExBot.Nav[name] then return nExBot.Nav[name] end
+      local sub = name:gsub("%.", "/")
+      local ok, mod = pcall(navLoad, "/navigation/" .. sub .. ".lua")
+      if not ok or not mod then
+        ok, mod = pcall(navLoad, "navigation/" .. sub .. ".lua")
+      end
+      if ok and mod then
+        nExBot.Nav[name] = mod
+        return mod
+      end
+      error("module '" .. tostring(name) .. "' not found", 2)
+    end
+  end
+
+  local navModules = {
+    "domain",
+    "ports",
+    "observability",
+    "step_validator",
+    "path_planner",
+    "step_executor",
+    "retry",
+    "session",
+    "recovery",
+    "transitions",
+    "obstacles",
+    "ml_shadow",
+    "route_graph",
+    "recorder",
+    "adapter_fake",
+    "adapter_otclient",
+    "legacy_bridge",
+  }
+  for i = 1, #navModules do
+    -- dofile() triggers each module's self-registration into nExBot.Nav (the
+    -- OTClient dofile discards return values, so registration happens inside
+    -- the module). loadScript also captures the return when available.
+    local loaded = loadScript(navModules[i], "navigation", "/navigation/")
+    if loaded then
+      nExBot.Nav["navigation." .. navModules[i]] = loaded
+    end
+  end
+
+  -- Create the production bridge (OTClient adapter + session + all deps) and
+  -- expose it as the WaypointNavigator replacement for legacy callers.
+  local okNav, bridgeMod = pcall(function()
+    local lb = require("navigation.legacy_bridge")
+    return lb and lb.new()
+  end)
+  if okNav and bridgeMod then
+    nExBot.Navigation = bridgeMod
+    if CaveBot then CaveBot.Navigation = bridgeMod end
+  end
+end
 
 -- ============================================================================
 -- PHASE 4: CORE LIBRARIES (Legacy compatibility)
