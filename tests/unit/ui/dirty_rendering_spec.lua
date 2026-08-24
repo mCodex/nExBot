@@ -4,7 +4,6 @@ local function fresh()
   Harness.reset()
   Harness.install()
   _G.nExBot = { UI = {} }
-  dofile("ui/core/icon_registry.lua")
   dofile("ui/core/lifecycle.lua")
   dofile("ui/design_system/tokens.lua")
   dofile("ui/design_system/typography.lua")

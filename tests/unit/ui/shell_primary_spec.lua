@@ -4,7 +4,6 @@ local function fresh()
   Harness.reset()
   Harness.install()
   _G.nExBot = { UI = {} }
-  dofile("ui/core/icon_registry.lua")
   dofile("ui/core/view_model.lua")
   dofile("ui/core/lifecycle.lua")
   dofile("ui/design_system/tokens.lua")
@@ -16,10 +15,7 @@ local function fresh()
   dofile("ui/modules/page.lua")
   dofile("ui/modules/cockpit.lua")
   local Registry = dofile("ui/core/module_registry.lua")
-  for _, n in ipairs({
-    "dashboard", "cavebot", "targetbot", "healing", "looting", "supplies",
-    "scripts", "intelligence", "profiles", "settings", "diagnostics",
-  }) do
+  for _, n in ipairs({ "profiles", "settings", "diagnostics" }) do
     dofile("ui/modules/" .. n .. ".lua")
   end
   return Registry

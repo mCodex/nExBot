@@ -5,7 +5,6 @@ local function fresh()
   Harness.install()
   Harness.installHostPanel()
   _G.nExBot = { UI = {} }
-  dofile("ui/core/icon_registry.lua")
   dofile("ui/core/view_model.lua")
   dofile("ui/core/lifecycle.lua")
   dofile("ui/design_system/tokens.lua")
@@ -18,10 +17,7 @@ local function fresh()
   dofile("ui/modules/page.lua")
   dofile("ui/modules/cockpit.lua")
   dofile("ui/core/module_registry.lua")
-  for _, n in ipairs({
-    "dashboard", "cavebot", "targetbot", "healing", "looting", "supplies",
-    "scripts", "intelligence", "profiles", "settings", "diagnostics",
-  }) do
+  for _, n in ipairs({ "profiles", "settings", "diagnostics" }) do
     dofile("ui/modules/" .. n .. ".lua")
   end
   _G.nExBot.UI.Shell = nil
@@ -33,6 +29,15 @@ describe("BotShell host integration", function()
 
   before_each(function()
     Shell = fresh()
+  end)
+
+  it("gives the attached shell and its content real layout geometry", function()
+    local file = assert(io.open("ui/shell/styles.otui", "r"))
+    local styles = file:read("*a")
+    file:close()
+
+    assert.is_truthy(styles:match("NexShellLayout < Panel.-anchors%.fill: parent"))
+    assert.is_truthy(styles:match("NexContent < Panel.-fit%-children: true"))
   end)
 
   it("attaches into the host left panel instead of a floating window", function()
@@ -83,6 +88,53 @@ describe("BotShell host integration", function()
     local shell = Shell.show()
     assert.is_false(cp.botTabs:isEnabled(), "legacy tab bar must be disabled once the shell owns the panel")
     assert.is_false(cp.botTabs:isVisible())
+    shell:destroy()
+  end)
+
+  it("removes alternate host tab navigation names", function()
+    local cp = modules.game_bot.contentsPanel
+    cp.tabBar = cp.botTabs
+    cp.botTabs = nil
+
+    local shell = Shell.show()
+
+    assert.is_false(cp.tabBar:isEnabled())
+    assert.is_false(cp.tabBar:isVisible())
+    shell:destroy()
+  end)
+
+  it("renders narrow engine rails without duplicate Edit buttons or unsafe text", function()
+    local shell = Shell.show()
+    local content = shell:getContent()
+    local editorActions = {
+      cave = "open_cave_editor",
+      target = "open_target_editor",
+      heal = "open_heal_config",
+      loot = "open_loot_config",
+    }
+
+    for _, id in ipairs({ "cave", "target", "heal", "loot" }) do
+      local row = assert(content:recursiveGetChildById(id))
+      assert.is_truthy(row:recursiveGetChildById(id .. "Info"))
+      assert.is_nil(row:recursiveGetChildById(editorActions[id]))
+    end
+
+    local function assertAscii(widget)
+      assert.is_nil(widget:getText():find("[^\1-\127]"), "unsafe text in " .. tostring(widget:getId()))
+      for _, child in ipairs(widget:getChildren()) do assertAscii(child) end
+    end
+    assertAscii(content)
+    shell:destroy()
+  end)
+
+  it("opens engine settings from the rail instead of a second button", function()
+    local shell = Shell.show()
+    local action
+    nExBot.UI.Actions.run = function(id) action = id; return true end
+
+    shell:getContent():recursiveGetChildById("caveInfo"):click()
+
+    assert.are_equal("open_cave_editor", action)
     shell:destroy()
   end)
 

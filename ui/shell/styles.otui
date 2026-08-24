@@ -2,18 +2,17 @@ NexButton < Button
   margin-top: 1
   margin-bottom: 1
 
-NexIconButton < Button
-  width: 20
-  height: 20
-  margin: 1
-
 NexCard < Panel
   margin-left: 4
   margin-right: 4
   margin-top: 4
   margin-bottom: 4
+  layout:
+    type: verticalBox
+    fit-children: true
 
 NexSectionHeader < Panel
+  height: 18
   margin-left: 6
   margin-top: 8
   margin-bottom: 2
@@ -26,6 +25,7 @@ NexMetricCard < Panel
   margin: 4
 
 NexRow < Panel
+  height: 18
   margin-left: 6
   margin-right: 6
   margin-top: 2
@@ -49,31 +49,54 @@ NexShell < MainWindow
 
 -- Compact single-column shell that preserves the game viewport.
 NexShellLayout < Panel
+  anchors.fill: parent
   layout:
     type: verticalBox
 
 NexContent < Panel
+  layout:
+    type: verticalBox
+    fit-children: true
 
 NexEngineRow < Panel
-  height: 26
+  height: 34
   margin-left: 4
   margin-right: 4
   margin-top: 1
   margin-bottom: 1
-  layout:
-    type: horizontalBox
 
 NexEngineItem < UIItem
   width: 24
   height: 24
   virtual: true
   draggable: false
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+
+NexEngineInfo < Panel
+  anchors.left: prev.right
+  anchors.right: next.left
+  anchors.top: parent.top
+  anchors.bottom: parent.bottom
+  margin-left: 4
+  margin-right: 4
+  layout:
+    type: verticalBox
+
+NexEngineToggle < Button
+  width: 38
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
 
 NexCockpitFooter < Panel
   height: 30
   margin: 2
   layout:
     type: horizontalBox
+
+NexFooterButton < Button
+  width: 52
+  margin: 1
 
 NexFooter < Panel
   height: 32

@@ -56,7 +56,7 @@ describe("ModuleRegistry", function()
     assert.same({ "alpha", "mid", "zeta" }, ids)
   end)
 
-  it("each module has a unique id, icon, and registered sections", function()
+  it("each module has a unique id and registered sections", function()
     local Registry = nExBot.UI.ModuleRegistry
     Registry.register({
       id = "cavebot", label = "CaveBot", icon = "cavebot", order = 1,
@@ -68,13 +68,6 @@ describe("ModuleRegistry", function()
     })
     local errors = Registry.validate()
     assert.are_equal(0, #errors)
-  end)
-
-  it("defaults the icon to the module id when unspecified", function()
-    local Registry = nExBot.UI.ModuleRegistry
-    Registry.register({ id = "defaulticon", label = "Bad", order = 1, sections = {} })
-    assert.are_equal("defaulticon", Registry.get("defaulticon").icon)
-    assert.are_equal(0, #Registry.validate())
   end)
 
   it("a rejected duplicate leaves the original intact", function()

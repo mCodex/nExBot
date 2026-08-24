@@ -4,7 +4,6 @@ local function fresh()
   Harness.reset()
   Harness.install()
   _G.nExBot = { UI = {} }
-  dofile("ui/core/icon_registry.lua")
   dofile("ui/core/view_model.lua")
   dofile("ui/core/lifecycle.lua")
   dofile("ui/design_system/tokens.lua")
@@ -15,10 +14,7 @@ local function fresh()
   dofile("ui/modules/page.lua")
   local Registry = dofile("ui/core/module_registry.lua")
   -- register all modules (same order as ui/init.lua)
-  local names = {
-    "dashboard", "cavebot", "targetbot", "healing", "looting", "supplies",
-    "scripts", "intelligence", "profiles", "settings", "diagnostics",
-  }
+  local names = { "profiles", "settings", "diagnostics" }
   for _, n in ipairs(names) do
     dofile("ui/modules/" .. n .. ".lua")
   end
@@ -32,8 +28,8 @@ describe("module registry integration", function()
     Registry = fresh()
   end)
 
-  it("registers all 11 modules exactly once", function()
-    assert.are_equal(11, Registry.count())
+  it("registers all modules exactly once", function()
+    assert.are_equal(3, Registry.count())
     local errors = Registry.validate()
     assert.are_equal(0, #errors)
   end)
@@ -45,26 +41,19 @@ describe("module registry integration", function()
       assert.is_nil(seen[id], "duplicate id " .. id)
       seen[id] = true
     end
-    assert.are_equal(11, #ids)
-  end)
-
-  it("every module has an icon", function()
-    for _, id in ipairs(Registry.ids()) do
-      assert.is_truthy(Registry.icon(id), "missing icon for " .. id)
-    end
+    assert.are_equal(3, #ids)
   end)
 
   it("module order is deterministic", function()
     local ids = Registry.ids()
     assert.same({
-      "dashboard", "cavebot", "targetbot", "healing", "looting", "supplies",
-      "scripts", "intelligence", "profiles", "settings", "diagnostics",
+      "profiles", "settings", "diagnostics",
     }, ids)
   end)
 
   it("duplicate navigation declarations are rejected", function()
     local before = Registry.count()
-    local ok = Registry.register({ id = "cavebot", label = "CaveBot dup", order = 99 })
+    local ok = Registry.register({ id = "profiles", label = "Profiles dup", order = 99 })
     assert.is_false(ok)
     assert.are_equal(before, Registry.count())
   end)
@@ -73,7 +62,6 @@ describe("module registry integration", function()
     for _, m in ipairs(Registry.list()) do
       assert.is_string(m.id)
       assert.is_string(m.label)
-      assert.is_string(m.icon)
       assert.is_number(m.order)
       assert.is_table(m.sections)
       assert.is_function(m.render)

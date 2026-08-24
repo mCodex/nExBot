@@ -14,9 +14,9 @@ returns — modules load via `loadfile+call` and self-register into `nExBot.UI`.
 │  EventBus · UnifiedTick · UnifiedStorage · core/acl        │
 ├─────────────────────────────────────────────────────────────┤
 │  PRESENTATION (ui/)                                        │
-│  BotShell (sidebar/header/content/footer)                  │
-│  ModuleRegistry · IconRegistry · DesignSystem (tokens)     │
-│  Presenter/view-model projection · Commands · Lifecycle    │
+│  BotShell (cockpit/content/footer)                         │
+│  ModuleRegistry · DesignSystem (tokens)                    │
+│  Presenter/view-model projection · Actions · Lifecycle     │
 │  Components (shared widget library) · Module pages         │
 ├─────────────────────────────────────────────────────────────┤
 │  DOMAIN (existing bot contexts — untouched)                │
@@ -45,13 +45,11 @@ through `statusProvider()` projections; commands are the only write path.
 
 | Path | Purpose |
 |---|---|
-| `ui/core/` | ModuleRegistry, IconRegistry, ViewModel, CommandDispatcher, Lifecycle, BoundedList, Perf, resolve |
+| `ui/core/` | ModuleRegistry, ViewModel, actions, Lifecycle, Perf |
 | `ui/design_system/` | tokens (colors/spacing/radii/borders/dimensions), typography, density, status |
 | `ui/components/` | shared widget library (buttons, cards, rows, badges, states, lists) |
 | `ui/shell/` | BotShell + styles.otui |
-| `ui/modules/` | 11 module pages + shared page renderer |
-| `ui/assets/icons/` | SVG sources (source of truth) + `generated/*.png` runtime assets |
-| `tools/icons/` | Node build pipeline (catalog + build.mjs) |
+| `ui/modules/` | cockpit, three secondary pages, and shared page renderer |
 
 ## View model contract
 
@@ -66,15 +64,8 @@ States: `LOADING EMPTY READY DEGRADED ERROR`. Revisions advance only via
 
 ## Registry
 
-`ModuleRegistry` is the single source of truth for navigation. It drives the
-sidebar, ordering, icons, availability, status badges, and tests. No hard-coded
-navigation lists exist elsewhere.
-
-## Commands
-
-`CommandDispatcher` gives typed results: `{ ok=true, data=... }` or
-`{ ok=false, error="CODE" }`. Prerequisites are validated; destructive
-commands require explicit confirmation; exceptions are contained.
+`ModuleRegistry` stores the secondary pages available through More in
+deterministic order.
 
 ## Lifecycle
 
@@ -87,10 +78,9 @@ the same shell instance.
 `_Loader.lua` Phase 12 loads `ui/init.lua`, which:
 1. creates `nExBot.UI` up front (the namespace must exist before any module
    self-registration runs);
-2. loads core/design-system/components/shell modules via `loadfile+call`;
-3. registers all 11 modules into ModuleRegistry;
-4. registers the icon catalog into IconRegistry;
-5. imports `ui/shell/styles.otui`.
+2. loads core/design-system/components/shell modules via `dofile`;
+3. registers the three secondary pages into ModuleRegistry;
+4. imports `ui/shell/styles.otui`.
 
 ## Sandbox constraints (critical)
 
@@ -111,8 +101,8 @@ OTClient sandbox") and may not resolve `require("ui.*")` natively. Rules:
 
 `BotShell` **replaces the host client's left bot bar** (`modules.game_bot.
 contentsPanel.botPanel`). It attaches directly into the left panel and becomes
-the sole visible navigation surface: a module sidebar (driven by
-ModuleRegistry) on the left, and header/content/footer on the right.
+the sole visible navigation surface: a compact hunt cockpit with secondary
+pages behind More.
 
 **Legacy tab UI is hidden, not destroyed.** The module engines (CaveBot,
 TargetBot, ...) hold direct widget references into their tab panels (e.g.
@@ -133,15 +123,13 @@ editor, etc.) are reachable from the shell's module pages.
 1. `ui/modules/<name>.lua`: implement `viewModel(state)` (pure, testable),
    `statusProvider()` (nil-safe projection), `render(shell, content, lifecycle)`,
    and `register()`.
-2. Register in `ui/init.lua` module list + icon catalog list.
-3. Add `tests/unit/ui/<name>_spec.lua` (view-model contract) and a case in
-   `tests/unit/ui/modules_spec.lua` + `registry_integration_spec.lua`.
+2. Register it in the `ui/init.lua` module list.
+3. Add its view-model and registry integration tests.
 4. `make check`.
 
 ## Performance
 
-- Registry/icon lookup: O(1) keyed maps.
+- Registry lookup: O(1) keyed map.
 - Dirty rendering: tick updates only the header badge when revision changes;
   content rebuilds only on module select.
-- `BoundedList`: top-K bounded rendering.
 - `Perf`: bounded (256-sample) p95/p99 timings for render/tick.

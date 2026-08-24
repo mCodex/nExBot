@@ -36,22 +36,20 @@ See [Release Notes](docs/RELEASE_NOTES.md) and [Remediation Summary](docs/REMEDI
 ## v5 UI Platform
 
 nExBot v5 introduces a unified product interface built on one design system,
-one navigation shell, one icon registry, and one shared component library.
+one navigation shell, and one shared component library.
 
-- **BotShell** — replaces the client's left bot bar with a module sidebar
-  (11 modules) + header (profile/session/warnings) + module content + footer.
+- **BotShell** — replaces the client's left bot bar with a compact cockpit
+  containing engine controls, telemetry, attention state, and a footer.
   Single instance, generation-guarded lifecycle, auto-attaches to the host
   left panel at startup.
-- **ModuleRegistry** — single source of truth for navigation, ordering,
-  icons, and status.
+- **ModuleRegistry** — secondary-page navigation and ordering.
 - **Design system** — semantic color/spacing/typography/density/status tokens
   (`ui/design_system/`), frozen against mutation.
-- **Icons** — 56 original SVGs built to committed PNGs at 16/20/24/32px
-  (`node tools/icons/build.mjs`); runtime never converts SVG.
+- **Icons** — native Tibia item sprites through `UIItem`; no asset toolchain.
 - **Components** — shared widget library (`ui/components/`).
-- **Bounded contexts** — every module exposes a versioned view model
+- **View models** — secondary modules expose a versioned projection
   (`schemaVersion, revision, state, header, sections, actions`); widgets never
-  mutate domain globals directly; commands return typed results.
+  mutate domain globals directly.
 
 The shell replaces the legacy tab-fill left bar. See
 [UI Architecture](docs/ui/architecture.md), [Guides](docs/ui/guides.md),

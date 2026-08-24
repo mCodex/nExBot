@@ -6,6 +6,12 @@ local Actions = nExBot and nExBot.UI and nExBot.UI.Actions
 
 local Cockpit = {}
 
+local STATUS_VARIANT = {
+  ACTIVE = "active",
+  DISABLED = "inactive",
+  UNKNOWN = "warning",
+}
+
 local ENGINE_DEFS = {
   { key = "cave", label = "Cave", itemId = 3003, toggleAction = "toggle_cavebot", editorAction = "open_cave_editor" },
   { key = "target", label = "Target", itemId = 3155, toggleAction = "toggle_targetbot", editorAction = "open_target_editor" },
@@ -31,7 +37,7 @@ function Cockpit.viewModel(state)
       itemId = def.itemId,
       status = status,
       statusText = statusText,
-      detail = state[def.key .. "Detail"] or "—",
+      detail = state[def.key .. "Detail"] or "-",
       toggleAction = def.toggleAction,
       editorAction = def.editorAction,
     }
@@ -41,12 +47,12 @@ function Cockpit.viewModel(state)
   return {
     snapshot = {
       revision = state.revision or 0,
-      character = state.character or "—",
-      profile = state.profile or "—",
+      character = state.character or "-",
+      profile = state.profile or "-",
       engines = engines,
-      route = state.route or "—",
-      waypoint = state.waypoint or "—",
-      targetName = state.targetName or "—",
+      route = state.route or "-",
+      waypoint = state.waypoint or "-",
+      targetName = state.targetName or "-",
       targetHp = state.targetHp,
       hp = state.hp,
       mana = state.mana,
@@ -124,33 +130,33 @@ function Cockpit.render(content)
     local engineRow = engine
     local row = g_ui.createWidget("NexEngineRow", content)
     row:setId(engineRow.id)
+    row:setBackgroundColor(Tokens.colors.background.elevated)
     local item = g_ui.createWidget("NexEngineItem", row)
     item:setId(engineRow.id .. "Item")
     item:setItemId(engineRow.itemId)
     item:setTooltip(engineRow.label)
-    Components.label(row, { id = engineRow.id .. "Label", text = engineRow.label, color = Tokens.colors.text.primary })
-    Components.label(row, { id = engineRow.id .. "Detail", text = engineRow.detail, textStyle = "metadata", color = Tokens.colors.text.muted })
+    item.onClick = function() run(engineRow.editorAction, attention) end
+    local info = g_ui.createWidget("NexEngineInfo", row)
+    info:setId(engineRow.id .. "Info")
+    info:setTooltip("Open " .. engineRow.label .. " settings")
+    info.onClick = function() run(engineRow.editorAction, attention) end
+    Components.label(info, { id = engineRow.id .. "Label", text = engineRow.label, color = Tokens.colors.text.primary })
+    Components.label(info, { id = engineRow.id .. "Detail", text = engineRow.detail, textStyle = "metadata", color = Tokens.colors.text.muted })
     Components.button(row, {
       id = engineRow.toggleAction,
+      style = "NexEngineToggle",
       text = engineRow.statusText,
-      variant = engineRow.status == "ACTIVE" and "primary" or "ghost",
+      variant = STATUS_VARIANT[engineRow.status],
       onClick = function() run(engineRow.toggleAction, attention) end,
-    })
-    Components.button(row, {
-      id = engineRow.editorAction,
-      text = "Edit",
-      variant = "ghost",
-      tooltip = engineRow.label .. " settings",
-      onClick = function() run(engineRow.editorAction, attention) end,
     })
   end
 
   Components.sectionHeader(content, { title = "Now" })
   local now = Components.card(content, { id = "now" })
-  Components.keyValueRow(now, { key = "Route", value = view.route .. " · " .. view.waypoint })
+  Components.keyValueRow(now, { key = "Route", value = view.route .. " / " .. view.waypoint })
   Components.keyValueRow(now, { key = "Target", value = view.targetName .. (view.targetHp and " " .. view.targetHp .. "%" or "") })
-  Components.keyValueRow(now, { key = "HP / MP", value = (view.hp or "—") .. "% / " .. (view.mana or "—") .. "%" })
-  Components.keyValueRow(now, { key = "XP/h", value = view.xpHour or "—" })
+  Components.keyValueRow(now, { key = "HP / MP", value = (view.hp or "-") .. "% / " .. (view.mana or "-") .. "%" })
+  Components.keyValueRow(now, { key = "XP/h", value = view.xpHour or "-" })
 
   Components.sectionHeader(content, { title = "Attention" })
   attention = Components.label(content, {

@@ -2,7 +2,7 @@
   Components — the shared widget library consumed by every module.
 
   Each component is a factory: (parent, options) -> widget (or row handle).
-  Components resolve colors/fonts/spacing through the design system and icons
+  Components resolve colors, fonts, and spacing through the design system.
   They never read domain globals; they receive everything they need through
   options and callbacks.
 
@@ -46,13 +46,16 @@ function C.button(parent, opts)
   local colors = Tokens.colors
   local variantColor = {
     primary = colors.accent.primary,
+    active = colors.active,
+    inactive = colors.disabled,
+    warning = colors.warning,
     secondary = colors.border.default,
     ghost = colors.text.secondary,
     danger = colors.danger,
   }
   local w = create(parent, opts.style or "NexButton", opts)
   w:setText(opts.text or "")
-  w:setColor(variantColor[opts.variant or "primary"] or colors.accent.primary)
+  w:setColor(opts.color or variantColor[opts.variant or "primary"] or colors.accent.primary)
   if opts.onClick then w.onClick = opts.onClick end
   if opts.background then w:setBackgroundColor(opts.background) end
   return w

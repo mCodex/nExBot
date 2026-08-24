@@ -5,7 +5,6 @@ local function fresh()
   Harness.reset()
   Harness.install()
   _G.nExBot = { UI = {} }
-  dofile("ui/core/icon_registry.lua")
   local root = _G.g_ui.createWidget("Root", nil)
   return root
 end
@@ -41,18 +40,6 @@ describe("UI components", function()
     local btn = Components.button(root, { text = "Z", disabled = true, onClick = function() clicked = clicked + 1 end })
     btn:click()
     assert.are_equal(0, clicked)
-  end)
-
-  it("icon button resolves an icon through the registry", function()
-    local R = _G.nExBot.UI.IconRegistry
-    R.register("save", { svg = "ui/assets/icons/save.svg", raster = "ui/assets/icons/generated/save_%d.png" })
-    local btn = Components.iconButton(root, { icon = "save", size = 24 })
-    assert.is_truthy(btn:getImageSource():find("save", 1, true))
-  end)
-
-  it("icon button falls back safely for unknown icons", function()
-    local btn = Components.iconButton(root, { icon = "nope" })
-    assert.is_string(btn:getImageSource())
   end)
 
   it("card creates a panel with the card style", function()

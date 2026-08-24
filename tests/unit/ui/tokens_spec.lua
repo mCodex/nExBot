@@ -36,6 +36,41 @@ describe("DesignTokens", function()
     walk(DS.colors)
   end)
 
+  it("keeps semantic text and state colors WCAG AA against the base surface", function()
+    local function luminance(hex)
+      local channels = {}
+      for offset = 2, 6, 2 do
+        local channel = tonumber(hex:sub(offset, offset + 1), 16) / 255
+        channels[#channels + 1] = channel <= 0.04045 and channel / 12.92 or ((channel + 0.055) / 1.055) ^ 2.4
+      end
+      return 0.2126 * channels[1] + 0.7152 * channels[2] + 0.0722 * channels[3]
+    end
+
+    local foreground = {
+      DS.colors.text.primary, DS.colors.text.secondary, DS.colors.text.muted,
+      DS.colors.active, DS.colors.disabled, DS.colors.warning, DS.colors.danger,
+    }
+    local backgrounds = {
+      DS.colors.background.canvas,
+      DS.colors.background.base,
+      DS.colors.background.elevated,
+    }
+    for _, surface in ipairs(backgrounds) do
+      local background = luminance(surface)
+      for _, color in ipairs(foreground) do
+        local value = luminance(color)
+        local ratio = (math.max(value, background) + 0.05) / (math.min(value, background) + 0.05)
+        assert.is_true(ratio >= 4.5, color .. " on " .. surface .. " contrast was " .. tostring(ratio))
+      end
+    end
+  end)
+
+  it("does not rely on color aliases for active, inactive, and warning states", function()
+    assert.are_not_equal(DS.colors.active, DS.colors.disabled)
+    assert.are_not_equal(DS.colors.active, DS.colors.warning)
+    assert.are_not_equal(DS.colors.disabled, DS.colors.warning)
+  end)
+
   it("spacing scale is a sorted small set", function()
     assert.same({ 2, 4, 6, 8, 12, 16, 20, 24 }, DS.spacing)
   end)

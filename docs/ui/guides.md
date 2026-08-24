@@ -1,4 +1,4 @@
-# nExBot UI — Design System, Components, Icons, Migration
+# nExBot UI — Design System, Components, Migration
 
 ## Design system
 
@@ -22,28 +22,16 @@ Single source: `ui/design_system/tokens.lua` (frozen, proxy-protected).
 ## Shared components (`ui/components/components.lua`)
 
 `label`, `button` (variants: primary/secondary/ghost/danger; disabled),
-`iconButton`, `card`, `sectionHeader`, `statusBadge`, `metricCard`,
+`card`, `sectionHeader`, `statusBadge`, `metricCard`,
 `keyValueRow`, `toggleRow`, `checkboxRow`, `selectRow`, `inputRow`,
 `sliderRow`, `searchToolbar`, `listRow`, `emptyState`, `loadingState`,
 `errorState`, `inlineWarning`, `footerActions`, `diagnosticBlock`,
 `helpTooltip`.
 
 Each component: `factory(parent, options)` -> widget (or row handle with
-`getSwitch/getInput/getCombo/setValue`). Components resolve colors/fonts/icons
-through the design system; they never read domain globals.
-
-## Icon system
-
-- SVG sources: `ui/assets/icons/*.svg` (24×24 viewBox, stroke-based,
-  currentColor). Canonical catalog: `tools/icons/catalog.mjs`.
-- Build: `node tools/icons/build.mjs` -> `ui/assets/icons/generated/<name>_<size>.png`
-  at 16/20/24/32px via `@resvg/resvg-js`. PNGs are committed; runtime never
-  converts SVG.
-- Registry: `ui/core/icon_registry.lua` — O(1) lookup, safe fallback
-  (warning icon), `resolve(id, size)`.
-- Adding an icon: add to `catalog.mjs`, run the build script, add to the
-  IconRegistry registration list in `ui/init.lua`, add to
-  `tests/unit/ui/icon_assets_spec.lua` + `icon_registry_spec.lua`.
+`getSwitch/getInput/getCombo/setValue`). Components resolve colors/fonts
+through the design system; they never read domain globals. Cockpit controls
+use native `UIItem` sprites, avoiding external image parsing.
 
 ## Shell
 
@@ -57,9 +45,8 @@ re-renders only when the cockpit fingerprint changes.
 
 ## Module pages
 
-`ui/modules/cockpit.lua` owns the primary state projection. Compatibility and
-advanced modules (dashboard, cavebot, targetbot, healing, looting, supplies,
-scripts, intelligence, profiles, settings, diagnostics) provide
+`ui/modules/cockpit.lua` owns the primary state projection. Secondary modules
+(profiles, settings, diagnostics) provide
 `viewModel/statusProvider/render/register` and render through
 `ui/modules/page.lua` (shared shape: title + badge + section cards + actions).
 
@@ -79,8 +66,8 @@ scripts, intelligence, profiles, settings, diagnostics) provide
 
 | Client | Widget system | Icons | Fonts |
 |---|---|---|---|
-| OpenTibiaBR OTClient | OTUI (`UI.*`, `g_ui.*`) | PNG (committed) | client `verdana-11px-rounded` etc. |
-| OTCv8 | OTUI (same) | PNG (committed) | client fonts |
+| OpenTibiaBR OTClient | OTUI (`UI.*`, `g_ui.*`) | native item sprites | client `verdana-11px-rounded` etc. |
+| OTCv8 | OTUI (same) | native item sprites | client fonts |
 
 ## Sandbox note (important for contributors)
 
@@ -96,5 +83,4 @@ or (require and require("ui.<name>"))`. See `docs/ui/architecture.md`
 ```
 make test      # busted tests/ (all units + integration + performance)
 make lint      # luacheck (note: Lua 5.5 + luacheck 1.2 incompatibility in this env)
-node tools/icons/build.mjs   # regenerate icons after catalog changes
 ```

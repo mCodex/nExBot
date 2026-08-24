@@ -4,7 +4,6 @@ local function fresh()
   Harness.reset()
   Harness.install()
   _G.nExBot = { UI = {} }
-  dofile("ui/core/icon_registry.lua")
   dofile("ui/core/view_model.lua")
   dofile("ui/core/lifecycle.lua")
   dofile("ui/design_system/tokens.lua")
@@ -14,10 +13,7 @@ local function fresh()
   dofile("ui/components/components.lua")
   dofile("ui/modules/page.lua")
   local Registry = dofile("ui/core/module_registry.lua")
-  for _, n in ipairs({
-    "dashboard", "cavebot", "targetbot", "healing", "looting", "supplies",
-    "scripts", "intelligence", "profiles", "settings", "diagnostics",
-  }) do
+  for _, n in ipairs({ "profiles", "settings", "diagnostics" }) do
     dofile("ui/modules/" .. n .. ".lua")
   end
   return Registry
@@ -44,19 +40,11 @@ describe("UI performance", function()
     end
   end)
 
-  it("module lookup is O(1) across 11 modules", function()
+  it("module lookup is O(1)", function()
     -- verify get() is a direct map access, not a linear scan
     for _, id in ipairs(Registry.ids()) do
       assert.are_equal(id, Registry.get(id).id)
     end
-  end)
-
-  it("icon lookup is deterministic and cheap", function()
-    local R = _G.nExBot.UI.IconRegistry
-    R.register("cavebot", { svg = "x/cavebot.svg", raster = "x/cavebot_%d.png" })
-    local first = R.resolve("cavebot", 24)
-    local second = R.resolve("cavebot", 24)
-    assert.are_equal(first, second)
   end)
 
   it("widget count stays stable across navigation", function()

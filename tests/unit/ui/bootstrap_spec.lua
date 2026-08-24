@@ -1,7 +1,7 @@
 local Harness = require("tests.helpers.widget_harness")
 
 describe("ui bootstrap", function()
-  it("registers 11 modules and attaches the shell to the host left bar", function()
+  it("registers secondary modules and attaches the cockpit to the host left bar", function()
     Harness.reset()
     Harness.install()
     Harness.installHostPanel()
@@ -33,7 +33,7 @@ describe("ui bootstrap", function()
     assert.is_true(ok, tostring(err))
 
     local R = _G.nExBot.UI.ModuleRegistry
-    assert.are_equal(11, R.count())
+    assert.are_equal(3, R.count())
     assert.are_equal(0, #R.validate())
 
     -- Auto-open: the shell is attached to the host left bar after bootstrap.

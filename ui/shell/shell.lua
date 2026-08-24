@@ -31,6 +31,19 @@ local function hostContentsPanel()
   return cp
 end
 
+local function findTabNavigation(host)
+  for _, key in ipairs({ "botTabs", "tabBar", "tabs" }) do
+    if host[key] then return host[key] end
+  end
+  if host.recursiveGetChildById then
+    for _, id in ipairs({ "botTabs", "tabBar", "tabs" }) do
+      local tabs = host:recursiveGetChildById(id)
+      if tabs then return tabs end
+    end
+  end
+  return nil
+end
+
 -- Detach the legacy tab UI instead of destroying it. The module engines
 -- (CaveBot, TargetBot, ...) hold direct references to widgets inside those
 -- tab panels (e.g. CaveBot.actionList = ui.list) and write to them every
@@ -62,14 +75,15 @@ local function hideLegacyTabs(host)
       hidden = true
     end
   end
-  if host.botTabs then
+  local tabs = findTabNavigation(host)
+  if tabs then
     -- Belt-and-suspenders: OTClient's click-release path checks isEnabled()
     -- and containsPoint(), never isVisible() -- so a tab button pressed just
     -- before/while hiding can still fire onClick afterward. Disabling the
     -- tab bar (cascades to its tab buttons) blocks that independently of the
     -- removal above.
-    if host.botTabs.setVisible then host.botTabs:setVisible(false) end
-    if host.botTabs.setEnabled then host.botTabs:setEnabled(false) end
+    if tabs.setVisible then tabs:setVisible(false) end
+    if tabs.setEnabled then tabs:setEnabled(false) end
   end
   return hidden
 end
@@ -114,15 +128,15 @@ local function createShell(opts)
     local footer = g_ui.createWidget("NexCockpitFooter", w)
     footer:setId("footer")
     self.footer = footer
-    Components.button(footer, { text = "Profile", id = "footerProfile", variant = "ghost", onClick = function() self:select("profiles") end })
-    Components.button(footer, { text = "Pause all", id = "pause_all", variant = "danger", onClick = function()
+    Components.button(footer, { text = "Profile", id = "footerProfile", style = "NexFooterButton", variant = "ghost", onClick = function() self:select("profiles") end })
+    Components.button(footer, { text = "Pause", id = "pause_all", style = "NexFooterButton", variant = "danger", onClick = function()
       local ok, reason = nExBot.UI.Actions.run("pause_all")
       if not ok then
         local attention = self.content and self.content:recursiveGetChildById("attention")
         if attention then attention:setText(reason or "Could not pause") end
       end
     end })
-    Components.button(footer, { text = "•••", id = "footerMore", variant = "ghost", onClick = function() self:select("more") end })
+    Components.button(footer, { text = "More", id = "footerMore", style = "NexFooterButton", variant = "ghost", onClick = function() self:select("more") end })
   end
 
   function self:open()
@@ -136,6 +150,7 @@ local function createShell(opts)
       hideLegacyTabs(host)
       local root = g_ui.createWidget("NexShellLayout", host.botPanel)
       root:setId("NexBotShell")
+      root:setBackgroundColor(Tokens.colors.background.canvas)
       self.window = root
       buildShell(root)
       root:show()
@@ -253,6 +268,7 @@ local function createShell(opts)
     hideLegacyTabs(host)
     local root = g_ui.createWidget("NexShellLayout", host.botPanel)
     root:setId("NexBotShell")
+    root:setBackgroundColor(Tokens.colors.background.canvas)
     if self.window and self.window.destroy then self.window:destroy() end
     self.window = root
     buildShell(root)
