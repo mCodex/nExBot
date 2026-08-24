@@ -385,7 +385,7 @@ local function initSetupWindow()
     end
     
     setupWindow = win
-    
+
     local h = tonumber(config.windowHeight)
     if not h or h < 150 then h = 220 end
     setupWindow:setHeight(h)
@@ -1405,6 +1405,17 @@ sortingMacro = macro(300, function(m)
     m:setOff()
     cachedContainers = nil
 end)
+
+Containers = Containers or {}
+function Containers.initSetupWindow()
+    if not setupWindow then initSetupWindow() end
+    if setupWindow then
+        setupWindow:show()
+        setupWindow:raise()
+        setupWindow:focus()
+        refreshContainerList()
+    end
+end
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Discovery Service Bridge

@@ -32,7 +32,7 @@ StashItem < Panel
     text: Add item to select locker.
     color: #CCCCCC
 
-DepositerPanel < MainWindow
+DepositerPanel < NexLegacyMainWindow
   size: 230 380
   !text: tr('Depositer Panel')
   @onEscape: self:hide()

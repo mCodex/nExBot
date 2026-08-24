@@ -7,7 +7,7 @@ CaveBotAction < Label
     background-color: #00000055
 
 
-CaveBotPanel < Panel
+CaveBotPanel < NexLegacyPanel
   layout:
     type: verticalBox
     fit-children: true

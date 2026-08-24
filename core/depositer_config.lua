@@ -28,6 +28,7 @@ end
 local depositerPanel = UI.createWindow('DepositerPanel')
 if depositerPanel then
   depositerPanel:hide()
+
   depositerPanel.CloseButton.onClick = function()
       depositerPanel:hide()
   end

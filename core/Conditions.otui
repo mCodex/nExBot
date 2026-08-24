@@ -382,35 +382,7 @@ HoldConditions < Panel
     width: 100
     font: verdana-11px-rounded
 
-  CheckBox
-    id: IgnoreInPz
-    anchors.left: label5.left
-    anchors.top: label6.bottom
-    margin-top: 12
-
-  Label
-    anchors.verticalCenter: IgnoreInPz.verticalCenter
-    anchors.left: prev.right
-    margin-top: 3
-    margin-left: 5
-    text: Don't Cast in Protection Zones
-    font: cipsoftFont
-
-  CheckBox
-    id: StopHaste
-    anchors.horizontalCenter: IgnoreInPz.horizontalCenter
-    anchors.top: IgnoreInPz.bottom
-    margin-top: 8
-  
-  Label
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    margin-top: 3
-    margin-left: 5
-    text: Stop Haste if TargetBot Is Active
-    font: cipsoftFont
-
-ConditionsWindow < MainWindow
+ConditionsWindow < NexLegacyMainWindow
   !text: tr('Condition Manager')
   size: 445 280
   @onEscape: self:hide()

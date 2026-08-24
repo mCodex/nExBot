@@ -465,10 +465,6 @@ end
     currentSettings.ignoreMana = not currentSettings.ignoreMana
     settingsUI.IgnoreMana:setChecked(currentSettings.ignoreMana)
   end
-  settingsUI.Rotate.onClick = function(widget)
-    currentSettings.Rotate = not currentSettings.Rotate
-    settingsUI.Rotate:setChecked(currentSettings.Rotate)
-  end
   settingsUI.Kills.onClick = function(widget)
     currentSettings.Kills = not currentSettings.Kills
     settingsUI.Kills:setChecked(currentSettings.Kills)
@@ -548,7 +544,6 @@ end
     settingsUI.BlackListSafe:setChecked(currentSettings.BlackListSafe)
     settingsUI.AntiRsRange:setValue(currentSettings.AntiRsRange)
     settingsUI.IgnoreMana:setChecked(currentSettings.ignoreMana)
-    settingsUI.Rotate:setChecked(currentSettings.Rotate)
     settingsUI.Kills:setChecked(currentSettings.Kills)
     settingsUI.KillsAmount:setValue(currentSettings.KillsAmount)
     settingsUI.Training:setChecked(currentSettings.Training)

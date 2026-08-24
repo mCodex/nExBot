@@ -22,6 +22,7 @@ end
 importStyle("/cavebot/cavebot.otui")
 importStyle("/cavebot/config.otui")
 importStyle("/cavebot/editor.otui")
+safeDofile("/cavebot/waypoint_search.lua")
 safeDofile("/cavebot/actions.lua")
 safeDofile("/cavebot/config.lua")
 safeDofile("/cavebot/example_functions.lua")

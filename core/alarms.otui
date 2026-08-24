@@ -60,7 +60,7 @@ AlarmCheckBoxAndTextEdit < Panel
     margin-top: 1
     margin-bottom: 1
 
-AlarmsWindow < MainWindow
+AlarmsWindow < NexLegacyMainWindow
   !text: tr('Alarms')
   size: 330 400
   padding: 15

@@ -82,7 +82,7 @@ ItemPanel < Panel
     text: AVG
     !tooltip: ("This is average consumption of supplies by round to help calculate the amount to purchase\n (info provided by CaveBot Stats)")
 
-SuppliesWindow < MainWindow
+SuppliesWindow < NexLegacyMainWindow
   !text: tr('Supplies')
   size: 430 330
   @onEscape: self:hide()

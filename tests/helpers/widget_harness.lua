@@ -45,6 +45,7 @@ local function newWidget(style, parent, kind)
     _onClick = nil,
     _onOptionChange = nil,
     _imageSource = nil,
+    _itemId = 0,
   }
 
   self.children = children
@@ -204,15 +205,20 @@ local function newWidget(style, parent, kind)
   -- image (icon)
   function self:setImageSource(src) self._imageSource = src; M.record("setImageSource", self, src) return self end
   function self:getImageSource() return self._imageSource end
+  function self:setItemId(id) self._itemId = id; M.record("setItemId", self, id) return self end
+  function self:getItemId() return self._itemId end
 
-  -- click
-  function self:setOnClick(fn) self._onClick = fn; return self end
-  function self:onClick(fn) self._onClick = fn; return self end
+  -- click: the real client wires this via direct field assignment
+  -- (widget.onClick = fn), never a setOnClick()/onClick() method call --
+  -- see uiwidget.cpp's callLuaField("onClick", ...). Deliberately no
+  -- setOnClick/onClick method is defined here, so production code that
+  -- calls one (instead of assigning the field) fails the same way it
+  -- would against the real client.
   function self:setOnRelease(fn) self._onRelease = fn; return self end
   function self:click()
     M.record("click", self)
     if self._enabled == false then return end
-    if self._onClick then self._onClick(self) end
+    if self.onClick then self.onClick(self) end
   end
 
   return self
@@ -277,6 +283,11 @@ function M.reset()
   M.currentTab = "Main"
   M.styleNames = {}
   M.clearLog()
+  -- installHostPanel() early-returns if modules.game_bot.contentsPanel already
+  -- exists, so leaving it set would leak mutated widget state (e.g. botTabs'
+  -- enabled/visible flags) across tests; clear it so each reset() +
+  -- installHostPanel() pair rebuilds a fresh host panel.
+  if _G.modules then _G.modules.game_bot = nil end
 end
 
 local g_ui_fake = {}
@@ -324,7 +335,7 @@ local UI_fake = {
   Button = function(text, onClick, style)
     local btn = g_ui_fake.createWidget(style or "Button", nil)
     if text then btn:setText(text) end
-    if onClick then btn:setOnClick(onClick) end
+    if onClick then btn.onClick = onClick end
     local contents = M.tabContents[M.currentTab]
     contents[#contents + 1] = btn
     return btn

@@ -47,34 +47,33 @@ NexShell < MainWindow
   text: nExBot
   @onEscape: self:hide()
 
--- Horizontal shell layout that fills the host left panel (botPanel).
--- Sidebar rail on the left, a right column with header/content/footer.
+-- Compact single-column shell that preserves the game viewport.
 NexShellLayout < Panel
   layout:
-    type: horizontalBox
-
-NexShellRight < Panel
-  layout:
     type: verticalBox
 
-NexSidebar < Panel
-  width: 176
-  layout:
-    type: verticalBox
+NexContent < Panel
 
-NexSidebarItem < Button
-  width: 168
+NexEngineRow < Panel
   height: 26
   margin-left: 4
   margin-right: 4
   margin-top: 1
   margin-bottom: 1
-  text-align: left
+  layout:
+    type: horizontalBox
 
-NexHeader < Panel
-  height: 40
+NexEngineItem < UIItem
+  width: 24
+  height: 24
+  virtual: true
+  draggable: false
 
-NexContent < Panel
+NexCockpitFooter < Panel
+  height: 30
+  margin: 2
+  layout:
+    type: horizontalBox
 
 NexFooter < Panel
   height: 32

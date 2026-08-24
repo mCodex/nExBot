@@ -28,21 +28,23 @@ local function get(...)
 end
 
 local function invoke(fn, ...)
-  if type(fn) == "function" then
-    pcall(fn, ...)
-  end
+  if type(fn) ~= "function" then return false, "Action unavailable" end
+  local ok, err = pcall(fn, ...)
+  if not ok then return false, tostring(err) end
+  return true
 end
 
 local function toggle(moduleName)
   local M = get(moduleName)
-  if not M then return end
+  if not M then return false, "Action unavailable" end
   if M.isOn and M.isOn() then
-    invoke(M.setOff)
+    return invoke(M.setOff)
   elseif M.isOff and M.isOff() then
-    invoke(M.setOn)
+    return invoke(M.setOn)
   elseif M.setOn then
-    invoke(M.setOn)
+    return invoke(M.setOn)
   end
+  return false, "Action unavailable"
 end
 
 Actions.handlers = {
@@ -51,18 +53,53 @@ Actions.handlers = {
   toggle_healing = function() toggle("HealBot") end,
   toggle_looting = function()
     local T = get("TargetBot")
-    if T and T.setLootingEnabled then invoke(T.setLootingEnabled, not (T.isLootingEnabled and T.isLootingEnabled() or false)) end
+    if not T or not T.setLootingEnabled then return false, "Action unavailable" end
+    return invoke(T.setLootingEnabled, not (T.isLootingEnabled and T.isLootingEnabled() or false))
+  end,
+
+  pause_all = function()
+    local stopped = false
+    for _, moduleName in ipairs({ "CaveBot", "TargetBot", "HealBot" }) do
+      local M = get(moduleName)
+      if M and M.setOff then
+        local ok = invoke(M.setOff)
+        stopped = ok or stopped
+      end
+    end
+    local T = get("TargetBot")
+    if T and T.setLootingEnabled then
+      local ok = invoke(T.setLootingEnabled, false)
+      stopped = ok or stopped
+    end
+    if not stopped then return false, "Hunt engines unavailable" end
+    return true
+  end,
+
+  open_cave_editor = function()
+    local E = get("CaveBot", "Editor")
+    return invoke(E and E.show)
+  end,
+  open_target_editor = function()
+    local T = get("TargetBot")
+    return invoke(T and T.showCreatureEditor)
+  end,
+  open_heal_config = function()
+    local H = get("HealBot")
+    return invoke(H and H.show)
+  end,
+  open_loot_config = function()
+    local C = get("Containers")
+    return invoke(C and C.initSetupWindow)
+  end,
+  open_supply_config = function()
+    local S = get("Supplies")
+    return invoke(S and S.show)
   end,
 
   open_looting = function()
     local s = get("nExBot", "UI", "Shell")
     if s and s.select then s.select("looting") end
   end,
-  open_script_editor = function()
-    local E = get("IngameEditor")
-    if E and E.show then invoke(E.show) end
-  end,
-
   open_cavebot = function()
     local s = get("nExBot", "UI", "Shell")
     if s and s.select then s.select("cavebot") end
@@ -79,17 +116,9 @@ Actions.handlers = {
     local s = get("nExBot", "UI", "Shell")
     if s and s.select then s.select("intelligence") end
   end,
-  open_editor = function()
-    local T = get("TargetBot")
-    if T and T.showCreatureEditor then invoke(T.showCreatureEditor) end
-    local C = get("CaveBot")
-    if C and C.Editor and C.Editor.show then invoke(C.Editor.show) end
-  end,
-  open_config = function()
-    local H = get("HealBot")
-    if H and H.show then invoke(H.show) end
-    local S = get("Supplies")
-    if S and S.show then invoke(S.show) end
+  open_intelligence_window = function()
+    local I = get("nExBot", "TacticalIntelligence")
+    return invoke(I and I.showWindow)
   end,
   open_conditions = function()
     local C = get("Conditions")
@@ -97,15 +126,11 @@ Actions.handlers = {
   end,
   open_containers = function()
     local C = get("Containers")
-    if C and C.showSetup then invoke(C.showSetup) end
+    if C and C.initSetupWindow then invoke(C.initSetupWindow) end
   end,
   open_depositor = function()
     local D = get("DepositerConfig")
     if D and D.show then invoke(D.show) end
-  end,
-  open_macros = function()
-    local T = get("Tools")
-    if T and T.showMacros then invoke(T.showMacros) end
   end,
   open_dashboard = function()
     local s = get("nExBot", "UI", "Shell")
@@ -144,13 +169,17 @@ Actions.handlers = {
   end,
   open_script_editor = function()
     local E = get("IngameEditor")
-    if E and E.show then invoke(E.show) end
+    return invoke(E and E.show)
   end,
 }
 
 function Actions.run(id)
   local handler = Actions.handlers[id]
-  if handler then handler() end
+  if not handler then return false, "Action unavailable" end
+  local ok, result, reason = pcall(handler)
+  if not ok then return false, tostring(result) end
+  if result == false then return false, reason or "Action failed" end
+  return true
 end
 
 if nExBot then

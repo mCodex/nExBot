@@ -314,7 +314,6 @@ if rootWidget then
     healWindow.settings.list.Visible:setChecked(currentSettings.Visible)
     healWindow.settings.list.Cooldown:setChecked(currentSettings.Cooldown)
     healWindow.settings.list.Delay:setChecked(currentSettings.Delay)
-    healWindow.settings.list.MessageDelay:setChecked(currentSettings.MessageDelay)
     healWindow.settings.list.Interval:setChecked(currentSettings.Interval)
     healWindow.settings.list.Conditions:setChecked(currentSettings.Conditions)
   end

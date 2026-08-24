@@ -26,7 +26,20 @@ describe("intelligence OTClient UI bridge", function()
 
     assert.is_truthy(source:find("Panel", 1, true))
     assert.is_truthy(source:find("id: contentPanel", 1, true))
+    assert.is_truthy(source:find("ScrollablePanel", 1, true))
+    assert.is_truthy(source:find("vertical%-scrollbar: scroll"))
+    assert.is_truthy(source:find("id: statusHeader", 1, true))
+    assert.is_truthy(source:find("NexAiMetric", 1, true))
     assert.is_falsy(source:find("MultilineTextEdit", 1, true))
+  end)
+
+  it("indexes rendered widgets instead of recursively scanning for every value", function()
+    local file = assert(io.open("core/intelligence/ui/ui_bridge.lua", "r"))
+    local source = file:read("*a")
+    file:close()
+
+    assert.is_truthy(source:find("widgetsById", 1, true))
+    assert.is_falsy(source:find('panel:recursiveGetChildById(id)', 1, true))
   end)
 
   it("shows render failures in the window instead of leaving it blank", function()

@@ -1,0 +1,170 @@
+-- Compact, truthful read model for the primary hunt controls.
+
+local Components = nExBot and nExBot.UI and nExBot.UI["ui.components.components"]
+local Tokens = nExBot and nExBot.UI and nExBot.UI["ui.design_system.tokens"]
+local Actions = nExBot and nExBot.UI and nExBot.UI.Actions
+
+local Cockpit = {}
+
+local ENGINE_DEFS = {
+  { key = "cave", label = "Cave", itemId = 3003, toggleAction = "toggle_cavebot", editorAction = "open_cave_editor" },
+  { key = "target", label = "Target", itemId = 3155, toggleAction = "toggle_targetbot", editorAction = "open_target_editor" },
+  { key = "heal", label = "Heal", itemId = 23375, toggleAction = "toggle_healing", editorAction = "open_heal_config" },
+  { key = "loot", label = "Loot", itemId = 2854, toggleAction = "toggle_looting", editorAction = "open_loot_config" },
+}
+
+local function engineStatus(value)
+  if value == nil then return "UNKNOWN", "Unavailable" end
+  if value then return "ACTIVE", "On" end
+  return "DISABLED", "Off"
+end
+
+function Cockpit.viewModel(state)
+  state = state or {}
+  local engines = {}
+
+  for _, def in ipairs(ENGINE_DEFS) do
+    local status, statusText = engineStatus(state[def.key])
+    engines[#engines + 1] = {
+      id = def.key,
+      label = def.label,
+      itemId = def.itemId,
+      status = status,
+      statusText = statusText,
+      detail = state[def.key .. "Detail"] or "—",
+      toggleAction = def.toggleAction,
+      editorAction = def.editorAction,
+    }
+  end
+
+  local issues = state.issues or {}
+  return {
+    snapshot = {
+      revision = state.revision or 0,
+      character = state.character or "—",
+      profile = state.profile or "—",
+      engines = engines,
+      route = state.route or "—",
+      waypoint = state.waypoint or "—",
+      targetName = state.targetName or "—",
+      targetHp = state.targetHp,
+      hp = state.hp,
+      mana = state.mana,
+      xpHour = state.xpHour,
+      issues = issues,
+      attention = issues[1] and (issues[1].message or tostring(issues[1])) or "No issues",
+    },
+  }
+end
+
+local function availableState(module, method)
+  if not module or type(module[method]) ~= "function" then return nil end
+  local ok, value = pcall(module[method])
+  if not ok then return nil end
+  return value == true
+end
+
+local function call(object, method)
+  if not object or type(object[method]) ~= "function" then return nil end
+  local ok, value = pcall(object[method], object)
+  if ok then return value end
+  return nil
+end
+
+local function value(helper)
+  if type(helper) ~= "function" then return helper end
+  local ok, result = pcall(helper)
+  if ok then return result end
+  return nil
+end
+
+function Cockpit.statusProvider()
+  local player = player
+  local storage = storage
+  local caveConfig = storage and storage.cavebot
+  local targetConfig = storage and storage.targetbot
+  local target = TargetBot and value(TargetBot.getCurrentTarget)
+  local targetName = call(target, "getName") or (type(target) == "string" and target or nil)
+
+  return Cockpit.viewModel({
+    cave = availableState(CaveBot, "isOn"),
+    target = availableState(TargetBot, "isOn"),
+    heal = availableState(HealBot, "isOn"),
+    loot = availableState(TargetBot, "isLootingEnabled"),
+    caveDetail = caveConfig and caveConfig.selectedConfig,
+    targetDetail = targetConfig and targetConfig.selectedConfig,
+    healDetail = HealBot and HealBot.getActiveProfile and HealBot.getActiveProfile(),
+    lootDetail = "Containers",
+    character = call(player, "getName"),
+    profile = storage and storage.profileName,
+    route = caveConfig and caveConfig.selectedConfig,
+    waypoint = nExBot and nExBot.lastLabel,
+    targetName = targetName,
+    targetHp = call(target, "getHealthPercent"),
+    hp = call(player, "getHealthPercent") or value(hppercent),
+    mana = call(player, "getManaPercent") or value(manapercent),
+    xpHour = nExBot and nExBot.CaveBotData and nExBot.CaveBotData.xpPerHour,
+    issues = nExBot and nExBot.UI and nExBot.UI.Diagnostics and nExBot.UI.Diagnostics.currentIssues and nExBot.UI.Diagnostics.currentIssues() or {},
+  })
+end
+
+local function run(actionId, attention)
+  local ok, reason = Actions.run(actionId)
+  if not ok and attention then attention:setText(reason or "Action unavailable") end
+end
+
+function Cockpit.render(content)
+  local view = Cockpit.statusProvider().snapshot
+  Components.label(content, { id = "cockpitCharacter", text = view.character, textStyle = "windowTitle", color = Tokens.colors.text.primary })
+  Components.label(content, { id = "cockpitProfile", text = "Profile: " .. view.profile, textStyle = "metadata", color = Tokens.colors.text.muted })
+  Components.sectionHeader(content, { title = "Hunt systems" })
+
+  local attention
+  for _, engine in ipairs(view.engines) do
+    local engineRow = engine
+    local row = g_ui.createWidget("NexEngineRow", content)
+    row:setId(engineRow.id)
+    local item = g_ui.createWidget("NexEngineItem", row)
+    item:setId(engineRow.id .. "Item")
+    item:setItemId(engineRow.itemId)
+    item:setTooltip(engineRow.label)
+    Components.label(row, { id = engineRow.id .. "Label", text = engineRow.label, color = Tokens.colors.text.primary })
+    Components.label(row, { id = engineRow.id .. "Detail", text = engineRow.detail, textStyle = "metadata", color = Tokens.colors.text.muted })
+    Components.button(row, {
+      id = engineRow.toggleAction,
+      text = engineRow.statusText,
+      variant = engineRow.status == "ACTIVE" and "primary" or "ghost",
+      onClick = function() run(engineRow.toggleAction, attention) end,
+    })
+    Components.button(row, {
+      id = engineRow.editorAction,
+      text = "Edit",
+      variant = "ghost",
+      tooltip = engineRow.label .. " settings",
+      onClick = function() run(engineRow.editorAction, attention) end,
+    })
+  end
+
+  Components.sectionHeader(content, { title = "Now" })
+  local now = Components.card(content, { id = "now" })
+  Components.keyValueRow(now, { key = "Route", value = view.route .. " · " .. view.waypoint })
+  Components.keyValueRow(now, { key = "Target", value = view.targetName .. (view.targetHp and " " .. view.targetHp .. "%" or "") })
+  Components.keyValueRow(now, { key = "HP / MP", value = (view.hp or "—") .. "% / " .. (view.mana or "—") .. "%" })
+  Components.keyValueRow(now, { key = "XP/h", value = view.xpHour or "—" })
+
+  Components.sectionHeader(content, { title = "Attention" })
+  attention = Components.label(content, {
+    id = "attention",
+    text = view.attention,
+    textStyle = "helper",
+    color = #view.issues > 0 and Tokens.colors.warning or Tokens.colors.text.muted,
+  })
+end
+
+if nExBot then
+  nExBot.UI = nExBot.UI or {}
+  nExBot.UI.Cockpit = Cockpit
+  nExBot.UI["ui.modules.cockpit"] = Cockpit
+end
+
+return Cockpit

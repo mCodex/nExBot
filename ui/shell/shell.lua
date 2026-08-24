@@ -1,11 +1,7 @@
 --[[
-  BotShell — the nExBot product shell. Renders INTO the host client's left
-  bot panel (modules.game_bot.contentsPanel.botPanel), replacing the old
-  tab-fill navigation with a module sidebar. A floating-window fallback is
-  used only when the host panel is unavailable (e.g. tests).
-
-  Layout inside the left panel:
-    sidebar (module rail from ModuleRegistry) | header (profile/session) + content
+  BotShell — compact hunt cockpit rendered into the host client's left bot
+  panel. Advanced tools open from More or in their dedicated client windows.
+  A floating-window fallback is used only when the host panel is unavailable.
   Exactly one controller instance per process; opening twice returns the same
   shell. All delayed callbacks are generation-guarded through UiLifecycle.
 ]]
@@ -13,9 +9,6 @@
 local Lifecycle = (nExBot and nExBot.UI and nExBot.UI["ui.core.lifecycle"]) or (type(require) == "function" and require("ui.core.lifecycle"))
 local Components = (nExBot and nExBot.UI and nExBot.UI["ui.components.components"]) or (type(require) == "function" and require("ui.components.components"))
 local Tokens = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.tokens"]) or (type(require) == "function" and require("ui.design_system.tokens"))
-local Status = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.status"]) or (type(require) == "function" and require("ui.design_system.status"))
-local Density = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.density"]) or (type(require) == "function" and require("ui.design_system.density"))
-local Typography = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.typography"]) or (type(require) == "function" and require("ui.design_system.typography"))
 local Perf = (nExBot and nExBot.UI and nExBot.UI["ui.core.perf"]) or (type(require) == "function" and require("ui.core.perf"))
 
 local Shell = {}
@@ -25,12 +18,11 @@ local function registry()
   return nExBot.UI.ModuleRegistry
 end
 
-local function icons()
-  return nExBot.UI.IconRegistry
+local function cockpit()
+  return nExBot.UI.Cockpit
 end
 
--- Locate the host's left bot panel (contentsPanel.botPanel). The BotTabBar is
--- hidden because the module sidebar replaces it.
+-- Locate the host's left bot panel. The legacy BotTabBar is replaced by the cockpit.
 local function hostContentsPanel()
   local modulesTbl = modules
   if not modulesTbl or not modulesTbl.game_bot then return nil end
@@ -39,22 +31,45 @@ local function hostContentsPanel()
   return cp
 end
 
--- Hide the legacy tab UI instead of destroying it. The module engines (CaveBot,
--- TargetBot, ...) hold direct references to widgets inside those tab panels
--- (e.g. CaveBot.actionList = ui.list) and write to them every tick; destroying
--- them would dangle those references. Hiding keeps the engines running while
--- the shell becomes the visible surface. Returns true if any panel was hidden.
+-- Detach the legacy tab UI instead of destroying it. The module engines
+-- (CaveBot, TargetBot, ...) hold direct references to widgets inside those
+-- tab panels (e.g. CaveBot.actionList = ui.list) and write to them every
+-- tick; destroying (:destroy()) them would dangle those references. Removing
+-- them from the widget tree (:removeChild()) is safe -- it only unparents the
+-- widget, it does not destroy it -- and keeps the engines running while the
+-- shell becomes the visible surface.
+--
+-- This must be a real removal, not just setVisible(false): the host's
+-- UITabBar:selectTab (corelib/ui/uitabbar.lua) swaps tabs by checking
+-- contentWidget:getLastChild().isTab and only evicts that one panel. Once our
+-- shell is added as botPanel's new last child (not .isTab), a merely-hidden
+-- legacy tab panel is never evicted, so a later addChild for that same panel
+-- collides ("attempt to add a child again into a UIWidget"). Removing the
+-- children outright avoids the collision entirely and keeps this idempotent.
 local function hideLegacyTabs(host)
   if not host or not host.botPanel then return false end
   local hidden = false
-  for _, child in ipairs(host.botPanel:getChildren()) do
+  -- getChildren() returns the panel's live children array; removeChild()
+  -- mutates that same array in place, so removing while iterating it
+  -- directly would skip every other entry. Snapshot first, then remove.
+  local snapshot = {}
+  for i, child in ipairs(host.botPanel:getChildren()) do
+    snapshot[i] = child
+  end
+  for _, child in ipairs(snapshot) do
     if child ~= current and (not child:getId() or child:getId() ~= "NexBotShell") then
-      if child.setVisible then child:setVisible(false) end
+      if host.botPanel.removeChild then host.botPanel:removeChild(child) end
       hidden = true
     end
   end
-  if host.botTabs and host.botTabs.setVisible then
-    host.botTabs:setVisible(false)
+  if host.botTabs then
+    -- Belt-and-suspenders: OTClient's click-release path checks isEnabled()
+    -- and containsPoint(), never isVisible() -- so a tab button pressed just
+    -- before/while hiding can still fire onClick afterward. Disabling the
+    -- tab bar (cascades to its tab buttons) blocks that independently of the
+    -- removal above.
+    if host.botTabs.setVisible then host.botTabs:setVisible(false) end
+    if host.botTabs.setEnabled then host.botTabs:setEnabled(false) end
   end
   return hidden
 end
@@ -66,8 +81,6 @@ local function createShell(opts)
     root = opts.root,
     host = nil,        -- host contentsPanel when attached to the left bar
     window = nil,      -- floating window (fallback) or the root layout panel
-    sidebar = nil,
-    header = nil,
     content = nil,
     footer = nil,
     selectedId = nil,
@@ -83,8 +96,6 @@ local function createShell(opts)
   end
 
   function self:getWindow() return self.window end
-  function self:getSidebar() return self.sidebar end
-  function self:getHeader() return self.header end
   function self:getContent() return self.content end
   function self:getFooter() return self.footer end
   function self:selected() return self.selectedId end
@@ -96,50 +107,29 @@ local function createShell(opts)
   end
 
   local function buildShell(w)
-    -- Sidebar (left rail)
-    local sidebar = g_ui.createWidget("NexSidebar", w)
-    sidebar:setId("sidebar")
-    self.sidebar = sidebar
-    for _, module in ipairs(registry().list()) do
-      local item = g_ui.createWidget("NexSidebarItem", sidebar)
-      item:setId(module.id)
-      item:setText(module.label)
-      item:setColor(Tokens.colors.text.secondary)
-      item:setImageSource(icons().resolve(module.icon, 16))
-      item:setOnClick(function()
-        self:select(module.id)
-      end)
-    end
-
-    -- Right column: header / content / footer
-    local right = g_ui.createWidget("NexShellRight", w)
-    right:setId("right")
-
-    local header = g_ui.createWidget("NexHeader", right)
-    header:setId("header")
-    self.header = header
-    Components.label(header, "nExBot", { id = "brand", textStyle = "windowTitle", color = Tokens.colors.text.primary })
-    Components.label(header, "", { id = "profile", textStyle = "metadata", color = Tokens.colors.text.muted })
-    Components.statusBadge(header, { id = "session", status = "INFO", text = "…" })
-
-    local content = g_ui.createWidget("NexContent", right)
+    local content = g_ui.createWidget("NexContent", w)
     content:setId("content")
     self.content = content
 
-    local footer = g_ui.createWidget("NexFooter", right)
+    local footer = g_ui.createWidget("NexCockpitFooter", w)
     footer:setId("footer")
     self.footer = footer
-    Components.button(footer, { text = "Settings", id = "footerSettings", variant = "ghost" })
-    Components.button(footer, { text = "Close", id = "footerClose", variant = "ghost", onClick = function()
-      self:destroy()
+    Components.button(footer, { text = "Profile", id = "footerProfile", variant = "ghost", onClick = function() self:select("profiles") end })
+    Components.button(footer, { text = "Pause all", id = "pause_all", variant = "danger", onClick = function()
+      local ok, reason = nExBot.UI.Actions.run("pause_all")
+      if not ok then
+        local attention = self.content and self.content:recursiveGetChildById("attention")
+        if attention then attention:setText(reason or "Could not pause") end
+      end
     end })
+    Components.button(footer, { text = "•••", id = "footerMore", variant = "ghost", onClick = function() self:select("more") end })
   end
 
   function self:open()
     local host = hostContentsPanel()
     if host and host.botPanel then
       -- Attach directly into the host left panel. The legacy tab UI is hidden
-      -- (kept alive for the module engines) and the sidebar becomes the sole
+      -- (kept alive for the module engines) and the cockpit becomes the sole
       -- visible navigation surface.
       self.host = host
       self.panelMode = true
@@ -155,7 +145,7 @@ local function createShell(opts)
     -- Fallback: floating window (tests / host unavailable).
     local w = UI.createWindow("NexBotShell", self.root)
     w:setId("NexBotShell")
-    w:setWidth(Tokens.dimensions.sidebarWidth + 420)
+    w:setWidth(Tokens.dimensions.minWidth)
     w:setHeight(600)
     self.window = w
     buildShell(w)
@@ -165,71 +155,85 @@ local function createShell(opts)
 
   function self:select(id)
     if not self.active then return false end
-    local module = registry().get(id)
-    if not module then return false end
+    if id ~= "cockpit" and id ~= "more" and not registry().get(id) then return false end
     self.selectedId = id
-    -- highlight selected item, clear others
-    if self.sidebar then
-      for _, child in ipairs(self.sidebar:getChildren()) do
-        if child.getId then
-          child:setColor(child:getId() == id and Tokens.colors.accent.primary or Tokens.colors.text.secondary)
-        end
-      end
-    end
     self:renderCurrent()
     return true
   end
 
+  local function renderMore(content)
+    Components.label(content, { text = "More", id = "moreTitle", textStyle = "moduleTitle", color = Tokens.colors.text.primary })
+    local destinations = {
+      { id = "supplies", label = "Supplies", action = "open_supply_config" },
+      { id = "scripts", label = "Scripts", action = "open_script_editor" },
+      { id = "intelligence", label = "AI Intelligence", action = "open_intelligence_window" },
+      { id = "diagnostics", label = "Diagnostics" },
+      { id = "settings", label = "Settings" },
+    }
+    for _, destination in ipairs(destinations) do
+      local item = destination
+      Components.button(content, {
+        id = "more_" .. item.id,
+        text = item.label,
+        variant = "ghost",
+        onClick = function()
+          if item.action then
+            local ok, reason = nExBot.UI.Actions.run(item.action)
+            if not ok then
+              Components.inlineWarning(content, { id = "moreError", message = reason or "Window unavailable" })
+            end
+          else
+            self:select(item.id)
+          end
+        end,
+      })
+    end
+    Components.button(content, { id = "backToCockpit", text = "Back to hunt", variant = "primary", onClick = function() self:select("cockpit") end })
+  end
+
   function self:renderCurrent()
-    local module = currentModule()
-    if not module then return end
     if not self.active then return end
     if not self.content then return end
     Perf.begin("module_render")
-    -- clear previous module content
     self.content:destroyChildren()
-    if module.render then
+    local module = currentModule()
+    if self.selectedId == "cockpit" then
+      cockpit().render(self.content)
+    elseif self.selectedId == "more" then
+      renderMore(self.content)
+    elseif module and module.render then
       module.render(self, self.content, self.lifecycle)
-    else
+    elseif module then
       Components.emptyState(self.content, { message = module.label .. " has no page yet." })
     end
     Perf.end_("module_render")
   end
 
-  -- Tick callback used by the unified scheduler; generation-guarded.
-  -- Updates only the header status badge when the module's revision changed;
-  -- content is rebuilt only on select(). Unchanged state -> zero widget writes.
+  -- Tick callback used by the unified scheduler. Unchanged state causes no writes.
   function self:onTick()
     return self.lifecycle:guard(function()
-      local module = currentModule()
-      if not module then return end
-      if not self.active then return end
-      if not module.statusProvider then return end
-      local status = module.statusProvider()
-      local revision = type(status) == "table" and status.revision or 0
+      if self.selectedId ~= "cockpit" then return end
+      local view = cockpit().statusProvider().snapshot
+      local parts = {
+        tostring(view.character or ""), tostring(view.profile or ""), tostring(view.route or ""),
+        tostring(view.waypoint or ""), tostring(view.targetName or ""), tostring(view.targetHp or ""), tostring(view.hp or ""),
+        tostring(view.mana or ""), tostring(view.xpHour or ""), tostring(view.attention or ""),
+      }
+      for _, engine in ipairs(view.engines) do
+        parts[#parts + 1] = tostring(engine.status or "")
+        parts[#parts + 1] = tostring(engine.detail or "")
+      end
+      local revision = table.concat(parts, "|")
       if revision ~= self._statusRevision then
         self._statusRevision = revision
-        local header = status and status.header
-        if header then
-          self:setSession(header.status, header.statusText)
-        end
+        self:renderCurrent()
       end
     end)
   end
 
-  function self:setSession(status, text)
-    if not self.header then return end
-    local badge = self.header:recursiveGetChildById("session")
-    if badge then
-      badge:setText(text or status or "")
-      badge:setColor(Status.color(status))
-    end
-  end
-
-  function self:setProfile(name)
-    if not self.header then return end
-    local p = self.header:recursiveGetChildById("profile")
-    if p then p:setText(name or "") end
+  function self:tick()
+    self._tickCallback = self._tickCallback or self:onTick()
+    return self._tickCallback()
   end
 
   -- Re-attach hook for when the host framework re-runs (reload/game start):
@@ -265,8 +269,6 @@ local function createShell(opts)
     end
     self.host = nil
     self.window = nil
-    self.sidebar = nil
-    self.header = nil
     self.content = nil
     self.footer = nil
     self.selectedId = nil
@@ -298,11 +300,7 @@ function Shell.show(moduleId)
   shell:open()
   shell:raise()
   if moduleId then shell:select(moduleId) end
-  -- default to the first registered module so the shell never opens blank
-  if not shell:selected() then
-    local ids = nExBot.UI.ModuleRegistry.ids()
-    if ids and #ids > 0 then shell:select(ids[1]) end
-  end
+  if not shell:selected() then shell:select("cockpit") end
   return shell
 end
 

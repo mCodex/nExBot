@@ -2,6 +2,7 @@ TargetBot.Creature.edit = function(config, callback) -- callback = function(newC
   config = config or {}
 
   local editor = UI.createWindow('TargetBotCreatureEditorWindow')
+
   local values = {} -- (key, function returning value of key)
 
   editor.name:setText(config.name or "")

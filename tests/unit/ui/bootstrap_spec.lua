@@ -41,7 +41,9 @@ describe("ui bootstrap", function()
     assert.are_equal(1, Shell.count(), "shell should auto-open after bootstrap")
     assert.is_true(Shell.instance():isPanelMode(), "shell must attach to the host left bar")
     assert.are_equal("botPanel", Shell.instance():getWindow():getParent():getId())
-    assert.are_equal(11, Shell.instance():getSidebar():getChildCount())
+    assert.is_nil(Shell.instance():getWindow():recursiveGetChildById("sidebar"))
+    assert.are_equal("cockpit", Shell.instance():selected())
+    assert.is_truthy(Shell.instance():getContent():recursiveGetChildById("cave"))
 
     -- Re-opening does not duplicate the shell.
     Shell.show()

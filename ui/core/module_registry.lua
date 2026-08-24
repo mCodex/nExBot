@@ -1,10 +1,9 @@
 --[[
   ModuleRegistry — single source of truth for the nExBot UI shell navigation.
 
-  Drives the sidebar, labels, icons, ordering, availability, selected-state,
-  status badges, and tests. Modules register once at load time; the shell and
-  every navigation surface read from this registry. No hard-coded navigation
-  lists live elsewhere.
+  Drives advanced destinations, labels, ordering, availability, and
+  tests. The primary hunt cockpit is intentionally fixed; secondary module
+  pages register here for Shell.select and More navigation.
 
   Lookup is O(1) via a keyed map; ordering is derived from a sorted index.
 ]]
@@ -39,7 +38,6 @@ function Registry.register(desc)
   modules[id] = {
     id = id,
     label = desc.label,
-    icon = desc.icon or id,
     order = desc.order,
     sections = desc.sections or {},
     permissions = desc.permissions or {},
@@ -78,11 +76,6 @@ function Registry.sections(id)
   return m and m.sections or {}
 end
 
-function Registry.icon(id)
-  local m = modules[id]
-  return m and m.icon or nil
-end
-
 -- Returns a list of {message, id} errors. Empty list == valid.
 function Registry.validate()
   local errors = {}
@@ -93,9 +86,6 @@ function Registry.validate()
       errors[#errors + 1] = { id = id, message = "duplicate registration" }
     else
       seen[id] = true
-    end
-    if not m.icon then
-      errors[#errors + 1] = { id = id, message = "missing icon" }
     end
     if type(m.sections) ~= "table" then
       errors[#errors + 1] = { id = id, message = "sections must be a table" }

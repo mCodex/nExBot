@@ -3,8 +3,8 @@
 
   Each component is a factory: (parent, options) -> widget (or row handle).
   Components resolve colors/fonts/spacing through the design system and icons
-  through the IconRegistry. They never read domain globals; they receive
-  everything they need through options and callbacks.
+  They never read domain globals; they receive everything they need through
+  options and callbacks.
 
   Styles referenced here (NexButton, NexCard, ...) are declared in
   ui/shell/styles.otui, imported by the shell.
@@ -16,12 +16,6 @@ local Density = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.density"])
 local Status = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.status"]) or (type(require) == "function" and require("ui.design_system.status"))
 
 local C = {}
-
-local function resolveIcon(id, size)
-  local R = nExBot and nExBot.UI and nExBot.UI.IconRegistry
-  if R and R.resolve then return R.resolve(id or "", size or 16) end
-  return ""
-end
 
 local function create(parent, style, opts)
   opts = opts or {}
@@ -59,17 +53,8 @@ function C.button(parent, opts)
   local w = create(parent, opts.style or "NexButton", opts)
   w:setText(opts.text or "")
   w:setColor(variantColor[opts.variant or "primary"] or colors.accent.primary)
-  if opts.onClick then w:setOnClick(opts.onClick) end
+  if opts.onClick then w.onClick = opts.onClick end
   if opts.background then w:setBackgroundColor(opts.background) end
-  return w
-end
-
-function C.iconButton(parent, opts)
-  opts = opts or {}
-  local w = create(parent, opts.style or "NexIconButton", opts)
-  w:setImageSource(resolveIcon(opts.icon, opts.size or 16))
-  if opts.tooltip then w:setTooltip(opts.tooltip) end
-  if opts.onClick then w:setOnClick(opts.onClick) end
   return w
 end
 
@@ -199,7 +184,6 @@ end
 function C.searchToolbar(parent, opts)
   opts = opts or {}
   local w = create(parent, "NexToolbar", opts)
-  C.iconButton(w, { icon = "search", id = "searchIcon", size = 14 })
   local input = create(w, "BotTextEdit", { id = "search" })
   if opts.placeholder then input:setText(opts.placeholder) end
   input._onChange = opts.onChange

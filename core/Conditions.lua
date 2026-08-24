@@ -49,9 +49,7 @@ Panel
       utanaCost = 440,
       holdUtura = false,
       uturaType = "",
-      uturaCost = 100,
-      ignoreInPz = true,
-      stopHaste = false
+      uturaCost = 100
     }
   end
 
@@ -79,7 +77,6 @@ Panel
   if rootWidget then
     conditionsWindow = UI.createWindow('ConditionsWindow', rootWidget)
     conditionsWindow:hide()
-    
 
     conditionsWindow.onVisibilityChange = function(widget, visible)
       if not visible then
@@ -215,18 +212,6 @@ Panel
       widget:setChecked(config.holdUtura)
     end
 
-    conditionsWindow.Hold.IgnoreInPz:setChecked(config.ignoreInPz)
-    conditionsWindow.Hold.IgnoreInPz.onClick = function(widget)
-      config.ignoreInPz = not config.ignoreInPz
-      widget:setChecked(config.ignoreInPz)
-    end
-
-    conditionsWindow.Hold.StopHaste:setChecked(config.stopHaste)
-    conditionsWindow.Hold.StopHaste.onClick = function(widget)
-      config.stopHaste = not config.stopHaste
-      widget:setChecked(config.stopHaste)
-    end
-
     -- buttons
     conditionsWindow.closeButton.onClick = function(widget)
       conditionsWindow:hide()
@@ -253,16 +238,16 @@ Panel
       elseif config.cureElectrify and mana() >= config.electrifyCost and isEnergized() then say("exana vis") 
       end
     end
-    if (not config.ignoreInPz or not isInPz()) and config.holdUtura and mana() >= config.uturaCost and canCast(config.uturaType) and hppercent() < 90 then say(config.uturaType)
-    elseif (not config.ignoreInPz or not isInPz()) and config.holdUtana and mana() >= config.utanaCost and (not utanaCast or (now - utanaCast > 120000)) then say("utana vid") utanaCast = now
+    if not isInPz() and config.holdUtura and mana() >= config.uturaCost and canCast(config.uturaType) and hppercent() < 90 then say(config.uturaType)
+    elseif not isInPz() and config.holdUtana and mana() >= config.utanaCost and (not utanaCast or (now - utanaCast > 120000)) then say("utana vid") utanaCast = now
     end
   end
   
   -- Hold spells handler (50ms - high frequency for responsiveness)
   local function holdSpellsHandler()
     if not config.enabled then return end
-    if (not config.ignoreInPz or not isInPz()) and config.holdUtamo and mana() >= config.utamoCost and not hasManaShield() then say("utamo vita")
-    elseif ((not config.ignoreInPz or not isInPz()) and standTime() < 5000 and config.holdHaste and mana() >= config.hasteCost and not hasHaste() and not getSpellCoolDown(config.hasteSpell) and (not target() or not config.stopHaste or TargetBot.isCaveBotActionAllowed())) and standTime() < 3000 then say(config.hasteSpell)
+    if not isInPz() and config.holdUtamo and mana() >= config.utamoCost and not hasManaShield() then say("utamo vita")
+    elseif (not isInPz() and standTime() < 5000 and config.holdHaste and mana() >= config.hasteCost and not hasHaste() and not getSpellCoolDown(config.hasteSpell)) and standTime() < 3000 then say(config.hasteSpell)
     elseif config.cureParalyse and mana() >= config.paralyseCost and isParalyzed() and not getSpellCoolDown(config.paralyseSpell) then say(config.paralyseSpell)
     end
   end

@@ -1,0 +1,58 @@
+-- ============================================================================
+-- LEGACY WINDOW SKIN
+--
+-- Shared base styles for the pre-shell config windows (HealBot, Supplies,
+-- Conditions, AttackBot, CaveBot/TargetBot editors, Containers, Depositer,
+-- Equipper, ...) so they read as part of the same product as the new
+-- left-bar shell (ui/shell/) instead of stock OTClient chrome.
+--
+-- OTUI can't read ui/design_system/tokens.lua at parse time (Lua values
+-- aren't visible to the OTML parser), so these hex values are literal
+-- copies of Tokens.colors — keep both in sync by hand if either changes:
+--   background.base     #1a1d26   ->  window / panel canvas
+--   background.elevated  #222634   ->  inputs (TextEdit/ComboBox)
+--   background.interactive #2a2f40 ->  buttons
+--   border.default       #3a4154
+--   text.primary          #e8eaf0
+--   accent.primary        #4f9cf9
+--
+-- Derived classes only — MainWindow/Panel/Button/BotSwitch/TextEdit/ComboBox
+-- are native/shared client styles; reopening them directly would re-skin
+-- host UI outside nExBot (login screen, other mods, ...), so every legacy
+-- window opts in explicitly by inheriting from these Nex-prefixed classes
+-- instead (see core/*.otui / cavebot/*.otui / targetbot/*.otui: "< MainWindow"
+-- -> "< NexLegacyMainWindow", "< Panel" -> "< NexLegacyPanel").
+--
+-- Filename starts with "_" so it sorts (and therefore imports) before the
+-- window files that reference it within _Loader.lua's loadStyles() batch
+-- scan of core/*.otui — see _Loader.lua loadStyles(). Placed under core/
+-- rather than ui/legacy/ so it loads in that same early batch: ui/init.lua
+-- (which would otherwise be the natural home) only runs at Phase 12, well
+-- after HealBot.lua and friends have already created their windows.
+-- ============================================================================
+
+NexLegacyMainWindow < MainWindow
+  background-color: #1a1d26
+  color: #e8eaf0
+  font: verdana-11px-rounded
+
+NexLegacyPanel < Panel
+  background-color: #1a1d26
+
+NexLegacyButton < Button
+  background-color: #2a2f40
+  color: #e8eaf0
+  font: verdana-11px-rounded
+
+NexLegacySwitch < BotSwitch
+  color: #4f9cf9
+
+NexLegacyTextEdit < TextEdit
+  background-color: #222634
+  color: #e8eaf0
+  font: verdana-11px-rounded
+
+NexLegacyComboBox < ComboBox
+  background-color: #222634
+  color: #e8eaf0
+  font: verdana-11px-rounded

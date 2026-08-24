@@ -80,7 +80,6 @@ function Profiles.register()
   return Registry.register({
     id = "profiles",
     label = "Profiles",
-    icon = "profiles",
     order = 90,
     sections = SECTIONS,
     statusProvider = Profiles.statusProvider,

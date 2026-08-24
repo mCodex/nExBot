@@ -389,7 +389,7 @@ Conditions < Panel
       cell-spacing: 5
       num-columns: 2
 
-FriendHealer < MainWindow
+FriendHealer < NexLegacyMainWindow
   !text: tr('Friend Healer')
   size: 512 390
   padding-top: 30

@@ -1,4 +1,4 @@
-PushMaxWindow < MainWindow
+PushMaxWindow < NexLegacyMainWindow
   !text: tr('Pushmax Settings')
   size: 200 240
   @onEscape: self:hide()

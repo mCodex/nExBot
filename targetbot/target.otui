@@ -23,7 +23,7 @@ TargetBotDualLabel < Panel
     anchors.right: parent.right
     text-auto-resize: true
 
-TargetBotPanel < Panel
+TargetBotPanel < NexLegacyPanel
   layout:
     type: verticalBox
     fit-children: true

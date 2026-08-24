@@ -386,10 +386,6 @@ HealBotSettingsPanel < Panel
       id: Conditions
       text: Also check conditions from RL Tibia
 
-    SettingCheckBox
-      id: MessageDelay
-      text: Cooldown based on "Aaaah..." message
-
   VerticalSeparator
     anchors.top: prev.top
     anchors.bottom: prev.bottom
@@ -441,7 +437,7 @@ HealBotSettingsPanel < Panel
       text-auto-resize: true
       color: #ff4513
 
-HealWindow < MainWindow
+HealWindow < NexLegacyMainWindow
   !text: tr('Self Healer')
   size: 520 360
   @onEscape: self:hide()

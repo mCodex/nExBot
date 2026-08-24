@@ -134,7 +134,6 @@ function Diagnostics.register()
   return Registry.register({
     id = "diagnostics",
     label = "Diagnostics",
-    icon = "diagnostics",
     order = 110,
     sections = SECTIONS,
     statusProvider = Diagnostics.statusProvider,

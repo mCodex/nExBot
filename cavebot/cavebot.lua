@@ -10,6 +10,12 @@ local function getPS()
   return (nExBot and nExBot.PathStrategy) or PathStrategy
 end
 
+-- Pure candidate-selection logic for findReachableWaypoint, extracted so it's
+-- unit-testable without faking the OTClient runtime this file depends on
+-- (see cavebot/waypoint_search.lua).
+local WaypointSearch = (nExBot and nExBot.Nav and nExBot.Nav["cavebot.waypoint_search"])
+  or (type(require) == "function" and require("cavebot.waypoint_search"))
+
 -- Safe wrapper for CaveBot.resetWalking to prevent nil errors
 local function safeResetWalking()
   if CaveBot and CaveBot.resetWalking then
@@ -332,6 +338,19 @@ WaypointEngine = {
   lastRefocusTime   = 0,
   wasTargetBotBlocking = false,
   postCombatUntil      = 0,      -- tighter corridor check for 3s after combat ends
+
+  -- Reachability search bounds (findReachableWaypoint): real A* validation is
+  -- expensive, so it's capped by a work budget rather than a fixed rank
+  -- cutoff -- candidates past the budget are left unvalidated and skipped,
+  -- never blindly trusted by distance (that was the old behavior and picked
+  -- unreachable WPs when they happened to rank just past the cutoff).
+  PATH_VALIDATION_BUDGET = 12,
+  -- Cross-floor fallback: how many floors above/below to consider, ordered
+  -- nearest-|Δz|-first. Each candidate floor is still only distance-ranked
+  -- (no cross-floor A*, since reaching another floor requires an actual
+  -- stair/rope transition this engine doesn't model as a graph) but the
+  -- search is no longer limited to exactly one floor up or down.
+  MAX_FLOOR_SEARCH_RADIUS = 3,
 
   -- Performance: avoid redundant UI lookups
   tickCount = 0,
@@ -1503,64 +1522,51 @@ findReachableWaypoint = function(playerPos, options)
     return a.index < b.index
   end)
 
-  -- Path-validate top candidates (max 5 strict A* calls, bounded cost)
-  -- This prevents selecting WPs behind walls during recovery.
-  local PATH_VALIDATE_COUNT = 5
-  local PROXIMITY_GUARANTEE = 3
-  local validated = {}
-
-  for rank, c in ipairs(candidates) do
-    if rank > maxCandidates then break end
-
-    -- Proximity guarantee: always validate the 3 closest regardless of maxDist
-    local shouldValidate = (rank <= PROXIMITY_GUARANTEE) or c.withinRange
-    if not shouldValidate then goto skip_candidate end
-
-    -- Path validation: strict findPath (no ignoreNonPathable).
-    -- Generous maxSteps (100) accounts for obstacle detours that make
-    -- the real path 2-5x longer than Chebyshev distance.
-    local ps = getPS()
-    if rank <= PATH_VALIDATE_COUNT and ps and ps.findPath then
+  -- Path-validate candidates nearest-first until either a real cap on A*
+  -- work is hit or every in-range candidate has been checked. Unlike the
+  -- old fixed "validate top 5, trust distance beyond that" cutoff, nothing
+  -- past the budget is accepted on distance alone -- an unvalidated
+  -- candidate is simply not a candidate, so a farther-but-actually-reachable
+  -- WP can still be found once nearer ones fail real path validation.
+  local ps = getPS()
+  local chosen = WaypointSearch.selectReachable(candidates, {
+    proximityGuarantee = 3,
+    budget = WaypointEngine.PATH_VALIDATION_BUDGET,
+    maxCandidates = maxCandidates,
+    validate = (ps and ps.findPath) and function(c)
+      -- Strict findPath (no ignoreNonPathable). Generous maxSteps (100)
+      -- accounts for obstacle detours that make the real path 2-5x longer
+      -- than Chebyshev distance.
       local path = ps.findPath(playerPos, c, {
         maxSteps = math.min(math.floor(c.dist * 3) + 10, 100),
       })
-      if path and #path > 0 then
-        validated[#validated + 1] = c
-      end
-    else
-      -- Beyond validation budget: accept by distance (legacy behavior)
-      if c.withinRange then
-        validated[#validated + 1] = c
-      end
-    end
-    ::skip_candidate::
-  end
+      return path and #path > 0
+    end or nil,
+  })
+  if chosen then return chosen.child, chosen.index end
 
-  -- Return the nearest validated candidate (prefer goto WPs)
-  if #validated > 0 then
-    -- Prefer goto WPs over other types for recovery (goto WPs are actionable)
-    for _, v in ipairs(validated) do
-      if v.isGoto then return v.child, v.index end
-    end
-    return validated[1].child, validated[1].index
-  end
-
-  -- Cross-floor fallback
+  -- Cross-floor fallback: scan floors nearest-|Δz|-first, out to
+  -- MAX_FLOOR_SEARCH_RADIUS, instead of only ever checking one floor up or
+  -- down. There's no cross-floor A* here (reaching another floor needs an
+  -- actual stair/rope transition, which executeRecovery's minimap scan
+  -- handles separately) -- but widening which floors are even considered,
+  -- and scoring candidates the same way as same-floor ones (distance +
+  -- Intelligence penalty, goto WPs preferred), means a reachable waypoint
+  -- two or three floors away is no longer invisible to this search.
   if searchAllFloors then
-    for _, floorZ in ipairs({playerZ - 1, playerZ + 1}) do
-      if waypointCacheFloors[floorZ] then
-        local best, bestDist, bestIdx = nil, math.huge, 0
-        for i, wp in pairs(waypointPositionCache) do
-          if wp.z == floorZ and not isWaypointBlacklisted(wp.child) then
-            local d = chebyshevDist(playerPos, wp)
-            if d < bestDist then
-              best, bestDist, bestIdx = wp.child, d, i
-            end
-          end
-        end
-        if best then return best, bestIdx end
+    local candidatesByFloor = {}
+    for i, wp in pairs(waypointPositionCache) do
+      if waypointCacheFloors[wp.z] and wp.z ~= playerZ and not isWaypointBlacklisted(wp.child) then
+        local d = chebyshevDist(playerPos, wp)
+        local score = d + (nExBot.Intelligence and nExBot.Intelligence.navigationPenalty and nExBot.Intelligence.navigationPenalty(wp, nil, d) or 0)
+        candidatesByFloor[wp.z] = candidatesByFloor[wp.z] or {}
+        local list = candidatesByFloor[wp.z]
+        list[#list + 1] = { index = i, child = wp.child, isGoto = wp.isGoto, score = score }
       end
     end
+    local floorOrder = WaypointSearch.floorSearchOrder(playerZ, WaypointEngine.MAX_FLOOR_SEARCH_RADIUS)
+    local crossFloor = WaypointSearch.selectCrossFloor(floorOrder, candidatesByFloor)
+    if crossFloor then return crossFloor.child, crossFloor.index end
   end
 
   return nil, nil

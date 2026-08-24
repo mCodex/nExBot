@@ -70,7 +70,6 @@ function Settings.register()
   return Registry.register({
     id = "settings",
     label = "Settings",
-    icon = "settings",
     order = 100,
     sections = SECTIONS,
     statusProvider = Settings.statusProvider,

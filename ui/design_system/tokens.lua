@@ -10,34 +10,34 @@ local version = 1
 
 local colors = {
   background = {
-    canvas       = "#12141a",
-    base         = "#1a1d26",
-    elevated     = "#222634",
-    interactive  = "#2a2f40",
-    selected     = "#33405e",
+    canvas       = "#20201e",
+    base         = "#292927",
+    elevated     = "#333331",
+    interactive  = "#3b3b39",
+    selected     = "#4a4538",
   },
   border = {
-    subtle  = "#2c3140",
-    default = "#3a4154",
-    strong  = "#4a5268",
+    subtle  = "#383836",
+    default = "#4a4a47",
+    strong  = "#6b5b35",
   },
   text = {
-    primary   = "#e8eaf0",
-    secondary = "#b8bdc9",
-    muted     = "#7a8092",
+    primary   = "#d8c89c",
+    secondary = "#b8aa82",
+    muted     = "#81785f",
   },
   accent = {
-    primary = "#4f9cf9",
-    hover   = "#6fb0fb",
+    primary = "#c49a4a",
+    hover   = "#d4ad61",
   },
-  success = "#4ade80",
-  warning = "#fbbf24",
-  danger  = "#f87171",
-  info    = "#38bdf8",
-  active  = "#4ade80",
-  paused  = "#fbbf24",
-  disabled = "#5a5f6e",
-  degraded = "#c084fc",
+  success = "#6fa85a",
+  warning = "#c49a4a",
+  danger  = "#c45b4d",
+  info    = "#8ea7a0",
+  active  = "#6fa85a",
+  paused  = "#c49a4a",
+  disabled = "#686657",
+  degraded = "#aa7f58",
 }
 
 local spacing = { 2, 4, 6, 8, 12, 16, 20, 24 }
@@ -45,8 +45,6 @@ local spacing = { 2, 4, 6, 8, 12, 16, 20, 24 }
 local radii = { sm = 2, md = 4, lg = 6 }
 local borders = { subtle = 1, default = 1, strong = 2 }
 local dimensions = {
-  sidebarWidth = 176,
-  headerHeight = 40,
   footerHeight = 32,
   minWidth = 320,
   minHeight = 240,

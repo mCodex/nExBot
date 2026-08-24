@@ -16,6 +16,7 @@ local function fresh()
   dofile("ui/core/actions.lua")
   dofile("ui/components/components.lua")
   dofile("ui/modules/page.lua")
+  dofile("ui/modules/cockpit.lua")
   dofile("ui/core/module_registry.lua")
   for _, n in ipairs({
     "dashboard", "cavebot", "targetbot", "healing", "looting", "supplies",
@@ -40,24 +41,59 @@ describe("BotShell host integration", function()
     assert.is_false(shell:getWindow():getStyle() == "MainWindow", "must not create a floating window")
     local cp = modules.game_bot.contentsPanel
     assert.are_equal("botPanel", shell:getWindow():getParent():getId())
-    assert.is_truthy(shell:getSidebar():recursiveGetChildById("dashboard"))
+    assert.are_equal("cockpit", shell:selected())
+    assert.is_truthy(shell:getContent():recursiveGetChildById("cave"))
     shell:destroy()
   end)
 
-  it("hides legacy tab UI but keeps it alive for module engines", function()
+  it("detaches legacy tab UI but keeps it alive for module engines", function()
     local cp = modules.game_bot.contentsPanel
     local legacy = g_ui.createWidget("BotPanel", cp.botPanel)
     legacy:setId("tabPanel")
-    assert.is_true(legacy:isVisible())
+    assert.are_equal(cp.botPanel, legacy:getParent())
     local shell = Shell.show()
-    -- the legacy panel is hidden (not destroyed) so CaveBot/TargetBot engines
-    -- keep their widget references valid
-    assert.is_false(legacy:isVisible(), "legacy tab UI must be hidden")
+    -- the legacy panel is removed from the tree (not destroyed) so
+    -- CaveBot/TargetBot engines keep their widget references valid, and so
+    -- UITabBar:selectTab can never find it still parented and collide on a
+    -- later addChild ("attempt to add a child again into a UIWidget")
+    assert.is_nil(legacy:getParent(), "legacy tab UI must be detached from botPanel")
     assert.is_false(legacy:isDestroyed(), "legacy tab UI must stay alive")
     assert.is_true(shell:getWindow():isVisible(), "shell layout must be visible")
     shell:destroy()
     -- after destroy, the legacy panel is still alive
     assert.is_false(legacy:isDestroyed())
+  end)
+
+  it("botPanel has no leftover legacy children once the shell attaches", function()
+    local cp = modules.game_bot.contentsPanel
+    local legacyA = g_ui.createWidget("BotPanel", cp.botPanel)
+    legacyA:setId("tabPanelA")
+    local legacyB = g_ui.createWidget("BotPanel", cp.botPanel)
+    legacyB:setId("tabPanelB")
+    local shell = Shell.show()
+    local children = cp.botPanel:getChildren()
+    assert.are_equal(1, #children, "botPanel must contain only the shell layout")
+    assert.are_equal("NexBotShell", children[1]:getId())
+    shell:destroy()
+  end)
+
+  it("disables the legacy tab bar so a stray click can't reach it", function()
+    local cp = modules.game_bot.contentsPanel
+    assert.is_true(cp.botTabs:isEnabled())
+    local shell = Shell.show()
+    assert.is_false(cp.botTabs:isEnabled(), "legacy tab bar must be disabled once the shell owns the panel")
+    assert.is_false(cp.botTabs:isVisible())
+    shell:destroy()
+  end)
+
+  it("re-hiding on setupHostHooks stays idempotent and does not re-add removed children", function()
+    local cp = modules.game_bot.contentsPanel
+    local shell = Shell.show()
+    shell:setupHostHooks()
+    local children = cp.botPanel:getChildren()
+    assert.are_equal(1, #children, "repeated hide passes must not duplicate or re-add anything")
+    assert.are_equal("NexBotShell", children[1]:getId())
+    shell:destroy()
   end)
 
   it("single instance is shared between opens", function()
@@ -68,11 +104,13 @@ describe("BotShell host integration", function()
     s2:destroy()
   end)
 
-  it("module switching renders into the shell content panel", function()
+  it("More opens advanced modules and returns to the cockpit", function()
     local shell = Shell.show()
-    shell:select("cavebot")
-    assert.are_equal("cavebot", shell:selected())
-    assert.is_true(shell:getContent():getChildCount() > 0)
+    shell:select("more")
+    assert.are_equal("more", shell:selected())
+    assert.is_truthy(shell:getContent():recursiveGetChildById("more_diagnostics"))
+    shell:getContent():recursiveGetChildById("backToCockpit"):click()
+    assert.are_equal("cockpit", shell:selected())
     shell:destroy()
   end)
 

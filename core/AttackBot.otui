@@ -481,16 +481,8 @@ SettingsPanel < Panel
     margin-left: 5
 
   CheckBox
-    id: Rotate
-    anchors.top: Kills.bottom
-    anchors.left: Kills.left
-    margin-top: 8
-    width: 220
-    text: Turn to side with most monsters
-
-  CheckBox
     id: Cooldown
-    anchors.top: prev.bottom
+    anchors.top: Kills.bottom
     anchors.left: prev.left
     margin-top: 8
     width: 220
@@ -549,7 +541,7 @@ SettingsPanel < Panel
     focusable: true 
     margin-left: 5
 
-AttackBotWindow < MainWindow
+AttackBotWindow < NexLegacyMainWindow
   size: 535 300
   padding: 15
   text: AttackBot v2

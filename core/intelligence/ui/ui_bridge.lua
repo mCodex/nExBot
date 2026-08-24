@@ -4,6 +4,8 @@ local sections = {
   "Overview", "Live Decisions", "Monsters", "Hunt Performance", "Learning", "Diagnostics",
 }
 
+local nowMs = (nExBot.Shared and nExBot.Shared.nowMs) or function() return os.time() * 1000 end
+
 local function formatNumber(value)
   value = tonumber(value) or 0
   return tostring(math.floor(value + 0.5))
@@ -41,16 +43,14 @@ local function limited(items, limit)
   return result
 end
 
-local nowMs = (nExBot.Shared and nExBot.Shared.nowMs) or function() return os.time() * 1000 end
+local widgetsById = {}
 
-local function label(panel, id, text)
-  local widget = panel:recursiveGetChildById(id)
+local function label(panel, id, text, style)
+  local widget = widgetsById[id]
   if not widget then
-    widget = g_ui.createWidget("Label", panel)
+    widget = g_ui.createWidget(style or "NexAiMetric", panel)
     widget:setId(id)
-    widget:setFont("verdana-11px-monochrome")
-    widget:setColor("#c0c0c0")
-    widget:setMarginTop(1)
+    widgetsById[id] = widget
   end
   if widget:getText() ~= text then
     widget:setText(text)
@@ -59,11 +59,7 @@ local function label(panel, id, text)
 end
 
 local function heading(panel, id, text)
-  local widget = label(panel, id, text)
-  widget:setColor("#ffcc00")
-  widget:setMarginTop(6)
-  widget:setFont("verdana-11px-monochrome")
-  return widget
+  return label(panel, id, text, "NexAiHeading")
 end
 
 local function clearPanel(panel)
@@ -71,6 +67,7 @@ local function clearPanel(panel)
   for i = #children, 1, -1 do
     children[i]:destroy()
   end
+  widgetsById = {}
 end
 
 local function hasData(view)
@@ -87,7 +84,7 @@ local function renderOverview(view, panel)
   local p = view.pipeline or {}
   heading(panel, "h_overview", "Session Overview")
   label(panel, "r_lifecycle", "Session: " .. tostring(o.lifecycle or "stopped"))
-  label(panel, "r_elapsed", "Elapsed: " .. formatDuration(s.elapsedMs or o.lastSeenAt or 0))
+  label(panel, "r_elapsed", "Elapsed: " .. formatDuration(s.elapsedMs or 0))
   label(panel, "r_xp", "XP: " .. formatNumber(o.xpGained or 0) .. " (" .. formatNumber(o.xpPerHour or 0) .. "/h)")
   label(panel, "r_kills", "Kills: " .. formatNumber(o.kills or 0) .. " (" .. formatNumber(o.killsPerHour or 0) .. "/h)")
   label(panel, "r_target", "Target: " .. tostring(view.targeting and view.targeting.currentTarget and view.targeting.currentTarget.name or "none"))
@@ -123,8 +120,7 @@ local function renderMonsters(view, panel)
   label(panel, "r_profiles", "Profiles: " .. formatNumber(summary.persistedProfiles or 0))
   if m.profiles and #m.profiles > 0 then
     for i, profile in ipairs(limited(m.profiles, 10)) do
-      local elapsed = math.max(0, nowMs() - (profile.lastSeenAt or 0))
-      label(panel, "mp_" .. i, tostring(profile.displayName or profile.monsterKey or "?") .. " — " .. tostring(profile.state or "NO_DATA") .. " (" .. formatNumber(profile.samples or 0) .. " samples, conf " .. string.format("%.2f", tonumber(profile.confidence) or 0) .. ", seen " .. formatDuration(elapsed) .. " ago)")
+      label(panel, "mp_" .. i, tostring(profile.displayName or profile.monsterKey or "?") .. " — " .. tostring(profile.state or "NO_DATA") .. " (" .. formatNumber(profile.samples or 0) .. " samples, conf " .. string.format("%.2f", tonumber(profile.confidence) or 0) .. ", seen " .. timeAgo(profile.lastSeenAt) .. ")")
     end
   end
 end
@@ -142,7 +138,6 @@ local function renderHunt(view, panel)
   label(panel, "r_healing", "Healing done: " .. formatNumber(h.healingDone or 0))
   label(panel, "r_survivability", "Survivability: " .. formatNumber(h.survivabilityIndex or 0) .. "%")
   label(panel, "r_near_death", "Near-death events: " .. formatNumber(h.nearDeathCount or 0))
-  label(panel, "", "")
   label(panel, "r_hp_pots", "HP potions: " .. formatNumber(h.hpPotions or 0))
   label(panel, "r_mana_pots", "Mana potions: " .. formatNumber(h.manaPotions or 0))
   label(panel, "r_runes", "Runes: " .. formatNumber(h.runes or 0))
@@ -207,7 +202,7 @@ if not content then
   return
 end
 
-local window, contentPanel, lastSection, selected = nil, nil, nil, sections[1]
+local window, contentPanel, statusMode, statusHealth, statusTarget, lastSection, selected = nil, nil, nil, nil, nil, nil, sections[1]
 local ready = false
 
 local function init()
@@ -221,6 +216,9 @@ local function init()
     end
     window = w
     contentPanel = window:recursiveGetChildById("contentPanel")
+    statusMode = window:recursiveGetChildById("statusMode")
+    statusHealth = window:recursiveGetChildById("statusHealth")
+    statusTarget = window:recursiveGetChildById("statusTarget")
   end)
 
   if not ok then
@@ -258,6 +256,12 @@ local function render()
       platform = "desktop",
       touch = false,
     }) or {}
+    local overview = view.overview or {}
+    local pipeline = view.pipeline or {}
+    local targeting = view.targeting or {}
+    statusMode:setText("AI  " .. tostring(overview.lifecycle or "idle"))
+    statusHealth:setText("Pipeline  " .. tostring(overview.pipelineHealth or pipeline.health or "unknown"))
+    statusTarget:setText("Target  " .. tostring(targeting.currentTarget and targeting.currentTarget.name or "none"))
     local renderer = renderers[currentSection]
     if renderer then
       renderer(view, contentPanel)
