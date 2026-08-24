@@ -15,6 +15,7 @@ local function fresh()
   dofile("ui/modules/page.lua")
   dofile("ui/modules/cockpit.lua")
   local Registry = dofile("ui/core/module_registry.lua")
+  dofile("ui/modules/workflows.lua")
   for _, n in ipairs({ "profiles", "settings", "diagnostics" }) do
     dofile("ui/modules/" .. n .. ".lua")
   end
@@ -53,6 +54,19 @@ describe("shell as primary surface", function()
     assert.is_nil(shell:getWindow():recursiveGetChildById("sidebar"))
     shell:getFooter():recursiveGetChildById("footerMore"):click()
     assert.are_equal("more", shell:selected())
+    shell:destroy()
+  end)
+
+  it("opens embedded workflows from the hunt rail and returns with Back", function()
+    local Shell = dofile("ui/shell/shell.lua")
+    local shell = Shell.show()
+
+    shell:getContent():recursiveGetChildById("caveInfo"):click()
+    assert.are_equal("cavebot", shell:current())
+    assert.is_truthy(shell:getContent():recursiveGetChildById("pageTitle"))
+
+    shell:getWindow():recursiveGetChildById("shellBack"):click()
+    assert.are_equal("cockpit", shell:current())
     shell:destroy()
   end)
 

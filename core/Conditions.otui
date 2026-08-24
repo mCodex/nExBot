@@ -382,7 +382,7 @@ HoldConditions < Panel
     width: 100
     font: verdana-11px-rounded
 
-ConditionsWindow < NexLegacyMainWindow
+ConditionsWindow < MainWindow
   !text: tr('Condition Manager')
   size: 445 280
   @onEscape: self:hide()

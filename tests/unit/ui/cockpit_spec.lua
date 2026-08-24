@@ -25,7 +25,7 @@ describe("Hunt cockpit", function()
     assert.are_same({ "toggle_cavebot", "toggle_targetbot", "toggle_healing", "toggle_looting" }, {
       engines[1].toggleAction, engines[2].toggleAction, engines[3].toggleAction, engines[4].toggleAction,
     })
-    assert.are_same({ "open_cave_editor", "open_target_editor", "open_heal_config", "open_loot_config" }, {
+    assert.are_same({ "open_cavebot", "open_targetbot", "open_healing", "open_looting" }, {
       engines[1].editorAction, engines[2].editorAction, engines[3].editorAction, engines[4].editorAction,
     })
     assert.are_same({ 3003, 3155, 23375, 2854 }, {

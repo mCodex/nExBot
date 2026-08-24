@@ -43,7 +43,7 @@ ContainerEntry < Label
     width: 16
     height: 16
 
-ContainerSetupWindow < NexLegacyMainWindow
+ContainerSetupWindow < MainWindow
   !text: tr('Container Setup')
   size: 550 220
   @onEscape: self:hide()

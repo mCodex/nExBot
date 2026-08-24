@@ -61,7 +61,7 @@ TargetBotCreatureEditorCheckBox < BotSwitch
   height: 20
   margin-top: 7
 
-TargetBotCreatureEditorWindow < NexLegacyMainWindow
+TargetBotCreatureEditorWindow < MainWindow
   text: TargetBot creature editor
   width: 600
   height: 425

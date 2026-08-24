@@ -31,6 +31,7 @@ do
     "ui.shell.shell",
     "ui.modules.page",
     "ui.modules.cockpit",
+    "ui.modules.workflows",
     "ui.modules.profiles",
     "ui.modules.settings",
     "ui.modules.diagnostics",

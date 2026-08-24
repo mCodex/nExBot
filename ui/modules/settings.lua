@@ -42,11 +42,7 @@ function Settings.viewModel(state)
   }
 
   vm:setSections(sections)
-  vm:setActions({
-    { id = "density_default", label = "Default density" },
-    { id = "density_compact", label = "Compact density" },
-    { id = "density_comfortable", label = "Comfortable density" },
-  })
+  vm:setActions({})
   vm:commit()
   return vm
 end

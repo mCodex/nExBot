@@ -1,4 +1,4 @@
-CaveBotConfigPanel < NexLegacyPanel
+CaveBotConfigPanel < Panel
   id: cavebotEditor
   visible: false
   

@@ -13,6 +13,7 @@ local function fresh()
   dofile("ui/components/components.lua")
   dofile("ui/modules/page.lua")
   local Registry = dofile("ui/core/module_registry.lua")
+  dofile("ui/modules/workflows.lua")
   for _, n in ipairs({ "profiles", "settings", "diagnostics" }) do
     dofile("ui/modules/" .. n .. ".lua")
   end

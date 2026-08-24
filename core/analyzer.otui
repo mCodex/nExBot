@@ -414,7 +414,7 @@ BossTracker < MiniWindow
     SearchPanel
       id: search
 
-FeaturesWindow < NexLegacyMainWindow
+FeaturesWindow < MainWindow
   id: FeaturesWindow
   size: 250 370
   padding: 15

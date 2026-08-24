@@ -62,7 +62,7 @@ ExtrasCheckBox < BotSwitch
   height: 20
   margin-top: 7
 
-ExtrasWindow < NexLegacyMainWindow
+ExtrasWindow < MainWindow
   !text: tr('Extras')
   size: 440 360
   padding: 25

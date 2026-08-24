@@ -58,6 +58,26 @@ NexContent < Panel
     type: verticalBox
     fit-children: true
 
+NexShellHeader < Panel
+  height: 28
+
+NexHeaderButton < Button
+  width: 26
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+
+NexHeaderHome < Button
+  width: 42
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
+NexShellTitle < Label
+  anchors.left: shellBack.right
+  anchors.right: shellHome.left
+  anchors.verticalCenter: parent.verticalCenter
+  margin-left: 4
+  margin-right: 4
+
 NexEngineRow < Panel
   height: 34
   margin-left: 4

@@ -244,7 +244,7 @@ ComboActions < Panel
     text-wrap: true
     multiline: true
 
-ComboWindow < NexLegacyMainWindow
+ComboWindow < MainWindow
   !text: tr('Combo Options')
   size: 480 280
   @onEscape: self:hide()

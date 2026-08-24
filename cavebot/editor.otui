@@ -1,7 +1,7 @@
 CaveBotEditorButton < Button
 
 
-CaveBotEditorPanel < NexLegacyPanel
+CaveBotEditorPanel < Panel
   id: cavebotEditor
   visible: false
   layout:

@@ -13,7 +13,7 @@ local function fresh()
   dofile("ui/components/components.lua")
   dofile("ui/modules/page.lua")
   local Registry = dofile("ui/core/module_registry.lua")
-  -- register all modules (same order as ui/init.lua)
+  dofile("ui/modules/workflows.lua")
   local names = { "profiles", "settings", "diagnostics" }
   for _, n in ipairs(names) do
     dofile("ui/modules/" .. n .. ".lua")
@@ -29,7 +29,7 @@ describe("module registry integration", function()
   end)
 
   it("registers all modules exactly once", function()
-    assert.are_equal(3, Registry.count())
+    assert.are_equal(9, Registry.count())
     local errors = Registry.validate()
     assert.are_equal(0, #errors)
   end)
@@ -41,13 +41,14 @@ describe("module registry integration", function()
       assert.is_nil(seen[id], "duplicate id " .. id)
       seen[id] = true
     end
-    assert.are_equal(3, #ids)
+    assert.are_equal(9, #ids)
   end)
 
   it("module order is deterministic", function()
     local ids = Registry.ids()
     assert.same({
-      "profiles", "settings", "diagnostics",
+      "cavebot", "targetbot", "healing", "looting", "supplies",
+      "intelligence", "profiles", "settings", "diagnostics",
     }, ids)
   end)
 

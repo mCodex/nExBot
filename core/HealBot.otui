@@ -437,7 +437,7 @@ HealBotSettingsPanel < Panel
       text-auto-resize: true
       color: #ff4513
 
-HealWindow < NexLegacyMainWindow
+HealWindow < MainWindow
   !text: tr('Self Healer')
   size: 520 360
   @onEscape: self:hide()

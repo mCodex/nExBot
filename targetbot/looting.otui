@@ -1,4 +1,4 @@
-TargetBotLootingPanel < NexLegacyPanel
+TargetBotLootingPanel < Panel
   layout:
     type: verticalBox
     fit-children: true

@@ -47,6 +47,39 @@ describe("BotShell", function()
     assert.is_truthy(shell:getContent():recursiveGetChildById("cave"))
   end)
 
+  it("navigates with browser-style history and home", function()
+    local Registry = nExBot.UI.ModuleRegistry
+    Registry.register({ id = "profiles", label = "Profiles", order = 10, render = function() end })
+    Registry.register({ id = "diagnostics", label = "Diagnostics", order = 20, render = function() end })
+    local shell = Shell.new({ root = _G.g_ui.createWidget("Root", nil) })
+    shell:open()
+
+    shell:home()
+    shell:push("profiles")
+    shell:push("diagnostics")
+    assert.are_equal("diagnostics", shell:current())
+    assert.is_true(shell:canGoBack())
+
+    assert.is_true(shell:back())
+    assert.are_equal("profiles", shell:current())
+    shell:home()
+    assert.are_equal("cockpit", shell:current())
+    assert.is_false(shell:canGoBack())
+  end)
+
+  it("renders native header controls and updates the page title", function()
+    local Registry = nExBot.UI.ModuleRegistry
+    Registry.register({ id = "profiles", label = "Profiles", order = 10, render = function() end })
+    local shell = Shell.new({ root = _G.g_ui.createWidget("Root", nil) })
+    shell:open()
+    shell:home()
+    shell:push("profiles")
+
+    assert.are_equal("Profiles", shell:getWindow():recursiveGetChildById("shellTitle"):getText())
+    assert.is_truthy(shell:getWindow():recursiveGetChildById("shellBack"))
+    assert.is_truthy(shell:getWindow():recursiveGetChildById("shellHome"))
+  end)
+
   it("selecting a module updates the selected state and calls its render", function()
     local Registry = nExBot.UI.ModuleRegistry
     local rendered = 0

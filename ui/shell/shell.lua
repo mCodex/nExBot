@@ -1,6 +1,6 @@
 --[[
   BotShell — compact hunt cockpit rendered into the host client's left bot
-  panel. Advanced tools open from More or in their dedicated client windows.
+  panel. Workflows navigate inside the shell; detailed editors stay modal.
   A floating-window fallback is used only when the host panel is unavailable.
   Exactly one controller instance per process; opening twice returns the same
   shell. All delayed callbacks are generation-guarded through UiLifecycle.
@@ -95,9 +95,11 @@ local function createShell(opts)
     root = opts.root,
     host = nil,        -- host contentsPanel when attached to the left bar
     window = nil,      -- floating window (fallback) or the root layout panel
+    header = nil,
     content = nil,
     footer = nil,
     selectedId = nil,
+    history = {},
     density = "default",
     active = true,
     panelMode = false,
@@ -110,9 +112,12 @@ local function createShell(opts)
   end
 
   function self:getWindow() return self.window end
+  function self:getHeader() return self.header end
   function self:getContent() return self.content end
   function self:getFooter() return self.footer end
   function self:selected() return self.selectedId end
+  function self:current() return self.selectedId end
+  function self:canGoBack() return #self.history > 1 end
   function self:density() return self.density end
   function self:isPanelMode() return self.panelMode end
   function self:raise()
@@ -121,6 +126,13 @@ local function createShell(opts)
   end
 
   local function buildShell(w)
+    local header = g_ui.createWidget("NexShellHeader", w)
+    header:setId("header")
+    self.header = header
+    Components.button(header, { text = "<", id = "shellBack", style = "NexHeaderButton", onClick = function() self:back() end })
+    Components.label(header, { text = "Hunt", id = "shellTitle", style = "NexShellTitle", textStyle = "moduleTitle" })
+    Components.button(header, { text = "Home", id = "shellHome", style = "NexHeaderHome", variant = "ghost", onClick = function() self:home() end })
+
     local content = g_ui.createWidget("NexContent", w)
     content:setId("content")
     self.content = content
@@ -140,6 +152,7 @@ local function createShell(opts)
   end
 
   function self:open()
+    if self.window and not (self.window.isDestroyed and self.window:isDestroyed()) then return self end
     local host = hostContentsPanel()
     if host and host.botPanel then
       -- Attach directly into the host left panel. The legacy tab UI is hidden
@@ -150,7 +163,6 @@ local function createShell(opts)
       hideLegacyTabs(host)
       local root = g_ui.createWidget("NexShellLayout", host.botPanel)
       root:setId("NexBotShell")
-      root:setBackgroundColor(Tokens.colors.background.canvas)
       self.window = root
       buildShell(root)
       root:show()
@@ -169,19 +181,60 @@ local function createShell(opts)
   end
 
   function self:select(id)
+    return self:push(id)
+  end
+
+  local function canNavigate(id)
+    return id == "cockpit" or id == "more" or registry().get(id) ~= nil
+  end
+
+  function self:push(id, params)
     if not self.active then return false end
-    if id ~= "cockpit" and id ~= "more" and not registry().get(id) then return false end
+    if not canNavigate(id) then return false end
+    local currentEntry = self.history[#self.history]
+    if not currentEntry or currentEntry.id ~= id then
+      self.history[#self.history + 1] = { id = id, params = params }
+    end
     self.selectedId = id
     self:renderCurrent()
     return true
   end
 
+  function self:replace(id, params)
+    if not self.active or not canNavigate(id) then return false end
+    local index = #self.history > 0 and #self.history or 1
+    self.history[index] = { id = id, params = params }
+    self.selectedId = id
+    self:renderCurrent()
+    return true
+  end
+
+  function self:back()
+    if not self:canGoBack() then return false end
+    table.remove(self.history)
+    self.selectedId = self.history[#self.history].id
+    self:renderCurrent()
+    return true
+  end
+
+  function self:home()
+    if not self.active then return false end
+    self.history = { { id = "cockpit" } }
+    self.selectedId = "cockpit"
+    self:renderCurrent()
+    return true
+  end
+
   local function renderMore(content)
-    Components.label(content, { text = "More", id = "moreTitle", textStyle = "moduleTitle", color = Tokens.colors.text.primary })
+    Components.label(content, { text = "More", id = "moreTitle", textStyle = "moduleTitle" })
     local destinations = {
-      { id = "supplies", label = "Supplies", action = "open_supply_config" },
+      { id = "cavebot", label = "Cave" },
+      { id = "targetbot", label = "Target" },
+      { id = "healing", label = "Heal" },
+      { id = "looting", label = "Loot" },
+      { id = "supplies", label = "Supplies" },
       { id = "scripts", label = "Scripts", action = "open_script_editor" },
-      { id = "intelligence", label = "AI Intelligence", action = "open_intelligence_window" },
+      { id = "intelligence", label = "AI Intelligence" },
       { id = "diagnostics", label = "Diagnostics" },
       { id = "settings", label = "Settings" },
     }
@@ -203,7 +256,6 @@ local function createShell(opts)
         end,
       })
     end
-    Components.button(content, { id = "backToCockpit", text = "Back to hunt", variant = "primary", onClick = function() self:select("cockpit") end })
   end
 
   function self:renderCurrent()
@@ -212,6 +264,10 @@ local function createShell(opts)
     Perf.begin("module_render")
     self.content:destroyChildren()
     local module = currentModule()
+    local title = self.header and self.header:recursiveGetChildById("shellTitle")
+    if title then title:setText(module and module.label or (self.selectedId == "more" and "More" or "Hunt")) end
+    local back = self.header and self.header:recursiveGetChildById("shellBack")
+    if back then back:setEnabled(self:canGoBack()) end
     if self.selectedId == "cockpit" then
       cockpit().render(self.content)
     elseif self.selectedId == "more" then
@@ -268,7 +324,6 @@ local function createShell(opts)
     hideLegacyTabs(host)
     local root = g_ui.createWidget("NexShellLayout", host.botPanel)
     root:setId("NexBotShell")
-    root:setBackgroundColor(Tokens.colors.background.canvas)
     if self.window and self.window.destroy then self.window:destroy() end
     self.window = root
     buildShell(root)
@@ -286,8 +341,10 @@ local function createShell(opts)
     self.host = nil
     self.window = nil
     self.content = nil
+    self.header = nil
     self.footer = nil
     self.selectedId = nil
+    self.history = {}
     if current == self then current = nil end
   end
 

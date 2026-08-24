@@ -467,7 +467,7 @@ BossList < FlatPanel
     font: verdana-11px-rounded
     tooltip: Creature with given name will be considered as boss.
 
-EquipWindow < NexLegacyMainWindow
+EquipWindow < MainWindow
   size: 750 350
   text: Equipment Manager
   @onEscape: self:hide()

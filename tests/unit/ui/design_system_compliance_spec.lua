@@ -6,6 +6,7 @@ describe("design-system compliance", function()
     "ui/components/components.lua",
     "ui/shell/shell.lua",
     "ui/modules/cockpit.lua",
+    "ui/modules/workflows.lua",
     "ui/modules/profiles.lua",
     "ui/modules/settings.lua",
     "ui/modules/diagnostics.lua",

@@ -28,11 +28,11 @@ describe("UI components", function()
     assert.are_equal(1, clicked)
   end)
 
-  it("button variant resolves to a token color", function()
+  it("keeps native button colors except for semantic states", function()
     local danger = Components.button(root, { text = "X", variant = "danger" })
     assert.is_string(danger:getColor())
     local ghost = Components.button(root, { text = "Y", variant = "ghost" })
-    assert.is_string(ghost:getColor())
+    assert.is_nil(ghost:getColor())
   end)
 
   it("disabled button does not fire", function()

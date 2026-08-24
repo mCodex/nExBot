@@ -47,10 +47,15 @@ local function toggle(moduleName)
   return false, "Action unavailable"
 end
 
+local function navigate(pageId)
+  local shell = get("nExBot", "UI", "Shell")
+  return invoke(shell and shell.select, pageId)
+end
+
 Actions.handlers = {
-  toggle_cavebot = function() toggle("CaveBot") end,
-  toggle_targetbot = function() toggle("TargetBot") end,
-  toggle_healing = function() toggle("HealBot") end,
+  toggle_cavebot = function() return toggle("CaveBot") end,
+  toggle_targetbot = function() return toggle("TargetBot") end,
+  toggle_healing = function() return toggle("HealBot") end,
   toggle_looting = function()
     local T = get("TargetBot")
     if not T or not T.setLootingEnabled then return false, "Action unavailable" end
@@ -97,44 +102,20 @@ Actions.handlers = {
   end,
 
   open_looting = function()
-    local s = get("nExBot", "UI", "Shell")
-    if s and s.select then s.select("looting") end
+    return navigate("looting")
   end,
   open_cavebot = function()
-    local s = get("nExBot", "UI", "Shell")
-    if s and s.select then s.select("cavebot") end
+    return navigate("cavebot")
   end,
   open_targetbot = function()
-    local s = get("nExBot", "UI", "Shell")
-    if s and s.select then s.select("targetbot") end
+    return navigate("targetbot")
   end,
-  open_supplies = function()
-    local s = get("nExBot", "UI", "Shell")
-    if s and s.select then s.select("supplies") end
-  end,
-  open_intelligence = function()
-    local s = get("nExBot", "UI", "Shell")
-    if s and s.select then s.select("intelligence") end
+  open_healing = function()
+    return navigate("healing")
   end,
   open_intelligence_window = function()
     local I = get("nExBot", "TacticalIntelligence")
     return invoke(I and I.showWindow)
-  end,
-  open_conditions = function()
-    local C = get("Conditions")
-    if C and C.show then invoke(C.show) end
-  end,
-  open_containers = function()
-    local C = get("Containers")
-    if C and C.initSetupWindow then invoke(C.initSetupWindow) end
-  end,
-  open_depositor = function()
-    local D = get("DepositerConfig")
-    if D and D.show then invoke(D.show) end
-  end,
-  open_dashboard = function()
-    local s = get("nExBot", "UI", "Shell")
-    if s and s.select then s.select("intelligence") end
   end,
   run_doctor = function()
     local D = get("IntelligenceBotDoctor")
@@ -147,10 +128,6 @@ Actions.handlers = {
   export_replay = function()
     local R = get("nExBot", "TacticalIntelligence")
     if R and R.exportReplay then invoke(R.exportReplay) end
-  end,
-  clear_replay = function()
-    local R = get("nExBot", "TacticalIntelligence")
-    if R and R.clearReplay then invoke(R.clearReplay) end
   end,
   save_profile = function()
     local P = get("ProfileStorage")

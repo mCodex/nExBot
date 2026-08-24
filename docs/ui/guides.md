@@ -38,15 +38,16 @@ use native `UIItem` sprites, avoiding external image parsing.
 `ui/shell/shell.lua` replaces the host client's left bot bar with one narrow
 hunt cockpit: four engine controls, truthful live telemetry, attention state,
 and a compact footer. Advanced pages live behind More; rich configuration and
-AI views open in dedicated client windows. One generation-guarded instance
-auto-attaches and re-attaches on reload. Legacy tab panels are detached, not
+AI and configuration summaries navigate inside the shell; detailed editors
+remain native modal windows. One generation-guarded instance auto-attaches and
+re-attaches on reload. Old tab panels are detached, not
 destroyed, so domain engines keep valid widget references. The 250 ms UI tick
 re-renders only when the cockpit fingerprint changes.
 
 ## Module pages
 
-`ui/modules/cockpit.lua` owns the primary state projection. Secondary modules
-(profiles, settings, diagnostics) provide
+`ui/modules/cockpit.lua` owns the primary state projection. Workflow pages
+(Cave, Target, Heal, Loot, Supplies, AI, Profiles, Settings, Diagnostics) provide
 `viewModel/statusProvider/render/register` and render through
 `ui/modules/page.lua` (shared shape: title + badge + section cards + actions).
 

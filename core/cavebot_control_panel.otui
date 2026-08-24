@@ -1,4 +1,4 @@
-CaveBotControlPanel < NexLegacyPanel
+CaveBotControlPanel < Panel
   margin-top: 5
   layout:
     type: verticalBox

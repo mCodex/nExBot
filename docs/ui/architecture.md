@@ -49,7 +49,7 @@ through `statusProvider()` projections; commands are the only write path.
 | `ui/design_system/` | tokens (colors/spacing/radii/borders/dimensions), typography, density, status |
 | `ui/components/` | shared widget library (buttons, cards, rows, badges, states, lists) |
 | `ui/shell/` | BotShell + styles.otui |
-| `ui/modules/` | cockpit, three secondary pages, and shared page renderer |
+| `ui/modules/` | cockpit, embedded workflow pages, and shared page renderer |
 
 ## View model contract
 
@@ -79,7 +79,7 @@ the same shell instance.
 1. creates `nExBot.UI` up front (the namespace must exist before any module
    self-registration runs);
 2. loads core/design-system/components/shell modules via `dofile`;
-3. registers the three secondary pages into ModuleRegistry;
+3. registers the embedded workflow pages into ModuleRegistry;
 4. imports `ui/shell/styles.otui`.
 
 ## Sandbox constraints (critical)
@@ -112,11 +112,10 @@ running while the shell is the visible surface — the correct shell-first
 migration posture.
 
 It auto-attaches shortly after startup (`ui/init.lua`) and re-attaches via
-`setupHostHooks()` if the framework rebuilds the panel on reload. The legacy
-floating-window path is retained only as a fallback when the host panel is
-unavailable (tests). Module page actions dispatch through `ui/core/actions.lua`
-to real domain functions; legacy deep config dialogs (HealWindow, creature
-editor, etc.) are reachable from the shell's module pages.
+`setupHostHooks()` if the framework rebuilds the panel on reload. The floating
+window path is retained only as a fallback when the host panel is unavailable.
+Browser-style history connects embedded workflow pages; detailed creature,
+route, healing-rule, and container editors remain native modal windows.
 
 ## Adding a module
 

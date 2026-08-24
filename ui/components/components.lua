@@ -38,26 +38,23 @@ local function label(parent, text, style, opts)
 end
 
 function C.label(parent, opts)
-  return label(parent, opts.text, "Label", opts)
+  return label(parent, opts.text, opts.style or "Label", opts)
 end
 
 function C.button(parent, opts)
   opts = opts or {}
   local colors = Tokens.colors
   local variantColor = {
-    primary = colors.accent.primary,
     active = colors.active,
     inactive = colors.disabled,
     warning = colors.warning,
-    secondary = colors.border.default,
-    ghost = colors.text.secondary,
     danger = colors.danger,
   }
   local w = create(parent, opts.style or "NexButton", opts)
   w:setText(opts.text or "")
-  w:setColor(opts.color or variantColor[opts.variant or "primary"] or colors.accent.primary)
+  local color = opts.color or variantColor[opts.variant or "primary"]
+  if color then w:setColor(color) end
   if opts.onClick then w.onClick = opts.onClick end
-  if opts.background then w:setBackgroundColor(opts.background) end
   return w
 end
 
@@ -65,7 +62,7 @@ function C.card(parent, opts)
   opts = opts or {}
   local w = create(parent, opts.style or "NexCard", opts)
   if opts.title then
-    label(w, opts.title, "Label", { id = "cardTitle", textStyle = "sectionTitle", color = Tokens.colors.text.primary })
+    label(w, opts.title, "Label", { id = "cardTitle", textStyle = "sectionTitle" })
   end
   return w
 end
@@ -73,7 +70,7 @@ end
 function C.sectionHeader(parent, opts)
   opts = opts or {}
   local w = create(parent, opts.style or "NexSectionHeader", opts)
-  label(w, opts.title or "", "Label", { id = "title", textStyle = "sectionTitle", color = Tokens.colors.text.secondary })
+  label(w, opts.title or "", "Label", { id = "title", textStyle = "sectionTitle" })
   if opts.action and opts.action.text then
     C.button(w, { text = opts.action.text, id = "action", variant = "ghost", onClick = opts.action.onClick })
   end
@@ -103,8 +100,8 @@ end
 function C.keyValueRow(parent, opts)
   opts = opts or {}
   local w = create(parent, opts.style or "NexRow", opts)
-  label(w, opts.key or "", "Label", { id = "key", textStyle = "body", color = Tokens.colors.text.secondary })
-  label(w, tostring(opts.value or ""), "Label", { id = "value", textStyle = "body", color = Tokens.colors.text.primary })
+  label(w, opts.key or "", "Label", { id = "key", textStyle = "body" })
+  label(w, tostring(opts.value or ""), "Label", { id = "value", textStyle = "body" })
   return w
 end
 

@@ -13,10 +13,10 @@ local STATUS_VARIANT = {
 }
 
 local ENGINE_DEFS = {
-  { key = "cave", label = "Cave", itemId = 3003, toggleAction = "toggle_cavebot", editorAction = "open_cave_editor" },
-  { key = "target", label = "Target", itemId = 3155, toggleAction = "toggle_targetbot", editorAction = "open_target_editor" },
-  { key = "heal", label = "Heal", itemId = 23375, toggleAction = "toggle_healing", editorAction = "open_heal_config" },
-  { key = "loot", label = "Loot", itemId = 2854, toggleAction = "toggle_looting", editorAction = "open_loot_config" },
+  { key = "cave", label = "Cave", itemId = 3003, toggleAction = "toggle_cavebot", editorAction = "open_cavebot" },
+  { key = "target", label = "Target", itemId = 3155, toggleAction = "toggle_targetbot", editorAction = "open_targetbot" },
+  { key = "heal", label = "Heal", itemId = 23375, toggleAction = "toggle_healing", editorAction = "open_healing" },
+  { key = "loot", label = "Loot", itemId = 2854, toggleAction = "toggle_looting", editorAction = "open_looting" },
 }
 
 local function engineStatus(value)
@@ -121,8 +121,8 @@ end
 
 function Cockpit.render(content)
   local view = Cockpit.statusProvider().snapshot
-  Components.label(content, { id = "cockpitCharacter", text = view.character, textStyle = "windowTitle", color = Tokens.colors.text.primary })
-  Components.label(content, { id = "cockpitProfile", text = "Profile: " .. view.profile, textStyle = "metadata", color = Tokens.colors.text.muted })
+  Components.label(content, { id = "cockpitCharacter", text = view.character, textStyle = "windowTitle" })
+  Components.label(content, { id = "cockpitProfile", text = "Profile: " .. view.profile, textStyle = "metadata" })
   Components.sectionHeader(content, { title = "Hunt systems" })
 
   local attention
@@ -130,7 +130,6 @@ function Cockpit.render(content)
     local engineRow = engine
     local row = g_ui.createWidget("NexEngineRow", content)
     row:setId(engineRow.id)
-    row:setBackgroundColor(Tokens.colors.background.elevated)
     local item = g_ui.createWidget("NexEngineItem", row)
     item:setId(engineRow.id .. "Item")
     item:setItemId(engineRow.itemId)
@@ -140,8 +139,8 @@ function Cockpit.render(content)
     info:setId(engineRow.id .. "Info")
     info:setTooltip("Open " .. engineRow.label .. " settings")
     info.onClick = function() run(engineRow.editorAction, attention) end
-    Components.label(info, { id = engineRow.id .. "Label", text = engineRow.label, color = Tokens.colors.text.primary })
-    Components.label(info, { id = engineRow.id .. "Detail", text = engineRow.detail, textStyle = "metadata", color = Tokens.colors.text.muted })
+    Components.label(info, { id = engineRow.id .. "Label", text = engineRow.label })
+    Components.label(info, { id = engineRow.id .. "Detail", text = engineRow.detail, textStyle = "metadata" })
     Components.button(row, {
       id = engineRow.toggleAction,
       style = "NexEngineToggle",

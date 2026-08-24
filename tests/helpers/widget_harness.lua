@@ -31,7 +31,6 @@ local function newWidget(style, parent, kind)
     _text = "",
     _font = nil,
     _color = nil,
-    _backgroundColor = nil,
     _tooltip = nil,
     _width = 0,
     _height = 0,
@@ -134,8 +133,6 @@ local function newWidget(style, parent, kind)
 
   function self:setColor(color) self._color = color; M.record("setColor", self, color) return self end
   function self:getColor() return self._color end
-  function self:setBackgroundColor(color) self._backgroundColor = color; M.record("setBackgroundColor", self, color) return self end
-  function self:getBackgroundColor() return self._backgroundColor end
 
   function self:setTooltip(tip) self._tooltip = tip; M.record("setTooltip", self, tip) return self end
   function self:getTooltip() return self._tooltip end

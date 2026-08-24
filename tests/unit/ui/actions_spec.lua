@@ -10,26 +10,30 @@ describe("Actions", function()
     Actions = loadActions()
   end)
 
-  it("open_containers invokes Containers.initSetupWindow", function()
-    local called = false
-    _G.Containers = { initSetupWindow = function() called = true end }
-    Actions.run("open_containers")
-    assert.is_true(called)
-    _G.Containers = nil
-  end)
-
-  it("open_containers is a no-op when Containers has no initSetupWindow", function()
-    _G.Containers = {}
-    assert.has_no.errors(function() Actions.run("open_containers") end)
-    _G.Containers = nil
-  end)
-
   it("has no open_macros handler (no reachable host macro editor)", function()
     assert.is_nil(Actions.handlers.open_macros)
   end)
 
+  it("does not expose removed legacy navigation handlers", function()
+    assert.is_nil(Actions.handlers.open_dashboard)
+    assert.is_nil(Actions.handlers.open_containers)
+    assert.is_nil(Actions.handlers.open_conditions)
+  end)
+
   it("returns a useful failure for unknown actions", function()
     local ok, reason = Actions.run("missing")
+    assert.is_false(ok)
+    assert.are_equal("Action unavailable", reason)
+  end)
+
+  it("returns a useful failure when an engine is unavailable", function()
+    local ok, reason = Actions.run("toggle_cavebot")
+    assert.is_false(ok)
+    assert.are_equal("Action unavailable", reason)
+  end)
+
+  it("returns a useful failure when shell navigation is unavailable", function()
+    local ok, reason = Actions.run("open_cavebot")
     assert.is_false(ok)
     assert.are_equal("Action unavailable", reason)
   end)

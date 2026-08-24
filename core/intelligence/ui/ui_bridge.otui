@@ -3,7 +3,6 @@ NexAiMetric < Label
   margin-left: 4
   margin-right: 4
   margin-top: 1
-  color: #d6d0c2
   font: verdana-11px-monochrome
 
 NexAiHeading < Label
@@ -11,10 +10,9 @@ NexAiHeading < Label
   margin-left: 4
   margin-right: 4
   margin-top: 7
-  color: #c49a4a
   font: verdana-11px-rounded
 
-IntelligenceDashboardWindow < NexLegacyMainWindow
+IntelligenceDashboardWindow < MainWindow
   text: nExBot AI Intelligence
   width: 560
   height: 560
@@ -38,9 +36,6 @@ IntelligenceDashboardWindow < NexLegacyMainWindow
     margin-top: 6
     margin-left: 6
     margin-right: 6
-    background-color: #292927
-    border-width: 1
-    border-color: #6b5b35
 
     Label
       id: statusMode
@@ -49,7 +44,6 @@ IntelligenceDashboardWindow < NexLegacyMainWindow
       anchors.left: parent.left
       margin-top: 6
       margin-left: 8
-      color: #c49a4a
       font: verdana-11px-rounded
 
     Label
@@ -59,7 +53,6 @@ IntelligenceDashboardWindow < NexLegacyMainWindow
       anchors.left: parent.left
       margin-top: 4
       margin-left: 8
-      color: #d6d0c2
       font: verdana-11px-monochrome
 
     Label
@@ -68,7 +61,6 @@ IntelligenceDashboardWindow < NexLegacyMainWindow
       anchors.verticalCenter: parent.verticalCenter
       anchors.right: parent.right
       margin-right: 8
-      color: #d6d0c2
       font: verdana-11px-monochrome
 
   VerticalScrollBar
@@ -87,7 +79,6 @@ IntelligenceDashboardWindow < NexLegacyMainWindow
     anchors.bottom: buttons.top
     margin: 6
     margin-bottom: 4
-    background-color: #20201e
     vertical-scrollbar: scroll
     layout:
       type: verticalBox

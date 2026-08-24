@@ -47,10 +47,10 @@ function Page.render(shell, content, lifecycle, view)
 
   local header = view.header or {}
 
-  Components.label(content, header.title or header.module or "", { id = "pageTitle", textStyle = "moduleTitle", color = Tokens.colors.text.primary })
+  Components.label(content, { id = "pageTitle", text = header.title or header.module or "", textStyle = "moduleTitle" })
 
   if header.subtitle then
-    Components.label(content, header.subtitle, { id = "pageSubtitle", textStyle = "helper", color = Tokens.colors.text.muted })
+    Components.label(content, { id = "pageSubtitle", text = header.subtitle, textStyle = "helper" })
   end
 
   if header.status then

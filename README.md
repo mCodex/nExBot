@@ -47,7 +47,7 @@ one navigation shell, and one shared component library.
   (`ui/design_system/`), frozen against mutation.
 - **Icons** — native Tibia item sprites through `UIItem`; no asset toolchain.
 - **Components** — shared widget library (`ui/components/`).
-- **View models** — secondary modules expose a versioned projection
+- **View models** — embedded workflows expose versioned projections
   (`schemaVersion, revision, state, header, sections, actions`); widgets never
   mutate domain globals directly.
 
