@@ -1,0 +1,12 @@
+{
+  "name": "nexbot-ui-tools",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Dev-only build tooling for the nExBot v5 UI (SVG -> PNG icon pipeline). Runtime never requires Node.",
+  "scripts": {
+    "build:icons": "node tools/icons/build.mjs"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

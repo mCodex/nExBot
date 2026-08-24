@@ -1,0 +1,31 @@
+_G.nExBot = { UI = {} }
+local List = dofile("ui/core/bounded_list.lua")
+
+describe("BoundedList", function()
+  it("is empty initially", function()
+    local l = List.new(10)
+    assert.are_equal(0, l:count())
+    assert.are_equal(0, #l:getItems())
+  end)
+
+  it("keeps at most max rows (top-K)", function()
+    local l = List.new(3)
+    l:add({ rank = 1 })
+    l:add({ rank = 2 })
+    l:add({ rank = 3 })
+    l:add({ rank = 4 })
+    l:add({ rank = 5 })
+    assert.are_equal(3, l:count())
+  end)
+
+  it("clears the list", function()
+    local l = List.new(3)
+    l:add({ rank = 1 })
+    l:clear()
+    assert.are_equal(0, l:count())
+  end)
+
+  it("max > 0 is required", function()
+    assert.has_error(function() List.new(0) end)
+  end)
+end)

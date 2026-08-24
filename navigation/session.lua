@@ -70,6 +70,10 @@ function Session.new(ports, deps)
   return self
 end
 
+function Session:_nowMs()
+  return (self.ports.time and self.ports.time.nowMs and self.ports.time.nowMs()) or 0
+end
+
 -- ── Route loading ──────────────────────────────────────────────────────────
 
 --- Set the current route (ordered node/edge graph). Rebuilds cursors.
@@ -136,12 +140,21 @@ function Session:onPositionChange(newPos, oldPos)
 
   -- Z change: hand over to the transition coordinator / unexpected-Z logic.
   if newPos.z ~= oldPos.z then
+    -- Retire any in-flight command's own bookkeeping first: it dispatched the
+    -- step that caused this Z change, so it must not linger as
+    -- StepExecutor.active (state=DISPATCHED) after ownership has already
+    -- moved to the transition coordinator below. Left uncleared, the next
+    -- tick's "Active command" gate would block on it for up to
+    -- STEP_TIMEOUT_MS and then raise a spurious failure on every single
+    -- floor change.
+    local nowMs = self:_nowMs()
+    StepExecutor.onPositionChange(newPos, oldPos, nowMs)
     self:handleZChange(newPos, oldPos)
     return
   end
 
   -- Advance the cursor ONLY through the active command's expected prefix.
-  local nowMs = (self.ports.time and self.ports.time.nowMs and self.ports.time.nowMs()) or 0
+  local nowMs = self:_nowMs()
   local ack = StepExecutor.onPositionChange(newPos, oldPos, nowMs)
   if not ack then return end
 
@@ -191,7 +204,7 @@ function Session:advanceCursor(steps)
     -- (the next replan resets the cursor from the observed position).
     self.cursor = self.cursor + steps
   end
-  local nowMs = (self.ports.time and self.ports.time.nowMs and self.ports.time.nowMs()) or 0
+  local nowMs = self:_nowMs()
   Obs.record({
     tickId = self._tickId, timestamp = nowMs, acknowledgedCursor = self.cursor,
     reasonCodes = { D.REASON.MOVEMENT_ACKNOWLEDGED },
@@ -206,7 +219,7 @@ end
 -- ── Z change handling ──────────────────────────────────────────────────────
 
 function Session:handleZChange(newPos, oldPos)
-  local nowMs = (self.ports.time and self.ports.time.nowMs and self.ports.time.nowMs()) or 0
+  local nowMs = self:_nowMs()
   local transitions = self.deps.transitions
 
   if transitions and transitions.isActive() then
@@ -313,7 +326,7 @@ function Session:tick(ctx)
   -- Active command: wait for acknowledgement.
   local cmd = StepExecutor.getActive()
   if cmd then
-    local nowMs = (self.ports.time and self.ports.time.nowMs and self.ports.time.nowMs()) or 0
+    local nowMs = self:_nowMs()
     local timeout = StepExecutor.tick(nowMs)
     if timeout then
       self:_onFailure(timeout.reason, playerPos)
@@ -362,7 +375,21 @@ function Session:tick(ctx)
         observedProgress = true, evidenceRevision = self.evidenceRevision,
       })
     end
-    -- Path ended but not at destination: plan the last approach step.
+    -- Path ended but not at destination. For a transition edge this means
+    -- the player is already standing on the entry tile -- the common case
+    -- for back-to-back staircase/ladder waypoints, where the previous
+    -- edge's exact landing tile IS this edge's entry tile. There is no
+    -- approach walk left for _dispatchNext to send below, so without this
+    -- the transition would never start and the session would sit in
+    -- WAITING_BLOCKER forever. Hand off to the transition coordinator
+    -- directly instead.
+    if D.TRANSITION_EDGES[self.activeEdge.kind] and self.deps.transitions
+       and not self.deps.transitions.isActive() then
+      self.deps.transitions.begin(self.activeEdge, playerPos)
+      return D.result(D.NavStatus.PROGRESS, D.REASON.TRANSITION_BEGIN, {
+        observedProgress = false, evidenceRevision = self.evidenceRevision,
+      })
+    end
   end
 
   -- Dispatch the next validated step / bounded chunk.
@@ -376,72 +403,21 @@ end
 
 -- ── Edge path planning ─────────────────────────────────────────────────────
 
-function Session:_ensureEdgePath(playerPos)
-  local edge = self.activeEdge
-  if not edge then return nil end
-
-  if edge.kind == D.EDGE_KIND.WALK or edge.kind == D.EDGE_KIND.FIELD_CROSSING then
-    if self.edgePath and self.edgePath.mapGeneration == self.mapGeneration then
-      return self.edgePath
-    end
-    local goal = edge.toPos
-    local res = PathPlanner.find(self.ports, playerPos, goal, {
-      maxSteps = 120,
-      ignoreCreatures = false,
-      allowFields = (edge.kind == D.EDGE_KIND.FIELD_CROSSING),
-      allowFloorChange = false,
-      useCache = true,
-    })
-    if not res or res.status ~= "FOUND" then
-      self._lastPathFailure = res
-      return nil
-    end
-    self.edgePath = {
-      directions = res.directions,
-      positions = res.positions,
-      mapGeneration = self.mapGeneration,
-      plannedFrom = D.copyPos(playerPos),
-    }
-    self.cursor = 0
-    self._lastPathFailure = nil
-    return self.edgePath
-  end
-
-  if D.TRANSITION_EDGES[edge.kind] then
-    -- Approach the entry tile on the player's floor; the transition
-    -- coordinator takes over from there.
-    if self.edgePath and self.edgePath.mapGeneration == self.mapGeneration then
-      return self.edgePath
-    end
-    local entry = edge.entryPos or edge.toPos
-    local approachGoal = { x = entry.x, y = entry.y, z = playerPos.z }
-    local res = PathPlanner.find(self.ports, playerPos, approachGoal, {
-      maxSteps = 120, ignoreCreatures = false, allowFields = false,
-      allowFloorChange = false, useCache = true,
-    })
-    if not res or res.status ~= "FOUND" then
-      self._lastPathFailure = res
-      return nil
-    end
-    self.edgePath = {
-      directions = res.directions,
-      positions = res.positions,
-      mapGeneration = self.mapGeneration,
-      plannedFrom = D.copyPos(playerPos),
-    }
-    self.cursor = 0
-    self._lastPathFailure = nil
-    return self.edgePath
-  end
-
-  -- Action edges (door / machete / scythe / rope / shovel): approach first.
+-- Shared "approach a goal tile on the current floor" planner behind all
+-- three edge kinds below: check the already-planned path is still valid for
+-- this map generation, else ask PathPlanner for a fresh one, and record it
+-- (or the failure) on the session. Every edge kind used to hand-roll this
+-- exact sequence, differing only in how `goal`/`allowFields` are computed.
+function Session:_planEdgeApproach(playerPos, goal, allowFields)
   if self.edgePath and self.edgePath.mapGeneration == self.mapGeneration then
     return self.edgePath
   end
-  local target = edge.actionPos or edge.toPos
-  local res = PathPlanner.find(self.ports, playerPos, target, {
-    maxSteps = 120, ignoreCreatures = false, allowFields = false,
-    allowFloorChange = false, useCache = true,
+  local res = PathPlanner.find(self.ports, playerPos, goal, {
+    maxSteps = 120,
+    ignoreCreatures = false,
+    allowFields = allowFields or false,
+    allowFloorChange = false,
+    useCache = true,
   })
   if not res or res.status ~= "FOUND" then
     self._lastPathFailure = res
@@ -456,6 +432,26 @@ function Session:_ensureEdgePath(playerPos)
   self.cursor = 0
   self._lastPathFailure = nil
   return self.edgePath
+end
+
+function Session:_ensureEdgePath(playerPos)
+  local edge = self.activeEdge
+  if not edge then return nil end
+
+  if edge.kind == D.EDGE_KIND.WALK or edge.kind == D.EDGE_KIND.FIELD_CROSSING then
+    return self:_planEdgeApproach(playerPos, edge.toPos, edge.kind == D.EDGE_KIND.FIELD_CROSSING)
+  end
+
+  if D.TRANSITION_EDGES[edge.kind] then
+    -- Approach the entry tile on the player's floor; the transition
+    -- coordinator takes over from there.
+    local entry = edge.entryPos or edge.toPos
+    local approachGoal = { x = entry.x, y = entry.y, z = playerPos.z }
+    return self:_planEdgeApproach(playerPos, approachGoal)
+  end
+
+  -- Action edges (door / machete / scythe / rope / shovel): approach first.
+  return self:_planEdgeApproach(playerPos, edge.actionPos or edge.toPos)
 end
 
 function Session:_edgePathFailure()
@@ -525,7 +521,7 @@ function Session:_dispatchNext(playerPos)
   end
   if #chunkDirs == 0 then return nil end
 
-  local nowMs = (self.ports.time and self.ports.time.nowMs and self.ports.time.nowMs()) or 0
+  local nowMs = self:_nowMs()
   local cmd = StepExecutor.dispatch({
     ports = self.ports,
     routeId = self.routeId,
@@ -583,7 +579,7 @@ end
 function Session:completeEdge()
   local edge = self.activeEdge
   if not edge then return end
-  local nowMs = (self.ports.time and self.ports.time.nowMs and self.ports.time.nowMs()) or 0
+  local nowMs = self:_nowMs()
   Obs.bump("edgeCompletionRate", 1)
   Obs.record({
     tickId = self._tickId, timestamp = nowMs, activeEdgeId = edge.id,
@@ -611,7 +607,7 @@ end
 -- ── Failure handling (single retry owner) ─────────────────────────────────
 
 function Session:_onFailure(failure, playerPos)
-  local nowMs = (self.ports.time and self.ports.time.nowMs and self.ports.time.nowMs()) or 0
+  local nowMs = self:_nowMs()
   self.lastReason = failure
   self.lastFailureAt = nowMs
   self.lastFailurePos = playerPos and D.copyPos(playerPos) or nil
@@ -717,7 +713,7 @@ function Session:_updateAnchor()
     pathIndex = self.cursor,
     evidenceRevision = self.evidenceRevision,
     mapGeneration = self.mapGeneration,
-    ts = (self.ports.time and self.ports.time.nowMs and self.ports.time.nowMs()) or 0,
+    ts = self:_nowMs(),
   }
 end
 

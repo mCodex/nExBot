@@ -83,7 +83,7 @@ function Fake.World.setCreature(self, p) self:mutate(p, { creature = true }) end
 function Fake.World.clearCreature(self, p) self:mutate(p, { creature = nil }) end
 function Fake.World.setHazard(self, p, hazard) self:mutate(p, { hazard = hazard }) end
 function Fake.World.setDoor(self, p, closed) self:mutate(p, { doorClosed = closed ~= false }) end
-function Fake.World.setFloorChange(self, p) self:mutate(p, { floorChange = true }) end
+function Fake.World.setFloorChange(self, p, floorDelta) self:mutate(p, { floorChange = true, floorDelta = floorDelta or 1 }) end
 
 -- Contract tile (what ports.world.getTile exposes). nil for void/unknown.
 function Fake.World.getTile(self, p)
@@ -296,12 +296,24 @@ function Fake.Player:_completeNextStep()
     return
   end
 
+  -- Stairs/ladder tile: stepping onto it changes floor immediately, the
+  -- same way OTClient auto-elevates the player onto a staircase.
+  local raw = self.world.tiles[key(target)]
+  if raw and raw.floorChange then
+    target = { x = target.x, y = target.y, z = target.z + (raw.floorDelta or 1) }
+  end
+
   local old = copyPos(self.pos)
   self.pos = target
+  -- Real OTClient's onPlayerPositionChange fires for every position change,
+  -- Z included -- there is no separate onPlayerZChange global in the client
+  -- (navigation/adapter_otclient.lua's onZChange hook is unreachable dead
+  -- code for that reason). Firing posCbs unconditionally keeps this fake
+  -- aligned with production so a Z-changing step can be driven end to end
+  -- through Session the same way a normal step is.
+  self:_fire(self.posCbs, target, old)
   if target.z ~= old.z then
     self:_fire(self.zCbs, target, old)
-  else
-    self:_fire(self.posCbs, target, old)
   end
 end
 

@@ -86,8 +86,20 @@ function TransitionCoordinator:tick(ports, ctx)
 
   local playerPos = ctx and ctx.playerPos
   if not playerPos then return nil end
-  local dir = ctx and ctx.zStepDirection
-  if not dir then return nil end
+
+  -- The step direction is normally derived from the edge's own geometry
+  -- (entry tile -> landing tile), not supplied by the caller: nothing in
+  -- production ever populates ctx.zStepDirection, so relying on it left
+  -- this dispatch unreachable whenever begin() fires without a walk
+  -- already in flight (e.g. two transition edges chained back to back).
+  -- ctx.zStepDirection is kept as an explicit override for tests/fixtures.
+  local dir = (ctx and ctx.zStepDirection) or D.directionBetween(self.entryPos, self.edge.toPos)
+  if not dir then
+    self.phase = "FAILED"
+    return D.result(D.NavStatus.FAILED_RETRYABLE, D.FAILURE.ROUTE_CONFIGURATION_ERROR, {
+      detail = "cannot derive zStepDirection: entry/exit tile are not adjacent",
+    })
+  end
 
   local policy = {
     world = ports.world,

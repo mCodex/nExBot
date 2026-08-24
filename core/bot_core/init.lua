@@ -118,12 +118,6 @@ end
 
 -- EXHAUSTED EVENT HANDLING
 
--- Hook into exhausted events for graceful handling
-if onSpellCooldown then
-  onSpellCooldown(function(iconId, duration)
-  end)
-end
-
 if onGroupSpellCooldown then
   onGroupSpellCooldown(function(groupId, duration)
     -- Forward to priority engine for graceful handling

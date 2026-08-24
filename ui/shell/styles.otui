@@ -1,0 +1,80 @@
+NexButton < Button
+  margin-top: 1
+  margin-bottom: 1
+
+NexIconButton < Button
+  width: 20
+  height: 20
+  margin: 1
+
+NexCard < Panel
+  margin-left: 4
+  margin-right: 4
+  margin-top: 4
+  margin-bottom: 4
+
+NexSectionHeader < Panel
+  margin-left: 6
+  margin-top: 8
+  margin-bottom: 2
+
+NexBadge < Label
+  margin-left: 2
+  margin-right: 2
+
+NexMetricCard < Panel
+  margin: 4
+
+NexRow < Panel
+  margin-left: 6
+  margin-right: 6
+  margin-top: 2
+  margin-bottom: 2
+
+NexToolbar < Panel
+  margin: 4
+
+NexListRow < Panel
+  margin-left: 6
+  margin-right: 6
+  margin-top: 2
+  margin-bottom: 2
+
+NexFooter < Panel
+  margin: 4
+
+NexShell < MainWindow
+  text: nExBot
+  @onEscape: self:hide()
+
+-- Horizontal shell layout that fills the host left panel (botPanel).
+-- Sidebar rail on the left, a right column with header/content/footer.
+NexShellLayout < Panel
+  layout:
+    type: horizontalBox
+
+NexShellRight < Panel
+  layout:
+    type: verticalBox
+
+NexSidebar < Panel
+  width: 176
+  layout:
+    type: verticalBox
+
+NexSidebarItem < Button
+  width: 168
+  height: 26
+  margin-left: 4
+  margin-right: 4
+  margin-top: 1
+  margin-bottom: 1
+  text-align: left
+
+NexHeader < Panel
+  height: 40
+
+NexContent < Panel
+
+NexFooter < Panel
+  height: 32

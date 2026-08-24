@@ -53,6 +53,8 @@ globals = {
   "ZChangeGuard", "KillTracker",
   "AttackData", "AttackAnalytics", "AttackConfig", "CombatExecutor",
   "HealConfig", "SpellResolver", "HealAnalytics",
+  "Supplies", "BotDB", "AttackFSM", "MovementCoordinator",
+  "IntelligenceBotDoctor", "IntelligenceUiPresenter",
   "storage", "info", "warn",
 }
 

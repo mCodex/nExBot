@@ -414,14 +414,22 @@ do
   if type(require) ~= "function" or type(package) ~= "table" then
     require = function(name)
       if nExBot.Nav[name] then return nExBot.Nav[name] end
-      local sub = name:gsub("%.", "/")
-      local ok, mod = pcall(navLoad, "/navigation/" .. sub .. ".lua")
-      if not ok or not mod then
-        ok, mod = pcall(navLoad, "navigation/" .. sub .. ".lua")
+      local ns = nExBot.UI
+      if ns then
+        local cached = ns[name]
+        if cached ~= nil then
+          nExBot.Nav[name] = cached
+          return cached
+        end
       end
-      if ok and mod then
-        nExBot.Nav[name] = mod
-        return mod
+      local sub = name:gsub("%.", "/")
+      local prefixes = { "/", "" }
+      for i = 1, #prefixes do
+        local ok, mod = pcall(navLoad, prefixes[i] .. sub .. ".lua")
+        if ok and mod then
+          nExBot.Nav[name] = mod
+          return mod
+        end
       end
       error("module '" .. tostring(name) .. "' not found", 2)
     end
@@ -647,6 +655,11 @@ loadCategory("analytics", {
 -- to avoid duplicating the loading, we don't load them again here.
 
 -- ============================================================================
+-- PHASE 12: UI PLATFORM (design system, registries, shell, modules)
+-- ============================================================================
+loadScript("ui/init", "ui", "/")
+
+-- ============================================================================
 -- STARTUP COMPLETE
 -- ============================================================================
 
@@ -799,7 +812,6 @@ end
 loadPrivateScripts()
 
 -- Return to Main tab
-setDefaultTab("Main")
 
 -- ============================================================================
 -- ACTIVATE UNIFIED TICK SYSTEM

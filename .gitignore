@@ -2,3 +2,4 @@
 storage/
 private/
 .tokensave
+node_modules/

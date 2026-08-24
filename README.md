@@ -33,6 +33,31 @@ This release delivers a comprehensive remediation of state management, persisten
 
 See [Release Notes](docs/RELEASE_NOTES.md) and [Remediation Summary](docs/REMEDIATION_SUMMARY.md) for details.
 
+## v5 UI Platform
+
+nExBot v5 introduces a unified product interface built on one design system,
+one navigation shell, one icon registry, and one shared component library.
+
+- **BotShell** — replaces the client's left bot bar with a module sidebar
+  (11 modules) + header (profile/session/warnings) + module content + footer.
+  Single instance, generation-guarded lifecycle, auto-attaches to the host
+  left panel at startup.
+- **ModuleRegistry** — single source of truth for navigation, ordering,
+  icons, and status.
+- **Design system** — semantic color/spacing/typography/density/status tokens
+  (`ui/design_system/`), frozen against mutation.
+- **Icons** — 56 original SVGs built to committed PNGs at 16/20/24/32px
+  (`node tools/icons/build.mjs`); runtime never converts SVG.
+- **Components** — shared widget library (`ui/components/`).
+- **Bounded contexts** — every module exposes a versioned view model
+  (`schemaVersion, revision, state, header, sections, actions`); widgets never
+  mutate domain globals directly; commands return typed results.
+
+The shell replaces the legacy tab-fill left bar. See
+[UI Architecture](docs/ui/architecture.md), [Guides](docs/ui/guides.md),
+[Feature Map](docs/ui/feature-map.md), [Removal Report](docs/ui/removal-report.md),
+and [Final Report](docs/ui/report.md).
+
 ## Modules
 
 | Module | Function |
@@ -112,6 +137,11 @@ Open **nExBot Tactical Intelligence** from the Main tab to inspect lifecycle, ta
 | [Architecture](docs/ARCHITECTURE.md) | Technical design |
 | [Performance](docs/PERFORMANCE.md) | Optimization and tuning |
 | [Adaptive Intelligence](docs/INTELLIGENCE.md) | Arbitration, learning, replay, diagnostics, and UI |
+| [UI Architecture](docs/ui/architecture.md) | Shell, registry, view models, commands, lifecycle |
+| [UI Guides](docs/ui/guides.md) | Design system, components, icons, migration |
+| [UI Feature Map](docs/ui/feature-map.md) | Old-to-new feature mapping |
+| [UI Removal Report](docs/ui/removal-report.md) | Dead-code removal evidence |
+| [UI Final Report](docs/ui/report.md) | v5 UI delivery summary |
 | [FAQ](docs/FAQ.md) | Troubleshooting |
 
 ## Contributing
