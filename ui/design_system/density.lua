@@ -42,6 +42,7 @@ Density.presets = presets
 if nExBot then
   nExBot.UI = nExBot.UI or {}
   nExBot.UI.Density = Density
+  nExBot.UI["ui.design_system.density"] = Density
 end
 
 return Density

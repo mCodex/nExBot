@@ -34,4 +34,9 @@ function BoundedList:getItems()
   return self.items
 end
 
+if nExBot then
+  nExBot.UI = nExBot.UI or {}
+  nExBot.UI["ui.core.bounded_list"] = BoundedList
+end
+
 return BoundedList

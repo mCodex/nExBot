@@ -13,7 +13,7 @@ local Tokens = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.tokens"]) o
 local Status = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.status"]) or (type(require) == "function" and require("ui.design_system.status"))
 local Actions = (nExBot and nExBot.UI and nExBot.UI["ui.core.actions"]) or (type(require) == "function" and require("ui.core.actions"))
 
--- Resolve the shared dispatcher through the namespace so runtime (loadfile) and
+-- Resolve the shared dispatcher through the namespace so runtime (dofile) and
 -- tests (require) always share one instance.
 local function actionsDispatcher()
   local ns = nExBot and nExBot.UI
@@ -97,6 +97,11 @@ function Page.render(shell, content, lifecycle, view)
   for _, err in ipairs(view.errors or {}) do
     Components.inlineWarning(content, { message = err.message or err.code })
   end
+end
+
+if nExBot then
+  nExBot.UI = nExBot.UI or {}
+  nExBot.UI["ui.modules.page"] = Page
 end
 
 return Page

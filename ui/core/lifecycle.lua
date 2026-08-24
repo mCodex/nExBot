@@ -44,4 +44,9 @@ function Lifecycle:guard(fn, generation)
   end
 end
 
+if nExBot then
+  nExBot.UI = nExBot.UI or {}
+  nExBot.UI["ui.core.lifecycle"] = Lifecycle
+end
+
 return Lifecycle

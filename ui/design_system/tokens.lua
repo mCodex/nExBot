@@ -94,6 +94,7 @@ local tokens = freezeProxy({
 if nExBot then
   nExBot.UI = nExBot.UI or {}
   nExBot.UI.Tokens = tokens
+  nExBot.UI["ui.design_system.tokens"] = tokens
 end
 
 return tokens

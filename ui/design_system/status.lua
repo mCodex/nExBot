@@ -34,6 +34,7 @@ Status.map = map
 if nExBot then
   nExBot.UI = nExBot.UI or {}
   nExBot.UI.Status = Status
+  nExBot.UI["ui.design_system.status"] = Status
 end
 
 return Status

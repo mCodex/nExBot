@@ -3,9 +3,11 @@
   components, and every module. Called by _Loader.lua after the analytics/UI
   phase.
 
-  Module loading uses loadfile()+call() — the same pattern as navigation modules.
-  Each module self-registers into nExBot.UI via plain global (no _G).
-  Per-module error logging ensures silent failures are visible.
+  Module loading uses dofile() — the same pattern as navigation modules
+  (OTClient's sandbox has no loadfile/package/require, and dofile discards
+  return values). Each module self-registers into nExBot.UI as a side
+  effect of running. Per-module error logging ensures silent failures
+  are visible.
 ]]
 
 nExBot.UI = nExBot.UI or {}
@@ -46,19 +48,16 @@ do
   for i = 1, #modules do
     local name = modules[i]
     local path = "/" .. name:gsub("%.", "/") .. ".lua"
-    local chunk, loadErr = loadfile(path)
-    if not chunk then chunk, loadErr = loadfile(path:gsub("^/", "")) end
-    if chunk then
-      local ok, res = pcall(chunk)
-      if ok then
-        if res then nExBot.UI[name] = res end  -- return-value modules (busted)
-        loaded = loaded + 1
-      else
-        warn("[nExBot] UI: " .. name .. " init error: " .. tostring(res))
-        errors[#errors + 1] = name .. ":init"
-      end
+    -- OTClient sandbox has no loadfile/package/require; dofile is the only
+    -- file-execution primitive. Each module self-registers into nExBot.UI
+    -- as a side effect of running (same convention as navigation/*.lua),
+    -- so the chunk's return value isn't relied on here.
+    local ok, res = pcall(dofile, path)
+    if ok then
+      if res then nExBot.UI[name] = res end
+      loaded = loaded + 1
     else
-      warn("[nExBot] UI: " .. name .. " load error: " .. tostring(loadErr))
+      warn("[nExBot] UI: " .. name .. " load error: " .. tostring(res))
       errors[#errors + 1] = name .. ":load"
     end
   end

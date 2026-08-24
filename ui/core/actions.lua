@@ -156,6 +156,7 @@ end
 if nExBot then
   nExBot.UI = nExBot.UI or {}
   nExBot.UI.Actions = Actions
+  nExBot.UI["ui.core.actions"] = Actions
 end
 
 return Actions

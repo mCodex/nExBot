@@ -485,6 +485,7 @@ loadCategory("core", {
   "items",
   "lib",
   "safe_call",
+  "profile_restore_policy",
   "new_cavebot_lib",
   "configs",
   "bot_database",

@@ -1,5 +1,6 @@
--- Verify UI modules load when require is NOT a function.
--- This simulates the OTClient sandbox where require doesn't exist.
+-- Verify UI modules load in the real OTClient sandbox: no require, no
+-- loadfile, no package -- only dofile, and dofile discards return values
+-- (modules must self-register into nExBot.UI as a side effect of running).
 describe("UI modules load without require", function()
   local Harness = require("tests.helpers.widget_harness")
 
@@ -8,23 +9,24 @@ describe("UI modules load without require", function()
     Harness.install()
     Harness.installHostPanel()
     _G.nExBot = { paths = { config = "nExBot" }, UI = {}, loadErrors = {}, Nav = {} }
-    -- Override require to simulate "not a function"
     local origRequire = _G.require
-    _G.require = nil  -- require is not a function in OTClient sandbox
-    -- Override loadfile to resolve virtual paths
-    local origLoadfile = loadfile
-    _G.loadfile = function(path, ...)
+    local origLoadfile = _G.loadfile
+    local origDofile = _G.dofile
+    _G.require = nil  -- require does not exist in the OTClient sandbox
+    _G.loadfile = nil  -- loadfile does not exist in the OTClient sandbox
+    _G.dofile = function(path, ...)
       if type(path) == "string" and path:sub(1, 1) == "/" then path = "." .. path end
-      return origLoadfile(path, ...)
+      origDofile(path, ...)
+      return nil  -- OTClient's dofile discards chunk return values
     end
 
     local ok, err = pcall(function()
-      local chunk = assert(loadfile("ui/init.lua"))
-      chunk()
+      _G.dofile("/ui/init.lua")
     end)
 
     _G.require = origRequire
     _G.loadfile = origLoadfile
+    _G.dofile = origDofile
     return ok, err
   end
 

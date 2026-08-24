@@ -67,4 +67,9 @@ function Dispatcher:list()
   return out
 end
 
+if nExBot then
+  nExBot.UI = nExBot.UI or {}
+  nExBot.UI["ui.core.command"] = Dispatcher
+end
+
 return Dispatcher

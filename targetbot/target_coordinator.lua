@@ -619,11 +619,11 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 
 local function loadExplicitlyDisabledState()
-  local storage = type(nExBotStorageGet) == "function" and nExBotStorageGet("targetbot") or nil
-  if storage and storage.targetbotExplicitlyDisabled == true then
-    return true
+  if UnifiedStorage and UnifiedStorage.get then
+    local persisted = UnifiedStorage.get("targetbot.explicitlyDisabled")
+    if persisted ~= nil then return persisted == true end
   end
-  return false
+  return storage and storage.targetbotExplicitlyDisabled == true
 end
 
 TargetBot.explicitlyDisabled = loadExplicitlyDisabledState()

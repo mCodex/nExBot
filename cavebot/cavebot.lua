@@ -1249,29 +1249,25 @@ CaveBot.isOff = function()
 end
 
 CaveBot.setOn = function(val)
-  if val == false then  
+  if val == false then
     return CaveBot.setOff(true)
   end
-  -- Skip if profile is being applied programmatically
-  if CaveBot._profileApplying then return end
   -- Save enabled state to UnifiedStorage
   if UnifiedStorage and UnifiedStorage.set then
     UnifiedStorage.set("cavebot.enabled", true)
   end
-  config.setOn()  -- This triggers callback which handles storage
+  config.setOn()  -- This triggers callback which handles storage and clears _profileApplying
 end
 
 CaveBot.setOff = function(val)
-  if val == false then  
+  if val == false then
     return CaveBot.setOn(true)
   end
-  -- Skip if profile is being applied programmatically
-  if CaveBot._profileApplying then return end
   -- Save enabled state to UnifiedStorage
   if UnifiedStorage and UnifiedStorage.set then
     UnifiedStorage.set("cavebot.enabled", false)
   end
-  config.setOff()  -- This triggers callback which handles storage
+  config.setOff()  -- This triggers callback which handles storage and clears _profileApplying
 end
 
 CaveBot.getCurrentProfile = function()

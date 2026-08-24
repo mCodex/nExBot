@@ -73,6 +73,7 @@ Perf.ops = function() return buckets end
 if nExBot then
   nExBot.UI = nExBot.UI or {}
   nExBot.UI.Perf = Perf
+  nExBot.UI["ui.core.perf"] = Perf
 end
 
 return Perf

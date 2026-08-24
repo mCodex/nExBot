@@ -7,42 +7,29 @@ describe("ui bootstrap", function()
     Harness.installHostPanel()
     _G.nExBot = { paths = { config = "nExBot" }, UI = {}, loadErrors = {}, Nav = {} }
 
-    -- emulate OTClient virtual-FS loadfile + require shim
-    local origLoadfile = loadfile
+    -- emulate the real OTClient sandbox: no require, no loadfile, no
+    -- package -- only dofile, which discards chunk return values (modules
+    -- self-register into nExBot.UI as a side effect of running).
     local origRequire = _G.require
-    _G.loadfile = function(path, ...)
+    local origLoadfile = _G.loadfile
+    local origDofile = _G.dofile
+    _G.require = nil
+    _G.loadfile = nil
+    _G.dofile = function(path, ...)
       if type(path) == "string" and path:sub(1, 1) == "/" then path = "." .. path end
-      return origLoadfile(path, ...)
-    end
-    local function navLoad(path)
-      if path:sub(1, 1) == "/" then path = "." .. path end
-      local chunk, err = loadfile(path)
-      if not chunk then error(tostring(err), 2) end
-      return chunk()
-    end
-    _G.require = function(name)
-      if _G.nExBot.Nav[name] then return _G.nExBot.Nav[name] end
-      local ns = _G.nExBot.UI
-      if ns then
-        local c = ns[name]
-        if c ~= nil then _G.nExBot.Nav[name] = c; return c end
-      end
-      local sub = name:gsub("%.", "/")
-      for _, p in ipairs({ "/", "" }) do
-        local ok, mod = pcall(navLoad, p .. sub .. ".lua")
-        if ok and mod then _G.nExBot.Nav[name] = mod; return mod end
-      end
-      error("module '" .. name .. "' not found", 2)
+      origDofile(path, ...)
+      return nil
     end
     _G.warn = function() end
     _G.info = function() end
     _G.schedule = function(_, fn) fn() end
 
     local ok, err = pcall(function()
-      local chunk = assert(loadfile("ui/init.lua"))
-      chunk()
+      _G.dofile("/ui/init.lua")
     end)
     _G.require = origRequire
+    _G.loadfile = origLoadfile
+    _G.dofile = origDofile
     assert.is_true(ok, tostring(err))
 
     local R = _G.nExBot.UI.ModuleRegistry

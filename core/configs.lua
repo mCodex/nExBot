@@ -14,6 +14,8 @@
     - KISS: Simple, focused functions
 --]]
 
+local ProfileRestorePolicy = ProfileRestorePolicy or require("core.profile_restore_policy")
+
 -- Shared config name (DRY: single source of truth)
 BotConfigName = modules.game_bot.contentsPanel.config:getCurrentOption().text
 local configName = BotConfigName
@@ -143,44 +145,52 @@ local function lateRestoreFromUnifiedStorage()
         local targetFile = "/bot/" .. configName .. "/targetbot_configs/" .. targetbotConfig .. ".json"
         if g_resources.fileExists(targetFile) then
           local currentSelected = storage._configs and storage._configs.targetbot_configs and storage._configs.targetbot_configs.selected
-          if currentSelected ~= targetbotConfig then
+          local decision = ProfileRestorePolicy.decide(currentSelected, targetbotConfig, targetbotEnabled)
+
+          -- Profile selection and enabled/disabled state are independent:
+          -- both must be applied whenever they differ, even if only one does.
+          if decision.switchProfile then
             storage._configs = storage._configs or {}
             storage._configs.targetbot_configs = storage._configs.targetbot_configs or {}
             storage._configs.targetbot_configs.selected = targetbotConfig
-            
+
             if TargetBot and TargetBot.setCurrentProfile then
               pcall(function() TargetBot.setCurrentProfile(targetbotConfig) end)
             end
-          elseif targetbotEnabled ~= nil then
+          end
+          if decision.applyEnabled then
             if TargetBot then
-              if targetbotEnabled == true and TargetBot.setOn and not TargetBot.explicitlyDisabled then
+              if decision.enabled == true and TargetBot.setOn and not TargetBot.explicitlyDisabled then
                 pcall(function() TargetBot.setOn() end)
-              elseif targetbotEnabled == false and TargetBot.setOff then
+              elseif decision.enabled == false and TargetBot.setOff then
                 pcall(function() TargetBot.setOff() end)
               end
             end
           end
         end
       end
-      
+
       -- Restore CaveBot config
       if cavebotConfig and type(cavebotConfig) == "string" and cavebotConfig ~= "" then
         local cavebotFile = "/bot/" .. configName .. "/cavebot_configs/" .. cavebotConfig .. ".cfg"
         if g_resources.fileExists(cavebotFile) then
           local currentSelected = storage._configs and storage._configs.cavebot_configs and storage._configs.cavebot_configs.selected
-          if currentSelected ~= cavebotConfig then
+          local decision = ProfileRestorePolicy.decide(currentSelected, cavebotConfig, cavebotEnabled)
+
+          if decision.switchProfile then
             storage._configs = storage._configs or {}
             storage._configs.cavebot_configs = storage._configs.cavebot_configs or {}
             storage._configs.cavebot_configs.selected = cavebotConfig
-            
+
             if CaveBot and CaveBot.setCurrentProfile then
               pcall(function() CaveBot.setCurrentProfile(cavebotConfig) end)
             end
-          elseif cavebotEnabled ~= nil then
+          end
+          if decision.applyEnabled then
             if CaveBot then
-              if cavebotEnabled == true and CaveBot.setOn then
+              if decision.enabled == true and CaveBot.setOn then
                 pcall(function() CaveBot.setOn() end)
-              elseif cavebotEnabled == false and CaveBot.setOff then
+              elseif decision.enabled == false and CaveBot.setOff then
                 pcall(function() CaveBot.setOff() end)
               end
             end

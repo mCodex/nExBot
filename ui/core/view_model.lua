@@ -92,4 +92,9 @@ function VM:commit()
   return self.snapshot
 end
 
+if nExBot then
+  nExBot.UI = nExBot.UI or {}
+  nExBot.UI["ui.core.view_model"] = VM
+end
+
 return VM

@@ -283,4 +283,9 @@ function C.helpTooltip(parent, opts)
   return w
 end
 
+if nExBot then
+  nExBot.UI = nExBot.UI or {}
+  nExBot.UI["ui.components.components"] = C
+end
+
 return C

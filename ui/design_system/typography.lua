@@ -43,6 +43,7 @@ Typography.fonts = fonts
 if nExBot then
   nExBot.UI = nExBot.UI or {}
   nExBot.UI.Typography = Typography
+  nExBot.UI["ui.design_system.typography"] = Typography
 end
 
 return Typography
