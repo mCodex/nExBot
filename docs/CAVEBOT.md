@@ -4,7 +4,7 @@ Waypoint navigation, supply management, hunting route automation.
 
 ## Quick Start
 
-1. Open **Cave** tab → **Show Editor**
+1. Open **Cave** in the cockpit → **Edit route**
 2. Stand at start → **Add Goto**
 3. Walk to next → **Add Goto** again
 4. Save as `Dragon_Darashia`

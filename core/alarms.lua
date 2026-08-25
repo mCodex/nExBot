@@ -1,58 +1,25 @@
--- Ensure this module places its UI on the Main tab (so it appears above PushMax)
-setDefaultTab("Main")
 local panelName = "alarms"
-local ui = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('Alarms')
-
-  Button
-    id: alerts
-    anchors.top: prev.top
-    anchors.left: prev.right
-    anchors.right: parent.right
-    margin-left: 3
-    height: 17
-    text: Edit
-
-]])
-ui:setId(panelName)
-ui:setVisible(true)
-
 if not storage[panelName] then
   storage[panelName] = {}
 end
 
 local config = storage[panelName]
 
-ui.title:setOn(config.enabled)
-ui.title.onClick = function(widget)
-  local ok, err = pcall(function()
-    print("Alarms toggle clicked")
-    config.enabled = not config.enabled
-    widget:setOn(config.enabled)
-  end)
-  if not ok then print("Alarms toggle error: "..tostring(err)) end
-end
-
 local window = UI.createWindow("AlarmsWindow")
 window:hide()
 
-ui.alerts.onClick = function()
-  local ok, err = pcall(function()
+Alarms = {
+  config = config,
+  isOn = function() return config.enabled == true end,
+  setOn = function() config.enabled = true end,
+  setOff = function() config.enabled = false end,
+  toggle = function() config.enabled = not config.enabled return config.enabled end,
+  show = function()
     window:show()
     window:raise()
     window:focus()
-  end)
-  if not ok then print("Alarms edit open error: "..tostring(err)) end
-end
+  end
+}
 
 local widgets = 
 {

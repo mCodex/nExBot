@@ -52,4 +52,37 @@ describe("Hunt cockpit", function()
 
     _G.hppercent, _G.manapercent = nil, nil
   end)
+
+  it("reads the AI pulse from existing runtime state without building diagnostics", function()
+    nExBot.Intelligence = {
+      lifecycle = { active = true },
+      blackboard = {
+        read = function(_, key)
+          if key == "currentAttackIntent" then
+            return { action = "attack dragon", confidence = 0.84 }
+          end
+        end,
+      },
+    }
+    nExBot.HuntMetrics = { metrics = { kills = 12 } }
+
+    local view = Cockpit.statusProvider().snapshot
+
+    assert.are_equal("Active", view.aiState)
+    assert.are_equal("attack dragon", view.aiDecision)
+    assert.are_equal("84%", view.aiConfidence)
+    assert.are_equal("12 kills", view.aiOutcome)
+  end)
+
+  it("reports missing AI runtime data honestly", function()
+    nExBot.Intelligence = nil
+    nExBot.HuntMetrics = nil
+
+    local view = Cockpit.statusProvider().snapshot
+
+    assert.are_equal("Unavailable", view.aiState)
+    assert.are_equal("-", view.aiDecision)
+    assert.are_equal("-", view.aiConfidence)
+    assert.are_equal("-", view.aiOutcome)
+  end)
 end)

@@ -18,6 +18,7 @@ local function fresh()
   dofile("ui/modules/cockpit.lua")
   dofile("ui/core/module_registry.lua")
   dofile("ui/modules/workflows.lua")
+  dofile("ui/modules/auxiliary.lua")
   for _, n in ipairs({ "profiles", "settings", "diagnostics" }) do
     dofile("ui/modules/" .. n .. ".lua")
   end
@@ -38,7 +39,10 @@ describe("BotShell host integration", function()
     file:close()
 
     assert.is_truthy(styles:match("NexShellLayout < Panel.-anchors%.fill: parent"))
-    assert.is_truthy(styles:match("NexContent < Panel.-fit%-children: true"))
+    assert.is_truthy(styles:match("NexContent < ScrollablePanel.-anchors%.top: header%.bottom.-anchors%.bottom: footer%.top"))
+    assert.is_truthy(styles:match("vertical%-scrollbar: contentScroll"))
+    local headerStyle = styles:match("NexShellHeader < Panel(.-)NexHeaderButton")
+    assert.is_truthy(headerStyle:match("anchors%.top: parent%.top"), "anchor-layout header must own the top edge")
   end)
 
   it("attaches into the host left panel instead of a floating window", function()
@@ -52,22 +56,16 @@ describe("BotShell host integration", function()
     shell:destroy()
   end)
 
-  it("detaches legacy tab UI but keeps it alive for module engines", function()
+  it("destroys the replaced host surface", function()
     local cp = modules.game_bot.contentsPanel
     local legacy = g_ui.createWidget("BotPanel", cp.botPanel)
     legacy:setId("tabPanel")
     assert.are_equal(cp.botPanel, legacy:getParent())
     local shell = Shell.show()
-    -- the legacy panel is removed from the tree (not destroyed) so
-    -- CaveBot/TargetBot engines keep their widget references valid, and so
-    -- UITabBar:selectTab can never find it still parented and collide on a
-    -- later addChild ("attempt to add a child again into a UIWidget")
-    assert.is_nil(legacy:getParent(), "legacy tab UI must be detached from botPanel")
-    assert.is_false(legacy:isDestroyed(), "legacy tab UI must stay alive")
+    assert.is_nil(legacy:getParent(), "replaced UI must leave botPanel")
+    assert.is_true(legacy:isDestroyed(), "replaced UI must not remain alive")
     assert.is_true(shell:getWindow():isVisible(), "shell layout must be visible")
     shell:destroy()
-    -- after destroy, the legacy panel is still alive
-    assert.is_false(legacy:isDestroyed())
   end)
 
   it("botPanel has no leftover legacy children once the shell attaches", function()
@@ -89,6 +87,47 @@ describe("BotShell host integration", function()
     local shell = Shell.show()
     assert.is_false(cp.botTabs:isEnabled(), "legacy tab bar must be disabled once the shell owns the panel")
     assert.is_false(cp.botTabs:isVisible())
+    shell:destroy()
+  end)
+
+  it("hides the host profile toolbar without destroying its controls", function()
+    local cp = modules.game_bot.contentsPanel
+    local toolbar = g_ui.createWidget("Panel", nil)
+    cp.config = g_ui.createWidget("ComboBox", toolbar)
+    cp.edit = g_ui.createWidget("Button", toolbar)
+    cp.enabled = g_ui.createWidget("Button", toolbar)
+
+    local shell = Shell.show()
+
+    assert.is_false(toolbar:isVisible())
+    assert.is_false(toolbar:isEnabled())
+    assert.is_false(cp.config:isDestroyed(), "storage still reads the profile control")
+    shell:destroy()
+  end)
+
+  it("ignores host toolbar fields that are functions", function()
+    local cp = modules.game_bot.contentsPanel
+    cp.edit = function() end
+    cp.enabled = function() return true end
+
+    local shell = Shell.show()
+
+    assert.is_true(shell:isPanelMode())
+    assert.are_equal("cockpit", shell:selected())
+    shell:destroy()
+  end)
+
+  it("does not hide a shared ancestor containing the shell panel", function()
+    local cp = modules.game_bot.contentsPanel
+    local ancestor = g_ui.createWidget("Panel", nil)
+    ancestor:addChild(cp.botPanel)
+    cp.edit = g_ui.createWidget("Button", ancestor)
+
+    local shell = Shell.show()
+
+    assert.is_true(ancestor:isVisible())
+    assert.is_false(cp.edit:isVisible())
+    assert.is_true(shell:getWindow():isVisible())
     shell:destroy()
   end)
 
@@ -139,7 +178,7 @@ describe("BotShell host integration", function()
     shell:destroy()
   end)
 
-  it("re-hiding on setupHostHooks stays idempotent and does not re-add removed children", function()
+  it("host cleanup stays idempotent and does not re-add removed children", function()
     local cp = modules.game_bot.contentsPanel
     local shell = Shell.show()
     shell:setupHostHooks()
@@ -164,9 +203,20 @@ describe("BotShell host integration", function()
     assert.are_equal("more", shell:selected())
     assert.are_equal("More", shell:getWindow():recursiveGetChildById("shellTitle"):getText())
     assert.is_nil(shell:getContent():recursiveGetChildById("moreTitle"))
-    assert.is_truthy(shell:getContent():recursiveGetChildById("more_diagnostics"))
+    assert.is_truthy(shell:getContent():recursiveGetChildById("more_analytics"))
     shell:getWindow():recursiveGetChildById("shellBack"):click()
     assert.are_equal("cockpit", shell:selected())
+    shell:destroy()
+  end)
+
+  it("groups auxiliary controls into compact workflow pages", function()
+    local shell = Shell.show()
+    shell:select("more")
+    shell:getContent():recursiveGetChildById("more_tools"):click()
+
+    assert.are_equal("tools", shell:selected())
+    assert.is_truthy(shell:getContent():recursiveGetChildById("tools_looting"))
+    assert.is_truthy(shell:getContent():recursiveGetChildById("tools_toggle_dropper"))
     shell:destroy()
   end)
 

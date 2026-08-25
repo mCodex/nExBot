@@ -10,8 +10,6 @@
   Uses OTClient's g_game.getUnjustifiedPoints() for frag tracking.
 ]]
 
-setDefaultTab("Tools")
-
 -- State tracking (resets on script reload)
 local fragsSinceStart = 0
 local lastFragTime = 0
@@ -110,14 +108,19 @@ local function executeAntiRsProtection()
   end)
 end
 
--- Create the macro (empty function - logic is in event handler)
--- Use UnifiedTick if available for consistency, but this is effectively a no-op
-local antiRsMacro = macro(50, "AntiRS & Msg", function() end)
+local antiRsEnabled = false
+local antiRsMacro = {
+  name = "AntiRS & Msg",
+  isOn = function() return antiRsEnabled end,
+  setOn = function() antiRsEnabled = true end,
+  setOff = function() antiRsEnabled = false end
+}
+AntiRs = antiRsMacro
 BotDB.registerMacro(antiRsMacro, "antiRs")
 
 -- Listen for murder warning messages
 onTextMessage(function(mode, text)
-  if not antiRsMacro.isOn() then return end
+  if not antiRsMacro:isOn() then return end
   if not text then return end
   
   -- Check for murder warning message

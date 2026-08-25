@@ -18,6 +18,11 @@ describe("Actions", function()
     assert.is_nil(Actions.handlers.open_dashboard)
     assert.is_nil(Actions.handlers.open_containers)
     assert.is_nil(Actions.handlers.open_conditions)
+    assert.is_nil(Actions.handlers.open_cave_editor)
+    assert.is_nil(Actions.handlers.open_target_editor)
+    assert.is_nil(Actions.handlers.open_heal_config)
+    assert.is_nil(Actions.handlers.open_loot_config)
+    assert.is_nil(Actions.handlers.open_supply_config)
   end)
 
   it("returns a useful failure for unknown actions", function()
@@ -38,21 +43,16 @@ describe("Actions", function()
     assert.are_equal("Action unavailable", reason)
   end)
 
-  it("opens each editor without opening sibling editors", function()
-    local opened = {}
-    _G.CaveBot = { Editor = { show = function() opened.cave = true end } }
-    _G.TargetBot = { showCreatureEditor = function() opened.target = true end }
-    _G.HealBot = { show = function() opened.heal = true end }
-    _G.Containers = { initSetupWindow = function() opened.loot = true end }
+  it("keeps internal Lua paths out of user-facing failures", function()
+    local message = Actions.userMessage("toggle_cavebot", '[string "/ui/core/actions.lua"]:35: boom')
 
-    assert.is_true(Actions.run("open_cave_editor"))
-    assert.is_true(opened.cave)
-    assert.is_nil(opened.target)
-    assert.is_true(Actions.run("open_target_editor"))
-    assert.is_true(Actions.run("open_heal_config"))
-    assert.is_true(Actions.run("open_loot_config"))
+    assert.are_equal("Cave unavailable", message)
+    assert.is_nil(message:find(".lua", 1, true))
+  end)
 
-    _G.CaveBot, _G.TargetBot, _G.HealBot, _G.Containers = nil, nil, nil, nil
+  it("maps unavailable navigation and attack actions to domain messages", function()
+    assert.are_equal("Cave page unavailable", Actions.userMessage("open_cavebot", "Action unavailable"))
+    assert.are_equal("Attack settings unavailable", Actions.userMessage("open_attack_config", "Action failed"))
   end)
 
   it("pause_all stops every available hunt engine", function()

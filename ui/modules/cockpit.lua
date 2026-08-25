@@ -57,6 +57,10 @@ function Cockpit.viewModel(state)
       hp = state.hp,
       mana = state.mana,
       xpHour = state.xpHour,
+      aiState = state.aiState or "Unavailable",
+      aiDecision = state.aiDecision or "-",
+      aiConfidence = state.aiConfidence or "-",
+      aiOutcome = state.aiOutcome or "-",
       issues = issues,
       attention = issues[1] and (issues[1].message or tostring(issues[1])) or "No issues",
     },
@@ -70,9 +74,9 @@ local function availableState(module, method)
   return value == true
 end
 
-local function call(object, method)
+local function call(object, method, ...)
   if not object or type(object[method]) ~= "function" then return nil end
-  local ok, value = pcall(object[method], object)
+  local ok, value = pcall(object[method], object, ...)
   if ok then return value end
   return nil
 end
@@ -84,6 +88,27 @@ local function value(helper)
   return nil
 end
 
+local function intelligencePulse()
+  local intelligence = nExBot and nExBot.Intelligence
+  if not intelligence then
+    return "Unavailable", "-", "-", "-"
+  end
+
+  local lifecycle = intelligence.lifecycle
+  local aiState = lifecycle and (lifecycle.active and "Active" or "Idle") or "Unavailable"
+  local blackboard = intelligence.blackboard
+  local attackIntent = call(blackboard, "read", "currentAttackIntent")
+  local movementIntent = call(blackboard, "read", "currentMovementIntent")
+  local decision = attackIntent or movementIntent
+  local decisionText = decision and (decision.action or decision.type or decision.name or decision.decisionType) or "-"
+  local confidence = decision and (decision.confidence or (decision.prediction and decision.prediction.confidence))
+  local confidenceText = type(confidence) == "number" and math.floor(confidence * 100 + 0.5) .. "%" or "-"
+  local metrics = nExBot.HuntMetrics and nExBot.HuntMetrics.metrics
+  local outcome = metrics and type(metrics.kills) == "number" and metrics.kills .. " kills" or "-"
+
+  return aiState, decisionText, confidenceText, outcome
+end
+
 function Cockpit.statusProvider()
   local player = player
   local storage = storage
@@ -91,6 +116,7 @@ function Cockpit.statusProvider()
   local targetConfig = storage and storage.targetbot
   local target = TargetBot and value(TargetBot.getCurrentTarget)
   local targetName = call(target, "getName") or (type(target) == "string" and target or nil)
+  local aiState, aiDecision, aiConfidence, aiOutcome = intelligencePulse()
 
   return Cockpit.viewModel({
     cave = availableState(CaveBot, "isOn"),
@@ -110,13 +136,17 @@ function Cockpit.statusProvider()
     hp = call(player, "getHealthPercent") or value(hppercent),
     mana = call(player, "getManaPercent") or value(manapercent),
     xpHour = nExBot and nExBot.CaveBotData and nExBot.CaveBotData.xpPerHour,
+    aiState = aiState,
+    aiDecision = aiDecision,
+    aiConfidence = aiConfidence,
+    aiOutcome = aiOutcome,
     issues = nExBot and nExBot.UI and nExBot.UI.Diagnostics and nExBot.UI.Diagnostics.currentIssues and nExBot.UI.Diagnostics.currentIssues() or {},
   })
 end
 
 local function run(actionId, attention)
   local ok, reason = Actions.run(actionId)
-  if not ok and attention then attention:setText(reason or "Action unavailable") end
+  if not ok and attention then attention:setText(Actions.userMessage(actionId, reason)) end
 end
 
 function Cockpit.render(content)
@@ -157,10 +187,17 @@ function Cockpit.render(content)
   Components.keyValueRow(now, { key = "HP / MP", value = (view.hp or "-") .. "% / " .. (view.mana or "-") .. "%" })
   Components.keyValueRow(now, { key = "XP/h", value = view.xpHour or "-" })
 
+  Components.sectionHeader(content, { title = "AI pulse" })
+  local ai = Components.card(content, { id = "aiPulse" })
+  Components.keyValueRow(ai, { key = "State", value = view.aiState })
+  Components.keyValueRow(ai, { key = "Decision", value = view.aiDecision })
+  Components.keyValueRow(ai, { key = "Confidence", value = view.aiConfidence })
+  Components.keyValueRow(ai, { key = "Outcome", value = view.aiOutcome })
+
   Components.sectionHeader(content, { title = "Attention" })
   attention = Components.label(content, {
     id = "attention",
-    text = view.attention,
+    text = Actions.userMessage(nil, view.attention),
     textStyle = "helper",
     color = #view.issues > 0 and Tokens.colors.warning or Tokens.colors.text.muted,
   })

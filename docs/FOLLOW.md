@@ -4,7 +4,7 @@ Party hunt companion — stays near leader while attacking monsters.
 
 ## Quick Start
 
-1. Open **Tools** tab → **Auto Follow**
+1. Open **More → Tools** and configure Auto Follow.
 2. Enter leader's **name**
 3. Toggle **Follow Player** ON
 4. Toggle **Follow While Attacking** ON (recommended)

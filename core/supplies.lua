@@ -1,4 +1,3 @@
-setDefaultTab("Cave")
 local panelName = "supplies"
 if not SuppliesConfig[panelName] or SuppliesConfig[panelName].item1 then
   SuppliesConfig[panelName] = {
@@ -138,13 +137,6 @@ function addItemPanel()
   return panel
 end
 
-UI.Button(
-  "Supply Settings",
-  function()
-    SuppliesWindow:setVisible(not SuppliesWindow:isVisible())
-  end
-)
-
 -- load settings
 local function loadSettings()
   -- panels
@@ -255,6 +247,7 @@ local function setProfileFocus()
     end
   end
 end
+refreshProfileList()
 setProfileFocus()
 
 SuppliesWindow.newProfile.onClick = function()
@@ -445,4 +438,73 @@ Supplies.getFullData = function()
   }
 
   return data
+end
+
+Supplies.getCurrentProfile = function()
+  return SuppliesConfig[panelName].currentProfile
+end
+
+Supplies.listProfiles = function()
+  local profiles = {}
+  for name, profile in pairs(SuppliesConfig[panelName]) do
+    if type(profile) == "table" then profiles[#profiles + 1] = name end
+  end
+  table.sort(profiles)
+  return profiles
+end
+
+Supplies.setCurrentProfile = function(name)
+  if type(name) ~= "string" or type(SuppliesConfig[panelName][name]) ~= "table" then return false end
+  SuppliesConfig[panelName].currentProfile = name
+  currentProfile = name
+  config = SuppliesConfig[panelName][name]
+  loadSettings()
+  refreshProfileList()
+  setProfileFocus()
+  nExBotConfigSave("supply")
+  return true
+end
+
+Supplies.setItem = function(id, min, max, avg)
+  id = tonumber(id)
+  min, max, avg = tonumber(min), tonumber(max), tonumber(avg)
+  if not id or id <= 100 or not min or not max or not avg then return false end
+  if id % 1 ~= 0 or min % 1 ~= 0 or max % 1 ~= 0 or avg % 1 ~= 0 then return false end
+  if min < 0 or max < 0 or avg < 0 then return false end
+
+  config.items[tostring(id)] = { min = min, max = max, avg = avg }
+  loadSettings()
+  nExBotConfigSave("supply")
+  return true
+end
+
+Supplies.removeItem = function(id)
+  id = tonumber(id)
+  if not id or not config.items[tostring(id)] then return false end
+  config.items[tostring(id)] = nil
+  loadSettings()
+  nExBotConfigSave("supply")
+  return true
+end
+
+Supplies.setCondition = function(name, enabled, value)
+  local fields = {
+    capacity = { enabled = "capSwitch", value = "capValue" },
+    stamina = { enabled = "staminaSwitch", value = "staminaValue" },
+    softBoots = { enabled = "SoftBoots" },
+    imbues = { enabled = "imbues" },
+  }
+  local field = fields[name]
+  if not field then return false end
+
+  if field.value and value ~= nil then
+    value = tonumber(value)
+    if not value or value < 0 or value % 1 ~= 0 then return false end
+  end
+
+  config[field.enabled] = enabled == true
+  if field.value and value ~= nil then config[field.value] = value end
+  loadSettings()
+  nExBotConfigSave("supply")
+  return true
 end

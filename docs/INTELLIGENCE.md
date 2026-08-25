@@ -100,7 +100,7 @@ Hard safety and command execution remain enabled. See [Performance](PERFORMANCE.
 
 ## Tactical Intelligence window
 
-Open **nExBot Tactical Intelligence** from the Main tab. The window includes:
+Open **More → Analytics → AI Intelligence**. The window includes:
 
 - Overview and lifecycle
 - Targeting, Dynamic Lure, Pull, and Wave Avoidance

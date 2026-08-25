@@ -1,9 +1,12 @@
 CaveBotEditorButton < Button
 
 
-CaveBotEditorPanel < Panel
+CaveBotEditorPanel < MainWindow
   id: cavebotEditor
+  text: Cave route editor
+  width: 278
   visible: false
+  @onEscape: self:hide()
   layout:
     type: verticalBox
     fit-children: true
@@ -24,7 +27,7 @@ CaveBotEditorPanel < Panel
       fit-children: true
 
   Label
-    text: Double click on action from action list to edit it
+    text: Select a route action, then choose an edit command.
     text-align: center
     text-auto-resize: true
     text-wrap: true

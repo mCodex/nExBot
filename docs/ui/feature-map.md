@@ -1,8 +1,7 @@
 # nExBot UI — Verified Audit & Feature Map (v5)
 
-Verified against `feat/v5` @ `3ce9eeb` (2026-08-06). This is the old-to-new
-feature map required before any migration. Every row maps an existing feature
-to its source and to its destination in the new shell.
+This map records each feature's destination in the shell after the headless UI
+cutover.
 
 ## Runtime model (host constraints)
 
@@ -11,14 +10,13 @@ to its source and to its destination in the new shell.
   Config/createMiniWindow), `g_ui.*`, `setDefaultTab`, `modules.game_bot`,
   `modules.game_buttons`, `modules.client_topmenu`, `storage`, `schedule`,
   `macro`.
-- The bot does **not** own a shell/tabbar/menu today. UI is tab-fill content
-  (`Main/Cave/Target/HP/Tools`) + ~15 floating `MainWindow`/`MiniWindow`
-  dialogs. `_Loader.lua` drives load order; all `core/*.otui` are auto-imported
-  by `loadStyles()`.
+- nExBot owns one shell mounted in the host bot panel. The old
+  `Main/Cave/Target/HP/Tools` content is not created; detailed configuration
+  remains in native `MainWindow` dialogs.
 - Widget classes (`MainWindow`, `BotSwitch`, `BotButton`, `ComboBox`, ...) come
   from the client stylesheet.
-- OTClient `Image::load` reads PNG/APNG only — no SVG at runtime. Icons are
-  committed PNGs generated from SVG sources by a build script.
+- Workflow landmarks use native Tibia `UIItem` sprites; no icon asset pipeline
+  is required.
 - Font pipeline is client-owned (`.otfont` + `.png` bitmap atlases). The v5 UI
   uses only approved client font names; the font-rendering workstream is
   **explicitly out of scope** for this iteration.
@@ -78,7 +76,7 @@ to its source and to its destination in the new shell.
 |---|---|---|
 | Ingame editor + saved scripts | `core/ingame_editor.lua` | Shell > Scripts |
 | Macro registry (on/off persisted) | `core/bot_database.lua` | Scripts > Macros |
-| Tools tab (exchange, levitate, haste, mount, fishing, follow, mana train) | `core/tools.lua` | Scripts > Tools |
+| Tools (exchange, levitate, haste, mount, fishing, follow, mana train) | `core/tools.lua` | More > Tools |
 | Hotkeys (pushmax, useAll, MW/WG, spy level) | `core/pushmax.lua`, `extras.lua`, `spy_level.lua` | Scripts > Hotkeys |
 
 ### Intelligence (Tactical Intelligence)

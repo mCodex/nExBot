@@ -1,78 +1,3 @@
-setDefaultTab("Tools")
-
-local ui = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('Dropper')
-
-  Button
-    id: edit
-    anchors.top: prev.top
-    anchors.left: prev.right
-    anchors.right: parent.right
-    margin-left: 3
-    height: 17
-    text: Edit
-]])
-
-local edit = setupUI([[
-Panel
-  height: 150
-    
-  Label
-    anchors.top: parent.top
-    anchors.left: parent.left
-    anchors.right: parent.right
-    margin-top: 5
-    text-align: center
-    text: Trash:
-
-  BotContainer
-    id: TrashItems
-    anchors.top: prev.bottom
-    anchors.left: parent.left
-    anchors.right: parent.right
-    height: 32
-
-  Label
-    anchors.top: prev.bottom
-    margin-top: 5
-    anchors.left: parent.left
-    anchors.right: parent.right
-    text-align: center
-    text: Use:
-
-  BotContainer
-    id: UseItems
-    anchors.top: prev.bottom
-    anchors.left: parent.left
-    anchors.right: parent.right
-    height: 32
-
-  Label
-    anchors.top: prev.bottom
-    margin-top: 5
-    anchors.left: parent.left
-    anchors.right: parent.right
-    text-align: center
-    text: Drop if below 150 cap:
-
-  BotContainer
-    id: CapItems
-    anchors.top: prev.bottom
-    anchors.left: parent.left
-    anchors.right: parent.right
-    height: 32   
-]])
-edit:hide()
-
 local SharedHelpers = nExBot.SharedHelpers
 if not SharedHelpers then
   warn("[Dropper] SharedHelpers not loaded")
@@ -94,41 +19,6 @@ local function saveDropperConfig()
   setProfileSetting("dropper", config)
 end
 
-local showEdit = false
-ui.edit.onClick = function(widget)
-  showEdit = not showEdit
-  if showEdit then
-    edit:show()
-  else
-    edit:hide()
-  end
-end
-
-ui.title:setOn(config.enabled)
-ui.title.onClick = function(widget)
-  config.enabled = not config.enabled
-  ui.title:setOn(config.enabled)
-  saveDropperConfig()
-end
-
-UI.Container(function()
-    config.trashItems = edit.TrashItems:getItems()
-    saveDropperConfig()
-    end, true, nil, edit.TrashItems) 
-edit.TrashItems:setItems(config.trashItems)
-
-UI.Container(function()
-    config.useItems = edit.UseItems:getItems()
-    saveDropperConfig()
-    end, true, nil, edit.UseItems) 
-edit.UseItems:setItems(config.useItems)
-
-UI.Container(function()
-    config.capItems = edit.CapItems:getItems()
-    saveDropperConfig()
-    end, true, nil, edit.CapItems) 
-edit.CapItems:setItems(config.capItems)
-
 --[[
   Optimized Dropper Engine
   Uses O(1) hash lookups for fast item detection.
@@ -145,16 +35,33 @@ local function buildLookupTable(items)
     return lookup
 end
 
+local lookups = {
+    trashItems = buildLookupTable(config.trashItems),
+    useItems = buildLookupTable(config.useItems),
+    capItems = buildLookupTable(config.capItems),
+}
+
+local function setItems(key, items)
+    config[key] = items or {}
+    lookups[key] = buildLookupTable(config[key])
+    saveDropperConfig()
+end
+
+nExBot.Dropper = {
+    getConfig = function() return config end,
+    isEnabled = function() return config.enabled == true end,
+    setEnabled = function(enabled)
+        config.enabled = enabled == true
+        saveDropperConfig()
+    end,
+    setTrashItems = function(items) setItems("trashItems", items) end,
+    setUseItems = function(items) setItems("useItems", items) end,
+    setCapItems = function(items) setItems("capItems", items) end,
+}
+
 -- State
 local lastActionTime = 0
 local ACTION_COOLDOWN = 200
-
--- Check if table has any entries (safe check without using next())
-local function hasItems(tbl)
-    if not tbl then return false end
-    for _ in pairs(tbl) do return true end
-    return false
-end
 
 -- Dropper handler function (shared by UnifiedTick and fallback macro)
 local function dropperHandler()
@@ -172,11 +79,6 @@ local function dropperHandler()
         return
     end
     
-    -- Build lookup tables only if needed
-    local trashLookup = hasTrash and buildLookupTable(config.trashItems) or {}
-    local useLookup = hasUse and buildLookupTable(config.useItems) or {}
-    local capLookup = hasCap and buildLookupTable(config.capItems) or {}
-    
     -- Get player position for dropping
     local playerPos = player:getPosition()
     local currentCap = freecap()
@@ -188,21 +90,21 @@ local function dropperHandler()
                 local itemId = item:getId()
                 
                 -- Priority 1: Trash items (always drop)
-                if hasTrash and trashLookup[itemId] then
+                if hasTrash and lookups.trashItems[itemId] then
                     g_game.move(item, playerPos, item:getCount())
                     lastActionTime = now
                     return
                 end
                 
                 -- Priority 2: Use items
-                if hasUse and useLookup[itemId] then
+                if hasUse and lookups.useItems[itemId] then
                     g_game.use(item)
                     lastActionTime = now
                     return
                 end
                 
                 -- Priority 3: Cap items (drop only if low capacity)
-                if hasCap and capLookup[itemId] and currentCap < 150 then
+                if hasCap and lookups.capItems[itemId] and currentCap < 150 then
                     g_game.move(item, playerPos, item:getCount())
                     lastActionTime = now
                     return

@@ -32,6 +32,7 @@ do
     "ui.modules.page",
     "ui.modules.cockpit",
     "ui.modules.workflows",
+    "ui.modules.auxiliary",
     "ui.modules.profiles",
     "ui.modules.settings",
     "ui.modules.diagnostics",

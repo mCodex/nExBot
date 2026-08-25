@@ -32,14 +32,14 @@ CaveBot.Editor.registerAction = function(action, text, params)
       return
     end
     CaveBot.Editor.edit(action, nil, function(action, value)
-      local focusedAction = CaveBot.actionList:getFocusedChild()
-      local index = CaveBot.actionList:getChildCount()
+      local focusedAction = CaveBot.Route:getFocusedChild()
+      local index = CaveBot.Route:getChildCount()
       if focusedAction then
-        index = CaveBot.actionList:getChildIndex(focusedAction)
+        index = CaveBot.Route:getChildIndex(focusedAction)
       end
       local widget = CaveBot.addAction(action, value)
-      CaveBot.actionList:moveChildToIndex(widget, index + 1)
-      CaveBot.actionList:focusChild(widget)
+      CaveBot.Route:moveChildToIndex(widget, index + 1)
+      CaveBot.Route:focusChild(widget)
       CaveBot.save()
     end)
   end
@@ -47,39 +47,39 @@ CaveBot.Editor.registerAction = function(action, text, params)
 end
 
 CaveBot.Editor.setup = function()
-  CaveBot.Editor.ui = UI.createWidget("CaveBotEditorPanel")
+  CaveBot.Editor.ui = UI.createWindow("CaveBotEditorPanel", g_ui.getRootWidget())
   local ui = CaveBot.Editor.ui
   local registerAction = CaveBot.Editor.registerAction
 
   registerAction("move up", function()
-    local action = CaveBot.actionList:getFocusedChild()
+    local action = CaveBot.Route:getFocusedChild()
     if not action then return end
-    local index = CaveBot.actionList:getChildIndex(action)
+    local index = CaveBot.Route:getChildIndex(action)
     if index < 2 then return end
-    CaveBot.actionList:moveChildToIndex(action, index - 1)
-    CaveBot.actionList:ensureChildVisible(action)
+    CaveBot.Route:moveChildToIndex(action, index - 1)
+    CaveBot.Route:ensureChildVisible(action)
     if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
     if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
     CaveBot.save()
   end)
   registerAction("edit", function()
-    local action = CaveBot.actionList:getFocusedChild()
+    local action = CaveBot.Route:getFocusedChild()
     if not action or not action.onDoubleClick then return end
     action.onDoubleClick(action)
   end)
   registerAction("move down", function()
-    local action = CaveBot.actionList:getFocusedChild()
+    local action = CaveBot.Route:getFocusedChild()
     if not action then return end
-    local index = CaveBot.actionList:getChildIndex(action)
-    if index >= CaveBot.actionList:getChildCount() then return end
-    CaveBot.actionList:moveChildToIndex(action, index + 1)
-    CaveBot.actionList:ensureChildVisible(action)
+    local index = CaveBot.Route:getChildIndex(action)
+    if index >= CaveBot.Route:getChildCount() then return end
+    CaveBot.Route:moveChildToIndex(action, index + 1)
+    CaveBot.Route:ensureChildVisible(action)
     if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
     if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
     CaveBot.save()
   end)
   registerAction("remove", function()
-    local action = CaveBot.actionList:getFocusedChild()
+    local action = CaveBot.Route:getFocusedChild()
     if not action then return end
     action:destroy()
     if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end

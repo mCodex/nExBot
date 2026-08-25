@@ -95,6 +95,41 @@ describe("BotShell", function()
     assert.are_equal("cavebot", shell:selected())
   end)
 
+  it("rerenders an active workflow only when its snapshot changes", function()
+    local Registry = nExBot.UI.ModuleRegistry
+    local status = "Unavailable"
+    local rendered = 0
+    Registry.register({
+      id = "cavebot", label = "CaveBot", order = 10,
+      statusProvider = function()
+        return { snapshot = { header = { statusText = status }, sections = {}, actions = {}, errors = {} } }
+      end,
+      render = function() rendered = rendered + 1 end,
+    })
+    local shell = Shell.new({ root = _G.g_ui.createWidget("Root", nil) })
+    shell:open()
+    shell:select("cavebot")
+    shell:tick()
+    local stableCount = rendered
+
+    shell:tick()
+    assert.are_equal(stableCount, rendered)
+
+    status = "On"
+    shell:tick()
+    assert.are_equal(stableCount + 1, rendered)
+  end)
+
+  it("builds floating fallback content inside a shell layout", function()
+    local shell = Shell.new({ root = _G.g_ui.createWidget("Root", nil) })
+    shell:open()
+
+    local layout = shell:getWindow():recursiveGetChildById("NexBotShellLayout")
+    assert.is_truthy(layout)
+    assert.are_equal("NexShellLayout", layout:getStyle())
+    assert.are_equal(layout, shell:getHeader():getParent())
+  end)
+
   it("destroying the shell rejects later callbacks (generation guard)", function()
     local Registry = nExBot.UI.ModuleRegistry
     local ran = 0

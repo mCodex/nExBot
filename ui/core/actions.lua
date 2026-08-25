@@ -10,21 +10,26 @@
 
 local Actions = {}
 
--- Resolve a dotted path from the environment. OTClient's sandbox has no `_G`,
--- so prefer _G when present, then _ENV (5.2+), then getfenv (5.1/LuaJIT).
-local function env()
-  if _G ~= nil then return _G end
-  if _ENV ~= nil then return _ENV end
-  if getfenv then return getfenv(2) end
-  return nil
-end
+local USER_FAILURES = {
+  open_cavebot = "Cave page unavailable",
+  open_targetbot = "Target page unavailable",
+  open_healing = "Heal page unavailable",
+  open_looting = "Loot page unavailable",
+  open_attack_config = "Attack settings unavailable",
+  toggle_cavebot = "Cave unavailable",
+  toggle_targetbot = "Target unavailable",
+  toggle_healing = "Heal unavailable",
+  toggle_looting = "Loot unavailable",
+  pause_all = "Could not pause hunt",
+}
 
-local function get(...)
-  local v = env()
-  for i = 1, select("#", ...) do
-    v = v and v[select(i, ...)]
+function Actions.userMessage(actionId, reason)
+  local message = tostring(reason or "Action unavailable")
+  if message == "Action unavailable" or message == "Action failed"
+    or message:find("[string", 1, true) or message:find("/ui/", 1, true) or message:find(".lua:", 1, true) then
+    return USER_FAILURES[actionId] or "Action unavailable"
   end
-  return v
+  return message
 end
 
 local function invoke(fn, ...)
@@ -34,71 +39,59 @@ local function invoke(fn, ...)
   return true
 end
 
-local function toggle(moduleName)
-  local M = get(moduleName)
-  if not M then return false, "Action unavailable" end
-  if M.isOn and M.isOn() then
-    return invoke(M.setOff)
-  elseif M.isOff and M.isOff() then
-    return invoke(M.setOn)
-  elseif M.setOn then
-    return invoke(M.setOn)
+local function toggle(module)
+  if not module then return false, "Action unavailable" end
+  if module.isOn and module.isOn() then
+    return invoke(module.setOff)
+  elseif module.isOff and module.isOff() then
+    return invoke(module.setOn)
+  elseif module.setOn then
+    return invoke(module.setOn)
   end
   return false, "Action unavailable"
 end
 
 local function navigate(pageId)
-  local shell = get("nExBot", "UI", "Shell")
+  local shell = nExBot and nExBot.UI and nExBot.UI.Shell
   return invoke(shell and shell.select, pageId)
 end
 
+local function toggleEnabled(module)
+  if not module or not module.isEnabled or not module.setEnabled then return false, "Action unavailable" end
+  local ok, enabled = pcall(module.isEnabled)
+  if not ok then return false, tostring(enabled) end
+  return invoke(module.setEnabled, not enabled)
+end
+
 Actions.handlers = {
-  toggle_cavebot = function() return toggle("CaveBot") end,
-  toggle_targetbot = function() return toggle("TargetBot") end,
-  toggle_healing = function() return toggle("HealBot") end,
+  toggle_cavebot = function() return toggle(CaveBot) end,
+  toggle_targetbot = function() return toggle(TargetBot) end,
+  toggle_healing = function() return toggle(HealBot) end,
   toggle_looting = function()
-    local T = get("TargetBot")
+    local T = TargetBot
     if not T or not T.setLootingEnabled then return false, "Action unavailable" end
     return invoke(T.setLootingEnabled, not (T.isLootingEnabled and T.isLootingEnabled() or false))
   end,
 
   pause_all = function()
     local stopped = false
-    for _, moduleName in ipairs({ "CaveBot", "TargetBot", "HealBot" }) do
-      local M = get(moduleName)
+    local modules = {}
+    if CaveBot then modules[#modules + 1] = CaveBot end
+    if TargetBot then modules[#modules + 1] = TargetBot end
+    if HealBot then modules[#modules + 1] = HealBot end
+    for _, M in ipairs(modules) do
       if M and M.setOff then
         local ok = invoke(M.setOff)
         stopped = ok or stopped
       end
     end
-    local T = get("TargetBot")
+    local T = TargetBot
     if T and T.setLootingEnabled then
       local ok = invoke(T.setLootingEnabled, false)
       stopped = ok or stopped
     end
     if not stopped then return false, "Hunt engines unavailable" end
     return true
-  end,
-
-  open_cave_editor = function()
-    local E = get("CaveBot", "Editor")
-    return invoke(E and E.show)
-  end,
-  open_target_editor = function()
-    local T = get("TargetBot")
-    return invoke(T and T.showCreatureEditor)
-  end,
-  open_heal_config = function()
-    local H = get("HealBot")
-    return invoke(H and H.show)
-  end,
-  open_loot_config = function()
-    local C = get("Containers")
-    return invoke(C and C.initSetupWindow)
-  end,
-  open_supply_config = function()
-    local S = get("Supplies")
-    return invoke(S and S.show)
   end,
 
   open_looting = function()
@@ -113,41 +106,71 @@ Actions.handlers = {
   open_healing = function()
     return navigate("healing")
   end,
-  open_intelligence_window = function()
-    local I = get("nExBot", "TacticalIntelligence")
-    return invoke(I and I.showWindow)
-  end,
   run_doctor = function()
-    local D = get("IntelligenceBotDoctor")
+    local D = IntelligenceBotDoctor
     if D and D.runNow then invoke(D.runNow) end
   end,
   export_diagnostics = function()
-    local R = get("nExBot", "TacticalIntelligence")
+    local R = nExBot and nExBot.TacticalIntelligence
     if R and R.exportDiagnostics then invoke(R.exportDiagnostics) end
   end,
   export_replay = function()
-    local R = get("nExBot", "TacticalIntelligence")
+    local R = nExBot and nExBot.TacticalIntelligence
     if R and R.exportReplay then invoke(R.exportReplay) end
   end,
   save_profile = function()
-    local P = get("ProfileStorage")
+    local P = ProfileStorage
     if P and P.save then invoke(P.save) end
   end,
   import = function()
-    local S = get("nExBot", "UI", "Shell")
+    local S = nExBot and nExBot.UI and nExBot.UI.Shell
     if S and S.instance then
       local shell = S.instance()
       if shell and shell.select then shell:select("profiles") end
     end
   end,
   export = function()
-    local U = get("UnifiedStorage")
+    local U = UnifiedStorage
     if U and U.backup then invoke(U.backup) end
   end,
   open_script_editor = function()
-    local E = get("IngameEditor")
+    local E = IngameEditor
     return invoke(E and E.show)
   end,
+  cave_force_refill = function()
+    local C = CaveBot and CaveBot.Control
+    return invoke(C and C.forceRefill)
+  end,
+  cave_back_stop = function()
+    local C = CaveBot and CaveBot.Control
+    return invoke(C and C.backStop)
+  end,
+  cave_back_trainers = function()
+    local C = CaveBot and CaveBot.Control
+    return invoke(C and C.backTrainers)
+  end,
+  cave_back_offline = function()
+    local C = CaveBot and CaveBot.Control
+    return invoke(C and C.backOffline)
+  end,
+  toggle_alarms = function() return toggle(Alarms) end,
+  toggle_conditions = function() return toggle(Conditions) end,
+  toggle_antirs = function() return toggle(AntiRs) end,
+  toggle_pushmax = function() return toggle(PushMax) end,
+  toggle_combo = function() return toggle(ComboBot) end,
+  open_alarms = function() return invoke(Alarms and Alarms.show) end,
+  show_conditions = function() return invoke(Conditions and Conditions.show) end,
+  open_pushmax = function() return invoke(PushMax and PushMax.show) end,
+  open_combo = function() return invoke(ComboBot and ComboBot.show) end,
+  open_equipper = function() return invoke(nExBot and nExBot.Equipper and nExBot.Equipper.show) end,
+  open_attack_config = function() return invoke(AttackBot and AttackBot.show) end,
+  toggle_dropper = function() return toggleEnabled(nExBot and nExBot.Dropper) end,
+  toggle_depot_withdraw = function() return toggleEnabled(nExBot and nExBot.DepotWithdraw) end,
+  toggle_hold_target = function() return toggleEnabled(nExBot and nExBot.HoldTarget) end,
+  toggle_spy_level = function() return toggleEnabled(nExBot and nExBot.SpyLevel) end,
+  open_extras = function() return invoke(nExBot and nExBot.Extras and nExBot.Extras.showWindow) end,
+  open_depositer = function() return invoke(nExBot and nExBot.Depositer and nExBot.Depositer.showWindow) end,
+  open_analyzer = function() return invoke(Analyzer and Analyzer.showWindow) end,
 }
 
 function Actions.run(id)

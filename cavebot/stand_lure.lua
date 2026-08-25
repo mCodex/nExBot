@@ -151,21 +151,8 @@ end
 
 local next = false
 schedule(5, function() -- delay because cavebot.lua is loaded after this file
-    local function resolveCaveBotList()
-        -- try CaveBotList() if defined, else fallback to CaveBot.actionList
-        local ok, l = pcall(function()
-            if type(CaveBotList) == "function" then return CaveBotList() end
-            return nil
-        end)
-        if ok and l then return l end
-        if CaveBot and CaveBot.actionList then return CaveBot.actionList end
-        return nil
-    end
-
     local function attachHandler(list)
-        modules.game_bot.connect(list, {
-            onChildFocusChange = function(widget, newChild, oldChild)
-
+        list:onFocusChange(function(newChild, oldChild)
                 if oldChild and oldChild.action == "rushlure" then
                     next = true
                     return
@@ -181,17 +168,16 @@ schedule(5, function() -- delay because cavebot.lua is loaded after this file
                     enable = nil -- reset
                     next = false
                 end
-            end
-        })
+        end)
     end
 
-    local list = resolveCaveBotList()
+    local list = CaveBot and CaveBot.Route
     if list then
         attachHandler(list)
     else
         -- try again after short delay
         schedule(100, function()
-            local l2 = resolveCaveBotList()
+            local l2 = CaveBot and CaveBot.Route
             if l2 then
                 attachHandler(l2)
             else

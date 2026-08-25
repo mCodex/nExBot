@@ -4,7 +4,7 @@ Unified session analytics, monster intelligence, targeting history, resources, r
 
 ## Navigation
 
-Open the `Tactical Intelligence` window from the Main tab.
+Open **More → Analytics → AI Intelligence**.
 
 ## API
 

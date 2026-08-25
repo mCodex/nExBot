@@ -15,7 +15,8 @@ describe("intelligence OTClient UI bridge", function()
       assert.is_truthy(source:find('"' .. section .. '"', 1, true), section)
     end
 
-    assert.is_truthy(source:find('UI.Button("Tactical Intelligence"', 1, true))
+    assert.is_truthy(source:find("nExBot.TacticalIntelligence.showWindow = showWindow", 1, true))
+    assert.is_falsy(source:find('UI.Button("Tactical Intelligence"', 1, true))
     assert.is_truthy(source:find('UnifiedTick.register("tactical_intelligence_ui"', 1, true))
   end)
 

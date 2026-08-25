@@ -22,7 +22,7 @@
 
 ## Verify
 
-Startup message in console: `[nExBot vX.X.X] Loaded in XXms`. Main, Cave, Target tabs visible.
+Startup message in console: `[nExBot vX.X.X] Loaded in XXms`. The nExBot cockpit is visible in the bot panel.
 
 ## Auto-Detection
 

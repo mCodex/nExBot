@@ -312,11 +312,6 @@ nExBot.TacticalIntelligence.hideWindow = function()
 end
 nExBot.TacticalIntelligence.renderWindow = render
 
-setDefaultTab("Main")
-UI.Separator()
-UI.Label("AI")
-UI.Button("Tactical Intelligence", showWindow):setTooltip("Open Tactical Intelligence")
-
 UnifiedTick.register("tactical_intelligence_ui", {
   interval = 500,
   priority = UnifiedTick.Priority.LOW,

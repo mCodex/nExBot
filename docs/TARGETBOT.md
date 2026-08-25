@@ -4,7 +4,7 @@ AI-powered creature targeting, combat positioning, and behavior learning.
 
 ## Quick Start
 
-1. Open **Target** tab
+1. Open **Target** in the cockpit
 2. Click **+** → enter monster name → configure spells/behavior
 3. Toggle **ON**
 

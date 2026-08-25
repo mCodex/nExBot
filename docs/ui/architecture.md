@@ -104,18 +104,18 @@ contentsPanel.botPanel`). It attaches directly into the left panel and becomes
 the sole visible navigation surface: a compact hunt cockpit with secondary
 pages behind More.
 
-**Legacy tab UI is hidden, not destroyed.** The module engines (CaveBot,
-TargetBot, ...) hold direct widget references into their tab panels (e.g.
-`CaveBot.actionList = ui.list`) and write to them every tick. Destroying the
-tabs would dangle those references and break the engines. Hiding keeps them
-running while the shell is the visible surface — the correct shell-first
-migration posture.
+Engine state is headless. Routes, creature rules, profiles, and feature
+toggles no longer depend on tab widgets. During attachment the shell destroys
+the replaced host content and disables the host tab bar, leaving one nExBot
+surface.
 
 It auto-attaches shortly after startup (`ui/init.lua`) and re-attaches via
 `setupHostHooks()` if the framework rebuilds the panel on reload. The floating
 window path is retained only as a fallback when the host panel is unavailable.
-Browser-style history connects embedded workflow pages; detailed creature,
-route, healing-rule, and container editors remain native modal windows.
+Browser-style history connects workflows and grouped Tools, Safety, Equipment,
+Analytics, and Utilities pages. Primary profile, navigation, and supply controls
+render inside the scrollable shell; dense auxiliary editors keep their existing
+native windows until they expose domain-level editing APIs.
 
 ## Adding a module
 

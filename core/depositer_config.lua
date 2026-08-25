@@ -1,4 +1,3 @@
-setDefaultTab("Cave")
 local panelName = "specialDeposit"
 
 if not storage[panelName] then
@@ -41,7 +40,7 @@ if depositerPanel then
   end
 end
 
-UI.Button("Stashing Settings", function()  
+local function showDepositerWindow()
     if not depositerPanel then
         warn("[nExBot] DepositerPanel failed to create — check depositer_config.otui style")
         return
@@ -49,7 +48,7 @@ UI.Button("Stashing Settings", function()
     depositerPanel:show()
     depositerPanel:raise()
     depositerPanel:focus()
-end)
+end
 
 function arabicToRoman(n)
     local t = {"I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XI", "XII", "XIV", "XV", "XVI", "XVII"}
@@ -72,9 +71,6 @@ local function refreshEntries()
           end
       end
       panel.item:setItemId(entry.id)
-      if entry.id > 0 then
-        panel.item:setImageSource('')
-      end
       panel.item.onItemChange = function(widget)
         local id = widget:getItemId()
         if id < 100 then
@@ -88,7 +84,6 @@ local function refreshEntries()
                 end
             end
             entry.id = id
-            panel.item:setImageSource('')
             panel.name:setText(Item.create(entry.id):getMarketData().name)
             if entry.index == 0 then
                 local window = modules.client_textedit.show(panel.slot, {
@@ -146,9 +141,6 @@ function getStashingIndex(id)
     end
 end
 
-UI.Separator()
-UI.Label("Sell Exeptions")
-
 -- Profile storage helpers
 local function getProfileSetting(key)
   if ProfileStorage then
@@ -168,14 +160,20 @@ end
 -- Load from profile storage
 local cavebotSell = getProfileSetting("cavebotSell") or {23544, 3081}
 
-local sellContainer = UI.Container(function(widget, items)
+local function setCavebotSellItems(items)
   cavebotSell = items
   setProfileSetting("cavebotSell", items)
-end, true)
-sellContainer:setHeight(35)
-sellContainer:setItems(cavebotSell)
+end
 
 -- Export for other modules to access
 function getCavebotSellItems()
   return cavebotSell
 end
+
+nExBot.Depositer = {
+  showWindow = showDepositerWindow,
+  getItems = function() return config.items end,
+  getStashingIndex = getStashingIndex,
+  getSellItems = getCavebotSellItems,
+  setSellItems = setCavebotSellItems,
+}

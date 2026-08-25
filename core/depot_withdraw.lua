@@ -1,5 +1,4 @@
 -- config
-setDefaultTab("Tools")
 local defaultBp = "shopping bag"
 local id = 21411
 
@@ -85,12 +84,20 @@ if UnifiedTick and UnifiedTick.register then
     group = "tools"
   })
   -- Create dummy macro for UI toggle and BotDB compatibility
-  depotWithdrawMacro = macro(50, "Depot Withdraw", function() end)
+  depotWithdrawMacro = macro(50, function() end)
+  depotWithdrawMacro.name = "Depot Withdraw"
   depotWithdrawMacro:setOn(true)
   depotWithdrawMacro.onSwitch = function(m)
     UnifiedTick.setEnabled("depot_withdraw", m:isOn())
   end
 else
-  depotWithdrawMacro = macro(50, "Depot Withdraw", depotWithdrawHandler)
+  depotWithdrawMacro = macro(50, depotWithdrawHandler)
+  depotWithdrawMacro.name = "Depot Withdraw"
 end
 BotDB.registerMacro(depotWithdrawMacro, "depotWithdraw")
+
+nExBot.DepotWithdraw = {
+  isEnabled = function() return depotWithdrawMacro:isOn() end,
+  setEnabled = function(enabled) BotDB.setMacroState("depotWithdraw", enabled) end,
+  reopenLootContainer = reopenLootContainer,
+}

@@ -1,6 +1,3 @@
--- Tools tab widgets and macros
-setDefaultTab("Tools")
-
 -- ═══════════════════════════════════════════════════════════════════════════
 -- CLIENT SERVICE HELPERS (Cross-client compatibility: OTCv8 / OpenTibiaBR)
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -77,7 +74,7 @@ local lastExchangeTime = 0
 local EXCHANGE_COOLDOWN = 500  -- 500ms between exchanges for reliability
 
 -- Main macro with persistence
-local exchangeMoneyMacro = macro(200, "Exchange Money", function()
+local exchangeMoneyMacro = macro(200, function()
   -- Cooldown check
   if (now - lastExchangeTime) < EXCHANGE_COOLDOWN then return end
   
@@ -88,30 +85,26 @@ local exchangeMoneyMacro = macro(200, "Exchange Money", function()
     lastExchangeTime = now
   end
 end)
+exchangeMoneyMacro.name = "Exchange Money"
 BotDB.registerMacro(exchangeMoneyMacro, "exchangeMoney")
-
-UI.Separator()
 
 -- Auto trade message --------------------------------------------------------
 local autoTradeMessage = getProfileSetting("autoTradeMessage") or "nExBot is online!"
 
-local autoTradeMacro = macro(60 * 1000, "Send message on trade", function()
+local autoTradeMacro = macro(60 * 1000, function()
   local trade = getChannelId("advertising") or getChannelId("trade")
   local message = autoTradeMessage or ""
   if trade and message:len() > 0 then
     sayChannel(trade, message)
   end
 end)
+autoTradeMacro.name = "Send message on trade"
 BotDB.registerMacro(autoTradeMacro, "autoTradeMsg")
 
-local tradeMessageEdit = UI.TextEdit(autoTradeMessage, function(widget, text)
+local function setAutoTradeMessage(text)
   autoTradeMessage = text
   setProfileSetting("autoTradeMessage", text)
-end)
-
-UI.Separator()
-
-UI.Label("Tools:")
+end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- AUTO LEVITATE v2.0 — Event-Driven with Look-Ahead & CaveBot Integration
@@ -370,34 +363,14 @@ macro(60, function()
   end
 end)
 
--- ═══════════════════════════════════════════════════════════════════════════
--- UI TOGGLE
--- ═══════════════════════════════════════════════════════════════════════════
-
-local autoLevitateUI = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: autoLevitateToggle
-    anchors.top: parent.top
-    anchors.left: parent.left
-    anchors.right: parent.right
-    text-align: center
-    !text: tr('Auto Levitate')
-    tooltip: Event-driven auto-levitate: triggers on movement and key presses for instant response
-]])
-
-autoLevitateUI.autoLevitateToggle.onClick = function(widget)
-  autoLevitateEnabled = not autoLevitateEnabled
-  widget:setOn(autoLevitateEnabled)
+local function setAutoLevitateEnabled(enabled)
+  autoLevitateEnabled = enabled == true
   BotDB.set("macros.autoLevitate", autoLevitateEnabled)
 end
 
 -- Restore state on load
 if BotDB.get("macros.autoLevitate") == true then
   autoLevitateEnabled = true
-  autoLevitateUI.autoLevitateToggle:setOn(true)
 end
 
 -- Ensure a default depth value exists (number of extra Z levels to consider for UP; default=1)
@@ -460,7 +433,7 @@ local function resolveHasteSpell(vocation, currentMana)
   return nil
 end
 
-local autoHasteMacro = macro(500, "Auto Haste", function()
+local autoHasteMacro = macro(500, function()
   if not player then return end
   
   -- Cast cooldown
@@ -480,6 +453,7 @@ local autoHasteMacro = macro(500, "Auto Haste", function()
   say(haste.spell)
   lastHasteCast = now
 end)
+autoHasteMacro.name = "Auto Haste"
 BotDB.registerMacro(autoHasteMacro, "autoHaste")
 
 -- Auto Mount ----------------------------------------------------------------
@@ -491,7 +465,7 @@ BotDB.registerMacro(autoHasteMacro, "autoHaste")
 local lastMountAttempt = 0
 local MOUNT_COOLDOWN = 2000 -- Don't spam mount attempts
 
-local autoMountMacro = macro(500, "Auto Mount", function()
+local autoMountMacro = macro(500, function()
   if not player then return end
   
   -- Skip if in protection zone - saves CPU/memory
@@ -520,6 +494,7 @@ local autoMountMacro = macro(500, "Auto Mount", function()
     lastMountAttempt = now
   end
 end)
+autoMountMacro.name = "Auto Mount"
 BotDB.registerMacro(autoMountMacro, "autoMount")
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -579,23 +554,8 @@ local function autoRandomOutfitLoop()
   end
 end
 
-local autoRandomOutfitUI = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    anchors.right: parent.right
-    text-align: center
-    !text: tr('Auto Random Outfit Colors')
-]])
-
--- Connect UI switch to macro state
-autoRandomOutfitUI.title.onClick = function(widget)
-  autoRandomOutfitEnabled = not autoRandomOutfitEnabled
-  widget:setOn(autoRandomOutfitEnabled)
+local function setAutoRandomOutfitEnabled(enabled)
+  autoRandomOutfitEnabled = enabled == true
   if autoRandomOutfitEnabled then
     -- Start the loop
     randomizeOutfitColors() -- Apply immediately
@@ -605,8 +565,6 @@ autoRandomOutfitUI.title.onClick = function(widget)
     modules.game_textmessage.displayStatusMessage("Auto random outfit colors disabled!")
   end
 end
-
-UI.Separator()
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FISHING - Random water tile selection + auto fish drop to water
@@ -779,24 +737,8 @@ local fishingMacro = macro(1000, function()
   end
 end)
 
--- Fishing UI Switch (same pattern as Dropper)
-local fishingUI = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    anchors.right: parent.right
-    text-align: center
-    !text: tr('Fishing')
-]])
-
--- Connect UI switch to macro state using CharacterDB (per-character)
-fishingUI.title.onClick = function(widget)
-  fishingEnabled = not fishingEnabled
-  widget:setOn(fishingEnabled)
+local function setFishingEnabled(enabled)
+  fishingEnabled = enabled == true
   -- Save to CharacterDB if available, otherwise BotDB
   if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
     CharacterDB.set("macros.fishing", fishingEnabled)
@@ -816,10 +758,7 @@ end
 local savedFishingState = loadFishingState()
 if savedFishingState then
   fishingEnabled = true
-  fishingUI.title:setOn(true)
 end
-
-UI.Separator()
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FOLLOW PLAYER — Party hunt companion
@@ -838,11 +777,12 @@ if Follow and Follow.loadConfig then
   Follow.loadConfig()
 end
 
-local followPlayerMacro = macro(75, "Follow Player", function()
+local followPlayerMacro = macro(75, function()
   if Follow and Follow.tick then
     Follow.tick()
   end
 end)
+followPlayerMacro.name = "Follow Player"
 
 if Follow then
   local lastMacroState = nil
@@ -861,39 +801,20 @@ if Follow then
   end
 end
 
-if Follow then
-  UI.Label("Auto Follow")
-
-  UI.Label("Target:")
-  local followPlayerNameEdit = UI.TextEdit(Follow.getConfig().playerName, function(widget, text)
-    Follow.setPlayerName(text:trim())
-    Follow.saveConfig()
-  end)
-
-  local followWhileAttackingUI = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: followWhileAttackingToggle
-    anchors.top: parent.top
-    anchors.left: parent.left
-    anchors.right: parent.right
-    text-align: center
-    !text: tr('Follow While Attacking')
-    tooltip: Keep following player even when attacking monsters with TargetBot
-]])
-
-  followWhileAttackingUI.followWhileAttackingToggle:setOn(Follow.getConfig().followWhileAttacking)
-  followWhileAttackingUI.followWhileAttackingToggle.onClick = function(widget)
-    local cfg = Follow.getConfig()
-    cfg.followWhileAttacking = not cfg.followWhileAttacking
-    widget:setOn(cfg.followWhileAttacking)
+local function setFollowPlayerName(text)
+  if Follow then
+    Follow.setPlayerName((text or ""):trim())
     Follow.saveConfig()
   end
 end
 
-UI.Separator()
+local function setFollowWhileAttacking(enabled)
+  if Follow then
+    local cfg = Follow.getConfig()
+    cfg.followWhileAttacking = enabled == true
+    Follow.saveConfig()
+  end
+end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- MANA TRAINING - Per-character settings via CharacterDB
@@ -966,29 +887,26 @@ local function saveManaTrainingSettings()
   end
 end
 
-UI.Label("Mana Training:")
-
-UI.Label("Spell to cast (default: exura):")
-UI.TextEdit(manaTraining.spell or "exura", function(widget, text)
+local function setManaTrainingSpell(text)
   manaTraining.spell = sanitizeSpell(text)
   saveManaTrainingSettings()
-end)
+end
 
-UI.Label("Min mana % to train (10-100):")
-UI.TextEdit(tostring(manaTraining.minManaPercent or 80), function(widget, text)
-  local value = tonumber(text)
-  if not value then return end
+local function setManaTrainingMinPercent(value)
+  value = tonumber(value)
+  if not value then return false end
   if value < 10 then value = 10 end
   if value > 100 then value = 100 end
   manaTraining.minManaPercent = value
   saveManaTrainingSettings()
-end)
+  return true
+end
 
 -- Mana Training macro with built-in toggle (like Hold Target)
 local lastTrainCast = 0
 local TRAIN_COOLDOWN = 1000
 
-local manaTrainingMacro = macro(500, "Mana Training", function()
+local manaTrainingMacro = macro(500, function()
   if not player then return end
   if (now - lastTrainCast) < TRAIN_COOLDOWN then return end
 
@@ -1001,6 +919,22 @@ local manaTrainingMacro = macro(500, "Mana Training", function()
   say(spell)
   lastTrainCast = now
 end)
+manaTrainingMacro.name = "Mana Training"
 BotDB.registerMacro(manaTrainingMacro, "manaTraining")
 
-UI.Separator()
+nExBot.Tools = {
+  getAutoTradeMessage = function() return autoTradeMessage end,
+  setAutoTradeMessage = setAutoTradeMessage,
+  isAutoLevitateEnabled = function() return autoLevitateEnabled end,
+  setAutoLevitateEnabled = setAutoLevitateEnabled,
+  isAutoRandomOutfitEnabled = function() return autoRandomOutfitEnabled end,
+  setAutoRandomOutfitEnabled = setAutoRandomOutfitEnabled,
+  isFishingEnabled = function() return fishingEnabled end,
+  setFishingEnabled = setFishingEnabled,
+  getFollowConfig = function() return Follow and Follow.getConfig() or nil end,
+  setFollowPlayerName = setFollowPlayerName,
+  setFollowWhileAttacking = setFollowWhileAttacking,
+  getManaTraining = function() return manaTraining end,
+  setManaTrainingSpell = setManaTrainingSpell,
+  setManaTrainingMinPercent = setManaTrainingMinPercent,
+}

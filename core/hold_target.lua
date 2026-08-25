@@ -1,5 +1,3 @@
-setDefaultTab("Tools")
-
 local targetID = nil
 
 -- escape when attacking will reset hold target
@@ -48,7 +46,8 @@ if UnifiedTick and UnifiedTick.register then
         group = "targeting"
     })
     -- Create a dummy macro for UI toggle compatibility
-    holdTargetMacro = macro(100, "Hold Target", function() end)
+    holdTargetMacro = macro(100, function() end)
+    holdTargetMacro.name = "Hold Target"
     holdTargetMacro:setOn(true)
     -- Sync macro toggle with UnifiedTick handler
     holdTargetMacro.onSwitch = function(m)
@@ -56,6 +55,13 @@ if UnifiedTick and UnifiedTick.register then
     end
 else
     -- Fallback to standalone macro if UnifiedTick not available
-    holdTargetMacro = macro(100, "Hold Target", holdTargetHandler)
+    holdTargetMacro = macro(100, holdTargetHandler)
+    holdTargetMacro.name = "Hold Target"
 end
-BotDB.registerMacro(holdTargetMacro, "holdTarget") 
+BotDB.registerMacro(holdTargetMacro, "holdTarget")
+
+nExBot.HoldTarget = {
+    isEnabled = function() return holdTargetMacro:isOn() end,
+    setEnabled = function(enabled) BotDB.setMacroState("holdTarget", enabled) end,
+    clear = function() targetID = nil end,
+}

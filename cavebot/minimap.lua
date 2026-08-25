@@ -16,7 +16,7 @@ local function safeAddCaveBotWaypoint(x, y, z)
   if not CaveBot.addAction then
     return false
   end
-  if not CaveBot.actionList then
+  if not CaveBot.Route then
     return false
   end
   if not CaveBot.save then
@@ -62,8 +62,8 @@ minimap.onMouseRelease = function(widget,pos,button)
     menu:setGameMenu(true)
     menu:addOption(tr('Create mark'), function() minimap:createFlagWindow(mapPos) end)
     
-    -- Only show CaveBot options if CaveBot is fully loaded (including actionList)
-    if CaveBot and CaveBot.addAction and CaveBot.actionList then
+    -- Only show CaveBot options after its route model is loaded.
+    if CaveBot and CaveBot.addAction and CaveBot.Route then
       -- Add goto with player's current floor (safer, more reliable)
       menu:addOption(tr('Add CaveBot GoTo (current floor)'), function()
         safeAddCaveBotWaypoint(mapPos.x, mapPos.y, playerPos.z)

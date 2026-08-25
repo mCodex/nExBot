@@ -38,10 +38,10 @@ use native `UIItem` sprites, avoiding external image parsing.
 `ui/shell/shell.lua` replaces the host client's left bot bar with one narrow
 hunt cockpit: four engine controls, truthful live telemetry, attention state,
 and a compact footer. Advanced pages live behind More; rich configuration and
-AI and configuration summaries navigate inside the shell; detailed editors
-remain native modal windows. One generation-guarded instance auto-attaches and
-re-attaches on reload. Old tab panels are detached, not
-destroyed, so domain engines keep valid widget references. The 250 ms UI tick
+AI and primary configuration controls navigate inside the scrollable shell.
+Dense auxiliary editors without domain APIs retain their native windows. One generation-guarded instance auto-attaches and
+re-attaches on reload. Engine state is independent of widgets, so replaced host
+content is destroyed during attachment. The 250 ms UI tick
 re-renders only when the cockpit fingerprint changes.
 
 ## Module pages
@@ -50,15 +50,17 @@ re-renders only when the cockpit fingerprint changes.
 (Cave, Target, Heal, Loot, Supplies, AI, Profiles, Settings, Diagnostics) provide
 `viewModel/statusProvider/render/register` and render through
 `ui/modules/page.lua` (shared shape: title + badge + section cards + actions).
+Auxiliary features are grouped under Tools, Safety, Equipment, Analytics, and
+Utilities.
 
 ## Migration notes
 
-- Configs are untouched: `nExBot_configs/`, `cavebot_configs/`,
-  `targetbot_configs/`, `storage/` are never written by the shell.
+- Existing `.cfg`, `.json`, `storage._configs`, and `UnifiedStorage` contracts
+  are preserved by the headless profile store.
 - Module enable/disable state stays in the existing domain globals and
   `UnifiedStorage` keys; the shell only reads projections.
-- Host tab widgets remain alive but detached. Existing editors are the focused
-  configuration surfaces; the cockpit does not duplicate their controls.
+- Existing editors remain native configuration windows; tab widgets are no
+  longer used as engine state.
 - Hotkeys, macros, and client-topmenu integration are preserved.
 - No global texture filtering changes: the icon/font system only selects asset
   paths and approved font names; game sprite rendering is untouched.

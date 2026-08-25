@@ -23,48 +23,8 @@ local function safeResetWalking()
   end
 end
 
--- ui
-local configWidget = UI.Config()  -- Create config widget first
-local ui = UI.createWidget("CaveBotPanel")
-
--- Move the config widget into the placeholder panel at the top
-if ui.configWidgetPlaceholder and configWidget then
-  -- Try multiple methods to reparent the widget
-  local placeholder = ui.configWidgetPlaceholder
-  if configWidget.setParent then
-    configWidget:setParent(placeholder)
-  end
-  if placeholder.addChild then
-    -- Only add if not already a child to avoid duplicate-add warnings
-    local ok, parent = pcall(function() return configWidget:getParent() end)
-    if not ok or parent ~= placeholder then
-      placeholder:addChild(configWidget)
-    end
-  end
-  -- Move to first child position if possible
-  if placeholder.moveChildToIndex then
-    placeholder:moveChildToIndex(configWidget, 1)
-  end
-end
-
--- Move the main CaveBot panel to the first position in the tab
--- This ensures the waypoint list appears before Editor/Config panels
-do
-  local parent = ui:getParent()
-  if parent then
-    -- Try different OTClient methods for reordering children
-    if parent.moveChildToIndex then
-      parent:moveChildToIndex(ui, 1)
-    elseif parent.insertChild then
-      -- Alternative: remove and re-insert at front
-      parent:removeChild(ui)
-      parent:insertChild(1, ui)
-    end
-  end
-end
-
-ui.list = ui.listPanel.list -- shortcut
-CaveBot.actionList = ui.list
+local ui = { list = nExBot.OrderedModel.new() }
+CaveBot.Route = ui.list
 
 if CaveBot.Editor then
   CaveBot.Editor.setup()
@@ -1133,7 +1093,7 @@ end)
 
 -- config, its callback is called immediately, data can be nil
 local lastConfig = ""
-config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, enabled, data)
+config = nExBot.ProfileStore.open({ key = "cavebot_configs", extension = "cfg", onChange = function(name, enabled, data)
   if enabled and CaveBot.Recorder.isOn() then
     CaveBot.Recorder.disable()
     CaveBot.setOff()
@@ -1233,30 +1193,9 @@ config = Config.setup("cavebot_configs", configWidget, "cfg", function(name, ena
     ui.list:focusChild(ui.list:getChildByIndex(currentActionIndex))
   end
   lastConfig = name
-end)
-
--- ui callbacks
-ui.showEditor.onClick = function()
-  if not CaveBot.Editor then return end
-  if ui.showEditor:isOn() then
-    CaveBot.Editor.hide()
-    ui.showEditor:setOn(false)
-  else
-    CaveBot.Editor.show()
-    ui.showEditor:setOn(true)
-  end
-end
-
-ui.showConfig.onClick = function()
-  if not CaveBot.Config then return end
-  if ui.showConfig:isOn() then
-    CaveBot.Config.hide()
-    ui.showConfig:setOn(false)
-  else
-    CaveBot.Config.show()
-    ui.showConfig:setOn(true)
-  end
-end
+end })
+config.reload()
+CaveBot.listProfiles = config.list
 
 -- public function, you can use them in your scripts
 CaveBot.isOn = function()
@@ -1857,8 +1796,10 @@ CaveBot.setCurrentProfile = function(name)
     pcall(function() EventBus.emit("cavebot:configChanged", name) end)
   end
   
-  -- Restore previous enabled state after config loads
-  CaveBot.setOn(wasEnabled)
+  local ok = config.select(name)
+  if ok then
+    if wasEnabled then CaveBot.setOn() else CaveBot.setOff() end
+  end
 end
 
 CaveBot.delay = function(value)
@@ -1925,10 +1866,6 @@ CaveBot.save = function()
   end
   table.insert(data, {"extensions", json.encode(extension_data, 2)})
   config.save(data)
-end
-
-CaveBotList = function()
-  return ui.list
 end
 
 -- Note: Profile restoration is handled early in configs.lua

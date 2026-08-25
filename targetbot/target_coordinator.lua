@@ -458,12 +458,22 @@ end
 TargetBot.ChaseModeEnforcer = ChaseModeEnforcer
 TargetBot.enforceChaseModeNow = enforceChaseModeNow
 
--- ui
-local configWidget = UI.Config()
-local ui = UI.createWidget("TargetBotPanel")
+local function textValue(initial)
+  local value = tostring(initial or "")
+  return {
+    getText = function() return value end,
+    setText = function(_, text) value = tostring(text or "") end,
+  }
+end
 
-ui.list = ui.listPanel.list -- shortcut
-TargetBot.targetList = ui.list
+local ui = {
+  list = nExBot.OrderedModel.new(),
+  status = { right = textValue("Off") },
+  target = { right = textValue("-") },
+  config = { right = textValue("-") },
+  danger = { right = textValue("0") },
+}
+TargetBot.Creatures = ui.list
 TargetBot.Looting.setup()
 
 -- Setup eat food feature if available
@@ -471,16 +481,10 @@ if TargetBot.EatFood and TargetBot.EatFood.setup then
   TargetBot.EatFood.setup()
 end
 
-ui.status.left:setText("Status:")
 setStatusRight("Off")
-ui.target.left:setText("Target:")
 setWidgetTextSafe(ui.target.right, "-")
-ui.config.left:setText("Config:")
 setWidgetTextSafe(ui.config.right, "-")
-ui.danger.left:setText("Danger:")
 setWidgetTextSafe(ui.danger.right, "0")
-
-if ui and ui.editor and ui.editor.debug then ui.editor.debug:destroy() end
 
 local oldTibia = getClientVersion() < 960
 
@@ -488,38 +492,35 @@ local oldTibia = getClientVersion() < 960
 -- Config setup moved down to after macro (to ensure macro and recalc exist before callback runs)
 -- See vBot for reference: https://github.com/Vithrax/vBot
 
--- Setup UI tooltips
-ui.editor.buttons.add:setTooltip("Add a new creature targeting configuration.\nDefine which creatures to attack and how.")
-ui.editor.buttons.edit:setTooltip("Edit the selected creature targeting configuration.\nModify priority, distance, and behavior settings.")
-ui.editor.buttons.remove:setTooltip("Remove the selected creature targeting configuration.\nThis action cannot be undone.")
+TargetBot.showCreatureEditor = function()
+  local selected = ui.list:getFocusedChild()
+  local current = selected and selected.value or nil
+  TargetBot.Creature.edit(current, function(newConfig)
+    if selected then
+      selected:setText(newConfig.name)
+      selected.value = newConfig
+      TargetBot.Creature.resetConfigsCache()
+    else
+      TargetBot.Creature.addConfig(newConfig, true)
+    end
+    TargetBot.save()
+  end)
+end
 
-ui.configButton:setTooltip("Show/hide the target editor panel.\nUse to add, edit, or remove creature configurations.")
-
--- setup ui
-ui.editor.buttons.add.onClick = function()
+TargetBot.addCreature = function()
   TargetBot.Creature.edit(nil, function(newConfig)
     TargetBot.Creature.addConfig(newConfig, true)
     TargetBot.save()
   end)
 end
 
-ui.editor.buttons.edit.onClick = function()
+TargetBot.removeSelectedCreature = function()
   local entry = ui.list:getFocusedChild()
-  if not entry then return end
-  TargetBot.Creature.edit(entry.value, function(newConfig)
-    entry:setText(newConfig.name)
-    entry.value = newConfig
-    TargetBot.Creature.resetConfigsCache()
-    TargetBot.save()
-  end)
-end
-
-ui.editor.buttons.remove.onClick = function()
-  local entry = ui.list:getFocusedChild()
-  if not entry then return end
+  if not entry then return false end
   entry:destroy()
   TargetBot.Creature.resetConfigsCache()
   TargetBot.save()
+  return true
 end
 
 -- public function, you can use them in your scripts
@@ -792,9 +793,10 @@ TargetBot.setCurrentProfile = function(name)
     setCharacterProfile("targetbotProfile", name)
   end
   
-  -- Restore previous enabled state after config loads
-  -- Note: explicitlyDisabled is NOT set during programmatic profile apply
-  TargetBot.setOn(wasEnabled)
+  local ok = config.select(name)
+  if ok then
+    if wasEnabled then TargetBot.setOn() else TargetBot.setOff() end
+  end
 end
 
 TargetBot.delay = function(value)
@@ -1565,7 +1567,7 @@ moduleInitialized = true
 pcall(function() performPendingEnableOnce() end)
 
 -- Config setup (moved here so macro/recalc are defined before callback runs)
-config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
+config = nExBot.ProfileStore.open({ key = "targetbot_configs", extension = "json", onChange = function(name, enabled, data)
   -- Track if this callback was triggered by user clicking the switch
   -- During programmatic profile application, don't treat as user toggle
   local isUserToggle = TargetBot._initialized and not TargetBot._profileApplying
@@ -1675,7 +1677,9 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
     schedule(100, function() pcall(function() if targetbotMacro then pcall(targetbotMacro) end end) end)
   end
   lureEnabled = true
-end)
+end })
+config.reload()
+TargetBot.listProfiles = config.list
 
 -- Stop attacking the current target
 TargetBot.stopAttack = function(clearWalk)

@@ -10,31 +10,6 @@ if serviceLoadOk and serviceResult then
     EquipperService = serviceResult
 end
 
--- UI SETUP
-
-local ui = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: switch
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('EQ Manager')
-
-  Button
-    id: setup
-    anchors.top: prev.top
-    anchors.left: prev.right
-    anchors.right: parent.right
-    margin-left: 3
-    height: 17
-    text: Setup
-]])
-ui:setId(panelName)
-
 -- STORAGE & STATE (Per-Character with CharacterDB)
 
 -- Default config structure
@@ -233,34 +208,15 @@ local function getEnabledRules()
     return out
 end
 
--- UI SWITCH SYNC (Per-Character State)
-
--- Sync switch state with config (call on init and when CharacterDB becomes ready)
-local function syncSwitchState()
-    if ui and ui.switch then
-        ui.switch:setOn(config.enabled == true)
-    end
-end
-
--- Initial sync
-syncSwitchState()
-
 -- Delayed re-sync to ensure CharacterDB is ready
 -- (In case the player wasn't fully available at init time)
 schedule(500, function()
     if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
         -- Reinitialize config from CharacterDB
         initConfig()
-        syncSwitchState()
         invalidateRulesCache()
     end
 end)
-
-ui.switch.onClick = function(widget)
-  config.enabled = not config.enabled
-  widget:setOn(config.enabled)
-  saveConfig()  -- Force immediate save on toggle
-end
 
 local conditions = { -- always add new conditions at the bottom
     "Item is available and not worn.", -- nothing 1
@@ -291,7 +247,7 @@ local optionalConditionNumber = 2
 local mainWindow = UI.createWindow("EquipWindow")
 mainWindow:hide()
 
-ui.setup.onClick = function()
+local function showSetup()
     mainWindow:show()
     mainWindow:raise()
     mainWindow:focus()
@@ -1237,6 +1193,17 @@ EquipManager = macro(300, function()
     -- Run the throttled check (respects cooldowns internally)
     throttledEquipCheck()
 end)
+
+nExBot.Equipper = {
+    isEnabled = function() return config.enabled == true end,
+    setEnabled = function(enabled)
+        config.enabled = enabled == true
+        saveConfig()
+        triggerEquipCheck()
+    end,
+    show = showSetup,
+    getRules = function() return config.rules end,
+}
 
 -- EVENT-DRIVEN EQUIPMENT MANAGEMENT
 -- Listen to equipment changes to invalidate cache

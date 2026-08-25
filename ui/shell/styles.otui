@@ -1,8 +1,14 @@
 NexButton < Button
+  height: 22
   margin-top: 1
   margin-bottom: 1
+  margin-left: 3
+  margin-right: 3
 
 NexCard < Panel
+  background-color: #242729
+  border-width: 1
+  border-color: #626a6f
   margin-left: 4
   margin-right: 4
   margin-top: 4
@@ -22,7 +28,25 @@ NexBadge < Label
   margin-right: 2
 
 NexMetricCard < Panel
+  height: 36
   margin: 4
+
+NexMetricValue < Label
+  anchors.left: parent.left
+  anchors.top: parent.top
+  anchors.right: status.left
+  text-wrap: false
+
+NexMetricLabel < Label
+  anchors.left: parent.left
+  anchors.bottom: parent.bottom
+  anchors.right: status.left
+  text-wrap: false
+
+NexMetricStatus < Label
+  width: 48
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
 
 NexRow < Panel
   height: 18
@@ -31,17 +55,113 @@ NexRow < Panel
   margin-top: 2
   margin-bottom: 2
 
+NexKeyLabel < Label
+  width: 56
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+
+NexValueLabel < Label
+  anchors.left: prev.right
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  text-align: right
+  text-wrap: false
+
+NexControlLabel < Label
+  width: 76
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+
+NexControlCombo < ComboBox
+  anchors.left: prev.right
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
+NexControlInput < BotTextEdit
+  anchors.left: prev.right
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
+NexControlSlider < HorizontalScrollBar
+  anchors.left: prev.right
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
+NexControlSwitch < BotSwitch
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
+NexControlCheckBox < CheckBox
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
 NexToolbar < Panel
   margin: 4
 
 NexListRow < Panel
+  height: 36
   margin-left: 6
   margin-right: 6
   margin-top: 2
   margin-bottom: 2
 
-NexFooter < Panel
-  margin: 4
+NexListTitle < Label
+  anchors.left: parent.left
+  anchors.top: parent.top
+  anchors.right: listActions.left
+  text-wrap: false
+
+NexListSubtitle < Label
+  anchors.left: parent.left
+  anchors.bottom: parent.bottom
+  anchors.right: listActions.left
+  text-wrap: false
+
+NexListActions < Panel
+  id: listActions
+  height: 18
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  layout:
+    type: horizontalBox
+    fit-children: true
+
+NexItemRow < Panel
+  height: 38
+  margin-left: 4
+  margin-right: 4
+  margin-top: 2
+  margin-bottom: 2
+  background-color: #303438
+  border-width: 1
+  border-color: #626a6f
+
+NexItemSprite < UIItem
+  width: 32
+  height: 32
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+  margin-left: 2
+  image-source: /images/ui/item
+  virtual: true
+  draggable: false
+
+NexItemDetails < Panel
+  anchors.left: item.right
+  anchors.right: parent.right
+  anchors.top: parent.top
+  anchors.bottom: parent.bottom
+  margin-left: 4
+  layout:
+    type: verticalBox
+
+NexItemTitle < Label
+  height: 16
+  text-wrap: false
+
+NexItemSubtitle < Label
+  height: 16
+  text-wrap: false
 
 NexShell < MainWindow
   text: nExBot
@@ -50,19 +170,36 @@ NexShell < MainWindow
 -- Compact single-column shell that preserves the game viewport.
 NexShellLayout < Panel
   anchors.fill: parent
-  layout:
-    type: verticalBox
 
-NexContent < Panel
+NexContentScrollBar < VerticalScrollBar
+  width: 10
+  anchors.top: header.bottom
+  anchors.right: parent.right
+  anchors.bottom: footer.top
+  step: 18
+  pixels-scroll: true
+
+NexContent < ScrollablePanel
+  anchors.left: parent.left
+  anchors.right: contentScroll.left
+  anchors.top: header.bottom
+  anchors.bottom: footer.top
+  vertical-scrollbar: contentScroll
   layout:
     type: verticalBox
     fit-children: true
 
 NexShellHeader < Panel
+  background-color: #191b1d
+  border-width: 1
+  border-color: #b6904d
   height: 28
+  anchors.left: parent.left
+  anchors.right: parent.right
+  anchors.top: parent.top
 
 NexHeaderButton < Button
-  width: 26
+  width: 48
   anchors.left: parent.left
   anchors.verticalCenter: parent.verticalCenter
 
@@ -77,6 +214,15 @@ NexShellTitle < Label
   anchors.verticalCenter: parent.verticalCenter
   margin-left: 4
   margin-right: 4
+
+NexPageLandmark < UIItem
+  width: 24
+  height: 24
+  margin-top: 2
+  margin-bottom: 2
+  virtual: true
+  draggable: false
+  image-source: /images/ui/item
 
 NexEngineRow < Panel
   height: 34
@@ -109,8 +255,13 @@ NexEngineToggle < Button
   anchors.verticalCenter: parent.verticalCenter
 
 NexCockpitFooter < Panel
+  background-color: #191b1d
+  border-width: 1
+  border-color: #626a6f
   height: 30
-  margin: 2
+  anchors.left: parent.left
+  anchors.right: parent.right
+  anchors.bottom: parent.bottom
   layout:
     type: horizontalBox
 
@@ -120,3 +271,6 @@ NexFooterButton < Button
 
 NexFooter < Panel
   height: 32
+  margin: 4
+  layout:
+    type: horizontalBox

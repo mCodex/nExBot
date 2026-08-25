@@ -42,7 +42,6 @@ function Registry.register(desc)
     sections = desc.sections or {},
     permissions = desc.permissions or {},
     statusProvider = desc.statusProvider,
-    viewModelProvider = desc.viewModelProvider,
     commandHandler = desc.commandHandler,
     render = desc.render,
   }

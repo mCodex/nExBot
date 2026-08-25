@@ -1,5 +1,3 @@
-setDefaultTab("Main")
-
 -- securing storage namespace
 local zChanging = nExBot.zChanging or function() return false end
 local panelName = "extras"
@@ -118,7 +116,7 @@ local addScrollBar = function(id, title, min, max, defaultValue, dest, tooltip)
   widget.scroll.onValueChange(widget.scroll, widget.scroll:getValue())
 end
 
-UI.Button("nExBot Settings and Scripts", function()
+local function showExtrasWindow()
   if not extrasWindow then
     warn("[nExBot] extrasWindow is nil — attempting to recreate")
     local ok, w = pcall(UI.createWindow, 'ExtrasWindow')
@@ -133,17 +131,17 @@ UI.Button("nExBot Settings and Scripts", function()
   extrasWindow:show()
   extrasWindow:raise()
   extrasWindow:focus()
-end)
-
--- Documentation Button - Opens docs
-local docBtn = UI.Button("Documentation", function()
-  g_platform.openUrl("https://nexbot.cc/docs")
-end)
-if docBtn then
-  docBtn:setTooltip("Opens nExBot documentation.\nContains guides for CaveBot, TargetBot, HealBot, and more.")
 end
 
-UI.Separator()
+local function openDocumentation()
+  g_platform.openUrl("https://nexbot.cc/docs")
+end
+
+nExBot.Extras = {
+  getSettings = function() return settings end,
+  showWindow = showExtrasWindow,
+  openDocumentation = openDocumentation,
+}
 
 ---- to maintain order, add options right after another:
 --- add object
@@ -238,7 +236,6 @@ if true then
   local macheteId = { 2130, 3696 }
   local scytheId = { 3653 }
 
-  setDefaultTab("Tools")
   -- script
   if settings.useAll and settings.useAll:len() > 0 then
     hotkey(settings.useAll, function()

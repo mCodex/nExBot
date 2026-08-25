@@ -1,5 +1,4 @@
 
-setDefaultTab("Tools")
 local panelName = "containerPanel"
 
 local PURSE_ITEM_ID = 23396
@@ -116,110 +115,20 @@ end
 local syncUIWithConfig
 local refreshContainerList
 
-UI.Separator()
-local containerUI = setupUI([[
-Panel
-  height: 110
+local function stateControl()
+    local state = false
+    return {
+        setOn = function(_, value) state = value == true end,
+        isOn = function() return state end,
+        setTooltip = function() end,
+    }
+end
 
-  Label
-    text-align: center
-    text: Container Panel
-    anchors.left: parent.left
-    anchors.right: parent.right
-    anchors.top: parent.top
-    font: verdana-11px-rounded
-
-  BotSwitch
-    id: openAll
-    !text: tr('Auto Open')
-    anchors.top: prev.bottom
-    anchors.left: parent.left
-    width: 90
-    margin-top: 3
-    text-align: center
-    font: verdana-11px-rounded
-
-  Button
-    id: setupBtn
-    !text: tr('Setup')
-    anchors.top: prev.top
-    anchors.left: prev.right
-    anchors.right: parent.right
-    margin-left: 2
-    height: 17
-    font: verdana-11px-rounded
-
-  Button
-    id: reopenAll
-    !text: tr('Reopen All')
-    anchors.top: prev.bottom
-    anchors.left: parent.left
-    anchors.right: parent.right
-    margin-top: 2
-    height: 17
-    font: verdana-11px-rounded
-
-  Button
-    id: closeAll
-    !text: tr('Close All')
-    anchors.top: prev.bottom
-    anchors.left: parent.left
-    anchors.right: parent.right
-    margin-top: 2
-    height: 17
-    font: verdana-11px-rounded
-
-  Button
-    id: minimizeAll
-    !text: tr('Minimize All')
-    anchors.top: prev.bottom
-    anchors.left: parent.left
-    width: 90
-    margin-top: 2
-    height: 17
-    font: verdana-11px-rounded
-
-  Button
-    id: maximizeAll
-    !text: tr('Maximize All')
-    anchors.top: prev.top
-    anchors.left: prev.right
-    anchors.right: parent.right
-    margin-left: 2
-    height: 17
-    font: verdana-11px-rounded
-
-  BotSwitch
-    id: purseSwitch
-    anchors.top: minimizeAll.bottom
-    anchors.left: parent.left
-    width: 90
-    margin-top: 3
-    text-align: center
-    !text: tr('Open Purse')
-    font: verdana-11px-rounded
-
-  BotSwitch
-    id: autoMinSwitch
-    anchors.top: minimizeAll.bottom
-    anchors.left: prev.right
-    anchors.right: parent.right
-    margin-top: 3
-    margin-left: 2
-    text-align: center
-    !text: tr('Auto Min')
-    font: verdana-11px-rounded
-  ]])
-containerUI:setId(panelName)
-
-containerUI.openAll:setTooltip("When enabled, automatically opens all containers on re-login\n(Toggle ON to enable auto-open on each login)")
-containerUI.setupBtn:setTooltip("Configure container names, sorting rules, and behavior")
-containerUI.reopenAll:setTooltip("Close all containers and reopen from back slot")
-containerUI.closeAll:setTooltip("Close all open containers")
-containerUI.minimizeAll:setTooltip("Minimize all container windows")
-containerUI.maximizeAll:setTooltip("Maximize all container windows")
-containerUI.purseSwitch:setTooltip("Also open the purse when reopening")
-containerUI.autoMinSwitch:setTooltip("Automatically minimize containers after opening")
+local containerUI = {
+    openAll = stateControl(), setupBtn = stateControl(), reopenAll = stateControl(),
+    closeAll = stateControl(), minimizeAll = stateControl(), maximizeAll = stateControl(),
+    purseSwitch = stateControl(), autoMinSwitch = stateControl(),
+}
 
 syncUIWithConfig = function()
     if containerUI then

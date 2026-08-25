@@ -21,13 +21,27 @@ local function actionsDispatcher()
   return Actions
 end
 
-local function resolveAction(action)
+local function resolveAction(action, content)
   return {
     id = action.id,
     label = action.label,
     variant = action.variant,
     onClick = (type(action.onClick) == "function") and action.onClick
-      or function() actionsDispatcher().run(action.id) end,
+      or function()
+        local ok, reason = actionsDispatcher().run(action.id)
+        local warning = content:recursiveGetChildById("workflowActionError")
+        if ok then
+          if warning then warning:destroy() end
+          return
+        end
+        local message = actionsDispatcher().userMessage(action.id, reason)
+        if warning then
+          warning:setText(message)
+        else
+          warning = Components.inlineWarning(content, { message = message })
+          warning:setId("workflowActionError")
+        end
+      end,
   }
 end
 
@@ -47,7 +61,11 @@ function Page.render(shell, content, lifecycle, view)
 
   local header = view.header or {}
 
-  Components.label(content, { id = "pageTitle", text = header.title or header.module or "", textStyle = "moduleTitle" })
+  if header.itemId then
+    local landmark = g_ui.createWidget("NexPageLandmark", content)
+    landmark:setId("pageLandmark")
+    landmark:setItemId(header.itemId)
+  end
 
   if header.subtitle then
     Components.label(content, { id = "pageSubtitle", text = header.subtitle, textStyle = "helper" })
@@ -67,7 +85,7 @@ function Page.render(shell, content, lifecycle, view)
     if section.id then
       Components.sectionHeader(content, { title = section.title or section.id })
     end
-    local card = Components.card(content, { title = section.title })
+    local card = Components.card(content)
     for _, row in ipairs(section.rows or {}) do
       Components.keyValueRow(card, { key = row.key, value = row.value })
     end
@@ -80,13 +98,13 @@ function Page.render(shell, content, lifecycle, view)
 
   if view.actions and #view.actions > 0 then
     local footer = Components.footerActions(content, {
-      primary = view.primaryAction and resolveAction(view.primaryAction),
-      secondary = view.secondaryAction and resolveAction(view.secondaryAction),
+      primary = view.primaryAction and resolveAction(view.primaryAction, content),
+      secondary = view.secondaryAction and resolveAction(view.secondaryAction, content),
     })
     -- remaining actions as ghost buttons
     for _, action in ipairs(view.actions) do
       if action ~= view.primaryAction and action ~= view.secondaryAction then
-        local a = resolveAction(action)
+        local a = resolveAction(action, content)
         Components.button(footer, {
           text = a.label, id = a.id, variant = "ghost", onClick = a.onClick,
         })
@@ -95,7 +113,7 @@ function Page.render(shell, content, lifecycle, view)
   end
 
   for _, err in ipairs(view.errors or {}) do
-    Components.inlineWarning(content, { message = err.message or err.code })
+    Components.inlineWarning(content, { message = Actions.userMessage(nil, err.message or err.code) })
   end
 end
 

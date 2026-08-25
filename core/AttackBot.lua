@@ -11,7 +11,6 @@ end
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
 
-setDefaultTab("Main")
 -- locales
 local panelName = "AttackBot"
 local currentSettings
@@ -148,12 +147,18 @@ elseif not AttackBotConfig.currentBotProfile or AttackBotConfig.currentBotProfil
   AttackBotConfig.currentBotProfile = 1
 end
 
--- create panel UI
-ui = UI.createWidget("AttackBotBotPanel")
-if not ui then
-  warn("[AttackBot] Failed to create UI widget AttackBotBotPanel")
-  return
+local function stateControl()
+  local state = false
+  return {
+    setOn = function(_, value) state = value == true end,
+    isOn = function() return state end,
+    setText = function() end,
+    setColor = function() end,
+  }
 end
+
+local ui = { title = stateControl(), settings = stateControl(), name = stateControl() }
+for index = 1, 5 do ui[index] = stateControl() end
 
 -- finding correct table, manual unfortunately
 local setActiveProfile = function()

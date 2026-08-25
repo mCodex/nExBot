@@ -9,49 +9,13 @@ local getClientVersion = nExBot.Shared.getClientVersion
 TargetBot.Looting = {}
 TargetBot.Looting.list = {} -- list of containers to loot
 
-local ui
 local items = {}
 local containers = {}
 local itemsById = {}
 local containersById = {}
-local dontSave = false
+local settings = { everyItem = false, eatFromCorpses = false, maxDanger = 10, minCapacity = 100 }
 
 TargetBot.Looting.setup = function()
-  ui = UI.createWidget("TargetBotLootingPanel")
-  UI.Container(TargetBot.Looting.onItemsUpdate, true, nil, ui.items)
-  UI.Container(TargetBot.Looting.onContainersUpdate, true, nil, ui.containers)
-
-  ui.everyItem.onClick = function()
-    if ui.everyItem and ui.everyItem.isOn then ui.everyItem:setOn(not ui.everyItem:isOn()) end
-    TargetBot.save()
-  end
-
-  -- Eat food from corpses toggle
-  ui.eatFromCorpses.onClick = function()
-    ui.eatFromCorpses:setOn(not ui.eatFromCorpses:isOn())
-    if TargetBot.EatFood and TargetBot.EatFood.setEnabled then
-      TargetBot.EatFood.setEnabled(ui.eatFromCorpses:isOn())
-    end
-    TargetBot.save()
-  end
-
-  ui.maxDangerPanel.value.onTextChange = function()
-    local value = tonumber(ui.maxDangerPanel.value:getText())
-    if not value then
-      ui.maxDangerPanel.value:setText(0)
-    end
-    if dontSave then return end
-    TargetBot.save()
-  end
-  ui.minCapacityPanel.value.onTextChange = function()
-    local value = tonumber(ui.minCapacityPanel.value:getText())
-    if not value then
-      ui.minCapacityPanel.value:setText(0)
-    end
-    if dontSave then return end
-    TargetBot.save()
-  end
-
   -- Event-driven triggers: mark loot state dirty when containers change
   if EventBus and nExBot and nExBot.EventUtil and nExBot.EventUtil.debounce then
     local markDirtyDebounced = nExBot.EventUtil.debounce(120, function()
@@ -84,59 +48,49 @@ TargetBot.Looting.setup = function()
 end
 
 TargetBot.Looting.onItemsUpdate = function()
-  if dontSave then return end
   TargetBot.save()
   TargetBot.Looting.updateItemsAndContainers()
 end
 
 TargetBot.Looting.onContainersUpdate = function()
-  if dontSave then return end
   TargetBot.save()
   TargetBot.Looting.updateItemsAndContainers()
 end
 
 TargetBot.Looting.update = function(data)
-  dontSave = true
+  data = data or {}
   TargetBot.Looting.list = {}
-  ui.items:setItems(data['items'] or {})
-  ui.containers:setItems(data['containers'] or {})
-  ui.everyItem:setOn(data['everyItem'])
-  ui.maxDangerPanel.value:setText(data['maxDanger'] or 10)
-  ui.minCapacityPanel.value:setText(data['minCapacity'] or 100)
-  
-  -- Eat food from corpses setting
-  local eatFromCorpses = data['eatFromCorpses'] or false
-  ui.eatFromCorpses:setOn(eatFromCorpses)
+  items = data.items or {}
+  containers = data.containers or {}
+  settings.everyItem = data.everyItem == true
+  settings.maxDanger = tonumber(data.maxDanger) or 10
+  settings.minCapacity = tonumber(data.minCapacity) or 100
+  settings.eatFromCorpses = data.eatFromCorpses == true
   if TargetBot.EatFood and TargetBot.EatFood.setEnabled then
-    TargetBot.EatFood.setEnabled(eatFromCorpses)
+    TargetBot.EatFood.setEnabled(settings.eatFromCorpses)
   end
-  
   TargetBot.Looting.updateItemsAndContainers()
-  dontSave = false
-  
-  -- nExBot loot tracking
+
   nExBot.lootContainers = {}
   nExBot.lootItems = {}
-  for i, item in ipairs(ui.containers:getItems()) do
+  for _, item in ipairs(containers) do
     table.insert(nExBot.lootContainers, item['id'])
   end
-  for i, item in ipairs(ui.items:getItems()) do
+  for _, item in ipairs(items) do
     table.insert(nExBot.lootItems, item['id'])
   end
 end
 
 TargetBot.Looting.save = function(data)
-  data['items'] = ui.items:getItems()
-  data['containers'] = ui.containers:getItems()
-  data['maxDanger'] = tonumber(ui.maxDangerPanel.value:getText())
-  data['minCapacity'] = tonumber(ui.minCapacityPanel.value:getText())
-  data['everyItem'] = (ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn() or false
-  data['eatFromCorpses'] = ui.eatFromCorpses:isOn()
+  data.items = items
+  data.containers = containers
+  data.maxDanger = settings.maxDanger
+  data.minCapacity = settings.minCapacity
+  data.everyItem = settings.everyItem
+  data.eatFromCorpses = settings.eatFromCorpses
 end
 
 TargetBot.Looting.updateItemsAndContainers = function()
-  items = ui.items:getItems()
-  containers = ui.containers:getItems()
   itemsById = {}
   containersById = {}
   for i, item in ipairs(items) do
@@ -145,6 +99,12 @@ TargetBot.Looting.updateItemsAndContainers = function()
   for i, container in ipairs(containers) do
     containersById[container.id] = 1
   end
+end
+
+TargetBot.Looting.getConfig = function()
+  return { items = items, containers = containers, everyItem = settings.everyItem,
+    eatFromCorpses = settings.eatFromCorpses, maxDanger = settings.maxDanger,
+    minCapacity = settings.minCapacity }
 end
 
 local waitTill = 0
@@ -223,7 +183,7 @@ end
 TargetBot.Looting.process = function(targets, dangerLevel)
   dangerLevel = dangerLevel or 0
   local eatFoodOnly = TargetBot.EatFood and TargetBot.EatFood.isEnabled and TargetBot.EatFood.isEnabled()
-  local hasLootConfig = (items[1] or ((ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn())) and containers[1]
+  local hasLootConfig = (items[1] or settings.everyItem) and containers[1]
   if not hasLootConfig and not eatFoodOnly then
     status = ""
     return false
@@ -236,12 +196,12 @@ TargetBot.Looting.process = function(targets, dangerLevel)
       return false
     end
   end
-  local maxDanger = tonumber((ui and ui.maxDangerPanel and ui.maxDangerPanel.value and ui.maxDangerPanel.value.getText) and ui.maxDangerPanel.value:getText() or nil) or 0
+  local maxDanger = settings.maxDanger
   if dangerLevel > maxDanger then
     status = "High danger"
     return false
   end
-  local minCap = tonumber((ui and ui.minCapacityPanel and ui.minCapacityPanel.value and ui.minCapacityPanel.value.getText) and ui.minCapacityPanel.value:getText() or nil) or 0
+  local minCap = settings.minCapacity
   local freeCap = player and player.getFreeCapacity and player:getFreeCapacity() or 0
   if not eatFoodOnly and freeCap < minCap then
     status = "No cap"
@@ -631,7 +591,7 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
     if item:isContainer() and not itemsById[item:getId()] then
       -- Add to nested containers list instead of just tracking one
       table.insert(nestedContainers, item)
-    elseif itemsById[item:getId()] or ((ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn() and not item:isContainer()) then
+    elseif itemsById[item:getId()] or (settings.everyItem and not item:isContainer()) then
       item.lootTries = (item.lootTries or 0) + 1
       if item.lootTries < 5 then -- if can't be looted within 0.5s then skip it
         return TargetBot.Looting.lootItem(lootContainers, item)
@@ -682,7 +642,7 @@ TargetBot.Looting.lootContainer = function(lootContainers, container)
   -- no more items to loot, open next nested container (BFS: first in queue)
   -- Open nested containers for both looting AND food eating (food is often
   -- inside the corpse's body bag, not directly in the top-level corpse).
-  local hasLootConfig = items[1] or ((ui.everyItem and ui.everyItem.isOn) and ui.everyItem:isOn())
+  local hasLootConfig = items[1] or settings.everyItem
   local eatEnabled = TargetBot.EatFood and TargetBot.EatFood.isEnabled and TargetBot.EatFood.isEnabled()
   if #nestedContainers > 0 and (hasLootConfig or eatEnabled) then
     local nextContainer = nestedContainers[1]

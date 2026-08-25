@@ -23,7 +23,7 @@ Copy `nExBot/` into your client's `bot/` directory. vBot: `%APPDATA%/OTClientV8/
 
 ## CaveBot
 
-**How to create waypoints?** Cave tab → Show Editor → stand at position → Add Goto → walk → Add Goto → save. Or use Recorder.
+**How to create waypoints?** Cockpit → Cave → Edit route → stand at position → Add Goto → walk → Add Goto → save. Or use Recorder.
 
 **Stops moving:** Enabled? Started (`Ctrl+Z`)? Pull System pausing? Coordinates reachable? Door/field blocking?
 
@@ -35,7 +35,7 @@ Copy `nExBot/` into your client's `bot/` directory. vBot: `%APPDATA%/OTClientV8/
 
 ## TargetBot
 
-**How to add monsters?** Target tab → + → enter name → configure → Save.
+**How to add monsters?** Cockpit → Target → Edit creatures → enter a name → configure → Save.
 
 **Pattern matching:** `Dragon` = exact, `Dragon*` = starts with, `*, !Dragon` = except.
 

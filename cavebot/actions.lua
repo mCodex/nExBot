@@ -163,7 +163,7 @@ CaveBot.addAction = function(action, value, focus)
   if type(value) == 'number' then
     value = tostring(value)
   end
-  local widget = UI.createWidget("CaveBotAction", CaveBot.actionList)
+  local widget = CaveBot.Route:add({})
   widget:setText(action .. ":" .. value:split("\n")[1])
   widget.action = action
   widget.value = value
@@ -188,8 +188,7 @@ CaveBot.addAction = function(action, value, focus)
     end
   end
   if focus then
-    widget:focus()
-    CaveBot.actionList:ensureChildVisible(widget)
+    CaveBot.Route:focus(widget)
   end
   return widget
 end

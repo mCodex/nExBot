@@ -119,91 +119,18 @@ end
 local red = "#ff0800" -- "#ff0800" / #ea3c53 best
 local blue = "#7ef9ff"
 
-setDefaultTab("HP")
--- healPanelName already defined at top of file
-local ui = setupUI([[
-Panel
-  height: 55
+local function stateControl()
+  local state = false
+  return {
+    setOn = function(_, value) state = value == true end,
+    isOn = function() return state end,
+    setText = function() end,
+    setColor = function() end,
+  }
+end
 
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('HealBot')
-
-  Button
-    id: settings
-    anchors.top: prev.top
-    anchors.left: prev.right
-    margin-left: 3
-    height: 17
-    width: 55
-    text: Self
-
-  Button
-    id: allySetup
-    anchors.top: prev.top
-    anchors.left: prev.right
-    margin-left: 3
-    height: 17
-    width: 50
-    text: Ally
-
-  Button
-    id: 1
-    anchors.top: prev.bottom
-    anchors.left: parent.left
-    text: 1
-    margin-right: 2
-    margin-top: 4
-    size: 17 17
-
-  Button
-    id: 2
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    text: 2
-    margin-left: 4
-    size: 17 17
-    
-  Button
-    id: 3
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    text: 3
-    margin-left: 4
-    size: 17 17
-
-  Button
-    id: 4
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    text: 4
-    margin-left: 4
-    size: 17 17 
-    
-  Button
-    id: 5
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    text: 5
-    margin-left: 4
-    size: 17 17
-    
-  Label
-    id: name
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    anchors.right: parent.right
-    text-align: center
-    margin-left: 4
-    height: 17
-    text: Profile #1
-    background: #292A2A
-]])
-ui:setId(healPanelName)
+local ui = { title = stateControl(), settings = stateControl(), allySetup = stateControl(), name = stateControl() }
+for index = 1, 5 do ui[index] = stateControl() end
 
 heal_config.ensureDefaults(HealBotConfig, healPanelName)
 
@@ -1293,45 +1220,10 @@ local function validateAlly(widget, category)
   syncAllyBotCore()
 end
 
-setDefaultTab("Main")
-local fhUI = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('Friend Healer')
-
-  Button
-    id: settings
-    anchors.top: prev.top
-    anchors.left: prev.right
-    margin-left: 3
-    height: 17
-    text: Setup
-]])
-if fhUI and fhUI.title then
-  fhUI.title:setOn(allyConfig.enabled)
-  fhUI.title.onClick = function(widget)
-    allyConfig.enabled = not allyConfig.enabled
-    widget:setOn(allyConfig.enabled)
-    syncAllyBotCore()
-  end
+HealBot.showAlly = function()
+  if not friendHealerWindow then return false end
+  friendHealerWindow:show()
+  friendHealerWindow:raise()
+  friendHealerWindow:focus()
+  return true
 end
-
-if fhUI and fhUI.settings then
-  fhUI.settings.onClick = function()
-    if friendHealerWindow then
-      friendHealerWindow:show()
-      friendHealerWindow:raise()
-      friendHealerWindow:focus()
-    end
-  end
-end
-setDefaultTab("HP")
-
-UI.Separator()

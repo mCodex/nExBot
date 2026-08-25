@@ -1,31 +1,6 @@
-setDefaultTab("Main")
 local zChanging = nExBot.zChanging or function() return false end
 local SafeCall = SafeCall or require("core.safe_call")
 local panelName = "combobot"
-
-local ui = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('ComboBot')
-
-  Button
-    id: combos
-    anchors.top: prev.top
-    anchors.left: prev.right
-    anchors.right: parent.right
-    margin-left: 3
-    height: 17
-    text: Setup
-
-]])
-ui:setId(panelName)
 
 if not storage[panelName] then
   storage[panelName] = {
@@ -50,6 +25,13 @@ if not storage[panelName] then
 end
 
 local config = storage[panelName]
+ComboBot = {
+  config = config,
+  isOn = function() return config.enabled == true end,
+  setOn = function() config.enabled = true end,
+  setOff = function() config.enabled = false end,
+  toggle = function() config.enabled = not config.enabled return config.enabled end
+}
 
 local function canUseAttackItem()
   return config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item)
@@ -58,22 +40,16 @@ end
 local leaderTarget = nil
 local startCombo = false
 
-ui.title:setOn(config.enabled)
-ui.title.onClick = function(widget)
-  config.enabled = not config.enabled
-  widget:setOn(config.enabled)
-end
-
-ui.combos.onClick = function(widget)
-  comboWindow:show()
-  comboWindow:raise()
-  comboWindow:focus()
-end
-
 rootWidget = g_ui.getRootWidget()
 if rootWidget then
   comboWindow = UI.createWindow('ComboWindow', rootWidget)
   comboWindow:hide()
+
+  ComboBot.show = function()
+    comboWindow:show()
+    comboWindow:raise()
+    comboWindow:focus()
+  end
 
   comboWindow.actions.attackItem:setItemId(config.item)
   comboWindow.actions.attackItem.onItemChange = function(widget)

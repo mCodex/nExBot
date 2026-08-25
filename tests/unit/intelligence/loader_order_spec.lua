@@ -16,6 +16,13 @@ describe("intelligence loader foundation", function()
     assert.is_truthy(ring:find("nExBot.RingBuffer = RingBuffer", 1, true))
   end)
 
+  it("yields noncritical startup work in scheduled batches", function()
+    local source = assert(io.open("_Loader.lua", "r")):read("*a")
+    assert.is_truthy(source:find('deferScript("analyzer", "deferred_analytics")', 1, true))
+    assert.is_truthy(source:find('schedule(10, nextBatch)', 1, true))
+    assert.is_truthy(source:find('nExBot.startupReady = true', 1, true))
+  end)
+
   it("uses the client-safe clock and the canonical tick registration shape", function()
     for _, path in ipairs({
       "core/intelligence/foundation/event_aggregator.lua",

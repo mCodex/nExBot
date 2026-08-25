@@ -1,29 +1,4 @@
-setDefaultTab("HP")
 local panelName = "ConditionPanel"
-local ui = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('Conditions')
-
-  Button
-    id: conditionList
-    anchors.top: prev.top
-    anchors.left: prev.right
-    anchors.right: parent.right
-    margin-left: 3
-    height: 17
-    text: Setup
-      
-  ]])
-  ui:setId(panelName)
-
   if not HealBotConfig[panelName] then
     HealBotConfig[panelName] = {
       enabled = false,
@@ -60,18 +35,23 @@ Panel
     config.curePosion = nil
   end
 
-  ui.title:setOn(config.enabled)
-  ui.title.onClick = function(widget)
-    config.enabled = not config.enabled
-    widget:setOn(config.enabled)
-    nExBotConfigSave("heal")
-  end
-  
-  ui.conditionList.onClick = function(widget)
-    conditionsWindow:show()
-    conditionsWindow:raise()
-    conditionsWindow:focus()
-  end
+  Conditions = {
+    config = config,
+    isOn = function() return config.enabled == true end,
+    setOn = function()
+      config.enabled = true
+      nExBotConfigSave("heal")
+    end,
+    setOff = function()
+      config.enabled = false
+      nExBotConfigSave("heal")
+    end,
+    toggle = function()
+      config.enabled = not config.enabled
+      nExBotConfigSave("heal")
+      return config.enabled
+    end
+  }
 
   local rootWidget = g_ui.getRootWidget()
   if rootWidget then
@@ -217,7 +197,6 @@ Panel
       conditionsWindow:hide()
     end
 
-    Conditions = {}
     Conditions.show = function()
       conditionsWindow:show()
       conditionsWindow:raise()

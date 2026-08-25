@@ -247,13 +247,48 @@ local function loadCategory(categoryName, scripts, basePath)
   loadTimes["_category_" .. categoryName] = math.floor((os.clock() - catStart) * 1000)
 end
 
+local deferredScripts = {}
+
+local function deferScript(name, category, basePath)
+  deferredScripts[#deferredScripts + 1] = {
+    name = name,
+    category = category,
+    basePath = basePath,
+  }
+end
+
+local function startDeferredScripts(onComplete)
+  local index = 1
+  local function nextBatch()
+    local item = deferredScripts[index]
+    if not item then
+      if onComplete then onComplete() end
+      return
+    end
+    loadScript(item.name, item.category, item.basePath)
+    index = index + 1
+    schedule(10, nextBatch)
+  end
+
+  if #deferredScripts == 0 or not schedule then
+    while deferredScripts[index] do
+      local item = deferredScripts[index]
+      loadScript(item.name, item.category, item.basePath)
+      index = index + 1
+    end
+    if onComplete then onComplete() end
+    return
+  end
+  schedule(1, nextBatch)
+end
+
 -- ============================================================================
 -- LOAD STYLES FIRST
 -- ============================================================================
 loadStyles()
 
 -- ============================================================================
--- PHASE 1: ACL AND CLIENT ABSTRACTION
+-- ACL AND CLIENT ABSTRACTION
 -- ============================================================================
 loadCategory("acl", {
   "acl/init",
@@ -363,7 +398,7 @@ end
 autoDetectClient(1, 8)
 
 -- ============================================================================
--- PHASE 2: CONSTANTS
+-- CONSTANTS
 -- ============================================================================
 loadCategory("constants", {
   "constants/floor_items",
@@ -372,7 +407,7 @@ loadCategory("constants", {
 }, "/")
 
 -- ============================================================================
--- PHASE 3: UTILS (Core shared utilities)
+-- UTILS (Core shared utilities)
 -- ============================================================================
 loadCategory("utils", {
   "utils/shared",
@@ -389,7 +424,7 @@ loadCategory("utils", {
 }, "/")
 
 -- ============================================================================
--- PHASE 3.5: NAVIGATION BOUNDED CONTEXT
+-- NAVIGATION BOUNDED CONTEXT
 -- Strict, ack-driven navigation domain (replaces WaypointNavigator internals).
 -- Loaded before core/cavebot so the lazy require() in cavebot/walking.lua and
 -- the legacy bridge wiring both resolve navigation.* modules deterministically.
@@ -476,15 +511,13 @@ do
   end
 end
 
--- ============================================================================
--- PHASE 4: CORE LIBRARIES (Legacy compatibility)
--- ============================================================================
-loadScript("updater", "core")  -- Load updater first so its UI appears above main.lua
+loadScript("updater", "core")
 loadCategory("core", {
-  "main",
   "items",
   "lib",
   "safe_call",
+  "ordered_model",
+  "profile_store",
   "profile_restore_policy",
   "new_cavebot_lib",
   "configs",
@@ -493,9 +526,6 @@ loadCategory("core", {
   "client_lifecycle",
 })
 
--- ============================================================================
--- PHASE 6: ARCHITECTURE LAYER
--- ============================================================================
 loadCategory("ml_models", {
   "contextual_features",
   "kill_completion_model",
@@ -587,9 +617,6 @@ loadCategory("architecture", {
   "bot_core/init",
 })
 
--- ============================================================================
--- PHASE 7.5: EXTRACTED MODULES (dofile, set globals)
--- ============================================================================
 loadCategory("extracted_modules", {
   "attack/attack_data",
   "attack/attack_analytics",
@@ -600,10 +627,7 @@ loadCategory("extracted_modules", {
   "heal/heal_analytics",
 })
 
--- ============================================================================
--- PHASE 8: LEGACY FEATURE MODULES
--- ============================================================================
-loadCategory("features_legacy", {
+loadCategory("features", {
   "extras",
   "cavebot",
   "alarms",
@@ -615,10 +639,7 @@ loadCategory("features_legacy", {
   "AttackBot",
 })
 
--- ============================================================================
--- PHASE 9: LEGACY TOOLS
--- ============================================================================
-loadCategory("tools_legacy", {
+loadCategory("tools", {
   "ingame_editor",
   "Dropper",
   "Containers",
@@ -637,7 +658,6 @@ loadCategory("tools_legacy", {
 -- PHASE 11: ANALYTICS AND UI
 -- ============================================================================
 loadCategory("analytics", {
-  "analyzer",
   "smart_hunt",
   "spy_level",
   "supplies",
@@ -646,19 +666,23 @@ loadCategory("analytics", {
   "xeno_menu",
   "hold_target",
   "cavebot_control_panel",
-  "intelligence/ui/ui_bridge",
 })
 
--- NOTE: TargetBot scripts are loaded by core/cavebot.lua (in features_legacy phase)
+-- Presentation-only analytics yield to the first usable client frame.
+deferScript("analyzer", "deferred_analytics")
+deferScript("intelligence/ui/ui_bridge", "deferred_analytics")
+
+-- TargetBot scripts are loaded by core/cavebot.lua.
 -- to avoid duplicating the loading, we don't load them again here.
 
--- NOTE: CaveBot scripts are loaded by core/cavebot.lua (in features_legacy phase)
+-- CaveBot scripts are loaded by core/cavebot.lua.
 -- to avoid duplicating the loading, we don't load them again here.
 
 -- ============================================================================
 -- PHASE 12: UI PLATFORM (design system, registries, shell, modules)
 -- ============================================================================
 loadScript("ui/init", "ui", "/")
+nExBot.startupReady = false
 
 -- ============================================================================
 -- STARTUP COMPLETE
@@ -763,12 +787,13 @@ local function collectLuaFiles(folderPath, dofileBase, collected)
   return collected
 end
 
-local function loadPrivateScripts()
+local function loadPrivateScripts(onComplete)
   local status, items = pcall(function()
     return g_resources.listDirectoryFiles(P.private, false, false)
   end)
 
   if not status or not items or #items == 0 then
+    if onComplete then onComplete() end
     return
   end
 
@@ -776,6 +801,7 @@ local function loadPrivateScripts()
   local luaFiles = collectLuaFiles(P.private, PRIVATE_DOFILE_PATH)
 
   if #luaFiles == 0 then
+    if onComplete then onComplete() end
     return
   end
 
@@ -783,8 +809,15 @@ local function loadPrivateScripts()
 
   local loadedCount = 0
 
-  for i = 1, #luaFiles do
-    local file = luaFiles[i]
+  local index = 1
+  local function loadNext()
+    local file = luaFiles[index]
+    if not file then
+      loadTimes["_private_total"] = math.floor((os.clock() - privateStart) * 1000)
+      if loadedCount > 0 then info("[nExBot] Loaded " .. loadedCount .. " private script(s)") end
+      if onComplete then onComplete() end
+      return
+    end
     local scriptStart = os.clock()
 
     local loadStatus, err = pcall(function()
@@ -801,16 +834,18 @@ local function loadPrivateScripts()
       nExBot.loadErrors = nExBot.loadErrors or {}
       nExBot.loadErrors["private:" .. file.name] = tostring(err)
     end
+    index = index + 1
+    if schedule then schedule(10, loadNext) else loadNext() end
   end
-
-  loadTimes["_private_total"] = math.floor((os.clock() - privateStart) * 1000)
-
-  if loadedCount > 0 then
-    info("[nExBot] Loaded " .. loadedCount .. " private script(s)")
-  end
+  loadNext()
 end
 
-loadPrivateScripts()
+startDeferredScripts(function()
+  loadPrivateScripts(function()
+    nExBot.startupReady = true
+    loadTimes["_ready"] = math.floor((os.clock() - startTime) * 1000)
+  end)
+end)
 
 -- Return to Main tab
 

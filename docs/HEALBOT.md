@@ -4,7 +4,7 @@ Automated healing — spells, potions, support buffs, condition curing.
 
 ## Quick Start
 
-1. Open **Main** tab → **Healing**
+1. Open **Heal** in the cockpit
 2. Add spell: `exura vita` at 50% HP
 3. Add potion: `Great Health Potion` at 40% HP
 4. Toggle HealBot **ON**

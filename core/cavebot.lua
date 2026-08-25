@@ -5,7 +5,6 @@
 local cavebotTab = "Cave"
 local targetingTab = storage.extras.joinBot and "Cave" or "Target"
 
-setDefaultTab(cavebotTab)
 CaveBot.Extensions = {}
 
 local function safeDofile(path)
@@ -19,8 +18,6 @@ local function safeDofile(path)
 end
 
 -- Essential UI and core modules (load immediately)
-importStyle("/cavebot/cavebot.otui")
-importStyle("/cavebot/config.otui")
 importStyle("/cavebot/editor.otui")
 safeDofile("/cavebot/waypoint_search.lua")
 safeDofile("/cavebot/actions.lua")
@@ -57,18 +54,13 @@ local deferredModules = {
 local function loadDeferred(idx)
 	idx = idx or 1
 	if idx > #deferredModules then return end
-	setDefaultTab(cavebotTab)
 		safeDofile(deferredModules[idx])
 	schedule(20, function() loadDeferred(idx + 1) end)
 end
 
 loadDeferred()
 
-setDefaultTab(targetingTab)
-if storage.extras.joinBot then UI.Label("-- [[ TargetBot ]] --") end
 TargetBot = {} -- global namespace
-importStyle("/targetbot/looting.otui")
-importStyle("/targetbot/target.otui")
 importStyle("/targetbot/creature_editor.otui")
 
 -- Load TargetBot core module first (shared utilities)

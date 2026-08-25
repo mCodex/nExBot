@@ -23,8 +23,6 @@
   getBlessings, getSpeed, getSkillLevel/Percent, getMagicLevel
 ]]
 
-setDefaultTab("Main")
-
 -- CONSTANTS & CONFIGURATION
 
 local zChanging = nExBot.zChanging or function() return false end

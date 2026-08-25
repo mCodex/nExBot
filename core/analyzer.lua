@@ -644,7 +644,6 @@ local xpGraph = UI.createWidget("AnalyzerGraph", xpWindow.contentsPanel)
 
 --#############################################   UI DONE
 
-setDefaultTab("Main")
 -- first, the variables
 
 local console = modules.game_console
@@ -1771,6 +1770,18 @@ end)
 -- public functions
 -- global namespace
 Analyzer = {}
+
+Analyzer.showWindow = function()
+  mainWindow:show()
+  mainWindow:raise()
+  mainWindow:focus()
+  if analyzerButton then analyzerButton:setOn(true) end
+end
+
+Analyzer.hideWindow = function()
+  mainWindow:hide()
+  if analyzerButton then analyzerButton:setOn(false) end
+end
 
 Analyzer.getKillsAmount = function(name)
   return killList[name] or 0

@@ -89,19 +89,17 @@ end
 function C.metricCard(parent, opts)
   opts = opts or {}
   local w = create(parent, opts.style or "NexMetricCard", opts)
-  label(w, tostring(opts.value or "-"), "Label", { id = "value", textStyle = "displayMetric", color = Tokens.colors.text.primary })
-  label(w, opts.label or "", "Label", { id = "label", textStyle = "metadata", color = Tokens.colors.text.muted })
-  if opts.status then
-    C.statusBadge(w, { id = "status", status = opts.status, text = opts.status })
-  end
+  label(w, tostring(opts.value or "-"), "NexMetricValue", { id = "value", textStyle = "displayMetric", color = Tokens.colors.text.primary })
+  label(w, opts.label or "", "NexMetricLabel", { id = "label", textStyle = "metadata", color = Tokens.colors.text.muted })
+  C.statusBadge(w, { id = "status", style = "NexMetricStatus", status = opts.status, text = opts.status or "" })
   return w
 end
 
 function C.keyValueRow(parent, opts)
   opts = opts or {}
   local w = create(parent, opts.style or "NexRow", opts)
-  label(w, opts.key or "", "Label", { id = "key", textStyle = "body" })
-  label(w, tostring(opts.value or ""), "Label", { id = "value", textStyle = "body" })
+  label(w, opts.key or "", "NexKeyLabel", { id = "key", textStyle = "body" })
+  label(w, tostring(opts.value or ""), "NexValueLabel", { id = "value", textStyle = "body" })
   return w
 end
 
@@ -109,7 +107,7 @@ local function rowWithLabel(parent, labelText, opts)
   opts = opts or {}
   local w = create(parent, opts.style or "NexRow", opts)
   if labelText then
-    label(w, labelText, "Label", { id = "rowLabel", textStyle = "body", color = Tokens.colors.text.secondary })
+    label(w, labelText, "NexControlLabel", { id = "rowLabel", textStyle = "body", color = Tokens.colors.text.secondary })
   end
   return w
 end
@@ -117,7 +115,7 @@ end
 function C.toggleRow(parent, opts)
   opts = opts or {}
   local w = rowWithLabel(parent, opts.label, opts)
-  local sw = create(w, "BotSwitch", { id = "switch" })
+  local sw = create(w, "NexControlSwitch", { id = "switch" })
   sw:setChecked(opts.value == true)
   -- Wire change: a wrapper around setChecked that fires onChange.
   local origSet = sw.setChecked
@@ -125,6 +123,9 @@ function C.toggleRow(parent, opts)
     v = not not v
     origSet(self, v)
     if opts.onChange then opts.onChange(v) end
+  end
+  sw.onClick = function()
+    sw:setChecked(not sw:isChecked())
   end
   return {
     widget = w,
@@ -137,7 +138,7 @@ end
 function C.checkboxRow(parent, opts)
   opts = opts or {}
   local w = rowWithLabel(parent, opts.label, opts)
-  local cb = create(w, "CheckBox", { id = "checkbox" })
+  local cb = create(w, "NexControlCheckBox", { id = "checkbox" })
   cb:setChecked(opts.value == true)
   local origSet = cb.setChecked
   cb.setChecked = function(self, v)
@@ -145,36 +146,61 @@ function C.checkboxRow(parent, opts)
     origSet(self, v)
     if opts.onChange then opts.onChange(v) end
   end
+  cb.onClick = function()
+    cb:setChecked(not cb:isChecked())
+  end
   return { widget = w, getCheckbox = function() return cb end, setValue = function(v) cb:setChecked(v) end }
 end
 
 function C.selectRow(parent, opts)
   opts = opts or {}
   local w = rowWithLabel(parent, opts.label, opts)
-  local combo = create(w, "ComboBox", { id = "combo" })
+  local combo = create(w, "NexControlCombo", { id = "combo" })
   if opts.options then
     for _, o in ipairs(opts.options) do
       combo:addOption(type(o) == "table" and (o.text or o) or o, type(o) == "table" and o.value or nil)
     end
   end
-  if opts.onChange then combo:setOnOptionChange(opts.onChange) end
   if opts.value then combo:setCurrentOption(opts.value) end
+  if opts.onChange then combo:setOnOptionChange(opts.onChange) end
   return { widget = w, getCombo = function() return combo end, setValue = function(v) combo:setCurrentOption(v) end }
 end
 
 function C.inputRow(parent, opts)
   opts = opts or {}
   local w = rowWithLabel(parent, opts.label, opts)
-  local input = create(w, "BotTextEdit", { id = "input" })
+  local input = create(w, "NexControlInput", { id = "input" })
   if opts.value ~= nil then input:setText(opts.value) end
-  if opts.onChange then input._onChange = opts.onChange end
+  if opts.onChange then
+    input.onTextChange = function(_, text) opts.onChange(text) end
+  end
   return { widget = w, getInput = function() return input end, setValue = function(v) input:setText(v) end }
+end
+
+function C.itemRow(parent, opts)
+  opts = opts or {}
+  local row = create(parent, "NexItemRow", opts)
+  local item = create(row, "NexItemSprite", { id = "item", tooltip = opts.tooltip })
+  item:setItemId(tonumber(opts.itemId) or 0)
+  if opts.count then item:setItemCount(opts.count) end
+
+  local details = create(row, "NexItemDetails", { id = "details" })
+  label(details, opts.title or ("Item " .. tostring(opts.itemId or "")), "NexItemTitle", {
+    id = "title", textStyle = "rowTitle", color = Tokens.colors.text.primary,
+  })
+  if opts.subtitle then
+    label(details, opts.subtitle, "NexItemSubtitle", {
+      id = "subtitle", textStyle = "metadata", color = Tokens.colors.text.muted,
+    })
+  end
+  if opts.onClick then row.onClick = opts.onClick end
+  return row
 end
 
 function C.sliderRow(parent, opts)
   opts = opts or {}
   local w = rowWithLabel(parent, opts.label, opts)
-  local slider = create(w, "HorizontalScrollBar", { id = "slider" })
+  local slider = create(w, "NexControlSlider", { id = "slider" })
   if opts.min then slider:setMinimum(opts.min) end
   if opts.max then slider:setMaximum(opts.max) end
   if opts.value then slider:setValue(opts.value) end
@@ -193,16 +219,17 @@ end
 function C.listRow(parent, opts)
   opts = opts or {}
   local w = create(parent, opts.style or "NexListRow", opts)
-  local title = label(w, opts.title or "", "Label", { id = "title", textStyle = "rowTitle", color = Tokens.colors.text.primary })
+  local title = label(w, opts.title or "", "NexListTitle", { id = "title", textStyle = "rowTitle", color = Tokens.colors.text.primary })
   if opts.subtitle then
-    label(w, opts.subtitle, "Label", { id = "subtitle", textStyle = "metadata", color = Tokens.colors.text.muted })
+    label(w, opts.subtitle, "NexListSubtitle", { id = "subtitle", textStyle = "metadata", color = Tokens.colors.text.muted })
   end
+  local actions = create(w, "NexListActions", { id = "listActions" })
   if opts.status then
-    C.statusBadge(w, { id = "status", status = opts.status, text = opts.statusText or opts.status })
+    C.statusBadge(actions, { id = "status", status = opts.status, text = opts.statusText or opts.status })
   end
   if opts.actions then
     for _, action in ipairs(opts.actions) do
-      C.button(w, {
+      C.button(actions, {
         text = action.text, id = action.id,
         variant = action.variant or "ghost",
         onClick = action.onClick,

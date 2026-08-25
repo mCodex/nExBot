@@ -80,7 +80,7 @@ nExBot shares combat and navigation context through one bounded intelligence run
 - Replay, calibration, resource tracking, learned navigation costs, and Bot Doctor diagnostics use bounded storage.
 - Adaptive tick rates reduce background work while combat and safety paths keep their priority.
 
-Open **nExBot Tactical Intelligence** from the Main tab to inspect lifecycle, targeting, routes, models, replay, resources, and diagnostics.
+Open **More → Analytics → AI Intelligence** to inspect lifecycle, targeting, routes, models, replay, resources, and diagnostics.
 
 ## Architecture
 

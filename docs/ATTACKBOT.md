@@ -4,7 +4,7 @@ Automated attack spells and runes with AoE optimization.
 
 ## Quick Start
 
-1. Open **Main** tab → **AttackBot**
+1. Open **More → Equipment** and open the Attack configuration window.
 2. Click **Add** — select spell/rune, set monster count, configure priority
 3. Toggle **ON**
 

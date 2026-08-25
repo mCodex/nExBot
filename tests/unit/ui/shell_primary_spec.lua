@@ -16,6 +16,7 @@ local function fresh()
   dofile("ui/modules/cockpit.lua")
   local Registry = dofile("ui/core/module_registry.lua")
   dofile("ui/modules/workflows.lua")
+  dofile("ui/modules/auxiliary.lua")
   for _, n in ipairs({ "profiles", "settings", "diagnostics" }) do
     dofile("ui/modules/" .. n .. ".lua")
   end
@@ -63,7 +64,8 @@ describe("shell as primary surface", function()
 
     shell:getContent():recursiveGetChildById("caveInfo"):click()
     assert.are_equal("cavebot", shell:current())
-    assert.is_truthy(shell:getContent():recursiveGetChildById("pageTitle"))
+    assert.are_equal("Cave", shell:getWindow():recursiveGetChildById("shellTitle"):getText())
+    assert.is_truthy(shell:getContent():recursiveGetChildById("pageBadge"))
 
     shell:getWindow():recursiveGetChildById("shellBack"):click()
     assert.are_equal("cockpit", shell:current())
@@ -105,7 +107,7 @@ describe("shell as primary surface", function()
 
   it("every module action id resolves to a handler", function()
     for _, id in ipairs(Registry.ids()) do
-      local provider = Registry.get(id).viewModelProvider
+      local provider = Registry.get(id).statusProvider
       if provider then
         local vm = provider({ enabled = true })
         for _, action in ipairs(vm.snapshot.actions or {}) do

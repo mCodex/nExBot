@@ -7,6 +7,8 @@ local VM = (nExBot and nExBot.UI and nExBot.UI["ui.core.view_model"]) or (type(r
 local Page = (nExBot and nExBot.UI and nExBot.UI["ui.modules.page"]) or (type(require) == "function" and require("ui.modules.page"))
 
 local Diagnostics = {}
+local ISSUE_CACHE_MS = 5000
+local issueCache = { value = {} }
 
 local SECTIONS = {
   "Bot Doctor", "Warnings", "Recent Errors", "Module Health",
@@ -89,12 +91,28 @@ function Diagnostics.viewModel(state)
   return vm
 end
 
-function Diagnostics.currentIssues()
+local function nowMs()
+  if nExBot and nExBot.Shared and nExBot.Shared.nowMs then
+    return nExBot.Shared.nowMs()
+  end
+  return math.floor(os.clock() * 1000)
+end
+
+function Diagnostics.currentIssues(force)
+  local now = nowMs()
+  if not force and issueCache.at and now - issueCache.at < ISSUE_CACHE_MS then
+    return issueCache.value
+  end
+
   local issues = {}
   local Doctor = IntelligenceBotDoctor or (nExBot and nExBot.BotDoctor)
   if Doctor and Doctor.inspect then
-    local result = Doctor.inspect(nExBot and nExBot.TacticalIntelligence and nExBot.TacticalIntelligence.runtime or nil)
-    if type(result) == "table" then
+    local runtime = nExBot and nExBot.TacticalIntelligence and nExBot.TacticalIntelligence.runtime
+    if not runtime and Doctor.capture then
+      runtime = Doctor.capture(nExBot and nExBot.Intelligence)
+    end
+    local ok, result = pcall(Doctor.inspect, runtime)
+    if ok and type(result) == "table" then
       for _, issue in ipairs(result) do
         issues[#issues + 1] = {
           code = issue.code,
@@ -106,7 +124,13 @@ function Diagnostics.currentIssues()
       end
     end
   end
+  issueCache.at = now
+  issueCache.value = issues
   return issues
+end
+
+function Diagnostics.refreshIssues()
+  return Diagnostics.currentIssues(true)
 end
 
 function Diagnostics.statusProvider()
