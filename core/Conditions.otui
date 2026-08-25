@@ -19,7 +19,7 @@ CureConditions < Panel
     margin-top: 10
     margin-left: 5
     text: Poison
-    color: #ffaa00
+    color: #d7d7d7
     font: verdana-11px-rounded
 
   Label
@@ -50,7 +50,7 @@ CureConditions < Panel
     anchors.top: label1.bottom
     margin-top: 10
     text: Curse
-    color: #ffaa00
+    color: #d7d7d7
     font: verdana-11px-rounded
 
   Label
@@ -81,7 +81,7 @@ CureConditions < Panel
     anchors.top: label2.bottom
     margin-top: 10
     text: Bleed
-    color: #ffaa00
+    color: #d7d7d7
   font: verdana-11px-rounded
 
   Label
@@ -112,7 +112,7 @@ CureConditions < Panel
     anchors.top: label3.bottom
     margin-top: 10
     text: Burn
-    color: #ffaa00
+    color: #d7d7d7
     font: verdana-11px-rounded
 
   Label
@@ -143,7 +143,7 @@ CureConditions < Panel
     anchors.top: label4.bottom
     margin-top: 10
     text: Electify
-    color: #ffaa00
+    color: #d7d7d7
     font: verdana-11px-rounded
 
   Label
@@ -174,7 +174,7 @@ CureConditions < Panel
     anchors.top: label5.bottom
     margin-top: 10
     text: Paralyse
-    color: #ffaa00
+    color: #d7d7d7
     font: verdana-11px-rounded  
 
   Label
@@ -230,7 +230,7 @@ HoldConditions < Panel
     margin-top: 10
     margin-left: 5
     text: Haste
-    color: #ffaa00
+    color: #d7d7d7
     font: verdana-11px-rounded  
 
   Label
@@ -278,7 +278,7 @@ HoldConditions < Panel
     anchors.top: label2.bottom
     margin-top: 10
     text: Utana Vid
-    color: #ffaa00
+    color: #d7d7d7
     font: verdana-11px-rounded
 
   Label
@@ -309,7 +309,7 @@ HoldConditions < Panel
     anchors.top: label3.bottom
     margin-top: 10
     text: Utamo Vita
-    color: #ffaa00
+    color: #d7d7d7
     font: verdana-11px-rounded
 
   Label
@@ -340,7 +340,7 @@ HoldConditions < Panel
     anchors.top: label4.bottom
     margin-top: 10
     text: Recovery
-    color: #ffaa00 
+    color: #d7d7d7
     font: verdana-11px-rounded 
 
   Label
@@ -398,7 +398,7 @@ ConditionsWindow < MainWindow
     anchors.top: parent.top
     anchors.left: parent.left
     text: Cure Conditions 
-    color: #88e3dd
+    color: #d7d7d7
     margin-left: 10
     font: verdana-11px-rounded
 
@@ -413,7 +413,7 @@ ConditionsWindow < MainWindow
     anchors.top: parent.top
     anchors.right: parent.right
     text: Hold Conditions 
-    color: #88e3dd
+    color: #d7d7d7
     margin-right: 100
     font: verdana-11px-rounded    
 
@@ -427,7 +427,7 @@ ConditionsWindow < MainWindow
   Button
     id: closeButton
     !text: tr('Close')
-    font: cipsoftFont
+    font: verdana-11px-rounded
     anchors.right: parent.right
     anchors.bottom: parent.bottom
     size: 45 21

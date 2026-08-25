@@ -327,7 +327,6 @@ PlayerList < Panel
   TextList
     id: list
     anchors.fill: parent
-    fit-children: true
     padding-top: 2
     vertical-scrollbar: listScrollBar
 
@@ -427,7 +426,7 @@ FriendHealer < MainWindow
   Button
     id: closeButton
     !text: tr('Close')
-    font: cipsoftFont
+    font: verdana-11px-rounded
     anchors.right: parent.right
     anchors.bottom: parent.bottom
     size: 45 21

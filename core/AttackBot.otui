@@ -54,7 +54,6 @@ CategoryLabel < Panel
     text-align: center
     text: Area Rune (avalanche, great fireball, etc)
     font: verdana-11px-rounded
-    background: #363636
 
 SourceLabel < Panel
   size: 105 15
@@ -68,7 +67,6 @@ SourceLabel < Panel
     text-align: center
     text: Monster Name
     font: verdana-11px-rounded
-    background: #363636
 
 RangeLabel < Panel
   size: 323 15
@@ -82,14 +80,11 @@ RangeLabel < Panel
     text-align: center
     text: 5 Sqm
     font: verdana-11px-rounded
-    background: #363636
 
 PreButton < PreviousButton
-  background: #363636
   height: 15
 
 NexButton < NextButton
-  background: #363636
   height: 15
 
 AttackBotPanel < Panel
@@ -180,8 +175,7 @@ AttackBotPanel < Panel
     margin-top: 5
     size: 405 15
     text: monster names
-    font: cipsoftFont
-    background: #363636
+    font: verdana-11px-rounded
 
   Label
     anchors.left: prev.left
@@ -295,7 +289,7 @@ AttackBotPanel < Panel
     size: 60 17
     text: Move Up
     text-align: center
-    font: cipsoftFont
+    font: verdana-11px-rounded
     margin-top: 7
     margin-right: 8
 
@@ -307,7 +301,7 @@ AttackBotPanel < Panel
     margin-right: 5
     text: Move Down
     text-align: center
-    font: cipsoftFont
+    font: verdana-11px-rounded
   
   Button
     id: addEntry
@@ -316,7 +310,7 @@ AttackBotPanel < Panel
     size: 40 19
     text-align: center
     text: New
-    font: cipsoftFont
+    font: verdana-11px-rounded
 
   BotItem
     id: itemId
@@ -334,8 +328,7 @@ AttackBotPanel < Panel
     margin-left: 5
     height: 15
     text: spell name
-    background: #363636
-    font: cipsoftFont
+    font: verdana-11px-rounded
     visible: false
 
 SettingsPanel < Panel
@@ -500,7 +493,7 @@ AttackBotWindow < MainWindow
     anchors.left: prev.left
     margin-left: 3
     text: Settings
-    color: #fe4400
+    color: #d7d7d7
     font: verdana-11px-rounded
 
   AttackBotPanel
@@ -517,7 +510,7 @@ AttackBotWindow < MainWindow
     anchors.left: prev.left
     margin-left: 3
     text: Spell Shooter
-    color: #fe4400
+    color: #d7d7d7
     font: verdana-11px-rounded
     visible: false    
 
@@ -533,12 +526,12 @@ AttackBotWindow < MainWindow
     anchors.bottom: parent.bottom
     size: 45 21
     text: Close
-    font: cipsoftFont
+    font: verdana-11px-rounded
 
   Button
     id: settings
     anchors.left: parent.left
     anchors.verticalCenter: prev.verticalCenter
     size: 50 21
-    font: cipsoftFont
+    font: verdana-11px-rounded
     text: Settings

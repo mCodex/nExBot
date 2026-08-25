@@ -16,7 +16,6 @@ describe("Actions", function()
 
   it("does not expose removed legacy navigation handlers", function()
     assert.is_nil(Actions.handlers.open_dashboard)
-    assert.is_nil(Actions.handlers.open_containers)
     assert.is_nil(Actions.handlers.open_conditions)
     assert.is_nil(Actions.handlers.open_cave_editor)
     assert.is_nil(Actions.handlers.open_target_editor)
@@ -60,12 +59,11 @@ describe("Actions", function()
     _G.CaveBot = { setOff = function() stopped.cave = true end }
     _G.TargetBot = {
       setOff = function() stopped.target = true end,
-      setLootingEnabled = function(value) stopped.loot = value == false end,
     }
     _G.HealBot = { setOff = function() stopped.heal = true end }
 
     assert.is_true(Actions.run("pause_all"))
-    assert.are_same({ cave = true, target = true, heal = true, loot = true }, stopped)
+    assert.are_same({ cave = true, target = true, heal = true }, stopped)
     _G.CaveBot, _G.TargetBot, _G.HealBot = nil, nil, nil
   end)
 end)

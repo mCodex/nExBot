@@ -38,46 +38,43 @@ describe("BotShell", function()
     assert.are_equal(1, Shell.count())
   end)
 
-  it("builds the compact cockpit without a permanent sidebar", function()
+  it("keeps configuration workspace lazy until requested", function()
     local root = _G.g_ui.createWidget("Root", nil)
     local shell = Shell.new({ root = root })
     shell:open()
+    assert.is_nil(shell:getWorkspace())
+    assert.is_truthy(shell:getWindow():recursiveGetChildById("openWorkspace"))
     shell:select("cockpit")
-    assert.is_nil(shell:getWindow():recursiveGetChildById("sidebar"))
+    assert.is_truthy(shell:getWorkspace():recursiveGetChildById("workspaceNav"))
     assert.is_truthy(shell:getContent():recursiveGetChildById("cave"))
   end)
 
-  it("navigates with browser-style history and home", function()
+  it("switches shallow categories without browser history", function()
     local Registry = nExBot.UI.ModuleRegistry
     Registry.register({ id = "profiles", label = "Profiles", order = 10, render = function() end })
     Registry.register({ id = "diagnostics", label = "Diagnostics", order = 20, render = function() end })
     local shell = Shell.new({ root = _G.g_ui.createWidget("Root", nil) })
     shell:open()
 
-    shell:home()
     shell:push("profiles")
     shell:push("diagnostics")
     assert.are_equal("diagnostics", shell:current())
-    assert.is_true(shell:canGoBack())
-
-    assert.is_true(shell:back())
-    assert.are_equal("profiles", shell:current())
+    assert.is_false(shell:canGoBack())
+    assert.is_false(shell:back())
     shell:home()
     assert.are_equal("cockpit", shell:current())
-    assert.is_false(shell:canGoBack())
   end)
 
-  it("renders native header controls and updates the page title", function()
+  it("renders persistent category and contextual tab controls", function()
     local Registry = nExBot.UI.ModuleRegistry
     Registry.register({ id = "profiles", label = "Profiles", order = 10, render = function() end })
     local shell = Shell.new({ root = _G.g_ui.createWidget("Root", nil) })
     shell:open()
-    shell:home()
     shell:push("profiles")
 
-    assert.are_equal("Profiles", shell:getWindow():recursiveGetChildById("shellTitle"):getText())
-    assert.is_truthy(shell:getWindow():recursiveGetChildById("shellBack"))
-    assert.is_truthy(shell:getWindow():recursiveGetChildById("shellHome"))
+    assert.is_truthy(shell:getWorkspace():recursiveGetChildById("nav_settings_category"))
+    assert.is_truthy(shell:getWorkspace():recursiveGetChildById("tab_profiles"))
+    assert.is_nil(shell:getWorkspace():recursiveGetChildById("shellBack"))
   end)
 
   it("selecting a module updates the selected state and calls its render", function()
@@ -95,7 +92,7 @@ describe("BotShell", function()
     assert.are_equal("cavebot", shell:selected())
   end)
 
-  it("rerenders an active workflow only when its snapshot changes", function()
+  it("does not rebuild an open form from background status changes", function()
     local Registry = nExBot.UI.ModuleRegistry
     local status = "Unavailable"
     local rendered = 0
@@ -117,17 +114,32 @@ describe("BotShell", function()
 
     status = "On"
     shell:tick()
-    assert.are_equal(stableCount + 1, rendered)
+    assert.are_equal(stableCount, rendered)
   end)
 
-  it("builds floating fallback content inside a shell layout", function()
+  it("does not rebuild the controller for volatile combat metrics", function()
+    local hp = 100
+    nExBot.UI.Cockpit.statusProvider = function()
+      return { snapshot = { character = "Knight", profile = "Main", hp = hp, engines = {} } }
+    end
+    local shell = Shell.new({ root = _G.g_ui.createWidget("Root", nil) })
+    shell:open()
+    local controller = shell:getWindow():recursiveGetChildById("controller")
+    shell:tick()
+    local title = controller:recursiveGetChildById("controllerTitle")
+    hp = 80
+    shell:tick()
+
+    assert.are_equal(title, controller:recursiveGetChildById("controllerTitle"))
+  end)
+
+  it("builds a native floating fallback controller", function()
     local shell = Shell.new({ root = _G.g_ui.createWidget("Root", nil) })
     shell:open()
 
-    local layout = shell:getWindow():recursiveGetChildById("NexBotShellLayout")
-    assert.is_truthy(layout)
-    assert.are_equal("NexShellLayout", layout:getStyle())
-    assert.are_equal(layout, shell:getHeader():getParent())
+    assert.are_equal("MainWindow", shell:getWindow():getStyle())
+    assert.is_truthy(shell:getWindow():recursiveGetChildById("controller"))
+    assert.is_nil(shell:getWorkspace())
   end)
 
   it("destroying the shell rejects later callbacks (generation guard)", function()

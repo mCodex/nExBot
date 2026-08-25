@@ -461,6 +461,51 @@ if rootWidget then
     healWindow:raise()
     healWindow:focus()
   end
+
+  local function describeRule(kind, entry)
+    if kind == "item" then
+      return string.format("%s%s%s: item %s", entry.origin or "", entry.sign or "", tostring(entry.value or ""), tostring(entry.item))
+    end
+    return string.format("(MP>%s) %s%s%s: %s", tostring(entry.cost), entry.origin or "", entry.sign or "", tostring(entry.value or ""), tostring(entry.spell))
+  end
+
+  local function ruleSource(kind)
+    ensureCurrentSettings()
+    if not currentSettings then return nil end
+    return kind == "item" and currentSettings.itemTable or currentSettings.spellTable
+  end
+
+  -- Read-only projection for the shell's Healing page. Widgets consume this;
+  -- they never touch spellTable/itemTable directly.
+  HealBot.getRules = function(kind)
+    local source = ruleSource(kind)
+    local rules = {}
+    if not source then return rules end
+    for index, entry in ipairs(source) do
+      rules[#rules + 1] = { kind = kind, index = index, enabled = entry.enabled, label = describeRule(kind, entry), itemId = kind == "item" and entry.item or nil }
+    end
+    return rules
+  end
+
+  HealBot.toggleRule = function(kind, index)
+    local source = ruleSource(kind)
+    local entry = source and source[index]
+    if not entry then return end
+    entry.enabled = not entry.enabled
+    applyHealEngineToggles()
+    saveHeal()
+    if kind == "item" then refreshItems() else refreshSpells() end
+  end
+
+  HealBot.removeRule = function(kind, index)
+    local source = ruleSource(kind)
+    local entry = source and source[index]
+    if not entry then return end
+    table.removevalue(source, entry)
+    applyHealEngineToggles()
+    saveHeal()
+    if kind == "item" then refreshItems() else refreshSpells() end
+  end
 end
 
 --[[

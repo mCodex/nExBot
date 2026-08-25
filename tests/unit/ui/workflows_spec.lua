@@ -5,14 +5,31 @@ describe("embedded workflow pages", function()
     Harness.reset()
     Harness.install()
     _G.nExBot = { UI = {} }
+    dofile("core/ordered_model.lua")
     _G.CaveBot = {
       isOn = function() return false end,
       listProfiles = function() return { "Default" } end,
       getCurrentProfile = function() return "Default" end,
       setCurrentProfile = function() end,
+      Route = nExBot.OrderedModel.new(),
+      Config = { get = function() return false end, set = function() end },
     }
-    _G.TargetBot = { isOn = function() return false end, isLootingEnabled = function() return false end }
-    _G.HealBot = { isOn = function() return false end }
+    _G.TargetBot = {
+      isOn = function() return false end,
+      Looting = { getConfig = function() return { items = {}, containers = {} } end },
+      Creatures = nExBot.OrderedModel.new(),
+    }
+    local healRules = { spell = {}, item = {} }
+    _G.HealBot = {
+      isOn = function() return false end,
+      getActiveProfile = function() return 1 end,
+      setActiveProfile = function() end,
+      getRules = function(kind) return healRules[kind] end,
+      toggleRule = function(kind, index) healRules[kind][index].enabled = not healRules[kind][index].enabled end,
+      removeRule = function(kind, index) table.remove(healRules[kind], index) end,
+      show = function() end,
+      _rules = healRules,
+    }
     _G.Supplies = {
       getCurrentProfile = function() return "Default" end,
       listProfiles = function() return { "Default" } end,
@@ -56,14 +73,22 @@ describe("embedded workflow pages", function()
     assert.is_nil(content:recursiveGetChildById("open_cave_editor"))
   end)
 
-  it("leaves page titling to the shell header", function()
+  it("uses the existing TargetBot looting owner without inventing a second toggle", function()
+    local loot = nExBot.UI.ModuleRegistry.get("looting").statusProvider().snapshot
+
+    assert.are_equal("Ready", loot.header.statusText)
+    assert.are_equal("Runs with Target", loot.sections[1].rows[2].value)
+    assert.are_equal(0, #loot.actions)
+  end)
+
+  it("renders a consistent page header", function()
     local root = g_ui.createWidget("Root", nil)
     local content = g_ui.createWidget("NexContent", root)
     local lifecycle = nExBot.UI["ui.core.lifecycle"].new("workflow")
 
     nExBot.UI.ModuleRegistry.get("cavebot").render(nil, content, lifecycle)
 
-    assert.is_nil(content:recursiveGetChildById("pageTitle"))
+    assert.are_equal("Cave", content:recursiveGetChildById("pageTitle"):getText())
   end)
 
   it("renders one native Tibia item landmark for each workflow", function()
@@ -89,6 +114,47 @@ describe("embedded workflow pages", function()
     assert.are_equal(268, content:recursiveGetChildById("supplyItem_268"):recursiveGetChildById("item"):getItemId())
     assert.is_truthy(content:recursiveGetChildById("addSupply"))
     assert.is_truthy(content:recursiveGetChildById("supplyCondition_capacity"))
+  end)
+
+  it("restores waypoint and target management without duplicating domain state", function()
+    local waypoint = CaveBot.Route:add({ action = "goto", value = "1,2,3" }, true)
+    waypoint:setText("goto:1,2,3")
+    local target = TargetBot.Creatures:add({ value = { name = "Dragon", pattern = "dragon" } }, true)
+    target:setText("Dragon")
+    local root = g_ui.createWidget("Root", nil)
+    local lifecycle = nExBot.UI["ui.core.lifecycle"].new("workflow")
+
+    local cave = g_ui.createWidget("NexContent", root)
+    nExBot.UI.ModuleRegistry.get("cavebot").render({}, cave, lifecycle)
+    assert.is_truthy(cave:recursiveGetChildById("waypoint_1"))
+    assert.is_truthy(cave:recursiveGetChildById("addWaypoint"))
+    assert.is_truthy(cave:recursiveGetChildById("removeWaypoint"))
+
+    local targets = g_ui.createWidget("NexContent", root)
+    nExBot.UI.ModuleRegistry.get("targetbot").render({}, targets, lifecycle)
+    assert.is_truthy(targets:recursiveGetChildById("targetRule_1"))
+    assert.is_truthy(targets:recursiveGetChildById("addTarget"))
+    assert.is_truthy(targets:recursiveGetChildById("removeTarget"))
+  end)
+
+  it("restores healing rule management without duplicating domain state", function()
+    HealBot._rules.spell[1] = { kind = "spell", index = 1, enabled = true, label = "(MP>0) HP<50%: exura" }
+    HealBot._rules.item[1] = { kind = "item", index = 1, enabled = false, label = "HP<50%: item 266" }
+    local root = g_ui.createWidget("Root", nil)
+    local content = g_ui.createWidget("NexContent", root)
+    local lifecycle = nExBot.UI["ui.core.lifecycle"].new("workflow")
+
+    nExBot.UI.ModuleRegistry.get("healing").render({}, content, lifecycle)
+
+    assert.is_truthy(content:recursiveGetChildById("healRule_spell_1"))
+    assert.is_truthy(content:recursiveGetChildById("healRule_item_1"))
+    assert.is_truthy(content:recursiveGetChildById("manageHealRules"))
+
+    content:recursiveGetChildById("healRuleToggle_item_1"):click()
+    assert.is_true(HealBot._rules.item[1].enabled)
+
+    content:recursiveGetChildById("healRuleRemove_spell_1"):click()
+    assert.are_equal(0, #HealBot._rules.spell)
   end)
 
   it("shows one sanitized action error and removes it after success", function()

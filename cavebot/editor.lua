@@ -11,21 +11,16 @@ CaveBot.Editor.registerAction = function(action, text, params)
     text = action
   end
 
-  local color = nil
   if type(params) ~= 'function' then
     local raction = CaveBot.Actions[action]
     if not raction then
       return warn("CaveBot editor warn: action " .. action .. " doesn't exist")
     end
     CaveBot.Editor.Actions[action] = params
-    color = raction.color
   end
   
   local button = UI.createWidget('CaveBotEditorButton', CaveBot.Editor.ui.buttons)
   button:setText(text)
-  if color then
-    button:setColor(color)
-  end
   button.onClick = function()    
     if type(params) == 'function' then
       params()
@@ -172,6 +167,7 @@ CaveBot.Editor.setup = function()
     ui.pos:setText("Position: " .. pos.x .. ", " .. pos.y .. ", " .. pos.z) 
   end)
   ui.pos:setText("Position: " .. posx() .. ", " .. posy() .. ", " .. posz()) 
+  ui:hide()
 end
 
 CaveBot.Editor.show = function()

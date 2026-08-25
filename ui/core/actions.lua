@@ -19,7 +19,6 @@ local USER_FAILURES = {
   toggle_cavebot = "Cave unavailable",
   toggle_targetbot = "Target unavailable",
   toggle_healing = "Heal unavailable",
-  toggle_looting = "Loot unavailable",
   pause_all = "Could not pause hunt",
 }
 
@@ -67,11 +66,6 @@ Actions.handlers = {
   toggle_cavebot = function() return toggle(CaveBot) end,
   toggle_targetbot = function() return toggle(TargetBot) end,
   toggle_healing = function() return toggle(HealBot) end,
-  toggle_looting = function()
-    local T = TargetBot
-    if not T or not T.setLootingEnabled then return false, "Action unavailable" end
-    return invoke(T.setLootingEnabled, not (T.isLootingEnabled and T.isLootingEnabled() or false))
-  end,
 
   pause_all = function()
     local stopped = false
@@ -84,11 +78,6 @@ Actions.handlers = {
         local ok = invoke(M.setOff)
         stopped = ok or stopped
       end
-    end
-    local T = TargetBot
-    if T and T.setLootingEnabled then
-      local ok = invoke(T.setLootingEnabled, false)
-      stopped = ok or stopped
     end
     if not stopped then return false, "Hunt engines unavailable" end
     return true
@@ -137,6 +126,8 @@ Actions.handlers = {
     local E = IngameEditor
     return invoke(E and E.show)
   end,
+  open_friend_healer = function() return invoke(HealBot and HealBot.showAlly) end,
+  open_containers = function() return invoke(Containers and Containers.initSetupWindow) end,
   cave_force_refill = function()
     local C = CaveBot and CaveBot.Control
     return invoke(C and C.forceRefill)
@@ -163,6 +154,7 @@ Actions.handlers = {
   open_pushmax = function() return invoke(PushMax and PushMax.show) end,
   open_combo = function() return invoke(ComboBot and ComboBot.show) end,
   open_equipper = function() return invoke(nExBot and nExBot.Equipper and nExBot.Equipper.show) end,
+  toggle_equipper = function() return toggleEnabled(nExBot and nExBot.Equipper) end,
   open_attack_config = function() return invoke(AttackBot and AttackBot.show) end,
   toggle_dropper = function() return toggleEnabled(nExBot and nExBot.Dropper) end,
   toggle_depot_withdraw = function() return toggleEnabled(nExBot and nExBot.DepotWithdraw) end,
@@ -171,6 +163,13 @@ Actions.handlers = {
   open_extras = function() return invoke(nExBot and nExBot.Extras and nExBot.Extras.showWindow) end,
   open_depositer = function() return invoke(nExBot and nExBot.Depositer and nExBot.Depositer.showWindow) end,
   open_analyzer = function() return invoke(Analyzer and Analyzer.showWindow) end,
+  toggle_quiver = function()
+    local db = BotDB
+    if not db or not db.getMacroState or not db.setMacroState then return false, "Action unavailable" end
+    local ok, enabled = pcall(db.getMacroState, "quiverManager")
+    if not ok then return false, tostring(enabled) end
+    return invoke(db.setMacroState, "quiverManager", not enabled)
+  end,
 }
 
 function Actions.run(id)

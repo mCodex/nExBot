@@ -22,7 +22,7 @@ describe("Hunt cockpit", function()
   it("exposes one explicit toggle and editor action per engine", function()
     local engines = Cockpit.viewModel({}).snapshot.engines
 
-    assert.are_same({ "toggle_cavebot", "toggle_targetbot", "toggle_healing", "toggle_looting" }, {
+    assert.are_same({ "toggle_cavebot", "toggle_targetbot", "toggle_healing", "open_looting" }, {
       engines[1].toggleAction, engines[2].toggleAction, engines[3].toggleAction, engines[4].toggleAction,
     })
     assert.are_same({ "open_cavebot", "open_targetbot", "open_healing", "open_looting" }, {

@@ -16,7 +16,7 @@ local ENGINE_DEFS = {
   { key = "cave", label = "Cave", itemId = 3003, toggleAction = "toggle_cavebot", editorAction = "open_cavebot" },
   { key = "target", label = "Target", itemId = 3155, toggleAction = "toggle_targetbot", editorAction = "open_targetbot" },
   { key = "heal", label = "Heal", itemId = 23375, toggleAction = "toggle_healing", editorAction = "open_healing" },
-  { key = "loot", label = "Loot", itemId = 2854, toggleAction = "toggle_looting", editorAction = "open_looting" },
+  { key = "loot", label = "Loot", itemId = 2854, toggleAction = "open_looting", editorAction = "open_looting" },
 }
 
 local function engineStatus(value)
@@ -122,7 +122,7 @@ function Cockpit.statusProvider()
     cave = availableState(CaveBot, "isOn"),
     target = availableState(TargetBot, "isOn"),
     heal = availableState(HealBot, "isOn"),
-    loot = availableState(TargetBot, "isLootingEnabled"),
+    loot = availableState(TargetBot, "isOn"),
     caveDetail = caveConfig and caveConfig.selectedConfig,
     targetDetail = targetConfig and targetConfig.selectedConfig,
     healDetail = HealBot and HealBot.getActiveProfile and HealBot.getActiveProfile(),
@@ -151,8 +151,20 @@ end
 
 function Cockpit.render(content)
   local view = Cockpit.statusProvider().snapshot
-  Components.label(content, { id = "cockpitCharacter", text = view.character, textStyle = "windowTitle" })
-  Components.label(content, { id = "cockpitProfile", text = "Profile: " .. view.profile, textStyle = "metadata" })
+  local header = g_ui.createWidget("NexPageHeader", content)
+  header:setId("cockpitHeader")
+  local landmark = g_ui.createWidget("NexPageLandmark", header)
+  landmark:setId("cockpitLandmark")
+  landmark:setItemId(3003)
+  local headerText = g_ui.createWidget("NexPageHeaderText", header)
+  headerText:setId("cockpitHeaderText")
+  Components.label(headerText, { id = "cockpitCharacter", text = view.character, textStyle = "windowTitle", style = "NexPageTitle" })
+  Components.label(headerText, { id = "cockpitProfile", text = "Profile: " .. view.profile, textStyle = "metadata", style = "NexPageSubtitle" })
+  Components.statusBadge(header, {
+    id = "cockpitStatus", style = "NexPageHeaderBadge",
+    status = #view.issues > 0 and "WARNING" or "OK",
+    text = #view.issues > 0 and (#view.issues .. " issues") or "Ready",
+  })
   Components.sectionHeader(content, { title = "Hunt systems" })
 
   local attention

@@ -12,6 +12,11 @@
 
 nExBot.UI = nExBot.UI or {}
 
+-- The bot loader may execute this file again after an off/on cycle.
+-- Tear down the previous shell before replacing its module singleton.
+local previousShell = nExBot.UI.Shell
+if previousShell and previousShell.reset then pcall(previousShell.reset) end
+
 local errors = {}
 local loaded = 0
 

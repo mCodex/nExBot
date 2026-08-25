@@ -95,7 +95,7 @@ SpellHealing < FlatPanel
     anchors.left: parent.left
     margin-left: 5
     text: Spell Healing
-    color: #269e26
+    color: #d7d7d7
     font: verdana-11px-rounded
 
   SpellSourceBox
@@ -196,7 +196,7 @@ SpellHealing < FlatPanel
     anchors.bottom: spellList.bottom
     text: Add
     size: 40 17
-    font: cipsoftFont
+    font: verdana-11px-rounded
 
   Button
     id: MoveUp
@@ -205,7 +205,7 @@ SpellHealing < FlatPanel
     margin-right: 5
     text: Move Up
     size: 55 17
-    font: cipsoftFont
+    font: verdana-11px-rounded
 
   Button
     id: MoveDown
@@ -214,7 +214,7 @@ SpellHealing < FlatPanel
     margin-right: 5
     text: Move Down
     size: 55 17
-    font: cipsoftFont  
+    font: verdana-11px-rounded
 
 ItemHealing < FlatPanel
   size: 490 120
@@ -225,7 +225,7 @@ ItemHealing < FlatPanel
     anchors.left: parent.left
     margin-left: 5
     text: Item Healing
-    color: #ff4513
+    color: #d7d7d7
     font: verdana-11px-rounded
 
   SpellSourceBox
@@ -309,7 +309,7 @@ ItemHealing < FlatPanel
     anchors.bottom: itemList.bottom
     text: Add
     size: 40 17
-    font: cipsoftFont
+    font: verdana-11px-rounded
 
   Button
     id: MoveUp
@@ -318,7 +318,7 @@ ItemHealing < FlatPanel
     margin-right: 5
     text: Move Up
     size: 55 17
-    font: cipsoftFont
+    font: verdana-11px-rounded
 
   Button
     id: MoveDown
@@ -327,7 +327,7 @@ ItemHealing < FlatPanel
     margin-right: 5
     text: Move Down
     size: 55 17
-    font: cipsoftFont
+    font: verdana-11px-rounded
 
 HealerPanel < Panel
   size: 510 275
@@ -435,7 +435,7 @@ HealBotSettingsPanel < Panel
       anchors.horizontalCenter: parent.horizontalCenter
       text: Reset Current Profile
       text-auto-resize: true
-      color: #ff4513
+      color: #d7d7d7
 
 HealWindow < MainWindow
   !text: tr('Self Healer')
@@ -473,7 +473,7 @@ HealWindow < MainWindow
   Button
     id: closeButton
     !text: tr('Close')
-    font: cipsoftFont
+    font: verdana-11px-rounded
     anchors.right: parent.right
     anchors.bottom: parent.bottom
     size: 45 21
@@ -482,7 +482,7 @@ HealWindow < MainWindow
   Button
     id: settingsButton
     !text: tr('Settings')
-    font: cipsoftFont
+    font: verdana-11px-rounded
     anchors.left: parent.left
     anchors.bottom: parent.bottom
     size: 45 21

@@ -38,11 +38,13 @@ describe("BotShell host integration", function()
     local styles = file:read("*a")
     file:close()
 
-    assert.is_truthy(styles:match("NexShellLayout < Panel.-anchors%.fill: parent"))
-    assert.is_truthy(styles:match("NexContent < ScrollablePanel.-anchors%.top: header%.bottom.-anchors%.bottom: footer%.top"))
-    assert.is_truthy(styles:match("vertical%-scrollbar: contentScroll"))
-    local headerStyle = styles:match("NexShellHeader < Panel(.-)NexHeaderButton")
-    assert.is_truthy(headerStyle:match("anchors%.top: parent%.top"), "anchor-layout header must own the top edge")
+    assert.is_truthy(styles:match("NexControllerLayout < Panel.-anchors%.fill: parent"))
+    local controller = styles:match("NexControllerContent < Panel(.-)NexControllerEngine")
+    assert.is_nil(controller:match("fit%-children"), "a fill-anchored controller must not size itself from its children")
+    assert.is_truthy(styles:match("NexWorkspace < MainWindow.-size: 440 400"))
+    local workspace = styles:match("NexWorkspaceContent < ScrollablePanel(.-)NexPageLandmark")
+    assert.is_truthy(workspace:match("vertical%-scrollbar: workspaceScroll"))
+    assert.is_nil(workspace:match("fit%-children"), "anchored workspace content must not size itself from its children")
   end)
 
   it("attaches into the host left panel instead of a floating window", function()
@@ -52,7 +54,7 @@ describe("BotShell host integration", function()
     local cp = modules.game_bot.contentsPanel
     assert.are_equal("botPanel", shell:getWindow():getParent():getId())
     assert.are_equal("cockpit", shell:selected())
-    assert.is_truthy(shell:getContent():recursiveGetChildById("cave"))
+    assert.is_truthy(shell:getWindow():recursiveGetChildById("cave"))
     shell:destroy()
   end)
 
@@ -77,7 +79,7 @@ describe("BotShell host integration", function()
     local shell = Shell.show()
     local children = cp.botPanel:getChildren()
     assert.are_equal(1, #children, "botPanel must contain only the shell layout")
-    assert.are_equal("NexBotShell", children[1]:getId())
+    assert.are_equal("NexBotController", children[1]:getId())
     shell:destroy()
   end)
 
@@ -143,20 +145,14 @@ describe("BotShell host integration", function()
     shell:destroy()
   end)
 
-  it("renders narrow engine rails without duplicate Edit buttons or unsafe text", function()
+  it("renders narrow engine rails with exactly one Configure button per row and no unsafe text", function()
     local shell = Shell.show()
-    local content = shell:getContent()
-    local editorActions = {
-      cave = "open_cave_editor",
-      target = "open_target_editor",
-      heal = "open_heal_config",
-      loot = "open_loot_config",
-    }
+    local content = shell:getWindow():recursiveGetChildById("controller")
 
     for _, id in ipairs({ "cave", "target", "heal", "loot" }) do
       local row = assert(content:recursiveGetChildById(id))
-      assert.is_truthy(row:recursiveGetChildById(id .. "Info"))
-      assert.is_nil(row:recursiveGetChildById(editorActions[id]))
+      local configure = assert(row:recursiveGetChildById("configure_" .. id))
+      assert.are_equal("Configure", configure:getText())
     end
 
     local function assertAscii(widget)
@@ -167,14 +163,11 @@ describe("BotShell host integration", function()
     shell:destroy()
   end)
 
-  it("opens engine settings from the rail instead of a second button", function()
+  it("opens the single configuration workspace from the controller", function()
     local shell = Shell.show()
-    local action
-    nExBot.UI.Actions.run = function(id) action = id; return true end
-
-    shell:getContent():recursiveGetChildById("caveInfo"):click()
-
-    assert.are_equal("open_cavebot", action)
+    shell:getWindow():recursiveGetChildById("openWorkspace"):click()
+    assert.are_equal("cockpit", shell:selected())
+    assert.is_truthy(shell:getWorkspace():recursiveGetChildById("nav_hunt"))
     shell:destroy()
   end)
 
@@ -184,7 +177,7 @@ describe("BotShell host integration", function()
     shell:setupHostHooks()
     local children = cp.botPanel:getChildren()
     assert.are_equal(1, #children, "repeated hide passes must not duplicate or re-add anything")
-    assert.are_equal("NexBotShell", children[1]:getId())
+    assert.are_equal("NexBotController", children[1]:getId())
     shell:destroy()
   end)
 
@@ -197,26 +190,21 @@ describe("BotShell host integration", function()
     s2:destroy()
   end)
 
-  it("More opens advanced modules and returns through header history", function()
+  it("maps the removed More route to Overview", function()
     local shell = Shell.show()
     shell:select("more")
-    assert.are_equal("more", shell:selected())
-    assert.are_equal("More", shell:getWindow():recursiveGetChildById("shellTitle"):getText())
-    assert.is_nil(shell:getContent():recursiveGetChildById("moreTitle"))
-    assert.is_truthy(shell:getContent():recursiveGetChildById("more_analytics"))
-    shell:getWindow():recursiveGetChildById("shellBack"):click()
     assert.are_equal("cockpit", shell:selected())
+    assert.is_truthy(shell:getWorkspace():recursiveGetChildById("tab_intelligence"))
     shell:destroy()
   end)
 
   it("groups auxiliary controls into compact workflow pages", function()
     local shell = Shell.show()
-    shell:select("more")
-    shell:getContent():recursiveGetChildById("more_tools"):click()
+    shell:select("tools")
 
     assert.are_equal("tools", shell:selected())
-    assert.is_truthy(shell:getContent():recursiveGetChildById("tools_looting"))
-    assert.is_truthy(shell:getContent():recursiveGetChildById("tools_toggle_dropper"))
+    assert.is_truthy(shell:getWorkspace():recursiveGetChildById("nav_automation"))
+    assert.is_truthy(shell:getContent():recursiveGetChildById("manager_toggle_dropper"))
     shell:destroy()
   end)
 

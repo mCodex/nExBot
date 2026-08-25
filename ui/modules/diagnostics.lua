@@ -29,23 +29,46 @@ function Diagnostics.viewModel(state)
   })
 
   local sections = {}
+  local issueItems = {}
+  local detailRows = {}
+
+  for _, issue in ipairs(state.issues or {}) do
+    local code = tostring(issue.code or "DIAGNOSTIC")
+    local severity = string.upper(tostring(issue.severity or "info"))
+    local message = tostring(issue.message or "No message provided.")
+    local action = tostring(issue.action or "Review the affected subsystem.")
+
+    issueItems[#issueItems + 1] = {
+      title = code .. " - " .. message,
+      subtitle = "Next: " .. action,
+      status = severity,
+      statusText = severity,
+    }
+
+    local details = tostring(issue.subsystem or "Unknown subsystem")
+    if issue.timestamp then details = details .. " | " .. tostring(issue.timestamp) end
+    detailRows[#detailRows + 1] = { key = code, value = details }
+  end
+
+  if #issueItems == 0 then
+    issueItems[1] = {
+      title = "No issues found",
+      subtitle = "Bot Doctor found no action requiring attention.",
+      status = "OK",
+    }
+  end
 
   sections[#sections + 1] = {
     id = "doctor",
     title = "Bot Doctor",
-    items = {},
+    items = issueItems,
   }
-  for _, issue in ipairs(state.issues or {}) do
+
+  if #detailRows > 0 then
     sections[#sections + 1] = {
-      id = "issue_" .. tostring(issue.code),
-      title = tostring(issue.code or "issue"),
-      rows = {
-        { key = "Subsystem", value = issue.subsystem or "-" },
-        { key = "Severity", value = issue.severity or "info", status = issue.severity or "INFO" },
-        { key = "Message", value = issue.message or "" },
-        { key = "Action", value = issue.action or "-" },
-        { key = "Timestamp", value = issue.timestamp or "-" },
-      },
+      id = "issue_details",
+      title = "Raw details",
+      rows = detailRows,
     }
   end
 
@@ -84,9 +107,6 @@ function Diagnostics.viewModel(state)
     { id = "export_replay", label = "Export replay" },
   })
 
-  for _, issue in ipairs(state.issues or {}) do
-    vm:addError(issue.code or "DIAGNOSTIC", issue.message or "")
-  end
   vm:commit()
   return vm
 end
@@ -120,6 +140,7 @@ function Diagnostics.currentIssues(force)
           severity = issue.severity,
           message = issue.message,
           action = issue.action,
+          timestamp = issue.timestamp,
         }
       end
     end

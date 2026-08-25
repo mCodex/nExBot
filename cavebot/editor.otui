@@ -1,10 +1,12 @@
 CaveBotEditorButton < Button
-
+  height: 26
+  font: verdana-11px-rounded
+  text-align: center
 
 CaveBotEditorPanel < MainWindow
   id: cavebotEditor
   text: Cave route editor
-  width: 278
+  width: 370
   visible: false
   @onEscape: self:hide()
   layout:
@@ -13,16 +15,20 @@ CaveBotEditorPanel < MainWindow
   
   Label
     id: pos
+    height: 22
+    font: verdana-11px-rounded
     text-align: center
     text: -
     
   Panel
     id: buttons
     margin-top: 2
+    margin-left: 4
+    margin-right: 4
     layout:
       type: grid
-      cell-size: 86 20
-      cell-spacing: 1
+      cell-size: 112 26
+      cell-spacing: 3
       flow: true
       fit-children: true
 
@@ -31,17 +37,24 @@ CaveBotEditorPanel < MainWindow
     text-align: center
     text-auto-resize: true
     text-wrap: true
-    margin-top: 3
-    margin-left: 2
-    margin-right: 2
+    font: verdana-11px-rounded
+    margin-top: 6
+    margin-left: 8
+    margin-right: 8
 
   BotSwitch
     id: autoRecording
     text: Auto Recording
-    margin-top: 3
+    font: verdana-11px-rounded
+    margin-top: 6
+    margin-left: 4
+    margin-right: 4
 
   BotButton
     margin-top: 3
+    margin-left: 4
+    margin-right: 4
     margin-bottom: 3
+    font: verdana-11px-rounded
     text: Documentation
     @onClick: g_platform.openUrl("https://www.nexbot.cc/docs")

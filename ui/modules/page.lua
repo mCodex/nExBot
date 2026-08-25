@@ -21,7 +21,7 @@ local function actionsDispatcher()
   return Actions
 end
 
-local function resolveAction(action, content)
+local function resolveAction(action, content, shell)
   return {
     id = action.id,
     label = action.label,
@@ -32,6 +32,7 @@ local function resolveAction(action, content)
         local warning = content:recursiveGetChildById("workflowActionError")
         if ok then
           if warning then warning:destroy() end
+          if shell and shell.renderCurrent then shell:renderCurrent() end
           return
         end
         local message = actionsDispatcher().userMessage(action.id, reason)
@@ -60,20 +61,17 @@ function Page.render(shell, content, lifecycle, view)
   end
 
   local header = view.header or {}
-
-  if header.itemId then
-    local landmark = g_ui.createWidget("NexPageLandmark", content)
-    landmark:setId("pageLandmark")
-    landmark:setItemId(header.itemId)
-  end
-
-  if header.subtitle then
-    Components.label(content, { id = "pageSubtitle", text = header.subtitle, textStyle = "helper" })
-  end
-
+  local pageHeader = g_ui.createWidget("NexPageHeader", content)
+  pageHeader:setId("pageHeader")
+  local landmark = g_ui.createWidget("NexPageLandmark", pageHeader)
+  landmark:setId("pageLandmark")
+  landmark:setItemId(header.itemId or 0)
+  local headerText = g_ui.createWidget("NexPageHeaderText", pageHeader)
+  headerText:setId("pageHeaderText")
+  Components.label(headerText, { id = "pageTitle", text = header.title or "nExBot", textStyle = "moduleTitle", style = "NexPageTitle" })
+  if header.subtitle then Components.label(headerText, { id = "pageSubtitle", text = header.subtitle, textStyle = "helper", style = "NexPageSubtitle" }) end
   if header.status then
-    local badge = Components.statusBadge(content, { id = "pageBadge", status = header.status, text = header.statusText or header.status })
-    badge:setColor(Status.color(header.status))
+    Components.statusBadge(pageHeader, { id = "pageBadge", style = "NexPageHeaderBadge", status = header.status, text = header.statusText or header.status })
   end
 
   if view.state == "EMPTY" then
@@ -98,13 +96,13 @@ function Page.render(shell, content, lifecycle, view)
 
   if view.actions and #view.actions > 0 then
     local footer = Components.footerActions(content, {
-      primary = view.primaryAction and resolveAction(view.primaryAction, content),
-      secondary = view.secondaryAction and resolveAction(view.secondaryAction, content),
+      primary = view.primaryAction and resolveAction(view.primaryAction, content, shell),
+      secondary = view.secondaryAction and resolveAction(view.secondaryAction, content, shell),
     })
     -- remaining actions as ghost buttons
     for _, action in ipairs(view.actions) do
       if action ~= view.primaryAction and action ~= view.secondaryAction then
-        local a = resolveAction(action, content)
+        local a = resolveAction(action, content, shell)
         Components.button(footer, {
           text = a.label, id = a.id, variant = "ghost", onClick = a.onClick,
         })

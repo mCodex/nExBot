@@ -38,11 +38,9 @@ ConditionBox < ComboBox
     self:addOption("or")
 
 PreButton < PreviousButton
-  background: #363636
   height: 15
 
 NexButton < NextButton
-  background: #363636
   height: 15
 
 CondidionLabel < FlatPanel
@@ -54,7 +52,6 @@ CondidionLabel < FlatPanel
     anchors.fill: parent
     text-align: center
     font: verdana-11px-rounded
-    background: #363636
 
 Rule < UIWidget
   background-color: alpha
@@ -158,7 +155,7 @@ ListPanel < FlatPanel
     anchors.left: parent.left
     text: Rules List
     font: verdana-11px-rounded
-    color: #FABD02
+    color: #d7d7d7
 
   Label
     id: mainLabel
@@ -195,7 +192,7 @@ ListPanel < FlatPanel
     size: 60 17
     text: Move Up
     text-align: center
-    font: cipsoftFont
+    font: verdana-11px-rounded
     margin-top: 5
     tooltip: Increase priority of selected rule.
 
@@ -207,7 +204,7 @@ ListPanel < FlatPanel
     margin-right: 5
     text: Move Down
     text-align: center
-    font: cipsoftFont
+    font: verdana-11px-rounded
     tooltip: Decrease priority of selected rule.
 
 InputPanel < FlatPanel
@@ -222,7 +219,7 @@ InputPanel < FlatPanel
     anchors.left: parent.left
     text: Condition Panel
     font: verdana-11px-rounded
-    color: #FF0000
+    color: #d7d7d7
 
   Label
     id: mainLabel
@@ -291,7 +288,7 @@ EQPanel < FlatPanel
     anchors.left: parent.left
     text: Equipment Setup
     font: verdana-11px-rounded
-    color: #03C04A
+    color: #d7d7d7
 
   SlotBotItem
     id: head
@@ -431,7 +428,7 @@ BossList < FlatPanel
     anchors.left: parent.left
     text: Boss List
     font: verdana-11px-rounded
-    color: #FABD02
+    color: #d7d7d7
 
   TextList
     id: list
@@ -525,7 +522,7 @@ EquipWindow < MainWindow
   Button
     id: closeButton
     !text: tr('Close')
-    font: cipsoftFont
+    font: verdana-11px-rounded
     anchors.right: parent.right
     anchors.bottom: parent.bottom
     size: 45 21  
@@ -533,7 +530,7 @@ EquipWindow < MainWindow
   Button
     id: bossList
     !text: tr('Boss list')
-    font: cipsoftFont
+    font: verdana-11px-rounded
     anchors.left: parent.left
     anchors.bottom: parent.bottom
     size: 65 21

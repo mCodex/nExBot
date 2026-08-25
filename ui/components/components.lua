@@ -70,7 +70,7 @@ end
 function C.sectionHeader(parent, opts)
   opts = opts or {}
   local w = create(parent, opts.style or "NexSectionHeader", opts)
-  label(w, opts.title or "", "Label", { id = "title", textStyle = "sectionTitle" })
+  label(w, opts.title or "", "NexSectionTitle", { id = "title", textStyle = "sectionTitle" })
   if opts.action and opts.action.text then
     C.button(w, { text = opts.action.text, id = "action", variant = "ghost", onClick = opts.action.onClick })
   end

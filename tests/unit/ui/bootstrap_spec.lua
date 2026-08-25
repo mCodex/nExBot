@@ -15,11 +15,12 @@ describe("ui bootstrap", function()
     local origDofile = _G.dofile
     _G.require = nil
     _G.loadfile = nil
-    _G.dofile = function(path, ...)
+    local sandboxDofile = function(path, ...)
       if type(path) == "string" and path:sub(1, 1) == "/" then path = "." .. path end
       origDofile(path, ...)
       return nil
     end
+    _G.dofile = sandboxDofile
     _G.warn = function() end
     _G.info = function() end
     _G.schedule = function(_, fn) fn() end
@@ -41,13 +42,20 @@ describe("ui bootstrap", function()
     assert.are_equal(1, Shell.count(), "shell should auto-open after bootstrap")
     assert.is_true(Shell.instance():isPanelMode(), "shell must attach to the host left bar")
     assert.are_equal("botPanel", Shell.instance():getWindow():getParent():getId())
-    assert.is_nil(Shell.instance():getWindow():recursiveGetChildById("sidebar"))
+    assert.is_nil(Shell.instance():getWorkspace(), "configuration stays lazy at startup")
     assert.are_equal("cockpit", Shell.instance():selected())
-    assert.is_truthy(Shell.instance():getContent():recursiveGetChildById("cave"))
+    assert.is_truthy(Shell.instance():getWindow():recursiveGetChildById("cave"))
 
-    -- Re-opening does not duplicate the shell.
-    Shell.show()
-    assert.are_equal(1, Shell.count(), "re-open must not duplicate the shell")
-    Shell.instance():destroy()
+    -- A full bot off/on reload replaces the old shell instead of appending it.
+    local oldWindow = Shell.instance():getWindow()
+    _G.require, _G.loadfile, _G.dofile = nil, nil, sandboxDofile
+    local reloadOk, reloadErr = pcall(function() _G.dofile("/ui/init.lua") end)
+    _G.require, _G.loadfile, _G.dofile = origRequire, origLoadfile, origDofile
+    assert.is_true(reloadOk, tostring(reloadErr))
+    local reloadedShell = _G.nExBot.UI.Shell
+    assert.is_true(oldWindow:isDestroyed(), "reload must destroy the previous controller")
+    assert.are_equal(1, reloadedShell.count(), "reload must keep one shell")
+    assert.are_equal(1, #modules.game_bot.contentsPanel.botPanel:getChildren(), "reload must keep one controller")
+    reloadedShell.instance():destroy()
   end)
 end)
