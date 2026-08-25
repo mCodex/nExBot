@@ -103,7 +103,6 @@ CaveBotEditorPanel < MainWindow
       cell-size: 112 26
       cell-spacing: 3
       flow: true
-      fit-children: true
 
   Label
     id: message
