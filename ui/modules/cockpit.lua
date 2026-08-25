@@ -177,19 +177,14 @@ end
 
 function Cockpit.render(content)
   local view = Cockpit.statusProvider().snapshot
-  local header = g_ui.createWidget("NexPageHeader", content)
-  header:setId("cockpitHeader")
-  local landmark = g_ui.createWidget("NexPageLandmark", header)
-  landmark:setId("cockpitLandmark")
-  landmark:setItemId(3003)
-  local headerText = g_ui.createWidget("NexPageHeaderText", header)
-  headerText:setId("cockpitHeaderText")
-  Components.label(headerText, { id = "cockpitCharacter", text = view.character, textStyle = "windowTitle", style = "NexPageTitle" })
-  Components.label(headerText, { id = "cockpitProfile", text = "Profile: " .. view.profile, textStyle = "metadata", style = "NexPageSubtitle" })
-  Components.statusBadge(header, {
-    id = "cockpitStatus", style = "NexPageHeaderBadge",
+  Components.pageHeader(content, {
+    id = "cockpitHeader", textId = "cockpitHeaderText",
+    itemId = 3003, landmarkId = "cockpitLandmark",
+    titleId = "cockpitCharacter", title = view.character,
+    subtitleId = "cockpitProfile", subtitle = "Profile: " .. view.profile,
+    badgeId = "cockpitStatus",
     status = #view.issues > 0 and "WARNING" or "OK",
-    text = #view.issues > 0 and (#view.issues .. " issues") or "Ready",
+    statusText = #view.issues > 0 and (#view.issues .. " issues") or "Ready",
   })
   Components.sectionHeader(content, { title = "Hunt systems" })
 

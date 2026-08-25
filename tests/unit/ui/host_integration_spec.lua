@@ -20,6 +20,12 @@ local function fresh()
   dofile("ui/modules/page.lua")
   dofile("ui/modules/cockpit.lua")
   dofile("ui/core/module_registry.lua")
+  dofile("ui/modules/workflows/shared.lua")
+  dofile("ui/modules/workflows/cave.lua")
+  dofile("ui/modules/workflows/target.lua")
+  dofile("ui/modules/workflows/healing.lua")
+  dofile("ui/modules/workflows/looting.lua")
+  dofile("ui/modules/workflows/supplies.lua")
   dofile("ui/modules/workflows.lua")
   _G.nExBot.Dropper = {
     getProjection = function() return { revision = 0, enabled = false, lowCap = 150, rows = {} } end,
