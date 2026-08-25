@@ -41,6 +41,43 @@ CaveBot.Editor.registerAction = function(action, text, params)
   return button
 end
 
+local function buildWaypointRow(item, index, parent)
+  local row = g_ui.createWidget('CaveBotEditorRow', parent)
+  row.item = item
+
+  local idLabel = g_ui.createWidget('CaveBotEditorCell', row)
+  idLabel:setWidth(28)
+  idLabel:setText(tostring(index))
+
+  local typeLabel = g_ui.createWidget('CaveBotEditorCell', row)
+  typeLabel:setWidth(82)
+  typeLabel:setText(tostring(item.action or "?"))
+
+  local valueLabel = g_ui.createWidget('CaveBotEditorCell', row)
+  valueLabel:setText(tostring(item.value or ""))
+
+  row.onClick = function()
+    CaveBot.Route:focusChild(item)
+    row:focus()
+  end
+  row.onDoubleClick = function()
+    if item.onDoubleClick then item.onDoubleClick(item) end
+  end
+
+  if CaveBot.Route:getFocusedChild() == item then
+    row:focus()
+  end
+end
+
+CaveBot.Editor.refreshTable = function()
+  local ui = CaveBot.Editor.ui
+  if not ui or not ui.tableScroll then return end
+  ui.tableScroll:destroyChildren()
+  for index, item in ipairs(CaveBot.Route:getChildren()) do
+    buildWaypointRow(item, index, ui.tableScroll)
+  end
+end
+
 CaveBot.Editor.setup = function()
   CaveBot.Editor.ui = UI.createWindow("CaveBotEditorPanel", g_ui.getRootWidget())
   local ui = CaveBot.Editor.ui
@@ -166,11 +203,22 @@ CaveBot.Editor.setup = function()
     end
     ui.pos:setText("Position: " .. pos.x .. ", " .. pos.y .. ", " .. pos.z) 
   end)
-  ui.pos:setText("Position: " .. posx() .. ", " .. posy() .. ", " .. posz()) 
+  ui.pos:setText("Position: " .. posx() .. ", " .. posy() .. ", " .. posz())
   ui:hide()
+
+  local lastRevision = -1
+  macro(250, function()
+    if not ui:isVisible() then return end
+    local revision = CaveBot.Route:getRevision()
+    if revision ~= lastRevision then
+      lastRevision = revision
+      CaveBot.Editor.refreshTable()
+    end
+  end)
 end
 
 CaveBot.Editor.show = function()
+  CaveBot.Editor.refreshTable()
   CaveBot.Editor.ui:show()
 end
 

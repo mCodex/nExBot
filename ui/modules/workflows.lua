@@ -6,7 +6,6 @@ local Components = nExBot and nExBot.UI and nExBot.UI["ui.components.components"
 
 local Workflows = {}
 local PAGE_SIZE = 40
-local routePage = 1
 local targetPage = 1
 local LANDMARKS = {
   cavebot = 3003,
@@ -156,7 +155,15 @@ local function pageBounds(page, count)
 end
 
 local function rerender(shell)
-  if shell and shell.renderCurrent then shell:renderCurrent() end
+  if not shell or not shell.renderCurrent then return end
+  -- Destroying the workspace content synchronously (e.g. from inside a
+  -- ComboBox option-click, which is still unwinding its own popup-menu
+  -- close logic) corrupts OTC's mouse-grab state and breaks all further
+  -- clicks. Defer to the next tick so the triggering widget's own click
+  -- handling finishes first.
+  scheduleEvent(function()
+    if shell.renderCurrent then shell:renderCurrent() end
+  end, 0)
 end
 
 local function actionBar(content)
@@ -166,6 +173,26 @@ end
 local function actionButton(parent, options)
   options.style = "NexWorkflowButton"
   return Components.button(parent, options)
+end
+
+local function newProfileAction(content, options)
+  local bar = actionBar(content)
+  actionButton(bar, {
+    id = options.id,
+    text = options.text or "New Profile",
+    onClick = function()
+      local function create(name)
+        local ok, reason = options.onCreate(name)
+        if not ok then return warn(reason or "Could not create profile") end
+        rerender(options.shell)
+      end
+      if options.prompt then
+        displayTextInputBox(options.prompt.title, options.prompt.label, create)
+      else
+        create()
+      end
+    end,
+  })
 end
 
 local function renderCaveControls(content, shell)
@@ -178,6 +205,14 @@ local function renderCaveControls(content, shell)
     onChange = function(name)
       if CaveBot.setCurrentProfile then CaveBot.setCurrentProfile(name) end
       rerender(shell)
+    end,
+  })
+  newProfileAction(content, {
+    id = "newCaveProfile", text = "New Profile", shell = shell,
+    prompt = { title = "New Cave Profile", label = "Enter a name for the new profile" },
+    onCreate = function(name)
+      if not CaveBot.createProfile then return false, "Not available" end
+      return CaveBot.createProfile(name)
     end,
   })
 
@@ -202,65 +237,29 @@ local function renderCaveControls(content, shell)
   local route = CaveBot.Route
   if not route or not route.getChildren then return end
   local waypoints = route:getChildren()
-  local pages, first, last
-  routePage, pages, first, last = pageBounds(routePage, #waypoints)
   Components.sectionHeader(content, { title = "Waypoints" })
-  if #waypoints == 0 then
-    Components.emptyState(content, { message = "No waypoints. Add the first route action." })
-  else
-    Components.label(content, { text = string.format("Showing %d-%d of %d", first, last, #waypoints), textStyle = "metadata" })
-    local selected = route:getFocusedChild()
-    for index = first, last do
-      local waypoint = waypoints[index]
-      local row = Components.listRow(content, {
-        id = "waypoint_" .. index,
-        title = waypoint.getText and waypoint:getText() or ((waypoint.action or "action") .. ":" .. tostring(waypoint.value or "")),
-        subtitle = "Waypoint " .. index,
-        status = waypoint == selected and "ACTIVE" or nil,
-        statusText = waypoint == selected and "Selected" or nil,
-      }).widget
-      row.onClick = function()
-        route:focus(waypoint)
-        rerender(shell)
-      end
-    end
-  end
-
-  local paging = actionBar(content)
-  actionButton(paging, { id = "routePrevious", text = "Previous", disabled = routePage == 1, onClick = function()
-    routePage = routePage - 1; rerender(shell)
-  end })
-  actionButton(paging, { id = "routeNext", text = "Next", disabled = routePage == pages, onClick = function()
-    routePage = routePage + 1; rerender(shell)
-  end })
+  Components.label(content, { text = string.format("%d waypoint(s) in this route", #waypoints), textStyle = "metadata" })
 
   local actions = actionBar(content)
-  actionButton(actions, { id = "addWaypoint", text = "Add Waypoint", onClick = function()
+  actionButton(actions, { id = "openWaypointEditor", text = "Open Waypoint Editor", onClick = function()
     if CaveBot.Editor and CaveBot.Editor.show then CaveBot.Editor.show() end
   end })
-  actionButton(actions, { id = "editWaypoint", text = "Edit", onClick = function()
-    local selected = route:getFocusedChild()
-    if selected and selected.onDoubleClick then selected.onDoubleClick(selected) end
-  end })
-  actionButton(actions, { id = "removeWaypoint", text = "Remove", variant = "danger", onClick = function()
-    local selected = route:getFocusedChild()
-    if not selected then return end
-    selected:destroy()
-    if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
-    if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
-    if CaveBot.save then CaveBot.save() end
-    rerender(shell)
-  end })
-  actionButton(actions, { id = "moveWaypointUp", text = "Up", onClick = function()
-    local selected = route:getFocusedChild()
-    local index = route:getChildIndex(selected)
-    if index > 1 then route:moveChildToIndex(selected, index - 1); if CaveBot.save then CaveBot.save() end; rerender(shell) end
-  end })
-  actionButton(actions, { id = "moveWaypointDown", text = "Down", onClick = function()
-    local selected = route:getFocusedChild()
-    local index = route:getChildIndex(selected)
-    if index > 0 and index < route:getChildCount() then route:moveChildToIndex(selected, index + 1); if CaveBot.save then CaveBot.save() end; rerender(shell) end
-  end })
+  if CaveBot.Recorder then
+    local recording = CaveBot.Recorder.isOn and CaveBot.Recorder.isOn()
+    actionButton(actions, {
+      id = "recordRoute",
+      text = recording and "Stop Recording" or "Record Route",
+      variant = recording and "danger" or nil,
+      onClick = function()
+        if CaveBot.Recorder.isOn and CaveBot.Recorder.isOn() then
+          CaveBot.Recorder.disable()
+        else
+          CaveBot.Recorder.enable()
+        end
+        rerender(shell)
+      end,
+    })
+  end
 end
 
 local function renderTargetControls(content, shell)
@@ -273,6 +272,14 @@ local function renderTargetControls(content, shell)
     onChange = function(name)
       if TargetBot.setCurrentProfile then TargetBot.setCurrentProfile(name) end
       rerender(shell)
+    end,
+  })
+  newProfileAction(content, {
+    id = "newTargetProfile", text = "New Profile", shell = shell,
+    prompt = { title = "New Target Profile", label = "Enter a name for the new profile" },
+    onCreate = function(name)
+      if not TargetBot.createProfile then return false, "Not available" end
+      return TargetBot.createProfile(name)
     end,
   })
 
@@ -372,6 +379,7 @@ local function renderHealingControls(content, shell)
     value = tostring(HealBot.getActiveProfile and HealBot.getActiveProfile() or 1),
     onChange = function(profile)
       if HealBot.setActiveProfile then HealBot.setActiveProfile(tonumber(profile)) end
+      rerender(shell)
     end,
   })
 
@@ -382,6 +390,11 @@ local function renderHealingControls(content, shell)
   actionButton(actions, { id = "manageHealRules", text = "Add / Manage Rules", onClick = function()
     if HealBot.show then HealBot.show() end
   end })
+  if HealBot.showAlly then
+    actionButton(actions, { id = "healFriend", text = "Heal Friend", onClick = function()
+      HealBot.showAlly()
+    end })
+  end
 end
 
 local function renderSupplyItem(content, id, values)
@@ -415,7 +428,7 @@ local function renderSupplyItem(content, id, values)
   })
 end
 
-local function renderSupplyControls(content)
+local function renderSupplyControls(content, shell)
   if not Supplies then
     Components.emptyState(content, { message = "Supplies did not load. Check the startup log." })
     return
@@ -426,7 +439,17 @@ local function renderSupplyControls(content)
     id = "supplyProfile",
     items = Supplies.listProfiles and Supplies.listProfiles() or {},
     value = Supplies.getCurrentProfile and Supplies.getCurrentProfile(),
-    onChange = Supplies.setCurrentProfile,
+    onChange = function(name)
+      if Supplies.setCurrentProfile then Supplies.setCurrentProfile(name) end
+      rerender(shell)
+    end,
+  })
+  newProfileAction(content, {
+    id = "newSupplyProfile", text = "New Profile", shell = shell,
+    onCreate = function()
+      if not Supplies.createProfile then return false, "Not available" end
+      return Supplies.createProfile()
+    end,
   })
 
   Components.sectionHeader(content, { title = "Items" })

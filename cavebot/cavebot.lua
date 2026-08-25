@@ -1802,6 +1802,10 @@ CaveBot.setCurrentProfile = function(name)
   end
 end
 
+CaveBot.createProfile = function(name)
+  return config.create(name)
+end
+
 CaveBot.delay = function(value)
   cavebotMacro.delay = math.max(cavebotMacro.delay or 0, now + value)
 end

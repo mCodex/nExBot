@@ -465,6 +465,20 @@ Supplies.setCurrentProfile = function(name)
   return true
 end
 
+Supplies.createProfile = function()
+  local n = #Supplies.listProfiles()
+  if n > 6 then
+    warn("You cannot create more than 6 profiles.")
+    return false, "You cannot create more than 6 profiles."
+  end
+  local name = "Profile #" .. n + 1
+  SuppliesConfig[panelName][name] = {items = {}}
+  refreshProfileList()
+  setProfileFocus()
+  nExBotConfigSave("supply")
+  return true, name
+end
+
 Supplies.setItem = function(id, min, max, avg)
   id = tonumber(id)
   min, max, avg = tonumber(min), tonumber(max), tonumber(avg)

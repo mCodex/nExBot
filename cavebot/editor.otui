@@ -3,28 +3,101 @@ CaveBotEditorButton < Button
   font: verdana-11px-rounded
   text-align: center
 
+CaveBotEditorHeaderColumn < Label
+  font: verdana-11px-rounded
+  color: #d7c8a5
+  text-wrap: false
+
+CaveBotEditorCell < Label
+  font: verdana-11px-rounded
+  text-wrap: false
+
+CaveBotEditorRow < Panel
+  height: 20
+  focusable: true
+  layout:
+    type: horizontalBox
+
+  $hover:
+    background-color: #35393c
+
+  $focus:
+    background-color: #4a5054
+
 CaveBotEditorPanel < MainWindow
   id: cavebotEditor
   text: Cave route editor
-  width: 370
+  size: 520 460
   visible: false
   @onEscape: self:hide()
-  layout:
-    type: verticalBox
-    fit-children: true
-  
+
   Label
     id: pos
     height: 22
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
     font: verdana-11px-rounded
     text-align: center
     text: -
-    
+
+  Panel
+    id: tableHeader
+    height: 18
+    anchors.top: pos.bottom
+    anchors.left: parent.left
+    width: 220
+    margin-top: 4
+    layout:
+      type: horizontalBox
+
+    CaveBotEditorHeaderColumn
+      id: headerId
+      width: 28
+      text: #
+      text-align: center
+
+    CaveBotEditorHeaderColumn
+      id: headerType
+      width: 82
+      text: Type
+
+    CaveBotEditorHeaderColumn
+      id: headerCoords
+      text: Value
+
+  VerticalScrollBar
+    id: tableScrollBar
+    width: 10
+    anchors.top: tableHeader.bottom
+    anchors.left: tableHeader.right
+    anchors.bottom: message.top
+    margin-top: 2
+    margin-bottom: 4
+    step: 20
+    pixels-scroll: true
+
+  ScrollablePanel
+    id: tableScroll
+    anchors.top: tableHeader.bottom
+    anchors.left: parent.left
+    anchors.right: tableScrollBar.left
+    anchors.bottom: message.top
+    margin-top: 2
+    margin-bottom: 4
+    vertical-scrollbar: tableScrollBar
+    layout:
+      type: verticalBox
+
   Panel
     id: buttons
-    margin-top: 2
-    margin-left: 4
-    margin-right: 4
+    anchors.top: pos.bottom
+    anchors.left: tableScrollBar.right
+    anchors.right: parent.right
+    anchors.bottom: message.top
+    margin-top: 4
+    margin-left: 8
+    margin-bottom: 4
     layout:
       type: grid
       cell-size: 112 26
@@ -33,25 +106,36 @@ CaveBotEditorPanel < MainWindow
       fit-children: true
 
   Label
-    text: Select a route action, then choose an edit command.
-    text-align: center
-    text-auto-resize: true
-    text-wrap: true
-    font: verdana-11px-rounded
-    margin-top: 6
+    id: message
+    height: 32
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: autoRecording.top
     margin-left: 8
     margin-right: 8
+    margin-bottom: 4
+    text: Select a route action, then choose an edit command.
+    text-align: center
+    text-wrap: true
+    font: verdana-11px-rounded
 
   BotSwitch
     id: autoRecording
     text: Auto Recording
     font: verdana-11px-rounded
-    margin-top: 6
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: docButton.top
     margin-left: 4
     margin-right: 4
+    margin-bottom: 4
 
   BotButton
-    margin-top: 3
+    id: docButton
+    height: 26
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
     margin-left: 4
     margin-right: 4
     margin-bottom: 3

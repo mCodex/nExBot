@@ -166,7 +166,7 @@ local function createShell(opts)
         onClick = function() run(engineRow.toggleAction, self.controller) end,
       })
       Components.button(row, {
-        id = "configure_" .. engineRow.id, text = "Configure", style = "NexControllerConfigure",
+        id = "configure_" .. engineRow.id, text = "", style = "NexControllerConfigure",
         tooltip = "Configure " .. engineRow.label,
         onClick = function() run(engineRow.editorAction, self.controller) end,
       })
@@ -174,10 +174,6 @@ local function createShell(opts)
     Components.button(self.controller, {
       id = "openWorkspace", text = "Open nExBot", style = "NexControllerOpen",
       onClick = function() self:select(self.selectedId or "cockpit") end,
-    })
-    Components.button(self.controller, {
-      id = "pause_all", text = "Pause hunt", style = "NexControllerPause", variant = "danger",
-      onClick = function() run("pause_all", self.controller) end,
     })
   end
 
@@ -231,6 +227,9 @@ local function createShell(opts)
     scroll:setId("workspaceScroll")
     self.content = g_ui.createWidget("NexWorkspaceContent", self.workspace)
     self.content:setId("workspaceContent")
+    local close = g_ui.createWidget("NexCloseButton", self.workspace)
+    close:setId("closeButton")
+    close.onClick = function() self.workspace:hide() end
   end
 
   function self:open()
@@ -244,6 +243,9 @@ local function createShell(opts)
       self.window = UI.createWindow("NexControllerWindow", self.root)
       self.window:setWidth(Tokens.dimensions.minWidth)
       self.window:setHeight(240)
+      local close = g_ui.createWidget("NexCloseButton", self.window)
+      close:setId("closeButton")
+      close.onClick = function() self.window:hide() end
     end
     self.window:setId("NexBotController")
     buildController(self.window)

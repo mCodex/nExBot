@@ -799,6 +799,10 @@ TargetBot.setCurrentProfile = function(name)
   end
 end
 
+TargetBot.createProfile = function(name)
+  return config.create(name)
+end
+
 TargetBot.delay = function(value)
   targetbotMacro.delay = now + value
 end

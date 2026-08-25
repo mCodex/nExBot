@@ -10,21 +10,31 @@ NexCard < Panel
   margin-right: 4
   margin-top: 4
   margin-bottom: 4
+  padding: 4 2
+  background-color: #2a2d2f90
+  border-width: 1
+  border-color: #454b4f80
   layout:
     type: verticalBox
     fit-children: true
 
 NexSectionHeader < Panel
-  height: 18
+  height: 20
   margin-left: 6
-  margin-top: 8
-  margin-bottom: 2
+  margin-right: 6
+  margin-top: 10
+  margin-bottom: 3
+  border-width: 0 0 1 0
+  border-color: #454b4f80
 
 NexSectionTitle < Label
   anchors.left: parent.left
   anchors.right: parent.right
-  anchors.verticalCenter: parent.verticalCenter
+  anchors.bottom: parent.bottom
+  margin-bottom: 3
   text-align: left
+  color: #d7c8a5
+  font: verdana-11px-rounded
 
 NexBadge < Label
   margin-left: 2
@@ -79,6 +89,17 @@ NexControlCombo < ComboBox
   anchors.left: prev.right
   anchors.right: parent.right
   anchors.verticalCenter: parent.verticalCenter
+  menu-scroll: true
+  menu-height: 200
+  menu-scroll-step: 34
+
+NexControlComboPopupMenu < ComboBoxPopupMenu
+
+NexControlComboPopupMenuButton < ComboBoxPopupMenuButton
+
+NexControlComboPopupScrollMenu < ComboBoxPopupScrollMenu
+
+NexControlComboPopupScrollMenuButton < ComboBoxPopupScrollMenuButton
 
 NexControlInput < BotTextEdit
   anchors.left: prev.right
@@ -182,6 +203,21 @@ NexControllerWindow < MainWindow
   text: nExBot
   @onEscape: self:hide()
 
+NexCloseButton < UIButton
+  size: 14 14
+  anchors.top: parent.top
+  anchors.right: parent.right
+  margin-top: -30
+  margin-right: -10
+  image-source: /images/ui/miniwindow_buttons
+  image-clip: 28 0 14 14
+
+  $hover:
+    image-clip: 28 14 14 14
+
+  $pressed:
+    image-clip: 28 28 14 14
+
 NexControllerContent < Panel
   anchors.fill: parent
   layout:
@@ -207,29 +243,24 @@ NexControllerLabel < Label
   margin-left: 4
 
 NexControllerToggle < Button
-  width: 34
+  width: 40
+  padding: 2 4
+  text-auto-resize: true
   font: verdana-11px-rounded
   anchors.right: next.left
   anchors.verticalCenter: parent.verticalCenter
   margin-right: 4
 
 NexControllerConfigure < Button
-  width: 58
-  font: verdana-11px-rounded
+  size: 22 22
   anchors.right: parent.right
   anchors.verticalCenter: parent.verticalCenter
+  icon: /images/ui/icon-edit
 
 NexControllerOpen < Button
   height: 24
   font: verdana-11px-rounded
   margin: 3
-
-NexControllerPause < Button
-  height: 22
-  font: verdana-11px-rounded
-  margin-left: 3
-  margin-right: 3
-  margin-bottom: 3
 
 NexWorkspace < MainWindow
   text: nExBot
@@ -293,8 +324,12 @@ NexPageLandmark < UIItem
   draggable: false
 
 NexPageHeader < Panel
-  height: 42
+  height: 46
   margin: 4
+  padding: 2 6
+  background-color: #2a2d2f90
+  border-width: 1
+  border-color: #b6904d50
 
 NexPageHeaderText < Panel
   anchors.left: pageLandmark.right
@@ -316,11 +351,15 @@ NexPageHeaderBadge < NexBadge
   anchors.verticalCenter: parent.verticalCenter
 
 NexEngineRow < Panel
-  height: 34
+  height: 38
   margin-left: 4
   margin-right: 4
-  margin-top: 1
-  margin-bottom: 1
+  margin-top: 2
+  margin-bottom: 2
+  padding: 2 6
+  background-color: #2a2d2f90
+  border-width: 1
+  border-color: #454b4f60
 
 NexEngineItem < UIItem
   width: 24
@@ -341,7 +380,10 @@ NexEngineInfo < Panel
     type: verticalBox
 
 NexEngineToggle < Button
-  width: 38
+  width: 44
+  padding: 2 4
+  text-auto-resize: true
+  font: verdana-11px-rounded
   anchors.right: parent.right
   anchors.verticalCenter: parent.verticalCenter
 

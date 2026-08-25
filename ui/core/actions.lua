@@ -43,16 +43,18 @@ local function toggle(module)
   if module.isOn and module.isOn() then
     return invoke(module.setOff)
   elseif module.isOff and module.isOff() then
-    return invoke(module.setOn)
+    return invoke(module.setOn, true, true)
   elseif module.setOn then
-    return invoke(module.setOn)
+    return invoke(module.setOn, true, true)
   end
   return false, "Action unavailable"
 end
 
 local function navigate(pageId)
-  local shell = nExBot and nExBot.UI and nExBot.UI.Shell
-  return invoke(shell and shell.select, pageId)
+  local ShellModule = nExBot and nExBot.UI and nExBot.UI.Shell
+  local shell = ShellModule and ShellModule.instance and ShellModule.instance()
+  if not shell or not shell.select then return false, "Action unavailable" end
+  return invoke(function() return shell:select(pageId) end)
 end
 
 local function toggleEnabled(module)

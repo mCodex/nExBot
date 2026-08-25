@@ -162,7 +162,7 @@ function C.selectRow(parent, opts)
     end
   end
   if opts.value then combo:setCurrentOption(opts.value) end
-  if opts.onChange then combo:setOnOptionChange(opts.onChange) end
+  if opts.onChange then combo.onOptionChange = function(_, text, data) opts.onChange(text, data) end end
   return { widget = w, getCombo = function() return combo end, setValue = function(v) combo:setCurrentOption(v) end }
 end
 

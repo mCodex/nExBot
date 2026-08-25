@@ -126,9 +126,7 @@ describe("embedded workflow pages", function()
 
     local cave = g_ui.createWidget("NexContent", root)
     nExBot.UI.ModuleRegistry.get("cavebot").render({}, cave, lifecycle)
-    assert.is_truthy(cave:recursiveGetChildById("waypoint_1"))
-    assert.is_truthy(cave:recursiveGetChildById("addWaypoint"))
-    assert.is_truthy(cave:recursiveGetChildById("removeWaypoint"))
+    assert.is_truthy(cave:recursiveGetChildById("openWaypointEditor"))
 
     local targets = g_ui.createWidget("NexContent", root)
     nExBot.UI.ModuleRegistry.get("targetbot").render({}, targets, lifecycle)

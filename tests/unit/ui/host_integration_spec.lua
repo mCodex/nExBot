@@ -152,7 +152,9 @@ describe("BotShell host integration", function()
     for _, id in ipairs({ "cave", "target", "heal", "loot" }) do
       local row = assert(content:recursiveGetChildById(id))
       local configure = assert(row:recursiveGetChildById("configure_" .. id))
-      assert.are_equal("Configure", configure:getText())
+      assert.are_equal("", configure:getText())
+      local tooltip = configure.getTooltip and configure:getTooltip()
+      assert.is_true(tooltip ~= nil and #tooltip > 0)
     end
 
     local function assertAscii(widget)
