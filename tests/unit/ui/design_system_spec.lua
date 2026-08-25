@@ -34,8 +34,8 @@ describe("Density", function()
     Density = dofile("ui/design_system/density.lua")
   end)
 
-  it("supports default, compact, and comfortable", function()
-    for _, name in ipairs({ "default", "compact", "comfortable" }) do
+  it("supports default, compact, comfortable, and touch", function()
+    for _, name in ipairs({ "default", "compact", "comfortable", "touch" }) do
       assert.is_table(Density.get(name))
     end
   end)
@@ -46,6 +46,13 @@ describe("Density", function()
     assert.is_number(compact.rowHeight)
     assert.is_number(def.rowHeight)
     assert.is_true(compact.rowHeight <= def.rowHeight)
+  end)
+
+  it("touch density meets the ~44px minimum tap target", function()
+    local touch = Density.get("touch")
+    assert.is_true(touch.rowHeight >= 44)
+    assert.is_true(touch.controlHeight >= 40)
+    assert.is_true(touch.rowHeight > Density.get("comfortable").rowHeight)
   end)
 
   it("falls back to default for unknown density", function()

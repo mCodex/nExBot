@@ -13,11 +13,19 @@ local function fresh()
   dofile("ui/design_system/status.lua")
   dofile("ui/core/perf.lua")
   dofile("ui/core/actions.lua")
+  dofile("ui/core/visual_asset_resolver.lua")
   dofile("ui/components/components.lua")
+  dofile("ui/components/table_model.lua")
+  dofile("ui/components/data_table.lua")
   dofile("ui/modules/page.lua")
   dofile("ui/modules/cockpit.lua")
   dofile("ui/core/module_registry.lua")
   dofile("ui/modules/workflows.lua")
+  _G.nExBot.Dropper = {
+    getProjection = function() return { revision = 0, enabled = false, lowCap = 150, rows = {} } end,
+    setEnabled = function() end,
+  }
+  dofile("ui/modules/dropper.lua")
   dofile("ui/modules/auxiliary.lua")
   for _, n in ipairs({ "profiles", "settings", "diagnostics" }) do
     dofile("ui/modules/" .. n .. ".lua")
@@ -149,7 +157,7 @@ describe("BotShell host integration", function()
     local shell = Shell.show()
     local content = shell:getWindow():recursiveGetChildById("controller")
 
-    for _, id in ipairs({ "cave", "target", "heal", "loot" }) do
+    for _, id in ipairs({ "cave", "target", "heal", "attack" }) do
       local row = assert(content:recursiveGetChildById(id))
       local configure = assert(row:recursiveGetChildById("configure_" .. id))
       assert.are_equal("", configure:getText())
@@ -200,13 +208,13 @@ describe("BotShell host integration", function()
     shell:destroy()
   end)
 
-  it("groups auxiliary controls into compact workflow pages", function()
+  it("routes Dropper to its dedicated workflow page", function()
     local shell = Shell.show()
-    shell:select("tools")
+    shell:select("dropper")
 
-    assert.are_equal("tools", shell:selected())
-    assert.is_truthy(shell:getWorkspace():recursiveGetChildById("nav_automation"))
-    assert.is_truthy(shell:getContent():recursiveGetChildById("manager_toggle_dropper"))
+    assert.are_equal("dropper", shell:selected())
+    assert.is_truthy(shell:getWorkspace():recursiveGetChildById("tab_dropper"))
+    assert.is_truthy(shell:getContent():recursiveGetChildById("dropperItems"))
     shell:destroy()
   end)
 

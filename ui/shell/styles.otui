@@ -134,6 +134,7 @@ NexWorkflowButton < Button
   height: 26
   margin-right: 2
   font: verdana-11px-rounded
+  text-auto-resize: true
 
 NexListRow < Panel
   height: 36
@@ -195,6 +196,72 @@ NexItemTitle < Label
 NexItemSubtitle < Label
   height: 16
   text-wrap: false
+
+NexDataTable < Panel
+  margin: 4
+  layout:
+    type: verticalBox
+    fit-children: true
+
+NexTableHeader < Panel
+  height: 22
+  padding: 2 6
+  background-color: #30343890
+  border-width: 0 0 1 0
+  border-color: #626a6f80
+
+NexTableSearch < BotTextEdit
+  width: 112
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
+NexTableBody < Panel
+  layout:
+    type: verticalBox
+    fit-children: true
+
+NexTableRow < Panel
+  height: 42
+  padding: 3 4
+  border-width: 0 0 1 0
+  border-color: #454b4f60
+
+NexTableItem < UIItem
+  size: 32 32
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+  virtual: true
+  draggable: false
+
+NexTableIcon < UIImage
+  size: 24 24
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+
+NexTableDetails < Panel
+  anchors.left: visual.right
+  anchors.right: actions.left
+  anchors.top: parent.top
+  anchors.bottom: parent.bottom
+  margin-left: 5
+  margin-right: 4
+  layout:
+    type: verticalBox
+
+NexTableTitle < Label
+  height: 17
+  text-wrap: false
+
+NexTableSecondary < Label
+  height: 17
+  text-wrap: false
+
+NexTableActions < Panel
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  layout:
+    type: horizontalBox
+    fit-children: true
 
 NexControllerLayout < Panel
   anchors.fill: parent
@@ -267,6 +334,29 @@ NexWorkspace < MainWindow
   size: 440 400
   @onEscape: self:hide()
 
+NexBackButton < Button
+  size: 38 24
+  anchors.left: parent.left
+  anchors.top: parent.top
+  text: Back
+  font: verdana-11px-rounded
+
+NexWorkspaceTopbar < Panel
+  height: 24
+  anchors.left: workspaceNav.right
+  anchors.right: parent.right
+  anchors.top: parent.top
+  margin-left: 4
+
+NexBreadcrumb < Label
+  anchors.left: prev.right
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  margin-left: 6
+  text-wrap: false
+  color: #b3aa96
+  font: verdana-11px-rounded
+
 NexWorkspaceNav < Panel
   width: 104
   anchors.left: parent.left
@@ -285,7 +375,7 @@ NexWorkspaceTabs < Panel
   height: 28
   anchors.left: workspaceNav.right
   anchors.right: parent.right
-  anchors.top: parent.top
+  anchors.top: workspaceTopbar.bottom
   margin-left: 4
   layout:
     type: horizontalBox
@@ -295,6 +385,12 @@ NexTabButton < Button
   margin-right: 2
   checkable: true
   font: verdana-11px-rounded
+
+NexTabSelect < ComboBox
+  anchors.fill: parent
+  margin: 2
+  menu-scroll: true
+  menu-height: 200
 
 NexWorkspaceScrollBar < VerticalScrollBar
   width: 10

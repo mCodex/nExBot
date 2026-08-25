@@ -158,6 +158,7 @@ Actions.handlers = {
   open_equipper = function() return invoke(nExBot and nExBot.Equipper and nExBot.Equipper.show) end,
   toggle_equipper = function() return toggleEnabled(nExBot and nExBot.Equipper) end,
   open_attack_config = function() return invoke(AttackBot and AttackBot.show) end,
+  toggle_attack = function() return toggle(AttackBot) end,
   toggle_dropper = function() return toggleEnabled(nExBot and nExBot.Dropper) end,
   toggle_depot_withdraw = function() return toggleEnabled(nExBot and nExBot.DepotWithdraw) end,
   toggle_hold_target = function() return toggleEnabled(nExBot and nExBot.HoldTarget) end,

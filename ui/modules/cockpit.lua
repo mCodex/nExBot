@@ -8,6 +8,7 @@ local Cockpit = {}
 
 local STATUS_VARIANT = {
   ACTIVE = "active",
+  PAUSED = "warning",
   DISABLED = "inactive",
   UNKNOWN = "warning",
 }
@@ -16,10 +17,11 @@ local ENGINE_DEFS = {
   { key = "cave", label = "Cave", itemId = 3003, toggleAction = "toggle_cavebot", editorAction = "open_cavebot" },
   { key = "target", label = "Target", itemId = 3155, toggleAction = "toggle_targetbot", editorAction = "open_targetbot" },
   { key = "heal", label = "Heal", itemId = 23375, toggleAction = "toggle_healing", editorAction = "open_healing" },
-  { key = "loot", label = "Loot", itemId = 2854, toggleAction = "open_looting", editorAction = "open_looting" },
+  { key = "attack", label = "Attack", itemId = 3155, toggleAction = "toggle_attack", editorAction = "open_attack_config" },
 }
 
-local function engineStatus(value)
+local function engineStatus(value, desired, effective)
+  if desired == true and effective == false then return "PAUSED", "Paused" end
   if value == nil then return "UNKNOWN", "Unavailable" end
   if value then return "ACTIVE", "On" end
   return "DISABLED", "Off"
@@ -30,14 +32,14 @@ function Cockpit.viewModel(state)
   local engines = {}
 
   for _, def in ipairs(ENGINE_DEFS) do
-    local status, statusText = engineStatus(state[def.key])
+    local status, statusText = engineStatus(state[def.key], state[def.key .. "Desired"], state[def.key .. "Effective"])
     engines[#engines + 1] = {
       id = def.key,
       label = def.label,
       itemId = def.itemId,
       status = status,
       statusText = statusText,
-      detail = state[def.key .. "Detail"] or "-",
+      detail = state[def.key .. "Reason"] or state[def.key .. "Detail"] or "-",
       toggleAction = def.toggleAction,
       editorAction = def.editorAction,
     }
@@ -109,6 +111,22 @@ local function intelligencePulse()
   return aiState, decisionText, confidenceText, outcome
 end
 
+local function coordinatedState(moduleId, fallback)
+  local coordinator = nExBot and nExBot.CharacterProfileStateCoordinator
+  if not coordinator or type(coordinator.getDesiredEnabled) ~= "function" then return fallback, fallback, nil end
+  local desired = coordinator:getDesiredEnabled(moduleId)
+  local effective = coordinator:getEffectiveEnabled(moduleId)
+  local inhibitors = coordinator:getInhibitors(moduleId)
+  local reason
+  for inhibitor, active in pairs(inhibitors or {}) do
+    if active then
+      reason = ({ RECONNECT_RESTORE = "Reconnect recovery", PROFILE_APPLY = "Applying profile", GAME_OFFLINE = "Client offline" })[inhibitor] or "Temporarily blocked"
+      break
+    end
+  end
+  return desired, effective, reason
+end
+
 function Cockpit.statusProvider()
   local player = player
   local storage = storage
@@ -117,16 +135,24 @@ function Cockpit.statusProvider()
   local target = TargetBot and value(TargetBot.getCurrentTarget)
   local targetName = call(target, "getName") or (type(target) == "string" and target or nil)
   local aiState, aiDecision, aiConfidence, aiOutcome = intelligencePulse()
+  local cave = availableState(CaveBot, "isOn")
+  local targetEnabled = availableState(TargetBot, "isOn")
+  local heal = availableState(HealBot, "isOn")
+  local attack = availableState(AttackBot, "isOn")
+  local caveDesired, caveEffective, caveReason = coordinatedState("cavebot", cave)
+  local targetDesired, targetEffective, targetReason = coordinatedState("targetbot", targetEnabled)
+  local healDesired, healEffective, healReason = coordinatedState("healbot", heal)
+  local attackDesired, attackEffective, attackReason = coordinatedState("attackbot", attack)
 
   return Cockpit.viewModel({
-    cave = availableState(CaveBot, "isOn"),
-    target = availableState(TargetBot, "isOn"),
-    heal = availableState(HealBot, "isOn"),
-    loot = availableState(TargetBot, "isOn"),
+    cave = cave, caveDesired = caveDesired, caveEffective = caveEffective, caveReason = caveReason,
+    target = targetEnabled, targetDesired = targetDesired, targetEffective = targetEffective, targetReason = targetReason,
+    heal = heal, healDesired = healDesired, healEffective = healEffective, healReason = healReason,
+    attack = attack, attackDesired = attackDesired, attackEffective = attackEffective, attackReason = attackReason,
     caveDetail = caveConfig and caveConfig.selectedConfig,
     targetDetail = targetConfig and targetConfig.selectedConfig,
     healDetail = HealBot and HealBot.getActiveProfile and HealBot.getActiveProfile(),
-    lootDetail = "Containers",
+    attackDetail = AttackBot and AttackBot.getActiveProfile and ("Profile " .. tostring(AttackBot.getActiveProfile())) or "-",
     character = call(player, "getName"),
     profile = storage and storage.profileName,
     route = caveConfig and caveConfig.selectedConfig,

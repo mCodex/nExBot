@@ -5,6 +5,8 @@ local Components = (nExBot and nExBot.UI and nExBot.UI["ui.components.components
 local Tokens = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.tokens"]) or (type(require) == "function" and require("ui.design_system.tokens"))
 local Perf = (nExBot and nExBot.UI and nExBot.UI["ui.core.perf"]) or (type(require) == "function" and require("ui.core.perf"))
 
+local DENSITIES = { compact = true, default = true, comfortable = true, touch = true }
+
 local Shell = {}
 local current
 
@@ -13,12 +15,13 @@ local CATEGORIES = {
     { id = "cockpit", label = "Status" }, { id = "intelligence", label = "AI" }, { id = "analytics", label = "Analyzer" },
   } },
   { id = "hunt", label = "Hunt", tabs = {
-    { id = "cavebot", label = "Route" }, { id = "targetbot", label = "Target" },
-    { id = "looting", label = "Loot" }, { id = "supplies", label = "Supplies" },
+    { id = "cavebot", label = "Route" }, { id = "targetbot", label = "Target" }, { id = "attack", label = "Attack" },
+    { id = "looting", label = "Loot" }, { id = "dropper", label = "Dropper" },
+    { id = "supplies", label = "Supplies" },
   } },
   { id = "character", label = "Character", tabs = {
-    { id = "healing", label = "Healing" }, { id = "safety", label = "Conditions" },
-    { id = "equipment", label = "Equipment" },
+    { id = "healing", label = "Healing" }, { id = "friend_healer", label = "Friend" }, { id = "conditions", label = "Conditions" }, { id = "safety", label = "Safety" },
+    { id = "equipment_rules", label = "Equipment" },
   } },
   { id = "automation", label = "Automation", tabs = {
     { id = "tools", label = "Tools" }, { id = "utilities", label = "Scripts" },
@@ -120,8 +123,9 @@ local function createShell(opts)
     id = "botshell", lifecycle = Lifecycle.new("botshell"), root = opts.root,
     host = nil, window = nil, workspace = nil, controller = nil, content = nil,
     tabs = nil, nav = nil, selectedId = "cockpit", selectedCategory = "overview",
-    density = "default", active = true, panelMode = false,
+    _density = storage and storage.uiDensity or "default", active = true, panelMode = false, history = {},
   }
+  Components.setDensity(self._density)
 
   function self:getWindow() return self.window end
   function self:getWorkspace() return self.workspace end
@@ -130,9 +134,26 @@ local function createShell(opts)
   function self:getFooter() return nil end
   function self:selected() return self.selectedId end
   function self:current() return self.selectedId end
-  function self:canGoBack() return false end
-  function self:density() return self.density end
+  function self:canGoBack() return #self.history > 0 end
+  function self:density() return self._density end
+  function self:setDensity(value)
+    if not DENSITIES[value] then return false end
+    self._density = value
+    Components.setDensity(value)
+    if storage then storage.uiDensity = value end
+    -- Re-select the current tab so nav/tab chrome (built at density-dependent
+    -- heights) and the content pane all pick up the new density immediately,
+    -- not just on the next navigation.
+    if self.workspace and self.workspace:isVisible() then self:select(self.selectedId) end
+    return true
+  end
   function self:isPanelMode() return self.panelMode end
+  function self:defer(callback, delay)
+    if not self.active or type(callback) ~= "function" then return false end
+    local guarded = self.lifecycle:guard(callback)
+    if scheduleEvent then scheduleEvent(guarded, delay or 0) else guarded() end
+    return true
+  end
 
   local function run(actionId, parent)
     local ok, reason = nExBot.UI.Actions.run(actionId)
@@ -203,7 +224,35 @@ local function createShell(opts)
     self.tabs:destroyChildren()
     local category = categoryById(self.selectedCategory)
     local tabs = category and category.tabs or {}
-    local tabWidth = math.floor((292 - math.max(0, #tabs - 1) * 2) / math.max(1, #tabs))
+    local selectedModule = registry().get(self.selectedId)
+    if self.breadcrumb then
+      self.breadcrumb:setText(selectedModule and selectedModule.breadcrumb or ((category and category.label or "nExBot") .. " / Dashboard"))
+    end
+    if self.backButton then self.backButton:setEnabled(self:canGoBack()) end
+    if self.compactNavigation then
+      local select = g_ui.createWidget("NexTabSelect", self.tabs)
+      select:setId("pageSelect")
+      local selectedLabel
+      for _, tab in ipairs(tabs) do
+        select:addOption(tab.label, tab.id)
+        if tab.id == self.selectedId then selectedLabel = tab.label end
+      end
+      if selectedLabel then select:setCurrentOption(selectedLabel) end
+      select.onOptionChange = function(_, text, id)
+        if not id then
+          for _, tab in ipairs(tabs) do
+            if tab.label == text then
+              id = tab.id
+              break
+            end
+          end
+        end
+        if id and id ~= self.selectedId then self:push(id) end
+      end
+      return
+    end
+    local tabsWidth = self.workspace and self.workspace.getWidth and self.workspace:getWidth() - 120 or 292
+    local tabWidth = math.max(44, math.floor((tabsWidth - math.max(0, #tabs - 1) * 2) / math.max(1, #tabs)))
     for _, tab in ipairs(tabs) do
       local definition = tab
       local button = Components.button(self.tabs, {
@@ -219,14 +268,31 @@ local function createShell(opts)
     if self.workspace and not (self.workspace.isDestroyed and self.workspace:isDestroyed()) then return end
     self.workspace = UI.createWindow("NexWorkspace", self.root)
     self.workspace:setId("NexWorkspace")
+    local rootWidth = self.root and self.root.getWidth and self.root:getWidth() or 0
+    local rootHeight = self.root and self.root.getHeight and self.root:getHeight() or 0
+    local workspaceWidth = rootWidth > 0 and math.min(620, math.max(1, rootWidth - 16)) or 440
+    local workspaceHeight = rootHeight > 0 and math.min(520, math.max(1, rootHeight - 16)) or 400
+    self.workspace:setWidth(workspaceWidth)
+    self.workspace:setHeight(workspaceHeight)
+    self.compactNavigation = rootWidth > 0 and workspaceWidth < 520
     self.nav = g_ui.createWidget("NexWorkspaceNav", self.workspace)
     self.nav:setId("workspaceNav")
+    if self.compactNavigation then self.nav:setWidth(82) end
+    self.topbar = g_ui.createWidget("NexWorkspaceTopbar", self.workspace)
+    self.topbar:setId("workspaceTopbar")
+    self.breadcrumb = g_ui.createWidget("NexBreadcrumb", self.topbar)
+    self.breadcrumb:setId("breadcrumb")
     self.tabs = g_ui.createWidget("NexWorkspaceTabs", self.workspace)
     self.tabs:setId("workspaceTabs")
     local scroll = g_ui.createWidget("NexWorkspaceScrollBar", self.workspace)
     scroll:setId("workspaceScroll")
     self.content = g_ui.createWidget("NexWorkspaceContent", self.workspace)
     self.content:setId("workspaceContent")
+    local back = g_ui.createWidget("NexBackButton", self.topbar)
+    back:setId("shellBack")
+    back:setTooltip("Back")
+    back.onClick = function() self:back() end
+    self.backButton = back
     local close = g_ui.createWidget("NexCloseButton", self.workspace)
     close:setId("closeButton")
     close.onClick = function() self.workspace:hide() end
@@ -288,10 +354,20 @@ local function createShell(opts)
     return true
   end
 
-  function self:push(id) return self:select(id) end
+  function self:push(id)
+    if self.selectedId and self.selectedId ~= id then
+      self.history[#self.history + 1] = self.selectedId
+      if #self.history > 32 then table.remove(self.history, 1) end
+    end
+    return self:select(id)
+  end
   function self:replace(id) return self:select(id) end
-  function self:back() return false end
-  function self:home() return self:select("cockpit") end
+  function self:back()
+    local id = table.remove(self.history)
+    if not id then return false end
+    return self:select(id)
+  end
+  function self:home() return self:push("cockpit") end
 
   function self:onTick()
     return self.lifecycle:guard(function()
@@ -331,7 +407,9 @@ local function createShell(opts)
     if self.workspace then self.workspace:destroy() end
     if self.window then self.window:destroy() end
     self.host, self.window, self.workspace, self.controller = nil, nil, nil, nil
+    self.topbar, self.breadcrumb, self.backButton = nil, nil, nil
     self.content, self.tabs, self.nav, self.selectedId, self.selectedCategory = nil, nil, nil, nil, nil
+    self.history = {}
     if current == self then current = nil end
   end
 

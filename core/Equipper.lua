@@ -1203,6 +1203,49 @@ nExBot.Equipper = {
     end,
     show = showSetup,
     getRules = function() return config.rules end,
+    getProjection = function()
+        local rows = {}
+        for index, rule in ipairs(config.rules or {}) do
+            local itemId
+            for _, value in ipairs(rule.data or {}) do
+                if type(value) == "number" and value > 100 then itemId = value; break end
+            end
+            rows[#rows + 1] = {
+                index = index, name = rule.name or ("Rule " .. index), enabled = rule.enabled ~= false,
+                itemId = itemId, mainCondition = rule.mainCondition, mainValue = rule.mainValue,
+                optionalCondition = rule.optionalCondition, optValue = rule.optValue, relation = rule.relation,
+                revision = index .. ":" .. tostring(rule.enabled) .. ":" .. tostring(itemId),
+            }
+        end
+        return { enabled = config.enabled == true, activeRule = config.activeRule, rows = rows }
+    end,
+    toggleRule = function(index)
+        local rule = config.rules and config.rules[index]
+        if not rule then return false end
+        rule.enabled = not rule.enabled
+        invalidateRulesCache()
+        saveConfig()
+        refreshRules()
+        return true
+    end,
+    moveRule = function(index, direction)
+        local rules = config.rules or {}
+        local destination = index + (direction == "up" and -1 or direction == "down" and 1 or 0)
+        if not rules[index] or destination < 1 or destination > #rules or destination == index then return false end
+        rules[index], rules[destination] = rules[destination], rules[index]
+        invalidateRulesCache()
+        saveConfig()
+        refreshRules()
+        return true
+    end,
+    removeRule = function(index)
+        if not config.rules or not config.rules[index] then return false end
+        table.remove(config.rules, index)
+        invalidateRulesCache()
+        saveConfig()
+        refreshRules()
+        return true
+    end,
 }
 
 -- EVENT-DRIVEN EQUIPMENT MANAGEMENT

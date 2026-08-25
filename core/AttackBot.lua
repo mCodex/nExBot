@@ -624,6 +624,48 @@ end
       mainWindow:focus()
     end
 
+    AttackBot.getRules = function()
+      local rules = {}
+      for index, entry in ipairs(currentSettings.attackTable or {}) do
+        rules[#rules + 1] = {
+          index = index, enabled = entry.enabled ~= false, spell = entry.spell,
+          itemId = tonumber(entry.itemId) and entry.itemId > 0 and entry.itemId or nil,
+          count = entry.count, orMore = entry.orMore, mana = entry.mana,
+          minHp = entry.minHp, maxHp = entry.maxHp, cooldown = entry.cooldown,
+          category = entry.category, patternCategory = entry.patternCategory, pattern = entry.pattern,
+          description = entry.description, revision = index .. ":" .. tostring(entry.enabled),
+        }
+      end
+      return rules
+    end
+
+    AttackBot.toggleRule = function(index)
+      local entry = currentSettings.attackTable and currentSettings.attackTable[index]
+      if not entry then return false end
+      entry.enabled = not entry.enabled
+      nExBotConfigSave("atk")
+      refreshAttacks()
+      return true
+    end
+
+    AttackBot.removeRule = function(index)
+      if not currentSettings.attackTable or not currentSettings.attackTable[index] then return false end
+      table.remove(currentSettings.attackTable, index)
+      nExBotConfigSave("atk")
+      refreshAttacks()
+      return true
+    end
+
+    AttackBot.moveRule = function(index, direction)
+      local rules = currentSettings.attackTable or {}
+      local destination = index + (direction == "up" and -1 or direction == "down" and 1 or 0)
+      if not rules[index] or destination < 1 or destination > #rules or destination == index then return false end
+      rules[index], rules[destination] = rules[destination], rules[index]
+      nExBotConfigSave("atk")
+      refreshAttacks()
+      return true
+    end
+
 -- COOLDOWN MANAGEMENT (use ClientHelper for DRY)
 
 local cooldowns = {}

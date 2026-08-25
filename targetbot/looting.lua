@@ -107,6 +107,80 @@ TargetBot.Looting.getConfig = function()
     minCapacity = settings.minCapacity }
 end
 
+local function addUnique(collection, itemId)
+  itemId = tonumber(itemId)
+  if not itemId or itemId <= 0 or itemId ~= math.floor(itemId) then return false end
+  for _, entry in ipairs(collection) do if tonumber(entry.id) == itemId then return false end end
+  collection[#collection + 1] = { id = itemId }
+  TargetBot.Looting.updateItemsAndContainers()
+  TargetBot.save()
+  return true
+end
+
+local function removeById(collection, itemId)
+  itemId = tonumber(itemId)
+  for index, entry in ipairs(collection) do
+    if tonumber(entry.id) == itemId then
+      table.remove(collection, index)
+      TargetBot.Looting.updateItemsAndContainers()
+      TargetBot.save()
+      return true
+    end
+  end
+  return false
+end
+
+local function collectionForKind(kind)
+  if kind == "item" then return items end
+  if kind == "container" then return containers end
+end
+
+local function findEntry(collection, itemId)
+  for index, entry in ipairs(collection) do
+    if tonumber(entry.id) == itemId then return index end
+  end
+end
+
+TargetBot.Looting.updateEntry = function(oldId, oldKind, newId, newKind)
+  oldId = tonumber(oldId)
+  newId = tonumber(newId)
+  local source = collectionForKind(oldKind)
+  local destination = collectionForKind(newKind)
+  if not source or not destination or not oldId or not newId or newId <= 0 or
+      newId ~= math.floor(newId) then return false end
+
+  local sourceIndex = findEntry(source, oldId)
+  if not sourceIndex then return false end
+
+  local duplicateIndex = findEntry(destination, newId)
+  if duplicateIndex and (source ~= destination or duplicateIndex ~= sourceIndex) then return false end
+
+  if source == destination then
+    source[sourceIndex] = { id = newId }
+  else
+    table.remove(source, sourceIndex)
+    destination[#destination + 1] = { id = newId }
+  end
+  TargetBot.Looting.updateItemsAndContainers()
+  TargetBot.save()
+  return true
+end
+
+TargetBot.Looting.addItem = function(itemId) return addUnique(items, itemId) end
+TargetBot.Looting.removeItem = function(itemId) return removeById(items, itemId) end
+TargetBot.Looting.addContainer = function(itemId) return addUnique(containers, itemId) end
+TargetBot.Looting.removeContainer = function(itemId) return removeById(containers, itemId) end
+TargetBot.Looting.setPreference = function(key, value)
+  if key == "everyItem" or key == "eatFromCorpses" then settings[key] = value == true
+  elseif key == "maxDanger" or key == "minCapacity" then
+    value = tonumber(value)
+    if not value or value < 0 then return false end
+    settings[key] = value
+  else return false end
+  TargetBot.save()
+  return true
+end
+
 local waitTill = 0
 local waitingForContainer = nil
 local status = ""

@@ -61,18 +61,13 @@ function Page.render(shell, content, lifecycle, view)
   end
 
   local header = view.header or {}
-  local pageHeader = g_ui.createWidget("NexPageHeader", content)
-  pageHeader:setId("pageHeader")
-  local landmark = g_ui.createWidget("NexPageLandmark", pageHeader)
-  landmark:setId("pageLandmark")
-  landmark:setItemId(header.itemId or 0)
-  local headerText = g_ui.createWidget("NexPageHeaderText", pageHeader)
-  headerText:setId("pageHeaderText")
-  Components.label(headerText, { id = "pageTitle", text = header.title or "nExBot", textStyle = "moduleTitle", style = "NexPageTitle" })
-  if header.subtitle then Components.label(headerText, { id = "pageSubtitle", text = header.subtitle, textStyle = "helper", style = "NexPageSubtitle" }) end
-  if header.status then
-    Components.statusBadge(pageHeader, { id = "pageBadge", style = "NexPageHeaderBadge", status = header.status, text = header.statusText or header.status })
-  end
+  Components.pageHeader(content, {
+    id = "pageHeader", textId = "pageHeaderText",
+    titleId = "pageTitle", titleStyle = "moduleTitle", title = header.title,
+    subtitleId = "pageSubtitle", subtitleStyle = "helper", subtitle = header.subtitle,
+    badgeId = "pageBadge", status = header.status, statusText = header.statusText,
+    itemId = header.itemId or 0, landmarkId = "pageLandmark",
+  })
 
   if view.state == "EMPTY" then
     Components.emptyState(content, { message = view.errors[1] and view.errors[1].message or "No data." })

@@ -6,7 +6,7 @@
 local presets = {
   default = {
     rowHeight = 22,
-    controlHeight = 20,
+    controlHeight = 22,
     padding = { 2, 4, 6, 8 },
     sectionGap = 8,
   },
@@ -21,6 +21,14 @@ local presets = {
     controlHeight = 24,
     padding = { 4, 6, 8, 12 },
     sectionGap = 12,
+  },
+  -- Finger-safe sizing for touch/mobile builds: rows and controls grow to the
+  -- ~44px minimum tap target (Apple HIG / Material Design guidance).
+  touch = {
+    rowHeight = 44,
+    controlHeight = 40,
+    padding = { 4, 8, 12, 16 },
+    sectionGap = 14,
   },
 }
 

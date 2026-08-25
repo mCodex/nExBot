@@ -19,9 +19,10 @@ describe("intelligence runtime event contract", function()
       end,
     }
     _G.UnifiedTick = {
-      Priority = { HIGH = 75 },
+      Priority = { HIGH = 75, IDLE = 10 },
       register = function(name, config)
-        listeners.__tick = { name = name, config = config }
+        listeners.__ticks = listeners.__ticks or {}
+        listeners.__ticks[name] = config
       end,
     }
     _G.onGameStart = function(callback)
@@ -71,7 +72,7 @@ describe("intelligence runtime event contract", function()
   it("publishes canonical snapshot, loot, and session aliases", function()
     local intelligence, listeners = loadRuntime(200)
 
-    listeners.__tick.config.handler()
+    listeners.__ticks["intelligence_orchestrator"].handler()
     local events = intelligence.events:recent()
     assert.equals("analytics:snapshot", events[#events].type)
 

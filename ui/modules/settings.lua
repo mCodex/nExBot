@@ -4,14 +4,11 @@
 
 local VM = (nExBot and nExBot.UI and nExBot.UI["ui.core.view_model"]) or (type(require) == "function" and require("ui.core.view_model"))
 local Page = (nExBot and nExBot.UI and nExBot.UI["ui.modules.page"]) or (type(require) == "function" and require("ui.modules.page"))
-local Density = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.density"]) or (type(require) == "function" and require("ui.design_system.density"))
-
 local Settings = {}
 
-local SECTIONS = {
-  "UI", "Theme", "Density", "Global Defaults", "Hotkeys", "Storage",
-  "Compatibility",
-}
+local Components = (nExBot and nExBot.UI and nExBot.UI["ui.components.components"]) or (type(require) == "function" and require("ui.components.components"))
+
+local SECTIONS = { "Interface" }
 
 function Settings.viewModel(state)
   state = state or {}
@@ -27,17 +24,6 @@ function Settings.viewModel(state)
     title = "UI",
     rows = {
       { key = "Density", value = state.density or "default" },
-      { key = "UI scale", value = state.uiScale or "1.00x" },
-      { key = "Theme", value = state.theme or "dark" },
-    },
-  }
-
-  sections[#sections + 1] = {
-    id = "compatibility",
-    title = "Compatibility",
-    rows = {
-      { key = "Client", value = state.clientName or "unknown" },
-      { key = "Version", value = state.version or "-" },
     },
   }
 
@@ -50,15 +36,24 @@ end
 function Settings.statusProvider()
   return Settings.viewModel({
     density = nExBot and nExBot.UI and nExBot.UI.Shell and nExBot.UI.Shell.instance and nExBot.UI.Shell.instance() and nExBot.UI.Shell.instance():density() or "default",
-    uiScale = storage and storage.uiScale or "1.00x",
-    theme = "dark",
-    clientName = nExBot and nExBot.clientName or "unknown",
-    version = nExBot and nExBot.version or "-",
   })
 end
 
 function Settings.render(shell, content, lifecycle)
   Page.render(shell, content, lifecycle, Settings.statusProvider().snapshot)
+  Components.selectRow(content, {
+    id = "uiDensity", label = "Density",
+    options = { "compact", "default", "comfortable", "touch" },
+    value = shell and shell.density and shell:density() or "default",
+    onChange = function(first, second)
+      local value = type(second) == "string" and second or type(first) == "string" and first
+      if value and shell and shell.setDensity then shell:setDensity(value) end
+    end,
+  })
+  Components.label(content, {
+    text = "Client compatibility and runtime tuning are detected automatically.",
+    textStyle = "helper",
+  })
 end
 
 function Settings.register()

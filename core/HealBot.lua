@@ -482,7 +482,12 @@ if rootWidget then
     local rules = {}
     if not source then return rules end
     for index, entry in ipairs(source) do
-      rules[#rules + 1] = { kind = kind, index = index, enabled = entry.enabled, label = describeRule(kind, entry), itemId = kind == "item" and entry.item or nil }
+      rules[#rules + 1] = {
+        kind = kind, index = index, enabled = entry.enabled,
+        label = describeRule(kind, entry), itemId = kind == "item" and entry.item or nil,
+        spell = entry.spell, origin = entry.origin, sign = entry.sign,
+        value = entry.value, cost = entry.cost, revision = index .. ":" .. tostring(entry.enabled),
+      }
     end
     return rules
   end
@@ -505,6 +510,17 @@ if rootWidget then
     applyHealEngineToggles()
     saveHeal()
     if kind == "item" then refreshItems() else refreshSpells() end
+  end
+
+  HealBot.moveRule = function(kind, index, direction)
+    local source = ruleSource(kind)
+    local destination = index + (direction == "up" and -1 or direction == "down" and 1 or 0)
+    if not source or not source[index] or destination < 1 or destination > #source or destination == index then return false end
+    source[index], source[destination] = source[destination], source[index]
+    applyHealEngineToggles()
+    saveHeal()
+    if kind == "item" then refreshItems() else refreshSpells() end
+    return true
   end
 end
 
@@ -1270,5 +1286,74 @@ HealBot.showAlly = function()
   friendHealerWindow:show()
   friendHealerWindow:raise()
   friendHealerWindow:focus()
+  return true
+end
+
+
+local function friendSource()
+  if allyConfig.conditions.party then return "party" end
+  if allyConfig.conditions.guild then return "guild" end
+  if allyConfig.conditions.friends then return "friends" end
+  return "list"
+end
+
+HealBot.getFriendHealerProjection = function()
+  local priorities = {}
+  for index, action in ipairs(allyConfig.priorities or {}) do
+    priorities[#priorities + 1] = {
+      index = index, name = action.name, enabled = action.enabled == true,
+      custom = action.custom == true, revision = index .. ":" .. tostring(action.enabled),
+    }
+  end
+  local players = BotCore and BotCore.FriendHealer and BotCore.FriendHealer.getPlayerProjection
+    and BotCore.FriendHealer.getPlayerProjection() or {}
+  return {
+    enabled = allyConfig.enabled == true,
+    source = friendSource(),
+    threshold = getAllySettingValue(5, 80),
+    priorities = priorities,
+    players = players,
+  }
+end
+
+HealBot.setFriendHealerEnabled = function(enabled)
+  allyConfig.enabled = enabled == true
+  syncAllyBotCore()
+end
+
+HealBot.setFriendSource = function(source)
+  if source ~= "party" and source ~= "guild" and source ~= "friends" and source ~= "list" then return false end
+  allyConfig.conditions.party = source == "party"
+  allyConfig.conditions.guild = source == "guild"
+  allyConfig.conditions.friends = source == "friends"
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("friendHealer.conditions", allyConfig.conditions)
+  end
+  syncAllyBotCore()
+  return true
+end
+
+HealBot.setFriendThreshold = function(value)
+  value = tonumber(value)
+  if not value or value < 1 or value > 100 then return false end
+  allyConfig.settings[5].value = value
+  syncAllyBotCore()
+  return true
+end
+
+HealBot.toggleFriendPriority = function(index)
+  local action = allyConfig.priorities and allyConfig.priorities[index]
+  if not action then return false end
+  action.enabled = not action.enabled
+  syncAllyBotCore()
+  return true
+end
+
+HealBot.moveFriendPriority = function(index, direction)
+  local priorities = allyConfig.priorities or {}
+  local destination = index + (direction == "up" and -1 or direction == "down" and 1 or 0)
+  if not priorities[index] or destination < 1 or destination > #priorities or destination == index then return false end
+  priorities[index], priorities[destination] = priorities[destination], priorities[index]
+  syncAllyBotCore()
   return true
 end

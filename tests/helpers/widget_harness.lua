@@ -69,6 +69,12 @@ local function newWidget(style, parent, kind)
     end
   end
 
+  function self:moveChildToIndex(child, index)
+    self:removeChild(child)
+    child._parent = self
+    table.insert(children, math.max(1, math.min(index, #children + 1)), child)
+  end
+
   function self:destroy()
     if self._destroyed then return end
     M.record("destroy", self)

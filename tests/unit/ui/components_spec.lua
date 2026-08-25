@@ -135,4 +135,83 @@ describe("UI components", function()
     local block = Components.diagnosticBlock(root, { code = "WP26 -> up" })
     assert.is_truthy(block:getText():find("WP26", 1, true))
   end)
+
+  describe("pageHeader", function()
+    it("renders title, subtitle, and status badge", function()
+      local header = Components.pageHeader(root, {
+        titleId = "title", subtitleId = "subtitle", badgeId = "badge",
+        title = "Dropper", subtitle = "Handles items automatically.",
+        status = "ACTIVE", statusText = "Active",
+      })
+      assert.are_equal("NexPageHeader", header:getStyle())
+      assert.are_equal("Dropper", header:recursiveGetChildById("title"):getText())
+      assert.are_equal("Handles items automatically.", header:recursiveGetChildById("subtitle"):getText())
+      assert.are_equal("Active", header:recursiveGetChildById("badge"):getText())
+    end)
+
+    it("supports explicit ids for modules that need to target their header", function()
+      local header = Components.pageHeader(root, {
+        id = "dropperHeader", textId = "dropperHeaderText", badgeId = "dropperStatus",
+        title = "Dropper", status = "ACTIVE",
+      })
+      assert.are_equal("dropperHeader", header:getId())
+      assert.is_truthy(header:recursiveGetChildById("dropperHeaderText"))
+      assert.is_truthy(header:recursiveGetChildById("dropperStatus"))
+    end)
+
+    it("omits the landmark icon and subtitle/badge when not requested", function()
+      local header = Components.pageHeader(root, { title = "Conditions" })
+      assert.is_nil(header:recursiveGetChildById("pageLandmark"))
+    end)
+
+    it("includes a landmark icon when an itemId is given", function()
+      local header = Components.pageHeader(root, { title = "Workflow", itemId = 3031 })
+      local landmark = header:recursiveGetChildById("pageLandmark")
+      assert.is_truthy(landmark)
+      assert.are_equal(3031, landmark:getItemId())
+    end)
+  end)
+
+  describe("density", function()
+    after_each(function()
+      Components.setDensity("default")
+    end)
+
+    it("defaults to the default density", function()
+      assert.are_equal("default", Components.getDensity())
+    end)
+
+    it("falls back to default for an unknown density name", function()
+      Components.setDensity("ultra")
+      assert.are_equal("default", Components.getDensity())
+    end)
+
+    it("sizes buttons and simple rows from the active density preset", function()
+      Components.setDensity("touch")
+      local btn = Components.button(root, { text = "Go" })
+      local row = Components.keyValueRow(root, { key = "HP", value = "100%" })
+      assert.are_equal(40, btn:getHeight())
+      assert.are_equal(44, row:getHeight())
+    end)
+
+    it("an explicit height always wins over the density preset", function()
+      Components.setDensity("touch")
+      local btn = Components.button(root, { text = "Go", height = 12 })
+      assert.are_equal(12, btn:getHeight())
+    end)
+
+    it("grows the tap area around row-embedded controls without resizing the control itself", function()
+      Components.setDensity("touch")
+      local row = Components.toggleRow(root, { label = "Enabled", value = false })
+      assert.are_equal(44, row.widget:getHeight())
+    end)
+
+    it("does not resize content-driven rows (item/list rows keep their natural height)", function()
+      Components.setDensity("touch")
+      local item = Components.itemRow(root, { itemId = 100, title = "Sword" })
+      local list = Components.listRow(root, { title = "Dragon" })
+      assert.are_equal(0, item:getHeight())
+      assert.are_equal(0, list.widget:getHeight())
+    end)
+  end)
 end)

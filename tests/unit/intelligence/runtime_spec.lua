@@ -15,10 +15,10 @@ describe("intelligence runtime", function()
     _G.g_game = { getLocalPlayer = function() return {} end }
     _G.g_map = { getSpectators = function() return {} end }
     _G.EventBus = { on = function() return function() end end }
-    local registered
+    local registrations = {}
     _G.UnifiedTick = {
-      Priority = { HIGH = 75 },
-      register = function(name, config) registered = { name = name, config = config } end,
+      Priority = { HIGH = 75, IDLE = 10 },
+      register = function(name, config) registrations[name] = config end,
     }
     _G.onGameStart = function(callback) _G.startIntelligence = callback end
     _G.onGameEnd = function(callback) _G.stopIntelligence = callback end
@@ -62,8 +62,8 @@ describe("intelligence runtime", function()
     assert.is_table(nExBot.Intelligence.route)
     assert.is_table(nExBot.Intelligence.models)
     assert.is_table(nExBot.Intelligence.replay)
-    assert.equals("intelligence_orchestrator", registered.name)
-    registered.config.handler()
+    assert.is_not_nil(registrations["intelligence_orchestrator"])
+    registrations["intelligence_orchestrator"].handler()
     assert.equals(1, nExBot.Intelligence.currentSnapshot.generation)
     assert.is_true(nExBot.Intelligence.optionalEnabled("replay"))
     local navigation = nExBot.Intelligence.models:get("RouteReliabilityModel")

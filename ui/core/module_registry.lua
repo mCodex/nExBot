@@ -44,6 +44,10 @@ function Registry.register(desc)
     statusProvider = desc.statusProvider,
     commandHandler = desc.commandHandler,
     render = desc.render,
+    group = desc.group,
+    route = desc.route or id,
+    breadcrumb = desc.breadcrumb or desc.label,
+    primaryAction = desc.primaryAction,
   }
   order[#order + 1] = id
   dirty = true

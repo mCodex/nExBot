@@ -91,6 +91,14 @@ if not Intelligence.lifecycle then
   })
   local DecisionExplainer = nExBot.IntelligenceDecisionExplainer or dofile("core/intelligence/observability/decision_explainer.lua")
   Intelligence.decisionExplainer = DecisionExplainer.new({})
+  local TelemetryCollector = nExBot.IntelligenceTelemetryCollector or dofile("core/intelligence/telemetry/collector.lua")
+  Intelligence.telemetry = TelemetryCollector.new({
+    resources = g_resources,
+    codec = json,
+    root = "/bot/" .. tostring(nExBot.paths and nExBot.paths.config or "default") .. "/telemetry/",
+    botVersion = nExBot.version,
+  })
+  Intelligence.telemetry:attach(Intelligence.events)
   Intelligence.contextAdjustments = IntelligenceContextAdjustment.new()
   Intelligence.latency = IntelligenceLatencyClassifier.new()
   Intelligence.horizons = IntelligenceHorizonCounters.new()
@@ -273,6 +281,12 @@ if not Intelligence.lifecycle then
       group = "intelligence",
       handler = Intelligence.tick,
     })
+    UnifiedTick.register("intelligence_telemetry_flush", {
+      interval = 5000,
+      priority = UnifiedTick.Priority.IDLE,
+      group = "intelligence",
+      handler = function() Intelligence.telemetry:flush() end,
+    })
   end
 
   if EventBus and EventBus.on then
@@ -295,12 +309,14 @@ if not Intelligence.lifecycle then
     EventBus.on("attack:single_rune", runeUsed)
     EventBus.on("analytics:session:start", function(data)
       Intelligence.sessionId = data and data.sessionId or tostring(os.time())
+      Intelligence.telemetry:startSession(Intelligence.sessionId, nExBot.paths and nExBot.paths.config or "")
       Intelligence.events:publish("analytics:session_started", { active = true, sourceEvent = "analytics:session:start" }, { source = "TacticalIntelligence" })
     end)
     EventBus.on("analytics:session:end", function()
+      Intelligence.events:publish("analytics:session_ended", { active = false, sourceEvent = "analytics:session:end" }, { source = "TacticalIntelligence" })
+      Intelligence.telemetry:endSession("session_end")
       Intelligence.sessionId = ""
       Intelligence.huntId = ""
-      Intelligence.events:publish("analytics:session_ended", { active = false, sourceEvent = "analytics:session:end" }, { source = "TacticalIntelligence" })
     end)
     EventBus.on("combat:target", function(creature)
       if Intelligence.optionalEnabled("learning") and creature then

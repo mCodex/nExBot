@@ -12,7 +12,7 @@ describe("Hunt cockpit", function()
   end)
 
   it("keeps unavailable engine state distinct from stopped", function()
-    local view = Cockpit.viewModel({ cave = nil, target = false, heal = true, loot = false }).snapshot
+    local view = Cockpit.viewModel({ cave = nil, target = false, heal = true, attack = false }).snapshot
 
     assert.are_equal("UNKNOWN", view.engines[1].status)
     assert.are_equal("DISABLED", view.engines[2].status)
@@ -22,13 +22,13 @@ describe("Hunt cockpit", function()
   it("exposes one explicit toggle and editor action per engine", function()
     local engines = Cockpit.viewModel({}).snapshot.engines
 
-    assert.are_same({ "toggle_cavebot", "toggle_targetbot", "toggle_healing", "open_looting" }, {
+    assert.are_same({ "toggle_cavebot", "toggle_targetbot", "toggle_healing", "toggle_attack" }, {
       engines[1].toggleAction, engines[2].toggleAction, engines[3].toggleAction, engines[4].toggleAction,
     })
-    assert.are_same({ "open_cavebot", "open_targetbot", "open_healing", "open_looting" }, {
+    assert.are_same({ "open_cavebot", "open_targetbot", "open_healing", "open_attack_config" }, {
       engines[1].editorAction, engines[2].editorAction, engines[3].editorAction, engines[4].editorAction,
     })
-    assert.are_same({ 3003, 3155, 23375, 2854 }, {
+    assert.are_same({ 3003, 3155, 23375, 3155 }, {
       engines[1].itemId, engines[2].itemId, engines[3].itemId, engines[4].itemId,
     })
   end)

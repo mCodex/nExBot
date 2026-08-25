@@ -50,7 +50,30 @@ local panelName = "ConditionPanel"
       config.enabled = not config.enabled
       nExBotConfigSave("heal")
       return config.enabled
-    end
+    end,
+    getRules = function()
+      return {
+        { id = "poison", name = "Cure poison", spell = "exana pox", enabled = config.curePoison, cost = config.poisonCost },
+        { id = "curse", name = "Cure curse", spell = "exana mort", enabled = config.cureCurse, cost = config.curseCost },
+        { id = "bleed", name = "Cure bleeding", spell = "exana kor", enabled = config.cureBleed, cost = config.bleedCost },
+        { id = "burn", name = "Cure burning", spell = "exana flam", enabled = config.cureBurn, cost = config.burnCost },
+        { id = "electrify", name = "Cure electrify", spell = "exana vis", enabled = config.cureElectrify, cost = config.electrifyCost },
+        { id = "paralyse", name = "Cure paralysis", spell = config.paralyseSpell, enabled = config.cureParalyse, cost = config.paralyseCost },
+        { id = "haste", name = "Movement haste", spell = config.hasteSpell, enabled = config.holdHaste, cost = config.hasteCost },
+        { id = "shield", name = "Magic shield", spell = "utamo vita", enabled = config.holdUtamo, cost = config.utamoCost },
+        { id = "invisible", name = "Invisibility", spell = "utana vid", enabled = config.holdUtana, cost = config.utanaCost },
+        { id = "regeneration", name = "Regeneration", spell = config.uturaType, enabled = config.holdUtura, cost = config.uturaCost },
+      }
+    end,
+    setRuleEnabled = function(id, enabled)
+      local key = ({ poison = "curePoison", curse = "cureCurse", bleed = "cureBleed", burn = "cureBurn",
+        electrify = "cureElectrify", paralyse = "cureParalyse", haste = "holdHaste", shield = "holdUtamo",
+        invisible = "holdUtana", regeneration = "holdUtura" })[id]
+      if not key then return false end
+      config[key] = enabled == true
+      nExBotConfigSave("heal")
+      return true
+    end,
   }
 
   local rootWidget = g_ui.getRootWidget()

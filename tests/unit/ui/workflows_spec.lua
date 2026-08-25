@@ -135,6 +135,21 @@ describe("embedded workflow pages", function()
     assert.is_truthy(targets:recursiveGetChildById("removeTarget"))
   end)
 
+  it("projects target rules with readable names and stable fallback keys", function()
+    local widget = {
+      value = { name = "Dragon", pattern = "dragon" },
+      getId = function() return "" end,
+      getText = function() return "" end,
+    }
+
+    local row = nExBot.UI.Workflows.projectTargetRule(widget, 2, false)
+
+    assert.are_equal("targetRule_2", row.id)
+    assert.are_equal("Dragon", row.title)
+    assert.are_equal("dragon", row.secondary)
+    assert.are_equal("Configured", row.statusText)
+  end)
+
   it("restores healing rule management without duplicating domain state", function()
     HealBot._rules.spell[1] = { kind = "spell", index = 1, enabled = true, label = "(MP>0) HP<50%: exura" }
     HealBot._rules.item[1] = { kind = "item", index = 1, enabled = false, label = "HP<50%: item 266" }

@@ -11,21 +11,16 @@ local managers = {
   tools = { label = "Tools", order = 80, items = {
     { "Containers", "Backpack setup and sorting", "open_containers", function() return Containers end },
     { "Depositer", "Deposit and sell lists", "open_depositer", function() return nExBot.Depositer end },
-    { "Dropper", "Drop configured items", "toggle_dropper", function() return nExBot.Dropper end, true },
     { "Depot withdraw", "Withdraw configured supplies", "toggle_depot_withdraw", function() return nExBot.DepotWithdraw end, true },
     { "Tools settings", "Client and hunt preferences", "open_extras", function() return nExBot.Extras end },
   } },
   safety = { label = "Safety", order = 90, items = {
     { "Alarms", "Alerts and emergency actions", "open_alarms", function() return Alarms end, true, "toggle_alarms" },
-    { "Conditions", "Cures and protective spells", "show_conditions", function() return Conditions end, true, "toggle_conditions" },
     { "Anti-RS", "Stops unsafe combat activity", "toggle_antirs", function() return AntiRs end, true },
     { "Push Max", "Push protection and hotkey", "open_pushmax", function() return PushMax end, true, "toggle_pushmax" },
     { "Combo", "Leader-assisted attacks", "open_combo", function() return ComboBot end, true, "toggle_combo" },
   } },
   equipment = { label = "Character", order = 100, items = {
-    { "Attack rotation", "Spells, runes and priorities", "open_attack_config", function() return AttackBot end },
-    { "Healing", "Self-healing rules", "open_healing", function() return HealBot end },
-    { "Friend healer", "Party healing priorities", "open_friend_healer", function() return HealBot and HealBot.showAlly end },
     { "Equipment rules", "Automatic equipment conditions", "open_equipper", function() return nExBot.Equipper end, true, "toggle_equipper" },
     { "Quiver manager", "Automatic ammunition refill", "toggle_quiver", function() return macro("quiverManager") end, true },
   } },

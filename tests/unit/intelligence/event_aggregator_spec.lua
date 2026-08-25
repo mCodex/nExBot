@@ -73,4 +73,39 @@ describe("Intelligence Event Aggregator", function()
     assert.equals(1, observed)
     assert.equals(1, events:recent()[1].payload.nested.value)
   end)
+
+  it("notifies wildcard subscribers for every published event type", function()
+    local events = loadModule()
+    local seen = {}
+    events:subscribeAll(function(event) seen[#seen + 1] = event.type end)
+
+    events:publish("A", {}, { source = "test" })
+    events:publish("B", {}, { source = "test" })
+
+    assert.same({ "A", "B" }, seen)
+  end)
+
+  it("stops notifying a wildcard subscriber once unsubscribed", function()
+    local events = loadModule()
+    local seen = {}
+    local unsubscribe = events:subscribeAll(function(event) seen[#seen + 1] = event.type end)
+
+    events:publish("A", {}, { source = "test" })
+    unsubscribe()
+    events:publish("B", {}, { source = "test" })
+
+    assert.same({ "A" }, seen)
+  end)
+
+  it("isolates wildcard handler failures from typed listeners", function()
+    local events = loadModule()
+    local observed
+    events:subscribeAll(function() error("broken wildcard consumer") end)
+    events:subscribe("A", function(event) observed = event.payload.value end)
+
+    assert.has_no.errors(function()
+      events:publish("A", { value = 5 }, { source = "test" })
+    end)
+    assert.equals(5, observed)
+  end)
 end)

@@ -5,7 +5,6 @@ describe("auxiliary managers", function()
     Harness.reset()
     Harness.install()
     _G.nExBot = { UI = {}, Equipper = { isEnabled = function() return true end, show = function() end } }
-    _G.AttackBot = { show = function() end }
     for _, file in ipairs({ "tokens", "typography", "density", "status" }) do
       dofile("ui/design_system/" .. file .. ".lua")
     end
@@ -18,8 +17,8 @@ describe("auxiliary managers", function()
     Registry.get("equipment").render({}, root)
     local equipper = root:recursiveGetChildById("manager_open_equipper")
     assert.are_equal("On", equipper:recursiveGetChildById("status"):getText())
-    assert.is_nil(root:recursiveGetChildById("manager_open_attack_config"):recursiveGetChildById("status"))
-    assert.are_equal("Not loaded", root:recursiveGetChildById("manager_open_healing"):recursiveGetChildById("status"):getText())
+    assert.is_nil(root:recursiveGetChildById("manager_open_attack_config"))
+    assert.is_nil(root:recursiveGetChildById("manager_open_healing"))
   end)
 
   it("refreshes the page after changing a manager state", function()

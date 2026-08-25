@@ -17,13 +17,33 @@ local Status = (nExBot and nExBot.UI and nExBot.UI["ui.design_system.status"]) o
 
 local C = {}
 
-local function create(parent, style, opts)
+-- Current density name, applied to every "row" or "control" role widget at
+-- creation time. Set by the shell so the whole tree (nav, tabs, module
+-- content) tracks the user's density/touch preference without each module
+-- having to know about it.
+local currentDensity = "default"
+
+function C.setDensity(name)
+  currentDensity = Density.presets[name] and name or "default"
+  return currentDensity
+end
+
+function C.getDensity()
+  return currentDensity
+end
+
+local function create(parent, style, opts, role)
   opts = opts or {}
   local widget = g_ui.createWidget(style, parent)
   if opts.id then widget:setId(opts.id) end
   if opts.tooltip then widget:setTooltip(opts.tooltip) end
   if opts.width then widget:setWidth(opts.width) end
-  if opts.height then widget:setHeight(opts.height) end
+  if opts.height then
+    widget:setHeight(opts.height)
+  elseif role then
+    local preset = Density.get(currentDensity)
+    widget:setHeight(role == "row" and preset.rowHeight or preset.controlHeight)
+  end
   if opts.disabled then widget:setEnabled(false) end
   return widget
 end
@@ -50,7 +70,7 @@ function C.button(parent, opts)
     warning = colors.warning,
     danger = colors.danger,
   }
-  local w = create(parent, opts.style or "NexButton", opts)
+  local w = create(parent, opts.style or "NexButton", opts, "control")
   w:setText(opts.text or "")
   local color = opts.color or variantColor[opts.variant or "primary"]
   if color then w:setColor(color) end
@@ -86,6 +106,29 @@ function C.statusBadge(parent, opts)
   return w
 end
 
+-- Shared page-header shell: title + optional subtitle/landmark icon/status
+-- badge. Every module page (Page.render's generic flow and the DataTable-
+-- driven module pages) built this exact widget tree by hand; centralizing it
+-- here removes that duplication and keeps header markup consistent.
+function C.pageHeader(parent, opts)
+  opts = opts or {}
+  local header = create(parent, "NexPageHeader", { id = opts.id })
+  if opts.itemId ~= nil then
+    local landmark = g_ui.createWidget("NexPageLandmark", header)
+    landmark:setId(opts.landmarkId or "pageLandmark")
+    landmark:setItemId(opts.itemId)
+  end
+  local text = create(header, "NexPageHeaderText", { id = opts.textId })
+  label(text, opts.title or "nExBot", "NexPageTitle", { id = opts.titleId, textStyle = opts.titleStyle or "windowTitle" })
+  if opts.subtitle then
+    label(text, opts.subtitle, "NexPageSubtitle", { id = opts.subtitleId, textStyle = opts.subtitleStyle or "metadata" })
+  end
+  if opts.status then
+    C.statusBadge(header, { id = opts.badgeId, style = "NexPageHeaderBadge", status = opts.status, text = opts.statusText or opts.status })
+  end
+  return header
+end
+
 function C.metricCard(parent, opts)
   opts = opts or {}
   local w = create(parent, opts.style or "NexMetricCard", opts)
@@ -97,7 +140,7 @@ end
 
 function C.keyValueRow(parent, opts)
   opts = opts or {}
-  local w = create(parent, opts.style or "NexRow", opts)
+  local w = create(parent, opts.style or "NexRow", opts, "row")
   label(w, opts.key or "", "NexKeyLabel", { id = "key", textStyle = "body" })
   label(w, tostring(opts.value or ""), "NexValueLabel", { id = "value", textStyle = "body" })
   return w
@@ -105,7 +148,7 @@ end
 
 local function rowWithLabel(parent, labelText, opts)
   opts = opts or {}
-  local w = create(parent, opts.style or "NexRow", opts)
+  local w = create(parent, opts.style or "NexRow", opts, "row")
   if labelText then
     label(w, labelText, "NexControlLabel", { id = "rowLabel", textStyle = "body", color = Tokens.colors.text.secondary })
   end

@@ -19,6 +19,7 @@ function IntelligenceEventAggregator.new(options)
   return setmetatable({
     now = options.now or nowMs,
     listeners = {},
+    wildcardListeners = {},
     listenerOrder = 0,
     generations = { snapshot = 0, route = 0, combat = 0 },
     history = RingBuffer.new(options.maxEvents or 500),
@@ -38,6 +39,18 @@ function IntelligenceEventAggregator:subscribe(eventType, callback, priority)
   table.sort(listeners, function(a, b)
     return a.priority == b.priority and a.order < b.order or a.priority > b.priority
   end)
+  return function()
+    for index, listener in ipairs(listeners) do
+      if listener == entry then table.remove(listeners, index); return end
+    end
+  end
+end
+
+function IntelligenceEventAggregator:subscribeAll(callback)
+  self.listenerOrder = self.listenerOrder + 1
+  local entry = { callback = callback, order = self.listenerOrder }
+  local listeners = self.wildcardListeners
+  listeners[#listeners + 1] = entry
   return function()
     for index, listener in ipairs(listeners) do
       if listener == entry then table.remove(listeners, index); return end
@@ -69,6 +82,10 @@ function IntelligenceEventAggregator:publish(eventType, payload, metadata)
 
   self.history:push(event)
   for _, listener in ipairs(self.listeners[eventType] or {}) do
+    local ok, err = pcall(listener.callback, copy(event))
+    if not ok and warn then warn("[IntelligenceEventAggregator] " .. tostring(err)) end
+  end
+  for _, listener in ipairs(self.wildcardListeners) do
     local ok, err = pcall(listener.callback, copy(event))
     if not ok and warn then warn("[IntelligenceEventAggregator] " .. tostring(err)) end
   end

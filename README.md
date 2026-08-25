@@ -119,29 +119,6 @@ Open **More → Analytics → AI Intelligence** to inspect lifecycle, targeting,
 │   └── Tactical Intelligence ←─ unified analytics + learning
 ```
 
-## Documentation
-
-| Guide | Description |
-|-------|-------------|
-| [Installing](docs/INSTALLING.md) | Installation for vBot and OTCR |
-| [HealBot](docs/HEALBOT.md) | Healing spells, potions, conditions |
-| [AttackBot](docs/ATTACKBOT.md) | Attack spells, runes, AoE optimization |
-| [CaveBot](docs/CAVEBOT.md) | Navigation, waypoints, supply management |
-| [TargetBot](docs/TARGETBOT.md) | Combat AI, Tactical Intelligence, movement |
-| [Follow Player](docs/FOLLOW.md) | Party hunt companion |
-| [Containers](docs/CONTAINERS.md) | Container management, quiver system |
-| [Tactical Intelligence](docs/INTELLIGENCE.md) | Unified analytics, learning, diagnostics, UI |
-| [Extras](docs/EXTRAS.md) | Safety, equipment, utilities |
-| [Architecture](docs/ARCHITECTURE.md) | Technical design |
-| [Performance](docs/PERFORMANCE.md) | Optimization and tuning |
-| [Adaptive Intelligence](docs/INTELLIGENCE.md) | Arbitration, learning, replay, diagnostics, and UI |
-| [UI Architecture](docs/ui/architecture.md) | Shell, registry, view models, commands, lifecycle |
-| [UI Guides](docs/ui/guides.md) | Design system, components, icons, migration |
-| [UI Feature Map](docs/ui/feature-map.md) | Old-to-new feature mapping |
-| [UI Removal Report](docs/ui/removal-report.md) | Dead-code removal evidence |
-| [UI Final Report](docs/ui/report.md) | v5 UI delivery summary |
-| [FAQ](docs/FAQ.md) | Troubleshooting |
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Run `make check` before submitting. Follow existing Lua style (2-space indentation).
