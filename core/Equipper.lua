@@ -218,638 +218,6 @@ schedule(500, function()
     end
 end)
 
-local conditions = { -- always add new conditions at the bottom
-    "Item is available and not worn.", -- nothing 1
-    "Monsters around is more than: ", -- spinbox 2
-    "Monsters around is less than: ", -- spinbox 3
-    "Health precent is below:", -- spinbox 4
-    "Health precent is above:", -- spinbox 5
-    "Mana precent is below:", -- spinbox 6
-    "Mana precent is above:", -- spinbox 7
-    "Target name is:", -- BotTextEdit 8
-    "Hotkey is being pressed:", -- BotTextEdit 9
-    "Player is paralyzed", -- nothing 10
-    "Player is in protection zone", -- nothing 11
-    "Players around is more than:", -- spinbox 12
-    "Players around is less than:", -- spinbox 13
-    "TargetBot Danger is Above:", -- spinbox 14
-    "Blacklist player in range (sqm)", -- spinbox 15
-    "Target is Boss", -- nothing 16
-    "Player is NOT in protection zone", -- nothing 17
-    "CaveBot is ON, TargetBot is OFF", -- nothing 18
-    "HealBot is enabled", -- nothing 19
-    "HealBot is disabled" -- nothing 20
-}
-
-local conditionNumber = 1
-local optionalConditionNumber = 2
-
-local mainWindow = UI.createWindow("EquipWindow")
-mainWindow:hide()
-
-local function showSetup()
-    mainWindow:show()
-    mainWindow:raise()
-    mainWindow:focus()
-end
-
-local inputPanel = mainWindow.inputPanel
-local listPanel = mainWindow.listPanel
-local namePanel = mainWindow.profileName
-local eqPanel = mainWindow.setup
-local bossPanel = mainWindow.bossPanel
-
-local slotWidgets = {eqPanel.head, eqPanel.body, eqPanel.legs, eqPanel.feet, eqPanel.neck, eqPanel["left-hand"], eqPanel["right-hand"], eqPanel.finger, eqPanel.ammo} -- back is disabled
-
-local function setCondition(first, n)
-    local widget
-    local spinBox 
-    local textEdit
-
-    if first then
-        widget = inputPanel.condition.description.text
-        spinBox = inputPanel.condition.spinbox
-        textEdit = inputPanel.condition.text
-    else
-        widget = inputPanel.optionalCondition.description.text
-        spinBox = inputPanel.optionalCondition.spinbox
-        textEdit = inputPanel.optionalCondition.text
-    end
-
-    -- reset values after change
-    spinBox:setValue(0)
-    textEdit:setText('')
-
-    if n == 1 or n == 10 or n == 11 or n == 16 or n == 17 or n == 18 or n == 19 or n == 20 then
-        spinBox:hide()
-        textEdit:hide()
-    elseif n == 9 or n == 8 then
-        spinBox:hide()
-        textEdit:show()
-        if n == 9 then
-            textEdit:setWidth(75)
-        else
-            textEdit:setWidth(200)
-        end
-    else
-        spinBox:show()
-        textEdit:hide()
-    end
-    widget:setText(conditions[n])
-end
-
-local function resetFields()
-    conditionNumber = 1
-    optionalConditionNumber = 2
-    setCondition(false, optionalConditionNumber)
-    setCondition(true, conditionNumber)
-    for i, widget in ipairs(slotWidgets) do
-        widget:setItemId(0)
-        widget:setChecked(false)
-    end
-    local children = listPanel.list:getChildren()
-    for i = 1, #children do
-        children[i].display = false
-    end
-    namePanel.profileName:setText("")
-    inputPanel.condition.text:setText('')
-    inputPanel.condition.spinbox:setValue(0)
-    inputPanel.useSecondCondition:setText('-')
-    inputPanel.optionalCondition.text:setText('')
-    inputPanel.optionalCondition.spinbox:setValue(0)
-    inputPanel.optionalCondition:hide()
-    bossPanel:hide()
-    listPanel:show()
-    mainWindow.bossList:setText('Boss List')
-    bossPanel.name:setText('')
-end
-resetFields()
-
-mainWindow.closeButton.onClick = function()
-    resetFields()
-    mainWindow:hide()
-end
-
-inputPanel.optionalCondition:hide()
-inputPanel.useSecondCondition.onOptionChange = function(widget, option, data)
-    if option ~= "-" then
-        inputPanel.optionalCondition:show()
-    else
-        inputPanel.optionalCondition:hide()
-    end
-end
-
--- add default text & windows
-setCondition(true, 1)
-setCondition(false, 2)
-
--- in/de/crementation buttons
-inputPanel.condition.nex.onClick = function()
-    local max = #conditions
-
-    if inputPanel.optionalCondition:isVisible() then
-        if conditionNumber == max then
-            if optionalConditionNumber == 1 then
-                conditionNumber = 2
-            else
-                conditionNumber = 1
-            end
-        else
-            local futureNumber = conditionNumber + 1
-            local safeFutureNumber = conditionNumber + 2 > max and 1 or conditionNumber + 2
-            conditionNumber = futureNumber ~= optionalConditionNumber and futureNumber or safeFutureNumber
-        end
-    else
-        conditionNumber = conditionNumber == max and 1 or conditionNumber + 1
-        if optionalConditionNumber == conditionNumber then
-            optionalConditionNumber = optionalConditionNumber == max and 1 or optionalConditionNumber + 1
-            setCondition(false, optionalConditionNumber)
-        end
-    end
-    setCondition(true, conditionNumber)
-end
-
-inputPanel.condition.pre.onClick = function()
-    local max = #conditions
-
-    if inputPanel.optionalCondition:isVisible() then
-        if conditionNumber == 1 then
-            if optionalConditionNumber == max then
-                conditionNumber = max-1
-            else
-                conditionNumber = max
-            end
-        else
-            local futureNumber = conditionNumber - 1
-            local safeFutureNumber = conditionNumber - 2 < 1 and max or conditionNumber - 2
-            conditionNumber = futureNumber ~= optionalConditionNumber and futureNumber or safeFutureNumber
-        end
-    else
-        conditionNumber = conditionNumber == 1 and max or conditionNumber - 1
-        if optionalConditionNumber == conditionNumber then
-            optionalConditionNumber = optionalConditionNumber == 1 and max or optionalConditionNumber - 1
-            setCondition(false, optionalConditionNumber)
-        end
-    end
-    setCondition(true, conditionNumber)
-end
-
-inputPanel.optionalCondition.nex.onClick = function()
-    local max = #conditions
-
-    if optionalConditionNumber == max then
-        if conditionNumber == 1 then
-            optionalConditionNumber = 2
-        else
-            optionalConditionNumber = 1
-        end
-    else
-        local futureNumber = optionalConditionNumber + 1
-        local safeFutureNumber = optionalConditionNumber + 2 > max and 1 or optionalConditionNumber + 2
-        optionalConditionNumber = futureNumber ~= conditionNumber and futureNumber or safeFutureNumber
-    end
-    setCondition(false, optionalConditionNumber)
-end
-
-inputPanel.optionalCondition.pre.onClick = function()
-    local max = #conditions
-
-    if optionalConditionNumber == 1 then
-        if conditionNumber == max then
-            optionalConditionNumber = max-1
-        else
-            optionalConditionNumber = max
-        end
-    else
-        local futureNumber = optionalConditionNumber - 1
-        local safeFutureNumber = optionalConditionNumber - 2 < 1 and max or optionalConditionNumber - 2
-        optionalConditionNumber = futureNumber ~= conditionNumber and futureNumber or safeFutureNumber
-    end
-    setCondition(false, optionalConditionNumber)
-end
-
-listPanel.up.onClick = function(widget)
-    local focused = listPanel.list:getFocusedChild()
-    local n = listPanel.list:getChildIndex(focused)
-    local t = config.rules
-
-    if n <= 1 then return end  -- Can't move up if already at top
-    
-    t[n], t[n-1] = t[n-1], t[n]
-    
-    -- Refresh entire list to fix ruleIndex references
-    invalidateRulesCache()
-    refreshRules()
-    
-    -- Re-focus the moved item (now at n-1)
-    local children = listPanel.list:getChildren()
-    if children[n-1] then
-        listPanel.list:focusChild(children[n-1])
-        listPanel.list:ensureChildVisible(children[n-1])
-    end
-    
-    -- Update button states
-    listPanel.up:setEnabled(n-1 > 1)
-    listPanel.down:setEnabled(true)
-end
-
-listPanel.down.onClick = function(widget)
-    local focused = listPanel.list:getFocusedChild()    
-    local n = listPanel.list:getChildIndex(focused)
-    local t = config.rules
-    local count = #t
-
-    if n >= count then return end  -- Can't move down if already at bottom
-    
-    t[n], t[n+1] = t[n+1], t[n]
-    
-    -- Refresh entire list to fix ruleIndex references
-    invalidateRulesCache()
-    refreshRules()
-    
-    -- Re-focus the moved item (now at n+1)
-    local children = listPanel.list:getChildren()
-    if children[n+1] then
-        listPanel.list:focusChild(children[n+1])
-        listPanel.list:ensureChildVisible(children[n+1])
-    end
-    
-    -- Update button states
-    listPanel.up:setEnabled(true)
-    listPanel.down:setEnabled(n+1 < count)
-end
-
-eqPanel.cloneEq.onClick = function(widget)
-    eqPanel.head:setItemId(getHead() and getHead():getId() or 0)
-    eqPanel.body:setItemId(getBody() and getBody():getId() or 0)
-    eqPanel.legs:setItemId(getLeg() and getLeg():getId() or 0)
-    eqPanel.feet:setItemId(getFeet() and getFeet():getId() or 0)  
-    eqPanel.neck:setItemId(getNeck() and getNeck():getId() or 0)   
-    eqPanel["left-hand"]:setItemId(getLeft() and getLeft():getId() or 0)
-    eqPanel["right-hand"]:setItemId(getRight() and getRight():getId() or 0)
-    eqPanel.finger:setItemId(getFinger() and getFinger():getId() or 0)    
-    eqPanel.ammo:setItemId(getAmmo() and getAmmo():getId() or 0)    
-end
-
-eqPanel.default.onClick = resetFields
-
--- buttons disabled by default
-listPanel.up:setEnabled(false)
-listPanel.down:setEnabled(false)
-
--- correct background image
-for i, widget in ipairs(slotWidgets) do
-    widget:setTooltip("Right click to set as slot to unequip")
-    widget.onItemChange = function(widget)
-        local selfId = widget:getItemId()
-        widget:setOn(selfId > 100)
-        if widget:isChecked() then
-            widget:setChecked(selfId < 100)
-        end
-    end
-    widget.onMouseRelease = function(widget, mousePos, mouseButton)
-        if mouseButton == 2 then
-            local clearItem = widget:isChecked() == false
-            widget:setChecked(not widget:isChecked())
-            if clearItem then
-                widget:setItemId(0)
-            end
-        end
-    end
-end
-
-inputPanel.condition.description.onMouseWheel = function(widget, mousePos, scroll)
-    if scroll == 1 then
-        inputPanel.condition.nex.onClick()
-    else
-        inputPanel.condition.pre.onClick()
-    end
-end
-
-inputPanel.optionalCondition.description.onMouseWheel = function(widget, mousePos, scroll)
-    if scroll == 1 then
-        inputPanel.optionalCondition.nex.onClick()
-    else
-        inputPanel.optionalCondition.pre.onClick()
-    end
-end
-
-namePanel.profileName.onTextChange = function(widget, text)
-    local button = inputPanel.add
-    text = text:lower()
-    
-    -- Check against config.rules directly (not UI children)
-    local isOverwrite = false
-    for i = 1, #config.rules do
-        if config.rules[i].name:lower() == text then
-            isOverwrite = true
-            break
-        end
-    end
-    
-    button:setText(isOverwrite and "Overwrite" or "Add Rule")
-    button:setTooltip(isOverwrite and ("Overwrite existing rule named: " .. text) or ("Add new rule to the list: " .. text))
-end
-
--- Populate Equipment Setup slots when editing a rule (double-click)
-local function loadRuleToSlots(data)
-    for i, value in ipairs(data) do
-        local widget = slotWidgets[i]
-        if value == false then
-            widget:setChecked(false)
-            widget:setItemId(0)
-        elseif value == true then
-            widget:setChecked(true)
-            widget:setItemId(0)
-        else
-            widget:setChecked(false)
-            widget:setItemId(value)       
-        end
-    end
-end
-
--- RULES LIST UI (Fixed - proper sync between UI and config.rules)
-
--- Forward declare refreshRules
-local refreshRules
-
--- Create or update a single rule widget - uses rule reference directly
-local function createRuleWidget(list, rule, index)
-  local widget = UI.createWidget('Rule', list)
-  
-  widget:setId("rule_" .. index)
-  widget:setText(rule.name)
-  
-  -- Store index, not a copy of rule data - always access config.rules[index] directly
-  widget.ruleIndex = index
-  
-  -- Update visual state
-  widget.visible:setColor(rule.visible and "green" or "red")
-  widget.enabled:setChecked(rule.enabled and true or false)
-  
-  -- Event handlers
-  widget.remove.onClick = function()
-    local idx = widget.ruleIndex
-    if idx and config.rules[idx] then
-      table.remove(config.rules, idx)
-      if config.activeRule and config.activeRule > #config.rules then
-        config.activeRule = nil
-      end
-    end
-    listPanel.up:setEnabled(false)
-    listPanel.down:setEnabled(false)
-    invalidateRulesCache()
-    refreshRules()
-    saveConfig()  -- Persist to CharacterDB
-  end
-
-  widget.visible.onClick = function()
-    local idx = widget.ruleIndex
-    if idx and config.rules[idx] then
-      config.rules[idx].visible = not config.rules[idx].visible
-      widget.visible:setColor(config.rules[idx].visible and "green" or "red")
-      saveConfig()  -- Persist to CharacterDB
-    end
-  end
-
-  widget.enabled.onClick = function()
-    local idx = widget.ruleIndex
-    if idx and config.rules[idx] then
-      config.rules[idx].enabled = not config.rules[idx].enabled
-      widget.enabled:setChecked(config.rules[idx].enabled and true or false)
-      invalidateRulesCache()
-      saveConfig()  -- Persist to CharacterDB
-    end
-  end
-
-  widget.onDoubleClick = function(w)
-    local idx = w.ruleIndex
-    if not idx or not config.rules[idx] then return end
-    local ruleData = config.rules[idx]
-    
-    w.display = true
-    loadRuleToSlots(ruleData.data)
-    conditionNumber = ruleData.mainCondition
-    optionalConditionNumber = ruleData.optionalCondition
-    setCondition(false, optionalConditionNumber)
-    setCondition(true, conditionNumber)
-    inputPanel.useSecondCondition:setOption(ruleData.relation)
-    namePanel.profileName:setText(ruleData.name)
-
-    if type(ruleData.mainValue) == "string" then
-      inputPanel.condition.text:setText(ruleData.mainValue)
-    elseif type(ruleData.mainValue) == "number" then
-      inputPanel.condition.spinbox:setValue(ruleData.mainValue)
-    end
-
-    if type(ruleData.optValue) == "string" then
-      inputPanel.optionalCondition.text:setText(ruleData.optValue)
-    elseif type(ruleData.optValue) == "number" then
-      inputPanel.optionalCondition.spinbox:setValue(ruleData.optValue)
-    end
-  end
-  
-  widget.onClick = function()
-    local panel = listPanel
-    local childCount = #panel.list:getChildren()
-    local focusedChild = panel.list:getFocusedChild()
-    local focusedIndex = focusedChild and panel.list:getChildIndex(focusedChild) or 0
-    
-    if childCount == 1 then
-      panel.up:setEnabled(false)
-      panel.down:setEnabled(false)
-    elseif focusedIndex == 1 then
-      panel.up:setEnabled(false)
-      panel.down:setEnabled(true)
-    elseif focusedIndex == childCount then
-      panel.up:setEnabled(true)
-      panel.down:setEnabled(false)
-    else
-      panel.up:setEnabled(true)
-      panel.down:setEnabled(true)
-    end
-  end
-  
-  return widget
-end
-
-refreshRules = function()
-  local list = listPanel.list
-  
-  -- Clear all existing widgets to avoid stale references
-  local existingChildren = list:getChildren()
-  for i = #existingChildren, 1, -1 do
-    existingChildren[i]:destroy()
-  end
-  
-  -- Create fresh widgets for each rule
-  for i, rule in ipairs(config.rules) do
-    createRuleWidget(list, rule, i)
-  end
-  
-  -- Reset up/down button states
-  listPanel.up:setEnabled(false)
-  listPanel.down:setEnabled(false)
-  
-  -- Invalidate macro cache
-  invalidateRulesCache()
-end
-refreshRules()
-
-inputPanel.add.onClick = function(widget)
-    local mainVal
-    local optVal
-    local t = {}
-    local relation = inputPanel.useSecondCondition:getText()
-    local profileName = namePanel.profileName:getText()
-    if profileName:len() == 0 then
-        return warn("Please fill profile name!")
-    end
-
-    for i, widget in ipairs(slotWidgets) do
-        local checked = widget:isChecked()
-        local id = widget:getItemId()
-
-        if checked then
-            table.insert(t, true) -- unequip selected slot
-        elseif id then
-            table.insert(t, id) -- equip selected item
-        else
-            table.insert(t, false) -- ignore slot
-        end
-    end
-
-    if conditionNumber == 1 then
-        mainVal = nil
-    elseif conditionNumber == 8 then
-        mainVal = inputPanel.condition.text:getText()
-        if mainVal:len() == 0 then
-            return warn("[nExBot Equipper] Please fill the name of the creature.")
-        end
-    elseif conditionNumber == 9 then
-        mainVal = inputPanel.condition.text:getText()
-        if mainVal:len() == 0 then
-            return warn("[nExBot Equipper] Please set correct hotkey.")
-        end
-    else
-        mainVal = inputPanel.condition.spinbox:getValue()
-    end
-
-    if relation ~= "-" then
-        if optionalConditionNumber == 1 then
-            optVal = nil
-        elseif optionalConditionNumber == 8 then
-            optVal = inputPanel.optionalCondition.text:getText()
-            if optVal:len() == 0 then
-                return warn("[nExBot Equipper] Please fill the name of the creature.")
-            end
-        elseif optionalConditionNumber == 9 then
-            optVal = inputPanel.optionalCondition.text:getText()
-            if optVal:len() == 0 then
-                return warn("[nExBot Equipper] Please set correct hotkey.")
-            end
-        else
-            optVal = inputPanel.optionalCondition.spinbox:getValue()
-        end
-    end
-
-    local index
-    for i, v in ipairs(config.rules) do
-        if v.name == profileName then
-            index = i   -- search if there's already rule with this name
-        end
-    end
-
-    local ruleData = {
-        name = profileName, 
-        data = t,
-        enabled = true,
-        visible = true,
-        mainCondition = conditionNumber,
-        optionalCondition = optionalConditionNumber,
-        mainValue = mainVal,
-        optValue = optVal,
-        relation = relation,
-    }
-
-    if index then
-        config.rules[index] = ruleData -- overwrite
-    else
-        table.insert(config.rules, ruleData) -- create new one
-        index = #config.rules
-    end
-
-    -- Keep existing enabled flags; clear legacy activeRule pointer
-    config.activeRule = nil
-
-    -- Reset display flag on all children
-    local children = listPanel.list:getChildren()
-    for i = 1, #children do
-        children[i].display = false
-    end
-    
-    resetFields()
-    invalidateRulesCache()  -- Important: invalidate cache after rule changes
-    refreshRules()
-    saveConfig()  -- Persist to CharacterDB
-end
-
-mainWindow.bossList.onClick = function(widget)
-    if bossPanel:isVisible() then
-        bossPanel:hide()
-        listPanel:show()
-        widget:setText('Boss List')
-    else
-        bossPanel:show()
-        listPanel:hide()
-        widget:setText('Rule List')
-
-    end
-end
-
--- create boss labels
-for i, v in ipairs(config.bosses) do
-    local widget = UI.createWidget("BossLabel", bossPanel.list)
-    widget:setText(v)
-    widget.remove.onClick = function()
-        table.remove(config.bosses, table.find(config.bosses, v))
-        widget:destroy()
-        saveConfig()  -- Persist to CharacterDB
-    end
-end
-
-bossPanel.add.onClick = function()
-    local name = bossPanel.name:getText()
-
-    if name:len() == 0 then
-        return warn("[Equipped] Please enter boss name!")
-    elseif table.find(config.bosses, name:lower(), true) then
-        return warn("[Equipper] Boss already added!")
-    end
-
-    local widget = UI.createWidget("BossLabel", bossPanel.list)
-    widget:setText(name)
-    widget.remove.onClick = function()
-        table.remove(config.bosses, table.find(config.bosses, name))
-        widget:destroy()
-        saveConfig()  -- Persist to CharacterDB
-    end    
-
-    table.insert(config.bosses, name)
-    bossPanel.name:setText('')
-    saveConfig()  -- Persist to CharacterDB
-end
-
-local function finalCheck(first,relation,second)
-    if relation == "-" then
-        return first
-    elseif relation == "and" then
-        return first and second
-    elseif relation == "or" then
-        return first or second
-    end
-end
-
 -- SLOT / INVENTORY HELPERS (pure-ish, cached per tick)
 
 -- Delegate slot/inventory/context helpers to EquipperService when available
@@ -1079,19 +447,6 @@ local function computeAction(rule, ctx, inventoryIndex)
     return nil, missing
 end
 
-local function markChild(child)
-    if mainWindow:isVisible() then
-        local children = listPanel.list:getChildren()
-        for i = 1, #children do
-            local c = children[i]
-            if c ~= child then
-                c:setColor('white')
-            end
-        end
-        if child then child:setColor('green') end
-    end
-end
-
 -- EVENT SUBSCRIPTIONS - Listen for condition changes
 
 -- Helper to trigger equipment re-check (just sets flag, no immediate processing)
@@ -1194,6 +549,8 @@ EquipManager = macro(300, function()
     throttledEquipCheck()
 end)
 
+local SLOT_NAMES = { "Head", "Body", "Legs", "Feet", "Neck", "Left hand", "Right hand", "Finger", "Ammo" }
+
 nExBot.Equipper = {
     isEnabled = function() return config.enabled == true end,
     setEnabled = function(enabled)
@@ -1201,8 +558,54 @@ nExBot.Equipper = {
         saveConfig()
         triggerEquipCheck()
     end,
-    show = showSetup,
+    show = function() end,
     getRules = function() return config.rules end,
+    getSlots = function()
+        local slots = {}
+        for i = 1, #SLOT_NAMES do
+            local item = slotHasItem(i)
+            slots[#slots + 1] = { index = i, name = SLOT_NAMES[i], itemId = item and item:getId() or 0 }
+        end
+        return slots
+    end,
+    getBosses = function()
+        local out = {}
+        for i = 1, #(config.bosses or {}) do out[i] = config.bosses[i] end
+        return out
+    end,
+    addBoss = function(name)
+        if type(name) ~= "string" or name:len() == 0 then return false, "Enter a boss name." end
+        if table.find(config.bosses, name:lower(), true) then return false, "That boss is already listed." end
+        table.insert(config.bosses, name)
+        saveConfig()
+        return true
+    end,
+    removeBoss = function(name)
+        local index = table.find(config.bosses, name)
+        if not index then return false end
+        table.remove(config.bosses, index)
+        saveConfig()
+        return true
+    end,
+    addRule = function(rule)
+        if not rule or type(rule.name) ~= "string" or rule.name:len() == 0 then return false, "Enter a rule name." end
+        local data = {}
+        for i = 1, #SLOT_NAMES do data[i] = rule.data and rule.data[i] or false end
+        local entry = {
+            name = rule.name, data = data, enabled = rule.enabled ~= false, visible = rule.visible ~= false,
+            mainCondition = rule.mainCondition or 1, optionalCondition = rule.optionalCondition or 2,
+            mainValue = rule.mainValue, optValue = rule.optValue, relation = rule.relation or "-",
+        }
+        local index
+        for i, v in ipairs(config.rules) do
+            if v.name:lower() == entry.name:lower() then index = i; break end
+        end
+        if index then config.rules[index] = entry else table.insert(config.rules, entry) end
+        config.activeRule = nil
+        invalidateRulesCache()
+        saveConfig()
+        return true
+    end,
     getProjection = function()
         local rows = {}
         for index, rule in ipairs(config.rules or {}) do
@@ -1225,7 +628,6 @@ nExBot.Equipper = {
         rule.enabled = not rule.enabled
         invalidateRulesCache()
         saveConfig()
-        refreshRules()
         return true
     end,
     moveRule = function(index, direction)
@@ -1235,7 +637,6 @@ nExBot.Equipper = {
         rules[index], rules[destination] = rules[destination], rules[index]
         invalidateRulesCache()
         saveConfig()
-        refreshRules()
         return true
     end,
     removeRule = function(index)
@@ -1243,7 +644,6 @@ nExBot.Equipper = {
         table.remove(config.rules, index)
         invalidateRulesCache()
         saveConfig()
-        refreshRules()
         return true
     end,
 }

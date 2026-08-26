@@ -128,8 +128,8 @@ Actions.handlers = {
     local E = IngameEditor
     return invoke(E and E.show)
   end,
-  open_friend_healer = function() return invoke(HealBot and HealBot.showAlly) end,
-  open_containers = function() return invoke(Containers and Containers.initSetupWindow) end,
+  open_friend_healer = function() return navigate("friend_healer") end,
+  open_containers = function() return navigate("containers") end,
   cave_force_refill = function()
     local C = CaveBot and CaveBot.Control
     return invoke(C and C.forceRefill)
@@ -151,21 +151,21 @@ Actions.handlers = {
   toggle_antirs = function() return toggle(AntiRs) end,
   toggle_pushmax = function() return toggle(PushMax) end,
   toggle_combo = function() return toggle(ComboBot) end,
-  open_alarms = function() return invoke(Alarms and Alarms.show) end,
-  show_conditions = function() return invoke(Conditions and Conditions.show) end,
-  open_pushmax = function() return invoke(PushMax and PushMax.show) end,
-  open_combo = function() return invoke(ComboBot and ComboBot.show) end,
-  open_equipper = function() return invoke(nExBot and nExBot.Equipper and nExBot.Equipper.show) end,
+  open_alarms = function() return navigate("alarms") end,
+  show_conditions = function() return navigate("conditions") end,
+  open_pushmax = function() return navigate("pushmax") end,
+  open_combo = function() return navigate("combo") end,
+  open_equipper = function() return navigate("equipment_rules") end,
   toggle_equipper = function() return toggleEnabled(nExBot and nExBot.Equipper) end,
-  open_attack_config = function() return invoke(AttackBot and AttackBot.show) end,
+  open_attack_config = function() return navigate("attack") end,
   toggle_attack = function() return toggle(AttackBot) end,
   toggle_dropper = function() return toggleEnabled(nExBot and nExBot.Dropper) end,
   toggle_depot_withdraw = function() return toggleEnabled(nExBot and nExBot.DepotWithdraw) end,
   toggle_hold_target = function() return toggleEnabled(nExBot and nExBot.HoldTarget) end,
   toggle_spy_level = function() return toggleEnabled(nExBot and nExBot.SpyLevel) end,
-  open_extras = function() return invoke(nExBot and nExBot.Extras and nExBot.Extras.showWindow) end,
-  open_depositer = function() return invoke(nExBot and nExBot.Depositer and nExBot.Depositer.showWindow) end,
-  open_analyzer = function() return invoke(Analyzer and Analyzer.showWindow) end,
+  open_extras = function() return navigate("extras") end,
+  open_depositer = function() return navigate("depositer") end,
+  open_analyzer = function() return navigate("analytics") end,
   toggle_quiver = function()
     local db = BotDB
     if not db or not db.getMacroState or not db.setMacroState then return false, "Action unavailable" end

@@ -67,7 +67,7 @@ function Shared.newProfileAction(content, options)
         Shared.rerender(options.shell)
       end
       if options.prompt then
-        displayTextInputBox(options.prompt.title, options.prompt.label, create)
+        UI.EditorWindow("", { title = options.prompt.title, description = options.prompt.label }, create)
       else
         create()
       end
@@ -81,6 +81,7 @@ local function optionName(first, second)
   if type(first) == "string" then return first end
   if type(first) == "table" then return first.text or first.value end
 end
+Shared.optionName = optionName
 
 function Shared.profileSelect(content, options)
   Components.selectRow(content, {

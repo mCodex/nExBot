@@ -82,290 +82,21 @@ if not config then
     end
   end
 end
-SuppliesWindow = UI.createWindow("SuppliesWindow")
-SuppliesWindow:hide()
+Supplies = {} -- public functions
 
-local function clearEmptyPanels()
-  local parent = SuppliesWindow.items
-  if not parent then return end
-  for i = parent:getChildCount(), 1, -1 do
-    local child = parent:getChildByIndex(i)
-    if child and child:getId() == "blank" then
-      parent:removeChild(child)
-    end
-  end
-end
-
-function addItemPanel()
-  local parent = SuppliesWindow.items
-  local childs = parent:getChildCount()
-  local panel = UI.createWidget("ItemPanel", parent)
-  local item = panel.id
-  local min = panel.min
-  local max = panel.max
-  local avg = panel.avg
-
-  panel:setId("blank")
-  item:setShowCount(false)
-
-  item.onItemChange = function(widget)
-    local id = widget:getItemId()
-    local panelId = panel:getId()
-
-    if id < 100 then
-      config.items[panelId] = nil
-      panel:setId("blank")
-      clearEmptyPanels()
-      return
-    end
-
-    if tonumber(panelId) == id then
-      return
-    end
-
-    if config.items[tostring(id)] then
-      warn("nExBot[Drop Tracker]: Item already added!")
-      widget:setItemId(0)
-      return
-    end
-
-    config.items[tostring(id)] = config.items[tostring(id)] or {}
-    panel:setId(id)
-    addItemPanel()
-  end
-
-  return panel
-end
-
--- load settings
-local function loadSettings()
-  -- panels
-  SuppliesWindow.items:destroyChildren()
-
-  for id, data in pairs(config.items) do
-    local widget = addItemPanel()
-    widget:setId(id)
-    widget.id:setItemId(tonumber(id))
-    widget.min:setText(data.min)
-    widget.max:setText(data.max)
-    widget.avg:setText(data.avg)
-  end
-  addItemPanel() -- add empty panel
-
-  -- switches and values
-  SuppliesWindow.capSwitch:setOn(config.capSwitch)
-  SuppliesWindow.SoftBoots:setOn(config.SoftBoots)
-  SuppliesWindow.imbues:setOn(config.imbues)
-  SuppliesWindow.staminaSwitch:setOn(config.staminaSwitch)
-  SuppliesWindow.capValue:setText(config.capValue or 0)
-  SuppliesWindow.staminaValue:setText(config.staminaValue or 0)
-end
-loadSettings()
-
--- save settings
-SuppliesWindow.onVisibilityChange = function(widget, visible)
-  if not visible then
-    local currentProfile = SuppliesConfig[panelName].currentProfile
-    SuppliesConfig[panelName][currentProfile].items = {}
-    local parent = SuppliesWindow.items
-
-    -- items
-    for i, panel in ipairs(parent:getChildren()) do
-      if panel.id:getItemId() > 100 then
-        local id = tostring(panel.id:getItemId())
-        local min = panel.min:getValue()
-        local max = panel.max:getValue()
-        local avg = panel.avg:getValue()
-
-        SuppliesConfig[panelName][currentProfile].items[id] = {
-          min = min,
-          max = max,
-          avg = avg
-        }
-      end
-    end
-
-    nExBotConfigSave("supply")
-  end
-end
-
-local function refreshProfileList()
-  local profiles = SuppliesConfig[panelName]
-
-  SuppliesWindow.profiles:destroyChildren()
-  for k, v in pairs(profiles) do
-    if type(v) == "table" then
-      local label = UI.createWidget("ProfileLabel", SuppliesWindow.profiles)
-      label:setText(k)
-      label:setTooltip("Click to load this profile. \nDouble click to change the name.")
-      label.remove.onClick = function()
-        local childs = SuppliesWindow.profiles:getChildCount()
-        if childs == 1 then
-          warn("At least one profile must exist. Cannot delete the last profile.")
-          return
-        end
-        profiles[k] = nil
-        label:destroy()
-        nExBotConfigSave("supply")
-      end
-      label.onDoubleClick = function(widget)
-        local window =
-          modules.client_textedit.show(
-          widget,
-          {title = "Set Profile Name", description = "Enter a new name for selected profile"}
-        )
-        schedule(
-          50,
-          function()
-            window:raise()
-            window:focus()
-          end
-        )
-      end
-      label.onClick = function()
-        SuppliesConfig[panelName].currentProfile = label:getText()
-        config = SuppliesConfig[panelName][label:getText()]
-        loadSettings()
-        nExBotConfigSave("supply")
-      end
-      label.onTextChange = function(widget, text)
-        currentProfile = text
-        SuppliesConfig[panelName].currentProfile = text
-        profiles[text] = profiles[k]
-        profiles[k] = nil
-        nExBotConfigSave("supply")
-      end
-    end
-  end
-end
-
-local function setProfileFocus()
-  for i, v in ipairs(SuppliesWindow.profiles:getChildren()) do
-    local name = v:getText()
-    if name == SuppliesConfig[panelName].currentProfile then
-      return v:focus()
-    end
-  end
-end
-refreshProfileList()
-setProfileFocus()
-
-SuppliesWindow.newProfile.onClick = function()
-  local n = SuppliesWindow.profiles:getChildCount()
-  if n > 6 then
-    warn("You cannot create more than 6 profiles.")
-    return
-  end
-  local name = "Profile #" .. n + 1
-  SuppliesConfig[panelName][name] = {items = {}}
-  refreshProfileList()
-  setProfileFocus()
+local function save()
   nExBotConfigSave("supply")
 end
 
-SuppliesWindow.capSwitch.onClick = function(widget)
-  config.capSwitch = not config.capSwitch
-  widget:setOn(config.capSwitch)
-end
-
-SuppliesWindow.SoftBoots.onClick = function(widget)
-  config.SoftBoots = not config.SoftBoots
-  widget:setOn(config.SoftBoots)
-end
-
-SuppliesWindow.imbues.onClick = function(widget)
-  config.imbues = not config.imbues
-  widget:setOn(config.imbues)
-end
-
-SuppliesWindow.staminaSwitch.onClick = function(widget)
-  config.staminaSwitch = not config.staminaSwitch
-  widget:setOn(config.staminaSwitch)
-end
-
-SuppliesWindow.capValue.onTextChange = function(widget, text)
-  local value = tonumber(SuppliesWindow.capValue:getText())
-  if not value then
-    SuppliesWindow.capValue:setText(0)
-    config.capValue = 0
-  else
-    text = text:match("0*(%d+)")
-    config.capValue = text
-  end
-end
-
-SuppliesWindow.staminaValue.onTextChange = function(widget, text)
-  local value = tonumber(SuppliesWindow.staminaValue:getText())
-  if not value then
-    SuppliesWindow.staminaValue:setText(0)
-    config.staminaValue = 0
-  else
-    text = text:match("0*(%d+)")
-    config.staminaValue = text
-  end
-end
-
-SuppliesWindow.increment.onClick = function(widget)
-  for i, panel in ipairs(SuppliesWindow.items:getChildren()) do
-    if panel.id:getItemId() > 100 then
-      local max = panel.max:getValue()
-      local avg = panel.avg:getValue()
-
-      if avg > 0 then
-        panel.max:setText(max + avg)
-      end
-    end
-  end
-end
-
-SuppliesWindow.decrement.onClick = function(widget)
-  for i, panel in ipairs(SuppliesWindow.items:getChildren()) do
-    if panel.id:getItemId() > 100 then
-      local max = panel.max:getValue()
-      local avg = panel.avg:getValue()
-
-      if avg > 0 then
-        panel.max:setText(math.max(0, max - avg)) -- dont go below 0
-      end
-    end
-  end
-end
-
-SuppliesWindow.increment.onMouseWheel = function(widget, mousePos, dir)
-  if dir == 1 then
-    SuppliesWindow.increment.onClick()
-  elseif dir == 2 then
-    SuppliesWindow.decrement.onClick()
-  end
-end
-
-SuppliesWindow.decrement.onMouseWheel = SuppliesWindow.increment.onMouseWheel
-
-Supplies = {} -- public functions
 Supplies.show = function()
-  SuppliesWindow:show()
-  SuppliesWindow:raise()
-  SuppliesWindow:focus()
+  -- Retired standalone window; kept as a safe no-op for the Actions bridge.
 end
 
 Supplies.getItemsData = function()
   local t = {}
-  -- items
-  for i, panel in ipairs(SuppliesWindow.items:getChildren()) do
-    if panel.id:getItemId() > 100 then
-      local id = tostring(panel.id:getItemId())
-      local min = panel.min:getValue()
-      local max = panel.max:getValue()
-      local avg = panel.avg:getValue()
-
-      t[id] = {
-        min = min,
-        max = max,
-        avg = avg
-      }
-    end
+  for id, data in pairs(config.items or {}) do
+    t[id] = { min = data.min, max = data.max, avg = data.avg }
   end
-
   return t
 end
 
@@ -397,29 +128,6 @@ Supplies.hasEnough = function()
 end
 
 hasSupplies = Supplies.hasEnough
-
-Supplies.setAverageValues = function(data)
-  for id, amount in pairs(data) do
-    local widget = SuppliesWindow.items[id]
-
-    if widget then
-      widget.avg:setText(amount)
-    end
-  end
-end
-
-Supplies.addSupplyItem = function(id, min, max, avg)
-  if not id then
-    return
-  end
-
-  local widget = addItemPanel()
-  widget:setId(id)
-  widget.id:setItemId(tonumber(id))
-  widget.min:setText(min or 0)
-  widget.max:setText(max or 0)
-  widget.avg:setText(avg or 0)
-end
 
 Supplies.getAdditionalData = function()
   local data = {
@@ -458,10 +166,7 @@ Supplies.setCurrentProfile = function(name)
   SuppliesConfig[panelName].currentProfile = name
   currentProfile = name
   config = SuppliesConfig[panelName][name]
-  loadSettings()
-  refreshProfileList()
-  setProfileFocus()
-  nExBotConfigSave("supply")
+  save()
   return true
 end
 
@@ -473,9 +178,7 @@ Supplies.createProfile = function()
   end
   local name = "Profile #" .. n + 1
   SuppliesConfig[panelName][name] = {items = {}}
-  refreshProfileList()
-  setProfileFocus()
-  nExBotConfigSave("supply")
+  save()
   return true, name
 end
 
@@ -487,8 +190,7 @@ Supplies.setItem = function(id, min, max, avg)
   if min < 0 or max < 0 or avg < 0 then return false end
 
   config.items[tostring(id)] = { min = min, max = max, avg = avg }
-  loadSettings()
-  nExBotConfigSave("supply")
+  save()
   return true
 end
 
@@ -496,8 +198,7 @@ Supplies.removeItem = function(id)
   id = tonumber(id)
   if not id or not config.items[tostring(id)] then return false end
   config.items[tostring(id)] = nil
-  loadSettings()
-  nExBotConfigSave("supply")
+  save()
   return true
 end
 
@@ -518,7 +219,6 @@ Supplies.setCondition = function(name, enabled, value)
 
   config[field.enabled] = enabled == true
   if field.value and value ~= nil then config[field.value] = value end
-  loadSettings()
-  nExBotConfigSave("supply")
+  save()
   return true
 end

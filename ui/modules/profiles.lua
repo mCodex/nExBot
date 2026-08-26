@@ -76,7 +76,8 @@ function Profiles.render(shell, content, lifecycle)
   Page.render(shell, content, lifecycle, Profiles.statusProvider().snapshot)
   Components.sectionHeader(content, { title = "Hunt profiles" })
 
-  local function optionName(first, second)
+  local Shared = nExBot and nExBot.UI and nExBot.UI["ui.modules.workflows.shared"]
+  local optionName = (Shared and Shared.optionName) or function(first, second)
     if type(second) == "string" then return second end
     if type(second) == "table" then return second.text or second.value end
     if type(first) == "string" then return first end

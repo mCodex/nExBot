@@ -1,4 +1,5 @@
--- Healing workflow controls: profile picker and spell/item rule tables.
+-- Healing workflow controls: profile picker, spell/item rule tables, inline
+-- rule adding, and the persisted engine settings.
 
 local Components = nExBot and nExBot.UI and nExBot.UI["ui.components.components"]
 local DataTable = nExBot and nExBot.UI and nExBot.UI.DataTable
@@ -8,13 +9,21 @@ local Shared = nExBot and nExBot.UI and nExBot.UI["ui.modules.workflows.shared"]
 
 local HealingPage = {}
 local healPage = { spell = 1, item = 1 }
+local draft = { kind = "spell", value = "", spell = "", cost = "", item = "" }
+
+local SETTINGS = {
+  { key = "Cooldown", label = "Check spell cooldowns" },
+  { key = "Visible", label = "Items must be visible (recommended)" },
+  { key = "Delay", label = "Don't use items when interacting" },
+  { key = "Interval", label = "Additional delay when looting corpses" },
+  { key = "Conditions", label = "Also check conditions from RL Tibia" },
+}
 
 local function renderHealRuleList(content, shell, kind, title)
   if not HealBot.getRules then return end
   local rules = HealBot.getRules(kind)
   local pages, first, last
   healPage[kind], pages, first, last = Shared.pageBounds(healPage[kind], #rules)
-  Components.sectionHeader(content, { title = title })
   if DataTable and Presenter and Resolver then
     local tableRows = {}
     for index = first, last do
@@ -45,6 +54,7 @@ local function renderHealRuleList(content, shell, kind, title)
     })
     return
   end
+  Components.sectionHeader(content, { title = title })
   if #rules == 0 then
     Components.emptyState(content, { message = "No rules configured." })
   else
@@ -77,6 +87,83 @@ local function renderHealRuleList(content, shell, kind, title)
   end })
 end
 
+local function renderHealAddForm(content, shell)
+  if not HealBot.addRule then return end
+  Components.sectionHeader(content, { title = "Add rule" })
+  Components.selectRow(content, {
+    id = "healAddKind",
+    label = "Type",
+    options = { { text = "Spell", value = "spell" }, { text = "Item", value = "item" } },
+    value = draft.kind == "item" and "Item" or "Spell",
+    onChange = function(_, value)
+      draft.kind = value or draft.kind
+      Shared.rerender(shell)
+    end,
+  })
+  Components.inputRow(content, {
+    id = "healAddValue",
+    label = "Heal below (HP%)",
+    value = draft.value,
+    onChange = function(value) draft.value = value end,
+  })
+  if draft.kind == "item" then
+    Components.inputRow(content, {
+      id = "healAddItem",
+      label = "Item ID",
+      value = draft.item,
+      onChange = function(value) draft.item = value end,
+    })
+  else
+    Components.inputRow(content, {
+      id = "healAddSpell",
+      label = "Spell name",
+      value = draft.spell,
+      onChange = function(value) draft.spell = value end,
+    })
+    Components.inputRow(content, {
+      id = "healAddCost",
+      label = "Mana cost",
+      value = draft.cost,
+      onChange = function(value) draft.cost = value end,
+    })
+  end
+  local feedback = Components.label(content, { id = "healAddFeedback", text = "", textStyle = "helper" })
+  Components.button(content, {
+    id = "healAddRule",
+    text = "Add rule",
+    onClick = function()
+      local ok
+      if draft.kind == "item" then
+        ok = HealBot.addRule("item", { value = draft.value, item = draft.item })
+      else
+        ok = HealBot.addRule("spell", { value = draft.value, spell = draft.spell, cost = draft.cost })
+      end
+      if not ok then
+        feedback:setText("Enter a valid trigger and " .. (draft.kind == "item" and "item ID" or "spell name") .. ".")
+        return
+      end
+      draft.value, draft.spell, draft.cost, draft.item = "", "", "", ""
+      Shared.rerender(shell)
+    end,
+  })
+end
+
+local function renderHealSettings(content, shell)
+  if not HealBot.getSetting then return end
+  Components.sectionHeader(content, { title = "Settings" })
+  for _, setting in ipairs(SETTINGS) do
+    Components.toggleRow(content, {
+      id = "healSetting_" .. setting.key,
+      label = setting.label,
+      value = HealBot.getSetting(setting.key) == true,
+      onChange = function(value)
+        HealBot.setSetting(setting.key, value)
+        Shared.rerender(shell)
+      end,
+    })
+  end
+end
+
 function HealingPage.render(content, shell)
   if not HealBot then return end
   Components.sectionHeader(content, { title = "Healing profile" })
@@ -90,18 +177,20 @@ function HealingPage.render(content, shell)
     end,
   })
 
+  Components.toggleRow(content, {
+    id = "healEnabled",
+    label = "Enabled",
+    value = HealBot.isOn and HealBot.isOn() or false,
+    onChange = function(value)
+      if value then HealBot.setOn() else HealBot.setOff() end
+      Shared.rerender(shell)
+    end,
+  })
+
   renderHealRuleList(content, shell, "spell", "Healing Spells")
   renderHealRuleList(content, shell, "item", "Healing Items")
-
-  local actions = Shared.actionBar(content)
-  Shared.actionButton(actions, { id = "manageHealRules", text = "Add / Manage Rules", onClick = function()
-    if HealBot.show then HealBot.show() end
-  end })
-  if HealBot.showAlly then
-    Shared.actionButton(actions, { id = "healFriend", text = "Heal Friend", onClick = function()
-      HealBot.showAlly()
-    end })
-  end
+  renderHealAddForm(content, shell)
+  renderHealSettings(content, shell)
 end
 
 if nExBot then

@@ -17,14 +17,16 @@ local CATEGORIES = {
   { id = "hunt", label = "Hunt", tabs = {
     { id = "cavebot", label = "Route" }, { id = "targetbot", label = "Target" }, { id = "attack", label = "Attack" },
     { id = "looting", label = "Loot" }, { id = "dropper", label = "Dropper" },
-    { id = "supplies", label = "Supplies" },
+    { id = "supplies", label = "Supplies" }, { id = "containers", label = "Containers" },
   } },
   { id = "character", label = "Character", tabs = {
     { id = "healing", label = "Healing" }, { id = "friend_healer", label = "Friend" }, { id = "conditions", label = "Conditions" }, { id = "safety", label = "Safety" },
-    { id = "equipment_rules", label = "Equipment" },
+    { id = "equipment_rules", label = "Equipment" }, { id = "extras", label = "Extras" },
   } },
   { id = "automation", label = "Automation", tabs = {
     { id = "tools", label = "Tools" }, { id = "utilities", label = "Scripts" },
+    { id = "combo", label = "Combo" }, { id = "alarms", label = "Alarms" },
+    { id = "pushmax", label = "Push" }, { id = "depositer", label = "Depositer" },
   } },
   { id = "settings_category", label = "Settings", tabs = {
     { id = "profiles", label = "Profiles" }, { id = "settings", label = "Interface" },
@@ -181,10 +183,11 @@ local function createShell(opts)
       item:setId(engineRow.id .. "Item")
       item:setItemId(engineRow.itemId)
       Components.label(row, { id = engineRow.id .. "Label", text = engineRow.label, style = "NexControllerLabel" })
-      Components.button(row, {
-        id = engineRow.toggleAction, text = engineRow.statusText, style = "NexControllerToggle",
-        variant = engineRow.status == "ACTIVE" and "active" or "inactive",
-        onClick = function() run(engineRow.toggleAction, self.controller) end,
+      Components.toggle(row, {
+        id = engineRow.toggleAction,
+        value = engineRow.status == "ACTIVE",
+        tooltip = "Toggle " .. engineRow.label,
+        onChange = function() run(engineRow.toggleAction, self.controller) end,
       })
       Components.button(row, {
         id = "configure_" .. engineRow.id, text = "", style = "NexControllerConfigure",
@@ -270,11 +273,12 @@ local function createShell(opts)
     self.workspace:setId("NexWorkspace")
     local rootWidth = self.root and self.root.getWidth and self.root:getWidth() or 0
     local rootHeight = self.root and self.root.getHeight and self.root:getHeight() or 0
-    local workspaceWidth = rootWidth > 0 and math.min(620, math.max(1, rootWidth - 16)) or 440
-    local workspaceHeight = rootHeight > 0 and math.min(520, math.max(1, rootHeight - 16)) or 400
+    local workspaceWidth = rootWidth > 0 and math.min(620, math.max(320, rootWidth - 16)) or 440
+    local workspaceHeight = rootHeight > 0 and math.min(520, math.max(240, rootHeight - 16)) or 400
     self.workspace:setWidth(workspaceWidth)
     self.workspace:setHeight(workspaceHeight)
-    self.compactNavigation = rootWidth > 0 and workspaceWidth < 520
+    self._lastCompactState = rootWidth > 0 and workspaceWidth < 520
+    self.compactNavigation = self._lastCompactState
     self.nav = g_ui.createWidget("NexWorkspaceNav", self.workspace)
     self.nav:setId("workspaceNav")
     if self.compactNavigation then self.nav:setWidth(82) end
@@ -295,7 +299,62 @@ local function createShell(opts)
     self.backButton = back
     local close = g_ui.createWidget("NexCloseButton", self.workspace)
     close:setId("closeButton")
+    close:setTooltip("Close")
     close.onClick = function() self.workspace:hide() end
+
+    -- Responsive resize: recalculate layout when the parent window changes size.
+    self.workspace.onResize = function(_, width, height)
+      if not width or not height or not self.nav or not self.tabs then return end
+      local w = math.min(620, math.max(320, width - 16))
+      local h = math.min(520, math.max(240, height - 16))
+      self.workspace:setWidth(w)
+      self.workspace:setHeight(h)
+      local compact = w < 520
+      if compact ~= self._lastCompactState then
+        self._lastCompactState = compact
+        self.compactNavigation = compact
+        if self.nav then self.nav:setWidth(compact and 82 or 104) end
+        renderNavigation()
+        renderTabs()
+      end
+    end
+
+    -- Keyboard navigation: Tab cycles focus, Escape closes workspace.
+    self.workspace.onKeyPress = function(_, code)
+      if code == KeyEscape then
+        self.workspace:hide()
+        return true
+      end
+      if code == KeyTab then
+        local children = self.workspace:getChildren()
+        if #children == 0 then return false end
+        local focused = self.workspace:getFocusedChild()
+        local startIndex = 1
+        if focused then
+          for i, child in ipairs(children) do
+            if child == focused then startIndex = (i % #children) + 1 break end
+          end
+        end
+        for offset = 0, #children - 1 do
+          local candidate = children[((startIndex - 1 + offset) % #children) + 1]
+          if candidate.focusable then
+            candidate:setFocus()
+            return true
+          end
+        end
+        return false
+      end
+      return false
+    end
+
+    -- Touch auto-detection: switch to touch density on first open if no user override.
+    if not self._touchChecked and g_platform and g_platform.getSystemInfo then
+      self._touchChecked = true
+      local ok, info = pcall(g_platform.getSystemInfo)
+      if ok and info and info.touchable and self._density == "default" then
+        self:setDensity("touch")
+      end
+    end
   end
 
   function self:open()
@@ -311,6 +370,7 @@ local function createShell(opts)
       self.window:setHeight(240)
       local close = g_ui.createWidget("NexCloseButton", self.window)
       close:setId("closeButton")
+      close:setTooltip("Close")
       close.onClick = function() self.window:hide() end
     end
     self.window:setId("NexBotController")

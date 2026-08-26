@@ -112,63 +112,11 @@ local function saveConfig()
     end
 end
 
-local syncUIWithConfig
-local refreshContainerList
-
-local function stateControl()
-    local state = false
-    return {
-        setOn = function(_, value) state = value == true end,
-        isOn = function() return state end,
-        setTooltip = function() end,
-    }
-end
-
-local containerUI = {
-    openAll = stateControl(), setupBtn = stateControl(), reopenAll = stateControl(),
-    closeAll = stateControl(), minimizeAll = stateControl(), maximizeAll = stateControl(),
-    purseSwitch = stateControl(), autoMinSwitch = stateControl(),
-}
-
-syncUIWithConfig = function()
-    if containerUI then
-        containerUI.openAll:setOn(config.autoOpenOnLogin == true)
-        containerUI.purseSwitch:setOn(config.purse == true)
-        containerUI.autoMinSwitch:setOn(config.autoMinimize ~= false)
-    end
-end
-
-syncUIWithConfig()
-
 schedule(500, function()
     if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
         initConfig()
-        syncUIWithConfig()
-        if setupWindow then
-            if refreshContainerList then refreshContainerList() end
-            setupWindow.sortEnabled:setChecked(config.sortEnabled == true)
-            setupWindow.forceOpen:setChecked(config.forceOpen == true)
-            setupWindow.renameEnabled:setChecked(config.renameEnabled == true)
-            setupWindow.lootBag:setChecked(config.lootBag == true)
-        end
     end
 end)
-
-do
-  local path = nExBot.paths.base .. "/core/Containers.otui"
-  local content = nil
-  if g_resources and g_resources.readFileContents then
-    content = g_resources.readFileContents(path)
-  end
-  if content then
-    g_ui.loadUIFromString(content)
-  else
-    warn("[Containers] Failed to load Containers.otui from " .. path)
-  end
-end
-
-local setupWindow = nil
-local selectedContainerIndex = nil
 
 local function extractItemIds(items)
     local ids = {}
@@ -190,220 +138,6 @@ local function findContainerByItemId(list, itemId)
     end
     return nil, nil
 end
-
-refreshContainerList = function()
-    if not setupWindow then return end
-    
-    local list = setupWindow.containerList
-    list:destroyChildren()
-    
-    for index, entry in ipairs(config.containerList) do
-        local label = g_ui.createWidget("ContainerEntry", list)
-        label:setText(entry.name or "Container")
-        label.enabled:setChecked(entry.enabled)
-        
-        label.minimize:setColor(entry.minimize and '#00FF00' or '#FF6666')
-        label.minimize:setTooltip(entry.minimize and 'Opens Minimized' or 'Opens Normal')
-        
-        label.nested:setColor(entry.openNested and '#00FF00' or '#FF6666')
-        label.nested:setTooltip(entry.openNested and 'Opens Nested' or 'No Nested')
-        
-        label.onMouseRelease = function()
-            selectedContainerIndex = index
-            setupWindow.containerId:setItemId(entry.itemId or 0)
-            setupWindow.containerName:setText(entry.name or "")
-            setupWindow.itemsList:setItems(entry.items or {})
-            list:focusChild(label)
-        end
-        
-        label.enabled.onClick = function()
-            entry.enabled = not entry.enabled
-            label.enabled:setChecked(entry.enabled)
-            saveConfig()  -- Persist to CharacterDB
-            if entry.enabled and sortingMacro and (config.sortEnabled or config.forceOpen) and not isLootLocked() then
-                sortingMacro:setOn()
-            end
-        end
-        
-        label.minimize.onClick = function()
-            entry.minimize = not entry.minimize
-            label.minimize:setColor(entry.minimize and '#00FF00' or '#FF6666')
-            label.minimize:setTooltip(entry.minimize and 'Opens Minimized' or 'Opens Normal')
-            saveConfig()  -- Persist to CharacterDB
-            if entry.enabled and entry.itemId then
-                for _, container in pairs(g_game.getContainers()) do
-                    local containerItem = container:getContainerItem()
-                    if containerItem and containerItem:getId() == entry.itemId then
-                        local window = getContainerWindow(container:getId())
-                        if entry.minimize then
-                            minimizeWindow(window)
-                        else
-                            maximizeWindow(window)
-                        end
-                    end
-                end
-            end
-        end
-        
-        label.nested.onClick = function()
-            entry.openNested = not entry.openNested
-            label.nested:setColor(entry.openNested and '#00FF00' or '#FF6666')
-            label.nested:setTooltip(entry.openNested and 'Opens Nested' or 'No Nested')
-            saveConfig()  -- Persist to CharacterDB
-            if ContainerBFS and ContainerBFS.isActive() and entry.enabled and entry.openNested and entry.itemId then
-                for _, container in pairs(g_game.getContainers()) do
-                    local containerItem = container:getContainerItem()
-                    if containerItem and containerItem:getId() == entry.itemId then
-                        for slot, item in ipairs(container:getItems()) do
-                            if item:isContainer() and item:getId() == entry.itemId then
-                                if ContainerBFS.queueItem then
-                                    ContainerBFS.queueItem(item, container:getId(), slot, true)
-                                else
-                                    g_game.open(item)
-                                end
-                                break
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        
-        label.remove.onClick = function()
-            table.remove(config.containerList, index)
-            refreshContainerList()
-            selectedContainerIndex = nil
-            saveConfig()  -- Persist to CharacterDB
-        end
-    end
-end
-
-local function initSetupWindow()
-    if setupWindow then return end
-    
-    local rootWidget = g_ui.getRootWidget()
-    if not rootWidget then
-        warn("[Container Panel] rootWidget not available")
-        return
-    end
-    
-    local ok, win = pcall(function() return UI.createWindow('ContainerSetupWindow', rootWidget) end)
-    if not ok or not win then
-        warn("[Container Panel] Failed to create setup window: " .. tostring(win))
-        return
-    end
-    
-    setupWindow = win
-
-    local h = tonumber(config.windowHeight)
-    if not h or h < 150 then h = 220 end
-    setupWindow:setHeight(h)
-    
-    setupWindow.onGeometryChange = function(widget, old, new)
-        if new.height >= 150 and old.height > 0 and new.height ~= old.height then
-            config.windowHeight = new.height
-        end
-    end
-    
-    setupWindow:hide()
-    
-    setupWindow.closeBtn.onClick = function()
-        setupWindow:hide()
-    end
-    
-    setupWindow.sortEnabled:setChecked(config.sortEnabled)
-    setupWindow.sortEnabled.onClick = function(widget)
-        config.sortEnabled = not config.sortEnabled
-        widget:setChecked(config.sortEnabled)
-        saveConfig()  -- Persist to CharacterDB
-        if config.sortEnabled and sortingMacro and not isLootLocked() then
-            sortingMacro:setOn()
-        end
-    end
-    
-    setupWindow.forceOpen:setChecked(config.forceOpen)
-    setupWindow.forceOpen.onClick = function(widget)
-        config.forceOpen = not config.forceOpen
-        widget:setChecked(config.forceOpen)
-        saveConfig()  -- Persist to CharacterDB
-        if config.forceOpen and sortingMacro and not isLootLocked() then
-            sortingMacro:setOn()
-        end
-    end
-    
-    setupWindow.renameEnabled:setChecked(config.renameEnabled)
-    setupWindow.renameEnabled.onClick = function(widget)
-        config.renameEnabled = not config.renameEnabled
-        widget:setChecked(config.renameEnabled)
-        saveConfig()  -- Persist to CharacterDB
-    end
-    
-    setupWindow.lootBag:setChecked(config.lootBag)
-    setupWindow.lootBag.onClick = function(widget)
-        config.lootBag = not config.lootBag
-        widget:setChecked(config.lootBag)
-        saveConfig()  -- Persist to CharacterDB
-    end
-    
-    setupWindow.addContainer.onClick = function()
-        local itemId = setupWindow.containerId:getItemId()
-        local name = setupWindow.containerName:getText()
-        
-        if itemId < 100 or name:len() == 0 then
-            setupWindow.containerId:setImageColor('#FF6666')
-            setupWindow.containerName:setColor('#FF6666')
-            schedule(500, function()
-                if setupWindow then
-                    setupWindow.containerId:setImageColor('#FFFFFF')
-                    setupWindow.containerName:setColor('#FFFFFF')
-                end
-            end)
-            return
-        end
-        
-        local existingIndex = findContainerByItemId(config.containerList, itemId)
-        local items = setupWindow.itemsList:getItems() or {}
-        
-        if existingIndex then
-            config.containerList[existingIndex].name = name
-            config.containerList[existingIndex].items = items
-        else
-            config.containerList[#config.containerList + 1] = {
-                name = name,
-                enabled = true,
-                itemId = itemId,
-                minimize = false,
-                openNested = false,
-                items = items
-            }
-        end
-        
-        setupWindow.containerId:setItemId(0)
-        setupWindow.containerName:setText("")
-        setupWindow.itemsList:setItems({})
-        selectedContainerIndex = nil
-        
-        refreshContainerList()
-        saveConfig()  -- Persist to CharacterDB
-        
-        if config.sortEnabled and sortingMacro and not isLootLocked() then
-            sortingMacro:setOn()
-        end
-    end
-    
-    UI.Container(function()
-        if selectedContainerIndex and config.containerList[selectedContainerIndex] then
-            config.containerList[selectedContainerIndex].items = setupWindow.itemsList:getItems()
-            saveConfig()  -- Persist to CharacterDB
-            if config.sortEnabled and sortingMacro and not isLootLocked() then
-                sortingMacro:setOn()
-            end
-        end
-    end, true, nil, setupWindow.itemsList)
-    
-    refreshContainerList()
-end
-
 
 local function isExcludedContainer(containerName)
     if not containerName then return false end
@@ -1048,57 +782,6 @@ function reopenBackpacks(onComplete)
 end
 
 
-containerUI.openAll.onClick = function(widget)
-    config.autoOpenOnLogin = not config.autoOpenOnLogin
-    widget:setOn(config.autoOpenOnLogin)
-    saveConfig()
-end
-
-containerUI.setupBtn.onClick = function(widget)
-    if not setupWindow then initSetupWindow() end
-    if setupWindow then
-        setupWindow:show()
-        setupWindow:raise()
-        setupWindow:focus()
-        refreshContainerList()
-    end
-end
-
-containerUI.reopenAll.onClick = function(widget)
-    reopenBackpacks()
-end
-
-containerUI.closeAll.onClick = function(widget)
-    for _, container in pairs(g_game.getContainers()) do
-        g_game.close(container)
-    end
-end
-
-containerUI.minimizeAll.onClick = function(widget)
-    for _, container in pairs(g_game.getContainers()) do
-        minimizeWindow(getContainerWindow(container:getId()))
-    end
-end
-
-containerUI.maximizeAll.onClick = function(widget)
-    for _, container in pairs(g_game.getContainers()) do
-        maximizeWindow(getContainerWindow(container:getId()))
-    end
-end
-
-containerUI.purseSwitch.onClick = function(widget)
-    config.purse = not config.purse
-    widget:setOn(config.purse)
-    saveConfig()
-end
-
-containerUI.autoMinSwitch.onClick = function(widget)
-    config.autoMinimize = not config.autoMinimize
-    widget:setOn(config.autoMinimize)
-    saveConfig()
-end
-
-
 local lastKnownHealth = 0
 local hasTriggeredThisSession = false
 local autoOpenState = {
@@ -1316,14 +999,80 @@ sortingMacro = macro(300, function(m)
 end)
 
 Containers = Containers or {}
-function Containers.initSetupWindow()
-    if not setupWindow then initSetupWindow() end
-    if setupWindow then
-        setupWindow:show()
-        setupWindow:raise()
-        setupWindow:focus()
-        refreshContainerList()
+
+-- Legacy setup window retired; the shell "containers" page replaces it.
+-- Kept as a safe no-op for the open_containers action in ui/core/actions.lua.
+function Containers.initSetupWindow() end
+
+local function kickSorting()
+    if sortingMacro and (config.sortEnabled or config.forceOpen) and not isLootLocked() then
+        sortingMacro:setOn()
     end
+end
+
+function Containers.getContainerList()
+    return config.containerList
+end
+
+function Containers.getBehavior()
+    return {
+        sortEnabled = config.sortEnabled == true,
+        forceOpen = config.forceOpen == true,
+        renameEnabled = config.renameEnabled == true,
+        lootBag = config.lootBag == true,
+    }
+end
+
+function Containers.setSortEnabled(enabled)
+    config.sortEnabled = enabled == true
+    if config.sortEnabled then kickSorting() end
+end
+
+function Containers.setForceOpen(enabled)
+    config.forceOpen = enabled == true
+    if config.forceOpen then kickSorting() end
+end
+
+function Containers.setRenameEnabled(enabled)
+    config.renameEnabled = enabled == true
+end
+
+function Containers.setLootBag(enabled)
+    config.lootBag = enabled == true
+end
+
+function Containers.setContainerEnabled(index, enabled)
+    local entry = config.containerList[tonumber(index)]
+    if not entry then return false end
+    entry.enabled = enabled == true
+    saveConfig()
+    if entry.enabled then kickSorting() end
+    return true
+end
+
+function Containers.addContainer(name, itemId)
+    name = tostring(name or "")
+    itemId = tonumber(itemId)
+    if name == "" or not itemId or itemId < 100 then return false end
+    local existing = findContainerByItemId(config.containerList, itemId)
+    if existing then
+        config.containerList[existing].name = name
+    else
+        config.containerList[#config.containerList + 1] = {
+            name = name, enabled = true, itemId = itemId, minimize = false, openNested = false, items = {},
+        }
+    end
+    saveConfig()
+    kickSorting()
+    return true
+end
+
+function Containers.removeContainer(index)
+    index = tonumber(index)
+    if not index or not config.containerList[index] then return false end
+    table.remove(config.containerList, index)
+    saveConfig()
+    return true
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────

@@ -31,8 +31,6 @@ This release delivers a comprehensive remediation of state management, persisten
 - **Lifecycle adapter** — `onGameStart`/`onGameEnd` drive state coordinator, generation guards on all async work
 - **Performance** — ≥70% Tactical CPU reduction target, no-change projection p95 <2ms
 
-See [Release Notes](docs/RELEASE_NOTES.md) and [Remediation Summary](docs/REMEDIATION_SUMMARY.md) for details.
-
 ## v5 UI Platform
 
 nExBot v5 introduces a unified product interface built on one design system,
@@ -51,10 +49,7 @@ one navigation shell, and one shared component library.
   (`schemaVersion, revision, state, header, sections, actions`); widgets never
   mutate domain globals directly.
 
-The shell replaces the legacy tab-fill left bar. See
-[UI Architecture](docs/ui/architecture.md), [Guides](docs/ui/guides.md),
-[Feature Map](docs/ui/feature-map.md), [Removal Report](docs/ui/removal-report.md),
-and [Final Report](docs/ui/report.md).
+The shell replaces the legacy tab-fill left bar.
 
 ## Modules
 
@@ -125,4 +120,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Run `make check` before submitting. Foll
 
 ## License
 
-[MIT License](LICENSE)
+MIT License.

@@ -288,6 +288,7 @@ function M.reset()
   M.tabContents = {}
   M.currentTab = "Main"
   M.styleNames = {}
+  M.keyPressHandler = nil
   M.clearLog()
   -- installHostPanel() early-returns if modules.game_bot.contentsPanel already
   -- exists, so leaving it set would leak mutated widget state (e.g. botTabs'
@@ -416,8 +417,13 @@ function M.install()
   _G.setDefaultTab = setDefaultTab_fake
   _G.info = function() end
   _G.warn = function() end
+  _G.onKeyPress = function(fn) M.keyPressHandler = fn end
   setDefaultTab_fake("Main")
   return M
+end
+
+function M.pressKey(key)
+  if M.keyPressHandler then return M.keyPressHandler(key) end
 end
 
 function M.widgetCount()

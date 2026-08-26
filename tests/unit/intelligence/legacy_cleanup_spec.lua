@@ -1,7 +1,7 @@
 describe("intelligence legacy cleanup", function()
-  it("keeps analyzer UI assets required by analyzer.lua", function()
+  it("retires analyzer UI assets (migrated to the shell Analyzer page)", function()
     local f = io.open("core/analyzer.otui", "r")
-    assert.is_not_nil(f)
+    assert.is_nil(f)
     if f then f:close() end
   end)
 

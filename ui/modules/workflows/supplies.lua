@@ -32,13 +32,13 @@ function SuppliesPage.render(content, shell)
     end,
   })
 
-  Components.sectionHeader(content, { title = "Items" })
   local items = Supplies.getItemsData and Supplies.getItemsData() or {}
   local ids = {}
   for id in pairs(items) do ids[#ids + 1] = tostring(id) end
   table.sort(ids, function(a, b) return tonumber(a) < tonumber(b) end)
-  if #ids == 0 then Components.emptyState(content, { message = "No supply items configured." }) end
   if not DataTable or not Resolver then
+    Components.sectionHeader(content, { title = "Items" })
+    if #ids == 0 then Components.emptyState(content, { message = "No supply items configured." }) end
     for _, id in ipairs(ids) do
       local values = items[id] or items[tonumber(id)]
       Components.itemRow(content, { id = "supplyItem_" .. id, itemId = id, title = "Item " .. id,
@@ -51,11 +51,11 @@ function SuppliesPage.render(content, shell)
     local visual = Resolver:item(id)
     supplyRows[#supplyRows + 1] = {
       id = id, itemId = id, title = visual.name,
-      secondary = string.format("Min %s · Max %s · Avg %s", values.min or 0, values.max or 0, values.avg or 0),
+      secondary = string.format("Min %s / Max %s / Avg %s", values.min or 0, values.max or 0, values.avg or 0),
       status = selectedSupplyId == id and "ACTIVE" or "INFO",
       statusText = selectedSupplyId == id and "Selected" or "Configured",
       onClick = function() selectedSupplyId = id; Shared.rerender(shell) end,
-      actions = { { id = "removeSupply_" .. id, text = "Remove", variant = "danger", onClick = function() Supplies.removeItem(id); selectedSupplyId = nil; Shared.rerender(shell) end } },
+      actions = { { id = "removeSupply_" .. id, text = "Remove", variant = "danger", tooltip = "Remove item", onClick = function() Supplies.removeItem(id); selectedSupplyId = nil; Shared.rerender(shell) end } },
     }
   end
   DataTable.create(content, {
@@ -96,8 +96,11 @@ function SuppliesPage.render(content, shell)
   Components.button(content, {
     id = "addSupply",
     text = "Add item",
+    tooltip = "Add the item to this supplies profile",
     onClick = function()
-      Supplies.setItem(newItem.id, newItem.min, newItem.max, newItem.avg)
+      if Supplies.setItem(newItem.id, newItem.min, newItem.max, newItem.avg) then
+        Shared.rerender(shell)
+      end
     end,
   })
 

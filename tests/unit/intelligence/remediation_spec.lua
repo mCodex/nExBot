@@ -327,7 +327,7 @@ describe("UnifiedStorage Migration", function()
     nExBot.StorageEngine = { new = function() return {} end }
     nExBot.Shared = nExBot.Shared or {}
     nExBot.Shared.getClient = function() return nil end
-    schedule = schedule or function() end
+    _G.schedule = function() end
     dofile("core/unified_storage.lua")
     return nExBot.UnifiedStorage
   end

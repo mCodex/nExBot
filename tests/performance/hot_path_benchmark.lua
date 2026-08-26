@@ -19,7 +19,6 @@ _G.SafeCreature = {
 _G.player = { getId = function() return 99999 end, getPosition = function() return { x = 100, y = 100, z = 7 } end }
 
 local E = dofile("targetbot/domain/target_evaluator.lua")
-local FeatureArbitrator = dofile("targetbot/domain/feature_arbitrator.lua")
 local KillCompletionModel = dofile("targetbot/ml/kill_completion_model.lua")
 
 local clock = 1000
@@ -61,16 +60,6 @@ local function randomContext(creature, isCurrent)
   }
 end
 
-local function makeIntent()
-  local sources = { "CHASE", "LURE", "KEEP_DISTANCE", "REPOSITION", "PULL", "FINISH_KILL_COMMITMENT", "WAVE_AVOIDANCE", "ROUTE_ADVANCEMENT" }
-  return {
-    source = sources[math.random(#sources)],
-    type = "movement",
-    confidence = math.random() * 0.8 + 0.2,
-    position = { x = 100 + math.random(-5, 5), y = 100 + math.random(-5, 5), z = 7 },
-  }
-end
-
 local function percentile(sorted, p)
   local idx = math.ceil(#sorted * p / 100)
   return sorted[math.max(1, math.min(idx, #sorted))]
@@ -105,33 +94,7 @@ print(string.format("  Avg:  %.4f ms", sum / #timings))
 print(string.format("  P95:  %.4f ms", percentile(timings, 95)))
 print(string.format("  P99:  %.4f ms", percentile(timings, 99)))
 
-print("\n2. FeatureArbitrator.resolve benchmark")
-print(string.rep("-", 60))
-math.randomseed(42)
-local arbitrator = FeatureArbitrator.new()
-local sizes = { 1, 3, 5, 10 }
-local iterations = 1000
-
-print(string.format("  %-10s %-15s", "Intents", "Avg (ms)"))
-for _, size in ipairs(sizes) do
-  local intentSets = {}
-  for i = 1, iterations do
-    local intents = {}
-    for j = 1, size do
-      intents[j] = makeIntent()
-    end
-    intentSets[i] = intents
-  end
-
-  local start = os.clock()
-  for i = 1, iterations do
-    arbitrator:resolve(intentSets[i], {})
-  end
-  local avgMs = (os.clock() - start) * 1000 / iterations
-  print(string.format("  %-10d %-15.4f", size, avgMs))
-end
-
-print("\n3. ReachabilityService evidence accumulation benchmark")
+print("\n2. ReachabilityService evidence accumulation benchmark")
 print(string.rep("-", 60))
 math.randomseed(42)
 ReachabilityService.reset()
@@ -157,7 +120,7 @@ print(string.format("  Total evaluations: %d", evalCount))
 print(string.format("  Total time: %.4f ms", totalMs))
 print(string.format("  Per-evaluation: %.4f ms", totalMs / evalCount))
 
-print("\n4. ML prediction benchmark")
+print("\n3. ML prediction benchmark")
 print(string.rep("-", 60))
 math.randomseed(42)
 local model = KillCompletionModel.new()

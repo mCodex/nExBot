@@ -68,7 +68,7 @@ function DropperPage.render(shell, content)
   for _, row in ipairs(projection.rows) do counts[row.behavior] = counts[row.behavior] + 1 end
   local summary = Components.card(content, { id = "dropperSummary" })
   Components.keyValueRow(summary, { key = "Trash / Use", value = counts.trash .. " / " .. counts.use })
-  Components.keyValueRow(summary, { key = "Low capacity", value = counts.lowCap .. " items · below " .. projection.lowCap })
+  Components.keyValueRow(summary, { key = "Low capacity", value = counts.lowCap .. " items / below " .. projection.lowCap })
 
   DataTable.create(content, {
     id = "dropperItems", title = "Configured items", rows = rows(shell, projection),

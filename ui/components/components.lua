@@ -155,21 +155,37 @@ local function rowWithLabel(parent, labelText, opts)
   return w
 end
 
-function C.toggleRow(parent, opts)
+-- Standalone NexToggle widget. Use inside custom layouts where toggleRow's
+-- row wrapper is not wanted (e.g. cockpit engine rows, controller sidebar).
+function C.toggle(parent, opts)
   opts = opts or {}
-  local w = rowWithLabel(parent, opts.label, opts)
-  local sw = create(w, "NexControlSwitch", { id = "switch" })
+  local sw = g_ui.createWidget("NexToggle", parent)
+  if opts.id then sw:setId(opts.id) end
+  if opts.tooltip then sw:setTooltip(opts.tooltip) end
   sw:setChecked(opts.value == true)
-  -- Wire change: a wrapper around setChecked that fires onChange.
+  local track = sw:getChildById("track")
+  local thumb = sw:getChildById("thumb")
+  local function updateVisual(checked)
+    if track then track:setText(checked and "ON" or "OFF") end
+  end
+  updateVisual(opts.value == true)
   local origSet = sw.setChecked
   sw.setChecked = function(self, v)
     v = not not v
     origSet(self, v)
+    updateVisual(v)
     if opts.onChange then opts.onChange(v) end
   end
   sw.onClick = function()
     sw:setChecked(not sw:isChecked())
   end
+  return sw
+end
+
+function C.toggleRow(parent, opts)
+  opts = opts or {}
+  local w = rowWithLabel(parent, opts.label, opts)
+  local sw = C.toggle(w, { id = "switch", value = opts.value, tooltip = opts.tooltip or ("Toggle " .. (opts.label or "")), onChange = opts.onChange })
   return {
     widget = w,
     getSwitch = function() return sw end,
@@ -179,26 +195,13 @@ function C.toggleRow(parent, opts)
 end
 
 function C.checkboxRow(parent, opts)
-  opts = opts or {}
-  local w = rowWithLabel(parent, opts.label, opts)
-  local cb = create(w, "NexControlCheckBox", { id = "checkbox" })
-  cb:setChecked(opts.value == true)
-  local origSet = cb.setChecked
-  cb.setChecked = function(self, v)
-    v = not not v
-    origSet(self, v)
-    if opts.onChange then opts.onChange(v) end
-  end
-  cb.onClick = function()
-    cb:setChecked(not cb:isChecked())
-  end
-  return { widget = w, getCheckbox = function() return cb end, setValue = function(v) cb:setChecked(v) end }
+  return C.toggleRow(parent, opts)
 end
 
 function C.selectRow(parent, opts)
   opts = opts or {}
   local w = rowWithLabel(parent, opts.label, opts)
-  local combo = create(w, "NexControlCombo", { id = "combo" })
+  local combo = create(w, "NexControlCombo", { id = "combo", tooltip = opts.tooltip or ("Select " .. (opts.label or "")) })
   if opts.options then
     for _, o in ipairs(opts.options) do
       combo:addOption(type(o) == "table" and (o.text or o) or o, type(o) == "table" and o.value or nil)
@@ -212,7 +215,7 @@ end
 function C.inputRow(parent, opts)
   opts = opts or {}
   local w = rowWithLabel(parent, opts.label, opts)
-  local input = create(w, "NexControlInput", { id = "input" })
+  local input = create(w, "NexControlInput", { id = "input", tooltip = opts.tooltip or (opts.label or "") })
   if opts.value ~= nil then input:setText(opts.value) end
   if opts.onChange then
     input.onTextChange = function(_, text) opts.onChange(text) end
@@ -307,6 +310,15 @@ end
 function C.inlineWarning(parent, opts)
   opts = opts or {}
   return label(parent, opts.message or "", "Label", { textStyle = "helper", color = Tokens.colors.warning })
+end
+
+-- Close button (top-right X) for standalone windows. Single source for every
+-- window's close affordance so it looks and behaves identically everywhere.
+function C.closeButton(parent, opts)
+  opts = opts or {}
+  local w = create(parent, "NexCloseButton", { id = opts.id or "close", tooltip = opts.tooltip or "Close" })
+  if opts.onClose then w.onClick = opts.onClose end
+  return w
 end
 
 function C.footerActions(parent, opts)

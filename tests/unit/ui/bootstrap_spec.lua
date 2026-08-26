@@ -34,7 +34,7 @@ describe("ui bootstrap", function()
     assert.is_true(ok, tostring(err))
 
     local R = _G.nExBot.UI.ModuleRegistry
-    assert.are_equal(19, R.count())
+    assert.are_equal(25, R.count())
     assert.are_equal(0, #R.validate())
 
     -- Auto-open: the shell is attached to the host left bar after bootstrap.

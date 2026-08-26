@@ -24,9 +24,6 @@ local managers = {
     { "Equipment rules", "Automatic equipment conditions", "open_equipper", function() return nExBot.Equipper end, true, "toggle_equipper" },
     { "Quiver manager", "Automatic ammunition refill", "toggle_quiver", function() return macro("quiverManager") end, true },
   } },
-  analytics = { label = "Analytics", order = 110, items = {
-    { "Hunt analyzer", "XP, profit, waste and kills", "open_analyzer", function() return Analyzer end },
-  } },
   utilities = { label = "Advanced", order = 120, items = {
     { "Hold target", "Keep the selected target", "toggle_hold_target", function() return nExBot.HoldTarget end, true },
     { "Floor spy", "Inspect nearby floors", "toggle_spy_level", function() return nExBot.SpyLevel end, true },

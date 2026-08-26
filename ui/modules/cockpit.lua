@@ -6,13 +6,6 @@ local Actions = nExBot and nExBot.UI and nExBot.UI.Actions
 
 local Cockpit = {}
 
-local STATUS_VARIANT = {
-  ACTIVE = "active",
-  PAUSED = "warning",
-  DISABLED = "inactive",
-  UNKNOWN = "warning",
-}
-
 local ENGINE_DEFS = {
   { key = "cave", label = "Cave", itemId = 3003, toggleAction = "toggle_cavebot", editorAction = "open_cavebot" },
   { key = "target", label = "Target", itemId = 3155, toggleAction = "toggle_targetbot", editorAction = "open_targetbot" },
@@ -204,12 +197,11 @@ function Cockpit.render(content)
     info.onClick = function() run(engineRow.editorAction, attention) end
     Components.label(info, { id = engineRow.id .. "Label", text = engineRow.label })
     Components.label(info, { id = engineRow.id .. "Detail", text = engineRow.detail, textStyle = "metadata" })
-    Components.button(row, {
+    Components.toggle(row, {
       id = engineRow.toggleAction,
-      style = "NexEngineToggle",
-      text = engineRow.statusText,
-      variant = STATUS_VARIANT[engineRow.status],
-      onClick = function() run(engineRow.toggleAction, attention) end,
+      value = engineRow.status == "ACTIVE",
+      tooltip = "Toggle " .. engineRow.label,
+      onChange = function() run(engineRow.toggleAction, attention) end,
     })
   end
 

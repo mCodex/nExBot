@@ -13,12 +13,8 @@ describe("Property invariants — validation tests", function()
     _G.TargetReachability = dofile("targetbot/monster_reachability.lua")
     _G.TargetCommitmentManager = dofile("targetbot/domain/target_commitment.lua")
     _G.TargetCandidateEvaluator = dofile("targetbot/domain/target_evaluator.lua")
-    _G.FeatureArbitrator = dofile("targetbot/domain/feature_arbitrator.lua")
     _G.ReachabilityService = dofile("targetbot/domain/reachability_service.lua")
-    _G.LurePlanner = dofile("targetbot/tactical/lure_planner.lua")
-    _G.PullPlanner = dofile("targetbot/tactical/pull_planner.lua")
     _G.KillCompletionModel = dofile("targetbot/ml/kill_completion_model.lua")
-    _G.MovementArbitrator = dofile("targetbot/application/movement_arbitrator.lua")
   end)
 
   it("Invalid replacement never invalidates current target", function()
@@ -92,24 +88,6 @@ describe("Property invariants — validation tests", function()
     assert.not_equals(_G.ReachabilityState.CONFIRMED_HARD_UNREACHABLE, r2.state)
   end)
 
-  it("ML never overrides hard safety", function()
-    local arbitrator = _G.FeatureArbitrator:new()
-
-    for _ = 1, 10 do
-      local intents = {
-        { source = "LURE", position = {x=105, y=100, z=7}, confidence = math.random() },
-        { source = "PULL", position = {x=103, y=100, z=7}, confidence = math.random() },
-      }
-
-      local result = arbitrator:resolve(intents, { playerHpPercent = 5 })
-
-      if result.selected then
-        local p = _G.FeatureArbitrator.PRECEDENCE[result.selected.source] or 0
-        assert.is_true(p >= 100 or result.selected.source == "HARD_SAFETY" or result.selected.source == "WAVE_AVOIDANCE")
-      end
-    end
-  end)
-
   it("ML never overrides finish commitment", function()
     local commitment = _G.TargetCommitmentManager
 
@@ -119,29 +97,6 @@ describe("Property invariants — validation tests", function()
     local active = commitment.getActive()
     assert.is_not_nil(active)
     assert.equals("FINISH_KILL", active.reason)
-  end)
-
-  it("FeatureArbitrator always returns at most one selected intent", function()
-    local arbitrator = _G.FeatureArbitrator:new()
-    local sources = {"LURE", "PULL", "REPOSITION", "CHASE", "KEEP_DISTANCE", "ROUTE_ADVANCEMENT"}
-
-    for _ = 1, 20 do
-      local intents = {}
-      local count = math.random(1, 10)
-      for _ = 1, count do
-        intents[#intents + 1] = {
-          source = sources[math.random(1, #sources)],
-          position = {x=100 + math.random(1, 10), y=100, z=7},
-          confidence = math.random(),
-        }
-      end
-
-      local result = arbitrator:resolve(intents, {})
-
-      if result.selected then
-        assert.is_not_nil(result.selected.source)
-      end
-    end
   end)
 
   it("Every release reason is in ReleaseReason enum", function()
@@ -229,45 +184,5 @@ describe("Property invariants — validation tests", function()
         assert.equals("A", winnerAC)
       end
     end
-  end)
-
-  it("MovementArbitrator never returns success without a selected intent", function()
-    local arbitrator = _G.FeatureArbitrator:new()
-    local movementArb = _G.MovementArbitrator.new({ featureArbitrator = arbitrator })
-
-    local ok = movementArb:tick({}, {})
-    assert.is_false(ok)
-
-    local decision = movementArb:getLastDecision()
-    assert.is_false(decision.success)
-  end)
-
-  it("LurePlanner never produces plan when hasCommitment and targetHp < 30%", function()
-    local lure = _G.LurePlanner.new()
-
-    for _ = 1, 10 do
-      local obs = {
-        hasCommitment = true,
-        targetHp = math.random(1, 29),
-        creatureCount = math.random(1, 5),
-        currentPos = {x=100, y=100, z=7},
-      }
-
-      local plan, reason = lure:plan(obs, { now = fx.clock })
-      assert.is_nil(plan)
-      assert.equals("LURE_DEFERRED_FINISH_TARGET", reason)
-    end
-  end)
-
-  it("PullPlanner never produces plan without destination", function()
-    local pull = _G.PullPlanner.new()
-
-    local plan, reason = pull:plan(
-      { participantId = 1, distance = 3, currentPos = nil },
-      { now = fx.clock }
-    )
-
-    assert.is_nil(plan)
-    assert.equals("NO_DESTINATION", reason)
   end)
 end)

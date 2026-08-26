@@ -15,11 +15,13 @@ local colors = {
     elevated     = "#303438",
     interactive  = "#3b4145",
     selected     = "#4a4333",
+    card         = "#2a2d2f",
   },
   border = {
     subtle  = "#454b4f",
     default = "#626a6f",
     strong  = "#b6904d",
+    accent  = "#b6904d",
   },
   text = {
     primary   = "#f4ead2",

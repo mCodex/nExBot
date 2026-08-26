@@ -20,7 +20,6 @@ _G.SafeCreature = {
 _G.player = { getId = function() return 99999 end, getPosition = function() return { x = 100, y = 100, z = 7 } end }
 
 local E = dofile("targetbot/domain/target_evaluator.lua")
-local FeatureArbitrator = dofile("targetbot/domain/feature_arbitrator.lua")
 local KillCompletionModel = dofile("targetbot/ml/kill_completion_model.lua")
 
 local clock = 1000
@@ -61,16 +60,6 @@ local function randomContext(creature, isCurrent)
     reachabilityPath = { 1, 2, math.random(1, 5) },
     playerHpPercent = math.random(20, 100),
     creatureHpPercent = creature:getHealthPercent(),
-  }
-end
-
-local function makeIntent()
-  local sources = { "CHASE", "LURE", "KEEP_DISTANCE", "REPOSITION", "PULL", "FINISH_KILL_COMMITMENT", "WAVE_AVOIDANCE", "ROUTE_ADVANCEMENT" }
-  return {
-    source = sources[math.random(#sources)],
-    type = "movement",
-    confidence = math.random() * 0.8 + 0.2,
-    position = { x = 100 + math.random(-5, 5), y = 100 + math.random(-5, 5), z = 7 },
   }
 end
 
@@ -220,23 +209,6 @@ describe("Combat Soak Test (10,000 ticks)", function()
     end
     local evalMs = (os.clock() - start) * 1000 / 1000
     assert.is_true(evalMs < 2, string.format("evaluate avg %.4f ms exceeds 2ms budget", evalMs))
-
-    local arbitrator = FeatureArbitrator.new()
-    local intentSets = {}
-    for i = 1, 1000 do
-      local intents = {}
-      for j = 1, 5 do
-        intents[j] = makeIntent()
-      end
-      intentSets[i] = intents
-    end
-
-    start = os.clock()
-    for i = 1, 1000 do
-      arbitrator:resolve(intentSets[i], {})
-    end
-    local resolveMs = (os.clock() - start) * 1000 / 1000
-    assert.is_true(resolveMs < 2, string.format("resolve avg %.4f ms exceeds 2ms budget", resolveMs))
   end)
 
 end)

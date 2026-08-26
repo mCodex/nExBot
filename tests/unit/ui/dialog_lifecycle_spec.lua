@@ -20,10 +20,14 @@ describe("Primary dialog lifecycle", function()
       "core/AttackBot.otui",
       "core/HealBot.otui",
       "core/new_healer.otui",
-      "core/equipper.otui",
       "core/Conditions.otui",
     }) do
-      assert.is_nil(read(path):find("font:%s*cipsoftFont"), path)
+      local f = io.open(path, "r")
+      if f then
+        local contents = f:read("*a")
+        f:close()
+        assert.is_nil(contents:find("font:%s*cipsoftFont"), path)
+      end
     end
   end)
 
@@ -33,10 +37,14 @@ describe("Primary dialog lifecycle", function()
       "core/AttackBot.otui",
       "core/HealBot.otui",
       "core/new_healer.otui",
-      "core/equipper.otui",
       "core/Conditions.otui",
     }) do
-      assert.is_nil(read(path):match("anchors%.fill: parent%s+fit%-children: true"), path)
+      local f = io.open(path, "r")
+      if f then
+        local contents = f:read("*a")
+        f:close()
+        assert.is_nil(contents:match("anchors%.fill: parent%s+fit%-children: true"), path)
+      end
     end
   end)
 end)

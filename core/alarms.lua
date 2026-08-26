@@ -5,8 +5,26 @@ end
 
 local config = storage[panelName]
 
-local window = UI.createWindow("AlarmsWindow")
-window:hide()
+local catalog = {
+  { id = "ignoreFriends", title = "Ignore Friends", parent = "settings" },
+  { id = "flashClient", title = "Flash Client", parent = "settings" },
+  { id = "damageTaken", title = "Damage Taken", parent = "alarms" },
+  { id = "lowHealth", title = "Low Health", value = 20, parent = "alarms" },
+  { id = "lowMana", title = "Low Mana", value = 20, parent = "alarms" },
+  { id = "playerAttack", title = "Player Attack", parent = "alarms" },
+  { id = "privateMsg", title = "Private Message", parent = "alarms" },
+  { id = "defaultMsg", title = "Default Message", parent = "alarms" },
+  { id = "customMessage", title = "Custom Message", value = "", parent = "alarms" },
+  { id = "creatureDetected", title = "Creature Detected", parent = "alarms" },
+  { id = "playerDetected", title = "Player Detected", parent = "alarms" },
+  { id = "creatureName", title = "Creature Name", value = "", parent = "alarms" },
+}
+
+for _, spec in ipairs(catalog) do
+  if type(config[spec.id]) ~= "table" then config[spec.id] = {} end
+  config[spec.id].enabled = config[spec.id].enabled == true
+  if spec.value ~= nil then config[spec.id].value = spec.value end
+end
 
 Alarms = {
   config = config,
@@ -14,82 +32,24 @@ Alarms = {
   setOn = function() config.enabled = true end,
   setOff = function() config.enabled = false end,
   toggle = function() config.enabled = not config.enabled return config.enabled end,
-  show = function()
-    window:show()
-    window:raise()
-    window:focus()
-  end
-}
-
-local widgets = 
-{
-  "AlarmCheckBox", 
-  "AlarmCheckBoxAndSpinBox", 
-  "AlarmCheckBoxAndTextEdit"
-}
-
-local parents = 
-{
-  window.list, 
-  window.settingsList
-}
-
--- type
-addAlarm = function(id, title, defaultValue, alarmType, parent, tooltip)
-  local widget = UI.createWidget(widgets[alarmType], parents[parent])
-  widget:setId(id)
-
-  if type(config[id]) ~= 'table' then
-    config[id] = {}
-  end
-
-  widget.tick:setText(title)
-  widget.tick:setChecked(config[id].enabled)
-  widget.tick:setTooltip(tooltip)
-  widget.tick.onClick = function()
-    config[id].enabled = not config[id].enabled
-    widget.tick:setChecked(config[id].enabled)
-  end
-
-  if alarmType > 1 and type(config[id].value) == 'nil' then
-    config[id].value = defaultValue
-  end
-
-  if alarmType == 2 then
-    widget.value:setValue(config[id].value)
-    widget.value.onValueChange = function(widget, value)
-      config[id].value = value
+  show = function() end,
+  getAlarms = function()
+    local rows = {}
+    for _, spec in ipairs(catalog) do
+      local entry = config[spec.id]
+      rows[#rows + 1] = {
+        id = spec.id, title = spec.title, parent = spec.parent,
+        enabled = entry and entry.enabled == true or false,
+        value = entry and entry.value,
+      }
     end
-  elseif alarmType == 3 then
-    widget.text:setText(config[id].value)
-    widget.text.onTextChange = function(widget, newText)
-      config[id].value = newText
-    end
+    return rows
+  end,
+  setAlarm = function(id, key, value)
+    config[id] = config[id] or {}
+    config[id][key] = value
   end
-
-end
-
--- settings
-addAlarm("ignoreFriends", "Ignore Friends", true, 1, 2)
-addAlarm("flashClient", "Flash Client", true, 1, 2)
-
--- alarm list
-addAlarm("damageTaken", "Damage Taken", false, 1, 1)
-addAlarm("lowHealth", "Low Health", 20, 2, 1)
-addAlarm("lowMana", "Low Mana", 20, 2, 1)
-addAlarm("playerAttack", "Player Attack", false, 1, 1)
-
-UI.Separator(window.list)
-
-addAlarm("privateMsg", "Private Message", false, 1, 1)
-addAlarm("defaultMsg", "Default Message", false, 1, 1)
-addAlarm("customMessage", "Custom Message:", "", 3, 1, "You can add text, that if found in any incoming message will trigger alert.\n You can add many, just separate them by comma.")
-
-UI.Separator(window.list)
-
-addAlarm("creatureDetected", "Creature Detected", false, 1, 1)
-addAlarm("playerDetected", "Player Detected", false, 1, 1)
-addAlarm("creatureName", "Creature Name:", "", 3, 1, "You can add a name or part of it, that if found in any visible creature name will trigger alert.\nYou can add many, just separate them by comma.")
+}
 
 local lastCall = now
 local function alarm(file, windowText)

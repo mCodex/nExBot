@@ -1,7 +1,6 @@
--- Cave workflow controls: route profile, navigation toggles, waypoints.
+-- Cave workflow controls: route profile, navigation toggles.
 
 local Components = nExBot and nExBot.UI and nExBot.UI["ui.components.components"]
-local DataTable = nExBot and nExBot.UI and nExBot.UI.DataTable
 local Shared = nExBot and nExBot.UI and nExBot.UI["ui.modules.workflows.shared"]
 
 local CavePage = {}
@@ -46,28 +45,14 @@ function CavePage.render(content, shell)
   end
 
   local route = CaveBot.Route
-  if not route or not route.getChildren then return end
-  local waypoints = route:getChildren()
-  Components.sectionHeader(content, { title = "Waypoints" })
-  Components.label(content, { text = string.format("%d waypoint(s) in this route", #waypoints), textStyle = "metadata" })
-  if DataTable then
-    local waypointRows = {}
-    for index, widget in ipairs(waypoints) do
-      local text = widget.getText and widget:getText() or tostring(widget.value or "Waypoint")
-      waypointRows[#waypointRows + 1] = {
-        id = widget.getId and widget:getId() or index,
-        revision = tostring(index) .. ":" .. text,
-        title = index .. "  " .. text,
-        secondary = index == (route.getFocusedChild and route:getChildIndex(route:getFocusedChild()) or -1) and "Selected" or "Pending",
-        status = index == (route.getFocusedChild and route:getChildIndex(route:getFocusedChild()) or -1) and "ACTIVE" or "INFO",
-        statusText = index == (route.getFocusedChild and route:getChildIndex(route:getFocusedChild()) or -1) and "Selected" or "Pending",
-        onClick = function() if route.focus then route:focus(widget) end end,
-      }
-    end
-    DataTable.create(content, {
-      id = "caveWaypoints", title = "Route", rows = waypointRows,
-      rowKey = function(row) return row.id end, pageSize = Shared.PAGE_SIZE,
-      emptyMessage = "No waypoints yet. Add the first route step.",
+  if route and route.getChildren then
+    local waypointCount = #route:getChildren()
+    Components.sectionHeader(content, { title = "Waypoints" })
+    Components.label(content, {
+      text = waypointCount == 0
+        and "No waypoints yet. Add the first route step in the Waypoint Editor."
+        or string.format("%d waypoint(s) — manage and track them in the Waypoint Editor.", waypointCount),
+      textStyle = "metadata",
     })
   end
 

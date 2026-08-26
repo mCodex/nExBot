@@ -581,7 +581,6 @@ loadCategory("architecture", {
   "intelligence/foundation/silent_restore",
   "intelligence/foundation/control_state_registry",
   "intelligence/foundation/otclient_adapter",
-  "client_lifecycle",
   "intelligence/ui/ui_presenter",
   "intelligence/contracts/outcome_reasons",
   "intelligence/contracts/event_schema",
@@ -675,7 +674,6 @@ loadCategory("analytics", {
 
 -- Presentation-only analytics yield to the first usable client frame.
 deferScript("analyzer", "deferred_analytics")
-deferScript("intelligence/ui/ui_bridge", "deferred_analytics")
 
 -- TargetBot scripts are loaded by core/cavebot.lua.
 -- to avoid duplicating the loading, we don't load them again here.

@@ -492,26 +492,10 @@ local oldTibia = getClientVersion() < 960
 -- Config setup moved down to after macro (to ensure macro and recalc exist before callback runs)
 -- See vBot for reference: https://github.com/Vithrax/vBot
 
-TargetBot.showCreatureEditor = function()
-  local selected = ui.list:getFocusedChild()
-  local current = selected and selected.value or nil
-  TargetBot.Creature.edit(current, function(newConfig)
-    if selected then
-      selected:setText(newConfig.name)
-      selected.value = newConfig
-      TargetBot.Creature.resetConfigsCache()
-    else
-      TargetBot.Creature.addConfig(newConfig, true)
-    end
-    TargetBot.save()
-  end)
-end
+TargetBot.showCreatureEditor = function() end
 
-TargetBot.addCreature = function()
-  TargetBot.Creature.edit(nil, function(newConfig)
-    TargetBot.Creature.addConfig(newConfig, true)
-    TargetBot.save()
-  end)
+TargetBot.addCreature = function(data)
+  return TargetBot.saveCreature(data)
 end
 
 TargetBot.removeSelectedCreature = function()

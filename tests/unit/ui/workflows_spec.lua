@@ -22,9 +22,14 @@ describe("embedded workflow pages", function()
     local healRules = { spell = {}, item = {} }
     _G.HealBot = {
       isOn = function() return false end,
+      setOn = function() end,
+      setOff = function() end,
       getActiveProfile = function() return 1 end,
       setActiveProfile = function() end,
       getRules = function(kind) return healRules[kind] end,
+      addRule = function() return true end,
+      getSetting = function() return true end,
+      setSetting = function() end,
       toggleRule = function(kind, index) healRules[kind][index].enabled = not healRules[kind][index].enabled end,
       removeRule = function(kind, index) table.remove(healRules[kind], index) end,
       show = function() end,
@@ -167,7 +172,9 @@ describe("embedded workflow pages", function()
 
     assert.is_truthy(content:recursiveGetChildById("healRule_spell_1"))
     assert.is_truthy(content:recursiveGetChildById("healRule_item_1"))
-    assert.is_truthy(content:recursiveGetChildById("manageHealRules"))
+    assert.is_truthy(content:recursiveGetChildById("healEnabled"))
+    assert.is_truthy(content:recursiveGetChildById("healAddRule"))
+    assert.is_truthy(content:recursiveGetChildById("healSetting_Cooldown"))
 
     content:recursiveGetChildById("healRuleToggle_item_1"):click()
     assert.is_true(HealBot._rules.item[1].enabled)

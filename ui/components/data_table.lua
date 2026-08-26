@@ -12,9 +12,10 @@ local function densityFor(parent, requested)
   return "standard"
 end
 
-local function renderRow(parent, projected, options, density)
+local function renderRow(parent, projected, options, density, rowIndex)
   local row = projected.data
-  local widget = g_ui.createWidget("NexTableRow", parent)
+  local isOdd = rowIndex % 2 == 1
+  local widget = g_ui.createWidget(isOdd and "NexTableRowOdd" or "NexTableRow", parent)
   widget:setId((options.id or "table") .. "_" .. projected.key)
   widget._rowFingerprint = tostring(row.revision or row.fingerprint or 0)
 
@@ -61,13 +62,16 @@ function DataTable.create(parent, options)
   root:setId(options.id or "dataTable")
   local header = g_ui.createWidget("NexTableHeader", root)
   header:setId("header")
-  Components.label(header, { id = "headerTitle", text = options.title or "", textStyle = "sectionTitle" })
   local search
   if options.searchable then
     search = g_ui.createWidget("NexTableSearch", header)
     search:setId("search")
     search:setTooltip("Filter this list")
   end
+  Components.label(header, {
+    id = "headerTitle", text = options.title or "", textStyle = "sectionTitle",
+    style = options.searchable and "NexTableHeaderSearchTitle" or "NexTableHeaderTitle",
+  })
   local body = g_ui.createWidget("NexTableBody", root)
   body:setId("body")
   local widgets = {}
@@ -89,13 +93,13 @@ function DataTable.create(parent, options)
     if model.fingerprint == fingerprint then return false end
 
     local retained = {}
-    for _, projected in ipairs(model.rows) do
+    for rowIndex, projected in ipairs(model.rows) do
       local key = projected.key
       local rowFingerprint = tostring(projected.data.revision or projected.data.fingerprint or 0)
       local widget = widgets[key]
       if not widget or widget._rowFingerprint ~= rowFingerprint then
         if widget then widget:destroy() end
-        widget = renderRow(body, projected, nextOptions, density)
+        widget = renderRow(body, projected, nextOptions, density, rowIndex)
       end
       retained[key] = widget
     end

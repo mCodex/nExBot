@@ -61,7 +61,6 @@ end
 loadDeferred()
 
 TargetBot = {} -- global namespace
-importStyle("/targetbot/creature_editor.otui")
 
 -- Load TargetBot core module first (shared utilities)
 dofile("/targetbot/core.lua")

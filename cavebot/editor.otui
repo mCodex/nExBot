@@ -19,10 +19,22 @@ CaveBotEditorRow < Panel
     type: horizontalBox
 
   $hover:
-    background-color: #35393c
+    background-color: #3b4145
 
   $focus:
-    background-color: #4a5054
+    background-color: #4a4333
+
+CaveBotEditorCloseButton < Button
+  size: 14 14
+  anchors.top: parent.top
+  anchors.right: parent.right
+  margin-top: -30
+  margin-right: -10
+  text: X
+  font: verdana-11px-rounded
+  text-align: center
+  text-auto-resize: false
+  tooltip: Close
 
 CaveBotEditorPanel < MainWindow
   id: cavebotEditor
@@ -30,6 +42,9 @@ CaveBotEditorPanel < MainWindow
   size: 520 460
   visible: false
   @onEscape: self:hide()
+
+  CaveBotEditorCloseButton
+    id: close
 
   Label
     id: pos

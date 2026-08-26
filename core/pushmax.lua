@@ -17,48 +17,12 @@ PushMax = {
   isOn = function() return config.enabled == true end,
   setOn = function() config.enabled = true end,
   setOff = function() config.enabled = false end,
-  toggle = function() config.enabled = not config.enabled return config.enabled end
+  toggle = function() config.enabled = not config.enabled return config.enabled end,
+  getConfig = function() return config end,
+  setConfig = function(key, value) config[key] = value end
 }
 
-rootWidget = g_ui.getRootWidget()
-if rootWidget then
-  pushWindow = UI.createWindow('PushMaxWindow', rootWidget)
-  pushWindow:hide()
-
-  PushMax.show = function()
-    pushWindow:show()
-    pushWindow:raise()
-    pushWindow:focus()
-  end
-
-  pushWindow.closeButton.onClick = function(widget)
-    pushWindow:hide()
-  end
-
-  local updateDelayText = function()
-    pushWindow.delayText:setText("Push Delay: ".. config.pushDelay)
-  end
-  updateDelayText()
-  pushWindow.delay.onValueChange = function(scroll, value)
-    config.pushDelay = value
-    updateDelayText()
-  end
-  pushWindow.delay:setValue(config.pushDelay)
-
-  pushWindow.runeId.onItemChange = function(widget)
-    config.pushMaxRuneId = widget:getItemId()
-  end
-  pushWindow.runeId:setItemId(config.pushMaxRuneId)
-  pushWindow.mwallId.onItemChange = function(widget)
-    config.mwallBlockId = widget:getItemId()
-  end
-  pushWindow.mwallId:setItemId(config.mwallBlockId)
-
-  pushWindow.hotkey.onTextChange = function(widget, text)
-    config.pushMaxKey = text
-  end
-  pushWindow.hotkey:setText(config.pushMaxKey)
-end
+PushMax.show = function() end
 
 -- variables for config
 local fieldTable = {2118, 105, 2122}

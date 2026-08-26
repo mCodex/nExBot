@@ -280,7 +280,7 @@ end
 -- Player events
 local _playerMoveLastEmit = 0
 local PLAYER_MOVE_THROTTLE_MS = 80  -- Don't emit more than 12x/sec
-local _zCooldown = 150  -- ponytail: duplicated from zchange_guard.lua
+local _zCooldown = (ZChangeGuard and ZChangeGuard.zCooldownMs) or 150
 if onPlayerPositionChange then
   onPlayerPositionChange(function(newPos, oldPos)
     if newPos and oldPos and newPos.z ~= oldPos.z then

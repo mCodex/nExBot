@@ -1,4 +1,5 @@
--- Target workflow controls: creature profile, target rule table, paging.
+-- Target workflow controls: creature profile, target rule table, paging,
+-- inline creature add/edit form.
 
 local Components = nExBot and nExBot.UI and nExBot.UI["ui.components.components"]
 local DataTable = nExBot and nExBot.UI and nExBot.UI.DataTable
@@ -6,6 +7,11 @@ local Shared = nExBot and nExBot.UI and nExBot.UI["ui.modules.workflows.shared"]
 
 local TargetPage = {}
 local targetPage = 1
+local editingEntry = nil
+
+local function trim(s)
+  return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
 
 function TargetPage.projectTargetRule(widget, index, selected)
   local value = widget.value or {}
@@ -18,6 +24,51 @@ function TargetPage.projectTargetRule(widget, index, selected)
     status = selected and "ACTIVE" or "INFO",
     statusText = selected and "Selected" or "Configured",
   }
+end
+
+local function renderEditor(content, creatures, shell)
+  local stillPresent = false
+  for _, widget in ipairs(creatures:getChildren()) do
+    if widget == editingEntry then stillPresent = true break end
+  end
+  if not stillPresent then editingEntry = nil end
+
+  local current = editingEntry and editingEntry.value or {}
+  Components.sectionHeader(content, { title = editingEntry and "Edit creature" or "Add creature" })
+  local nameRow = Components.inputRow(content, { id = "creatureName", label = "Creature name", value = current.name or "" })
+  local enabledRow = Components.toggleRow(content, { id = "creatureEnabled", label = "Enabled", value = current.enabled ~= false })
+  local priorityRow = Components.inputRow(content, { id = "creaturePriority", label = "Priority", value = tostring(current.priority or 1) })
+  local dangerRow = Components.inputRow(content, { id = "creatureDanger", label = "Danger", value = tostring(current.danger or 1) })
+  local distanceRow = Components.inputRow(content, { id = "creatureMaxDistance", label = "Max distance", value = tostring(current.maxDistance or 10) })
+  local feedback = Components.label(content, { id = "creatureFeedback", text = "", textStyle = "helper" })
+  Components.button(content, {
+    id = "saveCreature", text = editingEntry and "Save changes" or "Add creature",
+    onClick = function()
+      local data = {
+        name = trim(nameRow:getInput():getText()),
+        enabled = enabledRow:getSwitch():isChecked(),
+        priority = tonumber(priorityRow:getInput():getText()) or 1,
+        danger = tonumber(dangerRow:getInput():getText()) or 1,
+        maxDistance = tonumber(distanceRow:getInput():getText()) or 10,
+      }
+      if data.name == "" then
+        feedback:setText("Enter a creature name.")
+        return
+      end
+      if editingEntry then
+        data.entry = editingEntry
+        if TargetBot.saveCreature then TargetBot.saveCreature(data) end
+      elseif TargetBot.addCreature then
+        TargetBot.addCreature(data)
+      end
+      editingEntry = nil
+      Shared.rerender(shell)
+    end,
+  })
+  Components.button(content, { id = "cancelCreatureEdit", text = "Cancel", variant = "ghost", onClick = function()
+    editingEntry = nil
+    Shared.rerender(shell)
+  end })
 end
 
 function TargetPage.render(content, shell)
@@ -94,14 +145,20 @@ function TargetPage.render(content, shell)
 
   local actions = Shared.actionBar(content)
   Shared.actionButton(actions, { id = "addTarget", text = "Add Target", onClick = function()
-    if TargetBot.addCreature then TargetBot.addCreature() end
+    editingEntry = nil
+    Shared.rerender(shell)
   end })
   Shared.actionButton(actions, { id = "editTarget", text = "Edit", onClick = function()
-    if creatures:getFocusedChild() and TargetBot.showCreatureEditor then TargetBot.showCreatureEditor() end
+    if creatures:getFocusedChild() then
+      editingEntry = creatures:getFocusedChild()
+      Shared.rerender(shell)
+    end
   end })
   Shared.actionButton(actions, { id = "removeTarget", text = "Remove", variant = "danger", onClick = function()
     if creatures:getFocusedChild() and TargetBot.removeSelectedCreature then TargetBot.removeSelectedCreature(); Shared.rerender(shell) end
   end })
+
+  renderEditor(content, creatures, shell)
 end
 
 if nExBot then

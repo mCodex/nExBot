@@ -136,6 +136,7 @@ function ZChangeGuard.checkTileBurst()
 end
 
 -- Export for global access
+ZChangeGuard.zCooldownMs = _zCooldown
 nExBot = nExBot or {}
 nExBot.zChanging = ZChangeGuard.isBlocked
 nExBot.tileThrottled = ZChangeGuard.isTileThrottled

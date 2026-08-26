@@ -56,6 +56,13 @@ do
     "ui.modules.profiles",
     "ui.modules.settings",
     "ui.modules.diagnostics",
+    "ui.modules.analyzer",
+    "ui.modules.combo",
+    "ui.modules.alarms",
+    "ui.modules.pushmax",
+    "ui.modules.extras",
+    "ui.modules.depositer",
+    "ui.modules.containers",
   }
 
   for i = 1, #modules do
