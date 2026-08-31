@@ -68,16 +68,31 @@ function bridge.new(opts)
 end
 
 --- Drive one navigation tick from the caller's run loop.
--- @param playerPos table
+-- @param arg table — either a bare position {x,y,z} (legacy callers) or a
+--   context table { playerPos=, combatActive=, preempted=, mapGeneration= }.
+--   The context form lets the session honor combat/manual preemption so it
+--   never dispatches movement while the bot (or user) is moving/attacking.
 -- @return NavigationResult
-function bridge:tick(playerPos)
-  local ctx = {
-    playerPos = playerPos,
-    mapGeneration = self.port.world and self.port.world.getMapGeneration
-      and self.port.world.getMapGeneration() or nil,
-    nowMs = self.port.time and self.port.time.nowMs and self.port.time.nowMs() or 0,
-    combatActive = false,
-  }
+function bridge:tick(arg)
+  local ctx
+  local function base()
+    local playerPos = type(arg) == "table" and arg.playerPos or arg
+    return {
+      playerPos = playerPos,
+      mapGeneration = self.port.world and self.port.world.getMapGeneration
+        and self.port.world.getMapGeneration() or nil,
+      nowMs = self.port.time and self.port.time.nowMs and self.port.time.nowMs() or 0,
+      combatActive = false,
+      preempted = false,
+    }
+  end
+  if type(arg) == "table" and arg.playerPos then
+    ctx = base()
+    ctx.combatActive = arg.combatActive or false
+    ctx.preempted = arg.preempted or false
+  else
+    ctx = base()
+  end
   return self.session:tick(ctx)
 end
 

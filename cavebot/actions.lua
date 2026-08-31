@@ -6,6 +6,11 @@ local getClientVersion = nExBot.Shared.getClientVersion
 local WaypointPolicy = (nExBot and nExBot.Nav and nExBot.Nav["cavebot.waypoint_policy"])
   or require("cavebot.waypoint_policy")
 
+-- ponytail: session driver maps NavigationResult -> goto callback contract;
+-- load once via the same pattern as waypoint_policy above.
+local SessionDriver = (nExBot and nExBot.Nav and nExBot.Nav["cavebot.session_driver"])
+  or require("cavebot.session_driver")
+
 local oldTibia = getClientVersion() < 960
 
 -- Throttle table for unknown floor-change minimap color warnings (once per tile+color)
@@ -629,6 +634,36 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
   if retries > 2 then
     walkParams.ignoreFields = true
+  end
+
+  -- ========== SESSION-TICK GPS PATH (kill-switch: sessionNav, GPS guide) ==========
+  -- Drives movement through the strict S9 session (route graph + ack'd steps).
+  -- Maps NavigationResult back onto the callback contract; the legacy walkTo
+  -- below remains the fallback while the flag is OFF or no route is built.
+  if CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("sessionNav")
+     and SessionDriver and nExBot.Navigation
+     and SessionDriver.shouldUse(nExBot.Navigation) then
+    -- Never dispatch movement while attacking (combat owns movement).
+    local attacking = (Client and Client.isAttacking and Client.isAttacking())
+      or (g_game and g_game.isAttacking and g_game.isAttacking()) or false
+    local walk = SessionDriver.tickAndMap(nExBot.Navigation, playerPos, {
+      preempted = attacking,
+      combatActive = attacking,
+    })
+    if walk == "walking" or walk == "nudge" then
+      if CaveBot.setCurrentWaypointTarget then
+        CaveBot.setCurrentWaypointTarget(destPos, precision)
+      end
+      return "walking"
+    elseif walk == "retry" then
+      CaveBot.delay(75)
+      return "retry"
+    elseif walk == true then
+      CaveBot.clearWaypointTarget()
+      return true
+    else
+      return false, true
+    end
   end
 
   -- ========== ATTEMPT WALK ==========
