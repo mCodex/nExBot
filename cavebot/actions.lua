@@ -3,6 +3,8 @@ nExBot.lastLabel = ""
 
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
+local WaypointPolicy = (nExBot and nExBot.Nav and nExBot.Nav["cavebot.waypoint_policy"])
+  or require("cavebot.waypoint_policy")
 
 local oldTibia = getClientVersion() < 960
 
@@ -487,6 +489,23 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     end
   end
 
+  local classification = WaypointPolicy.classify({
+    position = destPos,
+    isFloorChange = isFloorChange,
+  }, {
+    playerPosition = playerPos,
+    destinationPosition = destPos,
+    isFloorChange = isFloorChange,
+    adjacentFloorChange = CaveBot.isNearFloorChangeTile and CaveBot.isNearFloorChangeTile(destPos),
+  })
+  local approach = WaypointPolicy.forApproach({
+    classification = classification,
+    precision = precision,
+    maxSteps = maxDist,
+    distance = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y),
+    floorObserved = isFloorChange and playerPos.z == expectedFloorAfterChange,
+  })
+
   -- ========== FLOOR CHECK ==========
   -- Non-floor-change WPs on a different floor → instantFail.
   -- Floor-change WPs on a different floor → allowed (walk there, wait for Z change).
@@ -510,7 +529,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- ========== ARRIVAL PRECISION ==========
   -- Adaptive: scale precision by distance to next goto WP to prevent zone overlap.
   -- Floor-change WPs keep precision=0 (must step on the exact tile).
-  if not isFloorChange and precision > 0 then
+  if classification == "normal" and precision > 0 then
     local currentAction = ui and ui.list and ui.list:getFocusedChild()
     local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
     if waypointIdx then
@@ -527,15 +546,16 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   local dist  = math.max(distX, distY)
 
   -- ========== ARRIVAL CHECK ==========
-  if distX <= precision and distY <= precision then
-    CaveBot.clearWaypointTarget()
+  if distX <= approach.arrivalPrecision and distY <= approach.arrivalPrecision then
     if isFloorChange then
       if playerPos.z == expectedFloorAfterChange then
+        CaveBot.clearWaypointTarget()
         return true
       end
       CaveBot.delay(50)
       return "retry"
     end
+    CaveBot.clearWaypointTarget()
     return true
   end
 
@@ -591,7 +611,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Walk precision matches arrival precision minus 1: A* stops at the zone
   -- boundary rather than overshooting to the center.
   local walkParams = {
-    precision = isFloorChange and 0 or math.max(0, precision - 1),
+    precision = isFloorChange and 0 or math.max(0, approach.arrivalPrecision - 1),
     allowFloorChange = isFloorChange
   }
   if retries > 1 then
