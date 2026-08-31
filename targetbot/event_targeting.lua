@@ -849,6 +849,57 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   end
 end
 
+-- Chain-kill: after a kill, immediately re-select the best remaining reachable,
+-- in-range, configured monster instead of resuming CaveBot past the survivors.
+-- Mirrors processCreature's filter but bypasses the creature-cache staleness
+-- gate (survivors are recent and would otherwise be skipped), so it can re-pick
+-- them at a combat boundary. Returns true if a new target was acquired.
+function EventTargeting.TargetAcquisition.reacquireBestRemaining()
+  if not canAttack() then return false end
+  updatePlayerRef()
+  if not player then return false end
+  local playerPos = SC.getPosition(player)
+  if not playerPos then return false end
+
+  local _, creatures = EventTargeting.refreshLiveCount()
+  if not creatures or #creatures == 0 then return false end
+
+  local best, bestPriority = nil, -1
+  for i = 1, #creatures do
+    local creature = creatures[i]
+    if creature and not SC.isDead(creature) and EventTargeting.TargetAcquisition.isValidTarget(creature) then
+      local cpos = SC.getPosition(creature)
+      if cpos and cpos.z == playerPos.z then
+        local dist = chebyshev(playerPos, cpos)
+        if dist <= CONST.DETECTION_RANGE then
+          local path, reachable = nil, false
+          if TargetReachability and TargetReachability.evaluate then
+            local ok, evaluated = pcall(TargetReachability.evaluate, creature, { source = "cavebot_chain_kill" })
+            if ok and evaluated then
+              path = evaluated.path
+              reachable = evaluated.attackable
+            end
+          else
+            local _, _, isReachable = EventTargeting.PathValidator.validate(playerPos, cpos)
+            reachable = isReachable
+          end
+          if reachable then
+            local priority = EventTargeting.TargetAcquisition.calculatePriority(creature, path)
+            if priority > bestPriority then
+              bestPriority = priority
+              best = creature
+            end
+          end
+        end
+      end
+    end
+  end
+
+  if not best then return false end
+  EventTargeting.TargetAcquisition.acquireTarget(best, nil, bestPriority)
+  return true
+end
+
 -- Process pending targets (called from macro)
 function EventTargeting.TargetAcquisition.processPending()
   -- CRITICAL: Do not process if TargetBot is disabled or explicitly turned off
@@ -1005,12 +1056,22 @@ function EventTargeting.CombatCoordinator.checkCombatStatus()
   local currentTarget = ClientService.getAttackingCreature()
   
   if not currentTarget or currentTarget:isDead() then
-    -- Combat ended
+    -- Combat ended: clear the slot, then chain-kill the best remaining monster
+    -- if one is still in range, otherwise resume CaveBot.
     if targetState.combatActive then
-      EventTargeting.CombatCoordinator.resumeCaveBot()
       targetState.currentTarget = nil
       targetState.currentTargetId = nil
-      
+
+      if EventTargeting.TargetAcquisition.reacquireBestRemaining() then
+        -- New target acquired (acquireTarget re-paused CaveBot + set combatActive).
+        if EventBus then
+          EventBus.emit("targeting/combat_end")
+        end
+        return
+      end
+
+      EventTargeting.CombatCoordinator.resumeCaveBot()
+
       -- Emit combat end event
       if EventBus then
         EventBus.emit("targeting/combat_end")

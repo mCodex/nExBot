@@ -147,8 +147,14 @@ end
 local FAIL_RETRY_MS = 500
 local _failCache = {}  -- "x:y:z:maxSteps" -> timestamp of last failed search
 
+-- Block classification for anti-collision: distinguish an unreachable tile
+-- (static wall/prop/FC) from a temporarily creature-blocked one. The caller
+-- (goto) uses this to back off against a wall instead of chasing/attacking
+-- through it, and to keep relaxing creature-collision for real creature blocks.
+local BLOCK_NONE, BLOCK_CREATURE, BLOCK_STATIC = "none", "creature", "static"
+
 local function findWalkablePath(playerPos, dest, opts)
-  if PS() == NOOP_PS then return nil end
+  if PS() == NOOP_PS then return nil, false, BLOCK_STATIC end
   -- 1) Try PathStrategy cursor cache
   if PS().isCursorValid and PS().isCursorValid(dest) then
     local cursor = PS().getCursor()
@@ -157,7 +163,7 @@ local function findWalkablePath(playerPos, dest, opts)
       local idx  = cursor.idx
       if path and idx and idx <= #path then
         if resolveWalkableDir(path[idx], not opts.disableSmoothing) then
-          return path, false
+          return path, false, BLOCK_NONE
         end
         -- First step blocked -> cache is stale
         PS().resetCursor()
@@ -174,7 +180,9 @@ local function findWalkablePath(playerPos, dest, opts)
   local failedAt = _failCache[failKey]
   local t = now
   if failedAt and (t - failedAt) < FAIL_RETRY_MS then
-    return nil, false
+    -- Preserve the last known block class so escalation keeps a consistent
+    -- policy across the cooldown (do not flip to chase on a static wall).
+    return nil, false, _failCache[failKey .. ":class"] or BLOCK_STATIC
   end
 
   -- 2) STRICT pathfinding (no ignoreNonPathable -> won't path through walls)
@@ -186,14 +194,22 @@ local function findWalkablePath(playerPos, dest, opts)
   }
   local path = PS().findPath(playerPos, dest, strictOpts)
 
-  -- 2b) Strict + ignoreCreatures
+  -- 2b) Strict + ignoreCreatures: clears a creature block; a path that still
+  -- fails here is blocked by a STATIC feature (wall/prop/FC), never a creature.
+  local blockClass = BLOCK_NONE
   if not path then
     strictOpts.ignoreCreatures = true
     path = PS().findPath(playerPos, dest, strictOpts)
+    if not path then
+      blockClass = BLOCK_STATIC
+    else
+      blockClass = BLOCK_CREATURE
+    end
   end
 
   if path and #path > 0 and resolveWalkableDir(path[1], not opts.disableSmoothing) then
     _failCache[failKey] = nil
+    _failCache[failKey .. ":class"] = nil
     PS().setCursor(path, dest)
     if not opts.disableSmoothing then
       local sm = PS().smoothPath(path, playerPos)
@@ -203,12 +219,13 @@ local function findWalkablePath(playerPos, dest, opts)
         if cur then cur.path = path end
       end
     end
-    return path, false
+    return path, false, BLOCK_NONE
   end
 
   -- No walkable path found
   _failCache[failKey] = t
-  return nil, false
+  _failCache[failKey .. ":class"] = blockClass
+  return nil, false, blockClass
 end
 
 -- DISPATCH: KEYBOARD STEP vs AUTOWALK
@@ -399,7 +416,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
   end
 
   -- Find a path with first-step validation
-  local path, wasRelaxed = findWalkablePath(playerPos, dest, {
+  local path, wasRelaxed, blockClass = findWalkablePath(playerPos, dest, {
     maxSteps        = approach.maxSteps,
     ignoreCreatures = ignoreCreatures,
     ignoreFields    = ignoreFields,
@@ -408,7 +425,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
   })
 
   if not path then
-    return false
+    return false, blockClass or BLOCK_STATIC
   end
 
   -- Count safe steps before first FC tile
@@ -418,14 +435,14 @@ CaveBot.walkTo = function(dest, maxDist, params)
 
   if safeSteps == 0 then
     PS().resetCursor()
-    return false
+    return false, blockClass or BLOCK_STATIC
   end
 
   local remaining   = #path - curIdx + 1
   local stepsToWalk = math.min(safeSteps, remaining)
   if stepsToWalk <= 0 then
     PS().resetCursor()
-    return false
+    return false, blockClass or BLOCK_STATIC
   end
 
   local curObj = PS().getCursor()

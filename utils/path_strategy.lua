@@ -237,15 +237,17 @@ function PathStrategy.rawStepDuration(diagonal)
   return pu and pu.getStepDuration(diagonal) or (diagonal and 280 or 200)
 end
 
--- DIRECTION GUARD (sole anti-zigzag system — replaces all others)
--- 3-entry ring buffer, 150ms opposite rejection, dampening after 3 rapid changes
+-- DIRECTION ANTI-ZIGZAG (simplified)
+-- The A* path is already the smoothest route; the client's native autowalk and
+-- smoothPath already emit diagonal merges. The old dampener HELD the previous
+-- direction for 200ms on every turn, which stalled the char at corners (lag)
+-- and then snapped to a diagonal (rubber-band). That hold is removed: we just
+-- track the last direction so siblings (e.g. smoothPath) can read it. "Linear
+-- and smooth" comes from following the path, not from holding a stale heading.
 
-local _dirRing = {nil, nil, nil}  -- 3 most recent directions
+local _dirRing = {nil, nil, nil}
 local _dirRingHead = 1
 local _dirRingSize = 0
-local _dirLastTs = 0
-local _dirRapidChanges = 0
-local _dirDampenUntil = 0         -- timestamp: hold direction until this time
 
 -- DRY: delegate to PathUtils (SSoT for direction relationship checks)
 -- Lazy wrappers since PathUtils may not be loaded yet at file scope
@@ -261,64 +263,15 @@ function PathStrategy.isOpposite(a, b)
   return pu and pu.areOppositeDirections and pu.areOppositeDirections(a, b) or false
 end
 
---- Update anti-zigzag state and return smoothed direction.
+--- Update anti-zigzag state and return the direction (no holding/dampening).
 -- @param dir       int  Direction constant
--- @param forceChange bool  When true, bypass dampening (used near FC tiles)
+-- @param forceChange bool  Accepted, retained for API compatibility
 function PathStrategy.smoothDirection(dir, forceChange)
   if not dir then return dir end
-  local t = tick()
-
-  if forceChange then
-    -- Force: accept direction, reset state
-    _dirRing[_dirRingHead] = dir
-    _dirRingHead = (_dirRingHead % 3) + 1
-    _dirRingSize = math.min(_dirRingSize + 1, 3)
-    _dirLastTs = t
-    _dirRapidChanges = 0
-    _dirDampenUntil = 0
-    return dir
-  end
-
-  -- If dampening is active, hold the last accepted direction
-  if t < _dirDampenUntil then
-    local lastAccepted = _dirRing[((_dirRingHead - 2) % 3) + 1]
-    return lastAccepted or dir
-  end
-
-  local lastDir = _dirRingSize > 0 and _dirRing[((_dirRingHead - 2) % 3) + 1] or nil
-
-  -- Same direction — no change needed
-  if lastDir and dir == lastDir then
-    _dirRapidChanges = math.max(0, _dirRapidChanges - 1)
-    return dir
-  end
-
-  -- Opposite direction rejection: if last direction was set <150ms ago, reject
-  if lastDir and PathStrategy.isOpposite(lastDir, dir) then
-    if (t - _dirLastTs) < 150 then
-      return lastDir
-    end
-  end
-
-  -- Track rapid direction changes
-  if lastDir and not PathStrategy.isSimilar(lastDir, dir) then
-    _dirRapidChanges = _dirRapidChanges + 1
-  else
-    _dirRapidChanges = math.max(0, _dirRapidChanges - 1)
-  end
-
-  -- If 3+ rapid changes, dampen for one step duration (~200ms)
-  if _dirRapidChanges >= 3 then
-    _dirRapidChanges = 0
-    _dirDampenUntil = t + 200
-    return lastDir or dir
-  end
-
-  -- Accept the new direction
+  -- Record the direction in the ring (ring history kept for amortized state)
   _dirRing[_dirRingHead] = dir
   _dirRingHead = (_dirRingHead % 3) + 1
   _dirRingSize = math.min(_dirRingSize + 1, 3)
-  _dirLastTs = t
   return dir
 end
 
@@ -326,9 +279,6 @@ function PathStrategy.resetDirectionState()
   _dirRing = {nil, nil, nil}
   _dirRingHead = 1
   _dirRingSize = 0
-  _dirLastTs = 0
-  _dirRapidChanges = 0
-  _dirDampenUntil = 0
 end
 
 -- PATH SMOOTHING — zigzag-to-diagonal conversion

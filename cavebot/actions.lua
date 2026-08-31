@@ -476,7 +476,9 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     precision = 0
     if minimapColor == 210 or minimapColor == 211 then
       expectedFloorAfterChange = destPos.z - 1
-    elseif minimapColor == 212 or minimapColor == 213 then
+    elseif minimapColor == 212 or minimapColor == 213 or minimapColor == 129 then
+      -- 212/213: rope spot + ladder (go down). 129: pit/hole rendered dark —
+      -- a floor-change hole always leads DOWN (fall/jump down), never up.
       expectedFloorAfterChange = destPos.z + 1
     end
     if expectedFloorAfterChange == nil then
@@ -618,6 +620,10 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     precision = isFloorChange and 0 or math.max(0, approach.arrivalPrecision - 1),
     allowFloorChange = isFloorChange
   }
+  -- Creep/field escalation is safe: it relaxes creature/field collision, never
+  -- wall walkability (no ignoreNonPathable), so it cannot path through a wall.
+  -- Whether to actually chase an obstacle is decided AFTER the walk fails,
+  -- based on the static-vs-creature block class.
   if retries > 1 then
     walkParams.ignoreCreatures = true
   end
@@ -626,10 +632,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
 
   -- ========== ATTEMPT WALK ==========
-  -- Walk directly to destPos. The A* pathfinder computes optimal smooth paths
-  -- around obstacles. No lookahead target needed — smooth movement comes from
-  -- the widened arrival precision (player advances to next WP before stopping).
-  local walkResult = CaveBot.walkTo(destPos, maxDist, walkParams)
+  local walkResult, walkBlockClass = CaveBot.walkTo(destPos, maxDist, walkParams)
   if walkResult == "nudge" then
     -- Nudge only — count as retry so progressive strategies activate
     if CaveBot.setCurrentWaypointTarget then
@@ -650,9 +653,34 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return "walking"
   end
 
-  -- Walk failed — retry with progressive escalation
-  if CaveBot.clearWalkingState then
-    CaveBot.clearWalkingState()
+  -- Walk failed.
+  if CaveBot.clearWalkingState then CaveBot.clearWalkingState() end
+
+  -- Anti-collision: a STATIC block means the tile is (currently) unreachable —
+  -- no amount of creature/field escalation or chasing will clear a wall. Back
+  -- off with an incremental bounded delay so the bot stops hammering into the
+  -- obstacle, and wait for the world to change (door, creature moving aside,
+  -- or the user re-routing) rather than trying to bypass it.
+  if walkBlockClass == "static" then
+    local backoff = math.min(250 + retries * 150, 1200)
+    CaveBot.delay(backoff)
+    return "retry"
+  end
+
+  -- Creature/unknown block — retry with progressive escalation (chase/blast
+  -- a real creature in the way is legitimate; a wall is not).
+  if retries > 2 then
+    local blocker = getBlockingMonster(playerPos, destPos, maxDist)
+    if blocker then
+      local Client = getClient()
+      local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+      if currentTarget ~= blocker and TargetBot and TargetBot.requestAttack then
+        TargetBot.requestAttack(blocker, "CaveBotBlocker")
+      end
+      if MovementCoordinator then MovementCoordinator.setChaseMode(true) end
+      CaveBot.delay(100)
+      return "retry"
+    end
   end
   return "retry"
 end)
