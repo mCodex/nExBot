@@ -99,8 +99,7 @@ end
 -- IMPROVED: Increased range for better monster detection
 -- This prevents the bot from leaving monsters behind when moving to waypoints
 -- ═══════════════════════════════════════════════════════════════════════════
-local MONSTER_DETECTION_RANGE = 14  -- INCREASED from 10 to 14 (covers full visible screen)
-local MONSTER_TARGETING_RANGE = 12  -- INCREASED from 10 to 12 (targeting range)
+local MONSTER_DETECTION_RANGE = 14  -- Shared detection and targeting range.
 
 local dangerValue = 0
 local looterStatus = ""
@@ -515,6 +514,48 @@ end
 TargetBot.isCaveBotActionAllowed = function()
   return cavebotAllowance > now
 end
+
+local function getOwnedTarget()
+  for _, owner in ipairs({ AttackFSM, AttackStateMachine }) do
+    if owner and owner.getTarget then
+      local ok, target = pcall(owner.getTarget)
+      if ok and target then return target end
+    end
+  end
+  return nil
+end
+
+local function isLiveConfiguredTarget(creature)
+  if not creature or SC.isDead(creature) or (SC.isRemoved and SC.isRemoved(creature)) then return false end
+  local configs = TargetBot.Creature and TargetBot.Creature.getConfigs
+  local ok, matches = configs and pcall(configs, creature)
+  return ok and matches and matches[1] ~= nil
+end
+
+local function hasFreshConfiguredTarget()
+  local creatures = BotCore.Creatures.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE) or {}
+  for _, creature in ipairs(creatures) do
+    if isLiveConfiguredTarget(creature) then return true end
+  end
+  return false
+end
+
+TargetBot.CombatOwnership = {
+  getTarget = function()
+    return getOwnedTarget()
+  end,
+  hasLiveConfiguredTarget = function()
+    return isLiveConfiguredTarget(getOwnedTarget())
+  end,
+  canReleaseTarget = function()
+    return cavebotAllowance > now and not TargetBot.CombatOwnership.hasLiveConfiguredTarget()
+  end,
+  isBlockingRoute = function()
+    if not TargetBot.isOn() then return false end
+    if TargetBot.CombatOwnership.hasLiveConfiguredTarget() then return true end
+    return hasFreshConfiguredTarget() and not TargetBot.CombatOwnership.canReleaseTarget()
+  end,
+}
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- MONSTER DETECTION FOR CAVEBOT (v3.0)

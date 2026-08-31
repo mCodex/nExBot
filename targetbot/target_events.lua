@@ -102,7 +102,8 @@ if EventBus then
         if _combatEndPending then return end
         _combatEndPending = schedule(COMBAT_END_GRACE_MS, function()
           _combatEndPending = nil
-          if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then return end
+          local ownership = TargetBot.CombatOwnership
+          if ownership and (ownership.getTarget() or ownership.isBlockingRoute()) then return end
           if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", false) end
           pcall(function() EventBus.emit("targetbot/combat_end") end)
           lastCombatTargetId = nil

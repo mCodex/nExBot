@@ -672,12 +672,12 @@ end
 
 -- Cache TargetBot function references (avoid repeated table lookups)
 local targetBotIsActive = nil
-local targetBotIsCaveBotAllowed = nil
+local combatOwnershipBlocksRoute = nil
 
 local function initTargetBotCache()
   if TargetBot then
     targetBotIsActive = TargetBot.isActive
-    targetBotIsCaveBotAllowed = TargetBot.isCaveBotActionAllowed
+    combatOwnershipBlocksRoute = TargetBot.CombatOwnership and TargetBot.CombatOwnership.isBlockingRoute
   end
 end
 
@@ -797,13 +797,13 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
   -- Check TargetBot allows CaveBot action (cached function refs)
   local targetBotBlocking = false
   if targetBotIsActive and targetBotIsActive() then
-    if targetBotIsCaveBotAllowed and not targetBotIsCaveBotAllowed() then
+    if combatOwnershipBlocksRoute and combatOwnershipBlocksRoute() then
       safeResetWalking()
       pauseIntelligenceRoute("targetbot")
       WaypointEngine.wasTargetBotBlocking = true
       return
     end
-    
+
     -- PULL SYSTEM PAUSE: If smartPull is active, pause waypoint walking
     if TargetBot.smartPullActive then
       safeResetWalking()
@@ -812,38 +812,6 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
       return
     end
     
-    -- MONSTER DETECTION: Pause for targetable monsters on screen
-    -- Defer to TargetBot's cavebotAllowance: when TargetBot has evaluated all
-    -- monsters and explicitly allowed CaveBot (e.g., all targets unreachable),
-    -- respect that decision instead of blocking based on passive monster detection.
-    if TargetBot.shouldWaitForMonsters and TargetBot.shouldWaitForMonsters() then
-      if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
-        safeResetWalking()
-        pauseIntelligenceRoute("monsters")
-        WaypointEngine.wasTargetBotBlocking = true
-        return
-      end
-    end
-
-    -- ASM BACKUP: block CaveBot while attack is in progress
-    if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
-      if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
-        safeResetWalking()
-        pauseIntelligenceRoute("attack")
-        WaypointEngine.wasTargetBotBlocking = true
-        return
-      end
-    end
-    
-    -- BACKUP CHECK: If EventTargeting reports combat active, also pause
-    if EventTargeting and EventTargeting.isCombatActive and EventTargeting.isCombatActive() then
-      if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
-        safeResetWalking()
-        pauseIntelligenceRoute("combat")
-        WaypointEngine.wasTargetBotBlocking = true
-        return
-      end
-    end
   end
 
   local intelligenceRoute = nExBot and nExBot.Intelligence and nExBot.Intelligence.route
