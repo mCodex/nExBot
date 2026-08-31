@@ -1,11 +1,12 @@
 local Components = nExBot.UI["ui.components.components"]
 local DataTable = nExBot.UI.DataTable
 local Resolver = nExBot.UI.VisualAssetResolver
+local Shared = nExBot.UI["ui.modules.workflows.shared"] or (type(require) == "function" and require("ui.modules.workflows.shared"))
 
 local ConditionsPage = {}
 
 local function rerender(shell)
-  shell:defer(function() if shell and shell.renderCurrent then shell:renderCurrent() end end, 0)
+  Shared.rerender(shell)
 end
 
 local CURE_CONDITIONS = {

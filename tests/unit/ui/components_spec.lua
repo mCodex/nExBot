@@ -109,6 +109,21 @@ describe("UI components", function()
     assert.is_truthy(t:getInput())
   end)
 
+  it("rerenders through a deferred shared callback", function()
+    local Shared = require("ui.modules.workflows.shared")
+    local called = 0
+    local parent = {
+      defer = function(_, callback, delay)
+        assert.are_equal(0, delay)
+        callback()
+      end,
+    }
+
+    Shared.rerender(parent, function() called = called + 1 end)
+
+    assert.are_equal(1, called)
+  end)
+
   it("listRow renders title, subtitle, badge, and actions", function()
     local row = Components.listRow(root, {
       title = "Dragon", subtitle = "Priority 900",

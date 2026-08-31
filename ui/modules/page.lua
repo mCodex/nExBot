@@ -32,7 +32,9 @@ local function resolveAction(action, content, shell)
         local warning = content:recursiveGetChildById("workflowActionError")
         if ok then
           if warning then warning:destroy() end
-          if shell and shell.renderCurrent then shell:renderCurrent() end
+          local shared = nExBot.UI["ui.modules.workflows.shared"]
+            or (type(require) == "function" and require("ui.modules.workflows.shared"))
+          shared.rerender(shell)
           return
         end
         local message = actionsDispatcher().userMessage(action.id, reason)

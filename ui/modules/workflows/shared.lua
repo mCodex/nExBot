@@ -34,16 +34,17 @@ function Shared.pageBounds(page, count)
   return page, pages, first, math.min(count, first + Shared.PAGE_SIZE - 1)
 end
 
-function Shared.rerender(shell)
-  if not shell or not shell.renderCurrent then return end
+function Shared.rerender(parent, renderFn)
+  if not parent or type(parent.defer) ~= "function" then return end
+  renderFn = renderFn or function()
+    if parent.renderCurrent then parent:renderCurrent() end
+  end
   -- Destroying the workspace content synchronously (e.g. from inside a
   -- ComboBox option-click, which is still unwinding its own popup-menu
   -- close logic) corrupts OTC's mouse-grab state and breaks all further
   -- clicks. Defer to the next tick so the triggering widget's own click
   -- handling finishes first.
-  shell:defer(function()
-    if shell.renderCurrent then shell:renderCurrent() end
-  end, 0)
+  parent:defer(renderFn, 0)
 end
 
 function Shared.actionBar(content)

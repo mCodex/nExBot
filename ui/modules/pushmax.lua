@@ -1,14 +1,12 @@
 local Components = nExBot.UI["ui.components.components"]
+local Shared = nExBot.UI["ui.modules.workflows.shared"] or (type(require) == "function" and require("ui.modules.workflows.shared"))
 
 local PushMaxPage = {}
 
 local DELAYS = { 1000, 1060, 1200, 1500, 2000 }
 
 local function rerender(shell)
-  if not shell or not shell.renderCurrent then return end
-  shell:defer(function()
-    if shell.renderCurrent then shell:renderCurrent() end
-  end, 0)
+  Shared.rerender(shell)
 end
 
 function PushMaxPage.render(shell, content)

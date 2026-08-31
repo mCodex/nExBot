@@ -1,6 +1,7 @@
 local Components = nExBot.UI["ui.components.components"]
 local DataTable = nExBot.UI.DataTable
 local Resolver = nExBot.UI.VisualAssetResolver
+local Shared = nExBot.UI["ui.modules.workflows.shared"] or (type(require) == "function" and require("ui.modules.workflows.shared"))
 
 local DropperPage = {}
 local selectedItemId
@@ -8,10 +9,7 @@ local selectedItemId
 local LABELS = { trash = "Drop", use = "Use", lowCap = "Low capacity" }
 
 local function rerender(shell)
-  if not shell or not shell.renderCurrent then return end
-  shell:defer(function()
-    if shell.renderCurrent then shell:renderCurrent() end
-  end, 0)
+  Shared.rerender(shell)
 end
 
 local function rows(shell, projection)

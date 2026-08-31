@@ -12,12 +12,13 @@ local function densityFor(parent, requested)
   return "standard"
 end
 
-local function renderRow(parent, projected, options, density, rowIndex)
+local function renderRow(parent, projected, options, density, rowIndex, widget)
   local row = projected.data
   local isOdd = rowIndex % 2 == 1
-  local widget = g_ui.createWidget(isOdd and "NexTableRowOdd" or "NexTableRow", parent)
+  widget = widget or g_ui.createWidget(isOdd and "NexTableRowOdd" or "NexTableRow", parent)
+  if widget.destroyChildren then widget:destroyChildren() end
   widget:setId((options.id or "table") .. "_" .. projected.key)
-  widget._rowFingerprint = tostring(row.revision or row.fingerprint or 0)
+  widget._rowFingerprint = projected.revision
 
   if row.itemId then
     local item = g_ui.createWidget("NexTableItem", widget)
@@ -95,11 +96,12 @@ function DataTable.create(parent, options)
     local retained = {}
     for rowIndex, projected in ipairs(model.rows) do
       local key = projected.key
-      local rowFingerprint = tostring(projected.data.revision or projected.data.fingerprint or 0)
+      local rowFingerprint = projected.revision
       local widget = widgets[key]
-      if not widget or widget._rowFingerprint ~= rowFingerprint then
-        if widget then widget:destroy() end
+      if not widget then
         widget = renderRow(body, projected, nextOptions, density, rowIndex)
+      elseif widget._rowFingerprint ~= rowFingerprint then
+        renderRow(body, projected, nextOptions, density, rowIndex, widget)
       end
       retained[key] = widget
     end

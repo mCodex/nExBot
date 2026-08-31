@@ -1,5 +1,6 @@
 local Components = nExBot.UI["ui.components.components"]
 local DataTable = nExBot.UI.DataTable
+local Shared = nExBot.UI["ui.modules.workflows.shared"] or (type(require) == "function" and require("ui.modules.workflows.shared"))
 
 local FriendPage = {}
 
@@ -10,7 +11,7 @@ local REASONS = {
 }
 
 local function rerender(shell)
-  shell:defer(function() if shell and shell.renderCurrent then shell:renderCurrent() end end, 0)
+  Shared.rerender(shell)
 end
 
 local VOCATIONS = { { "knights", "Knights" }, { "paladins", "Paladins" }, { "druids", "Druids" }, { "sorcerers", "Sorcerers" }, { "monks", "Monks" } }
