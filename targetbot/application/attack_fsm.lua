@@ -10,6 +10,7 @@ local S = {
   REPOSITIONING      = "REPOSITIONING",
   TEMPORARILY_BLOCKED = "TEMPORARILY_BLOCKED",
   RECOVERING_TARGET  = "RECOVERING_TARGET",
+  STALLED            = "STALLED",
   RELEASING          = "RELEASING",
 }
 
@@ -72,14 +73,21 @@ local st = {
   previous        = nil,
   enteredAt       = 0,
   generation      = 0,
+  connectionGeneration = 0,
 
   targetId        = nil,
+  selectedTarget  = nil,
   creature        = nil,
   hp              = 100,
   priority        = 0,
 
   lastCommandAt   = 0,
   lastConfirmedAt = 0,
+  commandSentAt   = 0,
+  clientTargetConfirmedAt = 0,
+  lastProgressAt  = 0,
+  recoveryAttempt = 0,
+  recoveryAttemptAt = 0,
   retries         = 0,
   currentTimeout  = 0,
 
@@ -130,13 +138,14 @@ local function gameTarget()
 end
 
 local function isConfirmedInternal()
+  if st.commandSentAt == 0 then return false end
   local gt = gameTarget()
   if not gt then return false end
   local gtId = cId(gt)
   return gtId ~= nil and gtId == st.targetId
 end
 
-local function sendAttack(creature)
+local function sendAttack(creature, forceDispatch)
   if not creature or cDead(creature) then return false end
   ensureDeps()
 
@@ -152,7 +161,7 @@ local function sendAttack(creature)
   local gt = gameTarget()
   if gt then
     local gtId = cId(gt)
-    if gtId and gtId == cId(creature) then
+    if gtId and gtId == cId(creature) and not forceDispatch then
       st.lastCommandAt = t
       return true
     end
@@ -161,13 +170,16 @@ local function sendAttack(creature)
   local ok = false
   local C = getClient()
   if C and C.attack then
-    ok = pcall(C.attack, creature)
+    local called, result = pcall(C.attack, creature)
+    ok = called and result ~= false
   elseif g_game and g_game.attack then
-    ok = pcall(g_game.attack, creature)
+    local called, result = pcall(g_game.attack, creature)
+    ok = called and result ~= false
   end
 
   if ok then
     st.lastCommandAt = t
+    st.commandSentAt = t
     st.stats.commands = st.stats.commands + 1
   end
   return ok
@@ -185,20 +197,32 @@ end
 
 local function clearTarget()
   st.creature    = nil
+  st.selectedTarget = nil
   st.targetId    = nil
   st.hp          = 100
   st.priority    = 0
   st.currentTimeout = 0
   st._pendingSwitch = nil
+  st.commandSentAt = 0
+  st.clientTargetConfirmedAt = 0
+  st.lastProgressAt = 0
+  st.recoveryAttempt = 0
+  st.recoveryAttemptAt = 0
 end
 
 local function setTarget(creature, priority, reason)
   st.creature    = creature
+  st.selectedTarget = creature
   st.targetId    = cId(creature)
   st.hp          = cHp(creature)
   st.priority    = priority or 0
   st.retries     = 0
   st.currentTimeout = 0
+  st.commandSentAt = 0
+  st.clientTargetConfirmedAt = 0
+  st.lastProgressAt = 0
+  st.recoveryAttempt = 0
+  st.recoveryAttemptAt = 0
   st._pendingSwitch = nil
   st.lastSwitchAt = nowMs()
   st.stats.switches = st.stats.switches + 1
@@ -246,15 +270,19 @@ local function handleAcquiring()
     return
   end
 
-  if sendAttack(st.creature) then
-    transition(S.ATTACKING, "attack_sent")
+  if st.currentTimeout > 0 and (nowMs() - st.enteredAt) < st.currentTimeout then return end
+
+  if sendAttack(st.creature) and isConfirmedInternal() then
+    st.clientTargetConfirmedAt = nowMs()
+    st.lastConfirmedAt = st.clientTargetConfirmedAt
+    st.lastProgressAt = st.clientTargetConfirmedAt
+    st.stats.confirms = st.stats.confirms + 1
+    transition(S.ATTACKING, "attack_confirmed")
   else
-    if commitmentBlocksRelease() then
-      transition(S.TEMPORARILY_BLOCKED, "attack_failed_committed")
-    else
-      clearTarget()
-      transition(S.IDLE, "attack_failed")
-    end
+    if st.currentTimeout == 0 then st.currentTimeout = 200 end
+    if (nowMs() - st.enteredAt) < st.currentTimeout then return end
+    st.enteredAt = nowMs()
+    st.currentTimeout = math.min(st.currentTimeout * 2, 3000)
   end
 end
 
@@ -267,8 +295,7 @@ local function handleAttacking()
   end
 
   if isConfirmedInternal() then
-    st.lastConfirmedAt = nowMs()
-    st.stats.confirms = st.stats.confirms + 1
+    st.clientTargetConfirmedAt = st.clientTargetConfirmedAt ~= 0 and st.clientTargetConfirmedAt or nowMs()
     transition(S.LOCKED, "confirmed")
     return
   end
@@ -338,12 +365,12 @@ local function handleLocked()
     return
   end
 
-  st.hp = cHp(st.creature)
-
-  if isConfirmedInternal() then
-    st.lastConfirmedAt = nowMs()
-    return
+  local currentHp = cHp(st.creature)
+  if currentHp < st.hp then
+    st.lastProgressAt = nowMs()
+    st.recoveryAttempt = 0
   end
+  st.hp = currentHp
 
   if st._pendingSwitch then
     local ps = st._pendingSwitch
@@ -393,10 +420,41 @@ local function handleLocked()
     return
   end
 
-  if (nowMs() - st.lastConfirmedAt) > CC.GRACE_PERIOD then
+  if (nowMs() - (st.lastProgressAt > 0 and st.lastProgressAt or st.clientTargetConfirmedAt)) > CC.GRACE_PERIOD then
     st.retries = 0
     st.currentTimeout = 0
-    transition(S.RECOVERING_TARGET, "grace_expired")
+    st.recoveryAttempt = 0
+    st.recoveryAttemptAt = nowMs()
+    transition(S.STALLED, "progress_stalled")
+  end
+end
+
+local function handleStalled()
+  if not st.creature or cDead(st.creature) then
+    clearTarget()
+    transition(S.IDLE, "target_gone")
+    return
+  end
+
+  local elapsed = nowMs() - st.recoveryAttemptAt
+  local retryAt = ({ 200, 1000, 3000 })[st.recoveryAttempt + 1]
+  if st.recoveryAttempt >= 3 then
+    if elapsed < 3000 then return end
+    transition(S.RELEASING, "stall_recovery_exhausted")
+    return
+  end
+  if elapsed < retryAt then return end
+
+  st.recoveryAttempt = st.recoveryAttempt + 1
+  st.recoveryAttemptAt = nowMs()
+  st.commandSentAt = 0
+  if sendAttack(st.creature, true) then
+    if isConfirmedInternal() then
+      st.clientTargetConfirmedAt = nowMs()
+      st.lastConfirmedAt = st.clientTargetConfirmedAt
+    else
+      transition(S.RECOVERING_TARGET, "stall_retry_sent")
+    end
   end
 end
 
@@ -545,6 +603,8 @@ local function update()
     handleTemporarilyBlocked()
   elseif st.current == S.RECOVERING_TARGET then
     handleRecoveringTarget()
+  elseif st.current == S.STALLED then
+    handleStalled()
   elseif st.current == S.RELEASING then
     handleReleasing()
   end
@@ -560,6 +620,10 @@ function AttackFSM.requestAttack(creature, priority)
   if id == st.targetId then
     if priority and priority > st.priority then
       st.priority = priority
+    end
+    if st.current == S.IDLE or not isConfirmedInternal() then
+      st.commandSentAt = 0
+      return sendAttack(creature)
     end
     return true
   end
@@ -617,12 +681,19 @@ function AttackFSM.reset()
   st.previous        = nil
   st.enteredAt       = 0
   st.generation      = 0
+  st.connectionGeneration = 0
   st.targetId        = nil
+  st.selectedTarget  = nil
   st.creature        = nil
   st.hp              = 100
   st.priority        = 0
   st.lastCommandAt   = 0
   st.lastConfirmedAt = 0
+  st.commandSentAt   = 0
+  st.clientTargetConfirmedAt = 0
+  st.lastProgressAt  = 0
+  st.recoveryAttempt = 0
+  st.recoveryAttemptAt = 0
   st.retries         = 0
   st.currentTimeout  = 0
   st.lastStopAt      = 0
@@ -637,6 +708,39 @@ end
 function AttackFSM.getState()    return st.current end
 function AttackFSM.getTarget()   return st.creature end
 function AttackFSM.getTargetId() return st.targetId end
+function AttackFSM.isProgressing()
+  return st.lastProgressAt > 0 and (nowMs() - st.lastProgressAt) <= CC.GRACE_PERIOD
+end
+
+function AttackFSM.onConnectionGeneration(generation)
+  if generation ~= nil then st.connectionGeneration = generation end
+  if st.current == S.IDLE and not st.targetId then return end
+  if st.targetId then
+    st.holdTargetId = st.targetId
+    st.holdTargetName = cName(st.creature)
+  end
+  cancelAttack()
+  clearTarget()
+  st.lastCommandAt = 0
+  st.lastConfirmedAt = 0
+  transition(S.IDLE, "connection_generation")
+end
+
+function AttackFSM.onTargetDisappeared(creature)
+  if creature and cId(creature) ~= st.targetId then return false end
+  if not st.targetId then return false end
+  cancelAttack()
+  clearTarget()
+  transition(S.IDLE, "target_disappeared")
+  return true
+end
+
+function AttackFSM.onHealthProgress(creature, percent)
+  if not creature or cId(creature) ~= st.targetId or percent == nil then return false end
+  if percent < st.hp then st.lastProgressAt = nowMs() end
+  st.hp = percent
+  return true
+end
 
 function AttackFSM.isActive()
   return st.current ~= S.IDLE
@@ -680,6 +784,11 @@ function AttackFSM.getStats()
     targetHealth = st.hp,
     holdTargetId = st.holdTargetId,
     generation   = st.generation,
+    connectionGeneration = st.connectionGeneration,
+    commandSentAt = st.commandSentAt,
+    clientTargetConfirmedAt = st.clientTargetConfirmedAt,
+    lastProgressAt = st.lastProgressAt,
+    recoveryAttempt = st.recoveryAttempt,
     stats        = st.stats,
   }
 end

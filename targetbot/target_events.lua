@@ -15,6 +15,7 @@ if EventBus then
   end, 20)
   EventBus.on("monster:disappear", function(creature)
     if TargetBot.isOff() then return end
+    if AttackFSM and AttackFSM.onTargetDisappeared then AttackFSM.onTargetDisappeared(creature) end
     I.debouncedInvalidateAndRecalc()
   end, 20)
   EventBus.on("creature:move", function(creature, oldPos)
@@ -24,6 +25,7 @@ if EventBus then
   end, 20)
   EventBus.on("monster:health", function(creature, percent)
     if TargetBot.isOff() then return end
+    if AttackFSM and AttackFSM.onHealthProgress then AttackFSM.onHealthProgress(creature, percent) end
     I.debouncedInvalidateAndRecalc()
   end, 20)
   EventBus.on("player:move", function(newPos, oldPos)

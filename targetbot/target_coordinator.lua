@@ -285,6 +285,19 @@ local SharedHelpers = nExBot.SharedHelpers or {}
   end)
 end
 
+-- Invalidate native combat confirmation whenever the client session changes.
+if nExBot.ClientLifecycle and nExBot.ClientLifecycle.on then
+  local function invalidateAttack(generation)
+    if AttackFSM and AttackFSM.onConnectionGeneration then
+      AttackFSM.onConnectionGeneration(generation)
+    end
+  end
+  nExBot.ClientLifecycle:on("gameStart", invalidateAttack)
+  nExBot.ClientLifecycle:on("gameEnd", invalidateAttack)
+  nExBot.ClientLifecycle:on("login", invalidateAttack)
+  nExBot.ClientLifecycle:on("logout", invalidateAttack)
+end
+
 -- LRU eviction helper: move ID to end of access order — O(1) via posMap
 local function touchCreature(id)
   local order = monsterCache.accessOrder
@@ -1784,6 +1797,9 @@ if EventBus then
     local gen = payload and payload.generation
     if _recoveryPausedGen == gen then return end
     _recoveryPausedGen = gen
+    if AttackFSM and AttackFSM.onConnectionGeneration then
+      AttackFSM.onConnectionGeneration(gen)
+    end
     -- Pause macro ticks if TargetBot is on.
     if TargetBot.isOn and TargetBot.isOn() then
       if targetbotMacro and targetbotMacro.setOn then

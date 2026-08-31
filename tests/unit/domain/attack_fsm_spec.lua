@@ -22,6 +22,7 @@ end
 local attackCalls = {}
 local cancelCalls = {}
 local attackingCreature = nil
+local attackResult = true
 
 local reachabilityResult = { state = "ATTACKABLE_NOW", attackable = true }
 local commitmentBlocks = false
@@ -36,7 +37,8 @@ _G.nExBot = {
 _G.g_game = {
   attack = function(creature)
     table.insert(attackCalls, creature)
-    attackingCreature = creature
+    if attackResult then attackingCreature = creature end
+    return attackResult
   end,
   getAttackingCreature = function()
     return attackingCreature
@@ -98,6 +100,7 @@ describe("AttackFSM", function()
     attackCalls = {}
     cancelCalls = {}
     attackingCreature = nil
+    attackResult = true
     reachabilityResult = { state = "ATTACKABLE_NOW", attackable = true }
     commitmentBlocks = false
     fsm = dofile("targetbot/application/attack_fsm.lua")
@@ -140,6 +143,89 @@ describe("AttackFSM", function()
     assert.equals("ACQUIRING", fsm.getState())
     assert.equals(genBefore, fsm.getGeneration())
     assert.equals(1, fsm.getStats().stats.switches)
+  end)
+
+  it("does not treat a false native attack return as a dispatched command", function()
+    local c = makeCreature(301, "FalseAttack")
+    attackResult = false
+
+    assert.is_false(fsm.requestAttack(c, 500))
+    assert.equals("ACQUIRING", fsm.getState())
+    assert.equals(0, fsm.getStats().stats.commands)
+  end)
+
+  it("re-dispatches the same target after a connection generation change", function()
+    local c = makeCreature(302, "Reconnect")
+    assert.is_true(fsm.requestAttack(c, 500))
+    assert.equals(1, #attackCalls)
+
+    fsm.onConnectionGeneration(7)
+    assert.equals("IDLE", fsm.getState())
+    assert.equals(1, #cancelCalls)
+    assert.is_true(fsm.requestAttack(c, 500))
+    assert.equals(2, #attackCalls)
+  end)
+
+  it("keeps a stale confirmed target eligible for bounded stall recovery", function()
+    local c = makeCreature(303, "Stalled")
+    fsm.requestAttack(c, 500)
+    clock = clock + 200
+    fsm.update()
+    assert.equals("ATTACKING", fsm.getState())
+    clock = clock + 200
+    fsm.update()
+    assert.equals("LOCKED", fsm.getState())
+
+    clock = clock + 1600
+    fsm.update()
+    assert.equals("STALLED", fsm.getState())
+    assert.is_false(fsm.isProgressing())
+  end)
+
+  it("records health decrease as progress evidence", function()
+    local c = makeCreature(304, "Progress", 100)
+    fsm.requestAttack(c, 500)
+    clock = clock + 200
+    fsm.update()
+    clock = clock + 200
+    fsm.update()
+    c.hp = 90
+    clock = clock + 100
+    fsm.update()
+
+    assert.is_true(fsm.isProgressing())
+    assert.equals(90, fsm.getStats().targetHealth)
+  end)
+
+  it("releases after the fixed stall retry schedule", function()
+    local c = makeCreature(305, "RetryLimit")
+    fsm.requestAttack(c, 500)
+    clock = clock + 200
+    fsm.update()
+    clock = clock + 200
+    fsm.update()
+    clock = clock + 1600
+    fsm.update()
+
+    clock = clock + 200
+    fsm.update()
+    clock = clock + 1000
+    fsm.update()
+    clock = clock + 3000
+    fsm.update()
+    assert.equals(3, fsm.getStats().recoveryAttempt)
+
+    clock = clock + 3000
+    fsm.update()
+    assert.equals("RELEASING", fsm.getState())
+  end)
+
+  it("does not count disappearance as a kill", function()
+    local c = makeCreature(306, "Disappearing")
+    fsm.requestAttack(c, 500)
+    assert.is_true(fsm.onTargetDisappeared(c))
+    assert.equals("IDLE", fsm.getState())
+    assert.equals(0, fsm.getStats().stats.kills)
   end)
 
   it("failed replacement: preserves current target, rejects candidate, no cancelAttack", function()
