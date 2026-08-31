@@ -452,6 +452,9 @@ local function handleStalled()
     if isConfirmedInternal() then
       st.clientTargetConfirmedAt = nowMs()
       st.lastConfirmedAt = st.clientTargetConfirmedAt
+      st.lastProgressAt = nowMs()
+      st.currentTimeout = 0
+      transition(S.LOCKED, "stall_recovery_confirmed")
     else
       transition(S.RECOVERING_TARGET, "stall_retry_sent")
     end

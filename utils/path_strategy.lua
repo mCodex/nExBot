@@ -102,10 +102,24 @@ local function isSafeTile(pos, ignoreCreatures)
   return true
 end
 
+-- Floor-change tiles (stairs/ropes/holes) are safe only as the FINAL step,
+-- never as intermediate steps: you cannot walk THROUGH a transition tile to
+-- get somewhere past it. validateNativePath therefore allows the goal position
+-- to be a floor-change tile (so the bot can step onto the stair/rope/hole),
+-- but still rejects them everywhere else so paths never cut through one.
+local function isSafeStep(pos, ignoreCreatures, isFinal)
+  local pu = PU()
+  if not pu then return false end
+  if pu.isTileWalkable and not pu.isTileWalkable(pos, ignoreCreatures) then return false end
+  if pu.isFloorChangeTile and pu.isFloorChangeTile(pos) and not isFinal then return false end
+  return true
+end
+
 local function validateNativePath(startPos, path, opts)
   if type(path) ~= "table" or #path == 0 then return false end
   local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
   local ignoreCreatures = opts and opts.ignoreCreatures or false
+  local allowFloorChange = opts and opts.allowFloorChange or false
   for i = 1, #path do
     local dir = path[i]
     local off = dirOffset(dir)
@@ -113,12 +127,15 @@ local function validateNativePath(startPos, path, opts)
     if isDiagonal(dir) then
       local sideA = {x = probe.x + off.x, y = probe.y, z = probe.z}
       local sideB = {x = probe.x, y = probe.y + off.y, z = probe.z}
-      if not isSafeTile(sideA, ignoreCreatures) or not isSafeTile(sideB, ignoreCreatures) then
+      if not isSafeStep(sideA, ignoreCreatures, false) or not isSafeStep(sideB, ignoreCreatures, false) then
         return false
       end
     end
     probe = applyOff(probe, off)
-    if not isSafeTile(probe, ignoreCreatures) then return false end
+    -- Only the terminal tile may be a floor-change tile, and only when
+    -- the caller explicitly requested floor-change traversal.
+    local isFinal = allowFloorChange and (i == #path)
+    if not isSafeStep(probe, ignoreCreatures, isFinal) then return false end
   end
   return true
 end
@@ -471,12 +488,16 @@ function PathStrategy.nativePathIsSafe(startPos, goalPos, opts)
   end
 
   local isFC = getIsFC()
+  local allowFloorChange = opts and opts.allowFloorChange or false
   local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
   for i = 1, #nativePath do
     local off = dirOffset(nativePath[i])
     if not off then return false, nativePath, i end
     probe = applyOff(probe, off)
-    if isFC(probe) or not isSafeTile(probe, opts and opts.ignoreCreatures) then
+    -- The terminal tile may be a floor-change tile only when the caller
+    -- explicitly requested floor-change traversal.
+    local isFinal = allowFloorChange and (i == #nativePath)
+    if (isFC(probe) and not isFinal) or not isSafeTile(probe, opts and opts.ignoreCreatures) then
       return false, nativePath, i
     end
   end

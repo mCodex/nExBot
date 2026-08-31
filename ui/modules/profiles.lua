@@ -74,33 +74,15 @@ end
 
 function Profiles.render(shell, content, lifecycle)
   Page.render(shell, content, lifecycle, Profiles.statusProvider().snapshot)
-  Components.sectionHeader(content, { title = "Hunt profiles" })
-
-  local Shared = nExBot and nExBot.UI and nExBot.UI["ui.modules.workflows.shared"]
-  local optionName = (Shared and Shared.optionName) or function(first, second)
-    if type(second) == "string" then return second end
-    if type(second) == "table" then return second.text or second.value end
-    if type(first) == "string" then return first end
-    if type(first) == "table" then return first.text or first.value end
-  end
-
-  Components.selectRow(content, {
-    id = "caveProfile", label = "Cave",
-    options = CaveBot and CaveBot.listProfiles and CaveBot.listProfiles() or {},
-    value = CaveBot and CaveBot.getCurrentProfile and CaveBot.getCurrentProfile(),
-    onChange = function(first, second)
-      local name = optionName(first, second)
-      if name and CaveBot and CaveBot.setCurrentProfile then CaveBot.setCurrentProfile(name) end
-    end,
+  Components.sectionHeader(content, { title = "Profile management" })
+  local card = Components.card(content)
+  Components.keyValueRow(card, {
+    key = "Change active profile",
+    value = "Use the default client toolbar",
   })
-  Components.selectRow(content, {
-    id = "targetProfile", label = "Target",
-    options = TargetBot and TargetBot.listProfiles and TargetBot.listProfiles() or {},
-    value = TargetBot and TargetBot.getCurrentProfile and TargetBot.getCurrentProfile(),
-    onChange = function(first, second)
-      local name = optionName(first, second)
-      if name and TargetBot and TargetBot.setCurrentProfile then TargetBot.setCurrentProfile(name) end
-    end,
+  Components.keyValueRow(card, {
+    key = "Feature configuration",
+    value = "Open the related workflow page",
   })
 end
 

@@ -65,34 +65,8 @@ local function findTabNavigation(host)
   end
 end
 
-local function hideHostToolbar(host)
-  local controls = {}
-  for _, key in ipairs({ "config", "edit", "enabled", "enable", "onOff" }) do
-    local control = host[key]
-    local controlType = type(control)
-    if (controlType == "table" or controlType == "userdata") and type(control.getParent) == "function" then
-      controls[#controls + 1] = control
-    end
-  end
-  if #controls == 0 then return end
-
-  local parent = controls[1]:getParent()
-  local ownsBotPanel = parent and parent.recursiveGetChildById
-    and parent:recursiveGetChildById("botPanel") == host.botPanel
-  if parent and parent ~= host and parent ~= host.botPanel and not ownsBotPanel then
-    if parent.setVisible then parent:setVisible(false) end
-    if parent.setEnabled then parent:setEnabled(false) end
-    return
-  end
-  for _, control in ipairs(controls) do
-    if control.setVisible then control:setVisible(false) end
-    if control.setEnabled then control:setEnabled(false) end
-  end
-end
-
 local function clearHostSurface(host, ownedController)
   if not host or not host.botPanel then return false end
-  hideHostToolbar(host)
   local removed = false
   local children = {}
   for i, child in ipairs(host.botPanel:getChildren()) do children[i] = child end
@@ -183,12 +157,13 @@ local function createShell(opts)
       item:setId(engineRow.id .. "Item")
       item:setItemId(engineRow.itemId)
       Components.label(row, { id = engineRow.id .. "Label", text = engineRow.label, style = "NexControllerLabel" })
-      Components.toggle(row, {
+      local toggle = Components.toggle(row, {
         id = engineRow.toggleAction,
         value = engineRow.status == "ACTIVE",
         tooltip = "Toggle " .. engineRow.label,
         onChange = function() run(engineRow.toggleAction, self.controller) end,
       })
+      if toggle.setMarginRight then toggle:setMarginRight(28) end
       Components.button(row, {
         id = "configure_" .. engineRow.id, text = "", style = "NexControllerConfigure",
         tooltip = "Configure " .. engineRow.label,
@@ -232,7 +207,7 @@ local function createShell(opts)
       self.breadcrumb:setText(selectedModule and selectedModule.breadcrumb or ((category and category.label or "nExBot") .. " / Dashboard"))
     end
     if self.backButton then self.backButton:setEnabled(self:canGoBack()) end
-    if self.compactNavigation then
+    if self.compactNavigation or #tabs > 4 then
       local select = g_ui.createWidget("NexTabSelect", self.tabs)
       select:setId("pageSelect")
       local selectedLabel
@@ -273,8 +248,8 @@ local function createShell(opts)
     self.workspace:setId("NexWorkspace")
     local rootWidth = self.root and self.root.getWidth and self.root:getWidth() or 0
     local rootHeight = self.root and self.root.getHeight and self.root:getHeight() or 0
-    local workspaceWidth = rootWidth > 0 and math.min(620, math.max(320, rootWidth - 16)) or 440
-    local workspaceHeight = rootHeight > 0 and math.min(520, math.max(240, rootHeight - 16)) or 400
+    local workspaceWidth = rootWidth > 0 and math.min(900, math.max(360, rootWidth - 16)) or 760
+    local workspaceHeight = rootHeight > 0 and math.min(760, math.max(280, rootHeight - 16)) or 560
     self.workspace:setWidth(workspaceWidth)
     self.workspace:setHeight(workspaceHeight)
     self._lastCompactState = rootWidth > 0 and workspaceWidth < 520
@@ -304,9 +279,12 @@ local function createShell(opts)
 
     -- Responsive resize: recalculate layout when the parent window changes size.
     self.workspace.onResize = function(_, width, height)
-      if not width or not height or not self.nav or not self.tabs then return end
-      local w = math.min(620, math.max(320, width - 16))
-      local h = math.min(520, math.max(240, height - 16))
+      local size = type(width) == "table" and width or { width = width, height = height }
+      local newWidth = tonumber(size.width or size.x)
+      local newHeight = tonumber(size.height or size.y)
+      if not newWidth or not newHeight or not self.nav or not self.tabs then return end
+      local w = math.min(900, math.max(360, newWidth - 16))
+      local h = math.min(760, math.max(280, newHeight - 16))
       self.workspace:setWidth(w)
       self.workspace:setHeight(h)
       local compact = w < 520
@@ -366,8 +344,8 @@ local function createShell(opts)
       self.window = g_ui.createWidget("NexControllerLayout", host.botPanel)
     else
       self.window = UI.createWindow("NexControllerWindow", self.root)
-      self.window:setWidth(Tokens.dimensions.minWidth)
-      self.window:setHeight(240)
+      self.window:setWidth(760)
+      self.window:setHeight(560)
       local close = g_ui.createWidget("NexCloseButton", self.window)
       close:setId("closeButton")
       close:setTooltip("Close")

@@ -351,7 +351,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
 
     if manhattan <= 3 then
       -- Close: precise keyboard steps
-      local fcPath = PS().findPath(playerPos, walkDest, {precision = approach.arrivalPrecision})
+      local fcPath = PS().findPath(playerPos, walkDest, {precision = approach.arrivalPrecision, allowFloorChange = true})
       if fcPath and #fcPath > 0 then
         local dir = fcPath[1]
         local smoothed = approach.dispatch == "keyboard" and dir or PS().smoothDirection(dir, true) or dir
@@ -366,9 +366,9 @@ CaveBot.walkTo = function(dest, maxDist, params)
       return false
     else
       -- Far: guarded autoWalk
-      local isSafe = PS().nativePathIsSafe(playerPos, walkDest)
+      local isSafe = PS().nativePathIsSafe(playerPos, walkDest, { allowFloorChange = true })
       if isSafe then
-        PS().autoWalk(walkDest, maxDist, {precision = precision})
+        PS().autoWalk(walkDest, maxDist, {precision = precision, allowFloorChange = true})
       else
         local dirToDest = getDirectionTo(playerPos, walkDest)
         if dirToDest and canWalkDirection(dirToDest) then

@@ -32,6 +32,10 @@ local colors = {
     primary = "#f2c66d",
     hover   = "#ffda85",
   },
+  toggle = {
+    track    = "#3a3d40",
+    trackOn  = "#2d4a3a",
+  },
   success = "#91d982",
   warning = "#f2c66d",
   danger  = "#ff8f85",

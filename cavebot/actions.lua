@@ -517,7 +517,9 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- If the navigator confirms the player has already passed this WP on the route,
   -- advance immediately. This handles smooth walk-through transitions where A* paths
   -- carry the player past a WP before the goto action's arrival check fires.
-  if nExBot.Navigation and nExBot.Navigation.hasPassedWaypoint then
+  -- Floor-change WPs are excluded: they must be stepped on exactly (precision=0)
+  -- so a forward pass can never skip the actual stair/rope/hole tile.
+  if not isFloorChange and nExBot.Navigation and nExBot.Navigation.hasPassedWaypoint then
     local currentAction = ui and ui.list and ui.list:getFocusedChild()
     local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
     if waypointIdx and nExBot.Navigation.hasPassedWaypoint(playerPos, waypointIdx, destPos) then
@@ -527,8 +529,10 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
 
   -- ========== ARRIVAL PRECISION ==========
-  -- Adaptive: scale precision by distance to next goto WP to prevent zone overlap.
-  -- Floor-change WPs keep precision=0 (must step on the exact tile).
+  -- Adaptive: scale walk precision by distance to next goto WP to prevent zone
+  -- overlap. Only the WALK precision is widened — arrival precision stays exact
+  -- (the waypoint's own precision), so the bot always steps close to the tile
+  -- instead of stopping several tiles short (which reads as "inaccurate").
   if classification == "normal" and precision > 0 then
     local currentAction = ui and ui.list and ui.list:getFocusedChild()
     local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil

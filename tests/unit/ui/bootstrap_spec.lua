@@ -1,6 +1,40 @@
 local Harness = require("tests.helpers.widget_harness")
 
 describe("ui bootstrap", function()
+  it("retries host attachment until the host panel becomes available", function()
+    Harness.reset()
+    Harness.install()
+    _G.nExBot = { paths = { config = "nExBot" }, UI = {}, loadErrors = {}, Nav = {} }
+
+    local pending = {}
+    local origSchedule = _G.schedule
+    _G.schedule = function(delay, callback)
+      pending[#pending + 1] = { delay = delay, callback = callback }
+    end
+    local origDofile = _G.dofile
+    _G.dofile = function(path, ...)
+      if type(path) == "string" and path:sub(1, 1) == "/" then path = "." .. path end
+      origDofile(path, ...)
+    end
+
+    local ok, err = pcall(function() _G.dofile("/ui/init.lua") end)
+    _G.dofile = origDofile
+    assert.is_true(ok, tostring(err))
+    assert.is_true(#pending > 0)
+
+    pending[1].callback()
+    assert.is_nil(_G.nExBot.UI.Shell.instance())
+
+    Harness.installHostPanel()
+    for i = 2, #pending do pending[i].callback() end
+    _G.schedule = origSchedule
+
+    local shell = _G.nExBot.UI.Shell.instance()
+    assert.is_true(shell:isPanelMode())
+    assert.are_equal("botPanel", shell:getWindow():getParent():getId())
+    shell:destroy()
+  end)
+
   it("registers secondary modules and attaches the cockpit to the host left bar", function()
     Harness.reset()
     Harness.install()
@@ -36,6 +70,12 @@ describe("ui bootstrap", function()
     local R = _G.nExBot.UI.ModuleRegistry
     assert.are_equal(25, R.count())
     assert.are_equal(0, #R.validate())
+
+    for _, id in ipairs({ "cavebot", "targetbot", "attack", "looting", "dropper", "supplies", "containers",
+      "healing", "friend_healer", "conditions", "equipment_rules", "extras", "combo", "alarms", "pushmax",
+      "depositer", "profiles", "settings", "diagnostics", "intelligence", "analytics" }) do
+      assert.is_truthy(R.get(id), "missing registered shortcut: " .. id)
+    end
 
     -- Auto-open: the shell is attached to the host left bar after bootstrap.
     local Shell = _G.nExBot.UI.Shell

@@ -50,7 +50,7 @@ local function renderRow(parent, projected, options, density, rowIndex, widget)
   for _, action in ipairs(row.actions or {}) do
     Components.button(actions, {
       id = action.id, text = action.text, variant = action.variant or "ghost",
-      tooltip = action.tooltip, onClick = action.onClick,
+      tooltip = action.tooltip, onClick = action.onClick, style = "NexTableActionButton",
     })
   end
   if row.onClick then widget.onClick = row.onClick end

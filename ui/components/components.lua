@@ -157,28 +157,35 @@ end
 
 -- Standalone NexToggle widget. Use inside custom layouts where toggleRow's
 -- row wrapper is not wanted (e.g. cockpit engine rows, controller sidebar).
+-- The toggle is a plain Button (text "ON"/"OFF"); all state visuals are
+-- painted from Lua so the widget never depends on OTUI parser features that
+-- vary between clients.
+local function paintToggle(sw, checked)
+  local on = checked
+  if sw.setText then sw:setText(on and "ON" or "OFF") end
+  if sw.setColor then sw:setColor(on and Tokens.colors.active or Tokens.colors.text.muted) end
+  if sw.setBackgroundColor then sw:setBackgroundColor(on and Tokens.colors.toggle.trackOn or Tokens.colors.toggle.track) end
+  if sw.setBorderColor then sw:setBorderColor(on and Tokens.colors.active or Tokens.colors.border.subtle) end
+end
+
 function C.toggle(parent, opts)
   opts = opts or {}
   local sw = g_ui.createWidget("NexToggle", parent)
   if opts.id then sw:setId(opts.id) end
   if opts.tooltip then sw:setTooltip(opts.tooltip) end
-  sw:setChecked(opts.value == true)
-  local track = sw:getChildById("track")
-  local thumb = sw:getChildById("thumb")
-  local function updateVisual(checked)
-    if track then track:setText(checked and "ON" or "OFF") end
-  end
-  updateVisual(opts.value == true)
-  local origSet = sw.setChecked
-  sw.setChecked = function(self, v)
+  sw._checked = opts.value == true
+  function sw:setChecked(v)
     v = not not v
-    origSet(self, v)
-    updateVisual(v)
+    if self._checked == v then return self end
+    self._checked = v
+    paintToggle(self, v)
     if opts.onChange then opts.onChange(v) end
+    return self
   end
-  sw.onClick = function()
-    sw:setChecked(not sw:isChecked())
-  end
+  function sw:isChecked() return self._checked == true end
+  function sw:isOn() return self:isChecked() end
+  sw.onClick = function() sw:setChecked(not sw:isChecked()) end
+  paintToggle(sw, sw._checked)
   return sw
 end
 
@@ -325,13 +332,13 @@ function C.footerActions(parent, opts)
   opts = opts or {}
   local w = create(parent, "NexFooter", opts)
   if opts.primary then
-    C.button(w, { text = opts.primary.text, id = "primary", variant = "primary", onClick = opts.primary.onClick })
+    C.button(w, { text = opts.primary.text, id = "primary", variant = "primary", style = "NexFooterButton", onClick = opts.primary.onClick })
   end
   if opts.secondary then
-    C.button(w, { text = opts.secondary.text, id = "secondary", variant = "ghost", onClick = opts.secondary.onClick })
+    C.button(w, { text = opts.secondary.text, id = "secondary", variant = "ghost", style = "NexFooterButton", onClick = opts.secondary.onClick })
   end
   if opts.danger then
-    C.button(w, { text = opts.danger.text, id = "danger", variant = "danger", onClick = opts.danger.onClick })
+    C.button(w, { text = opts.danger.text, id = "danger", variant = "danger", style = "NexFooterButton", onClick = opts.danger.onClick })
   end
   return w
 end

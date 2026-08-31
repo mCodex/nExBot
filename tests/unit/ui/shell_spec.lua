@@ -92,6 +92,33 @@ describe("BotShell", function()
     assert.are_equal(82, shell:getWorkspace():recursiveGetChildById("workspaceNav"):getWidth())
   end)
 
+  it("accepts OTClient resize callbacks that pass a size table", function()
+    local root = _G.g_ui.createWidget("Root", nil)
+    root:setWidth(900)
+    root:setHeight(700)
+    local shell = Shell.new({ root = root })
+    shell:open()
+    shell:select("profiles")
+
+    assert.has_no.errors(function()
+      shell:getWorkspace().onResize(shell:getWorkspace(), { width = 500, height = 360 })
+    end)
+    assert.are_equal(484, shell:getWorkspace():getWidth())
+    assert.are_equal(344, shell:getWorkspace():getHeight())
+  end)
+
+  it("uses the compact selector for crowded tab groups", function()
+    local root = _G.g_ui.createWidget("Root", nil)
+    root:setWidth(900)
+    root:setHeight(700)
+    local shell = Shell.new({ root = root })
+    shell:open()
+    shell:select("tools")
+
+    assert.is_truthy(shell:getWorkspace():recursiveGetChildById("pageSelect"))
+    assert.is_nil(shell:getWorkspace():recursiveGetChildById("tab_tools"))
+  end)
+
   it("selecting a module updates the selected state and calls its render", function()
     local Registry = nExBot.UI.ModuleRegistry
     local rendered = 0

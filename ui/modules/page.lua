@@ -101,7 +101,7 @@ function Page.render(shell, content, lifecycle, view)
       if action ~= view.primaryAction and action ~= view.secondaryAction then
         local a = resolveAction(action, content, shell)
         Components.button(footer, {
-          text = a.label, id = a.id, variant = "ghost", onClick = a.onClick,
+          text = a.label, id = a.id, variant = "ghost", style = "NexFooterButton", onClick = a.onClick,
         })
       end
     end

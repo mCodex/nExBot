@@ -254,6 +254,10 @@ local chebyshevDist = Directions.chebyshevDistance  -- SSoT: constants/direction
 local waypointPositionCache = {} -- Waypoint position cache table
 local waypointCacheValid = false
 local waypointCacheFloors = {}
+-- Spatial index for O(neighbours) nearby-waypoint lookup: floor -> cellKey -> {idx,...}
+-- Cell size 256 tiles; cells bounded (a route is finite so this is naturally bounded).
+local waypointSpatialIndex = {}
+local SPATIAL_CELL = 256
 local startupWaypointFound = false
 local startupCheckTime = nil   -- Set on first check to enforce 500ms delay
 local startupFocusTarget = nil -- Fallback child ref when focusChild fails on startup
@@ -1281,6 +1285,7 @@ invalidateWaypointCache = function()
   waypointPositionCache = {}
   waypointCacheValid = false
   waypointCacheFloors = {}
+  waypointSpatialIndex = {}
   -- Invalidate the navigation route (segment cache is stale)
   if nExBot.Navigation and nExBot.Navigation.invalidate then
     nExBot.Navigation.invalidate()
@@ -1304,6 +1309,7 @@ buildWaypointCache = function()
   
   waypointPositionCache = {}
   waypointCacheFloors = {}
+  waypointSpatialIndex = {}
   local actions = ui.list:getChildren()
   
   for i, child in ipairs(actions) do
@@ -1319,6 +1325,14 @@ buildWaypointCache = function()
         isGoto = (child.action == "goto"),
       }
       waypointCacheFloors[pos.z] = true
+      local cx = math.floor(pos.x / SPATIAL_CELL)
+      local cy = math.floor(pos.y / SPATIAL_CELL)
+      local cellKey = cx .. ":" .. cy
+      local floorIdx = waypointSpatialIndex[pos.z] or {}
+      local cell = floorIdx[cellKey] or {}
+      cell[#cell + 1] = i
+      floorIdx[cellKey] = cell
+      waypointSpatialIndex[pos.z] = floorIdx
     end
   end
   
@@ -1401,22 +1415,33 @@ findReachableWaypoint = function(playerPos, options)
   end
 
   -- Collect same-floor, non-blacklisted candidates (prefer goto WPs for recovery)
+  -- from the spatial index: the player's cell plus the 3x3 neighbourhood. A cell
+  -- is 256 tiles wide, so this covers ~362 tiles Chebyshev — far beyond any goto
+  -- distance — while skipping an O(all-waypoints) scan every tick.
   local candidates = {}
-  for i, wp in pairs(waypointPositionCache) do
-    if isWaypointBlacklisted(wp.child) then goto continue end
-    if excludeCurrent and i == currentIdx then goto continue end
-    if wp.z ~= playerZ then goto continue end
-
-    local dist = chebyshevDist(playerPos, wp)
-    -- Include if within maxDist OR if it's one of the very closest (proximity guarantee)
-    if dist > maxDist * 1.5 then goto continue end
-
-    candidates[#candidates + 1] = {
-      index = i, dist = dist, score = dist + (nExBot.Intelligence and nExBot.Intelligence.navigationPenalty and nExBot.Intelligence.navigationPenalty(wp, nil, dist) or 0), child = wp.child,
-      x = wp.x, y = wp.y, z = wp.z,
-      isGoto = wp.isGoto, withinRange = (dist <= maxDist)
-    }
-    ::continue::
+  local playerCellX = math.floor(playerPos.x / SPATIAL_CELL)
+  local playerCellY = math.floor(playerPos.y / SPATIAL_CELL)
+  local floorIndex = waypointSpatialIndex[playerZ] or {}
+  for gx = playerCellX - 1, playerCellX + 1 do
+    for gy = playerCellY - 1, playerCellY + 1 do
+      local cell = floorIndex[gx .. ":" .. gy]
+      if cell then
+        for k = 1, #cell do
+          local i = cell[k]
+          local wp = waypointPositionCache[i]
+          if not isWaypointBlacklisted(wp.child) and not (excludeCurrent and i == currentIdx) then
+            local dist = chebyshevDist(playerPos, wp)
+            if dist <= maxDist * 1.5 then
+              candidates[#candidates + 1] = {
+                index = i, dist = dist, score = dist + (nExBot.Intelligence and nExBot.Intelligence.navigationPenalty and nExBot.Intelligence.navigationPenalty(wp, nil, dist) or 0), child = wp.child,
+                x = wp.x, y = wp.y, z = wp.z,
+                isGoto = wp.isGoto, withinRange = (dist <= maxDist)
+              }
+            end
+          end
+        end
+      end
+    end
   end
 
   if #candidates == 0 and not searchAllFloors then

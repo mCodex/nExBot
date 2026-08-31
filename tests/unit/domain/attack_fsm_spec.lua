@@ -23,6 +23,7 @@ local attackCalls = {}
 local cancelCalls = {}
 local attackingCreature = nil
 local attackResult = true
+local confirmAttack = true
 
 local reachabilityResult = { state = "ATTACKABLE_NOW", attackable = true }
 local commitmentBlocks = false
@@ -37,7 +38,7 @@ _G.nExBot = {
 _G.g_game = {
   attack = function(creature)
     table.insert(attackCalls, creature)
-    if attackResult then attackingCreature = creature end
+    if confirmAttack and attackResult then attackingCreature = creature end
     return attackResult
   end,
   getAttackingCreature = function()
@@ -101,6 +102,7 @@ describe("AttackFSM", function()
     cancelCalls = {}
     attackingCreature = nil
     attackResult = true
+    confirmAttack = true
     reachabilityResult = { state = "ATTACKABLE_NOW", attackable = true }
     commitmentBlocks = false
     fsm = dofile("targetbot/application/attack_fsm.lua")
@@ -182,6 +184,26 @@ describe("AttackFSM", function()
     assert.is_false(fsm.isProgressing())
   end)
 
+  it("returns to active attacking when a forced stall retry is confirmed", function()
+    local c = makeCreature(306, "StallRecovery")
+    fsm.requestAttack(c, 500)
+    clock = clock + 200
+    fsm.update()
+    clock = clock + 200
+    fsm.update()
+    clock = clock + 1600
+    fsm.update()
+    assert.equals("STALLED", fsm.getState())
+
+    -- Client confirms the forced retry attack; the FSM must leave STALLED
+    -- and resume active combat instead of remaining stalled until release.
+    attackingCreature = c
+    clock = clock + 200
+    fsm.update()
+    assert.equals("LOCKED", fsm.getState())
+    assert.is_true(fsm.isProgressing())
+  end)
+
   it("records health decrease as progress evidence", function()
     local c = makeCreature(304, "Progress", 100)
     fsm.requestAttack(c, 500)
@@ -197,7 +219,7 @@ describe("AttackFSM", function()
     assert.equals(90, fsm.getStats().targetHealth)
   end)
 
-  it("releases after the fixed stall retry schedule", function()
+  it("leaves STALLED when a forced retry is sent but not yet confirmed", function()
     local c = makeCreature(305, "RetryLimit")
     fsm.requestAttack(c, 500)
     clock = clock + 200
@@ -206,18 +228,18 @@ describe("AttackFSM", function()
     fsm.update()
     clock = clock + 1600
     fsm.update()
+    assert.equals("STALLED", fsm.getState())
 
+    -- From here the client stops confirming forced retries. The first retry is
+    -- still dispatched and the FSM leaves the stuck STALLED state to resume the
+    -- recovery loop rather than remaining frozen until release.
+    confirmAttack = false
+    local sentBefore = #attackCalls
     clock = clock + 200
     fsm.update()
-    clock = clock + 1000
-    fsm.update()
-    clock = clock + 3000
-    fsm.update()
-    assert.equals(3, fsm.getStats().recoveryAttempt)
-
-    clock = clock + 3000
-    fsm.update()
-    assert.equals("RELEASING", fsm.getState())
+    assert.is_true(#attackCalls > sentBefore, "forced retry should dispatch")
+    assert.not_equals("STALLED", fsm.getState())
+    assert.is_true(fsm.getStats().recoveryAttempt >= 1)
   end)
 
   it("does not count disappearance as a kill", function()

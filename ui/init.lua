@@ -39,8 +39,8 @@ do
     "ui.components.data_table",
     "ui.shell.shell",
     "ui.modules.page",
-    "ui.modules.cockpit",
     "ui.modules.workflows.shared",
+    "ui.modules.cockpit",
     "ui.modules.workflows.cave",
     "ui.modules.workflows.target",
     "ui.modules.workflows.healing",
@@ -117,7 +117,17 @@ end
 do
   local Shell = nExBot.UI.Shell
   if Shell and Shell.show then
-    local function attach()
+    nExBot.UI._shellAttachGeneration = (nExBot.UI._shellAttachGeneration or 0) + 1
+    local generation = nExBot.UI._shellAttachGeneration
+    local maxAttempts = 5
+    local retryDelay = 200
+    local function attach(attempt)
+      if nExBot.UI._shellAttachGeneration ~= generation then return end
+      local host = modules and modules.game_bot and modules.game_bot.contentsPanel
+      if not host or not host.botPanel then
+        if attempt < maxAttempts and schedule then schedule(retryDelay, function() attach(attempt + 1) end) end
+        return
+      end
       local ok, err = pcall(function()
         local shell = Shell.show()
         shell:setupHostHooks()
@@ -125,9 +135,9 @@ do
       if not ok then warn("[nExBot] UI cockpit attach failed: " .. tostring(err)) end
     end
     if schedule then
-      schedule(200, attach)
+      schedule(retryDelay, function() attach(1) end)
     else
-      attach()
+      attach(1)
     end
   end
 end

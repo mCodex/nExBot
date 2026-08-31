@@ -1,10 +1,9 @@
 NexButton < Button
-  height: 24
-  margin-top: 1
-  margin-bottom: 1
-  margin-left: 3
-  margin-right: 3
+  height: 26
+  margin: 2
   font: verdana-11px-rounded
+  text-auto-resize: false
+  text-wrap: false
 
   $focus:
     border-color: #f2c66d
@@ -86,7 +85,7 @@ NexValueLabel < Label
   text-wrap: false
 
 NexControlLabel < Label
-  width: 112
+  width: 132
   anchors.left: parent.left
   anchors.verticalCenter: parent.verticalCenter
   text-wrap: false
@@ -125,32 +124,16 @@ NexControlSlider < HorizontalScrollBar
     border-color: #f2c66d
     border-width: 1
 
-NexToggle < Panel
+NexToggle < Button
   width: 44
   height: 24
   anchors.right: parent.right
   anchors.verticalCenter: parent.verticalCenter
-  clickable: true
-  focusable: true
+  font: verdana-11px-rounded
+  text-align: center
   border-width: 1
   border-color: #454b4f80
-  border-radius: 12
   background-color: #3a3d40
-
-  Label id="track"
-    anchors.fill: parent
-    text-align: center
-    font: verdana-11px-rounded
-    text: OFF
-    color: #b3aa96
-
-  Panel id="thumb"
-    anchors.verticalCenter: parent.verticalCenter
-    margin-left: 3
-    width: 18
-    height: 18
-    background-color: #626a6f
-    border-radius: 9
 
   $hover:
     border-color: #626a6f
@@ -158,21 +141,6 @@ NexToggle < Panel
   $focus:
     border-color: #f2c66d
     border-width: 2
-
-  $checked:
-    background-color: #2d4a3a
-    border-color: #91d98260
-
-    Label id="track"
-      text: ON
-      color: #91d982
-
-    Panel id="thumb"
-      anchors.right: parent.right
-      anchors.left: auto
-      margin-left: auto
-      margin-right: 3
-      background-color: #91d982
 
 NexToolbar < Panel
   margin: 4
@@ -187,9 +155,10 @@ NexWorkflowActions < Panel
 
 NexWorkflowButton < Button
   height: 26
-  margin-right: 2
+  margin: 2
   font: verdana-11px-rounded
   text-auto-resize: true
+  text-wrap: false
 
 NexListRow < Panel
   height: 36
@@ -331,11 +300,17 @@ NexTableSecondary < Label
   text-wrap: false
 
 NexTableActions < Panel
+  width: 144
   anchors.right: parent.right
   anchors.verticalCenter: parent.verticalCenter
   layout:
     type: horizontalBox
     fit-children: true
+
+NexTableActionButton < NexButton
+  width: 68
+  height: 24
+  margin: 1
 
 NexControllerLayout < Panel
   anchors.fill: parent
@@ -396,9 +371,11 @@ NexControllerConfigure < Button
     border-width: 2
 
 NexControllerOpen < Button
-  height: 24
+  height: 26
   font: verdana-11px-rounded
   margin: 3
+  text-auto-resize: false
+  text-wrap: false
 
 NexWorkspace < MainWindow
   text: nExBot
@@ -460,6 +437,8 @@ NexTabButton < Button
   margin-right: 2
   checkable: true
   font: verdana-11px-rounded
+  text-auto-resize: false
+  text-wrap: false
 
   $focus:
     border-color: #f2c66d
@@ -559,3 +538,8 @@ NexFooter < Panel
   margin: 4
   layout:
     type: horizontalBox
+
+NexFooterButton < NexButton
+  width: 86
+  height: 26
+  margin: 1
