@@ -170,11 +170,15 @@ function StepValidator.canMergeDiagonal(fromPos, dirA, dirB, world, policy)
   if offA.x * offB.x + offA.y * offB.y ~= 0 then
     return false, "NOT_L_SHAPE"
   end
+  policy = policy or {}
   local p = D.copyPos(fromPos)
   local corner = { x = p.x + offA.x, y = p.y + offA.y, z = p.z }
+  local otherSide = { x = p.x + offB.x, y = p.y + offB.y, z = p.z }
   local diag = { x = p.x + offA.x + offB.x, y = p.y + offA.y + offB.y, z = p.z }
-  -- Both cardinal tiles AND the diagonal must be clear.
+  -- Both orthogonal sides and the diagonal must be clear.
   local blocked, reason = tileBlocked(world, corner, policy)
+  if blocked then return false, "CORNER_TILE_BLOCKED:" .. tostring(reason) end
+  blocked, reason = tileBlocked(world, otherSide, policy)
   if blocked then return false, "CORNER_TILE_BLOCKED:" .. tostring(reason) end
   blocked, reason = tileBlocked(world, diag, policy)
   if blocked then return false, "DIAGONAL_TILE_BLOCKED:" .. tostring(reason) end

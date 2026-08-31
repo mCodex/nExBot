@@ -94,6 +94,35 @@ local function isDiagonal(dir)
   return dir and dir >= 4
 end
 
+local function isSafeTile(pos, ignoreCreatures)
+  local pu = PU()
+  if not pu then return false end
+  if pu.isTileWalkable and not pu.isTileWalkable(pos, ignoreCreatures) then return false end
+  if pu.isFloorChangeTile and pu.isFloorChangeTile(pos) then return false end
+  return true
+end
+
+local function validateNativePath(startPos, path, opts)
+  if type(path) ~= "table" or #path == 0 then return false end
+  local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
+  local ignoreCreatures = opts and opts.ignoreCreatures or false
+  for i = 1, #path do
+    local dir = path[i]
+    local off = dirOffset(dir)
+    if not off then return false end
+    if isDiagonal(dir) then
+      local sideA = {x = probe.x + off.x, y = probe.y, z = probe.z}
+      local sideB = {x = probe.x, y = probe.y + off.y, z = probe.z}
+      if not isSafeTile(sideA, ignoreCreatures) or not isSafeTile(sideB, ignoreCreatures) then
+        return false
+      end
+    end
+    probe = applyOff(probe, off)
+    if not isSafeTile(probe, ignoreCreatures) then return false end
+  end
+  return true
+end
+
 --- Pseudo-random jitter for human-like timing.
 -- Uses math.random which is already seeded by OTClient.
 local function jitter(diagonal)
@@ -172,7 +201,8 @@ function PathStrategy.findPath(startPos, goalPos, opts)
   local flags    = optsToFlags(opts)
 
   if not _pathBackend then _pathBackend = resolveBackend() end
-  return _pathBackend(startPos, goalPos, maxSteps, flags, opts)
+  local path = _pathBackend(startPos, goalPos, maxSteps, flags, opts)
+  return validateNativePath(startPos, path, opts) and path or nil
 end
 
 -- HUMANISED STEP TIMING (DRY: raw duration from PathUtils, jitter added here)
@@ -326,13 +356,12 @@ function PathStrategy.smoothPath(path, startPos)
         local diagDir = directionTo(p, diagPos)
         if diagDir then
           -- Validate diagonal tile is safe
-          local safe = true
+          local safe = isSafeTile(diagPos, false)
           local pu = PU()
-          if pu and pu.isTileSafe then
-            safe = pu.isTileSafe(diagPos, false)
-          else
-            local tile = g_map and g_map.getTile(diagPos)
-            safe = tile and tile:isWalkable() or false
+          if safe and pu and pu.isTileSafe then safe = pu.isTileSafe(diagPos, false) end
+          if safe then
+            safe = isSafeTile({x = p.x + o1.x, y = p.y + o1.y, z = p.z}, false)
+              and isSafeTile({x = p.x + o2.x, y = p.y + o2.y, z = p.z}, false)
           end
           if safe then
             -- Also verify the diagonal doesn't cross a floor change
@@ -445,12 +474,9 @@ function PathStrategy.nativePathIsSafe(startPos, goalPos, opts)
   local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
   for i = 1, #nativePath do
     local off = dirOffset(nativePath[i])
-    if not off then break end
+    if not off then return false, nativePath, i end
     probe = applyOff(probe, off)
-    if isFC(probe) then
-      return false, nativePath, i
-    end
-    if not PU().isTileWalkable(probe) then
+    if isFC(probe) or not isSafeTile(probe, opts and opts.ignoreCreatures) then
       return false, nativePath, i
     end
   end

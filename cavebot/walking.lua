@@ -119,54 +119,7 @@ local function stopAutoWalk()
   if g_game and g_game.stop then g_game.stop() end
 end
 
--- KEYBOARD NUDGE (fallback when pathfinding fails)
-
-local ADJACENT_DIRS = {}
-if Directions and Directions.ADJACENT then
-  for dir, neighbours in pairs(Directions.ADJACENT) do
-    local arr = {}
-    for nd, _ in pairs(neighbours) do arr[#arr + 1] = nd end
-    ADJACENT_DIRS[dir] = arr
-  end
-end
-
-local lastNudgeDir  = nil
-local lastNudgeTime = 0
 local lastStepTime  = 0
-
---- Try a single keyboard step toward dest. Returns "nudge" or false.
-local function tryKeyboardNudge(playerPos, dest)
-  if not playerPos or not dest then return false end
-  if player:isWalking() then return false end
-
-  local dir = getDirectionTo(playerPos, dest)
-  if dir == nil then return false end
-
-  local candidates = { dir }
-  local adj = ADJACENT_DIRS[dir]
-  if adj then candidates[2] = adj[1]; candidates[3] = adj[2] end
-
-  -- Anti-oscillation
-  if dir == lastNudgeDir and now - lastNudgeTime < 500 and adj then
-    candidates = { adj[1], adj[2], dir }
-  end
-
-  for _, d in ipairs(candidates) do
-    if canWalkDirection(d) then
-      local off = DIR_TO_OFFSET[d]
-      if off then
-        local target = {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}
-        if not isFloorChangeTile(target) and PathUtils.isTileWalkable(target) then
-          PS().walkStep(d)
-          lastNudgeDir  = d
-          lastNudgeTime = now
-          return "nudge"
-        end
-      end
-    end
-  end
-  return false
-end
 
 -- MODULE STATE (minimal)
 
@@ -175,7 +128,7 @@ local lastSafePos = nil
 local MAX_PATHFIND_DIST = 50
 
 -- CORE: FIND A WALKABLE PATH
--- Tries cached cursor first, then strict, then relaxed.
+-- Tries cached cursor first, then strict pathfinding.
 -- Always validates first step against canWalkDirection before accepting.
 
 --- Check if a direction (or its smoothed variant) is physically walkable.
@@ -251,39 +204,6 @@ local function findWalkablePath(playerPos, dest, opts)
       end
     end
     return path, false
-  end
-
-  -- 3) RELAXED pathfinding (last resort — respects walkability, allows creatures/unseen/fields)
-  local relaxedOpts = {
-    maxSteps        = maxSteps,
-    ignoreCreatures = true,
-    ignoreFields    = opts.ignoreFields or false,
-    precision       = opts.precision or 0,
-  }
-  local relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
-
-  if not (relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1], not opts.disableSmoothing)) then
-    relaxedOpts.allowUnseen = true
-    relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
-  end
-
-  if not (relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1], not opts.disableSmoothing)) then
-    relaxedOpts.ignoreFields = true
-    relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
-  end
-
-  if relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1], not opts.disableSmoothing) then
-    _failCache[failKey] = nil
-    PS().setCursor(relaxedPath, dest)
-    if not opts.disableSmoothing then
-      local sm = PS().smoothPath(relaxedPath, playerPos)
-      if sm and #sm > 0 and #sm <= #relaxedPath then
-        relaxedPath = sm
-        local cur = PS().getCursor()
-        if cur then cur.path = relaxedPath end
-      end
-    end
-    return relaxedPath, true
   end
 
   -- No walkable path found
@@ -488,7 +408,7 @@ CaveBot.walkTo = function(dest, maxDist, params)
   })
 
   if not path then
-    return tryKeyboardNudge(playerPos, dest)
+    return false
   end
 
   -- Count safe steps before first FC tile
@@ -498,14 +418,14 @@ CaveBot.walkTo = function(dest, maxDist, params)
 
   if safeSteps == 0 then
     PS().resetCursor()
-    return tryKeyboardNudge(playerPos, dest)
+    return false
   end
 
   local remaining   = #path - curIdx + 1
   local stepsToWalk = math.min(safeSteps, remaining)
   if stepsToWalk <= 0 then
     PS().resetCursor()
-    return tryKeyboardNudge(playerPos, dest)
+    return false
   end
 
   local curObj = PS().getCursor()
@@ -527,7 +447,8 @@ CaveBot.walkTo = function(dest, maxDist, params)
           local nextPos = applyOffset(currentPos, off)
           if not isFieldTile(nextPos) then break end
           if isFloorChangeTile(nextPos) then break end
-          walk(d)
+          if not resolveWalkableDir(d, false) then break end
+          PS().walkStep(d)
           currentPos = nextPos
           lastWalked = i
           if posEquals(currentPos, dest) then
@@ -546,11 +467,11 @@ CaveBot.walkTo = function(dest, maxDist, params)
   if approach.dispatch == "keyboard" or stepsToWalk <= KEYBOARD_THRESHOLD then
     if keyboardStep(path, playerPos, curIdx, classification ~= "transition") then return true end
     PS().resetCursor()
-    return tryKeyboardNudge(playerPos, dest)
+    return false
   else
     if autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist) then return true end
     PS().resetCursor()
-    return tryKeyboardNudge(playerPos, dest)
+    return false
   end
 end
 

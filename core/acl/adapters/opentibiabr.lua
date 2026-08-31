@@ -83,8 +83,8 @@ function A.game.forceWalk(direction)
   if g_game and g_game.walk      then return g_game.walk(direction) end
 end
 
-function A.game.autoWalk(destination, options)
-  return g_game and g_game.autoWalk and g_game.autoWalk(destination, options) or false
+function A.game.autoWalk(destination, maxSteps, options)
+  return g_game and g_game.autoWalk and g_game.autoWalk(destination, maxSteps, options) or false
 end
 
 function A.game.setScheduleLastWalk(s)     return gameMethod("setScheduleLastWalk", s) end
