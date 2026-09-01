@@ -21,7 +21,6 @@ end
 importStyle("/cavebot/editor.otui")
 safeDofile("/cavebot/waypoint_search.lua")
 safeDofile("/cavebot/waypoint_policy.lua")
-safeDofile("/cavebot/session_driver.lua")
 safeDofile("/cavebot/actions.lua")
 safeDofile("/cavebot/config.lua")
 safeDofile("/cavebot/example_functions.lua")

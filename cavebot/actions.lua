@@ -6,11 +6,6 @@ local getClientVersion = nExBot.Shared.getClientVersion
 local WaypointPolicy = (nExBot and nExBot.Nav and nExBot.Nav["cavebot.waypoint_policy"])
   or require("cavebot.waypoint_policy")
 
--- ponytail: session driver maps NavigationResult -> goto callback contract;
--- load once via the same pattern as waypoint_policy above.
-local SessionDriver = (nExBot and nExBot.Nav and nExBot.Nav["cavebot.session_driver"])
-  or require("cavebot.session_driver")
-
 local oldTibia = getClientVersion() < 960
 
 -- Throttle table for unknown floor-change minimap color warnings (once per tile+color)
@@ -635,46 +630,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   if retries > 2 then
     walkParams.ignoreFields = true
   end
-
-  -- ========== SESSION-TICK GPS PATH (kill-switch: sessionNav, GPS guide) ==========
-  -- Drives movement through the strict S9 session (route graph + ack'd steps).
-  -- Maps NavigationResult back onto the callback contract; the legacy walkTo
-  -- below remains the fallback while the flag is OFF or no route is built.
-  -- Escape hatch: when the session reports 'retry' past the escalation
-  -- threshold (retries > 1, same as ignoreCreatures below), fall through to
-  -- legacy walkTo so its ignoreCreatures/ignoreFields escalation and
-  -- blocks-creature kill can push past a stuck monster.
-  local sessionWalk = nil
-  if CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("sessionNav")
-     and SessionDriver and nExBot.Navigation
-     and SessionDriver.shouldUse(nExBot.Navigation) then
-    -- Never dispatch movement while attacking (combat owns movement).
-    local attacking = (Client and Client.isAttacking and Client.isAttacking())
-      or (g_game and g_game.isAttacking and g_game.isAttacking()) or false
-    local walk = SessionDriver.tickAndMap(nExBot.Navigation, playerPos, {
-      preempted = attacking,
-      combatActive = attacking,
-    })
-    if walk == "walking" or walk == "nudge" then
-      if CaveBot.setCurrentWaypointTarget then
-        CaveBot.setCurrentWaypointTarget(destPos, precision)
-      end
-      sessionWalk = "walking"
-    elseif walk == "retry" and retries <= 1 then
-      CaveBot.delay(75)
-      sessionWalk = "retry"
-    elseif walk == true then
-      CaveBot.clearWaypointTarget()
-      sessionWalk = true
-    else
-      sessionWalk = false -- terminal static failure: instantFail, do not fall through
-    end
-  end
-  if sessionWalk == "walking" then return "walking" end
-  if sessionWalk == "retry" then return "retry" end
-  if sessionWalk == true then return true end
-  if sessionWalk == false then return false, true end
-  -- Otherwise (session OFF / no route / session retry > threshold): fall to legacy.
 
   -- ========== ATTEMPT WALK ==========
   local walkResult, walkBlockClass = CaveBot.walkTo(destPos, maxDist, walkParams)
