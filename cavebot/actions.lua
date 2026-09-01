@@ -640,6 +640,11 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Drives movement through the strict S9 session (route graph + ack'd steps).
   -- Maps NavigationResult back onto the callback contract; the legacy walkTo
   -- below remains the fallback while the flag is OFF or no route is built.
+  -- Escape hatch: when the session reports 'retry' past the escalation
+  -- threshold (retries > 1, same as ignoreCreatures below), fall through to
+  -- legacy walkTo so its ignoreCreatures/ignoreFields escalation and
+  -- blocks-creature kill can push past a stuck monster.
+  local sessionWalk = nil
   if CaveBot.Config and CaveBot.Config.get and CaveBot.Config.get("sessionNav")
      and SessionDriver and nExBot.Navigation
      and SessionDriver.shouldUse(nExBot.Navigation) then
@@ -654,17 +659,22 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
       if CaveBot.setCurrentWaypointTarget then
         CaveBot.setCurrentWaypointTarget(destPos, precision)
       end
-      return "walking"
-    elseif walk == "retry" then
+      sessionWalk = "walking"
+    elseif walk == "retry" and retries <= 1 then
       CaveBot.delay(75)
-      return "retry"
+      sessionWalk = "retry"
     elseif walk == true then
       CaveBot.clearWaypointTarget()
-      return true
+      sessionWalk = true
     else
-      return false, true
+      sessionWalk = false -- terminal static failure: instantFail, do not fall through
     end
   end
+  if sessionWalk == "walking" then return "walking" end
+  if sessionWalk == "retry" then return "retry" end
+  if sessionWalk == true then return true end
+  if sessionWalk == false then return false, true end
+  -- Otherwise (session OFF / no route / session retry > threshold): fall to legacy.
 
   -- ========== ATTEMPT WALK ==========
   local walkResult, walkBlockClass = CaveBot.walkTo(destPos, maxDist, walkParams)
