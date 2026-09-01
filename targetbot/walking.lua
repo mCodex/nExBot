@@ -1,74 +1,30 @@
 --[[
-  TargetBot Walking Module - Optimized Pathfinding intelligence.0.0
+  TargetBot Walking Module - Strict Movement
   
-  Uses path caching and progressive pathfinding for better performance.
-  Integrates with TargetBot's creature cache for efficient walking.
-  
-  intelligence.0.0: Integrated PathUtils for DRY, added anti-zigzag, native API optimization
+  Routes all walkTo/walk movement through the unified PathStrategy engine
+  (same strict, wall-safe pathfinding CaveBot uses) + StepValidator, instead
+  of the old permissive bare getPath which let chase paths cut through walls.
 ]]
 
-local getClient = nExBot.Shared.getClient
-
-local getClientVersion = nExBot.Shared.getClientVersion
-
--- PathUtils is set as global by path_utils.lua (loaded in Phase 3 by _Loader)
-local SharedHelpers = nExBot.SharedHelpers or {}
-local function ensurePathUtils()
-  if PathUtils then return PathUtils end
-  SharedHelpers.ensurePathUtils()
-  return PathUtils
+-- Unified strict movement engine (same as CaveBot): PathStrategy does strict,
+-- wall-safe pathfinding + smoothing; StepValidator validates each step
+-- fail-closed.
+local PS = (nExBot and nExBot.PathStrategy) or PathStrategy
+local StepValidator = (nExBot and nExBot.Nav and nExBot.Nav["navigation.step_validator"])
+local function getStepValidator()
+  if StepValidator then return StepValidator end
+  if not StepValidator then
+    local ok, mod = pcall(require, "navigation.step_validator")
+    if ok and mod then StepValidator = mod end
+  end
+  return StepValidator
 end
-ensurePathUtils()
+
+local getClient = nExBot.Shared.getClient
 
 local dest = nil
 local maxDist = nil
 local params = nil
-
--- Use PathUtils for direction offsets if available, else fallback
-local DIR_TO_OFFSET = (PathUtils and PathUtils.DIR_TO_OFFSET) or {
-  [North] = {x = 0, y = -1},
-  [East] = {x = 1, y = 0},
-  [South] = {x = 0, y = 1},
-  [West] = {x = -1, y = 0},
-  [NorthEast] = {x = 1, y = -1},
-  [SouthEast] = {x = 1, y = 1},
-  [SouthWest] = {x = -1, y = 1},
-  [NorthWest] = {x = -1, y = -1}
-}
-
--- Use PathUtils for floor-change detection (DRY, guaranteed loaded by ensurePathUtils)
-local function isFloorChangeTile(pos)
-  return PathUtils.isFloorChangeTile(pos)
-end
-
--- Use TargetCore for path floor-change validation (DRY)
-local function pathCrossesFloorChange(path, startPos)
-  return TargetCore.PathSafety.pathCrossesFloorChange(path, startPos)
-end
-
--- Use PathUtils for direction relationship checks (DRY)
-local function areSimilarDirections(dir1, dir2)
-  return PathUtils.areSimilarDirections(dir1, dir2)
-end
-
-local function areOppositeDirections(dir1, dir2)
-  return PathUtils.areOppositeDirections(dir1, dir2)
-end
-
--- Path cache for TargetBot walking
-local WalkCache = {
-  path = nil,
-  destKey = nil,
-  timestamp = 0,
-  idx = 1,
-  TTL = 200  -- Short TTL for combat responsiveness
-}
-
--- Generate cache key
-local function getCacheKey(destination)
-  if not destination then return nil end
-  return destination.x .. "," .. destination.y .. "," .. destination.z
-end
 
 TargetBot.walkTo = function(_dest, _maxDist, _params)
   dest = _dest
@@ -130,15 +86,6 @@ TargetBot.walkTo = function(_dest, _maxDist, _params)
     end
   end
   
-  -- Invalidate cache if destination changed
-  local newKey = getCacheKey(_dest)
-  if newKey ~= WalkCache.destKey then
-    WalkCache.path = nil
-    WalkCache.destKey = newKey
-    WalkCache.timestamp = 0
-    WalkCache.idx = 1
-  end
-  
   -- IMMEDIATE WALK: Execute first step right away instead of waiting for next tick
   -- This fixes the timing issue where TargetBot.walk() was called before walkTo()
   if dest and not player:isWalking() then
@@ -151,6 +98,7 @@ end
 TargetBot.walk = function()
   if not dest then return end
   if player:isWalking() then return end
+  if not PS then return end
   
   local playerPos = player:getPosition()
   if not playerPos then return end
@@ -158,17 +106,6 @@ TargetBot.walk = function()
     dest = nil
     return 
   end
-
-  -- Abort if player unexpectedly changed floor mid-chase (path likely invalid)
-  if WalkCache.lastZ and WalkCache.lastZ ~= playerPos.z then
-    dest = nil
-    WalkCache.path = nil
-    WalkCache.idx = 1
-    WalkCache.timestamp = 0
-    WalkCache.destKey = nil
-    return
-  end
-  WalkCache.lastZ = playerPos.z
   
   -- Calculate distance
   local distX = math.abs(playerPos.x - dest.x)
@@ -188,64 +125,45 @@ TargetBot.walk = function()
       return
     end
   end
-  
-  -- Check cache
-  if WalkCache.path and WalkCache.idx <= #WalkCache.path and (now - WalkCache.timestamp) < WalkCache.TTL then
-    -- Safety: abort if next step leads to floor change
-    local nextPos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-    local nextDir = WalkCache.path[WalkCache.idx]
-    local off = DIR_TO_OFFSET[nextDir]
-    if off then
-      nextPos.x = nextPos.x + off.x
-      nextPos.y = nextPos.y + off.y
-      if isFloorChangeTile(nextPos) then
-        dest = nil
-        WalkCache.path = nil
-        WalkCache.idx = 1
-        return
-      end
-    end
-    
-    -- Use cached path - take first step
-    local moved = walk(nextDir) ~= false
-    WalkCache.idx = WalkCache.idx + 1
-    return moved
-  end
-  
-  -- Calculate new path
-  -- Safety: if destination itself is a floor-change tile, abort chase/avoid move
-  if isFloorChangeTile(dest) then
+
+  -- STRICT pathfinding via the shared engine (PathStrategy). It never paths
+  -- through non-pathable/wall tiles (no ignoreNonPathable) and validates every
+  -- step against floor-change tiles, so chases stop cutting through walls.
+  -- Path recomputed each idle tick from the observed position (bounded short
+  -- chase paths); no hand-rolled cache to go stale.
+  local path = PS.findPath(playerPos, dest, {
+    maxSteps = math.min(maxDist or 10, 50),
+    ignoreCreatures = (params and params.ignoreCreatures) or false,
+    precision = (params and params.precision) or 1,
+  })
+  if not path or #path == 0 then
     dest = nil
-    WalkCache.path = nil
-    WalkCache.idx = 1
-    WalkCache.timestamp = 0
-    WalkCache.destKey = nil
-    return
+    return false
   end
 
-  local path = getPath(playerPos, dest, maxDist or 10, params)
-  
-  if path and #path > 0 then
-    -- Abort if path crosses floor-change tiles (prevents unintended Z changes)
-    if pathCrossesFloorChange(path, playerPos) then
+  -- Validate + smooth the first step (same fail-closed accuracy path as CaveBot).
+  local dir = path[1]
+  local smoothed = PS.smoothDirection(dir) or dir
+  local validator = getStepValidator()
+  local vctx = { player = player, world = g_map, getPosition = function() return player:getPosition() end }
+  if validator and validator.canWalkDirection then
+    if validator.canWalkDirection(smoothed, vctx) then
+      PS.walkStep(smoothed)
       dest = nil
-      WalkCache.path = nil
-      WalkCache.idx = 1
-      return
+      return true
     end
-    -- Cache the path
-    WalkCache.path = path
-    WalkCache.timestamp = now
-    WalkCache.idx = 1
-    
-    -- Take first step
-    local moved = walk(path[1]) ~= false
-    WalkCache.idx = WalkCache.idx + 1
+    if smoothed ~= dir and validator.canWalkDirection(dir, vctx) then
+      PS.walkStep(dir)
+      dest = nil
+      return true
+    end
+  else
+    -- No validator available (shouldn't happen): fall back to the raw step.
+    local moved = walk(dir) ~= false
     dest = nil
     return moved
   end
   
-  -- Clear destination after attempting walk
   dest = nil
   return false
 end
@@ -253,6 +171,4 @@ end
 -- Clear walking state
 TargetBot.clearWalk = function()
   dest = nil
-  WalkCache.path = nil
-  WalkCache.timestamp = 0
 end

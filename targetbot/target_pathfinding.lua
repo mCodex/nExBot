@@ -3,32 +3,10 @@
 
 local getClient = nExBot.Shared.getClient
 
-local PATH_PARAMS = {
-  ignoreLastCreature = true,
-  ignoreNonPathable = true,
-  ignoreCost = true,
-  ignoreCreatures = true,
-  allowOnlyVisibleTiles = true,
-  precision = 1
-}
-
-local RELAXED_PATH_PARAMS = {
-  ignoreLastCreature = true,
-  ignoreNonPathable = true,
-  ignoreCost = true,
-  ignoreCreatures = true,
-  allowOnlyVisibleTiles = false,
-  precision = 1
-}
-
 -- Creature path caching lives exclusively in TargetReachability.
 local function cleanupPathCache() end
 local function getCachedPath() return nil end
 local function setCachedPath() end
-
-local function findPathInternal(pos, cpos, maxDist, params)
-  return findPath(pos, cpos, maxDist, params)
-end
 
 local function isInRange(pos1, pos2, range)
   if not pos1 or not pos2 then return false end
@@ -101,9 +79,6 @@ nExBot.target_pathfinding = {
   getCachedPath = getCachedPath,
   setCachedPath = setCachedPath,
   cleanupPathCache = cleanupPathCache,
-  PATH_PARAMS = PATH_PARAMS,
-  RELAXED_PATH_PARAMS = RELAXED_PATH_PARAMS,
-  findPath = findPathInternal,
   isInRange = isInRange,
   getWalkDirection = getWalkDirection,
   isSameFloor = isSameFloor,
