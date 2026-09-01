@@ -365,11 +365,22 @@ local function avoidWaveAttacks()
   local currentTarget = target and target()
   local safePos, score = findSafeAdjacentTile(playerPos, monsters, currentTarget, scaling)
   if safePos then
-    if MovementCoordinator and MovementCoordinator.canMove and MovementCoordinator.canMove() then
+    local Intelligence = nExBot and nExBot.Intelligence
+    local generations = Intelligence and Intelligence.lifecycle.generations or {}
+    local threatId = currentTarget and currentTarget.getId and currentTarget:getId() or 0
+    local proposal = Intelligence and Intelligence.waveBeam:update({
+      snapshotGeneration = generations.snapshot or 0,
+      threatId = threatId,
+      kind = "wave",
+      evidence = { { name = "safe_tile_geometry", confidence = 0.8, weight = 1 } },
+    }, { generations = generations, now = currentTime })
+    if proposal then proposal.position = safePos end
+    local selected = proposal and Intelligence.decisions:select({ proposal }, generations, { playerPosition = playerPos })
+    if selected and MovementCoordinator and MovementCoordinator.canMove and MovementCoordinator.canMove() then
       avoidanceState.lastMove = currentTime; avoidanceState.lastSafePos = safePos
       avoidanceState.consecutiveMoves = avoidanceState.consecutiveMoves + 1
-      TargetBot.walkTo(safePos, 2, {ignoreNonPathable = true, precision = 0})
-      return true
+      MovementCoordinator.avoidWave(selected.position, selected.confidence)
+      return MovementCoordinator.tick()
     end
     return false
   end

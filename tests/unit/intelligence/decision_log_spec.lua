@@ -1,0 +1,140 @@
+local DecisionLog = dofile("core/intelligence/evaluation/decision_log.lua")
+
+describe("IntelligenceDecisionLog", function()
+  local log
+
+  before_each(function()
+    log = DecisionLog.new({ maxSize = 100 })
+  end)
+
+  describe("new", function()
+    it("returns a log instance", function()
+      assert.is_not_nil(log)
+      assert.is_function(log.log)
+      assert.is_function(log.getLogs)
+      assert.is_function(log.getStats)
+    end)
+
+    it("uses default maxSize when not provided", function()
+      local defaultLog = DecisionLog.new({})
+      assert.is_not_nil(defaultLog)
+    end)
+  end)
+
+  describe("log", function()
+    it("logs a valid decision record", function()
+      local ok = log:log({
+        decisionId = "d1", sessionId = "s1", huntId = "h1",
+        decisionType = "target_select", candidates = {}, baseline = {},
+      })
+      assert.is_true(ok)
+    end)
+
+    it("returns false for nil decision", function()
+      local ok = log:log(nil)
+      assert.is_false(ok)
+    end)
+
+    it("returns false for non-table decision", function()
+      local ok = log:log("invalid")
+      assert.is_false(ok)
+    end)
+  end)
+
+  describe("getLogs", function()
+    it("returns all logs when no criteria", function()
+      log:log({ decisionId = "d1", sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      log:log({ decisionId = "d2", sessionId = "s2", huntId = "h1", decisionType = "movement", candidates = {}, baseline = {} })
+      local results = log:getLogs({})
+      assert.equals(2, #results)
+    end)
+
+    it("filters by decisionType", function()
+      log:log({ decisionId = "d1", sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      log:log({ decisionId = "d2", sessionId = "s1", huntId = "h1", decisionType = "movement", candidates = {}, baseline = {} })
+      local results = log:getLogs({ decisionType = "target_select" })
+      assert.equals(1, #results)
+      assert.equals("target_select", results[1].decisionType)
+    end)
+
+    it("filters by sessionId", function()
+      log:log({ decisionId = "d1", sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      log:log({ decisionId = "d2", sessionId = "s2", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      local results = log:getLogs({ sessionId = "s1" })
+      assert.equals(1, #results)
+      assert.equals("s1", results[1].sessionId)
+    end)
+
+    it("filters by huntId", function()
+      log:log({ decisionId = "d1", sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      log:log({ decisionId = "d2", sessionId = "s1", huntId = "h2", decisionType = "target_select", candidates = {}, baseline = {} })
+      local results = log:getLogs({ huntId = "h1" })
+      assert.equals(1, #results)
+    end)
+
+    it("respects limit", function()
+      for i = 1, 10 do
+        log:log({ decisionId = "d"..i, sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      end
+      local results = log:getLogs({ limit = 5 })
+      assert.equals(5, #results)
+    end)
+
+    it("returns empty table when no match", function()
+      log:log({ decisionId = "d1", sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      local results = log:getLogs({ decisionType = "loot" })
+      assert.equals(0, #results)
+    end)
+  end)
+
+  describe("getStats", function()
+    it("returns zero stats for empty log", function()
+      local stats = log:getStats()
+      assert.equals(0, stats.total)
+      assert.is_table(stats.byType)
+      assert.is_table(stats.bySession)
+    end)
+
+    it("tracks total count", function()
+      log:log({ decisionId = "d1", sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      log:log({ decisionId = "d2", sessionId = "s1", huntId = "h1", decisionType = "movement", candidates = {}, baseline = {} })
+      local stats = log:getStats()
+      assert.equals(2, stats.total)
+    end)
+
+    it("tracks byType counts", function()
+      log:log({ decisionId = "d1", sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      log:log({ decisionId = "d2", sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      log:log({ decisionId = "d3", sessionId = "s1", huntId = "h1", decisionType = "movement", candidates = {}, baseline = {} })
+      local stats = log:getStats()
+      assert.equals(2, stats.byType.target_select)
+      assert.equals(1, stats.byType.movement)
+    end)
+
+    it("tracks bySession counts", function()
+      log:log({ decisionId = "d1", sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      log:log({ decisionId = "d2", sessionId = "s2", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      local stats = log:getStats()
+      assert.equals(1, stats.bySession.s1)
+      assert.equals(1, stats.bySession.s2)
+    end)
+  end)
+
+  describe("eviction", function()
+    it("evicts oldest entries when maxSize exceeded", function()
+      for i = 1, 105 do
+        log:log({ decisionId = "d"..i, sessionId = "s1", huntId = "h1", decisionType = "target_select", candidates = {}, baseline = {} })
+      end
+      local stats = log:getStats()
+      assert.equals(100, stats.total)
+      local results = log:getLogs({ limit = 100 })
+      assert.equals("d6", results[1].decisionId)
+    end)
+  end)
+
+  describe("global registration", function()
+    it("sets nExBot.IntelligenceDecisionLog", function()
+      assert.is_not_nil(nExBot.IntelligenceDecisionLog)
+    end)
+  end)
+end)

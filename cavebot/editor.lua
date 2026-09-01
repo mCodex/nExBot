@@ -2,6 +2,53 @@ CaveBot.Editor = {}
 local zChanging = nExBot.zChanging or function() return false end
 CaveBot.Editor.Actions = {}
 
+-- Editor tracks its own selection so action buttons and the Delete key stay
+-- bound to what the user picked in the editor, not to CaveBot.Route's focus
+-- (which the walking engine changes on its own).
+CaveBot.Editor.selected = nil
+
+CaveBot.Editor.setMessage = function(text)
+  local ui = CaveBot.Editor.ui
+  if ui and ui.message and ui.message.setText then ui.message:setText(text) end
+end
+
+CaveBot.Editor.select = function(item)
+  CaveBot.Editor.selected = item
+  if item and CaveBot.Route and CaveBot.Route.focusChild then
+    CaveBot.Route:focusChild(item)
+  end
+end
+
+CaveBot.Editor.withSelected = function(fn)
+  local selected = CaveBot.Editor.selected
+  if not selected or CaveBot.Route:getChildIndex(selected) < 1 then
+    CaveBot.Editor.selected = nil
+    CaveBot.Editor.setMessage("Select a waypoint first.")
+    return
+  end
+  return fn(selected)
+end
+
+CaveBot.Editor.commitChange = function()
+  if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
+  if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
+  CaveBot.save()
+  CaveBot.Editor.refreshTable()
+end
+
+CaveBot.Editor.removeSelected = function()
+  CaveBot.Editor.withSelected(function(action)
+    local index = CaveBot.Route:getChildIndex(action)
+    action:destroy()
+    local replacement = CaveBot.Route:getChildByIndex(index) or CaveBot.Route:getChildByIndex(index - 1)
+    CaveBot.Editor.select(replacement)
+    CaveBot.Editor.commitChange()
+    if not replacement then
+      CaveBot.Editor.setMessage("Route is empty. Add a waypoint to start building.")
+    end
+  end)
+end
+
 -- also works as registerAction(action, params), then text == action
 -- params are options for text editor or function to be executed when clicked
 -- you have many examples how to use it bellow
@@ -11,80 +58,105 @@ CaveBot.Editor.registerAction = function(action, text, params)
     text = action
   end
 
-  local color = nil
   if type(params) ~= 'function' then
     local raction = CaveBot.Actions[action]
     if not raction then
       return warn("CaveBot editor warn: action " .. action .. " doesn't exist")
     end
     CaveBot.Editor.Actions[action] = params
-    color = raction.color
   end
   
   local button = UI.createWidget('CaveBotEditorButton', CaveBot.Editor.ui.buttons)
   button:setText(text)
-  if color then
-    button:setColor(color)
-  end
   button.onClick = function()    
     if type(params) == 'function' then
       params()
       return
     end
     CaveBot.Editor.edit(action, nil, function(action, value)
-      local focusedAction = CaveBot.actionList:getFocusedChild()
-      local index = CaveBot.actionList:getChildCount()
+      local focusedAction = CaveBot.Editor.selected
+      local index = CaveBot.Route:getChildCount()
       if focusedAction then
-        index = CaveBot.actionList:getChildIndex(focusedAction)
+        index = CaveBot.Route:getChildIndex(focusedAction)
       end
       local widget = CaveBot.addAction(action, value)
-      CaveBot.actionList:moveChildToIndex(widget, index + 1)
-      CaveBot.actionList:focusChild(widget)
-      CaveBot.save()
+      CaveBot.Route:moveChildToIndex(widget, index + 1)
+      CaveBot.Editor.select(widget)
+      CaveBot.Editor.commitChange()
     end)
   end
   return button
 end
 
+local function buildWaypointRow(item, index, parent)
+  local row = g_ui.createWidget('CaveBotEditorRow', parent)
+  row.item = item
+
+  local idLabel = g_ui.createWidget('CaveBotEditorCell', row)
+  idLabel:setWidth(28)
+  idLabel:setText(tostring(index))
+
+  local typeLabel = g_ui.createWidget('CaveBotEditorCell', row)
+  typeLabel:setWidth(82)
+  typeLabel:setText(tostring(item.action or "?"))
+
+  local valueLabel = g_ui.createWidget('CaveBotEditorCell', row)
+  valueLabel:setText(tostring(item.value or ""))
+
+  row.onClick = function()
+    CaveBot.Editor.select(item)
+    row:focus()
+  end
+  row.onDoubleClick = function()
+    if item.onDoubleClick then item.onDoubleClick(item) end
+  end
+
+  if CaveBot.Editor.selected == item then
+    row:focus()
+  end
+end
+
+CaveBot.Editor.refreshTable = function()
+  local ui = CaveBot.Editor.ui
+  if not ui or not ui.tableScroll then return end
+  ui.tableScroll:destroyChildren()
+  for index, item in ipairs(CaveBot.Route:getChildren()) do
+    buildWaypointRow(item, index, ui.tableScroll)
+  end
+end
+
 CaveBot.Editor.setup = function()
-  CaveBot.Editor.ui = UI.createWidget("CaveBotEditorPanel")
+  CaveBot.Editor.ui = UI.createWindow("CaveBotEditorPanel", g_ui.getRootWidget())
   local ui = CaveBot.Editor.ui
   local registerAction = CaveBot.Editor.registerAction
+  if ui.close then ui.close.onClick = function() ui:hide() end end
 
-  registerAction("move up", function()
-    local action = CaveBot.actionList:getFocusedChild()
-    if not action then return end
-    local index = CaveBot.actionList:getChildIndex(action)
-    if index < 2 then return end
-    CaveBot.actionList:moveChildToIndex(action, index - 1)
-    CaveBot.actionList:ensureChildVisible(action)
-    if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
-    if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
-    CaveBot.save()
+  registerAction("move up", "Move Up", function()
+    CaveBot.Editor.withSelected(function(action)
+      local index = CaveBot.Route:getChildIndex(action)
+      if index < 2 then return end
+      CaveBot.Route:moveChildToIndex(action, index - 1)
+      CaveBot.Route:ensureChildVisible(action)
+      CaveBot.Editor.commitChange()
+    end)
   end)
-  registerAction("edit", function()
-    local action = CaveBot.actionList:getFocusedChild()
-    if not action or not action.onDoubleClick then return end
-    action.onDoubleClick(action)
+  registerAction("edit", "Edit", function()
+    CaveBot.Editor.withSelected(function(action)
+      if not action.onDoubleClick then return end
+      action.onDoubleClick(action)
+    end)
   end)
-  registerAction("move down", function()
-    local action = CaveBot.actionList:getFocusedChild()
-    if not action then return end
-    local index = CaveBot.actionList:getChildIndex(action)
-    if index >= CaveBot.actionList:getChildCount() then return end
-    CaveBot.actionList:moveChildToIndex(action, index + 1)
-    CaveBot.actionList:ensureChildVisible(action)
-    if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
-    if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
-    CaveBot.save()
+  registerAction("move down", "Move Down", function()
+    CaveBot.Editor.withSelected(function(action)
+      local index = CaveBot.Route:getChildIndex(action)
+      if index >= CaveBot.Route:getChildCount() then return end
+      CaveBot.Route:moveChildToIndex(action, index + 1)
+      CaveBot.Route:ensureChildVisible(action)
+      CaveBot.Editor.commitChange()
+    end)
   end)
-  registerAction("remove", function()
-    local action = CaveBot.actionList:getFocusedChild()
-    if not action then return end
-    action:destroy()
-    if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
-    if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
-    CaveBot.save()
+  registerAction("remove", "Remove", function()
+    CaveBot.Editor.removeSelected()
   end)
     
   registerAction("label", {
@@ -171,10 +243,29 @@ CaveBot.Editor.setup = function()
     end
     ui.pos:setText("Position: " .. pos.x .. ", " .. pos.y .. ", " .. pos.z) 
   end)
-  ui.pos:setText("Position: " .. posx() .. ", " .. posy() .. ", " .. posz()) 
+  ui.pos:setText("Position: " .. posx() .. ", " .. posy() .. ", " .. posz())
+  ui:hide()
+
+  local lastRevision = -1
+  macro(250, function()
+    if not ui:isVisible() then return end
+    local revision = CaveBot.Route:getRevision()
+    if revision ~= lastRevision then
+      lastRevision = revision
+      CaveBot.Editor.refreshTable()
+    end
+  end)
+
+  onKeyPress(function(keys)
+    if not ui:isVisible() then return end
+    if keys == 'Delete' then
+      CaveBot.Editor.removeSelected()
+    end
+  end)
 end
 
 CaveBot.Editor.show = function()
+  CaveBot.Editor.refreshTable()
   CaveBot.Editor.ui:show()
 end
 

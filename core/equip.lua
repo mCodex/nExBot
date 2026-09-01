@@ -1,5 +1,3 @@
--- config
-setDefaultTab("HP")
 local scripts = 2 -- if you want more auto equip panels you can change 2 to higher value
 
 -- Non-blocking cooldown state
@@ -14,9 +12,6 @@ end
 local getProfileSetting = SharedHelpers.getProfileSetting
 local setProfileSetting = SharedHelpers.setProfileSetting
 
--- script by kondrah, don't edit below unless you know what you are doing
-UI.Label("Auto equip")
-
 -- Load from profile storage
 local autoEquip = getProfileSetting("autoEquip") or {}
 
@@ -24,11 +19,17 @@ for i=1,scripts do
   if not autoEquip[i] then
     autoEquip[i] = {on=false, title="Auto Equip", item1=i == 1 and 3052 or 0, item2=i == 1 and 3089 or 0, slot=i == 1 and 9 or 0}
   end
-  UI.TwoItemsAndSlotPanel(autoEquip[i], function(widget, newParams)
-    autoEquip[i] = newParams
-    setProfileSetting("autoEquip", autoEquip)
-  end)
 end
+
+nExBot.AutoEquip = {
+  getRules = function() return autoEquip end,
+  setRule = function(index, rule)
+    if type(index) ~= "number" or type(rule) ~= "table" then return false end
+    autoEquip[index] = rule
+    setProfileSetting("autoEquip", autoEquip)
+    return true
+  end,
+}
 
 -- Auto equip handler function (shared by UnifiedTick and fallback macro)
 local function autoEquipHandler()

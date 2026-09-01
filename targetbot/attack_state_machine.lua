@@ -553,8 +553,19 @@ local function handleEngaging()
 
   -- Send attack command (rate-limited by COMMAND_COOLDOWN internally)
   if not sendAttack(state.creature, "engage") and state.boundaryFailure then
-    clearTarget(false)
-    transition(STATE.IDLE, "reachability_blocked")
+    local isHard = false
+    if ReachabilityService and ReachabilityService.evaluate then
+      local svcResult = ReachabilityService.evaluate(state.creature, { source = "engage_boundary" })
+      if svcResult and ReachabilityState and ReachabilityState.isHardRelease and ReachabilityState.isHardRelease(svcResult.state) then
+        isHard = true
+      end
+    elseif state.boundaryFailure.classification == "different_floor" or state.boundaryFailure.classification == "hard_unreachable" then
+      isHard = true
+    end
+    if isHard then
+      clearTarget(false)
+      transition(STATE.IDLE, "reachability_blocked")
+    end
   end
 end
 
@@ -579,9 +590,20 @@ local function handleLocked()
     state.lastConfirmedAt = nowMs()
   else
     if not sendAttack(state.creature, "lock_recover") and state.boundaryFailure then
-      clearTarget(false)
-      transition(STATE.IDLE, "reachability_blocked")
-      return
+      local isHard = false
+      if ReachabilityService and ReachabilityService.evaluate then
+        local svcResult = ReachabilityService.evaluate(state.creature, { source = "lock_boundary" })
+        if svcResult and ReachabilityState and ReachabilityState.isHardRelease and ReachabilityState.isHardRelease(svcResult.state) then
+          isHard = true
+        end
+      elseif state.boundaryFailure.classification == "different_floor" or state.boundaryFailure.classification == "hard_unreachable" then
+        isHard = true
+      end
+      if isHard then
+        clearTarget(false)
+        transition(STATE.IDLE, "reachability_blocked")
+        return
+      end
     end
     if (nowMs() - state.lastConfirmedAt) > CC.GRACE_PERIOD then
       log("Attack lost after " .. CC.GRACE_PERIOD .. "ms grace")
@@ -642,11 +664,27 @@ local function update()
   if state.creature and TargetReachability and TargetReachability.evaluate then
     local evaluated = TargetReachability.evaluate(state.creature, { source = "active_monitor" })
     if not evaluated.attackable then
-      TargetReachability.quarantine(state.creature, evaluated)
-      cancelAttack()
-      clearTarget(false)
-      transition(STATE.IDLE, "target_became_unreachable")
-      return
+      local isHardFailure = false
+      if ReachabilityService and ReachabilityService.evaluate then
+        local svcResult = ReachabilityService.evaluate(state.creature, { source = "active_monitor" })
+        if svcResult and ReachabilityState and ReachabilityState.isHardRelease and ReachabilityState.isHardRelease(svcResult.state) then
+          isHardFailure = true
+        elseif svcResult and svcResult.state == "CONFIRMED_HARD_UNREACHABLE" then
+          isHardFailure = true
+        end
+      else
+        local classification = evaluated.classification or ""
+        if classification == "different_floor" or classification == "hard_unreachable" then
+          isHardFailure = true
+        end
+      end
+      if isHardFailure then
+        TargetReachability.quarantine(state.creature, evaluated)
+        cancelAttack()
+        clearTarget(false)
+        transition(STATE.IDLE, "target_became_unreachable")
+        return
+      end
     end
     local pp, cp = evaluated.playerPosition, evaluated.creaturePosition
     local signature = pp and cp and table.concat({ pp.x, pp.y, pp.z, cp.x, cp.y, cp.z,

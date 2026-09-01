@@ -119,91 +119,18 @@ end
 local red = "#ff0800" -- "#ff0800" / #ea3c53 best
 local blue = "#7ef9ff"
 
-setDefaultTab("HP")
--- healPanelName already defined at top of file
-local ui = setupUI([[
-Panel
-  height: 55
+local function stateControl()
+  local state = false
+  return {
+    setOn = function(_, value) state = value == true end,
+    isOn = function() return state end,
+    setText = function() end,
+    setColor = function() end,
+  }
+end
 
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('HealBot')
-
-  Button
-    id: settings
-    anchors.top: prev.top
-    anchors.left: prev.right
-    margin-left: 3
-    height: 17
-    width: 55
-    text: Self
-
-  Button
-    id: allySetup
-    anchors.top: prev.top
-    anchors.left: prev.right
-    margin-left: 3
-    height: 17
-    width: 50
-    text: Ally
-
-  Button
-    id: 1
-    anchors.top: prev.bottom
-    anchors.left: parent.left
-    text: 1
-    margin-right: 2
-    margin-top: 4
-    size: 17 17
-
-  Button
-    id: 2
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    text: 2
-    margin-left: 4
-    size: 17 17
-    
-  Button
-    id: 3
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    text: 3
-    margin-left: 4
-    size: 17 17
-
-  Button
-    id: 4
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    text: 4
-    margin-left: 4
-    size: 17 17 
-    
-  Button
-    id: 5
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    text: 5
-    margin-left: 4
-    size: 17 17
-    
-  Label
-    id: name
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
-    anchors.right: parent.right
-    text-align: center
-    margin-left: 4
-    height: 17
-    text: Profile #1
-    background: #292A2A
-]])
-ui:setId(healPanelName)
+local ui = { title = stateControl(), settings = stateControl(), allySetup = stateControl(), name = stateControl() }
+for index = 1, 5 do ui[index] = stateControl() end
 
 heal_config.ensureDefaults(HealBotConfig, healPanelName)
 
@@ -245,14 +172,6 @@ local function syncHealMacro()
   end
 end
 
-local setProfileName = function()
-  local name = (currentSettings and currentSettings.name) or ("Profile #" .. HealBotConfig.currentHealBotProfile)
-  ui.name:setText(name)
-  if healWindow and healWindow.settings and healWindow.settings.profiles then
-    healWindow.settings.profiles.Name:setText(name)
-  end
-end
-
 local activeProfileColor = function()
   for i=1,5 do
     if i == HealBotConfig.currentHealBotProfile then
@@ -273,268 +192,147 @@ ui.title.onClick = function(widget)
   saveHeal()
 end
 
-ui.settings.onClick = function(widget)
-  if healWindow then
-    healWindow:show()
-    healWindow:raise()
-    healWindow:focus()
-  end
-end
-
-local friendHealerWindow
-ui.allySetup.onClick = function(widget)
-  if friendHealerWindow then
-    friendHealerWindow:show()
-    friendHealerWindow:raise()
-    friendHealerWindow:focus()
-  end
-end
-
 -- Converter functions already defined at top of file
 
-local rootWidget = g_ui.getRootWidget()
-if rootWidget then
-  healWindow = UI.createWindow('HealWindow', rootWidget)
-  healWindow:hide()
+-- Public HealBot API. The standalone HealWindow is retired; the shell's
+-- healing page drives this domain API directly (widget code never touches
+-- domain tables).
+local function profileChange()
+  setActiveProfile()
+  activeProfileColor()
+  applyHealEngineToggles()  -- Update HealEngine with new profile's spells/potions
+  saveHeal()
+end
 
-  healWindow.closeButton.onClick = function(widget)
-    healWindow:hide()
+HealBot = {} -- global table
+
+HealBot.isOn = function()
+  return currentSettings.enabled
+end
+
+HealBot.isOff = function()
+  return not currentSettings.enabled
+end
+
+HealBot.setOff = function()
+  currentSettings.enabled = false
+  syncHealMacro()
+  applyHealEngineToggles()
+  saveHeal()
+end
+
+HealBot.setOn = function()
+  currentSettings.enabled = true
+  syncHealMacro()
+  applyHealEngineToggles()
+  saveHeal()
+end
+
+HealBot.getActiveProfile = function()
+  return HealBotConfig.currentHealBotProfile -- returns number 1-5
+end
+
+HealBot.setActiveProfile = function(n)
+  if not n or not tonumber(n) or n < 1 or n > 5 then
+    return error("[HealBot] wrong profile parameter! should be 1 to 5 is " .. tostring(n))
   end
+  HealBotConfig.currentHealBotProfile = n
+  profileChange()
+end
 
-  local refreshSpells
-  local refreshItems
+-- Standalone window retired; kept as a safe no-op for legacy callers.
+HealBot.show = function() end
 
-  local loadSettings = function()
-    ui.title:setOn(currentSettings.enabled)
-    syncHealMacro()
-    setProfileName()
-    refreshSpells()
-    refreshItems()
-    applyHealEngineToggles()
-    healWindow.settings.list.Visible:setChecked(currentSettings.Visible)
-    healWindow.settings.list.Cooldown:setChecked(currentSettings.Cooldown)
-    healWindow.settings.list.Delay:setChecked(currentSettings.Delay)
-    healWindow.settings.list.MessageDelay:setChecked(currentSettings.MessageDelay)
-    healWindow.settings.list.Interval:setChecked(currentSettings.Interval)
-    healWindow.settings.list.Conditions:setChecked(currentSettings.Conditions)
+-- Settings were widget-backed (Cooldown/Visible/Delay/Interval/Conditions);
+-- they live in the same persisted profile table the retired window wrote to.
+HealBot.getSetting = function(key)
+  return currentSettings[key]
+end
+
+HealBot.setSetting = function(key, value)
+  currentSettings[key] = not not value
+  saveHeal()
+end
+
+local function describeRule(kind, entry)
+  if kind == "item" then
+    return string.format("%s%s%s: item %s", entry.origin or "", entry.sign or "", tostring(entry.value or ""), tostring(entry.item))
   end
+  return string.format("(MP>%s) %s%s%s: %s", tostring(entry.cost), entry.origin or "", entry.sign or "", tostring(entry.value or ""), tostring(entry.spell))
+end
 
-    refreshSpells = function()
-      ensureCurrentSettings()
-      if not currentSettings or not currentSettings.spellTable then
-        return
-      end
-      healWindow.healer.spells.spellList:destroyChildren()
-      for _, entry in pairs(currentSettings.spellTable) do
-        local label = UI.createWidget("SpellEntry", healWindow.healer.spells.spellList)
-        label.enabled:setChecked(entry.enabled)
-        label.enabled.onClick = function()
-          entry.enabled = not entry.enabled
-          label.enabled:setChecked(entry.enabled)
-          applyHealEngineToggles()
-          saveHeal()
-        end
-        label.remove.onClick = function()
-          table.removevalue(currentSettings.spellTable, entry)
-          refreshSpells()
-          applyHealEngineToggles()
-          saveHeal()
-        end
-        label:setText("(MP>" .. entry.cost .. ") " .. entry.origin .. entry.sign .. entry.value .. ": " .. entry.spell)
-      end
-    end
+local function ruleSource(kind)
+  ensureCurrentSettings()
+  if not currentSettings then return nil end
+  return kind == "item" and currentSettings.itemTable or currentSettings.spellTable
+end
 
-    refreshItems = function()
-      if not currentSettings.itemTable then return end
-      healWindow.healer.items.itemList:destroyChildren()
-      for _, entry in pairs(currentSettings.itemTable) do
-        local label = UI.createWidget("ItemEntry", healWindow.healer.items.itemList)
-        label.enabled:setChecked(entry.enabled)
-        label.enabled.onClick = function()
-            entry.enabled = not entry.enabled
-            label.enabled:setChecked(entry.enabled)
-            applyHealEngineToggles()
-            saveHeal()
-          end
-        label.remove.onClick = function()
-            table.removevalue(currentSettings.itemTable, entry)
-            refreshItems()
-            applyHealEngineToggles()
-            saveHeal()
-          end
-        label.id:setItemId(entry.item)
-        label:setText(entry.origin .. entry.sign .. entry.value .. ": " .. entry.item)
-      end
-    end
-
-    healWindow.healer.spells.MoveUp.onClick = function()
-      local input = healWindow.healer.spells.spellList:getFocusedChild()
-      if not input then return end
-      local index = healWindow.healer.spells.spellList:getChildIndex(input)
-      if index < 2 then return end
-      local t = currentSettings.spellTable
-      t[index], t[index-1] = t[index-1], t[index]
-      healWindow.healer.spells.spellList:moveChildToIndex(input, index - 1)
-      healWindow.healer.spells.spellList:ensureChildVisible(input)
-      saveHeal()
-    end
-
-    healWindow.healer.spells.MoveDown.onClick = function()
-      local input = healWindow.healer.spells.spellList:getFocusedChild()
-      if not input then return end
-      local index = healWindow.healer.spells.spellList:getChildIndex(input)
-      if index >= healWindow.healer.spells.spellList:getChildCount() then return end
-      local t = currentSettings.spellTable
-      t[index], t[index+1] = t[index+1], t[index]
-      healWindow.healer.spells.spellList:moveChildToIndex(input, index + 1)
-      healWindow.healer.spells.spellList:ensureChildVisible(input)
-      saveHeal()
-    end
-
-    healWindow.healer.items.MoveUp.onClick = function()
-      local input = healWindow.healer.items.itemList:getFocusedChild()
-      if not input then return end
-      local index = healWindow.healer.items.itemList:getChildIndex(input)
-      if index < 2 then return end
-      local t = currentSettings.itemTable
-      t[index], t[index-1] = t[index-1], t[index]
-      healWindow.healer.items.itemList:moveChildToIndex(input, index - 1)
-      healWindow.healer.items.itemList:ensureChildVisible(input)
-      saveHeal()
-    end
-
-    healWindow.healer.items.MoveDown.onClick = function()
-      local input = healWindow.healer.items.itemList:getFocusedChild()
-      if not input then return end
-      local index = healWindow.healer.items.itemList:getChildIndex(input)
-      if index >= healWindow.healer.items.itemList:getChildCount() then return end
-      local t = currentSettings.itemTable
-      t[index], t[index+1] = t[index+1], t[index]
-      healWindow.healer.items.itemList:moveChildToIndex(input, index + 1)
-      healWindow.healer.items.itemList:ensureChildVisible(input)
-      saveHeal()
-    end
-
-    healWindow.healer.spells.addSpell.onClick = function()
-      ensureCurrentSettings()
-      if not currentSettings then
-        return
-      end
-      currentSettings.spellTable = currentSettings.spellTable or {}
-      local spellFormula = healWindow.healer.spells.spellFormula:getText():trim()
-      local manaCost = tonumber(healWindow.healer.spells.manaCost:getText())
-      local trigger = tonumber(healWindow.healer.spells.spellValue:getText())
-      local src = healWindow.healer.spells.spellSource:getCurrentOption().text
-      local eq = healWindow.healer.spells.spellCondition:getCurrentOption().text
-      if not manaCost or not trigger or spellFormula:len() == 0 then return end
-      local origin = (src == "Current Mana" and "MP") or (src == "Current Health" and "HP") or (src == "Mana Percent" and "MP%") or (src == "Health Percent" and "HP%") or "burst"
-      local sign = (eq == "Above" and ">") or (eq == "Below" and "<") or "="
-      table.insert(currentSettings.spellTable, {index = #currentSettings.spellTable+1, spell = spellFormula, sign = sign, origin = origin, cost = manaCost, value = trigger, enabled = true})
-      healWindow.healer.spells.spellFormula:setText('')
-      healWindow.healer.spells.spellValue:setText('')
-      healWindow.healer.spells.manaCost:setText('')
-      refreshSpells()
-      applyHealEngineToggles()
-      saveHeal()
-    end
-
-    healWindow.healer.items.addItem.onClick = function()
-      local id = healWindow.healer.items.itemId:getItemId()
-      local trigger = tonumber(healWindow.healer.items.itemValue:getText())
-      local src = healWindow.healer.items.itemSource:getCurrentOption().text
-      local eq = healWindow.healer.items.itemCondition:getCurrentOption().text
-      if not trigger or id <= 100 then return end
-      local origin = (src == "Current Mana" and "MP") or (src == "Current Health" and "HP") or (src == "Mana Percent" and "MP%") or (src == "Health Percent" and "HP%") or "burst"
-      local sign = (eq == "Above" and ">") or (eq == "Below" and "<") or "="
-      table.insert(currentSettings.itemTable, {index = #currentSettings.itemTable+1, item = id, sign = sign, origin = origin, value = trigger, enabled = true})
-      healWindow.healer.items.itemId:setItemId(0)
-      healWindow.healer.items.itemValue:setText('')
-      refreshItems()
-      applyHealEngineToggles()
-      saveHeal()
-    end
-  loadSettings()
-
-  local profileChange = function()
-    setActiveProfile()
-    activeProfileColor()
-    loadSettings()
-    applyHealEngineToggles()  -- Update HealEngine with new profile's spells/potions
-    saveHeal()
+-- Read-only projection for the shell's healing page. Widgets consume this;
+-- they never touch spellTable/itemTable directly.
+HealBot.getRules = function(kind)
+  local source = ruleSource(kind)
+  local rules = {}
+  if not source then return rules end
+  for index, entry in ipairs(source) do
+    rules[#rules + 1] = {
+      kind = kind, index = index, enabled = entry.enabled,
+      label = describeRule(kind, entry), itemId = kind == "item" and entry.item or nil,
+      spell = entry.spell, origin = entry.origin, sign = entry.sign,
+      value = entry.value, cost = entry.cost, revision = index .. ":" .. tostring(entry.enabled),
+    }
   end
+  return rules
+end
 
-  local resetSettings = function()
-    currentSettings.enabled = false
-    currentSettings.spellTable = {}
-    currentSettings.itemTable = {}
-    currentSettings.Visible = true
-    currentSettings.Cooldown = true
-    currentSettings.Delay = true
-    currentSettings.MessageDelay = false
-    currentSettings.Interval = true
-    currentSettings.Conditions = true
-    currentSettings.name = "Profile #" .. HealBotConfig.currentBotProfile
+HealBot.addRule = function(kind, params)
+  params = params or {}
+  if kind ~= "spell" and kind ~= "item" then return false end
+  local value = tonumber(params.value)
+  if not value then return false end
+  if kind == "item" then
+    local item = tonumber(params.item)
+    if not item or item <= 100 then return false end
+    local source = currentSettings.itemTable or {}
+    table.insert(source, { index = #source + 1, item = item, sign = "<", origin = "HP%", value = value, enabled = true })
+    currentSettings.itemTable = source
+  else
+    local spell = tostring(params.spell or ""):match("^%s*(.-)%s*$")
+    if spell == "" then return false end
+    local source = currentSettings.spellTable or {}
+    table.insert(source, { index = #source + 1, spell = spell, sign = "<", origin = "HP%", value = value, cost = tonumber(params.cost) or 0, enabled = true })
+    currentSettings.spellTable = source
   end
+  applyHealEngineToggles()
+  saveHeal()
+  return true
+end
 
-  -- profile buttons
-  for i=1,5 do
-    local button = ui[i]
-      button.onClick = function()
-      HealBotConfig.currentHealBotProfile = i
-      profileChange()
-    end
-  end
+HealBot.toggleRule = function(kind, index)
+  local source = ruleSource(kind)
+  local entry = source and source[index]
+  if not entry then return end
+  entry.enabled = not entry.enabled
+  applyHealEngineToggles()
+  saveHeal()
+end
 
-  healWindow.settings.profiles.ResetSettings.onClick = function()
-    resetSettings()
-    loadSettings()
-  end
+HealBot.removeRule = function(kind, index)
+  local source = ruleSource(kind)
+  local entry = source and source[index]
+  if not entry then return end
+  table.removevalue(source, entry)
+  applyHealEngineToggles()
+  saveHeal()
+end
 
-  -- public functions
-  HealBot = {} -- global table
-
-  HealBot.isOn = function()
-    return currentSettings.enabled
-  end
-
-  HealBot.isOff = function()
-    return not currentSettings.enabled
-  end
-
-  HealBot.setOff = function()
-    currentSettings.enabled = false
-    ui.title:setOn(currentSettings.enabled)
-    syncHealMacro()
-    applyHealEngineToggles()
-    saveHeal()
-  end
-
-  HealBot.setOn = function()
-    currentSettings.enabled = true
-    ui.title:setOn(currentSettings.enabled)
-    syncHealMacro()
-    applyHealEngineToggles()
-    saveHeal()
-  end
-
-  HealBot.getActiveProfile = function()
-    return HealBotConfig.currentHealBotProfile -- returns number 1-5
-  end
-
-  HealBot.setActiveProfile = function(n)
-    if not n or not tonumber(n) or n < 1 or n > 5 then
-      return error("[HealBot] wrong profile parameter! should be 1 to 5 is " .. n)
-    else
-      HealBotConfig.currentHealBotProfile = n
-      profileChange()
-    end
-  end
-
-  HealBot.show = function()
-    healWindow:show()
-    healWindow:raise()
-    healWindow:focus()
-  end
+HealBot.moveRule = function(kind, index, direction)
+  local source = ruleSource(kind)
+  local destination = index + (direction == "up" and -1 or direction == "down" and 1 or 0)
+  if not source or not source[index] or destination < 1 or destination > #source or destination == index then return false end
+  source[index], source[destination] = source[destination], source[index]
+  applyHealEngineToggles()
+  saveHeal()
+  return true
 end
 
 --[[
@@ -932,7 +730,7 @@ local function buildAllyBotCoreConfig()
   return bcConfig
 end
 
-local friendHealerMacro  -- forward declaration (assigned inside rootW block)
+local friendHealerMacro  -- forward declaration (assigned below)
 
 local function syncAllyBotCore()
   if not (BotCore and BotCore.FriendHealer) then return end
@@ -953,278 +751,9 @@ local function syncAllyBotCore()
   end
 end
 
-local rootW = g_ui.getRootWidget()
-if rootW then
-  friendHealerWindow = UI.createWindow('FriendHealer', rootW)
-  friendHealerWindow:hide()
-  friendHealerWindow:setId(allyPanelName)
-
-  friendHealerWindow.closeButton.onClick = function(widget)
-    friendHealerWindow:hide()
-  end
-
-  syncAllyBotCore()
-
-  local allyConditions = friendHealerWindow.conditions
-  local allyTargetSettings = friendHealerWindow.targetSettings
-  local allyCustomList = friendHealerWindow.customList
-  local allyPriority = friendHealerWindow.priority
-
-  -- Custom players list
-  local function createAllyPlayerEntry(name, health)
-    local widget = UI.createWidget("HealerPlayerEntry", allyCustomList.playerList.list)
-    widget.remove.onClick = function()
-        allyConfig.customPlayers[name] = nil
-        widget:destroy()
-        saveAllyCustomPlayers()
-        syncAllyBotCore()
-    end
-    widget:setText("["..health.."%]  "..name)
-    return widget
-  end
-
-  for name, health in pairs(allyConfig.customPlayers) do
-    createAllyPlayerEntry(name, health)
-  end
-
-  allyCustomList.playerList.onDoubleClick = function()
-    allyCustomList.playerList:hide()
-  end
-
-  local function clearAllyFields()
-    allyCustomList.addPanel.name:setText("friend name")
-    allyCustomList.addPanel.health:setText("1")
-    allyCustomList.playerList:show()
-  end
-
-  local properCase = nExBot and nExBot.Shared and nExBot.Shared.properCase or function(str)
-    local words = {}
-    for word in str:gmatch("%S+") do
-      words[#words + 1] = word:sub(1,1):upper() .. word:sub(2)
-    end
-    return table.concat(words, " ")
-  end
-
-  allyCustomList.addPanel.add.onClick = function()
-    local rawName = allyCustomList.addPanel.name:getText()
-    local name = properCase(rawName)
-    local health = tonumber(allyCustomList.addPanel.health:getText())
-
-    if not health then
-        clearAllyFields()
-        return warn("[HealBot] Ally: Please enter health percent value!")
-    end
-
-    if name:len() == 0 or name:lower() == "friend name" then
-        clearAllyFields()
-        return warn("[HealBot] Ally: Please enter friend name to be added!")
-    end
-
-    if allyConfig.customPlayers[name] or allyConfig.customPlayers[name:lower()] then
-        clearAllyFields()
-        return warn("[HealBot] Ally: Player already added to custom list.")
-    else
-        allyConfig.customPlayers[name] = health
-        createAllyPlayerEntry(name, health)
-        saveAllyCustomPlayers()
-        syncAllyBotCore()
-    end
-    clearAllyFields()
-  end
-
-local function validateAlly(widget, category)
-    local list = widget:getParent()
-    local label = list:getParent().title
-    category = category or 0
-    if category == 2 and not (storage.extras and storage.extras.checkPlayer) then
-        label:setColor("#d9321f")
-        label:setTooltip("! WARNING ! Turn on check players in extras to use this feature!")
-        return
-    else
-        label:setColor("#dfdfdf")
-        label:setTooltip("")
-    end
-    local checked = false
-    for i, child in ipairs(list:getChildren()) do
-        if category == 1 and child.enabled:isChecked() or child:isChecked() then
-            checked = true
-        end
-    end
-    if not checked then
-        label:setColor("#d9321f")
-        label:setTooltip("! WARNING ! No category selected!")
-    else
-        label:setColor("#dfdfdf")
-        label:setTooltip("")
-    end
-  end
-
-
-  local function bindAllyConditionCheckbox(widget, conditionKey, category)
-    widget:setChecked(allyConfig.conditions[conditionKey])
-    widget.onClick = function(w)
-      allyConfig.conditions[conditionKey] = not allyConfig.conditions[conditionKey]
-      w:setChecked(allyConfig.conditions[conditionKey])
-      validateAlly(w, category or 0)
-      syncAllyBotCore()
-      if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
-        CharacterDB.set("friendHealer.conditions", allyConfig.conditions)
-      end
-    end
-  end
-
-
-  local function setAllyCrementalButtons()
-    local children = allyPriority.list:getChildren()
-    local count = #children
-    for i, child in ipairs(children) do
-        if i == 1 then
-            child.increment:disable()
-        elseif i == count then
-            child.decrement:disable()
-        else
-            child.increment:enable()
-            child.decrement:enable()
-        end
-    end
-  end
-
-
-  local function createAllyPriorityWidget(action, index)
-    local widget = UI.createWidget("PriorityEntry", allyPriority.list)
-
-    widget:setText(action.name)
-    widget.increment.onClick = function()
-        local idx = allyPriority.list:getChildIndex(widget)
-        local tbl = allyConfig.priorities
-
-        allyPriority.list:moveChildToIndex(widget, idx-1)
-        tbl[idx], tbl[idx-1] = tbl[idx-1], tbl[idx]
-        setAllyCrementalButtons()
-        syncAllyBotCore()
-    end
-    widget.decrement.onClick = function()
-        local idx = allyPriority.list:getChildIndex(widget)
-        local tbl = allyConfig.priorities
-
-        allyPriority.list:moveChildToIndex(widget, idx+1)
-        tbl[idx], tbl[idx+1] = tbl[idx+1], tbl[idx]
-        setAllyCrementalButtons()
-        syncAllyBotCore()
-    end
-    widget.enabled:setChecked(action.enabled)
-    widget:setColor(action.enabled and "#98BF64" or "#dfdfdf")
-    widget.enabled.onClick = function()
-        action.enabled = not action.enabled
-        widget:setColor(action.enabled and "#98BF64" or "#dfdfdf")
-        widget.enabled:setChecked(action.enabled)
-        validateAlly(widget, 1)
-        syncAllyBotCore()
-    end
-
-    if action.custom then
-        widget.remove:show()
-        widget.remove.onClick = function()
-            local idx = allyPriority.list:getChildIndex(widget)
-            table.remove(allyConfig.priorities, idx)
-            widget:destroy()
-            setAllyCrementalButtons()
-            validateAlly(allyPriority.list:getFirstChild(), 1)
-            syncAllyBotCore()
-        end
-        widget.onDoubleClick = function()
-            local window = modules.client_textedit.show(widget, {title = "Custom Spell", description = "Enter below formula for a custom healing spell"})
-            schedule(50, function()
-              window:raise()
-              window:focus()
-            end)
-        end
-        widget.onTextChange = function(w, text)
-            action.name = text
-            syncAllyBotCore()
-        end
-        widget:setTooltip("Double click to edit. X to remove.")
-    end
-
-    return widget
-  end
-
-  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.knights, "knights", 2)
-  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.paladins, "paladins", 2)
-  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.druids, "druids", 2)
-  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.sorcerers, "sorcerers", 2)
-  bindAllyConditionCheckbox(allyTargetSettings.vocations.box.monks, "monks", 2)
-
-  bindAllyConditionCheckbox(allyTargetSettings.groups.box.friends, "friends")
-  bindAllyConditionCheckbox(allyTargetSettings.groups.box.party, "party")
-  bindAllyConditionCheckbox(allyTargetSettings.groups.box.guild, "guild")
-
-  validateAlly(allyTargetSettings.vocations.box.knights)
-  validateAlly(allyTargetSettings.groups.box.friends)
-  validateAlly(allyTargetSettings.vocations.box.sorcerers, 2)
-
-  -- Conditions settings
-  for i, setting in ipairs(allyConfig.settings) do
-    local widget = UI.createWidget(setting.type, allyConditions.box)
-    local text = setting.text
-    local val = setting.value
-    widget.text:setText(text)
-
-    if setting.type == "HealScroll" then
-        widget.text:setText(widget.text:getText()..val)
-        if not (text:find("Range") or text:find("Mas Res")) then
-            widget.text:setText(widget.text:getText().."%")
-        end
-        widget.scroll:setValue(val)
-        widget.scroll.onValueChange = function(scroll, value)
-            setting.value = value
-            widget.text:setText(text..value)
-            if not (text:find("Range") or text:find("Mas Res")) then
-                widget.text:setText(widget.text:getText().."%")
-            end
-            syncAllyBotCore()
-        end
-        if text:find("Range") or text:find("Mas Res") then
-            widget.scroll:setMaximum(10)
-        end
-    else
-        widget.item:setItemId(val)
-        widget.item:setShowCount(false)
-        widget.item.onItemChange = function(w)
-            setting.value = w:getItemId()
-            syncAllyBotCore()
-        end
-    end
-  end
-
-  for i, action in ipairs(allyConfig.priorities) do
-    createAllyPriorityWidget(action, i)
-
-    if i == #allyConfig.priorities then
-        validateAlly(allyPriority.list:getFirstChild(), 1)
-        setAllyCrementalButtons()
-    end
-  end
-
-  allyPriority.addSpellButton.onClick = function()
-    local newSpell = {
-        name = "Custom Spell " .. (#allyConfig.priorities + 1),
-        enabled = true,
-        custom = true
-    }
-    table.insert(allyConfig.priorities, newSpell)
-    local widget = createAllyPriorityWidget(newSpell, #allyConfig.priorities)
-    setAllyCrementalButtons()
-    syncAllyBotCore()
-
-    schedule(100, function()
-        local window = modules.client_textedit.show(widget, {title = "Custom Spell", description = "Enter below formula for a custom healing spell"})
-        schedule(50, function()
-            window:raise()
-            window:focus()
-        end)
-    end)
-  end
+-- Friend healing driver. The standalone FriendHealer window is retired; the
+-- shell's friend_healer page drives the config through HealBot's domain API.
+syncAllyBotCore()
 
   -- Sync HealEngine friend spells from config
   schedule(100, function()
@@ -1292,47 +821,92 @@ local function validateAlly(widget, category)
   end)
 
   syncAllyBotCore()
+
+-- Standalone FriendHealer window retired; kept as a safe no-op for legacy callers.
+HealBot.showAlly = function()
+  return false
 end
 
-setDefaultTab("Main")
-local fhUI = setupUI([[
-Panel
-  height: 19
 
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('Friend Healer')
+local function friendSource()
+  if allyConfig.conditions.party then return "party" end
+  if allyConfig.conditions.guild then return "guild" end
+  if allyConfig.conditions.friends then return "friends" end
+  return "list"
+end
 
-  Button
-    id: settings
-    anchors.top: prev.top
-    anchors.left: prev.right
-    margin-left: 3
-    height: 17
-    text: Setup
-]])
-if fhUI and fhUI.title then
-  fhUI.title:setOn(allyConfig.enabled)
-  fhUI.title.onClick = function(widget)
-    allyConfig.enabled = not allyConfig.enabled
-    widget:setOn(allyConfig.enabled)
-    syncAllyBotCore()
+HealBot.getFriendHealerProjection = function()
+  local priorities = {}
+  for index, action in ipairs(allyConfig.priorities or {}) do
+    priorities[#priorities + 1] = {
+      index = index, name = action.name, enabled = action.enabled == true,
+      custom = action.custom == true, revision = index .. ":" .. tostring(action.enabled),
+    }
   end
+  local players = BotCore and BotCore.FriendHealer and BotCore.FriendHealer.getPlayerProjection
+    and BotCore.FriendHealer.getPlayerProjection() or {}
+  return {
+    enabled = allyConfig.enabled == true,
+    source = friendSource(),
+    threshold = getAllySettingValue(5, 80),
+    conditions = allyConfig.conditions or {},
+    priorities = priorities,
+    players = players,
+  }
 end
 
-if fhUI and fhUI.settings then
-  fhUI.settings.onClick = function()
-    if friendHealerWindow then
-      friendHealerWindow:show()
-      friendHealerWindow:raise()
-      friendHealerWindow:focus()
-    end
+HealBot.getFriendCondition = function(key)
+  return allyConfig.conditions and allyConfig.conditions[key] == true
+end
+
+HealBot.setFriendCondition = function(key, value)
+  if not allyConfig.conditions or allyConfig.conditions[key] == nil then return false end
+  allyConfig.conditions[key] = value == true
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("friendHealer.conditions", allyConfig.conditions)
   end
+  syncAllyBotCore()
+  return true
 end
-setDefaultTab("HP")
 
-UI.Separator()
+HealBot.setFriendHealerEnabled = function(enabled)
+  allyConfig.enabled = enabled == true
+  syncAllyBotCore()
+end
+
+HealBot.setFriendSource = function(source)
+  if source ~= "party" and source ~= "guild" and source ~= "friends" and source ~= "list" then return false end
+  allyConfig.conditions.party = source == "party"
+  allyConfig.conditions.guild = source == "guild"
+  allyConfig.conditions.friends = source == "friends"
+  if CharacterDB and CharacterDB.isReady and CharacterDB.isReady() then
+    CharacterDB.set("friendHealer.conditions", allyConfig.conditions)
+  end
+  syncAllyBotCore()
+  return true
+end
+
+HealBot.setFriendThreshold = function(value)
+  value = tonumber(value)
+  if not value or value < 1 or value > 100 then return false end
+  allyConfig.settings[5].value = value
+  syncAllyBotCore()
+  return true
+end
+
+HealBot.toggleFriendPriority = function(index)
+  local action = allyConfig.priorities and allyConfig.priorities[index]
+  if not action then return false end
+  action.enabled = not action.enabled
+  syncAllyBotCore()
+  return true
+end
+
+HealBot.moveFriendPriority = function(index, direction)
+  local priorities = allyConfig.priorities or {}
+  local destination = index + (direction == "up" and -1 or direction == "down" and 1 or 0)
+  if not priorities[index] or destination < 1 or destination > #priorities or destination == index then return false end
+  priorities[index], priorities[destination] = priorities[destination], priorities[index]
+  syncAllyBotCore()
+  return true
+end

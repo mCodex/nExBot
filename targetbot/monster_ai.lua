@@ -1705,7 +1705,7 @@ nExBot.MonsterAI = MonsterAI
 
 -- Get full statistics summary for UI or debugging
 
--- Enable automatic collection by default so Monster Insights shows data without console commands
+-- Enable automatic collection by default so Tactical Intelligence gets live data without console commands
 -- Collection is now gated by TargetBot.isOn() to prevent CPU waste when targeting is off
 MonsterAI.COLLECT_ENABLED = (MonsterAI.COLLECT_ENABLED == nil) and true or MonsterAI.COLLECT_ENABLED
 
@@ -1722,11 +1722,10 @@ end
 
 if UnifiedTick and UnifiedTick.register then
   -- Periodic background updater (500ms) - NORMAL priority
-  UnifiedTick.register({
-    id = "monsterai_update",
+  UnifiedTick.register("monsterai_update", {
     interval = 500,
-    priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.NORMAL or 50,
-    callback = function()
+    priority = UnifiedTick.Priority.NORMAL,
+    handler = function()
       if shouldCollect() and MonsterAI.updateAll then
         pcall(function() MonsterAI.updateAll() end)
       end
@@ -1734,11 +1733,10 @@ if UnifiedTick and UnifiedTick.register then
   })
   
   -- Auto-tuner periodic pass (30000ms) - IDLE priority
-  UnifiedTick.register({
-    id = "monsterai_autotune",
+  UnifiedTick.register("monsterai_autotune", {
     interval = 30000,
-    priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.IDLE or 10,
-    callback = function()
+    priority = UnifiedTick.Priority.IDLE,
+    handler = function()
       if not shouldCollect() then return end
       if MonsterAI.AUTO_TUNE_ENABLED and MonsterAI.AutoTuner and MonsterAI.AutoTuner.runPass then
         pcall(function() MonsterAI.AutoTuner.runPass() end)

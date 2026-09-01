@@ -1,8 +1,7 @@
 local voc = player:getVocation()
 if voc == 1 or voc == 11 then
-    setDefaultTab("Cave")
-    UI.Separator()
-    local exetaLowHpMacro = macro(100000, "Exeta when low hp", function() end)
+    local exetaLowHpMacro = macro(100000, function() end)
+    exetaLowHpMacro.name = "Exeta when low hp"
     BotDB.registerMacro(exetaLowHpMacro, "exetaLowHp")
     
     local lastCast = now
@@ -55,12 +54,15 @@ if voc == 1 or voc == 11 then
     exetaStats.playerTriggeredCasts = exetaStats.playerTriggeredCasts or 0
     exetaStats.ampCasts = exetaStats.ampCasts or 0
 
-    local exetaIfPlayerMacro = macro(100000, "Exeta If Player", function() end)
+    local exetaIfPlayerMacro = macro(100000, function() end)
+    exetaIfPlayerMacro.name = "Exeta If Player"
     BotDB.registerMacro(exetaIfPlayerMacro, "exetaIfPlayer")
 
     -- "Amp" (ranged attacker) macro: cast when a distant creature is attacking you
-    local exetaAmpMacro = macro(100000, "Exeta Amp Res", function() end)
+    local exetaAmpMacro = macro(100000, function() end)
+    exetaAmpMacro.name = "Exeta Amp Res"
     BotDB.registerMacro(exetaAmpMacro, "exetaAmpRes")
+    local exetaMacros = { lowHp = exetaLowHpMacro, player = exetaIfPlayerMacro, amp = exetaAmpMacro }
 
     -- Robust safe_unpack helper (handles missing table.unpack/unpack)
     local function safe_unpack(tbl)
@@ -313,7 +315,7 @@ if voc == 1 or voc == 11 then
       end
       
       -- Simple polling macro to check for distant monsters not attacking local player
-      macro(500, "ExetaAmpFallback", function()
+      macro(500, function()
         if not exetaAmpMacro:isOn() then return end
         if (now - lastExetaAmp) < 6000 then return end
         if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
@@ -351,5 +353,13 @@ if voc == 1 or voc == 11 then
       end)
     end
 
-    UI.Separator()
+    nExBot.Exeta.isEnabled = function(name)
+      return exetaMacros[name] and exetaMacros[name]:isOn() or false
+    end
+    nExBot.Exeta.setEnabled = function(name, enabled)
+      local selected = exetaMacros[name]
+      if not selected then return false end
+      if enabled then selected:setOn() else selected:setOff() end
+      return true
+    end
 end

@@ -15,6 +15,7 @@ if EventBus then
   end, 20)
   EventBus.on("monster:disappear", function(creature)
     if TargetBot.isOff() then return end
+    if AttackFSM and AttackFSM.onTargetDisappeared then AttackFSM.onTargetDisappeared(creature) end
     I.debouncedInvalidateAndRecalc()
   end, 20)
   EventBus.on("creature:move", function(creature, oldPos)
@@ -24,6 +25,7 @@ if EventBus then
   end, 20)
   EventBus.on("monster:health", function(creature, percent)
     if TargetBot.isOff() then return end
+    if AttackFSM and AttackFSM.onHealthProgress then AttackFSM.onHealthProgress(creature, percent) end
     I.debouncedInvalidateAndRecalc()
   end, 20)
   EventBus.on("player:move", function(newPos, oldPos)
@@ -102,7 +104,8 @@ if EventBus then
         if _combatEndPending then return end
         _combatEndPending = schedule(COMBAT_END_GRACE_MS, function()
           _combatEndPending = nil
-          if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then return end
+          local ownership = TargetBot.CombatOwnership
+          if ownership and (ownership.getTarget() or ownership.isBlockingRoute()) then return end
           if UnifiedStorage then UnifiedStorage.set("targetbot.combatActive", false) end
           pcall(function() EventBus.emit("targetbot/combat_end") end)
           lastCombatTargetId = nil
@@ -225,13 +228,9 @@ if EventBus then
     local isAttacking = (Client and Client.isAttacking) and Client.isAttacking() or (g_game and g_game.isAttacking and g_game.isAttacking())
     if not isAttacking then CME.enabled = false; return end
     CME.enabled = true
-    local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
-    if currentMode ~= desiredMode then
-      if Client and Client.setChaseMode then Client.setChaseMode(desiredMode); CME.lastEnforcedMode = desiredMode; CME.lastEnforceTime = currentTime
-        if EventBus then pcall(function() EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand") end) end
-      elseif g_game and g_game.setChaseMode then g_game.setChaseMode(desiredMode); CME.lastEnforcedMode = desiredMode; CME.lastEnforceTime = currentTime
-        if EventBus then pcall(function() EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand") end) end
-      end
+    if MovementCoordinator.setChaseMode(desiredMode == 1) then
+      CME.lastEnforcedMode = desiredMode; CME.lastEnforceTime = currentTime
+      if EventBus then pcall(function() EventBus.emit("targetbot/chase_mode_enforced", desiredMode, desiredMode == 1 and "chase" or "stand") end) end
     end
   end
   EventBus.on("targetbot/target_acquired", function(creature, creaturePos)

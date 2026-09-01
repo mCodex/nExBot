@@ -1,0 +1,286 @@
+local HuntMetrics = {}
+HuntMetrics.__index = HuntMetrics
+
+local UnifiedStorage = nExBot.UnifiedStorage
+local EventBus = EventBus
+
+local DEFAULT_METRICS = {
+  xpGained = 0,
+  xpPerHour = 0,
+  kills = 0,
+  killsPerHour = 0,
+  combatUptime = 0,
+  tilesWalked = 0,
+  tilesPerKill = 0,
+  damageTaken = 0,
+  healingDone = 0,
+  survivabilityIndex = 0,
+  nearDeathCount = 0,
+  hpPotionsUsed = 0,
+  manaPotionsUsed = 0,
+  runesUsed = 0,
+  healSpellsCast = 0,
+  attackSpellsCast = 0,
+  manaSpent = 0,
+  potionsPerHour = 0,
+  runesPerHour = 0,
+  manaSpentPerHour = 0,
+}
+
+local function nowMs()
+  return nExBot.Shared and nExBot.Shared.nowMs and nExBot.Shared.nowMs() or os.time() * 1000
+end
+
+local function deepCopy(tbl)
+  if type(tbl) ~= "table" then return tbl end
+  local result = {}
+  for k, v in pairs(tbl) do
+    result[k] = deepCopy(v)
+  end
+  return result
+end
+
+function HuntMetrics.new()
+  local lp = g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()
+  local startXp = lp and lp.getExperience and lp:getExperience() or 0
+  local self = setmetatable({
+    metrics = {},
+    trends = {},
+    sessionStartMs = nowMs(),
+    lastSnapshotMs = 0,
+    snapshotIntervalMs = 60000,
+    loaded = false,
+    lastKnownXp = startXp,
+    combatStartMs = nil,
+    _dirty = false,
+  }, HuntMetrics)
+  return self
+end
+
+function HuntMetrics:load()
+  if self.loaded then return end
+  if UnifiedStorage and UnifiedStorage.isReady and UnifiedStorage.isReady() then
+    local stored = UnifiedStorage.get("huntMetrics")
+    if stored then
+      self.metrics = stored.metrics or {}
+      self.trends = stored.trends or {}
+      self.sessionStartMs = stored.sessionStartMs or self.sessionStartMs
+    end
+  end
+  self:applyDefaults()
+  self.loaded = true
+end
+
+function HuntMetrics:applyDefaults()
+  for k, v in pairs(DEFAULT_METRICS) do
+    if self.metrics[k] == nil then
+      self.metrics[k] = v
+    end
+  end
+end
+
+function HuntMetrics:save()
+  if not UnifiedStorage or not UnifiedStorage.isReady or not UnifiedStorage.isReady() then return end
+  UnifiedStorage.set("huntMetrics", {
+    metrics = self.metrics,
+    trends = self.trends,
+    sessionStartMs = self.sessionStartMs,
+  })
+end
+
+if UnifiedTick and UnifiedTick.register then
+  UnifiedTick.register("huntmetrics_flush", {
+    interval = 1000,
+    priority = UnifiedTick.Priority and UnifiedTick.Priority.LOW or 25,
+    handler = function()
+      local hm = HuntMetrics.instance
+      if hm and hm._dirty then
+        hm:save()
+        hm._dirty = false
+      end
+    end,
+  })
+end
+
+function HuntMetrics:reset()
+  self.metrics = {}
+  self.trends = {}
+  self.sessionStartMs = nowMs()
+  self:applyDefaults()
+  self:save()
+end
+
+function HuntMetrics:getElapsed()
+  self:load()
+  return nowMs() - self.sessionStartMs
+end
+
+function HuntMetrics:getMetrics()
+  self:load()
+  local lp = g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()
+  local currentXp = lp and lp.getExperience and lp:getExperience() or 0
+  if currentXp > self.lastKnownXp then
+    self:recordXp(currentXp - self.lastKnownXp)
+    self.lastKnownXp = currentXp
+  end
+  return deepCopy(self.metrics)
+end
+
+function HuntMetrics:getTrends()
+  self:load()
+  return deepCopy(self.trends)
+end
+
+function HuntMetrics:isActive()
+  return true
+end
+
+function HuntMetrics:recordXp(amount)
+  self:load()
+  self.metrics.xpGained = (self.metrics.xpGained or 0) + (amount or 0)
+  self:updateRates()
+  self._dirty = true
+end
+
+function HuntMetrics:recordKill()
+  self:load()
+  self.metrics.kills = (self.metrics.kills or 0) + 1
+  self:updateRates()
+  self._dirty = true
+end
+
+function HuntMetrics:recordCombat(active)
+  self:load()
+  if active then
+    if not self.combatStartMs then
+      self.combatStartMs = nowMs()
+    end
+  else
+    if self.combatStartMs then
+      self.metrics.combatUptimeMs = (self.metrics.combatUptimeMs or 0) + (nowMs() - self.combatStartMs)
+      self.combatStartMs = nil
+      self._dirty = true
+    end
+  end
+end
+
+local RESOURCE_KEYS = {
+  hpPotion = "hpPotionsUsed",
+  manaPotion = "manaPotionsUsed",
+  rune = "runesUsed",
+  healSpell = "healSpellsCast",
+  attackSpell = "attackSpellsCast",
+  mana = "manaSpent",
+}
+
+function HuntMetrics:recordResource(resourceType, amount)
+  self:load()
+  local key = RESOURCE_KEYS[resourceType]
+  if not key then return end
+  self.metrics[key] = (self.metrics[key] or 0) + (amount or 1)
+  self:updateRates()
+  self._dirty = true
+end
+
+function HuntMetrics:recordDamageTaken(amount)
+  self:load()
+  self.metrics.damageTaken = (self.metrics.damageTaken or 0) + (amount or 0)
+  self._dirty = true
+end
+
+function HuntMetrics:recordHealingDone(amount)
+  self:load()
+  self.metrics.healingDone = (self.metrics.healingDone or 0) + (amount or 0)
+  self._dirty = true
+end
+
+function HuntMetrics:recordTilesWalked(amount)
+  self:load()
+  self.metrics.tilesWalked = (self.metrics.tilesWalked or 0) + (amount or 0)
+  self._dirty = true
+end
+
+function HuntMetrics:recordNearDeath()
+  self:load()
+  self.metrics.nearDeathCount = (self.metrics.nearDeathCount or 0) + 1
+  self._dirty = true
+end
+
+function HuntMetrics:updateRates()
+  local elapsedHours = self:getElapsed() / 3600000
+  if elapsedHours > 0 then
+    self.metrics.xpPerHour = (self.metrics.xpGained or 0) / elapsedHours
+    self.metrics.killsPerHour = (self.metrics.kills or 0) / elapsedHours
+    self.metrics.potionsPerHour = ((self.metrics.hpPotionsUsed or 0) + (self.metrics.manaPotionsUsed or 0)) / elapsedHours
+    self.metrics.runesPerHour = (self.metrics.runesUsed or 0) / elapsedHours
+    self.metrics.manaSpentPerHour = (self.metrics.manaSpent or 0) / elapsedHours
+    self.metrics.combatUptime = self.metrics.combatUptimeMs and (self.metrics.combatUptimeMs / (self:getElapsed() or 1) * 100) or 0
+    if (self.metrics.kills or 0) > 0 then
+      self.metrics.tilesPerKill = (self.metrics.tilesWalked or 0) / self.metrics.kills
+    end
+  end
+end
+
+if EventBus then
+  EventBus.on("player:logout", function()
+    if HuntMetrics.instance then
+      HuntMetrics.instance:save()
+    end
+  end)
+  EventBus.on("monster:killed", function()
+    if HuntMetrics.instance then
+      HuntMetrics.instance:recordKill()
+    end
+  end)
+  EventBus.on("creature:health", function(creature, percent, oldPercent)
+    if HuntMetrics.instance and percent ~= oldPercent then
+      local ok, localPlayer = pcall(g_game.getLocalPlayer, g_game)
+      if ok and localPlayer and creature:getId() == localPlayer:getId() then
+        local maxHp = localPlayer.getMaxHealth and localPlayer:getMaxHealth() or 0
+        if maxHp > 0 and percent < oldPercent then
+          HuntMetrics.instance:recordDamageTaken((oldPercent - percent) / 100 * maxHp)
+        end
+      end
+    end
+  end)
+  local function onHealSpell(_, mana)
+    if HuntMetrics.instance then
+      local hm = HuntMetrics.instance
+      hm:load()
+      hm.metrics.healSpellsCast = (hm.metrics.healSpellsCast or 0) + 1
+      hm.metrics.manaSpent = (hm.metrics.manaSpent or 0) + (tonumber(mana) or 0)
+      hm._dirty = true
+    end
+  end
+  local function onHealPotion(_, potionType)
+    if HuntMetrics.instance then
+      local hm = HuntMetrics.instance
+      hm:load()
+      if potionType == "mana" then
+        hm.metrics.manaPotionsUsed = (hm.metrics.manaPotionsUsed or 0) + 1
+      else
+        hm.metrics.hpPotionsUsed = (hm.metrics.hpPotionsUsed or 0) + 1
+      end
+      hm._dirty = true
+    end
+  end
+  local function onRuneUsed()
+    if HuntMetrics.instance then
+      local hm = HuntMetrics.instance
+      hm:load()
+      hm.metrics.runesUsed = (hm.metrics.runesUsed or 0) + 1
+      hm._dirty = true
+    end
+  end
+  EventBus.on("heal:spell", onHealSpell)
+  EventBus.on("heal:potion", onHealPotion)
+  EventBus.on("attack:aoe_rune", onRuneUsed)
+  EventBus.on("attack:single_rune", onRuneUsed)
+end
+
+nExBot = nExBot or {}
+local instance = HuntMetrics.new()
+HuntMetrics.instance = instance
+nExBot.HuntMetrics = instance
+
+return instance

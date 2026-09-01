@@ -99,8 +99,7 @@ end
 -- IMPROVED: Increased range for better monster detection
 -- This prevents the bot from leaving monsters behind when moving to waypoints
 -- ═══════════════════════════════════════════════════════════════════════════
-local MONSTER_DETECTION_RANGE = 14  -- INCREASED from 10 to 14 (covers full visible screen)
-local MONSTER_TARGETING_RANGE = 12  -- INCREASED from 10 to 12 (targeting range)
+local MONSTER_DETECTION_RANGE = 14  -- Shared detection and targeting range.
 
 local dangerValue = 0
 local looterStatus = ""
@@ -172,33 +171,12 @@ TargetBot.AttackController = AttackController
 -- ═══════════════════════════════════════════════════════════════════════════
 TargetBot.requestAttack = function(creature, reason, force)
   if not creature then return false end
-  
-  -- OPTIMIZED: Use isCreatureDead helper (single pcall)
   if isCreatureDead(creature) then return false end
-  
-  local Client = getClient()
-  if not (Client and Client.attack) and not (g_game and g_game.attack) then return false end
-
-  -- OPTIMIZED: Use getCreatureId helper (single pcall)
-  local id = getCreatureId(creature)
-  if not id then return false end
-
-  -- Calculate priority for this creature
-  -- v2.4: Config priority scaled by 1000x for consistency with creature_priority.lua
-  local priority = 1000  -- Base priority (config priority 1)
-  if TargetBot.Creature and TargetBot.Creature.getConfigs then
-    local cfgs = TargetBot.Creature.getConfigs(creature)
-    if cfgs and cfgs[1] then
-      priority = (cfgs[1].priority or 1) * 1000
-    end
-  end
-
-  -- Use AttackStateMachine directly (always loaded as default)
-  if force then
-    return AttackStateMachine.forceSwitch(creature)
-  else
-    return AttackStateMachine.requestSwitch(creature, priority)
-  end
+  local cfgs = TargetBot.Creature and TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(creature)
+  local config = cfgs and cfgs[1] or { name = "intelligence_runtime", priority = 1, chase = true }
+  if not TargetBot.submitSelection then return false end
+  return TargetBot.submitSelection({ creature = creature, config = config, priority = (config.priority or 1) * 1000 },
+    1, reason or "TargetBotRequest")
 end
 
 -- Use TargetBotCore if available (DRY principle)
@@ -305,6 +283,19 @@ local SharedHelpers = nExBot.SharedHelpers or {}
       end)
     end)
   end)
+end
+
+-- Invalidate native combat confirmation whenever the client session changes.
+if nExBot.ClientLifecycle and nExBot.ClientLifecycle.on then
+  local function invalidateAttack(generation)
+    if AttackFSM and AttackFSM.onConnectionGeneration then
+      AttackFSM.onConnectionGeneration(generation)
+    end
+  end
+  nExBot.ClientLifecycle:on("gameStart", invalidateAttack)
+  nExBot.ClientLifecycle:on("gameEnd", invalidateAttack)
+  nExBot.ClientLifecycle:on("login", invalidateAttack)
+  nExBot.ClientLifecycle:on("logout", invalidateAttack)
 end
 
 -- LRU eviction helper: move ID to end of access order — O(1) via posMap
@@ -479,12 +470,22 @@ end
 TargetBot.ChaseModeEnforcer = ChaseModeEnforcer
 TargetBot.enforceChaseModeNow = enforceChaseModeNow
 
--- ui
-local configWidget = UI.Config()
-local ui = UI.createWidget("TargetBotPanel")
+local function textValue(initial)
+  local value = tostring(initial or "")
+  return {
+    getText = function() return value end,
+    setText = function(_, text) value = tostring(text or "") end,
+  }
+end
 
-ui.list = ui.listPanel.list -- shortcut
-TargetBot.targetList = ui.list
+local ui = {
+  list = nExBot.OrderedModel.new(),
+  status = { right = textValue("Off") },
+  target = { right = textValue("-") },
+  config = { right = textValue("-") },
+  danger = { right = textValue("0") },
+}
+TargetBot.Creatures = ui.list
 TargetBot.Looting.setup()
 
 -- Setup eat food feature if available
@@ -492,16 +493,10 @@ if TargetBot.EatFood and TargetBot.EatFood.setup then
   TargetBot.EatFood.setup()
 end
 
-ui.status.left:setText("Status:")
 setStatusRight("Off")
-ui.target.left:setText("Target:")
 setWidgetTextSafe(ui.target.right, "-")
-ui.config.left:setText("Config:")
 setWidgetTextSafe(ui.config.right, "-")
-ui.danger.left:setText("Danger:")
 setWidgetTextSafe(ui.danger.right, "0")
-
-if ui and ui.editor and ui.editor.debug then ui.editor.debug:destroy() end
 
 local oldTibia = getClientVersion() < 960
 
@@ -509,38 +504,19 @@ local oldTibia = getClientVersion() < 960
 -- Config setup moved down to after macro (to ensure macro and recalc exist before callback runs)
 -- See vBot for reference: https://github.com/Vithrax/vBot
 
--- Setup UI tooltips
-ui.editor.buttons.add:setTooltip("Add a new creature targeting configuration.\nDefine which creatures to attack and how.")
-ui.editor.buttons.edit:setTooltip("Edit the selected creature targeting configuration.\nModify priority, distance, and behavior settings.")
-ui.editor.buttons.remove:setTooltip("Remove the selected creature targeting configuration.\nThis action cannot be undone.")
+TargetBot.showCreatureEditor = function() end
 
-ui.configButton:setTooltip("Show/hide the target editor panel.\nUse to add, edit, or remove creature configurations.")
-
--- setup ui
-ui.editor.buttons.add.onClick = function()
-  TargetBot.Creature.edit(nil, function(newConfig)
-    TargetBot.Creature.addConfig(newConfig, true)
-    TargetBot.save()
-  end)
+TargetBot.addCreature = function(data)
+  return TargetBot.saveCreature(data)
 end
 
-ui.editor.buttons.edit.onClick = function()
+TargetBot.removeSelectedCreature = function()
   local entry = ui.list:getFocusedChild()
-  if not entry then return end
-  TargetBot.Creature.edit(entry.value, function(newConfig)
-    entry:setText(newConfig.name)
-    entry.value = newConfig
-    TargetBot.Creature.resetConfigsCache()
-    TargetBot.save()
-  end)
-end
-
-ui.editor.buttons.remove.onClick = function()
-  local entry = ui.list:getFocusedChild()
-  if not entry then return end
+  if not entry then return false end
   entry:destroy()
   TargetBot.Creature.resetConfigsCache()
   TargetBot.save()
+  return true
 end
 
 -- public function, you can use them in your scripts
@@ -551,6 +527,48 @@ end
 TargetBot.isCaveBotActionAllowed = function()
   return cavebotAllowance > now
 end
+
+local function getOwnedTarget()
+  for _, owner in ipairs({ AttackFSM, AttackStateMachine }) do
+    if owner and owner.getTarget then
+      local ok, target = pcall(owner.getTarget)
+      if ok and target then return target end
+    end
+  end
+  return nil
+end
+
+local function isLiveConfiguredTarget(creature)
+  if not creature or SC.isDead(creature) or (SC.isRemoved and SC.isRemoved(creature)) then return false end
+  local configs = TargetBot.Creature and TargetBot.Creature.getConfigs
+  local ok, matches = configs and pcall(configs, creature)
+  return ok and matches and matches[1] ~= nil
+end
+
+local function hasFreshConfiguredTarget()
+  local creatures = BotCore.Creatures.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE) or {}
+  for _, creature in ipairs(creatures) do
+    if isLiveConfiguredTarget(creature) then return true end
+  end
+  return false
+end
+
+TargetBot.CombatOwnership = {
+  getTarget = function()
+    return getOwnedTarget()
+  end,
+  hasLiveConfiguredTarget = function()
+    return isLiveConfiguredTarget(getOwnedTarget())
+  end,
+  canReleaseTarget = function()
+    return cavebotAllowance > now and not TargetBot.CombatOwnership.hasLiveConfiguredTarget()
+  end,
+  isBlockingRoute = function()
+    if not TargetBot.isOn() then return false end
+    if TargetBot.CombatOwnership.hasLiveConfiguredTarget() then return true end
+    return hasFreshConfiguredTarget() and not TargetBot.CombatOwnership.canReleaseTarget()
+  end,
+}
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- MONSTER DETECTION FOR CAVEBOT (v3.0)
@@ -640,11 +658,11 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 
 local function loadExplicitlyDisabledState()
-  local storage = type(nExBotStorageGet) == "function" and nExBotStorageGet("targetbot") or nil
-  if storage and storage.targetbotExplicitlyDisabled == true then
-    return true
+  if UnifiedStorage and UnifiedStorage.get then
+    local persisted = UnifiedStorage.get("targetbot.explicitlyDisabled")
+    if persisted ~= nil then return persisted == true end
   end
-  return false
+  return storage and storage.targetbotExplicitlyDisabled == true
 end
 
 TargetBot.explicitlyDisabled = loadExplicitlyDisabledState()
@@ -658,6 +676,11 @@ TargetBot._lastUserToggle = 0
 TargetBot.setOn = function(val, force)
   if val == false then  
     return TargetBot.setOff(true)
+  end
+  
+  -- During programmatic profile application, don't modify explicitlyDisabled
+  if TargetBot._profileApplying then
+    TargetBot._profileApplying = false
   end
   
   -- CRITICAL: If explicitly disabled and this is NOT a forced (user-initiated) call, block it
@@ -697,6 +720,11 @@ end
 TargetBot.setOff = function(val)
   if val == false then  
     return TargetBot.setOn(true)
+  end
+  
+  -- During programmatic profile application, don't set explicitlyDisabled
+  if TargetBot._profileApplying then
+    TargetBot._profileApplying = false
   end
   
   -- SET the explicit disable flag - user wants it OFF, prevent ALL auto-enable
@@ -785,8 +813,11 @@ TargetBot.setCurrentProfile = function(name)
   if not g_resources.fileExists("/bot/"..botConfigName.."/targetbot_configs/"..name..".json") then
     return warn("there is no targetbot profile with that name!")
   end
-  local wasOn = TargetBot.isOn()
-  TargetBot.setOff()
+  
+  -- Atomic profile switch: preserve desired enabled state
+  local wasEnabled = TargetBot.isOn()
+  TargetBot._profileApplying = true
+  
   storage._configs.targetbot_configs.selected = name
   -- Save to UnifiedStorage for per-character persistence
   if UnifiedStorage then
@@ -799,10 +830,15 @@ TargetBot.setCurrentProfile = function(name)
   if setCharacterProfile then
     setCharacterProfile("targetbotProfile", name)
   end
-  -- Only restore enabled state if not explicitly disabled by user
-  if wasOn and not TargetBot.explicitlyDisabled then
-    TargetBot.setOn()
+  
+  local ok = config.select(name)
+  if ok then
+    if wasEnabled then TargetBot.setOn() else TargetBot.setOff() end
   end
+end
+
+TargetBot.createProfile = function(name)
+  return config.create(name)
 end
 
 TargetBot.delay = function(value)
@@ -1232,6 +1268,44 @@ TargetBot.ActiveMovementConfig = TargetBot.ActiveMovementConfig or {
   anchorRange = 5
 }
 
+local function executeIntelligenceSelection(selection, targetCount, source)
+  local Intelligence = nExBot and nExBot.Intelligence
+  if not Intelligence or not TargetProposal then return false end
+  local proposal = TargetProposal.fromSelection(selection, {
+    now = now,
+    generations = Intelligence.lifecycle.generations,
+  })
+  if not proposal then return false end
+  Intelligence.applyContextAdjustment(proposal, selection)
+  Intelligence.activeCombatContext = proposal.contextKey
+  proposal.source = source or proposal.source
+  Intelligence.events:publish("TargetCandidateEvaluated", proposal, { source = proposal.source })
+  local maxHealth = player and player.getMaxHealth and player:getMaxHealth() or 0
+  local selected, rejected = Intelligence.decisions:select({ proposal }, Intelligence.lifecycle.generations, {
+    healthRatio = maxHealth > 0 and player:getHealth() / maxHealth or 0,
+    targetValid = selection.creature and not selection.creature:isDead(),
+  })
+  local features = Intelligence.features:extractCombat(Intelligence.currentSnapshot, { targetId = proposal.targetId })
+  features.predictions = { targetUtility = Intelligence.models:predict("TargetValueModel", features) }
+  if not Intelligence.optionalEnabled or Intelligence.optionalEnabled("replay") then
+    Intelligence.replay:record({
+      snapshotRef = Intelligence.currentSnapshot and Intelligence.currentSnapshot.generation,
+      features = features,
+      proposals = { proposal },
+      selected = selected,
+      rejected = rejected,
+    })
+  end
+  if not selected then
+    Intelligence.events:publish("TargetRejected", { proposal = proposal, rejected = rejected }, { source = "IntelligenceDecisionEngine" })
+    return false
+  end
+  Intelligence.events:publish("TargetSelected", selected, { source = "IntelligenceDecisionEngine" })
+  TargetBot.Creature.attack(selection, targetCount, false)
+  return true
+end
+TargetBot.submitSelection = executeIntelligenceSelection
+
 -- Main TargetBot loop - optimized with EventBus caching
 -- PERFORMANCE: 250ms macro interval balances responsiveness and CPU usage
 local lastRecalcTime = 0
@@ -1255,9 +1329,7 @@ targetbotMacro = macro(250, function()
   end
 
   -- Update AttackStateMachine (only when TargetBot is ON)
-  if AttackStateMachine and AttackStateMachine.update then
-    pcall(AttackStateMachine.update)
-  end
+  pcall(function() local FSM = AttackFSM or AttackStateMachine; if FSM and FSM.update then FSM.update() end end)
 
   -- Prevent execution before login is complete to avoid freezing
   local Client = getClient()
@@ -1277,45 +1349,12 @@ targetbotMacro = macro(250, function()
     local eventTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
     if eventTarget and not eventTarget:isDead() then
       -- EventTargeting is handling combat - ensure we're attacking AND chase mode is set
-      local Client = getClient()
-      local currentAttack = ClientService.getAttackingCreature()
-      
       -- CRITICAL: Chase is only active if enabled AND keepDistance is disabled
       local chaseEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.chase
       local keepDistanceEnabled = TargetBot.ActiveMovementConfig and TargetBot.ActiveMovementConfig.keepDistance
       local useNativeChase = chaseEnabled and not keepDistanceEnabled
       
-      if ChaseController then
-        ChaseController.setDesiredChase(useNativeChase)
-      else
-        if useNativeChase then
-          local currentMode = ClientService.getChaseMode() or 0
-          if currentMode ~= 1 then
-            if Client and Client.setChaseMode then
-              Client.setChaseMode(1)
-            elseif g_game and g_game.setChaseMode then
-              g_game.setChaseMode(1)
-            end
-            if TargetBot then TargetBot.usingNativeChase = true end
-          end
-        elseif not useNativeChase then
-          -- Chase disabled OR keepDistance enabled - ensure Stand mode
-          local currentMode = ClientService.getChaseMode() or 0
-          if currentMode ~= 0 then
-            if Client and Client.setChaseMode then
-              Client.setChaseMode(0)
-            elseif g_game and g_game.setChaseMode then
-              g_game.setChaseMode(0)
-            end
-            if TargetBot then TargetBot.usingNativeChase = false end
-          end
-        end
-      end
-      
-      if not currentAttack or currentAttack:getId() ~= eventTarget:getId() then
-        -- Sync our attack target with EventTargeting's choice
-        pcall(function() TargetBot.requestAttack(eventTarget, "event_sync") end)
-      end
+      MovementCoordinator.setChaseMode(useNativeChase)
       
       -- CRITICAL FIX: Still run creature_attack logic for movement features
       -- (avoidAttacks, keepDistance, dynamicLure, smartPull, rePosition, etc.)
@@ -1339,7 +1378,7 @@ targetbotMacro = macro(250, function()
           end
         end
         -- Run the full attack/walk logic with proper config
-        pcall(function() TargetBot.Creature.attack(params, targetCount, false) end)
+        pcall(executeIntelligenceSelection, params, targetCount, "EventTargeting")
       end
       
       setStatusRight("Targeting (Event)")
@@ -1437,7 +1476,7 @@ targetbotMacro = macro(250, function()
     local unreachableCount = monsterCache.unreachableCount or 0
     local reachableOnScreen = monsterCache.monsterCount or 0
     
-    -- v5.0: Also check AttackStateMachine for skipped creatures
+    -- intelligence.0: Also check AttackStateMachine for skipped creatures
     local smSkippedCount = 0
     if AttackStateMachine and AttackStateMachine.getSkippedCount then
       smSkippedCount = AttackStateMachine.getSkippedCount()
@@ -1522,34 +1561,7 @@ targetbotMacro = macro(250, function()
     local okId, id = pcall(function() return bestTarget.creature:getId() end)
     
     if okId and id then
-      -- Use AttackStateMachine for all attack management
-      local smState = AttackStateMachine.getState()
-      local smTargetId = AttackStateMachine.getTargetId()
-      local allowSync = true
-
-      if EventTargeting and EventTargeting.isInCombat and EventTargeting.isInCombat() then
-        local evtTarget = EventTargeting.getCurrentTarget and EventTargeting.getCurrentTarget()
-        if evtTarget then
-          local okEvtId, evtId = pcall(function() return evtTarget:getId() end)
-          if okEvtId and evtId and evtId ~= id then
-            allowSync = false
-          end
-        end
-      end
-      
-      if allowSync then
-        local smTargetId = AttackStateMachine.getTargetId()
-        if not smTargetId or bestTarget.creature:getId() ~= smTargetId then
-          AttackStateMachine.requestAttack(bestTarget.creature, 1000)
-          lastEngagementAt = now
-        else
-          local gameTarget = ClientService.getAttackingCreature()
-          if not gameTarget then
-            AttackStateMachine.forceAttack(bestTarget.creature)
-            lastEngagementAt = now
-          end
-        end
-      end
+      local smState = (AttackFSM or AttackStateMachine).getState()
 
       -- Update AttackController based on state machine status
       if smState == "LOCKED" then
@@ -1566,7 +1578,7 @@ targetbotMacro = macro(250, function()
     -- Delegate to unified attack/walk logic from creature_attack
     -- This ensures chase, positioning, avoidance and AttackBot integration run correctly
     -- DynamicLure/SmartPull will call allowCaveBot() if lure conditions are met
-    pcall(function() TargetBot.Creature.attack(bestTarget, targetCount, false) end)
+    pcall(executeIntelligenceSelection, bestTarget, targetCount, "TargetBot")
   else
     setWidgetTextSafe(ui.target.right, "-")
     setWidgetTextSafe(ui.config.right, "-")
@@ -1597,11 +1609,16 @@ moduleInitialized = true
 pcall(function() performPendingEnableOnce() end)
 
 -- Config setup (moved here so macro/recalc are defined before callback runs)
-config = Config.setup("targetbot_configs", configWidget, "json", function(name, enabled, data)
+config = nExBot.ProfileStore.open({ key = "targetbot_configs", extension = "json", onChange = function(name, enabled, data)
   -- Track if this callback was triggered by user clicking the switch
-  -- The 'enabled' parameter comes from the UI switch state
-  local isUserToggle = (TargetBot._initialized == true)  -- After init, changes are user-driven
+  -- During programmatic profile application, don't treat as user toggle
+  local isUserToggle = TargetBot._initialized and not TargetBot._profileApplying
   
+  -- Clear profile applying flag if it was set
+  if TargetBot._profileApplying then
+    TargetBot._profileApplying = false
+  end
+
   -- Save character's profile preference when profile changes (multi-client support)
   if enabled and name and name ~= "" then
     if setCharacterProfile then
@@ -1702,7 +1719,9 @@ config = Config.setup("targetbot_configs", configWidget, "json", function(name, 
     schedule(100, function() pcall(function() if targetbotMacro then pcall(targetbotMacro) end end) end)
   end
   lureEnabled = true
-end)
+end })
+config.reload()
+TargetBot.listProfiles = config.list
 
 -- Stop attacking the current target
 TargetBot.stopAttack = function(clearWalk)
@@ -1765,3 +1784,48 @@ TargetBot.__internals = {
 }
 
 -- End of TargetBot module
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Container Recovery Coordination
+-- Subscribe to recovery:pause/resume events emitted by Discovery.
+-- Prevents stale target acquisition during reconnect recovery.
+-- ─────────────────────────────────────────────────────────────────────────────
+if EventBus then
+  local _recoveryPausedGen = nil
+
+  EventBus.on("recovery:pause_targetbot", function(payload)
+    local gen = payload and payload.generation
+    if _recoveryPausedGen == gen then return end
+    _recoveryPausedGen = gen
+    if AttackFSM and AttackFSM.onConnectionGeneration then
+      AttackFSM.onConnectionGeneration(gen)
+    end
+    -- Pause macro ticks if TargetBot is on.
+    if TargetBot.isOn and TargetBot.isOn() then
+      if targetbotMacro and targetbotMacro.setOn then
+        pcall(function() targetbotMacro.setOn(false) end)
+      end
+    end
+  end, 0)
+
+  EventBus.on("recovery:resume_targetbot", function(payload)
+    local gen = payload and payload.generation
+    if _recoveryPausedGen ~= gen then return end
+    _recoveryPausedGen = nil
+    -- Invalidate stale target state before resuming.
+    if payload and payload.freshState then
+      if TargetBot.__internals and TargetBot.__internals.invalidateCache then
+        pcall(TargetBot.__internals.invalidateCache)
+      end
+      if TargetBot.__internals and TargetBot.__internals.clearPaths then
+        pcall(TargetBot.__internals.clearPaths)
+      end
+    end
+    -- Re-enable macro only if TargetBot is configured on.
+    if TargetBot.isOn and TargetBot.isOn() then
+      if targetbotMacro and targetbotMacro.setOn then
+        pcall(function() targetbotMacro.setOn(true) end)
+      end
+    end
+  end, 0)
+end

@@ -153,12 +153,12 @@ local function sanitizeStorage()
     end
     idx = stopAt + 1
     if idx <= #keys then
-      schedule(50, processChunk)
+      if schedule then schedule(50, processChunk) end
     else
       loadTimes["sanitize"] = math.floor((os.clock() - sanitizeStart) * 1000)
     end
   end
-  schedule(1, processChunk)
+  if schedule then schedule(1, processChunk) end
 end
 
 sanitizeStorage()
@@ -247,13 +247,48 @@ local function loadCategory(categoryName, scripts, basePath)
   loadTimes["_category_" .. categoryName] = math.floor((os.clock() - catStart) * 1000)
 end
 
+local deferredScripts = {}
+
+local function deferScript(name, category, basePath)
+  deferredScripts[#deferredScripts + 1] = {
+    name = name,
+    category = category,
+    basePath = basePath,
+  }
+end
+
+local function startDeferredScripts(onComplete)
+  local index = 1
+  local function nextBatch()
+    local item = deferredScripts[index]
+    if not item then
+      if onComplete then onComplete() end
+      return
+    end
+    loadScript(item.name, item.category, item.basePath)
+    index = index + 1
+    schedule(10, nextBatch)
+  end
+
+  if #deferredScripts == 0 or not schedule then
+    while deferredScripts[index] do
+      local item = deferredScripts[index]
+      loadScript(item.name, item.category, item.basePath)
+      index = index + 1
+    end
+    if onComplete then onComplete() end
+    return
+  end
+  schedule(1, nextBatch)
+end
+
 -- ============================================================================
 -- LOAD STYLES FIRST
 -- ============================================================================
 loadStyles()
 
 -- ============================================================================
--- PHASE 1: ACL AND CLIENT ABSTRACTION
+-- ACL AND CLIENT ABSTRACTION
 -- ============================================================================
 loadCategory("acl", {
   "acl/init",
@@ -347,25 +382,11 @@ local function autoDetectClient(attempt, maxAttempts)
       nExBot.isOTCv8 = acl.isOTCv8()
       nExBot.isOpenTibiaBR = acl.isOpenTibiaBR()
 
-      if newType ~= prevType or nExBot.clientName ~= prevName then
-      end
-
       if nExBot.isOpenTibiaBR then
         return
       end
 
       if attempt >= maxAttempts then
-        if acl.getDetectionInfo then
-          local info = acl.getDetectionInfo()
-          if info and info.signals then
-            local keys = {}
-            for k, v in pairs(info.signals) do
-              if v then
-                table.insert(keys, k)
-              end
-            end
-          end
-        end
         return
       end
     end
@@ -377,7 +398,7 @@ end
 autoDetectClient(1, 8)
 
 -- ============================================================================
--- PHASE 2: CONSTANTS
+-- CONSTANTS
 -- ============================================================================
 loadCategory("constants", {
   "constants/floor_items",
@@ -386,7 +407,7 @@ loadCategory("constants", {
 }, "/")
 
 -- ============================================================================
--- PHASE 3: UTILS (Core shared utilities)
+-- UTILS (Core shared utilities)
 -- ============================================================================
 loadCategory("utils", {
   "utils/shared",
@@ -400,42 +421,206 @@ loadCategory("utils", {
   "utils/event_debouncer",
   "utils/path_utils",
   "utils/path_strategy",
-  "utils/waypoint_navigator",
 }, "/")
 
 -- ============================================================================
--- PHASE 4: CORE LIBRARIES (Legacy compatibility)
+-- NAVIGATION BOUNDED CONTEXT
+-- Strict, ack-driven navigation domain (replaces WaypointNavigator internals).
+-- Loaded before core/cavebot so the lazy require() in cavebot/walking.lua and
+-- the legacy bridge wiring both resolve navigation.* modules deterministically.
 -- ============================================================================
-loadScript("updater", "core")  -- Load updater first so its UI appears above main.lua
+do
+  -- The OTClient sandbox exposes neither `package`, `require`, nor `_G`, and
+  -- its `dofile` DISCARDS chunk return values (the codebase communicates via
+  -- globals). Navigation modules are return-value modules, so they must be
+  -- loaded with loadfile()+call() to capture the module table.
+  nExBot.Nav = nExBot.Nav or {}
+
+  -- Load a Lua file and return its chunk result (works even where dofile
+  -- discards returns).
+  local function navLoad(path)
+    local chunk, err = loadfile(path)
+    if not chunk then error(tostring(err), 2) end
+    return chunk()
+  end
+
+  -- Registry-backed resolver: prefers the pre-loaded registry, falls back to
+  -- loadfile-based loading, cached into nExBot.Nav.
+  if type(require) ~= "function" or type(package) ~= "table" then
+    require = function(name)
+      if nExBot.Nav[name] then return nExBot.Nav[name] end
+      local ns = nExBot.UI
+      if ns then
+        local cached = ns[name]
+        if cached ~= nil then
+          nExBot.Nav[name] = cached
+          return cached
+        end
+      end
+      local sub = name:gsub("%.", "/")
+      local prefixes = { "/", "" }
+      for i = 1, #prefixes do
+        local ok, mod = pcall(navLoad, prefixes[i] .. sub .. ".lua")
+        if ok and mod then
+          nExBot.Nav[name] = mod
+          return mod
+        end
+      end
+      error("module '" .. tostring(name) .. "' not found", 2)
+    end
+  end
+
+  local navModules = {
+    "domain",
+    "ports",
+    "observability",
+    "step_validator",
+    "path_planner",
+    "step_executor",
+    "retry",
+    "session",
+    "recovery",
+    "transitions",
+    "obstacles",
+    "ml_shadow",
+    "route_graph",
+    "recorder",
+    "adapter_fake",
+    "adapter_otclient",
+    "legacy_bridge",
+  }
+  for i = 1, #navModules do
+    -- dofile() triggers each module's self-registration into nExBot.Nav (the
+    -- OTClient dofile discards return values, so registration happens inside
+    -- the module). loadScript also captures the return when available.
+    local loaded = loadScript(navModules[i], "navigation", "/navigation/")
+    if loaded then
+      nExBot.Nav["navigation." .. navModules[i]] = loaded
+    end
+  end
+
+  -- Create the production bridge (OTClient adapter + session + all deps) and
+  -- expose it as the WaypointNavigator replacement for legacy callers.
+  local okNav, bridgeMod = pcall(function()
+    local lb = require("navigation.legacy_bridge")
+    return lb and lb.new()
+  end)
+  if okNav and bridgeMod then
+    nExBot.Navigation = bridgeMod
+    if CaveBot then CaveBot.Navigation = bridgeMod end
+  end
+end
+
+loadScript("updater", "core")
 loadCategory("core", {
-  "main",
   "items",
   "lib",
   "safe_call",
+  "ordered_model",
+  "profile_store",
+  "profile_restore_policy",
   "new_cavebot_lib",
   "configs",
   "bot_database",
   "character_db",
+  "client_lifecycle",
 })
 
--- ============================================================================
--- PHASE 6: ARCHITECTURE LAYER
--- ============================================================================
+loadCategory("ml_models", {
+  "contextual_features",
+  "kill_completion_model",
+  "target_switch_risk_model",
+  "lure_success_model",
+  "pull_success_model",
+  "reposition_tile_model",
+}, "/targetbot/ml/")
+
 loadCategory("architecture", {
   "zchange_guard",
   "kill_tracker",
+  "unified_tick",
   "event_bus",
   "unified_storage",
-  "unified_tick",
+  "intelligence/foundation/lifecycle",
+  "intelligence/foundation/event_aggregator",
+  "intelligence/foundation/tactical_blackboard",
+  "intelligence/foundation/snapshot_builder",
+  "intelligence/foundation/feature_pipeline",
+  "intelligence/foundation/config_migration",
+  "intelligence/foundation/feature_flags",
+  "intelligence/learning/online_models",
+  "intelligence/decisions/safety_envelope",
+  "intelligence/decisions/default_safety",
+  "intelligence/decisions/decision_engine",
+  "intelligence/decisions/cavebot_route_state",
+  "intelligence/learning/model_registry",
+  "intelligence/learning/model_catalog",
+  "intelligence/observability/replay",
+  "intelligence/learning/calibration",
+  "intelligence/foundation/performance_budget",
+  "intelligence/decisions/dynamic_lure_state",
+  "intelligence/decisions/pull_state",
+  "intelligence/decisions/wave_beam_state",
+  "intelligence/learning/navigation_cost",
+  "intelligence/learning/tactical_memory",
+  "intelligence/learning/context_adjustment",
+  "intelligence/learning/latency_classifier",
+  "intelligence/learning/observation_quality",
+  "intelligence/learning/horizon_counters",
+  "intelligence/observability/resource_observer",
+  "intelligence/observability/loot_observer",
+  "intelligence/learning/reward_model",
+  "intelligence/foundation/metrics",
+  "intelligence/observability/bot_doctor",
+  "intelligence/foundation/adaptive_scheduler",
+  "intelligence/foundation/hunt_metrics",
+  "intelligence/foundation/telemetry_client",
+  "intelligence/foundation/state_enums",
+  "intelligence/foundation/character_context",
+  "intelligence/foundation/character_profile_coordinator",
+  "intelligence/foundation/silent_restore",
+  "intelligence/foundation/control_state_registry",
+  "intelligence/foundation/otclient_adapter",
+  "intelligence/ui/ui_presenter",
+  "intelligence/contracts/outcome_reasons",
+  "intelligence/contracts/event_schema",
+  "intelligence/contracts/event_factory",
+  "intelligence/contracts/event_deduplicator",
+  "intelligence/records/decision_record",
+  "intelligence/records/outcome_record",
+  "intelligence/episodes/episode_base",
+  "intelligence/episodes/encounter_tracker",
+  "intelligence/episodes/loot_episode_tracker",
+  "intelligence/episodes/route_segment_tracker",
+  "intelligence/episodes/hunt_tracker",
+  "intelligence/learning/reward_vector",
+  "intelligence/learning/reward_normalizer",
+  "intelligence/learning/model_interface_v2",
+  "intelligence/learning/item_value_provider",
+  "intelligence/learning/resource_cost",
+  "intelligence/guardrails/adjustment_bounds",
+  "intelligence/guardrails/rollback_monitor",
+  "intelligence/guardrails/kill_switch",
+  "intelligence/guardrails/target_switch_guard",
+  "intelligence/learning/conservative_reranker",
+  "intelligence/learning/loot_priority",
+  "intelligence/evaluation/decision_log",
+  "intelligence/evaluation/replay_evaluator",
+  "intelligence/evaluation/promotion_report",
+  "intelligence/evaluation/confidence_interval",
+  "intelligence/observability/decision_explainer",
+  "intelligence/telemetry/session",
+  "intelligence/telemetry/buffer",
+  "intelligence/telemetry/writer",
+  "intelligence/telemetry/retention",
+  "intelligence/telemetry/collector",
+  "intelligence/runtime",
   "creature_cache",
   "door_items",
   "global_config",
   "bot_core/init",
 })
 
--- ============================================================================
--- PHASE 7.5: EXTRACTED MODULES (dofile, set globals)
--- ============================================================================
 loadCategory("extracted_modules", {
   "attack/attack_data",
   "attack/attack_analytics",
@@ -446,10 +631,7 @@ loadCategory("extracted_modules", {
   "heal/heal_analytics",
 })
 
--- ============================================================================
--- PHASE 8: LEGACY FEATURE MODULES
--- ============================================================================
-loadCategory("features_legacy", {
+loadCategory("features", {
   "extras",
   "cavebot",
   "alarms",
@@ -461,10 +643,7 @@ loadCategory("features_legacy", {
   "AttackBot",
 })
 
--- ============================================================================
--- PHASE 9: LEGACY TOOLS
--- ============================================================================
-loadCategory("tools_legacy", {
+loadCategory("tools", {
   "ingame_editor",
   "Dropper",
   "Containers",
@@ -483,7 +662,6 @@ loadCategory("tools_legacy", {
 -- PHASE 11: ANALYTICS AND UI
 -- ============================================================================
 loadCategory("analytics", {
-  "analyzer",
   "smart_hunt",
   "spy_level",
   "supplies",
@@ -494,11 +672,20 @@ loadCategory("analytics", {
   "cavebot_control_panel",
 })
 
--- NOTE: TargetBot scripts are loaded by core/cavebot.lua (in features_legacy phase)
+-- Presentation-only analytics yield to the first usable client frame.
+deferScript("analyzer", "deferred_analytics")
+
+-- TargetBot scripts are loaded by core/cavebot.lua.
 -- to avoid duplicating the loading, we don't load them again here.
 
--- NOTE: CaveBot scripts are loaded by core/cavebot.lua (in features_legacy phase)
+-- CaveBot scripts are loaded by core/cavebot.lua.
 -- to avoid duplicating the loading, we don't load them again here.
+
+-- ============================================================================
+-- PHASE 12: UI PLATFORM (design system, registries, shell, modules)
+-- ============================================================================
+loadScript("ui/init", "ui", "/")
+nExBot.startupReady = false
 
 -- ============================================================================
 -- STARTUP COMPLETE
@@ -570,90 +757,100 @@ end
 local PRIVATE_DOFILE_PATH = "/private"
 
 local function collectLuaFiles(folderPath, dofileBase, collected)
-    collected = collected or {}
-    
-    local status, items = pcall(function()
-        return g_resources.listDirectoryFiles(folderPath, false, false)
-    end)
-    
-    if not status or not items then
-        return collected
-    end
-    
-    for i = 1, #items do
-        local item = items[i]
-        local fullPath = folderPath .. "/" .. item
-        local dofilePath = dofileBase .. "/" .. item
-        
-        if item:match("%.lua$") then
-            collected[#collected + 1] = {
-                name = item,
-                path = dofilePath
-            }
-        elseif not item:match("%.") then
-            local subStatus, subItems = pcall(function()
-                return g_resources.listDirectoryFiles(fullPath, false, false)
-            end)
-            if subStatus and subItems then
-                collectLuaFiles(fullPath, dofilePath, collected)
-            end
-        end
-    end
-    
+  collected = collected or {}
+
+  local status, items = pcall(function()
+    return g_resources.listDirectoryFiles(folderPath, false, false)
+  end)
+
+  if not status or not items then
     return collected
+  end
+
+  for i = 1, #items do
+    local item = items[i]
+    local fullPath = folderPath .. "/" .. item
+    local dofilePath = dofileBase .. "/" .. item
+
+    if item:match("%.lua$") then
+      collected[#collected + 1] = {
+        name = item,
+        path = dofilePath
+      }
+    elseif not item:match("%.") then
+      local subStatus, subItems = pcall(function()
+        return g_resources.listDirectoryFiles(fullPath, false, false)
+      end)
+      if subStatus and subItems then
+        collectLuaFiles(fullPath, dofilePath, collected)
+      end
+    end
+  end
+
+  return collected
 end
 
-local function loadPrivateScripts()
-    local status, items = pcall(function()
-        return g_resources.listDirectoryFiles(P.private, false, false)
+local function loadPrivateScripts(onComplete)
+  local status, items = pcall(function()
+    return g_resources.listDirectoryFiles(P.private, false, false)
+  end)
+
+  if not status or not items or #items == 0 then
+    if onComplete then onComplete() end
+    return
+  end
+
+  local privateStart = os.clock()
+  local luaFiles = collectLuaFiles(P.private, PRIVATE_DOFILE_PATH)
+
+  if #luaFiles == 0 then
+    if onComplete then onComplete() end
+    return
+  end
+
+  table.sort(luaFiles, function(a, b) return a.path < b.path end)
+
+  local loadedCount = 0
+
+  local index = 1
+  local function loadNext()
+    local file = luaFiles[index]
+    if not file then
+      loadTimes["_private_total"] = math.floor((os.clock() - privateStart) * 1000)
+      if loadedCount > 0 then info("[nExBot] Loaded " .. loadedCount .. " private script(s)") end
+      if onComplete then onComplete() end
+      return
+    end
+    local scriptStart = os.clock()
+
+    local loadStatus, err = pcall(function()
+      dofile(file.path)
     end)
-    
-    if not status or not items or #items == 0 then
-        return
+
+    local elapsed = math.floor((os.clock() - scriptStart) * 1000)
+
+    if loadStatus then
+      loadedCount = loadedCount + 1
+      loadTimes["private:" .. file.name] = elapsed
+    else
+      warn("[Private] Failed to load '" .. file.path .. "': " .. tostring(err))
+      nExBot.loadErrors = nExBot.loadErrors or {}
+      nExBot.loadErrors["private:" .. file.name] = tostring(err)
     end
-    
-    local privateStart = os.clock()
-    local luaFiles = collectLuaFiles(P.private, PRIVATE_DOFILE_PATH)
-    
-    if #luaFiles == 0 then
-        return
-    end
-    
-    table.sort(luaFiles, function(a, b) return a.path < b.path end)
-    
-    local loadedCount = 0
-    
-    for i = 1, #luaFiles do
-        local file = luaFiles[i]
-        local scriptStart = os.clock()
-        
-        local loadStatus, err = pcall(function()
-            dofile(file.path)
-        end)
-        
-        local elapsed = math.floor((os.clock() - scriptStart) * 1000)
-        
-        if loadStatus then
-            loadedCount = loadedCount + 1
-            loadTimes["private:" .. file.name] = elapsed
-        else
-            warn("[Private] Failed to load '" .. file.path .. "': " .. tostring(err))
-            nExBot.loadErrors = nExBot.loadErrors or {}
-            nExBot.loadErrors["private:" .. file.name] = tostring(err)
-        end
-    end
-    
-    loadTimes["_private_total"] = math.floor((os.clock() - privateStart) * 1000)
-    
-    if loadedCount > 0 then
-        info("[nExBot] Loaded " .. loadedCount .. " private script(s)")
-    end
+    index = index + 1
+    if schedule then schedule(10, loadNext) else loadNext() end
+  end
+  loadNext()
 end
 
-loadPrivateScripts()
+startDeferredScripts(function()
+  loadPrivateScripts(function()
+    nExBot.startupReady = true
+    loadTimes["_ready"] = math.floor((os.clock() - startTime) * 1000)
+  end)
+end)
 
 -- Return to Main tab
-setDefaultTab("Main")
 
 -- ============================================================================
 -- ACTIVATE UNIFIED TICK SYSTEM
@@ -670,15 +867,14 @@ if UnifiedTick and UnifiedTick.start then
 end
 
 -- ============================================================================
--- BOT ANALYTICS
+-- TELEMETRY CLIENT (started in architecture phase)
 -- ============================================================================
-pcall(dofile, "/core/analytics.lua")
-local analytics = nExBot.Analytics
-if analytics and analytics.start then
-  pcall(analytics.start)
+local telemetry = nExBot.TelemetryClient
+if telemetry and telemetry.start then
+  pcall(telemetry.start)
   if onGameEnd then
     onGameEnd(function()
-      pcall(analytics.stop)
+      pcall(telemetry.stop)
     end)
   end
 end

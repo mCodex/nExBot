@@ -1,31 +1,6 @@
-setDefaultTab("Main")
 local zChanging = nExBot.zChanging or function() return false end
 local SafeCall = SafeCall or require("core.safe_call")
 local panelName = "combobot"
-
-local ui = setupUI([[
-Panel
-  height: 19
-
-  BotSwitch
-    id: title
-    anchors.top: parent.top
-    anchors.left: parent.left
-    text-align: center
-    width: 130
-    !text: tr('ComboBot')
-
-  Button
-    id: combos
-    anchors.top: prev.top
-    anchors.left: prev.right
-    anchors.right: parent.right
-    margin-left: 3
-    height: 17
-    text: Setup
-
-]])
-ui:setId(panelName)
 
 if not storage[panelName] then
   storage[panelName] = {
@@ -50,6 +25,15 @@ if not storage[panelName] then
 end
 
 local config = storage[panelName]
+ComboBot = {
+  config = config,
+  isOn = function() return config.enabled == true end,
+  setOn = function() config.enabled = true end,
+  setOff = function() config.enabled = false end,
+  toggle = function() config.enabled = not config.enabled return config.enabled end,
+  getSetting = function(key) return config[key] end,
+  setSetting = function(key, value) config[key] = value end
+}
 
 local function canUseAttackItem()
   return config.attackItemEnabled and config.item and config.item > 100 and findItem and findItem(config.item)
@@ -58,120 +42,7 @@ end
 local leaderTarget = nil
 local startCombo = false
 
-ui.title:setOn(config.enabled)
-ui.title.onClick = function(widget)
-  config.enabled = not config.enabled
-  widget:setOn(config.enabled)
-end
-
-ui.combos.onClick = function(widget)
-  comboWindow:show()
-  comboWindow:raise()
-  comboWindow:focus()
-end
-
-rootWidget = g_ui.getRootWidget()
-if rootWidget then
-  comboWindow = UI.createWindow('ComboWindow', rootWidget)
-  comboWindow:hide()
-
-  comboWindow.actions.attackItem:setItemId(config.item)
-  comboWindow.actions.attackItem.onItemChange = function(widget)
-    config.item = widget:getItemId()
-  end
-
-  comboWindow.actions.commandsToggle:setOn(config.commandsEnabled)
-  comboWindow.actions.commandsToggle.onClick = function(widget)
-    config.commandsEnabled = not config.commandsEnabled
-    widget:setOn(config.commandsEnabled)
-  end
-
-  comboWindow.closeButton.onClick = function(widget)
-    comboWindow:hide()
-  end
-
-  comboWindow.actions.followLeader:setOption(config.follow)
-  comboWindow.actions.followLeader.onOptionChange = function(widget)
-    config.follow = widget:getCurrentOption().text
-  end
-
-  comboWindow.actions.attackLeaderTarget:setOption(config.attack)
-  comboWindow.actions.attackLeaderTarget.onOptionChange = function(widget)
-    config.attack = widget:getCurrentOption().text
-    -- Auto-enable attack when LEADER TARGET is selected
-    if config.attack == "LEADER TARGET" then
-      config.attackLeaderTargetEnabled = true
-      comboWindow.actions.attackLeaderTargetToggle:setChecked(true)
-    end
-  end
-
-  comboWindow.trigger.onSayToggle:setChecked(config.onSayEnabled)
-  comboWindow.trigger.onSayToggle.onClick = function(widget)
-    config.onSayEnabled = not config.onSayEnabled
-    widget:setChecked(config.onSayEnabled)
-  end
-
-  comboWindow.trigger.onShootToggle:setChecked(config.onShootEnabled)
-  comboWindow.trigger.onShootToggle.onClick = function(widget)
-    config.onShootEnabled = not config.onShootEnabled
-    widget:setChecked(config.onShootEnabled)
-  end
-
-  comboWindow.trigger.onCastToggle:setChecked(config.onCastEnabled)
-  comboWindow.trigger.onCastToggle.onClick = function(widget)
-    config.onCastEnabled = not config.onCastEnabled
-    widget:setChecked(config.onCastEnabled)
-  end
-
-  comboWindow.actions.followLeaderToggle:setChecked(config.followLeaderEnabled)
-  comboWindow.actions.followLeaderToggle.onClick = function(widget)
-    config.followLeaderEnabled = not config.followLeaderEnabled
-    widget:setChecked(config.followLeaderEnabled)
-  end
-
-  comboWindow.actions.attackLeaderTargetToggle:setChecked(config.attackLeaderTargetEnabled)
-  comboWindow.actions.attackLeaderTargetToggle.onClick = function(widget)
-    config.attackLeaderTargetEnabled = not config.attackLeaderTargetEnabled
-    widget:setChecked(config.attackLeaderTargetEnabled)
-  end
-
-  comboWindow.actions.attackSpellToggle:setChecked(config.attackSpellEnabled)
-  comboWindow.actions.attackSpellToggle.onClick = function(widget)
-    config.attackSpellEnabled = not config.attackSpellEnabled
-    widget:setChecked(config.attackSpellEnabled)
-  end
-
-  comboWindow.actions.attackItemToggle:setChecked(config.attackItemEnabled)
-  comboWindow.actions.attackItemToggle.onClick = function(widget)
-    config.attackItemEnabled = not config.attackItemEnabled
-    widget:setChecked(config.attackItemEnabled)
-  end
-
-  comboWindow.trigger.onSayLeader:setText(config.sayLeader)
-  comboWindow.trigger.onSayLeader.onTextChange = function(widget, text)
-    config.sayLeader = text
-  end
-
-  comboWindow.trigger.onShootLeader:setText(config.shootLeader)
-  comboWindow.trigger.onShootLeader.onTextChange = function(widget, text)
-    config.shootLeader = text
-  end
-
-  comboWindow.trigger.onCastLeader:setText(config.castLeader)
-  comboWindow.trigger.onCastLeader.onTextChange = function(widget, text)
-    config.castLeader = text
-  end
-
-  comboWindow.trigger.onSayPhrase:setText(config.sayPhrase)
-  comboWindow.trigger.onSayPhrase.onTextChange = function(widget, text)
-    config.sayPhrase = text
-  end
-
-  comboWindow.actions.attackSpell:setText(config.spell)
-  comboWindow.actions.attackSpell.onTextChange = function(widget, text)
-    config.spell = text
-  end
-end
+ComboBot.show = function() end
 
 onTalk(function(name, level, mode, text, channelId, pos)
   if not config.enabled then return end
@@ -205,8 +76,8 @@ onTalk(function(name, level, mode, text, channelId, pos)
         if #attParams == 2 then
           local atTarget = attParams[2]:trim()
           local creature = SafeCall.getCreatureByName(atTarget)
-          if creature and config.attack == "COMMAND TARGET" and AttackStateMachine and AttackStateMachine.requestAttack then
-            AttackStateMachine.requestAttack(creature, 1000)
+          if creature and config.attack == "COMMAND TARGET" and TargetBot and TargetBot.requestAttack then
+            TargetBot.requestAttack(creature, "ComboCommand")
           end
         end
       end
@@ -262,8 +133,8 @@ onMissle(function(missle)
   if config.attackSpellEnabled and config.spell and config.spell:len() > 1 then
     say(config.spell)
   end
-  if config.attack == "LEADER TARGET" and AttackStateMachine and AttackStateMachine.requestAttack then
-    AttackStateMachine.requestAttack(leaderTarget, 1000)
+  if config.attack == "LEADER TARGET" and TargetBot and TargetBot.requestAttack then
+    TargetBot.requestAttack(leaderTarget, "ComboLeader")
   end
 end)
 
@@ -279,8 +150,8 @@ local function leaderTargetHandler()
 
   local target = SafeCall.getTarget()
   if not target or target:getName() ~= leaderTarget:getName() then
-    if AttackStateMachine and AttackStateMachine.requestAttack then
-      AttackStateMachine.requestAttack(leaderTarget, 1000)
+    if TargetBot and TargetBot.requestAttack then
+      TargetBot.requestAttack(leaderTarget, "ComboLeader")
     end
   end
 end

@@ -17,6 +17,13 @@ describe("attack_config", function()
     end
   end)
 
+  it("Rotate stays fixed at its old UI default (control was removed)", function()
+    local defaults = attack_config.createDefaults()
+    for i = 1, 5 do
+      assert.is_false(defaults[i].Rotate)
+    end
+  end)
+
   it("first profile is enabled by default", function()
     local defaults = attack_config.createDefaults()
     assert.is_true(defaults[1].enabled)

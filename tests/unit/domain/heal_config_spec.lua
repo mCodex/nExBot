@@ -18,6 +18,13 @@ describe("heal_config", function()
     end
   end)
 
+  it("MessageDelay stays fixed at its old UI default (control was removed)", function()
+    local defaults = heal_config.createDefaults()
+    for i = 1, 5 do
+      assert.is_false(defaults[i].MessageDelay)
+    end
+  end)
+
   it("validateProfile accepts valid profile", function()
     local profile = {
       enabled = false,

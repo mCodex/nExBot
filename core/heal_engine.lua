@@ -566,6 +566,7 @@ function HealEngine.execute(action)
     if HuntAnalytics and HuntAnalytics.trackHealSpell then
       HuntAnalytics.trackHealSpell(action.name, action.mana or 0)
     end
+    if EventBus then EventBus.emit("heal:spell", action.name, action.mana or 0) end
     
     logDebug(string.format("execute: cast spell '%s'", action.name))
     return true
@@ -583,6 +584,7 @@ function HealEngine.execute(action)
         local potionType = action.potionType or "other"
         HuntAnalytics.trackPotion(action.name or "potion", potionType)
       end
+      if EventBus then EventBus.emit("heal:potion", action.id, action.potionType or "other") end
       
       logDebug(string.format("execute: used potion '%s' (id=%d)", action.name or "?", action.id))
       return true
@@ -670,4 +672,3 @@ end
 logDebug("HealEngine v2.0 loaded - Safety-critical healing system")
 
 return HealEngine
-

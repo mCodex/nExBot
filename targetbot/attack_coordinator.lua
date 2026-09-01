@@ -1,7 +1,6 @@
 -- TargetBot Attack Coordinator Module
 -- Main attack loop, walk/chase/reposition, lure/pull system
 
-local zChanging = nExBot.zChanging or function() return false end
 local getClient = nExBot.Shared.getClient
 local SC = SafeCreature or {}
 local Dirs = Directions
@@ -19,55 +18,7 @@ local function isTileSafe(pos)
   return nExBot.Shared.isTileSafe(pos)
 end
 
-local targetBotLure = false
-local targetCount = 0
-local delayValue = 0
-local lureMax = 0
 local anchorPosition = nil
-local delayFrom = nil
-local dynamicLureDelay = false
-local smartPullState = { lastEval = 0, lowStreak = 0, highStreak = 0, active = false, lastChange = 0 }
-local dynamicLureState = { lastTrigger = 0 }
-
-local function countMonstersByRange(range)
-  local specs = BotCore.Creatures.getNearby(range, range)
-  if not specs then return 0 end
-  local count = 0
-  for i = 1, #specs do
-    local creature = specs[i]
-    if creature and SC.isMonster(creature) and not SC.isDead(creature) then
-      count = count + 1
-    end
-  end
-  return count
-end
-
-local function safeGetMonsters(range)
-  if SafeCall and SafeCall.getMonsters then
-    return SafeCall.getMonsters(range) or 0
-  end
-  if getMonsters then
-    return getMonsters(range) or 0
-  end
-  return countMonstersByRange(range)
-end
-
-local zigzagState = { blockUntil = 0, cooldown = 250 }
-
-local function movementAllowed()
-  local nowt = now or (os.time() * 1000)
-  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.isZigzagging then
-    if MonsterAI.Scenario.isZigzagging() then
-      if nowt < zigzagState.blockUntil then return false end
-      zigzagState.blockUntil = nowt + zigzagState.cooldown
-      return false
-    end
-  end
-  if nExBot and nExBot.MovementCoordinator and nExBot.MovementCoordinator.canMove then
-    return nExBot.MovementCoordinator.canMove()
-  end
-  return true
-end
 
 local function evaluateLureAndPull(creature, config, targets)
   if not creature or not config then return false end
@@ -85,124 +36,46 @@ local function evaluateLureAndPull(creature, config, targets)
   else
     anchorPosition = nil
   end
-  if config.lureMin and config.lureMax and config.dynamicLure then
-    targetBotLure = config.lureMin >= targets
-    if targets >= config.lureMax then targetBotLure = false end
+  local Intelligence = nExBot.Intelligence
+  if not Intelligence then return false end
+  local safe = not targetIsLowHealth and not isTrapped
+  local generations = Intelligence.lifecycle.generations
+  local snapshot = Intelligence.currentSnapshot or { visibleMonsters = {} }
+  local ids = {}
+  for _, monster in ipairs(snapshot.visibleMonsters or {}) do ids[#ids + 1] = monster.id end
+  local proposals = {}
+  if config.dynamicLure then
+    local proposal = Intelligence.dynamicLure:update({
+      snapshotGeneration = generations.snapshot,
+      creatures = ids,
+      minCount = config.lureMin or 3,
+      maxCount = config.lureMax or 6,
+      safe = safe,
+    }, { generations = generations, now = now })
+    if proposal and TargetBot.canLure() then proposals[#proposals + 1] = proposal end
   end
-  targetCount = targets
-  delayValue = config.lureDelay
-  lureMax = config.lureMax or 0
-  dynamicLureDelay = config.dynamicLureDelay
-  delayFrom = config.delayFrom
-  if not targetIsLowHealth and not isTrapped then
-    if config.smartPull then
-      local nowt = now or (os.time() * 1000)
-      if (nowt - smartPullState.lastEval) >= 300 then
-        smartPullState.lastEval = nowt
-        local screenMonsters = 0
-        if EventTargeting and EventTargeting.getLiveMonsterCount then
-          screenMonsters = EventTargeting.getLiveMonsterCount() or 0
-        else
-          screenMonsters = countMonstersByRange(7)
-        end
-        if screenMonsters == 0 then
-          smartPullState.active = false
-          smartPullState.lowStreak = 0
-          smartPullState.highStreak = 0
-        else
-          local pullRange = config.smartPullRange or 2
-          local pullMin = config.smartPullMin or 3
-          local pullShape = config.smartPullShape or (nExBot.SHAPE and nExBot.SHAPE.CIRCLE) or 2
-          local pullOff = pullMin + 1
-          local nearbyMonsters = 0
-          if getMonstersAdvanced then
-            nearbyMonsters = SafeCall.global("getMonstersAdvanced", pullRange, pullShape) or 0
-          elseif getMonsters then
-            nearbyMonsters = getMonsters(pullRange) or 0
-          else
-            nearbyMonsters = countMonstersByRange(pullRange)
-          end
-          local underImmediateThreat = false
-          if MonsterAI and MonsterAI.getImmediateThreat then
-            local threatData = MonsterAI.getImmediateThreat()
-            underImmediateThreat = threatData.immediateThreat and threatData.highestConfidence >= 0.7
-          end
-          if underImmediateThreat then
-            smartPullState.active = false
-            smartPullState.lowStreak = 0
-            smartPullState.highStreak = 0
-          else
-            if nearbyMonsters < pullMin then
-              smartPullState.lowStreak = smartPullState.lowStreak + 1
-              smartPullState.highStreak = 0
-            elseif nearbyMonsters >= pullOff then
-              smartPullState.highStreak = smartPullState.highStreak + 1
-              smartPullState.lowStreak = 0
-            else
-              smartPullState.lowStreak = 0
-              smartPullState.highStreak = 0
-            end
-            if smartPullState.lowStreak >= 2 then
-              smartPullState.active = true
-              smartPullState.lastChange = nowt
-            elseif smartPullState.highStreak >= 2 then
-              smartPullState.active = false
-              smartPullState.lastChange = nowt
-            end
-          end
-        end
-      end
-      TargetBot.smartPullActive = smartPullState.active
-    else
-      TargetBot.smartPullActive = false
-      smartPullState.active = false
-      smartPullState.lowStreak = 0
-      smartPullState.highStreak = 0
-    end
-    if not TargetBot.smartPullActive and TargetBot.canLure() and config.dynamicLure then
-      local nowt = now or (os.time() * 1000)
-      if targetBotLure and (nowt - (dynamicLureState.lastTrigger or 0)) > 700 then
-        dynamicLureState.lastTrigger = nowt
-        TargetBot.allowCaveBot(250)
-        return true
-      end
-    end
-    if config.closeLure and config.closeLureAmount then
-      if safeGetMonsters(1) >= config.closeLureAmount then
-        local asmActive = AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive()
-        if not asmActive then
-          TargetBot.allowCaveBot(250)
-        end
-        return true
-      end
-    end
-    if not config.dynamicLure then
-      safeGetMonsters(7)
-    end
-  else
-    TargetBot.smartPullActive = false
+  if config.smartPull then
+    Intelligence.pull.enterDistance = config.smartPullRange or 5
+    local proposal = Intelligence.pull:update({
+      snapshotGeneration = generations.snapshot,
+      participantId = creature:getId(),
+      distance = math.max(math.abs(pos.x - cpos.x), math.abs(pos.y - cpos.y)),
+      safe = safe,
+    }, { generations = generations, now = now })
+    if proposal then proposals[#proposals + 1] = proposal end
+  end
+  local selected = Intelligence.decisions:select(proposals, generations, {
+    healthRatio = player:getHealth() / math.max(1, player:getMaxHealth()),
+    playerPosition = pos,
+  })
+  TargetBot.smartPullActive = selected and selected.action == "pull" or false
+  Intelligence.blackboard:write("currentLureState", Intelligence.dynamicLure.state, { owner = "DynamicLure" })
+  Intelligence.blackboard:write("currentPullState", Intelligence.pull.state, { owner = "PullSystem" })
+  if selected and MovementCoordinator and MovementCoordinator.executeTactical then
+    Intelligence.events:publish("TacticalActionSelected", selected, { source = "IntelligenceDecisionEngine" })
+    return MovementCoordinator.executeTactical(selected)
   end
   return false
-end
-
-local function calculateLureEligibility(config, targets)
-  if not config then
-    return { shouldLure = false, confidence = 0, reason = "no_config" }
-  end
-  if not config.dynamicLure then
-    return { shouldLure = false, confidence = 0, reason = "disabled" }
-  end
-  local lureMin = config.lureMin or 3
-  local lurMax = config.lureMax or 6
-  if targets < lureMin then
-    local deficit = lureMin - targets
-    local confidence = 0.5 + (deficit / lureMin) * 0.3
-    return { shouldLure = true, confidence = math.min(0.85, confidence), reason = "below_min", deficit = deficit }
-  end
-  if targets >= lurMax then
-    return { shouldLure = false, confidence = 0.9, reason = "at_max" }
-  end
-  return { shouldLure = false, confidence = 0.6, reason = "sufficient" }
 end
 
 TargetBot.Creature.attack = function(params, targets, isLooting)
@@ -225,67 +98,22 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
     TargetBot.ActiveMovementConfig.anchorRange = config.anchorRange or 5
   end
   local useNativeChase = config.chase and not config.keepDistance
-  local Client = getClient()
-  if ChaseController then
-    ChaseController.setDesiredChase(useNativeChase)
-    ChaseController.syncMode()
-  elseif (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode) then
-    local desiredMode = useNativeChase and 1 or 0
-    local currentMode = ClientService.getChaseMode() or -1
-    if currentMode ~= desiredMode then
-      if Client and Client.setChaseMode then Client.setChaseMode(desiredMode)
-      elseif g_game and g_game.setChaseMode then g_game.setChaseMode(desiredMode) end
-      if TargetCore and TargetCore.Native then TargetCore.Native.lastChaseMode = desiredMode end
-    end
-  end
+  if MovementCoordinator then MovementCoordinator.setChaseMode(useNativeChase) end
   TargetBot.usingNativeChase = useNativeChase
+  local ASM = AttackFSM or AttackStateMachine
   -- Skip reachability check if ASM is already locked on this target — the attack is working
   local creatureId = nil
   pcall(function() creatureId = creature:getId() end)
-  local asmAlreadyAttacking = AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive()
+  local asmAlreadyAttacking = ASM and ASM.isActive and ASM.isActive()
   local asmTargetId = nil
   if asmAlreadyAttacking then
-    pcall(function() asmTargetId = AttackStateMachine.getTargetId and AttackStateMachine.getTargetId() end)
+    pcall(function() asmTargetId = ASM.getTargetId and ASM.getTargetId() end)
   end
   local sameTarget = asmAlreadyAttacking and creatureId == asmTargetId
   if not sameTarget and MonsterAI and MonsterAI.Reachability and MonsterAI.Reachability.validateTarget then
-    if TargetBot then
-      TargetBot.UnreachableTracker = TargetBot.UnreachableTracker or {
-        entries = {}, ttl = 800, lastCleanup = 0, cleanupInterval = 2000
-      }
-    end
-    local tracker = TargetBot and TargetBot.UnreachableTracker or nil
-    local timeNow = now or (os.time() * 1000)
-    local isValid, reason, path = MonsterAI.Reachability.validateTarget(creature)
-    if isValid and tracker and creatureId then tracker.entries[creatureId] = nil end
+    local isValid = MonsterAI.Reachability.validateTarget(creature)
     if not isValid then
-      if reason == "no_path" or reason == "blocked_tile" then
-        if tracker and creatureId then
-          local entry = tracker.entries[creatureId]
-          if not entry then
-            entry = { firstSeen = timeNow, lastSeen = timeNow }
-            tracker.entries[creatureId] = entry
-          else
-            entry.lastSeen = timeNow
-          end
-          if (timeNow - (entry.firstSeen or timeNow)) < tracker.ttl then return end
-          if (timeNow - (tracker.lastCleanup or 0)) > tracker.cleanupInterval then
-            for id, data in pairs(tracker.entries) do
-              if (timeNow - (data.lastSeen or timeNow)) > tracker.cleanupInterval then tracker.entries[id] = nil end
-            end
-            tracker.lastCleanup = timeNow
-          end
-        end
-        if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
-          pcall(AttackStateMachine.stop)
-        else
-          local Client2 = getClient()
-          if Client2 and Client2.cancelAttackAndFollow then pcall(Client2.cancelAttackAndFollow)
-          elseif g_game and g_game.cancelAttackAndFollow then pcall(g_game.cancelAttackAndFollow) end
-        end
-        if TargetBot.allowCaveBot then TargetBot.allowCaveBot(300) end
-        return
-      end
+      return
     end
   end
   local currentTarget = ClientService.getAttackingCreature()
@@ -296,9 +124,10 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local needsAttack = (currentTargetId ~= wantedTargetId) or (not currentTarget)
   if needsAttack and wantedTargetId then
     local attackIssued = false
-    if AttackStateMachine and AttackStateMachine.requestSwitch then
+    local requestSwitch = ASM and (ASM.requestSwitch or ASM.requestAttack)
+    if requestSwitch then
       local priority = params.priority or (params.config and params.config.priority) or 100
-      attackIssued = AttackStateMachine.requestSwitch(creature, priority * 100)
+      attackIssued = requestSwitch(creature, priority * 100)
     else
       log("[TargetBot] AttackStateMachine unavailable — skipping attack (no fallback)")
     end
@@ -330,6 +159,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
   if TargetBot.isForceFollowActive and TargetBot.isForceFollowActive() then return end
   if config.anchor and not anchorPosition then anchorPosition = pos end
   local useCoordinator = MovementCoordinator and MovementCoordinator.Intent
+  if not useCoordinator then return false end
   local creatures = BotCore.Creatures.getNearby(7) or {}
   local monsters = {}
   for i = 1, #creatures do
@@ -337,7 +167,6 @@ TargetBot.Creature.walk = function(creature, config, targets)
     if c and c:isMonster() and not c:isDead() then monsters[#monsters + 1] = c end
   end
   if MonsterAI and MonsterAI.updateAll then MonsterAI.updateAll() end
-  local needsPrecisionControl = config.avoidAttacks or config.keepDistance
   local creatureHealth = creature and creature:getHealthPercent() or 100
   local killUnder = storage.extras.killUnder or 30
   local targetIsLowHealth = creatureHealth < killUnder
@@ -345,38 +174,6 @@ TargetBot.Creature.walk = function(creature, config, targets)
   local pathLen = 0
   local path = findPath(pos, cpos, 10, {ignoreNonPathable = true, ignoreCreatures = true})
   if path then pathLen = #path end
-  local Client = getClient()
-  if needsPrecisionControl then
-    local hasSetChaseMode = (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode)
-    local hasGetChaseMode = (Client and Client.getChaseMode) or (g_game and g_game.getChaseMode)
-    if hasSetChaseMode and hasGetChaseMode then
-      local currentMode = ClientService.getChaseMode()
-      if currentMode == 1 then
-        if Client and Client.setChaseMode then Client.setChaseMode(0)
-        elseif g_game and g_game.setChaseMode then g_game.setChaseMode(0) end
-        TargetBot.usingNativeChase = false
-      end
-    end
-    local hasCancelFollow = (Client and Client.cancelFollow) or (g_game and g_game.cancelFollow)
-    local hasGetFollowingCreature = (Client and Client.getFollowingCreature) or (g_game and g_game.getFollowingCreature)
-    if hasCancelFollow and hasGetFollowingCreature then
-      local currentFollow = ClientService.getFollowingCreature()
-      if currentFollow then
-        ClientService.cancelFollow()
-      end
-    end
-  elseif config.chase then
-    local hasSetChaseMode = (Client and Client.setChaseMode) or (g_game and g_game.setChaseMode)
-    local hasGetChaseMode = (Client and Client.getChaseMode) or (g_game and g_game.getChaseMode)
-    if hasSetChaseMode and hasGetChaseMode then
-      local currentMode = ClientService.getChaseMode()
-      if currentMode ~= 1 then
-        if Client and Client.setChaseMode then Client.setChaseMode(1)
-        elseif g_game and g_game.setChaseMode then g_game.setChaseMode(1) end
-        TargetBot.usingNativeChase = true
-      end
-    end
-  end
   if config.avoidAttacks then
     local safePos, safeScore = nExBot.findSafeAdjacentTile(pos, monsters, creature)
     if safePos then
@@ -386,14 +183,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
       elseif currentDanger.waveThreats == 1 and currentDanger.meleeThreats >= 2 then confidence = 0.80
       elseif currentDanger.totalDanger >= 4 then confidence = 0.75
       elseif currentDanger.totalDanger >= 2 then confidence = 0.70 end
-      if useCoordinator then
-        MovementCoordinator.avoidWave(safePos, confidence)
-      else
-        if confidence >= 0.70 then
-          nExBot.avoidWaveAttacks()
-          return true
-        end
-      end
+      MovementCoordinator.avoidWave(safePos, confidence)
     end
   end
   if targetIsLowHealth and pathLen > 1 then
@@ -401,13 +191,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
     if creatureHealth < 10 then confidence = 0.85
     elseif creatureHealth < 15 then confidence = 0.75
     elseif creatureHealth < 20 then confidence = 0.70 end
-    if useCoordinator then
-      MovementCoordinator.finishKill(cpos, confidence)
-    else
-      if confidence >= 0.70 then
-        if movementAllowed() then return TargetBot.walkTo(cpos, 10, {ignoreNonPathable = true, precision = 1}) end
-      end
-    end
+    MovementCoordinator.finishKill(cpos, confidence)
   end
   if SpellOptimizer and config.optimizeSpellPosition and #monsters >= 2 then
     local spellShape = config.spellShape or SpellOptimizer.CONSTANTS.SHAPE.ADJACENT
@@ -441,13 +225,7 @@ TargetBot.Creature.walk = function(creature, config, targets)
         if anchorValid then
           local confidence = 0.55
           if currentDist < keepRange then confidence = 0.7 end
-          if useCoordinator then
-            MovementCoordinator.keepDistance(keepPos, confidence)
-          else
-            local walkParams = { ignoreNonPathable = true, marginMin = keepRange, marginMax = keepRange + 1 }
-            if config.anchor and anchorPosition then walkParams.maxDistanceFrom = {anchorPosition, config.anchorRange or 5} end
-            if movementAllowed() then return TargetBot.walkTo(cpos, 10, walkParams) end
-          end
+          MovementCoordinator.keepDistance(keepPos, confidence)
         end
       end
     end
@@ -482,17 +260,12 @@ TargetBot.Creature.walk = function(creature, config, targets)
       end
       if betterPos then
         local confidence = math.min(0.4 + (bestScore - currentWalkable * 12) / 100, 0.75)
-        if useCoordinator then
-          MovementCoordinator.reposition(betterPos, confidence)
-        else
-          if confidence >= 0.5 then return CaveBot.GoTo(betterPos, 0) end
-        end
+        MovementCoordinator.reposition(betterPos, confidence)
       end
     end
   end
   local chaseDistanceThreshold = config.chaseDistanceThreshold or 2
   local directDist = math.max(math.abs(pos.x - cpos.x), math.abs(pos.y - cpos.y))
-  local chaseExecuted = false
   if config.chase and not config.keepDistance and pathLen > 1 and directDist > chaseDistanceThreshold then
     local nativeChaseMayWork = false
     local Client2 = getClient()
@@ -512,13 +285,8 @@ TargetBot.Creature.walk = function(creature, config, targets)
     end
     local needsCustomChase = not nativeChaseMayWork or hasAnchorConstraint
     if needsCustomChase and anchorValid then
-      if player and player.autoWalk and not player:isWalking() then
-        pcall(function() player:autoWalk(cpos) end)
-        chaseExecuted = true
-        return true
-      end
+      MovementCoordinator.Intent.register(MovementCoordinator.CONSTANTS.INTENT.CHASE, cpos, 0.7, "target_chase")
     elseif nativeChaseMayWork and anchorValid then
-      chaseExecuted = true
       return true
     end
   end
@@ -539,130 +307,18 @@ TargetBot.Creature.walk = function(creature, config, targets)
             anchorValid = anchorDist <= (config.anchorRange or 5)
           end
           if anchorValid then
-            if useCoordinator then MovementCoordinator.faceMonster(candidates[i], 0.45)
-            else if movementAllowed() then return TargetBot.walkTo(candidates[i], 2, {ignoreNonPathable = true}) end end
+            MovementCoordinator.faceMonster(candidates[i], 0.45)
             break
           end
         end
       end
     elseif dist <= 1 then
-      local dir = player:getDirection()
-      if dx == 1 and dir ~= 1 then turn(1)
-      elseif dx == -1 and dir ~= 3 then turn(3)
-      elseif dy == 1 and dir ~= 2 then turn(2)
-      elseif dy == -1 and dir ~= 0 then turn(0) end
+      MovementCoordinator.faceMonster(cpos, 0.6)
     end
   end
   if useCoordinator then
     local success, reason = MovementCoordinator.tick()
     if success then return true end
-    local fallbackDirectDist = math.max(math.abs(pos.x - cpos.x), math.abs(pos.y - cpos.y))
-    local fallbackChaseThreshold = config.chaseDistanceThreshold or 2
-    if config.chase and not config.keepDistance and pathLen > 1 and fallbackDirectDist > fallbackChaseThreshold then
-      local nativeChaseMayWork = false
-      local Client = getClient()
-      local hasGetChaseMode = (Client and Client.getChaseMode) or (g_game and g_game.getChaseMode)
-      local hasIsAttacking = (Client and Client.isAttacking) or (g_game and g_game.isAttacking)
-      if hasGetChaseMode and hasIsAttacking then
-        local isAttacking = ClientService.isAttacking()
-        local chaseMode = ClientService.getChaseMode()
-        nativeChaseMayWork = isAttacking and chaseMode == 1
-      end
-      if nativeChaseMayWork then return true end
-      if not player:isWalking() then
-        local anchorValid = true
-        if config.anchor and anchorPosition then
-          local anchorDist = math.max(math.abs(cpos.x - anchorPosition.x), math.abs(cpos.y - anchorPosition.y))
-          anchorValid = anchorDist <= (config.anchorRange or 5)
-        end
-        if anchorValid then
-          if player and player.autoWalk then pcall(function() player:autoWalk(cpos) end); return true end
-        end
-      end
-    end
+    return false, reason
   end
 end
-
-onPlayerPositionChange(function(newPos, oldPos)
-  if zChanging() then return end
-  if not CaveBot or not CaveBot.isOff or CaveBot.isOff() then return end
-  if not TargetBot or not TargetBot.isOff or TargetBot.isOff() then return end
-  if not lureMax then return end
-  if not dynamicLureDelay then return end
-  local targetThreshold = delayFrom or lureMax * 0.5
-  if targetCount < targetThreshold or not (target and target()) then return end
-  CaveBot.delay(delayValue or 0)
-end)
-
-if EventBus then
-  local lastLureState = { active = false, time = 0 }
-  EventBus.on("targetbot/target_count_change", function(newCount, oldCount)
-    if not TargetBot or not TargetBot.isOn or not TargetBot.isOn() then return end
-    local activeConfig = TargetBot.ActiveMovementConfig
-    if not activeConfig then return end
-    local eligibility = calculateLureEligibility(activeConfig, newCount)
-    if eligibility.shouldLure ~= lastLureState.active then
-      lastLureState.active = eligibility.shouldLure
-      lastLureState.time = now
-      if eligibility.shouldLure then
-        pcall(function() EventBus.emit("targetbot/lure_start", { reason = eligibility.reason, confidence = eligibility.confidence, deficit = eligibility.deficit }) end)
-        if MovementCoordinator and MovementCoordinator.Intent then
-          local playerPos = player and player:getPosition()
-          if playerPos then
-            MovementCoordinator.Intent.register(MovementCoordinator.CONSTANTS.INTENT.LURE, playerPos, eligibility.confidence, "lure_event", { triggered = "target_count", targets = newCount, deficit = eligibility.deficit })
-
-            -- Call allowCaveBot directly so CaveBot stays blocked during lure.
-            if TargetBot.allowCaveBot then TargetBot.allowCaveBot(150) end
-          end
-        end
-      else
-        pcall(function() EventBus.emit("targetbot/lure_stop", { reason = eligibility.reason, targets = newCount }) end)
-      end
-    end
-  end, 15)
-  EventBus.on("monster:disappear", function(creature)
-    if TargetBot.isOff() then return end
-    if not creature then return end
-    local monsterCount = 0
-    if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
-      local nearby = MovementCoordinator.MonsterCache.getNearby(7)
-      monsterCount = #nearby
-    end
-    pcall(function() EventBus.emit("targetbot/target_count_change", monsterCount, monsterCount + 1) end)
-  end, 18)
-  EventBus.on("monster:appear", function(creature)
-    if TargetBot.isOff() then return end
-    if not creature then return end
-    local playerPos = player and player:getPosition()
-    local creaturePos = creature:getPosition()
-    if not playerPos or not creaturePos then return end
-    local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))
-    if dist <= 7 then
-      local monsterCount = 0
-      if MovementCoordinator and MovementCoordinator.MonsterCache and MovementCoordinator.MonsterCache.getNearby then
-        local nearby = MovementCoordinator.MonsterCache.getNearby(7)
-        monsterCount = #nearby
-      end
-      pcall(function() EventBus.emit("targetbot/target_count_change", monsterCount, monsterCount - 1) end)
-    end
-  end, 18)
-  local lastPullState = false
-  EventBus.on("targetbot/combat_start", function(creature, data)
-    if TargetBot.isOff() then return end
-    schedule(100, function()
-      if TargetBot and TargetBot.smartPullActive ~= lastPullState then
-        lastPullState = TargetBot.smartPullActive
-        if TargetBot.smartPullActive then pcall(function() EventBus.emit("targetbot/pull_active", { creature = creature, time = now }) end) end
-      end
-    end)
-  end, 12)
-  EventBus.on("targetbot/combat_end", function()
-    if TargetBot.isOff() then return end
-    if lastPullState then
-      lastPullState = false
-      pcall(function() EventBus.emit("targetbot/pull_inactive") end)
-    end
-  end, 12)
-end
-
-nExBot.calculateLureEligibility = calculateLureEligibility

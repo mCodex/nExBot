@@ -755,6 +755,33 @@ function FriendHealerEnhanced.getStats()
   }
 end
 
+function FriendHealerEnhanced.getPlayerProjection()
+  local rows = {}
+  local config = _state.config or {}
+  local threshold = config.settings and config.settings.healAt or 80
+  for name, tracked in pairs(_state.friends) do
+    local creature = tracked.creature
+    local hp = safeGetHpPercent(creature) or tracked.lastHp or 0
+    local okPos, position = pcall(function() return creature:getPosition() end)
+    local distance = okPos and position and distanceFromPlayer and distanceFromPlayer(position) or 99
+    local okShoot, visible = pcall(function() return creature:canShoot() end)
+    local reason = "READY"
+    if safeIsDead(creature) then reason = "UNAVAILABLE"
+    elseif hp >= threshold then reason = "HEALTHY"
+    elseif distance > 7 then reason = "OUT_OF_RANGE"
+    elseif okShoot and not visible then reason = "NOT_VISIBLE" end
+    rows[#rows + 1] = {
+      id = name, name = name, hp = hp, distance = distance,
+      reason = reason, revision = tostring(hp) .. ":" .. tostring(distance) .. ":" .. reason,
+    }
+  end
+  table.sort(rows, function(a, b)
+    if a.hp ~= b.hp then return a.hp < b.hp end
+    return a.name < b.name
+  end)
+  return rows
+end
+
 function FriendHealerEnhanced.cleanup()
   for _, unsub in ipairs(_state.subscriptions) do
     if type(unsub) == "function" then

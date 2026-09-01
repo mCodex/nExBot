@@ -11,16 +11,9 @@ end
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
 
-setDefaultTab("Main")
 -- locales
 local panelName = "AttackBot"
 local currentSettings
-local showSettings = false
-local showItem = false
-local category = 1
-local patternCategory = 1
-local pattern = 1
-local mainWindow
 
 local attack_analytics = AttackAnalytics or require("core.attack.attack_analytics")
 local combat_executor = CombatExecutor or require("core.attack.combat_executor")
@@ -148,12 +141,18 @@ elseif not AttackBotConfig.currentBotProfile or AttackBotConfig.currentBotProfil
   AttackBotConfig.currentBotProfile = 1
 end
 
--- create panel UI
-ui = UI.createWidget("AttackBotBotPanel")
-if not ui then
-  warn("[AttackBot] Failed to create UI widget AttackBotBotPanel")
-  return
+local function stateControl()
+  local state = false
+  return {
+    setOn = function(_, value) state = value == true end,
+    isOn = function() return state end,
+    setText = function() end,
+    setColor = function() end,
+  }
 end
+
+local ui = { title = stateControl(), settings = stateControl(), name = stateControl() }
+for index = 1, 5 do ui[index] = stateControl() end
 
 -- finding correct table, manual unfortunately
 local setActiveProfile = function()
@@ -172,414 +171,12 @@ if not currentSettings.AntiRsRange then
   currentSettings.AntiRsRange = 5 
 end
 
-local setProfileName = function()
-  if ui.name then
-    ui.name:setText(currentSettings.name)
-  end
-end
 
--- small UI elements
-if ui.title then
-  ui.title.onClick = function(widget)
-    currentSettings.enabled = not currentSettings.enabled
-    widget:setOn(currentSettings.enabled)
-    nExBotConfigSave("atk")
-  end
-end
-  
-if ui.settings then
-  ui.settings.onClick = function(widget)
-    mainWindow:show()
-    mainWindow:raise()
-    mainWindow:focus()
-  end
-end
 
-  mainWindow = UI.createWindow("AttackBotWindow")
-  if not mainWindow then
-    warn("[AttackBot] Failed to create main window AttackBotWindow")
-    return
-  end
-  mainWindow:hide()
 
-  local panel = mainWindow.mainPanel
-  local settingsUI = mainWindow.settingsPanel
-
-  mainWindow.onVisibilityChange = function(widget, visible)
-    if not visible then
-      currentSettings.attackTable = {}
-      for i, child in ipairs(panel.entryList:getChildren()) do
-        table.insert(currentSettings.attackTable, child.params)
-      end
-      nExBotConfigSave("atk")
-    end
-  end
-
-  -- main panel
-
-    -- functions
-    function toggleSettings()
-      panel:setVisible(not showSettings)
-      mainWindow.shooterLabel:setVisible(not showSettings)
-      settingsUI:setVisible(showSettings)
-      mainWindow.settingsLabel:setVisible(showSettings)
-      mainWindow.settings:setText(showSettings and "Back" or "Settings")
-    end
-    toggleSettings()
-
-    mainWindow.settings.onClick = function()
-      showSettings = not showSettings
-      toggleSettings()
-    end
-
-    function toggleItem()
-      panel.monsters:setWidth(showItem and 405 or 341)
-      panel.itemId:setVisible(showItem)
-      panel.spellName:setVisible(not showItem)
-    end
-    toggleItem()
-
-    function setCategoryText()
-      panel.category.description:setText(categories[category])
-    end
-    setCategoryText()
-
-    function setPatternText()
-      panel.range.description:setText(patterns[patternCategory][pattern])
-    end
-    setPatternText()
-
-    -- in/de/crementation buttons
-    panel.previousCategory.onClick = function()
-      if category == 1 then
-        category = #categories
-      else
-        category = category - 1
-      end
-
-      showItem = (category == 2 or category == 3) and true or false
-      patternCategory = category == 4 and 3 or category == 5 and 4 or category
-      pattern = 1
-      toggleItem()
-      setPatternText()
-      setCategoryText()
-    end
-    panel.nextCategory.onClick = function()
-      if category == #categories then
-        category = 1 
-      else
-        category = category + 1
-      end
-
-      showItem = (category == 2 or category == 3) and true or false
-      patternCategory = category == 4 and 3 or category == 5 and 4 or category
-      pattern = 1
-      toggleItem()
-      setPatternText()
-      setCategoryText()
-    end
-    panel.previousSource.onClick = function() end
-    panel.nextSource.onClick = function() end
-    panel.previousRange.onClick = function()
-      local t = patterns[patternCategory]
-      if pattern == 1 then
-        pattern = #t 
-      else
-        pattern = pattern - 1
-      end
-      setPatternText()
-    end
-    panel.nextRange.onClick = function()
-      local t = patterns[patternCategory]
-      if pattern == #t then
-        pattern = 1 
-      else
-        pattern = pattern + 1
-      end
-      setPatternText()
-    end
-    -- eo in/de/crementation
-
-  ------- [[core table function]] -------
-    function setupWidget(widget)
-      local params = widget.params
-
-      widget:setText(params.description)
-      if params.itemId > 0 then
-        widget.spell:setVisible(false)
-        widget.id:setVisible(true)
-        widget.id:setItemId(params.itemId)
-      end
-      widget:setTooltip(params.tooltip)
-      widget.remove.onClick = function()
-        panel.up:setEnabled(false)
-        panel.down:setEnabled(false)
-        widget:destroy()
-      end
-      widget.enabled:setChecked(params.enabled)
-      widget.enabled.onClick = function()
-        params.enabled = not params.enabled
-        widget.enabled:setChecked(params.enabled)
-      end
-      -- will serve as edit
-      widget.onDoubleClick = function(widget)
-        panel.manaPercent:setValue(params.mana)
-        panel.creatures:setValue(params.count)
-        panel.minHp:setValue(params.minHp)
-        panel.maxHp:setValue(params.maxHp)
-        panel.cooldown:setValue(params.cooldown)
-        showItem = params.itemId > 100 and true or false
-        panel.itemId:setItemId(params.itemId)
-        panel.spellName:setText(params.spell or "")
-        panel.orMore:setChecked(params.orMore)
-        toggleItem()
-        category = params.category
-        patternCategory = params.patternCategory
-        pattern = params.pattern
-        setPatternText()
-        setCategoryText()
-        widget:destroy()
-      end
-      widget.onClick = function(widget)
-        if #panel.entryList:getChildren() == 1 then
-          panel.up:setEnabled(false)
-          panel.down:setEnabled(false)
-        elseif panel.entryList:getChildIndex(widget) == 1 then
-          panel.up:setEnabled(false)
-          panel.down:setEnabled(true)
-        elseif panel.entryList:getChildIndex(widget) == panel.entryList:getChildCount() then
-          panel.up:setEnabled(true)
-          panel.down:setEnabled(false)
-        else
-          panel.up:setEnabled(true)
-          panel.down:setEnabled(true)
-        end
-      end
-    end
-
-    -- refreshing values
-    function refreshAttacks()
-      if not currentSettings.attackTable then return end
-
-      panel.entryList:destroyChildren()
-      for i, entry in pairs(currentSettings.attackTable) do
-        local label = UI.createWidget("AttackEntry", panel.entryList)
-        label.params = entry
-        setupWidget(label)
-      end
-    end
-    refreshAttacks()
-    panel.up:setEnabled(false)
-    panel.down:setEnabled(false)
-
-    -- adding values
-    panel.addEntry.onClick = function(wdiget)
-      -- first variables
-      local creatures = panel.monsters:getText():lower()
-      local monsters = (creatures:len() == 0 or creatures == "*" or creatures == "monster names") and true or string.split(creatures, ",")
-      local mana = panel.manaPercent:getValue()
-      local count = panel.creatures:getValue()
-      local minHp = panel.minHp:getValue()
-      local maxHp = panel.maxHp:getValue()
-      local cooldown = panel.cooldown:getValue()
-      local itemId = panel.itemId:getItemId()
-      local spell = panel.spellName:getText()
-      local tooltip = monsters ~= true and creatures
-      local orMore = panel.orMore:isChecked()
-
-      -- validation
-      if showItem and itemId < 100 then
-        return warn("[AttackBot]: please fill item ID!")
-      elseif not showItem and (spell:lower() == "spell name" or spell:len() == 0) then
-        return warn("[AttackBot]: please fill spell name!")
-      end
-
-      local regex = patternCategory ~= 1 and [[^[^\(]+]] or [[^[^R]+]]
-      local matchResult = SafeCall.regexMatch(patterns[patternCategory][pattern], regex)
-      local type = matchResult and matchResult[1] and matchResult[1][1]:trim() or ""
-      regex = [[^[^ ]+]]
-      local categoryMatch = SafeCall.regexMatch(categories[category], regex)
-      local categoryName = categoryMatch and categoryMatch[1] and categoryMatch[1][1]:trim():lower() or ""
-      local specificMonsters = monsters == true and "Any Creatures" or "Creatures"
-      local attackType = showItem and "rune "..itemId or spell
-
-      local countDescription = orMore and count.."+" or count
-
-      local params = {
-        creatures = creatures,
-        monsters = monsters,
-        mana = mana,
-        count = count,
-        minHp = minHp,
-        maxHp = maxHp,
-        cooldown = cooldown,
-        itemId = itemId,
-        spell = showItem and nil or spell,
-        enabled = true,
-        category = category,
-        patternCategory = patternCategory,
-        pattern = pattern,
-        tooltip = tooltip,
-        orMore = orMore,
-        description = '['..type..'] '..countDescription.. ' '..specificMonsters..': '..attackType..', '..categoryName..' ('..minHp..'%-'..maxHp..'%)'
-      }
-
-      local label = UI.createWidget("AttackEntry", panel.entryList)
-      label.params = params
-      setupWidget(label)
-      resetFields()
-    end
-
-    -- moving values
-    -- up
-    panel.up.onClick = function(widget)
-      local focused = panel.entryList:getFocusedChild()
-      local n = panel.entryList:getChildIndex(focused)
-
-      if n-1 == 1 then
-        widget:setEnabled(false)
-      end
-      panel.down:setEnabled(true)
-      panel.entryList:moveChildToIndex(focused, n-1)
-      panel.entryList:ensureChildVisible(focused)
-    end
-    -- down
-    panel.down.onClick = function(widget)
-      local focused = panel.entryList:getFocusedChild()
-      local n = panel.entryList:getChildIndex(focused)
-
-      if n + 1 == panel.entryList:getChildCount() then
-        widget:setEnabled(false)
-      end
-      panel.up:setEnabled(true)
-      panel.entryList:moveChildToIndex(focused, n+1)
-      panel.entryList:ensureChildVisible(focused)
-    end
-
-  -- [[settings panel]] --
-  settingsUI.profileName.onTextChange = function(widget, text)
-    currentSettings.name = text
-    setProfileName()
-  end
-  settingsUI.IgnoreMana.onClick = function(widget)
-    currentSettings.ignoreMana = not currentSettings.ignoreMana
-    settingsUI.IgnoreMana:setChecked(currentSettings.ignoreMana)
-  end
-  settingsUI.Rotate.onClick = function(widget)
-    currentSettings.Rotate = not currentSettings.Rotate
-    settingsUI.Rotate:setChecked(currentSettings.Rotate)
-  end
-  settingsUI.Kills.onClick = function(widget)
-    currentSettings.Kills = not currentSettings.Kills
-    settingsUI.Kills:setChecked(currentSettings.Kills)
-  end
-  settingsUI.Cooldown.onClick = function(widget)
-    currentSettings.Cooldown = not currentSettings.Cooldown
-    settingsUI.Cooldown:setChecked(currentSettings.Cooldown)
-  end
-  settingsUI.Visible.onClick = function(widget)
-    currentSettings.Visible = not currentSettings.Visible
-    settingsUI.Visible:setChecked(currentSettings.Visible)
-  end
-  settingsUI.PvpMode.onClick = function(widget)
-    currentSettings.pvpMode = not currentSettings.pvpMode
-    settingsUI.PvpMode:setChecked(currentSettings.pvpMode)
-  end
-  settingsUI.PvpSafe.onClick = function(widget)
-    currentSettings.PvpSafe = not currentSettings.PvpSafe
-    settingsUI.PvpSafe:setChecked(currentSettings.PvpSafe)
-  end
-  settingsUI.Training.onClick = function(widget)
-    currentSettings.Training = not currentSettings.Training
-    settingsUI.Training:setChecked(currentSettings.Training)
-  end
-  settingsUI.BlackListSafe.onClick = function(widget)
-    currentSettings.BlackListSafe = not currentSettings.BlackListSafe
-    settingsUI.BlackListSafe:setChecked(currentSettings.BlackListSafe)
-  end
-  settingsUI.KillsAmount.onValueChange = function(widget, value)
-    currentSettings.KillsAmount = value
-  end
-  settingsUI.AntiRsRange.onValueChange = function(widget, value)
-    currentSettings.AntiRsRange = value
-  end
-
-   -- window elements
-  mainWindow.closeButton.onClick = function()
-    showSettings = false
-    toggleSettings()
-    resetFields()
-    mainWindow:hide()
-  end
-
-  -- core functions
-  function resetFields()
-    showItem = false
-    toggleItem()
-    pattern = 1
-    patternCategory = 1
-    category = 1
-    setPatternText()
-    setCategoryText()
-    panel.manaPercent:setText(1)
-    panel.creatures:setText(1)
-    panel.minHp:setValue(0)
-    panel.maxHp:setValue(100)
-    panel.cooldown:setText(1)
-    panel.monsters:setText("monster names")
-    panel.itemId:setItemId(0)
-    panel.spellName:setText("spell name")
-    panel.orMore:setChecked(false)
-  end
-  resetFields()
-
-  function loadSettings()
-    -- BOT panel
-    ui.title:setOn(currentSettings.enabled)
-    setProfileName()
-    -- main panel
-    refreshAttacks()
-    -- settings
-    settingsUI.profileName:setText(currentSettings.name)
-    settingsUI.Visible:setChecked(currentSettings.Visible)
-    settingsUI.Cooldown:setChecked(currentSettings.Cooldown)
-    settingsUI.PvpMode:setChecked(currentSettings.pvpMode)
-    settingsUI.PvpSafe:setChecked(currentSettings.PvpSafe)
-    settingsUI.BlackListSafe:setChecked(currentSettings.BlackListSafe)
-    settingsUI.AntiRsRange:setValue(currentSettings.AntiRsRange)
-    settingsUI.IgnoreMana:setChecked(currentSettings.ignoreMana)
-    settingsUI.Rotate:setChecked(currentSettings.Rotate)
-    settingsUI.Kills:setChecked(currentSettings.Kills)
-    settingsUI.KillsAmount:setValue(currentSettings.KillsAmount)
-    settingsUI.Training:setChecked(currentSettings.Training)
-  end
-  loadSettings()
-
-  local activeProfileColor = function()
-    for i=1,5 do
-      if i == AttackBotConfig.currentBotProfile then
-        ui[i]:setColor("green")
-      else
-        ui[i]:setColor("white")
-      end
-    end
-  end
-  activeProfileColor()
-
-  local profileChange = function()
+    local profileChange = function()
     setActiveProfile()
-    activeProfileColor()
-    loadSettings()
-    resetFields()
     nExBotConfigSave("atk")
-  end
-
-  for i=1,5 do
-    local button = ui[i]
-      button.onClick = function()
-      AttackBotConfig.currentBotProfile = i
-      profileChange()
-    end
   end
 
     -- public functions (preserve existing analytics API)
@@ -619,9 +216,95 @@ end
     end
 
     AttackBot.show = function()
-      mainWindow:show()
-      mainWindow:raise()
-      mainWindow:focus()
+      -- no-op: the shell page renders the attack config; nothing to open.
+    end
+
+    AttackBot.getRules = function()
+      local rules = {}
+      for index, entry in ipairs(currentSettings.attackTable or {}) do
+        rules[#rules + 1] = {
+          index = index, enabled = entry.enabled ~= false, spell = entry.spell,
+          itemId = tonumber(entry.itemId) and entry.itemId > 0 and entry.itemId or nil,
+          count = entry.count, orMore = entry.orMore, mana = entry.mana,
+          minHp = entry.minHp, maxHp = entry.maxHp, cooldown = entry.cooldown,
+          category = entry.category, patternCategory = entry.patternCategory, pattern = entry.pattern,
+          description = entry.description, revision = index .. ":" .. tostring(entry.enabled),
+        }
+      end
+      return rules
+    end
+
+    AttackBot.toggleRule = function(index)
+      local entry = currentSettings.attackTable and currentSettings.attackTable[index]
+      if not entry then return false end
+      entry.enabled = not entry.enabled
+      nExBotConfigSave("atk")
+      return true
+    end
+
+    AttackBot.removeRule = function(index)
+      if not currentSettings.attackTable or not currentSettings.attackTable[index] then return false end
+      table.remove(currentSettings.attackTable, index)
+      nExBotConfigSave("atk")
+      return true
+    end
+
+    AttackBot.moveRule = function(index, direction)
+      local rules = currentSettings.attackTable or {}
+      local destination = index + (direction == "up" and -1 or direction == "down" and 1 or 0)
+      if not rules[index] or destination < 1 or destination > #rules or destination == index then return false end
+      rules[index], rules[destination] = rules[destination], rules[index]
+      nExBotConfigSave("atk")
+      return true
+    end
+
+    AttackBot.getSetting = function(key)
+      return currentSettings and currentSettings[key]
+    end
+
+    AttackBot.setSetting = function(key, value)
+      if not currentSettings or key == nil then return false end
+      currentSettings[key] = value
+      nExBotConfigSave("atk")
+      return true
+    end
+
+    AttackBot.addRule = function(params)
+      if type(params) ~= "table" then return false end
+      local creatures = tostring(params.creatures or "")
+      local monsters = true
+      if creatures ~= "" and creatures ~= "*" then
+        monsters = string.split(creatures:lower(), ",")
+      end
+      local itemId = tonumber(params.itemId) or 0
+      local spell = itemId > 0 and nil or params.spell
+      local entry = {
+        creatures = creatures,
+        monsters = monsters,
+        mana = tonumber(params.mana) or 1,
+        count = tonumber(params.count) or 1,
+        minHp = tonumber(params.minHp) or 0,
+        maxHp = tonumber(params.maxHp) or 100,
+        cooldown = tonumber(params.cooldown) or 0,
+        itemId = itemId,
+        spell = spell,
+        enabled = params.enabled ~= false,
+        category = tonumber(params.category) or 1,
+        patternCategory = tonumber(params.patternCategory) or (tonumber(params.category) or 1),
+        pattern = tonumber(params.pattern) or 1,
+        orMore = params.orMore == true,
+        tooltip = type(monsters) == "table" and creatures or nil,
+        description = params.description,
+      }
+      if not entry.description then
+        local attackType = itemId > 0 and ("rune " .. itemId) or (spell or "spell")
+        local countLabel = entry.orMore and (entry.count .. "+") or entry.count
+        entry.description = "[" .. attackType .. "] " .. countLabel .. " creatures, HP " .. entry.minHp .. "%-" .. entry.maxHp .. "%"
+      end
+      currentSettings.attackTable = currentSettings.attackTable or {}
+      currentSettings.attackTable[#currentSettings.attackTable + 1] = entry
+      nExBotConfigSave("atk")
+      return true
     end
 
 -- COOLDOWN MANAGEMENT (use ClientHelper for DRY)
@@ -1092,7 +775,7 @@ function attackBotMain()
 
   -- Global guards (cannot attack at all)
   if not currentSettings or not currentSettings.enabled then return end
-  if not panel or not panel.entryList then return end
+  if not currentSettings.attackTable or #currentSettings.attackTable == 0 then return end
   if not target() then return end
   if SafeCall.isInPz() then return end
   if isGlobalBackoffActive() then return end
@@ -1118,12 +801,11 @@ function attackBotMain()
   -- Resource availability cache (items/spells checked once per item/spell key)
   local availableItems = {}
   local canCastCaller = SafeCall.getCachedCaller("canCast")
-  local entries = panel.entryList:getChildren()
+  local entries = currentSettings.attackTable
 
   -- ========== ACT: Find highest-priority valid entry and execute ==========
 
-  for _, child in ipairs(entries) do
-    local entry = child.params
+  for _, entry in ipairs(entries) do
     if not entry then goto continue end
 
     -- Resource check (item in inventory / spell castable)

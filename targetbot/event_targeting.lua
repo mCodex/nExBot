@@ -59,20 +59,7 @@ local function ensurePathUtils()
 end
 ensurePathUtils()
 
--- Load ChaseController if available (OTClient compatible)
-local ChaseController = ChaseController  -- Try existing global
-local function ensureChaseController()
-  if ChaseController then return ChaseController end
-  local success = pcall(function()
-    dofile("nExBot/targetbot/chase_controller.lua")
-  end)
-  -- After dofile, ChaseController should be global
-  if success then
-    ChaseController = ChaseController  -- Re-check global after dofile
-  end
-  return ChaseController
-end
-ensureChaseController()
+local ChaseController = ChaseController
 
 -- CONSTANTS (Tunable for performance)
 
@@ -667,8 +654,19 @@ function EventTargeting.TargetAcquisition.processCreature(creature)
   local dist = chebyshev(playerPos, creaturePos)
   if dist > CONST.DETECTION_RANGE then return end
   
-  -- Validate path
-  local path, pathLen, reachable = EventTargeting.PathValidator.validate(playerPos, creaturePos)
+  -- Validate path (delegated to TargetReachability when available)
+  local path = nil
+  local reachable = false
+  if TargetReachability and TargetReachability.evaluate then
+    local ok, evaluated = pcall(TargetReachability.evaluate, creature, { source = "event_creature_seen" })
+    if ok and evaluated then
+      path = evaluated.path
+      reachable = evaluated.attackable
+    end
+  else
+    local _, _, isReachable = EventTargeting.PathValidator.validate(playerPos, creaturePos)
+    reachable = isReachable
+  end
   
   -- Calculate priority
   local priority = EventTargeting.TargetAcquisition.calculatePriority(creature, path)
@@ -692,7 +690,15 @@ function EventTargeting.TargetAcquisition.processCreature(creature)
   touchEntry(id)
   evictOldEntries()
   
-  -- Check if this should be our target
+  -- Emit event for other systems
+  if EventBus then
+    pcall(function()
+      EventBus.emit("targeting/creature_seen", creature, priority, dist, reachable)
+    end)
+  end
+
+  -- Keep the acquisition pipeline alive: the event above has no consumers yet,
+  -- so evaluateTarget is the only path from sighting to AttackFSM.
   if reachable then
     EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, path)
   end
@@ -727,7 +733,6 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
     return
   end
   
-  local Client = getClient()
   local currentTarget = ClientService.getAttackingCreature()
   
   -- If no current target, acquire immediately
@@ -736,51 +741,38 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
     return
   end
   
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- IMPROVED: Check CONFIG PRIORITY first for instant high-priority switching
-  -- Config priority differences should override other factors
-  -- ═══════════════════════════════════════════════════════════════════════════
-  local newConfigPriority = 0
-  local currentConfigPriority = 0
-  
-  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
-    -- Get new creature's config priority
-    local newConfigs = TargetBot.Creature.getConfigs(creature)
-    if newConfigs and #newConfigs > 0 then
-      for i = 1, #newConfigs do
-        local cfg = newConfigs[i]
-        if cfg.priority and cfg.priority > newConfigPriority then
-          newConfigPriority = cfg.priority
-        end
+  -- Delegate switch decision to TargetCandidateEvaluator (structured comparison)
+  if TargetCandidateEvaluator and TargetCandidateEvaluator.shouldSwitch then
+    local ok, shouldSwitch = pcall(function()
+      local function configFor(candidate)
+        if not (TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs) then return nil end
+        local okC, configs = pcall(TargetBot.Creature.getConfigs, candidate)
+        return okC and configs and configs[1] or nil
       end
-    end
-    
-    -- Get current target's config priority
-    local currentConfigs = TargetBot.Creature.getConfigs(currentTarget)
-    if currentConfigs and #currentConfigs > 0 then
-      for i = 1, #currentConfigs do
-        local cfg = currentConfigs[i]
-        if cfg.priority and cfg.priority > currentConfigPriority then
-          currentConfigPriority = cfg.priority
-        end
-      end
-    end
-    
-    -- If new creature has HIGHER config priority, switch immediately!
-    -- This is the KEY fix for the user's issue
-    if newConfigPriority > currentConfigPriority then
-      if EventTargeting.DEBUG then
-        local name = creature:getName() or "Unknown"
-        local currentName = currentTarget:getName() or "Unknown"
-        print("[EventTargeting] Priority switch: " .. name .. " (priority=" .. newConfigPriority .. 
-              ") > " .. currentName .. " (priority=" .. currentConfigPriority .. ")")
-      end
+      local state = ReachabilityState and ReachabilityState.ATTACKABLE_NOW or "ATTACKABLE_NOW"
+      local currentScore = TargetCandidateEvaluator.evaluate(currentTarget, {
+        creatureHpPercent = SC.getHealthPercent(currentTarget) or 100,
+        reachabilityState = state,
+        config = configFor(currentTarget),
+        isCurrentTarget = true,
+      })
+      local candidateScore = TargetCandidateEvaluator.evaluate(creature, {
+        creatureHpPercent = SC.getHealthPercent(creature) or 100,
+        reachabilityState = state,
+        reachabilityPath = path,
+        config = configFor(creature),
+        isCurrentTarget = false,
+      })
+      local switched, _ = TargetCandidateEvaluator.shouldSwitch(currentScore, candidateScore)
+      return switched
+    end)
+    if ok and shouldSwitch then
       EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority)
-      return
     end
+    return
   end
   
-  -- Compare calculated priorities (for same config priority level)
+  -- Fallback: compare calculated priorities
   local currentPriority = 0
   local currentId = currentTarget:getId()
   local currentEntry = creatureCache.entries[currentId]
@@ -788,14 +780,17 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
   if currentEntry then
     currentPriority = currentEntry.priority or 0
   else
-    -- Calculate current target priority
-    local currentPath, _, _ = EventTargeting.PathValidator.getPath(currentTarget)
+    local currentPath
+    if TargetReachability and TargetReachability.evaluate then
+      local ok, evaluated = pcall(TargetReachability.evaluate, currentTarget, { source = "event_current" })
+      if ok and evaluated then currentPath = evaluated.path end
+    else
+      currentPath = select(1, EventTargeting.PathValidator.getPath(currentTarget))
+    end
     currentPriority = EventTargeting.TargetAcquisition.calculatePriority(currentTarget, currentPath)
   end
   
-  -- Switch if new target has significantly higher priority (same config level)
-  -- Use lower threshold since config priority is already checked above
-  local priorityThreshold = 50  -- Within same config priority tier
+  local priorityThreshold = 50
   if priority > currentPriority + priorityThreshold then
     EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority)
   end
@@ -819,159 +814,10 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   if not playerPos or not creaturePos then return end
   local dist = chebyshev(playerPos, creaturePos)
 
-  -- Supplied paths are hints only; authoritative metadata-aware validation cannot be bypassed.
-  if not TargetReachability or not TargetReachability.evaluate then return end
-  local configs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(creature)
-  local config = configs and configs[1] or nil
-  local mode = config and (config.keepDistance or (config.distance or 1) > 1) and "ranged" or "melee"
-  local evaluated = TargetReachability.evaluate(creature, {
-    source = "event_acquisition", mode = mode, config = config,
-    maxDistance = mode == "ranged" and ((config and config.distance) or 7) or 1,
-  })
-  if not evaluated.attackable then
-    TargetReachability.quarantine(creature, evaluated)
-    return
-  end
-  path = evaluated.path
-  
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- SET CHASE MODE BEFORE ATTACKING (Critical for OTClient)
-  -- 
-  -- OTClient ChaseModes (from const.h):
-  --   DontChase = 0 (Stand mode)
-  --   ChaseOpponent = 1 (Client auto-walks to attacked creature)
-  --
-  -- When chase mode is set BEFORE attacking, OTClient handles pathfinding
-  -- and walking automatically. This is the native chase behavior.
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- Get chase setting from the CREATURE's specific config (not global ActiveMovementConfig)
-  local chaseEnabled = false
-  local keepDistanceEnabled = false
-  if TargetBot and TargetBot.Creature and TargetBot.Creature.getConfigs then
-    local configs = TargetBot.Creature.getConfigs(creature)
-    if configs and #configs > 0 then
-      -- Use first matching config (highest priority)
-      local cfg = configs[1]
-      chaseEnabled = cfg.chase == true
-      keepDistanceEnabled = cfg.keepDistance == true
-      
-      -- Update global ActiveMovementConfig for other modules
-      if TargetBot.ActiveMovementConfig then
-        TargetBot.ActiveMovementConfig.chase = chaseEnabled
-        TargetBot.ActiveMovementConfig.keepDistance = keepDistanceEnabled
-        TargetBot.ActiveMovementConfig.keepDistanceRange = cfg.keepDistanceRange or 4
-      end
-    end
-  end
-  
-  -- Chase is only active if enabled AND keepDistance is disabled (they're mutually exclusive)
-  local useNativeChase = chaseEnabled and not keepDistanceEnabled
-  local Client = getClient()
-  
-  if ChaseController then
-    ChaseController.setDesiredChase(useNativeChase)
-  else
-    if useNativeChase then
-      local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
-      if currentMode ~= 1 then
-        if Client and Client.setChaseMode then
-          Client.setChaseMode(1)
-        elseif g_game and g_game.setChaseMode then
-          g_game.setChaseMode(1)
-        end
-        -- Update cache for other modules
-        if TargetCore and TargetCore.Native then
-          TargetCore.Native.lastChaseMode = 1
-        end
-        if TargetBot then
-          TargetBot.usingNativeChase = true
-        end
-      end
-    elseif not useNativeChase then
-      -- Chase is disabled OR keepDistance is enabled - use Stand mode
-      local currentMode = (Client and Client.getChaseMode) and Client.getChaseMode() or (g_game and g_game.getChaseMode and g_game.getChaseMode()) or 0
-      if currentMode ~= 0 then
-        if Client and Client.setChaseMode then
-          Client.setChaseMode(0)
-        elseif g_game and g_game.setChaseMode then
-          g_game.setChaseMode(0)
-        end
-        if TargetBot then
-          TargetBot.usingNativeChase = false
-        end
-      end
-    end
-  end
-  
-  -- Scenario gate: avoid illegal switches (anti-zigzag)
-  if MonsterAI and MonsterAI.Scenario and MonsterAI.Scenario.shouldAllowTargetSwitch then
-    local currentTarget = ClientService.getAttackingCreature()
-    if currentTarget and not (SC and SC.isDead and SC.isDead(currentTarget)) then
-      local newId = SC.getId(creature)
-      local curId = SC.getId(currentTarget)
-      if newId and curId and newId ~= curId then
-        local newPriority = priorityHint
-        if newPriority == nil then
-          newPriority = EventTargeting.TargetAcquisition.calculatePriority(creature, path)
-        end
-        local hp = SC.getHealthPercent(creature)
-        local allowed = MonsterAI.Scenario.shouldAllowTargetSwitch(newId, newPriority or 0, hp)
-        if not allowed then
-          return
-        end
-      end
-    end
-  end
-
-  -- Attack the creature (rate-limited to prevent spam)
-  -- CRITICAL: Final check that TargetBot is enabled and not explicitly disabled
-  if not canAttack() then
-    if EventTargeting.DEBUG then
-      print("[EventTargeting] Attack blocked - TargetBot disabled")
-    end
-    return
-  end
-
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- PRIORITY: Use AttackStateMachine for consistent, linear targeting
-  -- This is the SINGLE source of attack commands (prevents competing sources)
-  -- ═══════════════════════════════════════════════════════════════════════════
-  local sent = false
-  local currentTime = now or (os.time() * 1000)
-  local throttleSameTarget = (targetState.lastRequestId == id) and ((currentTime - (targetState.lastRequestTime or 0)) < CONST.REQUEST_COOLDOWN)
-  local smTargetId = AttackStateMachine and AttackStateMachine.getTargetId and AttackStateMachine.getTargetId()
-  
-  -- Use AttackStateMachine directly (always available - loaded as default)
-  local smPriority = priorityHint or EventTargeting.TargetAcquisition.calculatePriority(creature, path)
-  if AttackStateMachine and AttackStateMachine.requestSwitch then
-    if smTargetId and smTargetId == id then
-      sent = true
-    elseif not throttleSameTarget then
-      sent = AttackStateMachine.requestSwitch(creature, smPriority)
-    end
-    if sent and EventTargeting.DEBUG then
-      print("[EventTargeting] Delegated to AttackStateMachine: " .. creature:getName())
-    end
-  else
-    -- v3.0: No fallback — AttackStateMachine is the SOLE attack issuer.
-    -- If ASM is not loaded, we simply do not attack (prevents competing issuers).
-    if EventTargeting.DEBUG then
-      print("[EventTargeting] AttackStateMachine unavailable — skipping attack")
-    end
-  end
-
-  -- If attack was throttled and we are not already attacking this creature, bail
-  local Client = getClient()
-  local currentAttack = ClientService.getAttackingCreature()
-  local curId = currentAttack and SC.getId(currentAttack) or nil
-  if not sent and not (currentAttack and curId == id) then
-    return
-  end
-
-  if sent then
-    targetState.lastRequestId = id
-    targetState.lastRequestTime = currentTime
-  end
+  local FSM = AttackFSM or AttackStateMachine
+  if not FSM or not FSM.requestAttack then return end
+  local sent = FSM.requestAttack(creature, priorityHint or 0)
+  if not sent then return end
   
   targetState.currentTarget = creature
   targetState.currentTargetId = id
@@ -1003,6 +849,57 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   end
 end
 
+-- Chain-kill: after a kill, immediately re-select the best remaining reachable,
+-- in-range, configured monster instead of resuming CaveBot past the survivors.
+-- Mirrors processCreature's filter but bypasses the creature-cache staleness
+-- gate (survivors are recent and would otherwise be skipped), so it can re-pick
+-- them at a combat boundary. Returns true if a new target was acquired.
+function EventTargeting.TargetAcquisition.reacquireBestRemaining()
+  if not canAttack() then return false end
+  updatePlayerRef()
+  if not player then return false end
+  local playerPos = SC.getPosition(player)
+  if not playerPos then return false end
+
+  local _, creatures = EventTargeting.refreshLiveCount()
+  if not creatures or #creatures == 0 then return false end
+
+  local best, bestPriority = nil, -1
+  for i = 1, #creatures do
+    local creature = creatures[i]
+    if creature and not SC.isDead(creature) and EventTargeting.TargetAcquisition.isValidTarget(creature) then
+      local cpos = SC.getPosition(creature)
+      if cpos and cpos.z == playerPos.z then
+        local dist = chebyshev(playerPos, cpos)
+        if dist <= CONST.DETECTION_RANGE then
+          local path, reachable = nil, false
+          if TargetReachability and TargetReachability.evaluate then
+            local ok, evaluated = pcall(TargetReachability.evaluate, creature, { source = "cavebot_chain_kill" })
+            if ok and evaluated then
+              path = evaluated.path
+              reachable = evaluated.attackable
+            end
+          else
+            local _, _, isReachable = EventTargeting.PathValidator.validate(playerPos, cpos)
+            reachable = isReachable
+          end
+          if reachable then
+            local priority = EventTargeting.TargetAcquisition.calculatePriority(creature, path)
+            if priority > bestPriority then
+              bestPriority = priority
+              best = creature
+            end
+          end
+        end
+      end
+    end
+  end
+
+  if not best then return false end
+  EventTargeting.TargetAcquisition.acquireTarget(best, nil, bestPriority)
+  return true
+end
+
 -- Process pending targets (called from macro)
 function EventTargeting.TargetAcquisition.processPending()
   -- CRITICAL: Do not process if TargetBot is disabled or explicitly turned off
@@ -1013,51 +910,14 @@ function EventTargeting.TargetAcquisition.processPending()
   
   if #targetState.pendingTargets == 0 then return end
   
-  -- PERFORMANCE: Only re-validate paths occasionally, not every tick
-  local currentTime = now or (os.time() * 1000)
-  local shouldValidatePaths = (currentTime - (targetState.lastPathValidation or 0)) > 300
-  if shouldValidatePaths then
-    targetState.lastPathValidation = currentTime
-  end
-  
-  -- Find best pending target
-  local best = nil
-  local bestPriority = 0
-  local validTargets = {}
-  
-  -- PERFORMANCE: Get player reference once outside the loop
-  updatePlayerRef()
-  local playerPos = player and player:getPosition()
-  
-  for i = 1, #targetState.pendingTargets do
-    local pending = targetState.pendingTargets[i]
-    if pending.creature and not pending.creature:isDead() then
-      local stillReachable = true
-      
-      -- PERFORMANCE: Only validate paths every 300ms, not every tick
-      if shouldValidatePaths and playerPos then
-        local creaturePos = pending.creature:getPosition()
-        if creaturePos and chebyshev(playerPos, creaturePos) > 1 then
-          local _, _, reachable = EventTargeting.PathValidator.validate(playerPos, creaturePos)
-          stillReachable = reachable
-        end
-      end
-      
-      if stillReachable and pending.priority > bestPriority then
-        bestPriority = pending.priority
-        best = pending
-      end
-      -- Keep recent valid targets
-      if currentTime - pending.time < 500 then
-        table.insert(validTargets, pending)
-      end
+  -- Forward pending creatures to the cache update (no independent evaluation)
+  local pending = targetState.pendingTargets
+  targetState.pendingTargets = {}
+  for i = 1, #pending do
+    local entry = pending[i]
+    if entry and entry.creature then
+      EventTargeting.TargetAcquisition.processCreature(entry.creature)
     end
-  end
-  
-  targetState.pendingTargets = validTargets
-  
-  if best then
-    EventTargeting.TargetAcquisition.evaluateTarget(best.creature, best.priority, best.path)
   end
 end
 
@@ -1196,12 +1056,22 @@ function EventTargeting.CombatCoordinator.checkCombatStatus()
   local currentTarget = ClientService.getAttackingCreature()
   
   if not currentTarget or currentTarget:isDead() then
-    -- Combat ended
+    -- Combat ended: clear the slot, then chain-kill the best remaining monster
+    -- if one is still in range, otherwise resume CaveBot.
     if targetState.combatActive then
-      EventTargeting.CombatCoordinator.resumeCaveBot()
       targetState.currentTarget = nil
       targetState.currentTargetId = nil
-      
+
+      if EventTargeting.TargetAcquisition.reacquireBestRemaining() then
+        -- New target acquired (acquireTarget re-paused CaveBot + set combatActive).
+        if EventBus then
+          EventBus.emit("targeting/combat_end")
+        end
+        return
+      end
+
+      EventTargeting.CombatCoordinator.resumeCaveBot()
+
       -- Emit combat end event
       if EventBus then
         EventBus.emit("targeting/combat_end")
@@ -1768,16 +1638,14 @@ if onCreatureAppear then
               end
             end
 
-            -- Immediate attack (rate-limited to prevent spam)
-            -- v3.0: Route ALL attacks through AttackStateMachine (sole issuer)
+            -- Immediate intelligence proposal (rate-limited to prevent spam)
             local sent = false
-            if AttackStateMachine and AttackStateMachine.requestSwitch then
-              local priority = EventTargeting.TargetAcquisition
-                and EventTargeting.TargetAcquisition.calculatePriority
-                and EventTargeting.TargetAcquisition.calculatePriority(creature) or 100
-              sent = AttackStateMachine.requestSwitch(creature, priority + 10) -- +10 tiebreaker for new creature
-            elseif TargetBot and TargetBot.requestAttack then
-              sent = TargetBot.requestAttack(creature, "event_high_priority")
+            local priority = EventTargeting.TargetAcquisition
+              and EventTargeting.TargetAcquisition.calculatePriority
+              and EventTargeting.TargetAcquisition.calculatePriority(creature) or 100
+            if TargetBot.submitSelection then
+              sent = TargetBot.submitSelection({ creature = creature, config = configs[1], priority = priority + 10 },
+                EventTargeting.getLiveMonsterCount and EventTargeting.getLiveMonsterCount() or 1, "EventHighPriority")
             end
           
             -- If attack was throttled and we are not already attacking this creature, bail

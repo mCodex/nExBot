@@ -3,6 +3,8 @@ nExBot.lastLabel = ""
 
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
+local WaypointPolicy = (nExBot and nExBot.Nav and nExBot.Nav["cavebot.waypoint_policy"])
+  or require("cavebot.waypoint_policy")
 
 local oldTibia = getClientVersion() < 960
 
@@ -163,7 +165,7 @@ CaveBot.addAction = function(action, value, focus)
   if type(value) == 'number' then
     value = tostring(value)
   end
-  local widget = UI.createWidget("CaveBotAction", CaveBot.actionList)
+  local widget = CaveBot.Route:add({})
   widget:setText(action .. ":" .. value:split("\n")[1])
   widget.action = action
   widget.value = value
@@ -188,8 +190,7 @@ CaveBot.addAction = function(action, value, focus)
     end
   end
   if focus then
-    widget:focus()
-    CaveBot.actionList:ensureChildVisible(widget)
+    CaveBot.Route:focus(widget)
   end
   return widget
 end
@@ -331,47 +332,55 @@ end)
 ]]
 
 -- Check if path is blocked by attackable monster
+local _blockerCache = {}  -- "x:y:destX:destY" -> { t = timestamp, result = creature|nil }
 local function getBlockingMonster(playerPos, destPos, maxDist)
   -- Only check if we're close to destination
   local dist = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y)
   if dist > 5 then return nil end
-  
-  -- Try to find path ignoring creatures
+
+  -- Throttle: the retry loop calls this every 75ms tick; the native findPath
+  -- below costs 100ms+. Re-check at most every 300ms.
+  local key = playerPos.x .. ":" .. playerPos.y .. ":" .. destPos.x .. ":" .. destPos.y
+  local cached = _blockerCache[key]
+  if cached and (now - cached.t) < 300 then return cached.result end
+
+  local result = nil
   local path = findPath(playerPos, destPos, maxDist, {
     ignoreNonPathable = true,
     ignoreCreatures = true,
     precision = 1
   })
   
-  if not path or #path == 0 then return nil end
-  
-  -- Check first step for blocking monster
-  local dir = path[1]
-  local offset = DIR_MOD_LOOKUP[dir]
-  if not offset then return nil end
-  
-  local checkPos = {
-    x = playerPos.x + offset.x,
-    y = playerPos.y + offset.y,
-    z = playerPos.z
-  }
-  
-  local Client = getClient()
-  local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
-  if not tile then return nil end
-  if not tile.hasCreature or not tile:hasCreature() then return nil end
-  
-  local creatures = tile:getCreatures()
-  for _, creature in ipairs(creatures) do
-    if creature:isMonster() then
-      local hp = creature:getHealthPercent()
-      if hp and hp > 0 and (oldTibia or creature:getType() < 3) then
-        return creature
+  if path and #path > 0 then
+    -- Check first step for blocking monster
+    local dir = path[1]
+    local offset = DIR_MOD_LOOKUP[dir]
+    if offset then
+      local checkPos = {
+        x = playerPos.x + offset.x,
+        y = playerPos.y + offset.y,
+        z = playerPos.z
+      }
+
+      local Client = getClient()
+      local tile = (Client and Client.getTile) and Client.getTile(checkPos) or (g_map and g_map.getTile(checkPos))
+      if tile and tile.hasCreature and tile:hasCreature() then
+        local creatures = tile:getCreatures()
+        for _, creature in ipairs(creatures) do
+          if creature:isMonster() then
+            local hp = creature:getHealthPercent()
+            if hp and hp > 0 and (oldTibia or creature:getType() < 3) then
+              result = creature
+              break
+            end
+          end
+        end
       end
     end
   end
-  
-  return nil
+
+  _blockerCache[key] = { t = now, result = result }
+  return result
 end
 
 -- Get Chebyshev distance to the next goto waypoint in the list
@@ -450,7 +459,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   local maxDist = CaveBot.getMaxGotoDistance()
 
   -- ========== ENSURE NAVIGATOR ROUTE IS BUILT ==========
-  if WaypointNavigator and CaveBot.ensureNavigatorRoute then
+  if nExBot.Navigation and CaveBot.ensureNavigatorRoute then
     CaveBot.ensureNavigatorRoute(playerPos.z)
   end
 
@@ -467,7 +476,9 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     precision = 0
     if minimapColor == 210 or minimapColor == 211 then
       expectedFloorAfterChange = destPos.z - 1
-    elseif minimapColor == 212 or minimapColor == 213 then
+    elseif minimapColor == 212 or minimapColor == 213 or minimapColor == 129 then
+      -- 212/213: rope spot + ladder (go down). 129: pit/hole rendered dark —
+      -- a floor-change hole always leads DOWN (fall/jump down), never up.
       expectedFloorAfterChange = destPos.z + 1
     end
     if expectedFloorAfterChange == nil then
@@ -480,6 +491,23 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     end
   end
 
+  local classification = WaypointPolicy.classify({
+    position = destPos,
+    isFloorChange = isFloorChange,
+  }, {
+    playerPosition = playerPos,
+    destinationPosition = destPos,
+    isFloorChange = isFloorChange,
+    adjacentFloorChange = CaveBot.isNearFloorChangeTile and CaveBot.isNearFloorChangeTile(destPos),
+  })
+  local approach = WaypointPolicy.forApproach({
+    classification = classification,
+    precision = precision,
+    maxSteps = maxDist,
+    distance = math.abs(destPos.x - playerPos.x) + math.abs(destPos.y - playerPos.y),
+    floorObserved = isFloorChange and playerPos.z == expectedFloorAfterChange,
+  })
+
   -- ========== FLOOR CHECK ==========
   -- Non-floor-change WPs on a different floor → instantFail.
   -- Floor-change WPs on a different floor → allowed (walk there, wait for Z change).
@@ -491,19 +519,23 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- If the navigator confirms the player has already passed this WP on the route,
   -- advance immediately. This handles smooth walk-through transitions where A* paths
   -- carry the player past a WP before the goto action's arrival check fires.
-  if WaypointNavigator and WaypointNavigator.hasPassedWaypoint then
+  -- Floor-change WPs are excluded: they must be stepped on exactly (precision=0)
+  -- so a forward pass can never skip the actual stair/rope/hole tile.
+  if not isFloorChange and nExBot.Navigation and nExBot.Navigation.hasPassedWaypoint then
     local currentAction = ui and ui.list and ui.list:getFocusedChild()
     local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
-    if waypointIdx and WaypointNavigator.hasPassedWaypoint(playerPos, waypointIdx, destPos) then
+    if waypointIdx and nExBot.Navigation.hasPassedWaypoint(playerPos, waypointIdx, destPos) then
       CaveBot.clearWaypointTarget()
       return true
     end
   end
 
   -- ========== ARRIVAL PRECISION ==========
-  -- Adaptive: scale precision by distance to next goto WP to prevent zone overlap.
-  -- Floor-change WPs keep precision=0 (must step on the exact tile).
-  if not isFloorChange and precision > 0 then
+  -- Adaptive: scale walk precision by distance to next goto WP to prevent zone
+  -- overlap. Only the WALK precision is widened — arrival precision stays exact
+  -- (the waypoint's own precision), so the bot always steps close to the tile
+  -- instead of stopping several tiles short (which reads as "inaccurate").
+  if classification == "normal" and precision > 0 then
     local currentAction = ui and ui.list and ui.list:getFocusedChild()
     local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
     if waypointIdx then
@@ -520,15 +552,16 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   local dist  = math.max(distX, distY)
 
   -- ========== ARRIVAL CHECK ==========
-  if distX <= precision and distY <= precision then
-    CaveBot.clearWaypointTarget()
+  if distX <= approach.arrivalPrecision and distY <= approach.arrivalPrecision then
     if isFloorChange then
       if playerPos.z == expectedFloorAfterChange then
+        CaveBot.clearWaypointTarget()
         return true
       end
       CaveBot.delay(50)
       return "retry"
     end
+    CaveBot.clearWaypointTarget()
     return true
   end
 
@@ -546,8 +579,8 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- ========== TOO FAR ==========
   if dist > maxDist then
     -- If navigator knows the correct next WP and it's closer, advance
-    if WaypointNavigator and WaypointNavigator.isRouteBuilt and WaypointNavigator.isRouteBuilt() then
-      local nextWpIdx, nextWpPos = WaypointNavigator.getNextWaypoint(playerPos)
+    if nExBot.Navigation and nExBot.Navigation.isRouteBuilt and nExBot.Navigation.isRouteBuilt() then
+      local nextWpIdx, nextWpPos = nExBot.Navigation.getNextWaypoint(playerPos)
       if nextWpIdx and nextWpPos then
         local nextDist = math.max(math.abs(nextWpPos.x - playerPos.x), math.abs(nextWpPos.y - playerPos.y))
         if nextDist < dist then
@@ -571,14 +604,10 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     if blocker then
       local Client = getClient()
       local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
-      if currentTarget ~= blocker then
-        attack(blocker)
+      if currentTarget ~= blocker and TargetBot and TargetBot.requestAttack then
+        TargetBot.requestAttack(blocker, "CaveBotBlocker")
       end
-      if Client and Client.setChaseMode then
-        Client.setChaseMode(1)
-      else
-        g_game.setChaseMode(1)
-      end
+      if MovementCoordinator then MovementCoordinator.setChaseMode(true) end
       CaveBot.delay(100)
       return "retry"
     end
@@ -588,9 +617,13 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- Walk precision matches arrival precision minus 1: A* stops at the zone
   -- boundary rather than overshooting to the center.
   local walkParams = {
-    precision = isFloorChange and 0 or math.max(0, precision - 1),
+    precision = isFloorChange and 0 or math.max(0, approach.arrivalPrecision - 1),
     allowFloorChange = isFloorChange
   }
+  -- Creep/field escalation is safe: it relaxes creature/field collision, never
+  -- wall walkability (no ignoreNonPathable), so it cannot path through a wall.
+  -- Whether to actually chase an obstacle is decided AFTER the walk fails,
+  -- based on the static-vs-creature block class.
   if retries > 1 then
     walkParams.ignoreCreatures = true
   end
@@ -599,10 +632,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
 
   -- ========== ATTEMPT WALK ==========
-  -- Walk directly to destPos. The A* pathfinder computes optimal smooth paths
-  -- around obstacles. No lookahead target needed — smooth movement comes from
-  -- the widened arrival precision (player advances to next WP before stopping).
-  local walkResult = CaveBot.walkTo(destPos, maxDist, walkParams)
+  local walkResult, walkBlockClass = CaveBot.walkTo(destPos, maxDist, walkParams)
   if walkResult == "nudge" then
     -- Nudge only — count as retry so progressive strategies activate
     if CaveBot.setCurrentWaypointTarget then
@@ -623,9 +653,34 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return "walking"
   end
 
-  -- Walk failed — retry with progressive escalation
-  if CaveBot.clearWalkingState then
-    CaveBot.clearWalkingState()
+  -- Walk failed.
+  if CaveBot.clearWalkingState then CaveBot.clearWalkingState() end
+
+  -- Anti-collision: a STATIC block means the tile is (currently) unreachable —
+  -- no amount of creature/field escalation or chasing will clear a wall. Back
+  -- off with an incremental bounded delay so the bot stops hammering into the
+  -- obstacle, and wait for the world to change (door, creature moving aside,
+  -- or the user re-routing) rather than trying to bypass it.
+  if walkBlockClass == "static" then
+    local backoff = math.min(250 + retries * 150, 1200)
+    CaveBot.delay(backoff)
+    return "retry"
+  end
+
+  -- Creature/unknown block — retry with progressive escalation (chase/blast
+  -- a real creature in the way is legitimate; a wall is not).
+  if retries > 2 then
+    local blocker = getBlockingMonster(playerPos, destPos, maxDist)
+    if blocker then
+      local Client = getClient()
+      local currentTarget = (Client and Client.getAttackingCreature) and Client.getAttackingCreature() or (g_game and g_game.getAttackingCreature and g_game.getAttackingCreature())
+      if currentTarget ~= blocker and TargetBot and TargetBot.requestAttack then
+        TargetBot.requestAttack(blocker, "CaveBotBlocker")
+      end
+      if MovementCoordinator then MovementCoordinator.setChaseMode(true) end
+      CaveBot.delay(100)
+      return "retry"
+    end
   end
   return "retry"
 end)

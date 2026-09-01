@@ -1,0 +1,545 @@
+NexButton < Button
+  height: 26
+  margin: 2
+  font: verdana-11px-rounded
+  text-auto-resize: false
+  text-wrap: false
+
+  $focus:
+    border-color: #f2c66d
+    border-width: 2
+
+NexCard < Panel
+  margin-left: 4
+  margin-right: 4
+  margin-top: 4
+  margin-bottom: 4
+  padding: 4 2
+  background-color: #2a2d2f90
+  border-width: 1
+  border-color: #454b4f80
+  layout:
+    type: verticalBox
+    fit-children: true
+
+NexSectionHeader < Panel
+  height: 20
+  margin-left: 6
+  margin-right: 6
+  margin-top: 10
+  margin-bottom: 3
+  border-width: 0 0 1 0
+  border-color: #454b4f80
+
+NexSectionTitle < Label
+  anchors.left: parent.left
+  anchors.right: parent.right
+  anchors.bottom: parent.bottom
+  margin-bottom: 3
+  text-align: left
+  color: #d7c8a5
+  font: verdana-11px-rounded
+
+NexBadge < Label
+  margin-left: 2
+  margin-right: 2
+
+NexMetricCard < Panel
+  height: 36
+  margin: 4
+
+NexMetricValue < Label
+  anchors.left: parent.left
+  anchors.top: parent.top
+  anchors.right: status.left
+  text-wrap: false
+
+NexMetricLabel < Label
+  anchors.left: parent.left
+  anchors.bottom: parent.bottom
+  anchors.right: status.left
+  text-wrap: false
+
+NexMetricStatus < Label
+  width: 48
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
+NexRow < Panel
+  height: 22
+  margin-left: 6
+  margin-right: 6
+  margin-top: 2
+  margin-bottom: 2
+
+NexKeyLabel < Label
+  width: 94
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+
+NexValueLabel < Label
+  anchors.left: prev.right
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  text-align: right
+  text-wrap: false
+
+NexControlLabel < Label
+  width: 132
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+  text-wrap: false
+
+NexControlCombo < ComboBox
+  anchors.left: prev.right
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  menu-scroll: true
+  menu-height: 200
+  menu-scroll-step: 34
+
+NexControlComboPopupMenu < ComboBoxPopupMenu
+
+NexControlComboPopupMenuButton < ComboBoxPopupMenuButton
+
+NexControlComboPopupScrollMenu < ComboBoxPopupScrollMenu
+
+NexControlComboPopupScrollMenuButton < ComboBoxPopupScrollMenuButton
+
+NexControlInput < BotTextEdit
+  anchors.left: prev.right
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
+  $focus:
+    border-color: #f2c66d
+    border-width: 1
+
+NexControlSlider < HorizontalScrollBar
+  anchors.left: prev.right
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
+  $focus:
+    border-color: #f2c66d
+    border-width: 1
+
+NexToggle < Button
+  width: 44
+  height: 24
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  font: verdana-11px-rounded
+  text-align: center
+  border-width: 1
+  border-color: #454b4f80
+  background-color: #3a3d40
+
+  $hover:
+    border-color: #626a6f
+
+  $focus:
+    border-color: #f2c66d
+    border-width: 2
+
+NexToolbar < Panel
+  margin: 4
+
+NexWorkflowActions < Panel
+  height: 30
+  margin-left: 4
+  margin-right: 4
+  margin-top: 2
+  layout:
+    type: horizontalBox
+
+NexWorkflowButton < Button
+  height: 26
+  margin: 2
+  font: verdana-11px-rounded
+  text-auto-resize: true
+  text-wrap: false
+
+NexListRow < Panel
+  height: 36
+  margin-left: 6
+  margin-right: 6
+  margin-top: 2
+  margin-bottom: 2
+
+NexListTitle < Label
+  anchors.left: parent.left
+  anchors.top: parent.top
+  anchors.right: listActions.left
+  text-wrap: false
+
+NexListSubtitle < Label
+  anchors.left: parent.left
+  anchors.bottom: parent.bottom
+  anchors.right: listActions.left
+  text-wrap: false
+
+NexListActions < Panel
+  id: listActions
+  height: 18
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  layout:
+    type: horizontalBox
+    fit-children: true
+
+NexItemRow < Panel
+  height: 38
+  margin-left: 4
+  margin-right: 4
+  margin-top: 2
+  margin-bottom: 2
+
+NexItemSprite < UIItem
+  width: 32
+  height: 32
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+  margin-left: 2
+  virtual: true
+  draggable: false
+
+NexItemDetails < Panel
+  anchors.left: item.right
+  anchors.right: parent.right
+  anchors.top: parent.top
+  anchors.bottom: parent.bottom
+  margin-left: 4
+  layout:
+    type: verticalBox
+
+NexItemTitle < Label
+  height: 16
+  text-wrap: false
+
+NexItemSubtitle < Label
+  height: 16
+  text-wrap: false
+
+NexDataTable < Panel
+  margin: 4
+  layout:
+    type: verticalBox
+    fit-children: true
+
+NexTableHeader < Panel
+  height: 22
+  padding: 2 6
+  background-color: #30343890
+  border-width: 0 0 1 0
+  border-color: #626a6f80
+
+NexTableHeaderTitle < Label
+  anchors.left: parent.left
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  margin-left: 6
+  margin-right: 6
+  text-wrap: false
+
+NexTableHeaderSearchTitle < NexTableHeaderTitle
+  anchors.right: search.left
+  margin-right: 8
+
+NexTableSearch < BotTextEdit
+  width: 112
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  margin-right: 6
+
+NexTableBody < Panel
+  layout:
+    type: verticalBox
+    fit-children: true
+
+NexTableRow < Panel
+  height: 42
+  padding: 3 4
+  border-width: 0 0 1 0
+  border-color: #454b4f60
+
+  $hover:
+    background-color: #3b4145
+
+NexTableRowOdd < NexTableRow
+  background-color: #24272920
+
+NexTableItem < UIItem
+  size: 32 32
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+  virtual: true
+  draggable: false
+
+NexTableIcon < BotItem
+  size: 24 24
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+
+NexTableDetails < Panel
+  anchors.left: visual.right
+  anchors.right: actions.left
+  anchors.top: parent.top
+  anchors.bottom: parent.bottom
+  margin-left: 5
+  margin-right: 4
+  layout:
+    type: verticalBox
+
+NexTableTitle < Label
+  height: 17
+  text-wrap: false
+
+NexTableSecondary < Label
+  height: 17
+  text-wrap: false
+
+NexTableActions < Panel
+  width: 144
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  layout:
+    type: horizontalBox
+    fit-children: true
+
+NexTableActionButton < NexButton
+  width: 68
+  height: 24
+  margin: 1
+
+NexControllerLayout < Panel
+  anchors.fill: parent
+
+NexControllerWindow < MainWindow
+  text: nExBot
+  @onEscape: self:hide()
+
+NexCloseButton < Button
+  size: 24 24
+  anchors.top: parent.top
+  anchors.right: parent.right
+  margin-top: -30
+  margin-right: -10
+  text: X
+  font: verdana-11px-rounded
+  text-align: center
+  text-auto-resize: false
+
+  $focus:
+    border-color: #f2c66d
+    border-width: 2
+
+NexControllerContent < Panel
+  anchors.fill: parent
+  layout:
+    type: verticalBox
+
+NexControllerEngine < Panel
+  height: 28
+  margin-left: 3
+  margin-right: 3
+
+NexControllerItem < UIItem
+  width: 24
+  height: 24
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+  virtual: true
+  draggable: false
+
+NexControllerLabel < Label
+  anchors.left: prev.right
+  anchors.right: next.left
+  anchors.verticalCenter: parent.verticalCenter
+  margin-left: 4
+
+NexControllerConfigure < Button
+  size: 24 24
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  text: ...
+  font: verdana-11px-rounded
+  text-align: center
+
+  $focus:
+    border-color: #f2c66d
+    border-width: 2
+
+NexControllerOpen < Button
+  height: 26
+  font: verdana-11px-rounded
+  margin: 3
+  text-auto-resize: false
+  text-wrap: false
+
+NexWorkspace < MainWindow
+  text: nExBot
+  size: 440 400
+  @onEscape: self:hide()
+
+NexBackButton < Button
+  size: 38 24
+  anchors.left: parent.left
+  anchors.top: parent.top
+  text: Back
+  font: verdana-11px-rounded
+
+NexWorkspaceTopbar < Panel
+  height: 24
+  anchors.left: workspaceNav.right
+  anchors.right: parent.right
+  anchors.top: parent.top
+  margin-left: 4
+
+NexBreadcrumb < Label
+  anchors.left: prev.right
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+  margin-left: 6
+  text-wrap: false
+  color: #b3aa96
+  font: verdana-11px-rounded
+
+NexWorkspaceNav < Panel
+  width: 104
+  anchors.left: parent.left
+  anchors.top: parent.top
+  anchors.bottom: parent.bottom
+  layout:
+    type: verticalBox
+
+NexNavButton < Button
+  height: 28
+  margin: 1
+  checkable: true
+  font: verdana-11px-rounded
+
+  $focus:
+    border-color: #f2c66d
+    border-width: 2
+
+NexWorkspaceTabs < Panel
+  height: 28
+  anchors.left: workspaceNav.right
+  anchors.right: parent.right
+  anchors.top: workspaceTopbar.bottom
+  margin-left: 4
+  layout:
+    type: horizontalBox
+
+NexTabButton < Button
+  height: 24
+  margin-right: 2
+  checkable: true
+  font: verdana-11px-rounded
+  text-auto-resize: false
+  text-wrap: false
+
+  $focus:
+    border-color: #f2c66d
+    border-width: 2
+
+NexTabSelect < ComboBox
+  anchors.fill: parent
+  margin: 2
+  menu-scroll: true
+  menu-height: 200
+
+NexWorkspaceScrollBar < VerticalScrollBar
+  width: 14
+  anchors.top: workspaceTabs.bottom
+  anchors.right: parent.right
+  anchors.bottom: parent.bottom
+  step: 18
+  pixels-scroll: true
+
+NexWorkspaceContent < ScrollablePanel
+  anchors.left: workspaceNav.right
+  anchors.right: workspaceScroll.left
+  anchors.top: workspaceTabs.bottom
+  anchors.bottom: parent.bottom
+  margin-left: 4
+  vertical-scrollbar: workspaceScroll
+  layout:
+    type: verticalBox
+
+NexPageLandmark < UIItem
+  width: 24
+  height: 24
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+  margin-left: 4
+  virtual: true
+  draggable: false
+
+NexPageHeader < Panel
+  height: 46
+  margin: 4
+  padding: 2 6
+  background-color: #2a2d2f90
+  border-width: 1
+  border-color: #b6904d50
+
+NexPageHeaderText < Panel
+  anchors.left: pageLandmark.right
+  anchors.right: pageBadge.left
+  anchors.top: parent.top
+  anchors.bottom: parent.bottom
+  margin-left: 6
+  layout:
+    type: verticalBox
+
+NexPageTitle < Label
+  height: 18
+
+NexPageSubtitle < Label
+  height: 18
+
+NexPageHeaderBadge < NexBadge
+  anchors.right: parent.right
+  anchors.verticalCenter: parent.verticalCenter
+
+NexEngineRow < Panel
+  height: 38
+  margin-left: 4
+  margin-right: 4
+  margin-top: 2
+  margin-bottom: 2
+  padding: 2 6
+  background-color: #2a2d2f90
+  border-width: 1
+  border-color: #454b4f60
+
+NexEngineItem < UIItem
+  width: 24
+  height: 24
+  virtual: true
+  draggable: false
+  anchors.left: parent.left
+  anchors.verticalCenter: parent.verticalCenter
+
+NexEngineInfo < Panel
+  anchors.left: prev.right
+  anchors.right: next.left
+  anchors.top: parent.top
+  anchors.bottom: parent.bottom
+  margin-left: 4
+  margin-right: 4
+  layout:
+    type: verticalBox
+
+NexFooter < Panel
+  height: 32
+  margin: 4
+  layout:
+    type: horizontalBox
+
+NexFooterButton < NexButton
+  width: 86
+  height: 26
+  margin: 1
