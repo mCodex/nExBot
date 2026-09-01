@@ -8,12 +8,21 @@
 --   STEP_DISPATCHED / EDGE_COMPLETED / TRANSITION_BEGIN -> "walking" (wait ack)
 --   WAITING_ACK                                         -> "walking" (in-flight)
 --   WAITING_BLOCKER / FAILED_RETRYABLE / REPLAN         -> "retry"
---   COMPLETED                                           -> true
+--   COMPLETED / NO_ACTIVE_EDGE                          -> true (route done)
 --   FAILED_TERMINAL                                     -> false
+--
+-- ponytail: loaded via core/cavebot safeDofile whose pcall swallows load-time
+-- errors, so like waypoint_policy this file must have NO load-time deps; the
+-- navigation.domain require is deferred to first call (registry-backed in
+-- sandbox, plain require in busted).
 local SessionDriver = {}
 
-local domain = require("navigation.domain")
-local D = domain
+local D
+
+local function domain()
+  if not D then D = require("navigation.domain") end
+  return D
+end
 
 function SessionDriver.shouldUse(nav)
   if not nav then return false end
@@ -31,18 +40,19 @@ function SessionDriver.tickAndMap(bridge, playerPos, opts)
     mapGeneration = opts.mapGeneration,
   })
   if not res or not res.status then return "retry", "none" end
+  local d = domain()
   local st = res.status
-  if st == D.NavStatus.COMPLETED then return true, "none" end
-  if st == D.NavStatus.FAILED_TERMINAL then return false, "static" end
+  if st == d.NavStatus.COMPLETED then return true, "none" end
+  if st == d.NavStatus.FAILED_TERMINAL then return false, "static" end
   -- Route exhausted: the session reports NO_ACTIVE_EDGE only after _selectSuccessor
   -- exhausts the route (buildRoute always selects edge 1 first), so this is the
   -- deterministic route-completion signal.
-  if st == D.NavStatus.PROGRESS and res.reason == "NO_ACTIVE_EDGE" then
+  if st == d.NavStatus.PROGRESS and res.reason == "NO_ACTIVE_EDGE" then
     return true, "none"
   end
-  if st == D.NavStatus.WAITING_BLOCKER
-     or st == D.NavStatus.FAILED_RETRYABLE
-     or st == D.NavStatus.REPLAN then
+  if st == d.NavStatus.WAITING_BLOCKER
+     or st == d.NavStatus.FAILED_RETRYABLE
+     or st == d.NavStatus.REPLAN then
     return "retry", "none"
   end
   -- PROGRESS / WAITING_ACK / ACTION_REQUIRED / TRANSITION_PENDING
