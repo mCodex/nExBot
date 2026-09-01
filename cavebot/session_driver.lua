@@ -34,6 +34,12 @@ function SessionDriver.tickAndMap(bridge, playerPos, opts)
   local st = res.status
   if st == D.NavStatus.COMPLETED then return true, "none" end
   if st == D.NavStatus.FAILED_TERMINAL then return false, "static" end
+  -- Route exhausted: the session reports NO_ACTIVE_EDGE only after _selectSuccessor
+  -- exhausts the route (buildRoute always selects edge 1 first), so this is the
+  -- deterministic route-completion signal.
+  if st == D.NavStatus.PROGRESS and res.reason == "NO_ACTIVE_EDGE" then
+    return true, "none"
+  end
   if st == D.NavStatus.WAITING_BLOCKER
      or st == D.NavStatus.FAILED_RETRYABLE
      or st == D.NavStatus.REPLAN then
