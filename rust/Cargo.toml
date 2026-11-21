@@ -1,5 +1,5 @@
 [workspace]
-members = ["apps/nexbot-engine"]
+members = ["apps/nexbot-engine", "crates/nexbot-updater"]
 resolver = "3"
 
 [workspace.package]

@@ -1,0 +1,22 @@
+[package]
+name = "nexbot-updater"
+version = "5.0.0"
+edition = "2024"
+rust-version = "1.100"
+publish = false
+
+[dependencies]
+ed25519-dalek = { version = "3.0.0", default-features = false, features = ["zeroize"] }
+hex = "0.4.3"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
+semver = { version = "1.0.28", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = { version = "0.11.1", default-features = false }
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+uuid = { version = "1.29.3", features = ["serde"] }
+zeroize = "1.9.2"
+
+[lints]
+workspace = true
