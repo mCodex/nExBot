@@ -652,6 +652,35 @@ end
 
 loadPrivateScripts()
 
+-- Keep the native grid so OTClient can still compute the tab bar height.
+do
+  local tabBar = modules.game_bot.contentsPanel.botTabs
+  local layout = tabBar and tabBar:getLayout()
+  if layout and layout.isUIGridLayout and layout:isUIGridLayout()
+    and layout.setCellWidth and layout.getCellSpacing and layout.setCellSpacing and tabBar.getTabs then
+    local tabs = tabBar:getTabs()
+    local firstTab = tabs[1]
+    if #tabs == 5 and firstTab.setPaddingHorizontal then
+      local originalWidth = layout:getCellSize().width
+      local originalSpacing = layout:getCellSpacing()
+      local onDestroy = firstTab.onDestroy
+
+      for _, tab in ipairs(tabs) do
+        tab:setFont("small-9px")
+        tab:setPaddingHorizontal(1)
+      end
+      layout:setCellWidth(30)
+      layout:setCellSpacing(1)
+
+      firstTab.onDestroy = function(tab)
+        layout:setCellWidth(originalWidth)
+        layout:setCellSpacing(originalSpacing)
+        if onDestroy then onDestroy(tab) end
+      end
+    end
+  end
+end
+
 -- Return to Main tab
 setDefaultTab("Main")
 
