@@ -480,7 +480,7 @@ TargetBot.ChaseModeEnforcer = ChaseModeEnforcer
 TargetBot.enforceChaseModeNow = enforceChaseModeNow
 
 -- ui
-local configWidget = UI.Config()
+local configWidget = UI.createWidget("NexBotProfileSelector")
 local ui = UI.createWidget("TargetBotPanel")
 
 ui.list = ui.listPanel.list -- shortcut

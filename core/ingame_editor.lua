@@ -18,7 +18,7 @@ local function executeIngameScripts()
   return false
 end
 
-UI.Button("Ingame script editor", function()
+UI.Button("Script Editor", function()
     UI.MultilineEditorWindow(storage.ingame_hotkeys or "", {title="Hotkeys editor", description="You can add your custom scripts here. Click Ok to save and reload bot."}, function(text)
       -- Store in global storage (automatically persisted by OTClient)
       storage.ingame_hotkeys = text

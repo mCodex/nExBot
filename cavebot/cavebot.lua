@@ -18,28 +18,8 @@ local function safeResetWalking()
 end
 
 -- ui
-local configWidget = UI.Config()  -- Create config widget first
 local ui = UI.createWidget("CaveBotPanel")
-
--- Move the config widget into the placeholder panel at the top
-if ui.configWidgetPlaceholder and configWidget then
-  -- Try multiple methods to reparent the widget
-  local placeholder = ui.configWidgetPlaceholder
-  if configWidget.setParent then
-    configWidget:setParent(placeholder)
-  end
-  if placeholder.addChild then
-    -- Only add if not already a child to avoid duplicate-add warnings
-    local ok, parent = pcall(function() return configWidget:getParent() end)
-    if not ok or parent ~= placeholder then
-      placeholder:addChild(configWidget)
-    end
-  end
-  -- Move to first child position if possible
-  if placeholder.moveChildToIndex then
-    placeholder:moveChildToIndex(configWidget, 1)
-  end
-end
+local configWidget = UI.createWidget("NexBotProfileSelector", ui.configWidgetPlaceholder)
 
 -- Move the main CaveBot panel to the first position in the tab
 -- This ensures the waypoint list appears before Editor/Config panels

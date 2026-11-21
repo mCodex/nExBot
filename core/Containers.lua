@@ -119,11 +119,12 @@ local refreshContainerList
 UI.Separator()
 local containerUI = setupUI([[
 Panel
-  height: 110
+  height: 128
 
   Label
     text-align: center
     text: Container Panel
+    height: 16
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: parent.top
@@ -134,19 +135,21 @@ Panel
     !text: tr('Auto Open')
     anchors.top: prev.bottom
     anchors.left: parent.left
-    width: 90
+    anchors.right: parent.horizontalCenter
+    margin-right: 1
     margin-top: 3
     text-align: center
+    height: 20
     font: verdana-11px-rounded
 
   Button
     id: setupBtn
     !text: tr('Setup')
     anchors.top: prev.top
-    anchors.left: prev.right
+    anchors.left: parent.horizontalCenter
     anchors.right: parent.right
-    margin-left: 2
-    height: 17
+    margin-left: 1
+    height: 20
     font: verdana-11px-rounded
 
   Button
@@ -156,7 +159,7 @@ Panel
     anchors.left: parent.left
     anchors.right: parent.right
     margin-top: 2
-    height: 17
+    height: 20
     font: verdana-11px-rounded
 
   Button
@@ -166,48 +169,52 @@ Panel
     anchors.left: parent.left
     anchors.right: parent.right
     margin-top: 2
-    height: 17
+    height: 20
     font: verdana-11px-rounded
 
   Button
     id: minimizeAll
-    !text: tr('Minimize All')
+    !text: tr('Minimize')
     anchors.top: prev.bottom
     anchors.left: parent.left
-    width: 90
+    anchors.right: parent.horizontalCenter
+    margin-right: 1
     margin-top: 2
-    height: 17
+    height: 20
     font: verdana-11px-rounded
 
   Button
     id: maximizeAll
-    !text: tr('Maximize All')
+    !text: tr('Maximize')
     anchors.top: prev.top
-    anchors.left: prev.right
+    anchors.left: parent.horizontalCenter
     anchors.right: parent.right
-    margin-left: 2
-    height: 17
+    margin-left: 1
+    height: 20
     font: verdana-11px-rounded
 
   BotSwitch
     id: purseSwitch
     anchors.top: minimizeAll.bottom
     anchors.left: parent.left
-    width: 90
+    anchors.right: parent.horizontalCenter
+    margin-right: 1
     margin-top: 3
     text-align: center
+    height: 20
     !text: tr('Open Purse')
     font: verdana-11px-rounded
 
   BotSwitch
     id: autoMinSwitch
     anchors.top: minimizeAll.bottom
-    anchors.left: prev.right
+    anchors.left: parent.horizontalCenter
     anchors.right: parent.right
     margin-top: 3
-    margin-left: 2
+    margin-left: 1
     text-align: center
-    !text: tr('Auto Min')
+    height: 20
+    !text: tr('Auto Min.')
     font: verdana-11px-rounded
   ]])
 containerUI:setId(panelName)

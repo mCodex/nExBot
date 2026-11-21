@@ -43,23 +43,25 @@ AttackEntry < UIWidget
     height: 15
 
 AttackBotBotPanel < Panel
-  height: 38
+  height: 66
 
   BotSwitch
     id: title
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
-    width: 130
+    height: 20
+    anchors.right: parent.right
+    margin-top: 0
+    margin-right: 50
     !text: tr('AttackBot')
 
   Button
     id: settings
     anchors.top: prev.top
-    anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 3
-    height: 17
+    width: 47
+    height: 20
     text: Setup
 
   Button
@@ -105,12 +107,12 @@ AttackBotBotPanel < Panel
     
   Label
     id: name
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
+    anchors.top: prev.bottom
+    anchors.left: parent.left
     anchors.right: parent.right
+    margin-top: 3
     text-align: center
-    margin-left: 4
-    height: 17
+    height: 20
     text: Profile #1
     background: #292A2A
 

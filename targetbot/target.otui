@@ -20,8 +20,10 @@ TargetBotDualLabel < Panel
   Label
     id: right
     anchors.top: parent.top
+    anchors.left: left.right
     anchors.right: parent.right
-    text-auto-resize: true
+    margin-left: 5
+    text-align: right
 
 TargetBotPanel < Panel
   layout:
@@ -92,15 +94,17 @@ TargetBotPanel < Panel
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         text: Add
-        width: 56
+        width: 42
 
       Button
         id: edit
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.left: add.right
+        anchors.right: remove.left
+        margin-left: 2
+        margin-right: 2
         text: Edit
-        width: 56
 
       Button
         id: remove
@@ -108,6 +112,6 @@ TargetBotPanel < Panel
         anchors.bottom: parent.bottom
         anchors.right: parent.right
         text: Remove
-        width: 56
+        width: 51
     
 

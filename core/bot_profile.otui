@@ -1,0 +1,55 @@
+NexBotProfileSelector < Panel
+  id: botConfig
+  height: 46
+
+  ComboBox
+    id: list
+    &menuScroll: true
+    &menuHeight: 450
+    &menuScrollStep: 100
+    &parentWidth: true
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: switch.left
+    margin-right: 3
+    height: 20
+    text-offset: 3 0
+
+  Button
+    id: switch
+    anchors.top: parent.top
+    anchors.right: parent.right
+    size: 36 20
+
+    $on:
+      text: On
+      color: #00AA00
+
+    $!on:
+      text: Off
+      color: #FF0000
+
+  Button
+    id: add
+    anchors.top: list.bottom
+    anchors.left: parent.left
+    margin-top: 3
+    size: 42 20
+    text: Add
+
+  Button
+    id: edit
+    anchors.top: add.top
+    anchors.left: add.right
+    anchors.right: remove.left
+    margin-left: 2
+    margin-right: 2
+    height: 20
+    text: Edit
+
+  Button
+    id: remove
+    anchors.top: add.top
+    anchors.right: parent.right
+    size: 51 20
+    text: Remove

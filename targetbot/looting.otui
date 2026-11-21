@@ -46,7 +46,7 @@ TargetBotLootingPanel < Panel
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       margin-right: 6
-      width: 80
+      width: 46
 
     Label
       anchors.left: parent.left
@@ -65,7 +65,7 @@ TargetBotLootingPanel < Panel
       anchors.top: parent.top
       anchors.bottom: parent.bottom
       margin-right: 6
-      width: 80
+      width: 46
 
     Label
       anchors.left: parent.left

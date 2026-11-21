@@ -175,6 +175,7 @@ end
 local setProfileName = function()
   if ui.name then
     ui.name:setText(currentSettings.name)
+    ui.name:setTooltip(currentSettings.name)
   end
 end
 

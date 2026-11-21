@@ -123,14 +123,17 @@ setDefaultTab("HP")
 -- healPanelName already defined at top of file
 local ui = setupUI([[
 Panel
-  height: 55
+  height: 66
 
   BotSwitch
     id: title
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
-    width: 130
+    height: 20
+    anchors.right: parent.right
+    margin-top: 0
+    margin-right: 85
     !text: tr('HealBot')
 
   Button
@@ -138,8 +141,8 @@ Panel
     anchors.top: prev.top
     anchors.left: prev.right
     margin-left: 3
-    height: 17
-    width: 55
+    height: 20
+    width: 40
     text: Self
 
   Button
@@ -147,8 +150,8 @@ Panel
     anchors.top: prev.top
     anchors.left: prev.right
     margin-left: 3
-    height: 17
-    width: 50
+    height: 20
+    width: 39
     text: Ally
 
   Button
@@ -194,12 +197,12 @@ Panel
     
   Label
     id: name
-    anchors.verticalCenter: prev.verticalCenter
-    anchors.left: prev.right
+    anchors.top: prev.bottom
+    anchors.left: parent.left
     anchors.right: parent.right
+    margin-top: 3
     text-align: center
-    margin-left: 4
-    height: 17
+    height: 20
     text: Profile #1
     background: #292A2A
 ]])
@@ -248,6 +251,7 @@ end
 local setProfileName = function()
   local name = (currentSettings and currentSettings.name) or ("Profile #" .. HealBotConfig.currentHealBotProfile)
   ui.name:setText(name)
+  ui.name:setTooltip(name)
   if healWindow and healWindow.settings and healWindow.settings.profiles then
     healWindow.settings.profiles.Name:setText(name)
   end
@@ -1297,22 +1301,25 @@ end
 setDefaultTab("Main")
 local fhUI = setupUI([[
 Panel
-  height: 19
+  height: 22
 
   BotSwitch
     id: title
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
-    width: 130
+    height: 20
+    anchors.right: parent.right
+    margin-top: 0
+    margin-right: 50
     !text: tr('Friend Healer')
 
   Button
     id: settings
     anchors.top: prev.top
-    anchors.left: prev.right
-    margin-left: 3
-    height: 17
+    anchors.right: parent.right
+    width: 47
+    height: 20
     text: Setup
 ]])
 if fhUI and fhUI.title then

@@ -146,7 +146,7 @@ function getStashingIndex(id)
 end
 
 UI.Separator()
-UI.Label("Sell Exeptions")
+UI.Label("Sell Exceptions")
 
 -- Profile storage helpers
 local function getProfileSetting(key)

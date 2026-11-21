@@ -8,7 +8,7 @@ CaveBotControlPanel < Panel
   
   Label
     text-align: center
-    text: CaveBot Control Panel
+    text: Cave Controls
     font: verdana-11px-rounded
     margin-top: 3
 
@@ -18,10 +18,8 @@ CaveBotControlPanel < Panel
     id: buttons
     margin-top: 2
     layout:
-      type: grid
-      cell-size: 86 20
-      cell-spacing: 1
-      flow: true
+      type: verticalBox
+      spacing: 2
       fit-children: true
 
   HorizontalSeparator

@@ -14,23 +14,25 @@ end
 
 local ui = setupUI([[
 Panel
-  height: 19
+  height: 22
 
   BotSwitch
     id: switch
     anchors.top: parent.top
     anchors.left: parent.left
     text-align: center
-    width: 130
+    height: 20
+    anchors.right: parent.right
+    margin-top: 0
+    margin-right: 50
     !text: tr('EQ Manager')
 
   Button
     id: setup
     anchors.top: prev.top
-    anchors.left: prev.right
     anchors.right: parent.right
-    margin-left: 3
-    height: 17
+    width: 47
+    height: 20
     text: Setup
 ]])
 ui:setId(panelName)

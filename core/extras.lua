@@ -118,7 +118,7 @@ local addScrollBar = function(id, title, min, max, defaultValue, dest, tooltip)
   widget.scroll.onValueChange(widget.scroll, widget.scroll:getValue())
 end
 
-UI.Button("nExBot Settings and Scripts", function()
+UI.Button("Settings & Scripts", function()
   if not extrasWindow then
     warn("[nExBot] extrasWindow is nil — attempting to recreate")
     local ok, w = pcall(UI.createWindow, 'ExtrasWindow')
