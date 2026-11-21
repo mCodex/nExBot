@@ -8,7 +8,7 @@ if not Intelligence.lifecycle then
     currentTarget = { owner = "TargetBot" },
     currentRouteObjective = { owner = "CaveBot" },
     currentMovementIntent = { owner = "MovementCoordinator" },
-    currentAttackIntent = { owner = "AttackStateMachine" },
+    currentAttackIntent = { owner = "AttackFSM" },
     currentLureState = { owner = "DynamicLure" },
     currentPullState = { owner = "PullSystem" },
     currentWavePrediction = { owner = "WaveModel" },
@@ -411,7 +411,7 @@ local function classifyAttackTransition(state, previous, reason)
     return "TargetKilled"
   elseif reason == "unreachable" or reason == "path_failed" or reason == "retry_exhausted" then
     return "AttackCancelled"
-  elseif state == "ENGAGING" then
+  elseif state == "ATTACKING" then
     return "AttackStarted"
   elseif state == "LOCKED" then
     return "AttackCompleted"
@@ -423,7 +423,7 @@ EventBus.on("loot:received", onLootObserved)
 EventBus.on("attacksm:state_changed", function(state, previous, reason)
  local eventType = classifyAttackTransition(state, previous, reason)
  Intelligence.events:publish(eventType, { state = state, previous = previous, reason = reason }, {
- source = "AttackStateMachine",
+ source = "AttackFSM",
  combatGeneration = Intelligence.lifecycle:generation("combat"),
  })
  if Intelligence.optionalEnabled("replay") then

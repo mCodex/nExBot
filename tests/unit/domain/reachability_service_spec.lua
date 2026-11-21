@@ -148,6 +148,22 @@ describe("ReachabilityService", function()
     assert.equals(ReachabilityState.CONFIRMED_HARD_UNREACHABLE, result.state)
   end)
 
+  it("quarantines the creature in TargetReachability once CONFIRMED_HARD_UNREACHABLE", function()
+    -- Regression: a monster the FSM gives up on (never reachable across 3+ player
+    -- positions) must be excluded from target_coordinator's re-selection, or the
+    -- bot re-acquires the same unreachable creature forever instead of moving on.
+    local target = creature(11, 105, 100)
+
+    service.evaluate(target, { mode = "melee" })
+    player.position = pos(101, 100)
+    service.evaluate(target, { mode = "melee" })
+    player.position = pos(102, 100)
+    local result = service.evaluate(target, { mode = "melee" })
+
+    assert.equals(ReachabilityState.CONFIRMED_HARD_UNREACHABLE, result.state)
+    assert.is_true(TargetReachability.isQuarantined(target))
+  end)
+
   it("after player moves and creature becomes reachable, evidence resets", function()
     local target = creature(10, 105, 100)
 

@@ -106,7 +106,7 @@ local looterStatus = ""
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ATTACK STATE MACHINE INTEGRATION (Default Attack System)
--- The AttackStateMachine is now the PRIMARY attack handler for TargetBot.
+-- AttackFSM is the PRIMARY attack handler for TargetBot.
 -- It provides linear, consistent targeting with automatic recovery.
 -- ═══════════════════════════════════════════════════════════════════════════
 
@@ -166,7 +166,7 @@ TargetBot.AttackController = AttackController
 -- ═══════════════════════════════════════════════════════════════════════════
 -- REQUEST ATTACK (Unified Attack Interface)
 -- This is the SINGLE entry point for all attack requests in TargetBot.
--- Uses AttackStateMachine for state-based attack management.
+-- Uses AttackFSM for state-based attack management.
 -- OPTIMIZED: Uses consolidated validateCreature for reduced pcall overhead
 -- ═══════════════════════════════════════════════════════════════════════════
 TargetBot.requestAttack = function(creature, reason, force)
@@ -529,11 +529,9 @@ TargetBot.isCaveBotActionAllowed = function()
 end
 
 local function getOwnedTarget()
-  for _, owner in ipairs({ AttackFSM, AttackStateMachine }) do
-    if owner and owner.getTarget then
-      local ok, target = pcall(owner.getTarget)
-      if ok and target then return target end
-    end
+  if AttackFSM and AttackFSM.getTarget then
+    local ok, target = pcall(AttackFSM.getTarget)
+    if ok and target then return target end
   end
   return nil
 end
@@ -566,6 +564,7 @@ TargetBot.CombatOwnership = {
   isBlockingRoute = function()
     if not TargetBot.isOn() then return false end
     if TargetBot.CombatOwnership.hasLiveConfiguredTarget() then return true end
+    if TargetBot.hasTargetableMonstersOnScreen() then return true end
     return hasFreshConfiguredTarget() and not TargetBot.CombatOwnership.canReleaseTarget()
   end,
 }
@@ -1328,8 +1327,8 @@ targetbotMacro = macro(250, function()
     return
   end
 
-  -- Update AttackStateMachine (only when TargetBot is ON)
-  pcall(function() local FSM = AttackFSM or AttackStateMachine; if FSM and FSM.update then FSM.update() end end)
+  -- Update AttackFSM (only when TargetBot is ON)
+  pcall(function() if AttackFSM and AttackFSM.update then AttackFSM.update() end end)
 
   -- Prevent execution before login is complete to avoid freezing
   local Client = getClient()
@@ -1476,15 +1475,10 @@ targetbotMacro = macro(250, function()
     local unreachableCount = monsterCache.unreachableCount or 0
     local reachableOnScreen = monsterCache.monsterCount or 0
     
-    -- intelligence.0: Also check AttackStateMachine for skipped creatures
-    local smSkippedCount = 0
-    if AttackStateMachine and AttackStateMachine.getSkippedCount then
-      smSkippedCount = AttackStateMachine.getSkippedCount()
-    end
-    local totalBlocked = unreachableCount + smSkippedCount
-    
+    local totalBlocked = unreachableCount
+
     -- Check if there are REACHABLE monsters on screen
-    if reachableOnScreen > 0 and reachableOnScreen > smSkippedCount then
+    if reachableOnScreen > 0 then
       -- There are reachable monsters but no valid target (edge case)
       setStatusRight("Targeting (" .. tostring(reachableOnScreen) .. ")")
       if EventTargeting and EventTargeting.refreshLiveCount then
@@ -1554,14 +1548,14 @@ targetbotMacro = macro(250, function()
     end
 
     -- ═══════════════════════════════════════════════════════════════════════════
-    -- LINEAR ATTACK SYSTEM: AttackStateMachine handles all attack persistence
+    -- LINEAR ATTACK SYSTEM: AttackFSM handles all attack persistence
     -- Ensures continuous attacking of same target until death - no fallbacks
     -- ═══════════════════════════════════════════════════════════════════════════
     local nowt = now or (os.time() * 1000)
     local okId, id = pcall(function() return bestTarget.creature:getId() end)
-    
+
     if okId and id then
-      local smState = (AttackFSM or AttackStateMachine).getState()
+      local smState = AttackFSM.getState()
 
       -- Update AttackController based on state machine status
       if smState == "LOCKED" then

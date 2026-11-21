@@ -100,7 +100,7 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
   local useNativeChase = config.chase and not config.keepDistance
   if MovementCoordinator then MovementCoordinator.setChaseMode(useNativeChase) end
   TargetBot.usingNativeChase = useNativeChase
-  local ASM = AttackFSM or AttackStateMachine
+  local ASM = AttackFSM
   -- Skip reachability check if ASM is already locked on this target — the attack is working
   local creatureId = nil
   pcall(function() creatureId = creature:getId() end)
@@ -129,7 +129,7 @@ TargetBot.Creature.attack = function(params, targets, isLooting)
       local priority = params.priority or (params.config and params.config.priority) or 100
       attackIssued = requestSwitch(creature, priority * 100)
     else
-      log("[TargetBot] AttackStateMachine unavailable — skipping attack (no fallback)")
+      log("[TargetBot] AttackFSM unavailable — skipping attack (no fallback)")
     end
     if EventTargeting and EventTargeting.CombatCoordinator then
       local dist = math.max(math.abs(playerPos.x - creaturePos.x), math.abs(playerPos.y - creaturePos.y))

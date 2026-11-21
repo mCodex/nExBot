@@ -52,6 +52,18 @@ describe("WaypointPolicy.classify", function()
       assert.are_equal(case.expected, WaypointPolicy.classify(case.waypoint, case.topology), case.name)
     end
   end)
+
+  it("trusts a caller-computed isCorridor flag directly, without needing corner+topology", function()
+    -- CaveBot's goto action computes walkableNeighbors itself (via
+    -- PathUtils.walkableNeighborCount) and passes the final isCorridor
+    -- verdict straight through, rather than relying on the corner+topology
+    -- fallback path.
+    local classification = WaypointPolicy.classify(
+      { position = position(10, 10, 7), isCorridor = true },
+      { playerPosition = position(9, 10, 7), destinationPosition = position(10, 10, 7) }
+    )
+    assert.are_equal("corridor", classification)
+  end)
 end)
 
 describe("WaypointPolicy.forApproach", function()

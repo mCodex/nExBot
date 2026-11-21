@@ -291,7 +291,7 @@ if EventBus then
     _pendingCancelEvent = schedule(CHASE_NIL_GRACE_MS, function()
       _pendingCancelEvent = nil
       -- Only cancel if ASM also agrees the target is gone
-      if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
+      if AttackFSM and AttackFSM.isActive and AttackFSM.isActive() then
         return  -- ASM still managing a target — transient nil, ignore
       end
       if MovementCoordinator then MovementCoordinator.setChaseMode(false) end

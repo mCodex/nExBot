@@ -16,7 +16,7 @@ describe("PriorityEngine", function()
     _G.nExBot.Shared.getClient = function() return _G.g_game end
 
     _G.CombatConstants = _G.CombatConstants or {}
-    _G.AttackStateMachine = nil
+    _G.AttackFSM = nil
     _G.TargetBot = nil
 
     -- SafeCreature mock with real creature methods

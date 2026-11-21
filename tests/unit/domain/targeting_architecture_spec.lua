@@ -10,7 +10,7 @@ describe("TargetBot reachability architecture", function()
     local handle = assert(io.popen("find targetbot -name '*.lua' -type f"))
     for path in handle:lines() do
       local source = read(path):gsub("%-%-[^\n]*", "")
-      if path ~= "targetbot/attack_state_machine.lua" then
+      if path ~= "targetbot/application/attack_fsm.lua" then
         assert.is_nil(source:match("g_game%.attack%s*%(") or source:match("Client%.attack%s*%("), path)
       end
     end
@@ -34,7 +34,7 @@ describe("TargetBot reachability architecture", function()
 end)
 
 describe("intelligence reachability ownership", function()
-  it("does not keep a second unreachable tracker or cancel attacks outside ASM", function()
+  it("does not keep a second unreachable tracker or cancel attacks outside AttackFSM", function()
     local file = assert(io.open("targetbot/attack_coordinator.lua", "r"))
     local source = file:read("*a")
     file:close()
@@ -42,7 +42,7 @@ describe("intelligence reachability ownership", function()
     assert.is_nil(source:find("cancelAttackAndFollow", 1, true))
   end)
 
-  it("keeps autonomous attack calls behind AttackStateMachine", function()
+  it("keeps autonomous attack calls behind AttackFSM", function()
     for _, path in ipairs({ "cavebot/actions.lua", "cavebot/clear_tile.lua", "cavebot/stand_lure.lua", "core/hold_target.lua" }) do
       local file = assert(io.open(path, "r"))
       local source = file:read("*a")

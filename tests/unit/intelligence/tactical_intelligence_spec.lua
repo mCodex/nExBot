@@ -121,8 +121,8 @@ describe("tactical intelligence facade", function()
       events = {
         recent = function()
           return {
-            { type = "AttackStarted", source = "AttackStateMachine", timestamp = 10 },
-            { type = "TargetKilled", source = "AttackStateMachine", timestamp = 20 },
+            { type = "AttackStarted", source = "AttackFSM", timestamp = 10 },
+            { type = "TargetKilled", source = "AttackFSM", timestamp = 20 },
           }
         end,
       },

@@ -203,13 +203,35 @@ local function resolveBackend()
   return function() return nil end
 end
 
+-- Every native backend (ACL adapter, bare `findPath` global, raw
+-- g_map.findPath) paths onto the EXACT goal tile with zero tolerance - none
+-- of them understand marginMin/marginMax/precision. Callers chasing a
+-- creature pass its own (usually occupied, unwalkable) tile as the goal and
+-- rely on precision/margin to accept any nearby tile instead. Emulate that
+-- the same way targetbot/monster_reachability.lua's findPathToRing already
+-- does for reachability checks: probe every tile in the ring and keep the
+-- shortest path that actually validates.
+local function ringCandidates(goalPos, marginMin, marginMax)
+  local candidates = {}
+  for dx = -marginMax, marginMax do
+    for dy = -marginMax, marginMax do
+      local distance = math.max(math.abs(dx), math.abs(dy))
+      if distance >= marginMin and distance <= marginMax then
+        candidates[#candidates + 1] = { x = goalPos.x + dx, y = goalPos.y + dy, z = goalPos.z }
+      end
+    end
+  end
+  return candidates
+end
+
 --- Find a path from `startPos` to `goalPos`.
 --
 -- @param startPos table {x,y,z}
 -- @param goalPos  table {x,y,z}
 -- @param opts     table (optional) {
 --   maxSteps:int, allowUnseen:bool, ignoreCreatures:bool,
---   ignoreNonPathable:bool, ignoreFields:bool, precision:int
+--   ignoreNonPathable:bool, ignoreFields:bool, precision:int,
+--   marginMin:int, marginMax:int
 -- }
 -- @return {dir,...}|nil  array of direction ints, or nil
 function PathStrategy.findPath(startPos, goalPos, opts)
@@ -218,6 +240,21 @@ function PathStrategy.findPath(startPos, goalPos, opts)
   local flags    = optsToFlags(opts)
 
   if not _pathBackend then _pathBackend = resolveBackend() end
+
+  local marginMin = opts.marginMin or 0
+  local marginMax = opts.marginMax or opts.precision or 0
+
+  if marginMax > 0 then
+    local bestPath
+    for _, candidate in ipairs(ringCandidates(goalPos, marginMin, marginMax)) do
+      local path = _pathBackend(startPos, candidate, maxSteps, flags, opts)
+      if validateNativePath(startPos, path, opts) and (not bestPath or #path < #bestPath) then
+        bestPath = path
+      end
+    end
+    return bestPath
+  end
+
   local path = _pathBackend(startPos, goalPos, maxSteps, flags, opts)
   return validateNativePath(startPos, path, opts) and path or nil
 end

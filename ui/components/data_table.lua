@@ -54,6 +54,7 @@ local function renderRow(parent, projected, options, density, rowIndex, widget)
     })
   end
   if row.onClick then widget.onClick = row.onClick end
+  if widget.setChecked then widget:setChecked(not not row.selected) end
   return widget
 end
 

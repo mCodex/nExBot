@@ -80,7 +80,7 @@ function Doctor.capture(intelligence, live)
     },
     owners = {
       movement = { live.movementOwner or "MovementCoordinator" },
-      attack = { live.attackOwner or "AttackStateMachine" },
+      attack = { live.attackOwner or "AttackFSM" },
     },
     schemas = {
       storage = { current = live.storageVersion or 0, expected = 5 },

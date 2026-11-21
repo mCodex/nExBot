@@ -402,6 +402,27 @@ function M.installHostPanel()
   tabs._hostPanel = botPanel
   tabs.getPanel = function() return botPanel end
 
+  -- Mirrors mehah/otclient's game_bot: botTabs:addTab(name, widget) parents
+  -- the widget under the shared botPanel (the framework binds botPanel as
+  -- botTabs' content surface via setContentWidget) and returns a handle
+  -- whose tabPanel.content is that same widget. clearTabs() is what the
+  -- framework's clear() calls on every config-combo switch to reclaim every
+  -- tab it knows about — anything mounted outside this path is invisible
+  -- to it, which is the bug under test.
+  tabs._tabs = {}
+  tabs.addTab = function(self, name, widget)
+    botPanel:addChild(widget)
+    local entry = { name = name, content = widget }
+    self._tabs[#self._tabs + 1] = entry
+    return { tabPanel = { content = widget } }
+  end
+  tabs.clearTabs = function(self)
+    for _, entry in ipairs(self._tabs) do
+      if entry.content and not entry.content:isDestroyed() then entry.content:destroy() end
+    end
+    self._tabs = {}
+  end
+
   local contentsPanel = {
     botPanel = botPanel,
     botTabs = tabs,

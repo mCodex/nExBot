@@ -356,6 +356,35 @@ function C.helpTooltip(parent, opts)
   return w
 end
 
+-- Modal yes/no confirmation, used before any destructive multi-item action
+-- (e.g. deleting several waypoints at once). Single source so every
+-- destructive flow across modules confirms the same way.
+function C.confirmDialog(parent, opts)
+  opts = opts or {}
+  local overlay = create(parent, opts.overlayStyle or "NexConfirmOverlay", {})
+  local dialog = create(overlay, opts.style or "NexConfirmDialog", { id = "dialog" })
+  label(dialog, opts.message or "Are you sure?", "NexConfirmMessage", {
+    id = "message", textStyle = "body", color = Tokens.colors.text.primary,
+  })
+
+  local function close()
+    overlay:destroy()
+  end
+
+  C.footerActions(dialog, {
+    secondary = { text = opts.cancelText or "Cancel", onClick = function()
+      close()
+      if opts.onCancel then opts.onCancel() end
+    end },
+    primary = { text = opts.confirmText or "Confirm", onClick = function()
+      close()
+      if opts.onConfirm then opts.onConfirm() end
+    end },
+  })
+
+  return overlay
+end
+
 if nExBot then
   nExBot.UI = nExBot.UI or {}
   nExBot.UI["ui.components.components"] = C

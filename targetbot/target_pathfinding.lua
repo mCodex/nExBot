@@ -47,10 +47,6 @@ local function isTargetableCreature(creature)
   local Client = getClient()
   local oldTibia = (Client and Client.getClientVersion) and Client.getClientVersion() < 960
   if oldTibia then return true end
-  local okType, creatureType = pcall(function() return creature:getType() end)
-  if okType and creatureType then
-    return creatureType < 3
-  end
   return true
 end
 

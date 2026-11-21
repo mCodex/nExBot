@@ -3,27 +3,6 @@ CaveBotEditorButton < Button
   font: verdana-11px-rounded
   text-align: center
 
-CaveBotEditorHeaderColumn < Label
-  font: verdana-11px-rounded
-  color: #d7c8a5
-  text-wrap: false
-
-CaveBotEditorCell < Label
-  font: verdana-11px-rounded
-  text-wrap: false
-
-CaveBotEditorRow < Panel
-  height: 20
-  focusable: true
-  layout:
-    type: horizontalBox
-
-  $hover:
-    background-color: #3b4145
-
-  $focus:
-    background-color: #4a4333
-
 CaveBotEditorCloseButton < Button
   size: 14 14
   anchors.top: parent.top
@@ -39,7 +18,7 @@ CaveBotEditorCloseButton < Button
 CaveBotEditorPanel < MainWindow
   id: cavebotEditor
   text: Cave route editor
-  size: 520 460
+  size: 640 480
   visible: false
   @onEscape: self:hide()
 
@@ -56,68 +35,65 @@ CaveBotEditorPanel < MainWindow
     text-align: center
     text: -
 
-  Panel
-    id: tableHeader
-    height: 18
-    anchors.top: pos.bottom
-    anchors.left: parent.left
-    width: 220
-    margin-top: 4
-    layout:
-      type: horizontalBox
-
-    CaveBotEditorHeaderColumn
-      id: headerId
-      width: 28
-      text: #
-      text-align: center
-
-    CaveBotEditorHeaderColumn
-      id: headerType
-      width: 82
-      text: Type
-
-    CaveBotEditorHeaderColumn
-      id: headerCoords
-      text: Value
-
   VerticalScrollBar
-    id: tableScrollBar
+    id: paletteScrollBar
     width: 10
-    anchors.top: tableHeader.bottom
-    anchors.left: tableHeader.right
+    anchors.top: pos.bottom
+    anchors.right: parent.right
     anchors.bottom: message.top
-    margin-top: 2
+    margin-top: 4
     margin-bottom: 4
     step: 20
     pixels-scroll: true
 
   ScrollablePanel
-    id: tableScroll
-    anchors.top: tableHeader.bottom
+    id: palette
+    width: 210
+    anchors.top: pos.bottom
+    anchors.right: paletteScrollBar.left
+    anchors.bottom: message.top
+    margin-top: 4
+    margin-bottom: 4
+    vertical-scrollbar: paletteScrollBar
+    layout:
+      type: verticalBox
+
+  VerticalScrollBar
+    id: tableScrollBar
+    width: 10
+    anchors.top: pos.bottom
+    anchors.right: palette.left
+    anchors.bottom: commands.top
+    margin-top: 4
+    margin-right: 4
+    margin-bottom: 4
+    step: 20
+    pixels-scroll: true
+
+  ScrollablePanel
+    id: tableContainer
+    anchors.top: pos.bottom
     anchors.left: parent.left
     anchors.right: tableScrollBar.left
-    anchors.bottom: message.top
-    margin-top: 2
+    anchors.bottom: commands.top
+    margin-top: 4
+    margin-right: 4
     margin-bottom: 4
     vertical-scrollbar: tableScrollBar
     layout:
       type: verticalBox
 
   Panel
-    id: buttons
-    anchors.top: pos.bottom
-    anchors.left: tableScrollBar.right
-    anchors.right: parent.right
+    id: commands
+    height: 30
+    anchors.left: parent.left
+    anchors.right: palette.left
     anchors.bottom: message.top
-    margin-top: 4
-    margin-left: 8
+    margin-right: 4
     margin-bottom: 4
     layout:
-      type: grid
-      cell-size: 112 26
-      cell-spacing: 3
-      flow: true
+      type: horizontalBox
+      spacing: 4
 
   Label
     id: message

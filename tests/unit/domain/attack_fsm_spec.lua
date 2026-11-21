@@ -289,6 +289,43 @@ describe("AttackFSM", function()
     assert.equals(600, fsm.getTargetId())
   end)
 
+  it("releases the client attack pointer when giving up on a still-blocked target", function()
+    -- Regression: handleTemporarilyBlocked's "blocked_max_retries" path used to
+    -- call clearTarget() without cancelAttack() first. This target never dies
+    -- and is never hard-release-eligible, so the client's own attacking-creature
+    -- pointer must be explicitly released here -- otherwise EventTargeting
+    -- (which reads g_game.getAttackingCreature() as its sole ground truth for
+    -- "is combat still active") keeps believing this dead-end target is still
+    -- being fought forever, and TargetBot silently stops acquiring anything
+    -- else even with monsters fully visible on screen.
+    local c = makeCreature(1200, "Wraith")
+    fsm.requestAttack(c, 500)
+    clock = clock + 200
+    fsm.update()
+    attackingCreature = c
+    clock = clock + 200
+    fsm.update()
+    assert.equals("LOCKED", fsm.getState())
+
+    reachabilityResult = { state = "TEMPORARILY_BLOCKED", attackable = false }
+    clock = clock + 200
+    fsm.update()
+    assert.equals("TEMPORARILY_BLOCKED", fsm.getState())
+
+    -- Exhaust REAFFIRM_RETRY_MAX retries without the client ever un-marking
+    -- the creature as its attack target (it never died, never left -- it's
+    -- just perpetually blocked).
+    for _ = 1, CombatConstants.REAFFIRM_RETRY_MAX do
+      clock = clock + CombatConstants.ENGAGE_BACKOFF_BASE + 1
+      fsm.update()
+    end
+
+    assert.equals("IDLE", fsm.getState())
+    assert.is_nil(fsm.getTargetId())
+    assert.is_true(#cancelCalls > 0, "expected cancelAttack to release the client's stale attack pointer")
+    assert.is_nil(attackingCreature, "client attack pointer must not stay stuck on an abandoned target")
+  end)
+
   it("hard release DIFFERENT_FLOOR goes RELEASING -> IDLE", function()
     local c = makeCreature(700, "Ghost")
     fsm.requestAttack(c, 500)

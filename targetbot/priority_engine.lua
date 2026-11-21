@@ -570,8 +570,8 @@ function PriorityEngine.calculate(creature, config, path)
     if config.rpSafe then
       local gt = gameTarget()
       if gt and cId(gt) == cId(creature) then
-        if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
-          pcall(AttackStateMachine.stop)
+        if AttackFSM and AttackFSM.isActive and AttackFSM.isActive() then
+          pcall(AttackFSM.stop)
         end
       end
     end
@@ -604,8 +604,8 @@ function PriorityEngine.shouldAllowSwitch(newId, newPriority, newHp)
   end
 
   -- Fallback: simple switch gate
-  if AttackStateMachine and AttackStateMachine.getTargetId then
-    local curId = AttackStateMachine.getTargetId()
+  if AttackFSM and AttackFSM.getTargetId then
+    local curId = AttackFSM.getTargetId()
     if not curId then return true, "no_target" end
     if curId == newId then return true, "same_target" end
   end
@@ -615,8 +615,8 @@ function PriorityEngine.shouldAllowSwitch(newId, newPriority, newHp)
 
   -- Default: allow with basic cooldown
   local CC_SWITCH = (CC and CC.SWITCH_COOLDOWN) or 2500
-  if AttackStateMachine and AttackStateMachine.getStats then
-    local s = AttackStateMachine.getStats()
+  if AttackFSM and AttackFSM.getStats then
+    local s = AttackFSM.getStats()
     -- If stats don't exist yet, allow
     if not s then return true, "no_stats" end
   end

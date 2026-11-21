@@ -75,19 +75,19 @@ describe("BotShell host integration", function()
     shell:destroy()
   end)
 
-  it("destroys the replaced host surface", function()
+  it("leaves other tabs' content in botPanel untouched", function()
     local cp = modules.game_bot.contentsPanel
     local legacy = g_ui.createWidget("BotPanel", cp.botPanel)
     legacy:setId("tabPanel")
     assert.are_equal(cp.botPanel, legacy:getParent())
     local shell = Shell.show()
-    assert.is_nil(legacy:getParent(), "replaced UI must leave botPanel")
-    assert.is_true(legacy:isDestroyed(), "replaced UI must not remain alive")
+    assert.are_equal(cp.botPanel, legacy:getParent(), "another tab's content must not be reparented")
+    assert.is_false(legacy:isDestroyed(), "another tab's content must not be destroyed")
     assert.is_true(shell:getWindow():isVisible(), "shell layout must be visible")
     shell:destroy()
   end)
 
-  it("botPanel has no leftover legacy children once the shell attaches", function()
+  it("mounts alongside pre-existing botPanel children instead of replacing them", function()
     local cp = modules.game_bot.contentsPanel
     local legacyA = g_ui.createWidget("BotPanel", cp.botPanel)
     legacyA:setId("tabPanelA")
@@ -95,17 +95,39 @@ describe("BotShell host integration", function()
     legacyB:setId("tabPanelB")
     local shell = Shell.show()
     local children = cp.botPanel:getChildren()
-    assert.are_equal(1, #children, "botPanel must contain only the shell layout")
-    assert.are_equal("NexBotController", children[1]:getId())
+    assert.are_equal(3, #children, "shell must add its tab content, not clear the panel")
+    assert.is_false(legacyA:isDestroyed())
+    assert.is_false(legacyB:isDestroyed())
     shell:destroy()
   end)
 
-  it("disables the legacy tab bar so a stray click can't reach it", function()
+  it("mounts via botTabs:addTab and leaves the native tab bar enabled", function()
     local cp = modules.game_bot.contentsPanel
     assert.is_true(cp.botTabs:isEnabled())
+    assert.is_true(cp.botTabs:isVisible())
     local shell = Shell.show()
-    assert.is_false(cp.botTabs:isEnabled(), "legacy tab bar must be disabled once the shell owns the panel")
-    assert.is_false(cp.botTabs:isVisible())
+    assert.is_true(cp.botTabs:isEnabled(), "native tab bar must stay usable for other scripts/tabs")
+    assert.is_true(cp.botTabs:isVisible())
+    assert.are_equal(1, #cp.botTabs._tabs, "shell must register itself as exactly one native tab")
+    assert.are_equal("nExBot", cp.botTabs._tabs[1].name)
+    assert.are_equal(shell:getWindow(), cp.botTabs._tabs[1].content)
+    shell:destroy()
+  end)
+
+  it("the framework's clearTabs() (fired on a config-combo switch) reclaims the shell's tab, and setupHostHooks remounts a fresh one", function()
+    local cp = modules.game_bot.contentsPanel
+    local shell = Shell.show()
+    local oldWindow = shell:getWindow()
+
+    -- Mirrors mehah/otclient's bot.lua clear(), called by refresh() every
+    -- time the user picks a different entry in the config combo.
+    cp.botTabs:clearTabs()
+    assert.is_true(oldWindow:isDestroyed(), "the native framework must be able to reclaim the shell's tab")
+
+    shell:setupHostHooks()
+    assert.is_false(shell:getWindow():isDestroyed())
+    assert.is_false(oldWindow == shell:getWindow(), "shell must remount into a fresh tab")
+    assert.is_true(shell:getWindow():isVisible())
     shell:destroy()
   end)
 
@@ -150,15 +172,14 @@ describe("BotShell host integration", function()
     shell:destroy()
   end)
 
-  it("removes alternate host tab navigation names", function()
+  it("falls back to a floating window when the host has no botTabs", function()
     local cp = modules.game_bot.contentsPanel
-    cp.tabBar = cp.botTabs
     cp.botTabs = nil
 
     local shell = Shell.show()
 
-    assert.is_false(cp.tabBar:isEnabled())
-    assert.is_false(cp.tabBar:isVisible())
+    assert.is_false(shell:isPanelMode(), "without botTabs there is no native tab to mount into")
+    assert.are_equal("MainWindow", shell:getWindow():getStyle())
     shell:destroy()
   end)
 
@@ -224,23 +245,6 @@ describe("BotShell host integration", function()
     assert.are_equal("dropper", shell:selected())
     assert.is_truthy(shell:getWorkspace():recursiveGetChildById("pageSelect"))
     assert.is_truthy(shell:getContent():recursiveGetChildById("dropperItems"))
-    shell:destroy()
-  end)
-
-  it("setupHostHooks re-attaches when the host rebuilds the panel", function()
-    local shell = Shell.show()
-    local oldRoot = shell:getWindow()
-    -- simulate the framework re-running refresh(): it destroys the panel and
-    -- rebuilds a fresh botPanel + legacy content
-    local cp = modules.game_bot.contentsPanel
-    cp.botPanel:destroy()
-    cp.botPanel = g_ui.createWidget("Panel", nil)
-    cp.botPanel:setId("botPanel")
-    g_ui.createWidget("BotPanel", cp.botPanel)
-    shell:setupHostHooks()
-    assert.is_true(shell:isPanelMode())
-    assert.is_false(oldRoot == shell:getWindow(), "shell must rebuild into the fresh panel")
-    assert.is_true(shell:getWindow():isVisible())
     shell:destroy()
   end)
 

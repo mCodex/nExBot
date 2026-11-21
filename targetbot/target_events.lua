@@ -80,7 +80,6 @@ if EventBus then
     if TargetBot.isOff() then return end
     if newPos and oldPos and newPos.z ~= oldPos.z then
       I.invalidateCache()
-      if AttackStateMachine and AttackStateMachine.clearSkipList then AttackStateMachine.clearSkipList() end
       return
     end
     I.clearPaths()

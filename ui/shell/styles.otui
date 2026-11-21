@@ -266,6 +266,10 @@ NexTableRow < Panel
   $hover:
     background-color: #3b4145
 
+  $checked:
+    background-color: #3f6b9450
+    border-color: #5b8fc9
+
 NexTableRowOdd < NexTableRow
   background-color: #24272920
 
@@ -543,3 +547,23 @@ NexFooterButton < NexButton
   width: 86
   height: 26
   margin: 1
+
+NexConfirmOverlay < Panel
+  anchors.fill: parent
+  background-color: #000000a0
+  focusable: true
+
+NexConfirmDialog < Panel
+  width: 280
+  anchors.centerIn: parent
+  background-color: #2a2d2ff0
+  border-width: 1
+  border-color: #454b4f80
+  padding: 12
+  layout:
+    type: verticalBox
+    spacing: 10
+
+NexConfirmMessage < Label
+  text-wrap: true
+  text-auto-resize: true

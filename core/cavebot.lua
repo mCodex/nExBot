@@ -24,6 +24,9 @@ safeDofile("/cavebot/waypoint_policy.lua")
 safeDofile("/cavebot/actions.lua")
 safeDofile("/cavebot/config.lua")
 safeDofile("/cavebot/example_functions.lua")
+safeDofile("/cavebot/editor_selection.lua")
+safeDofile("/cavebot/editor_history.lua")
+safeDofile("/cavebot/editor_icons.lua")
 safeDofile("/cavebot/editor.lua")
 safeDofile("/cavebot/recorder.lua")
 safeDofile("/cavebot/tools.lua")
@@ -91,11 +94,9 @@ dofile("/targetbot/domain/reachability_service.lua")
 dofile("/targetbot/domain/target_commitment.lua")
 dofile("/targetbot/domain/target_evaluator.lua")
 
--- Load AttackStateMachine for linear, consistent targeting (before creature.lua)
 dofile("/targetbot/combat_constants.lua")      -- Shared timing constants for attack pipeline
-dofile("/targetbot/attack_state_machine.lua") -- State machine for attack persistence
 
--- Application layer (state machines — must load after domain + ASM)
+-- Application layer (state machines — must load after domain)
 dofile("/targetbot/application/combat_frame.lua")
 dofile("/targetbot/application/attack_fsm.lua")
 

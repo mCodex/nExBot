@@ -135,6 +135,9 @@ function S.evaluate(creature, context)
 
   if isHardFailure(state) and checkConfirmed(e) then
     state = ReachabilityState.CONFIRMED_HARD_UNREACHABLE
+    if TargetReachability and TargetReachability.quarantine then
+      TargetReachability.quarantine(creature, tr)
+    end
   end
 
   return { state = state, reason = tr.reason, path = tr.path, evidence = e, attackable = false }

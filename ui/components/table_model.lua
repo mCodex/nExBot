@@ -10,7 +10,7 @@ local function displayedFingerprint(row, density)
   local secondary = density == "narrow" and row.compactSecondary or (row.secondary or row.subtitle)
   local fields = {
     row.title or row.name or "", secondary or "", row.status or "", row.statusText or "",
-    row.itemId or "", row.imageSource or "",
+    row.itemId or "", row.imageSource or "", row.selected and "1" or "0",
   }
   local hash = 5381
   for _, field in ipairs(fields) do

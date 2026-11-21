@@ -122,6 +122,10 @@ local function transition(to, reason)
     st.retries = 0
     st.currentTimeout = 0
   end
+
+  if EventBus and EventBus.emit then
+    pcall(EventBus.emit, "attacksm:state_changed", to, st.previous, reason)
+  end
 end
 
 local function gameTarget()
@@ -310,6 +314,7 @@ local function handleAttacking()
       if commitmentBlocksRelease() then
         transition(S.TEMPORARILY_BLOCKED, "max_retries_committed")
       else
+        cancelAttack()
         clearTarget()
         transition(S.IDLE, "max_retries")
       end
@@ -346,6 +351,7 @@ local function handleConfirmingAttack()
       if commitmentBlocksRelease() then
         transition(S.TEMPORARILY_BLOCKED, "confirm_max_committed")
       else
+        cancelAttack()
         clearTarget()
         transition(S.IDLE, "confirm_max")
       end
@@ -497,6 +503,7 @@ local function handleTemporarilyBlocked()
         st.retries = 0
         return
       end
+      cancelAttack()
       clearTarget()
       transition(S.IDLE, "blocked_max_retries")
       return
@@ -514,7 +521,16 @@ local function handleRecoveringTarget()
     return
   end
 
-  if isConfirmedInternal() then
+  local r = evaluateReachability(st.creature)
+
+  -- isConfirmedInternal() only checks whether the client's attack-target
+  -- pointer still identifies this creature -- that pointer is sticky and
+  -- stays set even while the creature is genuinely unreachable (behind an
+  -- obstacle, no attack position, etc). Trusting it alone here caused an
+  -- infinite LOCKED <-> TEMPORARILY_BLOCKED <-> RECOVERING_TARGET loop that
+  -- reset st.retries every cycle and never let the FSM release a
+  -- permanently-blocked target.
+  if r.attackable and isConfirmedInternal() then
     st.lastConfirmedAt = nowMs()
     st.stats.confirms = st.stats.confirms + 1
     st.retries = 0
@@ -522,7 +538,6 @@ local function handleRecoveringTarget()
     return
   end
 
-  local r = evaluateReachability(st.creature)
   if r.attackable and sendAttack(st.creature) then
     if isConfirmedInternal() then
       st.lastConfirmedAt = nowMs()
@@ -541,6 +556,7 @@ local function handleRecoveringTarget()
       if commitmentBlocksRelease() then
         transition(S.TEMPORARILY_BLOCKED, "recovery_max_committed")
       else
+        cancelAttack()
         clearTarget()
         transition(S.IDLE, "recovery_max")
       end

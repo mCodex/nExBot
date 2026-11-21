@@ -40,6 +40,17 @@ describe("route safety", function()
     assert.is_nil(source:find("return tryKeyboardNudge"))
   end)
 
+  it("never delegates validated CaveBot movement to native autoWalk", function()
+    -- Native autoWalk recomputes its own route independently of the strict,
+    -- wall-safe path CaveBot already validated (nativePathIsSafe/findPath) --
+    -- it can silently diverge from it (skip tiles, take a looser route),
+    -- which is the exact failure class the session GPS driver was reverted
+    -- for (a61ebdc). CaveBot must dispatch every waypoint via the validated
+    -- per-tile keyboardStep, same as the already-proven corridor path.
+    local source = assert(io.open("cavebot/walking.lua", "r")):read("*a")
+    assert.is_nil(source:find("autoWalkDispatch", 1, true))
+  end)
+
   it("passes OTBR autoWalk max steps and options separately", function()
     local calls = {}
     _G.g_game = {

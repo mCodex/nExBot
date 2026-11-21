@@ -24,7 +24,7 @@ describe("intelligence Bot Doctor", function()
     local issues = Doctor.inspect({
       owners = {
         movement = { "MovementCoordinator" },
-        attack = { "AttackStateMachine" },
+        attack = { "AttackFSM" },
       },
       lifecycle = { active = true, subscriptions = 2, elapsedMs = 11 * 60 * 1000 },
       pipeline = { eventCount = 0 },
@@ -52,7 +52,7 @@ describe("intelligence Bot Doctor", function()
       budgets = { maxMilliseconds = 5 },
     }, {
       movementOwner = "MovementCoordinator",
-      attackOwner = "AttackStateMachine",
+      attackOwner = "AttackFSM",
       subscriptions = 4,
       tick = { avgTickTime = 2 },
       storageVersion = 5,
@@ -65,7 +65,7 @@ describe("intelligence Bot Doctor", function()
     })
 
     assert.same({ "MovementCoordinator" }, captured.owners.movement)
-    assert.same({ "AttackStateMachine" }, captured.owners.attack)
+    assert.same({ "AttackFSM" }, captured.owners.attack)
     assert.equals(4, captured.lifecycle.subscriptions)
     assert.equals(2, captured.performance.tickMs)
     assert.equals(5, captured.performance.budgetMs)

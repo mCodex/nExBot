@@ -18,8 +18,8 @@
   Architecture:
   - EventTargeting.LiveMonsterCount: Direct API count (most accurate)
   - EventTargeting.Cache: Fast creature tracking with LRU eviction
-  - EventTargeting.PathValidator: Validates reachability
-  - EventTargeting.TargetAcquisition: Instant target selection
+  - EventTargeting.TargetAcquisition: Instant target selection (reachability
+    delegated to the authoritative TargetReachability service)
   - EventTargeting.CombatCoordinator: CaveBot integration
 ]]
 
@@ -150,14 +150,6 @@ local targetState = {
 -- Cached player reference
 local Client = getClient()
 local player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or nil
-
--- Path validation parameters (reuse to avoid allocations)
-local PATH_PARAMS = {
-  ignoreLastCreature = true,
-  ignoreNonPathable = true,
-  ignoreCost = true,
-  ignoreCreatures = true
-}
 
 -- STATE MANAGEMENT
 
@@ -294,38 +286,6 @@ local function updatePlayerRef()
   player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or player
 end
 
--- FLOOR CHANGE DETECTION (Prevents chasing across stairs/ropes)
-
--- Use centralized floor-change items from constants (DRY principle)
-if not FloorItems then
-  dofile("constants/floor_items.lua")
-end
-local FLOOR_CHANGE_ITEMS = FloorItems.FLOOR_CHANGE
-
--- Use PathUtils for floor-change colors if available
-local FLOOR_CHANGE_COLORS = (PathUtils and PathUtils.FLOOR_CHANGE_COLORS) or FloorItems.FLOOR_CHANGE_COLORS
-
--- Check if position is a floor-change tile (Use PathUtils for DRY)
-local function isFloorChangeTile(pos)
-  if PathUtils and PathUtils.isFloorChangeTile then
-    return PathUtils.isFloorChangeTile(pos)
-  end
-  if TargetCore and TargetCore.PathSafety and TargetCore.PathSafety.isFloorChangeTile then
-    return TargetCore.PathSafety.isFloorChangeTile(pos)
-  end
-  if not pos then return false end
-  local Client = getClient()
-  local color = (Client and Client.getMinimapColor) and Client.getMinimapColor(pos) or (g_map and g_map.getMinimapColor and g_map.getMinimapColor(pos)) or 0
-  if FLOOR_CHANGE_COLORS[color] then return true end
-  local tile = (Client and Client.getTile) and Client.getTile(pos) or (g_map and g_map.getTile and g_map.getTile(pos))
-  if not tile then return false end
-  local ground = tile:getGround()
-  if ground and FLOOR_CHANGE_ITEMS[ground:getId()] then return true end
-  local topUse = tile:getTopUseThing()
-  if topUse and topUse:isItem() and FLOOR_CHANGE_ITEMS[topUse:getId()] then return true end
-  return false
-end
-
 -- CACHE MANAGEMENT
 
 -- Touch entry (move to end of LRU) — O(1) via posMap
@@ -399,114 +359,6 @@ local function cleanupCache()
   creatureCache.posMap = newPmap
   creatureCache.count = count
   creatureCache.lastCleanup = now
-end
-
--- PATH VALIDATION
-
-EventTargeting.PathValidator = {}
-
--- Check if path is valid and within range
--- Returns: path, pathLength, isReachable
-function EventTargeting.PathValidator.validate(playerPos, targetPos)
-  if not playerPos or not targetPos then
-    return nil, 999, false
-  end
-  
-  -- Must be on same floor
-  if playerPos.z ~= targetPos.z then
-    return nil, 999, false
-  end
-  
-  -- Check if target is on a floor-change tile (don't chase there)
-  if isFloorChangeTile(targetPos) then
-    return nil, 999, false
-  end
-  
-  -- Check if adjacent (no path needed)
-  local dist = chebyshev(playerPos, targetPos)
-  if dist <= 1 then
-    return {}, 0, true
-  end
-  
-  -- Check if too far
-  if dist > CONST.MAX_CHASE_RANGE then
-    return nil, dist, false
-  end
-  
-  -- Find path (use PathUtils if available)
-  local path = nil
-  if PathUtils and PathUtils.findPath then
-    path = PathUtils.findPath(playerPos, targetPos, CONST.MAX_CHASE_RANGE, PATH_PARAMS)
-  elseif findPath then
-    path = findPath(playerPos, targetPos, CONST.MAX_CHASE_RANGE, PATH_PARAMS)
-  elseif getPath then
-    path = getPath(playerPos, targetPos, CONST.MAX_CHASE_RANGE, PATH_PARAMS)
-  end
-  
-  if not path then
-    return nil, dist, false
-  end
-  
-  local pathLen = #path
-  if pathLen > CONST.PATH_MAX_LENGTH then
-    return path, pathLen, false  -- Path exists but too long
-  end
-  
-  -- Check if path crosses floor-change tiles (Use PathUtils for DRY)
-  if pathLen > 0 then
-    if PathUtils and PathUtils.pathCrossesFloorChange then
-      if PathUtils.pathCrossesFloorChange(path, playerPos, pathLen) then
-        return nil, pathLen, false  -- Path crosses floor change
-      end
-    else
-      -- Fallback: manual check
-      local DIR_OFFSET = Directions.DIR_TO_OFFSET
-      local probe = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-      for i = 1, pathLen do
-        local off = DIR_OFFSET[path[i]]
-        if off then
-          probe.x = probe.x + off.x
-          probe.y = probe.y + off.y
-          if isFloorChangeTile(probe) then
-            return nil, pathLen, false  -- Path crosses floor change
-          end
-        end
-      end
-    end
-  end
-  
-  return path, pathLen, true
-end
-
--- Get cached or fresh path
--- Get cached or fresh path (improved with SafeCreature module)
-function EventTargeting.PathValidator.getPath(creature)
-  if not creature then return nil, 999, false end
-  
-  -- Safe ID access using safe wrapper
-  local id = SC.getId(creature)
-  if not id then return nil, 999, false end
-
-  local entry = creatureCache.entries[id]
-  
-  -- Check cached path
-  if entry and entry.path and (now - entry.pathTime) < CONST.PATH_CACHE_TTL then
-    return entry.path, #entry.path, true
-  end
-  
-  -- Calculate fresh path
-  updatePlayerRef()
-  if not player then return nil, 999, false end
-  
-  -- Safe position access
-  local playerPos = SC.getPosition(player)
-  local creaturePos = SC.getPosition(creature)
-  
-  if not playerPos or not creaturePos then
-    return nil, 999, false
-  end
-  
-  return EventTargeting.PathValidator.validate(playerPos, creaturePos)
 end
 
 -- TARGET ACQUISITION (Event-Driven)
@@ -654,7 +506,8 @@ function EventTargeting.TargetAcquisition.processCreature(creature)
   local dist = chebyshev(playerPos, creaturePos)
   if dist > CONST.DETECTION_RANGE then return end
   
-  -- Validate path (delegated to TargetReachability when available)
+  -- Validate path via TargetReachability (authoritative reachability service,
+  -- loaded before this module by core/cavebot.lua)
   local path = nil
   local reachable = false
   if TargetReachability and TargetReachability.evaluate then
@@ -663,9 +516,6 @@ function EventTargeting.TargetAcquisition.processCreature(creature)
       path = evaluated.path
       reachable = evaluated.attackable
     end
-  else
-    local _, _, isReachable = EventTargeting.PathValidator.validate(playerPos, creaturePos)
-    reachable = isReachable
   end
   
   -- Calculate priority
@@ -784,8 +634,6 @@ function EventTargeting.TargetAcquisition.evaluateTarget(creature, priority, pat
     if TargetReachability and TargetReachability.evaluate then
       local ok, evaluated = pcall(TargetReachability.evaluate, currentTarget, { source = "event_current" })
       if ok and evaluated then currentPath = evaluated.path end
-    else
-      currentPath = select(1, EventTargeting.PathValidator.getPath(currentTarget))
     end
     currentPriority = EventTargeting.TargetAcquisition.calculatePriority(currentTarget, currentPath)
   end
@@ -814,7 +662,7 @@ function EventTargeting.TargetAcquisition.acquireTarget(creature, path, priority
   if not playerPos or not creaturePos then return end
   local dist = chebyshev(playerPos, creaturePos)
 
-  local FSM = AttackFSM or AttackStateMachine
+  local FSM = AttackFSM
   if not FSM or not FSM.requestAttack then return end
   local sent = FSM.requestAttack(creature, priorityHint or 0)
   if not sent then return end
@@ -879,9 +727,6 @@ function EventTargeting.TargetAcquisition.reacquireBestRemaining()
               path = evaluated.path
               reachable = evaluated.attackable
             end
-          else
-            local _, _, isReachable = EventTargeting.PathValidator.validate(playerPos, cpos)
-            reachable = isReachable
           end
           if reachable then
             local priority = EventTargeting.TargetAcquisition.calculatePriority(creature, path)
@@ -1344,7 +1189,7 @@ if EventBus then
       _etPendingNil = schedule(ET_NIL_GRACE_MS, function()
         _etPendingNil = nil
         -- Only clear if ASM also considers target gone
-        if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
+        if AttackFSM and AttackFSM.isActive and AttackFSM.isActive() then
           return  -- ASM still managing — transient nil
         end
         if targetState.combatActive then

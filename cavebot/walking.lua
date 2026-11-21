@@ -228,9 +228,7 @@ local function findWalkablePath(playerPos, dest, opts)
   return nil, false, blockClass
 end
 
--- DISPATCH: KEYBOARD STEP vs AUTOWALK
-
-local KEYBOARD_THRESHOLD = 2
+-- DISPATCH: KEYBOARD STEP
 
 --- Walk a single keyboard step along the path. Returns true on success.
 local function keyboardStep(path, playerPos, curIdx, allowSmoothing)
@@ -249,41 +247,6 @@ local function keyboardStep(path, playerPos, curIdx, allowSmoothing)
   -- P0.4: never advance the cursor optimistically on dispatch. The next
   -- walkTo call re-paths from the player's OBSERVED position, so path[1] is
   -- always the correct next step.
-  PS().resetCursor()
-  return true
-end
-
---- Walk via autoWalk for longer distances. Returns true on success.
-local function autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist)
-  local chunkSteps = math.min(safeSteps, 40)
-  local chunkDest  = PS().chunkDestination(path, playerPos, curIdx, chunkSteps)
-
-  -- Don't interrupt ongoing walk toward same destination
-  if player:isWalking() then
-    local d = math.abs(playerPos.x - chunkDest.x) + math.abs(playerPos.y - chunkDest.y)
-    if d <= chunkSteps + 2 then return true end
-  end
-
-  -- Verify native autoWalk path won't cross floor-change tiles
-  local isSafe, nPath, unsafeIdx = PS().nativePathIsSafe(playerPos, chunkDest)
-  if not isSafe then
-    if nPath and unsafeIdx and unsafeIdx > 1 then
-      local safeDest, safeN = PS().safePrefixDest(playerPos, nPath, unsafeIdx)
-      if safeN >= 2 then
-        chunkDest  = safeDest
-        chunkSteps = safeN
-        isSafe = true
-      end
-    end
-    if not isSafe then
-      return keyboardStep(path, playerPos, curIdx)
-    end
-  end
-
-  local precision = chunkSteps >= 10 and 1 or 0
-  PS().autoWalk(chunkDest, maxDist, {precision = precision})
-  -- P0.4: no optimistic cursor advance; the path re-plans from the observed
-  -- position on the next walkTo call.
   PS().resetCursor()
   return true
 end
@@ -480,16 +443,13 @@ CaveBot.walkTo = function(dest, maxDist, params)
     end
   end
 
-  -- Dispatch: keyboard for short paths, autoWalk for long
-  if approach.dispatch == "keyboard" or stepsToWalk <= KEYBOARD_THRESHOLD then
-    if keyboardStep(path, playerPos, curIdx, classification ~= "transition") then return true end
-    PS().resetCursor()
-    return false
-  else
-    if autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist) then return true end
-    PS().resetCursor()
-    return false
-  end
+  -- Dispatch: always per-tile keyboard stepping. Native autoWalk recomputes
+  -- its own route independently of the strict path just validated above, so
+  -- it can silently diverge from it (skip tiles, take a looser route) -- the
+  -- same failure class the session GPS driver was reverted for (a61ebdc).
+  if keyboardStep(path, playerPos, curIdx, classification ~= "transition") then return true end
+  PS().resetCursor()
+  return false
 end
 
 -- CONVENIENCE & PUBLIC API

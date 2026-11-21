@@ -15,6 +15,6 @@ describe("combat ownership", function()
       assert.is_truthy(coordinator:find(method, 1, true), method)
     end
     assert.is_truthy(cavebot:find("CombatOwnership.isBlockingRoute", 1, true))
-    assert.is_nil(cavebot:find("AttackStateMachine.isActive", 1, true))
+    assert.is_nil(cavebot:find("AttackFSM.isActive", 1, true))
   end)
 end)

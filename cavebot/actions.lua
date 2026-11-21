@@ -491,14 +491,24 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     end
   end
 
+  -- Narrow-corridor detection: <=2 walkable neighbors on the waypoint tile
+  -- means the only way through is forward/backward along the corridor axis.
+  -- Feeds WaypointPolicy.classify so tight passages get precise keyboard
+  -- stepping instead of chunked autoWalk (which tolerates multi-tile slack
+  -- and overshoots/backtracks when the corridor is only 1 tile wide).
+  local walkableNeighbors = not isFloorChange and PathUtils.walkableNeighborCount(destPos) or nil
+  local isCorridor = walkableNeighbors ~= nil and walkableNeighbors <= 2
+
   local classification = WaypointPolicy.classify({
     position = destPos,
     isFloorChange = isFloorChange,
+    isCorridor = isCorridor,
   }, {
     playerPosition = playerPos,
     destinationPosition = destPos,
     isFloorChange = isFloorChange,
     adjacentFloorChange = CaveBot.isNearFloorChangeTile and CaveBot.isNearFloorChangeTile(destPos),
+    walkableNeighbors = walkableNeighbors,
   })
   local approach = WaypointPolicy.forApproach({
     classification = classification,
@@ -618,7 +628,9 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- boundary rather than overshooting to the center.
   local walkParams = {
     precision = isFloorChange and 0 or math.max(0, approach.arrivalPrecision - 1),
-    allowFloorChange = isFloorChange
+    allowFloorChange = isFloorChange,
+    isCorridor = isCorridor,
+    walkableNeighbors = walkableNeighbors,
   }
   -- Creep/field escalation is safe: it relaxes creature/field collision, never
   -- wall walkability (no ignoreNonPathable), so it cannot path through a wall.

@@ -53,35 +53,28 @@ local function hostContentsPanel()
   return modules and modules.game_bot and modules.game_bot.contentsPanel or nil
 end
 
-local function findTabNavigation(host)
-  for _, key in ipairs({ "botTabs", "tabBar", "tabs" }) do
-    if host[key] then return host[key] end
+-- The native bot framework (game_bot/bot.lua + executor.lua) exposes each
+-- script's UI as a tab via botTabs:addTab(name, widget), which returns the
+-- widget wrapped as tab.tabPanel.content. That's the ONLY surface the
+-- framework's own teardown (clear(), run on every config-combo switch)
+-- knows how to reclaim — it calls botTabs:clearTabs() and scans for
+-- widget.botWidget flags, but never touches botPanel's raw children
+-- directly. Mounting a raw child of botPanel (the old approach) is
+-- therefore invisible to that cleanup and survives indefinitely, colliding
+-- with whatever the next-selected script builds. Going through addTab
+-- makes nExBot's content subject to the same lifecycle as any other
+-- script's tab (including vBot's own "Main" tab), so no ownership/teardown
+-- logic of our own is needed here.
+local function mountHostTab(host)
+  local tabs = host and host.botTabs
+  if not tabs or not tabs.addTab then return nil end
+  local widget = g_ui.createWidget("NexControllerLayout")
+  local ok, tab = pcall(tabs.addTab, tabs, "nExBot", widget)
+  if not ok or not tab or not tab.tabPanel or not tab.tabPanel.content then
+    if widget.destroy then widget:destroy() end
+    return nil
   end
-  if host.recursiveGetChildById then
-    for _, id in ipairs({ "botTabs", "tabBar", "tabs" }) do
-      local tabs = host:recursiveGetChildById(id)
-      if tabs then return tabs end
-    end
-  end
-end
-
-local function clearHostSurface(host, ownedController)
-  if not host or not host.botPanel then return false end
-  local removed = false
-  local children = {}
-  for i, child in ipairs(host.botPanel:getChildren()) do children[i] = child end
-  for _, child in ipairs(children) do
-    if child ~= ownedController then
-      child:destroy()
-      removed = true
-    end
-  end
-  local tabs = findTabNavigation(host)
-  if tabs then
-    if tabs.setVisible then tabs:setVisible(false) end
-    if tabs.setEnabled then tabs:setEnabled(false) end
-  end
-  return removed
+  return tab.tabPanel.content
 end
 
 local function controllerRevision(view)
@@ -338,10 +331,10 @@ local function createShell(opts)
   function self:open()
     if self.window and not (self.window.isDestroyed and self.window:isDestroyed()) then return self end
     local host = hostContentsPanel()
-    if host and host.botPanel then
+    local mounted = host and mountHostTab(host)
+    if mounted then
       self.host, self.panelMode = host, true
-      clearHostSurface(host)
-      self.window = g_ui.createWidget("NexControllerLayout", host.botPanel)
+      self.window = mounted
     else
       self.window = UI.createWindow("NexControllerWindow", self.root)
       self.window:setWidth(760)
@@ -428,11 +421,15 @@ local function createShell(opts)
   function self:setupHostHooks()
     if not self.active or not self.panelMode then return end
     local host = hostContentsPanel()
-    if not host or not host.botPanel then return end
-    if self.window and self.window:getParent() == host.botPanel then clearHostSurface(host, self.window); return end
-    clearHostSurface(host)
-    if self.window then self.window:destroy() end
-    self.window = g_ui.createWidget("NexControllerLayout", host.botPanel)
+    if not host or not host.botTabs then return end
+    -- Still attached to a live tab: nothing to do. If the framework's own
+    -- clear() (fired on a config-combo switch) already reclaimed our tab,
+    -- self.window will report destroyed and we fall through to remount.
+    if self.window and not (self.window.isDestroyed and self.window:isDestroyed()) then return end
+    local mounted = mountHostTab(host)
+    if not mounted then return end
+    self.host = host
+    self.window = mounted
     self.window:setId("NexBotController")
     buildController(self.window)
     self.window:show()
