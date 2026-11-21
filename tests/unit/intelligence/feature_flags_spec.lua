@@ -1,0 +1,12 @@
+local Flags = dofile("core/intelligence/foundation/feature_flags.lua")
+
+describe("intelligence feature flags", function()
+  it("uses declared safe defaults and rejects unknown flags", function()
+    local flags = Flags.new({ replay = true, neuralModel = false })
+    assert.is_true(flags:enabled("replay"))
+    assert.is_false(flags:enabled("neuralModel"))
+    assert.same({ false, "unknown_flag" }, { flags:set("missing", true) })
+    assert.is_true(flags:set("replay", false))
+    assert.is_false(flags:enabled("replay"))
+  end)
+end)

@@ -18,6 +18,13 @@
 
 TargetCore = TargetCore or {}
 
+TargetBot = TargetBot or {}
+if not TargetBot.isOff then
+  TargetBot.isOff = function()
+    return not (TargetBot.isOn and TargetBot.isOn())
+  end
+end
+
 -- Use shared ClientHelper aliases (loaded by _Loader.lua)
 local getClient = nExBot.Shared.getClient
 local getClientVersion = nExBot.Shared.getClientVersion
@@ -425,8 +432,8 @@ function TargetCore.Native.setChaseMode(mode)
     return false  -- No change needed
   end
   
-  if g_game.setChaseMode then
-    g_game.setChaseMode(mode)
+  if MovementCoordinator and MovementCoordinator.setChaseMode then
+    MovementCoordinator.setChaseMode(mode == 1)
     TargetCore.Native.lastChaseMode = mode
     
     -- Emit EventBus event for coordination with other modules

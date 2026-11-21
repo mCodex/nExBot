@@ -5,7 +5,6 @@
 local cavebotTab = "Cave"
 local targetingTab = storage.extras.joinBot and "Cave" or "Target"
 
-setDefaultTab(cavebotTab)
 CaveBot.Extensions = {}
 
 local function safeDofile(path)
@@ -19,12 +18,15 @@ local function safeDofile(path)
 end
 
 -- Essential UI and core modules (load immediately)
-importStyle("/cavebot/cavebot.otui")
-importStyle("/cavebot/config.otui")
 importStyle("/cavebot/editor.otui")
+safeDofile("/cavebot/waypoint_search.lua")
+safeDofile("/cavebot/waypoint_policy.lua")
 safeDofile("/cavebot/actions.lua")
 safeDofile("/cavebot/config.lua")
 safeDofile("/cavebot/example_functions.lua")
+safeDofile("/cavebot/editor_selection.lua")
+safeDofile("/cavebot/editor_history.lua")
+safeDofile("/cavebot/editor_icons.lua")
 safeDofile("/cavebot/editor.lua")
 safeDofile("/cavebot/recorder.lua")
 safeDofile("/cavebot/tools.lua")
@@ -56,20 +58,13 @@ local deferredModules = {
 local function loadDeferred(idx)
 	idx = idx or 1
 	if idx > #deferredModules then return end
-	setDefaultTab(cavebotTab)
 		safeDofile(deferredModules[idx])
 	schedule(20, function() loadDeferred(idx + 1) end)
 end
 
 loadDeferred()
 
-setDefaultTab(targetingTab)
-if storage.extras.joinBot then UI.Label("-- [[ TargetBot ]] --") end
 TargetBot = {} -- global namespace
-importStyle("/targetbot/looting.otui")
-importStyle("/targetbot/target.otui")
-importStyle("/targetbot/creature_editor.otui")
-importStyle("/targetbot/monster_inspector.otui")
 
 -- Load TargetBot core module first (shared utilities)
 dofile("/targetbot/core.lua")
@@ -89,11 +84,23 @@ dofile("/targetbot/monster_tbi.lua")            -- 9-stage TargetBot Intelligenc
 
 -- Load AI orchestrator (wires EventBus → subsystems, updateAll, public API)
 dofile("/targetbot/monster_ai.lua")           -- Monster AI orchestrator / glue (v3.0)
+dofile("/targetbot/chase_controller.lua")     -- Native chase owner (must precede movement coordinator)
 dofile("/targetbot/movement_coordinator.lua") -- Coordinated movement system
 
--- Load AttackStateMachine for linear, consistent targeting (before creature.lua)
+-- Domain layer (pure decision modules — must load before application layer)
+dofile("/targetbot/domain/release_reasons.lua")
+dofile("/targetbot/domain/reachability_states.lua")
+dofile("/targetbot/domain/reachability_service.lua")
+dofile("/targetbot/domain/target_commitment.lua")
+dofile("/targetbot/domain/target_evaluator.lua")
+
 dofile("/targetbot/combat_constants.lua")      -- Shared timing constants for attack pipeline
-dofile("/targetbot/attack_state_machine.lua") -- State machine for attack persistence
+
+-- Application layer (state machines — must load after domain)
+dofile("/targetbot/application/combat_frame.lua")
+dofile("/targetbot/application/attack_fsm.lua")
+
+dofile("/targetbot/target_proposal.lua")      -- intelligence combat proposal adapter
 
 -- Load TargetBot modules
 dofile("/targetbot/creature.lua")
@@ -101,8 +108,6 @@ dofile("/targetbot/creature.lua")
 -- Event-driven targeting system (uses EventBus + Creature configs)
 dofile("/targetbot/event_targeting.lua")      -- High-performance EventBus targeting
 
--- Monster inspector UI (visualize learned patterns)
-dofile("/targetbot/monster_inspector.lua")
 dofile("/targetbot/creature_attack.lua")
 dofile("/targetbot/priority_engine.lua")      -- Unified priority scoring engine
 dofile("/targetbot/creature_editor.lua")

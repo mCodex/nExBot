@@ -442,9 +442,9 @@ end
 
 -- Tick
 if UnifiedTick and UnifiedTick.register then
-  UnifiedTick.register({ id = "monsterai_scenario", interval = 500,
-    priority = UnifiedTick.PRIORITY and UnifiedTick.PRIORITY.NORMAL or 50,
-    callback = function() if MonsterAI.COLLECT_ENABLED then pcall(S.detectScenario) end end })
+  UnifiedTick.register("monsterai_scenario", { interval = 500,
+    priority = UnifiedTick.Priority.NORMAL,
+    handler = function() if MonsterAI.COLLECT_ENABLED then pcall(S.detectScenario) end end })
 else
   macro(500, function()
     if zChanging() then

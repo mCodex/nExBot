@@ -196,15 +196,23 @@ local function hasShot(pp, cp, maxDistance)
   return false, "shoot_api_unavailable"
 end
 
-local function prune(tableValue)
-  local count, oldestKey, oldestAt = 0, nil, math.huge
-  for key, entry in pairs(tableValue) do
-    count = count + 1
-    local at = entry.evaluatedAt or entry.blockedAt or 0
-    if at < oldestAt then oldestKey, oldestAt = key, at end
+-- O(1) FIFO-bounded eviction (replaces the O(n) pairs()-scan this used to do
+-- on every single write). Curried factory: each store gets its own ring-buffer
+-- tracker, so an update to an existing key is free (no scan, no eviction) and
+-- a genuinely new key evicts in constant time via a wrapping cursor.
+local function makeBoundedTracker(maxEntries)
+  local order, cursor = {}, 0
+  return function(tableValue, key)
+    if tableValue[key] ~= nil then return end
+    cursor = (cursor % maxEntries) + 1
+    local evictKey = order[cursor]
+    if evictKey ~= nil then tableValue[evictKey] = nil end
+    order[cursor] = key
   end
-  if count >= MAX_ENTRIES and oldestKey then tableValue[oldestKey] = nil end
 end
+
+local trackCacheInsert = makeBoundedTracker(MAX_ENTRIES)
+local trackQuarantineInsert = makeBoundedTracker(MAX_ENTRIES)
 
 function R.evaluate(creature, context)
   context = context or {}
@@ -251,7 +259,7 @@ function R.evaluate(creature, context)
   evaluated.attackPosition = attackPosition
 
   if not evaluated.attackable then stats.rejected = stats.rejected + 1 end
-  prune(cache)
+  trackCacheInsert(cache, key)
   cache[key] = evaluated
   debugEvent("target_reachability_evaluated", evaluated)
   if not evaluated.attackable then debugEvent("target_candidate_rejected", evaluated) end
@@ -265,7 +273,7 @@ function R.quarantine(creature, evaluated)
   local failures = previous and previous.failureCount + 1 or 1
   local temporary = evaluated.classification == "temporarily_blocked"
   local cooldown = temporary and TEMP_COOLDOWN or math.min(HARD_COOLDOWN * (2 ^ (failures - 1)), HARD_COOLDOWN_MAX)
-  prune(quarantine)
+  trackQuarantineInsert(quarantine, id)
   quarantine[id] = {
     creatureId = id,
     reason = evaluated.reason,
@@ -342,13 +350,15 @@ MonsterAI = MonsterAI or {}
 MonsterAI.Reachability = R
 
 if EventBus and EventBus.on then
-  EventBus.on("player:position", function() R.invalidateCache() end)
+  EventBus.on("player:position", function() R.invalidateCache(); quarantine = {} end)
   EventBus.on("creature:move", function(creature) R.invalidate(creatureId(creature), "creature_moved") end)
   EventBus.on("monster:disappear", function(creature) R.invalidate(creatureId(creature), "disappeared") end)
 end
 
 if UnifiedTick and UnifiedTick.register then
-  UnifiedTick.register({ id = "target_reachability_cleanup", interval = 5000, priority = 10, callback = R.cleanup })
+  UnifiedTick.register("target_reachability_cleanup", {
+    interval = 5000, priority = UnifiedTick.Priority.IDLE, handler = R.cleanup,
+  })
 elseif type(macro) == "function" then
   macro(5000, R.cleanup)
 end

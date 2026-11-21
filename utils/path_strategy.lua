@@ -94,6 +94,52 @@ local function isDiagonal(dir)
   return dir and dir >= 4
 end
 
+local function isSafeTile(pos, ignoreCreatures)
+  local pu = PU()
+  if not pu then return false end
+  if pu.isTileWalkable and not pu.isTileWalkable(pos, ignoreCreatures) then return false end
+  if pu.isFloorChangeTile and pu.isFloorChangeTile(pos) then return false end
+  return true
+end
+
+-- Floor-change tiles (stairs/ropes/holes) are safe only as the FINAL step,
+-- never as intermediate steps: you cannot walk THROUGH a transition tile to
+-- get somewhere past it. validateNativePath therefore allows the goal position
+-- to be a floor-change tile (so the bot can step onto the stair/rope/hole),
+-- but still rejects them everywhere else so paths never cut through one.
+local function isSafeStep(pos, ignoreCreatures, isFinal)
+  local pu = PU()
+  if not pu then return false end
+  if pu.isTileWalkable and not pu.isTileWalkable(pos, ignoreCreatures) then return false end
+  if pu.isFloorChangeTile and pu.isFloorChangeTile(pos) and not isFinal then return false end
+  return true
+end
+
+local function validateNativePath(startPos, path, opts)
+  if type(path) ~= "table" or #path == 0 then return false end
+  local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
+  local ignoreCreatures = opts and opts.ignoreCreatures or false
+  local allowFloorChange = opts and opts.allowFloorChange or false
+  for i = 1, #path do
+    local dir = path[i]
+    local off = dirOffset(dir)
+    if not off then return false end
+    if isDiagonal(dir) then
+      local sideA = {x = probe.x + off.x, y = probe.y, z = probe.z}
+      local sideB = {x = probe.x, y = probe.y + off.y, z = probe.z}
+      if not isSafeStep(sideA, ignoreCreatures, false) or not isSafeStep(sideB, ignoreCreatures, false) then
+        return false
+      end
+    end
+    probe = applyOff(probe, off)
+    -- Only the terminal tile may be a floor-change tile, and only when
+    -- the caller explicitly requested floor-change traversal.
+    local isFinal = allowFloorChange and (i == #path)
+    if not isSafeStep(probe, ignoreCreatures, isFinal) then return false end
+  end
+  return true
+end
+
 --- Pseudo-random jitter for human-like timing.
 -- Uses math.random which is already seeded by OTClient.
 local function jitter(diagonal)
@@ -157,13 +203,35 @@ local function resolveBackend()
   return function() return nil end
 end
 
+-- Every native backend (ACL adapter, bare `findPath` global, raw
+-- g_map.findPath) paths onto the EXACT goal tile with zero tolerance - none
+-- of them understand marginMin/marginMax/precision. Callers chasing a
+-- creature pass its own (usually occupied, unwalkable) tile as the goal and
+-- rely on precision/margin to accept any nearby tile instead. Emulate that
+-- the same way targetbot/monster_reachability.lua's findPathToRing already
+-- does for reachability checks: probe every tile in the ring and keep the
+-- shortest path that actually validates.
+local function ringCandidates(goalPos, marginMin, marginMax)
+  local candidates = {}
+  for dx = -marginMax, marginMax do
+    for dy = -marginMax, marginMax do
+      local distance = math.max(math.abs(dx), math.abs(dy))
+      if distance >= marginMin and distance <= marginMax then
+        candidates[#candidates + 1] = { x = goalPos.x + dx, y = goalPos.y + dy, z = goalPos.z }
+      end
+    end
+  end
+  return candidates
+end
+
 --- Find a path from `startPos` to `goalPos`.
 --
 -- @param startPos table {x,y,z}
 -- @param goalPos  table {x,y,z}
 -- @param opts     table (optional) {
 --   maxSteps:int, allowUnseen:bool, ignoreCreatures:bool,
---   ignoreNonPathable:bool, ignoreFields:bool, precision:int
+--   ignoreNonPathable:bool, ignoreFields:bool, precision:int,
+--   marginMin:int, marginMax:int
 -- }
 -- @return {dir,...}|nil  array of direction ints, or nil
 function PathStrategy.findPath(startPos, goalPos, opts)
@@ -172,7 +240,23 @@ function PathStrategy.findPath(startPos, goalPos, opts)
   local flags    = optsToFlags(opts)
 
   if not _pathBackend then _pathBackend = resolveBackend() end
-  return _pathBackend(startPos, goalPos, maxSteps, flags, opts)
+
+  local marginMin = opts.marginMin or 0
+  local marginMax = opts.marginMax or opts.precision or 0
+
+  if marginMax > 0 then
+    local bestPath
+    for _, candidate in ipairs(ringCandidates(goalPos, marginMin, marginMax)) do
+      local path = _pathBackend(startPos, candidate, maxSteps, flags, opts)
+      if validateNativePath(startPos, path, opts) and (not bestPath or #path < #bestPath) then
+        bestPath = path
+      end
+    end
+    return bestPath
+  end
+
+  local path = _pathBackend(startPos, goalPos, maxSteps, flags, opts)
+  return validateNativePath(startPos, path, opts) and path or nil
 end
 
 -- HUMANISED STEP TIMING (DRY: raw duration from PathUtils, jitter added here)
@@ -190,15 +274,17 @@ function PathStrategy.rawStepDuration(diagonal)
   return pu and pu.getStepDuration(diagonal) or (diagonal and 280 or 200)
 end
 
--- DIRECTION GUARD (sole anti-zigzag system — replaces all others)
--- 3-entry ring buffer, 150ms opposite rejection, dampening after 3 rapid changes
+-- DIRECTION ANTI-ZIGZAG (simplified)
+-- The A* path is already the smoothest route; the client's native autowalk and
+-- smoothPath already emit diagonal merges. The old dampener HELD the previous
+-- direction for 200ms on every turn, which stalled the char at corners (lag)
+-- and then snapped to a diagonal (rubber-band). That hold is removed: we just
+-- track the last direction so siblings (e.g. smoothPath) can read it. "Linear
+-- and smooth" comes from following the path, not from holding a stale heading.
 
-local _dirRing = {nil, nil, nil}  -- 3 most recent directions
+local _dirRing = {nil, nil, nil}
 local _dirRingHead = 1
 local _dirRingSize = 0
-local _dirLastTs = 0
-local _dirRapidChanges = 0
-local _dirDampenUntil = 0         -- timestamp: hold direction until this time
 
 -- DRY: delegate to PathUtils (SSoT for direction relationship checks)
 -- Lazy wrappers since PathUtils may not be loaded yet at file scope
@@ -214,64 +300,15 @@ function PathStrategy.isOpposite(a, b)
   return pu and pu.areOppositeDirections and pu.areOppositeDirections(a, b) or false
 end
 
---- Update anti-zigzag state and return smoothed direction.
+--- Update anti-zigzag state and return the direction (no holding/dampening).
 -- @param dir       int  Direction constant
--- @param forceChange bool  When true, bypass dampening (used near FC tiles)
+-- @param forceChange bool  Accepted, retained for API compatibility
 function PathStrategy.smoothDirection(dir, forceChange)
   if not dir then return dir end
-  local t = tick()
-
-  if forceChange then
-    -- Force: accept direction, reset state
-    _dirRing[_dirRingHead] = dir
-    _dirRingHead = (_dirRingHead % 3) + 1
-    _dirRingSize = math.min(_dirRingSize + 1, 3)
-    _dirLastTs = t
-    _dirRapidChanges = 0
-    _dirDampenUntil = 0
-    return dir
-  end
-
-  -- If dampening is active, hold the last accepted direction
-  if t < _dirDampenUntil then
-    local lastAccepted = _dirRing[((_dirRingHead - 2) % 3) + 1]
-    return lastAccepted or dir
-  end
-
-  local lastDir = _dirRingSize > 0 and _dirRing[((_dirRingHead - 2) % 3) + 1] or nil
-
-  -- Same direction — no change needed
-  if lastDir and dir == lastDir then
-    _dirRapidChanges = math.max(0, _dirRapidChanges - 1)
-    return dir
-  end
-
-  -- Opposite direction rejection: if last direction was set <150ms ago, reject
-  if lastDir and PathStrategy.isOpposite(lastDir, dir) then
-    if (t - _dirLastTs) < 150 then
-      return lastDir
-    end
-  end
-
-  -- Track rapid direction changes
-  if lastDir and not PathStrategy.isSimilar(lastDir, dir) then
-    _dirRapidChanges = _dirRapidChanges + 1
-  else
-    _dirRapidChanges = math.max(0, _dirRapidChanges - 1)
-  end
-
-  -- If 3+ rapid changes, dampen for one step duration (~200ms)
-  if _dirRapidChanges >= 3 then
-    _dirRapidChanges = 0
-    _dirDampenUntil = t + 200
-    return lastDir or dir
-  end
-
-  -- Accept the new direction
+  -- Record the direction in the ring (ring history kept for amortized state)
   _dirRing[_dirRingHead] = dir
   _dirRingHead = (_dirRingHead % 3) + 1
   _dirRingSize = math.min(_dirRingSize + 1, 3)
-  _dirLastTs = t
   return dir
 end
 
@@ -279,9 +316,6 @@ function PathStrategy.resetDirectionState()
   _dirRing = {nil, nil, nil}
   _dirRingHead = 1
   _dirRingSize = 0
-  _dirLastTs = 0
-  _dirRapidChanges = 0
-  _dirDampenUntil = 0
 end
 
 -- PATH SMOOTHING — zigzag-to-diagonal conversion
@@ -326,13 +360,12 @@ function PathStrategy.smoothPath(path, startPos)
         local diagDir = directionTo(p, diagPos)
         if diagDir then
           -- Validate diagonal tile is safe
-          local safe = true
+          local safe = isSafeTile(diagPos, false)
           local pu = PU()
-          if pu and pu.isTileSafe then
-            safe = pu.isTileSafe(diagPos, false)
-          else
-            local tile = g_map and g_map.getTile(diagPos)
-            safe = tile and tile:isWalkable() or false
+          if safe and pu and pu.isTileSafe then safe = pu.isTileSafe(diagPos, false) end
+          if safe then
+            safe = isSafeTile({x = p.x + o1.x, y = p.y + o1.y, z = p.z}, false)
+              and isSafeTile({x = p.x + o2.x, y = p.y + o2.y, z = p.z}, false)
           end
           if safe then
             -- Also verify the diagonal doesn't cross a floor change
@@ -436,23 +469,22 @@ end
 --- @return table|nil nativePath (dir array, only when isSafe==true)
 --- @return number|nil unsafeIdx  first unsafe step index (when isSafe==false)
 function PathStrategy.nativePathIsSafe(startPos, goalPos, opts)
-  local nativePath = PathStrategy.findPath(startPos, goalPos, opts or {
-    ignoreNonPathable = true,
-  })
+  local nativePath = PathStrategy.findPath(startPos, goalPos, opts or {})
   if not nativePath or #nativePath == 0 then
     return false, nil, nil   -- no path at all
   end
 
   local isFC = getIsFC()
+  local allowFloorChange = opts and opts.allowFloorChange or false
   local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
   for i = 1, #nativePath do
     local off = dirOffset(nativePath[i])
-    if not off then break end
+    if not off then return false, nativePath, i end
     probe = applyOff(probe, off)
-    if isFC(probe) then
-      return false, nativePath, i
-    end
-    if not PU().isTileWalkable(probe) then
+    -- The terminal tile may be a floor-change tile only when the caller
+    -- explicitly requested floor-change traversal.
+    local isFinal = allowFloorChange and (i == #nativePath)
+    if (isFC(probe) and not isFinal) or not isSafeTile(probe, opts and opts.ignoreCreatures) then
       return false, nativePath, i
     end
   end

@@ -1,0 +1,10 @@
+describe("Profiles page", function()
+  it("does not duplicate host profile selectors", function()
+    local file = assert(io.open("ui/modules/profiles.lua", "r"))
+    local source = file:read("*a")
+    file:close()
+
+    assert.is_nil(source:find("Components.selectRow", 1, true))
+    assert.is_truthy(source:find("default client toolbar", 1, true))
+  end)
+end)

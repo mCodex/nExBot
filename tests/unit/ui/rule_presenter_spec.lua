@@ -1,0 +1,15 @@
+local Presenter = require("ui.core.rule_presenter")
+
+describe("rule presenter", function()
+  it("formats healing spell and item triggers", function()
+    assert.are_equal("HP < 55% / Mana > 160", Presenter.healTrigger({ origin = "HP%", sign = "<", value = 55, cost = 160 }))
+    assert.are_equal("MP < 30%", Presenter.healTrigger({ origin = "MP%", sign = "<", value = 30 }))
+  end)
+
+  it("formats attack count, range and health conditions", function()
+    local text = Presenter.attackTrigger({ count = 4, orMore = true, minHp = 40, maxHp = 100, mana = 300, description = "Wave" })
+    assert.is_truthy(text:find("4+ creatures", 1, true))
+    assert.is_truthy(text:find("HP 40-100%", 1, true))
+    assert.is_truthy(text:find("Mana > 300", 1, true))
+  end)
+end)

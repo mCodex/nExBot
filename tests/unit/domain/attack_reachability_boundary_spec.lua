@@ -7,15 +7,17 @@ local function makeCreature(id)
   return c
 end
 
-describe("AttackStateMachine reachability boundary", function()
+describe("AttackFSM reachability boundary", function()
   local attacks
   local cancels
   local allowed
+  local attackingCreature
 
   before_each(function()
     attacks = 0
     cancels = 0
     allowed = false
+    attackingCreature = nil
     _G.now = 10000
     _G.nExBot = {
       Shared = {
@@ -39,9 +41,18 @@ describe("AttackStateMachine reachability boundary", function()
     }
     _G.g_game = {
       getLocalPlayer = function() return {} end,
-      getAttackingCreature = function() return nil end,
+      getAttackingCreature = function() return attackingCreature end,
       attack = function() attacks = attacks + 1 end,
-      cancelAttackAndFollow = function() cancels = cancels + 1 end,
+      cancelAttackAndFollow = function() cancels = cancels + 1; attackingCreature = nil end,
+    }
+    _G.ReachabilityService = {
+      evaluate = function()
+        return { attackable = allowed, reason = allowed and "reachable" or "no_attack_position", state = allowed and "ATTACKABLE_NOW" or "CONFIRMED_HARD_UNREACHABLE" }
+      end,
+    }
+    _G.ReachabilityState = {
+      isHardRelease = function(state) return state == "CONFIRMED_HARD_UNREACHABLE" end,
+      isTemporary = function(state) return false end,
     }
     _G.TargetReachability = {
       evaluate = function()
@@ -56,31 +67,45 @@ describe("AttackStateMachine reachability boundary", function()
     _G.PriorityEngine = nil
     _G.EventBus = nil
     _G.BotCore = { Creatures = { getNearby = function() return {} end } }
-    _G.AttackStateMachine = nil
-    dofile("targetbot/attack_state_machine.lua")
+    _G.AttackFSM = nil
+    _G.AttackFSM = dofile("targetbot/application/attack_fsm.lua")
+    AttackFSM.reset()
   end)
 
   it("blocks initial and forced attacks at the final boundary", function()
     local target = makeCreature(1)
-    assert.is_false(AttackStateMachine.requestAttack(target, 100))
-    assert.is_false(AttackStateMachine.forceAttack(target))
+    assert.is_false(AttackFSM.requestAttack(target, 100))
+    assert.is_false(AttackFSM.forceAttack(target))
     assert.equals(0, attacks)
   end)
 
   it("issues an attack after authoritative validation succeeds", function()
     allowed = true
-    assert.is_true(AttackStateMachine.requestAttack(makeCreature(2), 100))
+    assert.is_true(AttackFSM.requestAttack(makeCreature(2), 100))
     assert.equals(1, attacks)
   end)
 
-  it("releases a target that becomes unreachable without restoring its hold", function()
+  it("releases a target that becomes unreachable once locked", function()
     allowed = true
-    assert.is_true(AttackStateMachine.requestAttack(makeCreature(3), 100))
+    local target = makeCreature(3)
+    assert.is_true(AttackFSM.requestAttack(target, 100))
+    attackingCreature = target
+    _G.now = _G.now + 100
+    AttackFSM.update()
+    assert.equals("ATTACKING", AttackFSM.getState())
+    _G.now = _G.now + 100
+    AttackFSM.update()
+    assert.equals("LOCKED", AttackFSM.getState())
+
     allowed = false
     _G.now = _G.now + 100
-    AttackStateMachine.update()
-    assert.equals("IDLE", AttackStateMachine.getState())
-    assert.is_nil(AttackStateMachine.getHoldTargetId())
+    AttackFSM.update()
+    assert.equals("RELEASING", AttackFSM.getState())
+    _G.now = _G.now + 100
+    AttackFSM.update()
+
+    assert.equals("IDLE", AttackFSM.getState())
+    assert.is_nil(AttackFSM.getTargetId())
     assert.equals(1, attacks)
     assert.equals(1, cancels)
   end)

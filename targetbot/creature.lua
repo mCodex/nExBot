@@ -22,9 +22,9 @@ local CACHE_LRU_SIZE = 20    -- Keep only 20 most recent entries when pruning
 local cacheAccessOrder = {}  -- Array of {name, accessTime}
 
 TargetBot.Creature.resetConfigs = function()
-  -- Safety check: targetList may not be initialized yet
-  if TargetBot.targetList then
-    TargetBot.targetList:destroyChildren()
+  -- The collection may not be initialized during startup.
+  if TargetBot.Creatures then
+    TargetBot.Creatures:destroyChildren()
   end
   TargetBot.Creature.resetConfigsCache()
 end
@@ -75,8 +75,8 @@ local compiledPatterns = {}
 --- These standalone "!Name" entries act as a universal block list.
 TargetBot.Creature._rebuildGlobalExcludes = function()
   TargetBot.Creature.globalExcludes = {}
-  if not TargetBot.targetList then return end
-  local children = TargetBot.targetList:getChildren()
+  if not TargetBot.Creatures then return end
+  local children = TargetBot.Creatures:getChildren()
   for i = 1, #children do
     local cfg = children[i].value
     if cfg and cfg.regex == "^$" and cfg.excludeRegex then
@@ -156,13 +156,13 @@ TargetBot.Creature.addConfig = function(config, focus)
     end
   end
 
-  -- Safety check: targetList must be initialized
-  if not TargetBot.targetList then
+  -- The collection must be initialized before profiles are applied.
+  if not TargetBot.Creatures then
     warn("[TargetBot] Cannot add config - UI not initialized yet")
     return nil
   end
 
-  local widget = UI.createWidget("TargetBotEntry", TargetBot.targetList)
+  local widget = TargetBot.Creatures:add({})
   widget:setText(config.name)
   widget.value = config
 
@@ -179,10 +179,7 @@ TargetBot.Creature.addConfig = function(config, focus)
   end
 
   if focus then
-    widget:focus()
-    if TargetBot.targetList then
-      TargetBot.targetList:ensureChildVisible(widget)
-    end
+    TargetBot.Creatures:focus(widget)
   end
   return widget
 end
@@ -191,8 +188,8 @@ end
 TargetBot.Creature.getConfigs = function(creature)
   if not creature then return {} end
   
-  -- Safety check: targetList may not be initialized yet during startup
-  if not TargetBot.targetList then return {} end
+  -- Startup can query before the collection exists.
+  if not TargetBot.Creatures then return {} end
   
   -- Check cache TTL
   if now - TargetBot.Creature.lastCacheClear > CACHE_TTL then
@@ -233,7 +230,7 @@ TargetBot.Creature.getConfigs = function(creature)
   -- Build configs list with optimized iteration
   local configs = {}
   local configCount = 0
-  local children = TargetBot.targetList:getChildren()
+  local children = TargetBot.Creatures:getChildren()
   
   for i = 1, #children do
     local config = children[i]

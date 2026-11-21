@@ -147,26 +147,6 @@ end
 
 -- ── Movement ─────────────────────────────────────────────────────────
 
-local function walkStep(dir)
-  local lp = ClientService.getLocalPlayer()
-  if not lp or not dir then return false end
-  if lp.isWalking and lp:isWalking() then return false end
-
-  if g_game and g_game.forceWalk then
-    local ok = pcall(function() g_game.forceWalk(dir) end)
-    if ok then return true end
-  end
-  if lp.walk then
-    local ok = pcall(function() lp:walk(dir) end)
-    if ok then return true end
-  end
-  if g_game and g_game.walk then
-    local ok = pcall(function() g_game.walk(dir) end)
-    if ok then return true end
-  end
-  return false
-end
-
 local function registerFollowIntent(targetPos, confidence)
   if not MovementCoordinator or not MovementCoordinator.Intent then return false end
   local intentType = MovementCoordinator.CONSTANTS

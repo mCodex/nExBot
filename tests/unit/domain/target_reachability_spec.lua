@@ -138,6 +138,27 @@ describe("TargetReachability", function()
     assert.is_false(service.isQuarantined(target))
   end)
 
+  it("evicts the oldest quarantine entry once MAX_ENTRIES is exceeded (O(1), no full scan)", function()
+    -- Regression: prune() used to do a pairs() O(n) scan on every single insert.
+    -- The replacement is a curried ring-buffer tracker (makeBoundedTracker) that
+    -- evicts the oldest entry in O(1) once the store is at capacity.
+    local first = creature(1000, 105, 100)
+    local firstEval = service.evaluate(first, { mode = "melee", force = true })
+    service.quarantine(first, firstEval)
+    assert.is_true(service.isQuarantined(first))
+
+    for i = 1, 128 do
+      local target = creature(2000 + i, 105, 100)
+      local evaluated = service.evaluate(target, { mode = "melee", force = true })
+      service.quarantine(target, evaluated)
+    end
+
+    assert.is_false(service.isQuarantined(first))
+
+    local last = creature(2128, 105, 100)
+    assert.is_true(service.isQuarantined(last))
+  end)
+
   it("fails conservatively when no path capability exists", function()
     _G.findPath = nil
     _G.g_map.findPath = nil

@@ -1,42 +1,19 @@
-setDefaultTab("Cave")
-
-do
-  local path = nExBot.paths.base .. "/core/cavebot_control_panel.otui"
-  local content = nil
-  if g_resources and g_resources.readFileContents then
-    content = g_resources.readFileContents(path)
-  end
-  if content then
-    g_ui.loadUIFromString(content)
-  else
-    warn("[CaveBot] Failed to load cavebot_control_panel.otui from " .. path)
-    return
-  end
-end
-
-local panel = UI.createWidget("CaveBotControlPanel")
-
-storage.caveBot = {
+storage.caveBot = storage.caveBot or {
   forceRefill = false,
   backStop = false,
   backTrainers = false,
-  backOffline = false
+  backOffline = false,
 }
 
--- [[ B U T T O N S ]] --
+CaveBot.Control = {}
 
-local forceRefill = UI.Button("Force Refill", function(widget)
-    storage.caveBot.forceRefill = true
-end, panel.buttons)
+function CaveBot.Control.request(action)
+  if storage.caveBot[action] == nil then return false end
+  storage.caveBot[action] = true
+  return true
+end
 
-local backStop = UI.Button("Back & Stop", function(widget)
-    storage.caveBot.backStop = true
-end, panel.buttons)
-
-local backTrainers = UI.Button("To Trainers", function(widget)
-    storage.caveBot.backTrainers = true
-end, panel.buttons)
-
-local backOffline = UI.Button("Offline", function(widget)
-    storage.caveBot.backOffline = true
-end, panel.buttons)
+function CaveBot.Control.forceRefill() return CaveBot.Control.request("forceRefill") end
+function CaveBot.Control.backStop() return CaveBot.Control.request("backStop") end
+function CaveBot.Control.backTrainers() return CaveBot.Control.request("backTrainers") end
+function CaveBot.Control.backOffline() return CaveBot.Control.request("backOffline") end

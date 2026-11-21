@@ -1,0 +1,13 @@
+describe("CaveBot bootstrap", function()
+  it("loads waypoint policy before walking dependencies", function()
+    local file = assert(io.open("core/cavebot.lua", "r"))
+    local source = file:read("*a")
+    file:close()
+
+    local policy = assert(source:find('safeDofile("/cavebot/waypoint_policy.lua")', 1, true))
+    local actions = assert(source:find('safeDofile("/cavebot/actions.lua")', 1, true))
+    local walking = assert(source:find('safeDofile("/cavebot/walking.lua")', 1, true))
+    assert.is_true(policy < actions)
+    assert.is_true(policy < walking)
+  end)
+end)

@@ -89,12 +89,8 @@ if EventBus then
     if BotCore.Stats then
       BotCore.Stats.setHealth(hp, maxHp)
     end
-    -- Check if emergency heal needed
-    if BotCore.Priority and hp < oldHp then
-      -- Health dropped - priority engine will handle
-    end
   end, 200)
-  
+
   -- Mana changes
   EventBus.on("player:mana", function(mp, maxMp, oldMp, oldMaxMp)
     if BotCore.Stats then
@@ -121,16 +117,6 @@ if onManaChange then
 end
 
 -- EXHAUSTED EVENT HANDLING
-
--- Hook into exhausted events for graceful handling
-if onSpellCooldown then
-  onSpellCooldown(function(iconId, duration)
-    -- Forward to cooldown manager
-    if BotCore.Cooldown then
-      -- Cooldown manager handles this internally
-    end
-  end)
-end
 
 if onGroupSpellCooldown then
   onGroupSpellCooldown(function(groupId, duration)

@@ -68,7 +68,7 @@ CaveBot.Extensions.ClearTile.setup = function()
     if hasCreature2 then
       local c = tile:getCreatures()[1]
       if c:isMonster() then
-        attack(c)
+        if TargetBot and TargetBot.requestAttack then TargetBot.requestAttack(c, "ClearTile") end
         return "retry"
       end
     end

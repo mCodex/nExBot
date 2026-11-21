@@ -1,0 +1,18 @@
+local Scheduler = dofile("core/intelligence/foundation/adaptive_scheduler.lua")
+
+describe("intelligence adaptive scheduler policy", function()
+  it("uses deterministic activity rates without owning timers", function()
+    local scheduler = Scheduler.new({ idle = 500, route = 200, combat = 50, emergency = 20 })
+    assert.equals(500, scheduler:interval({}))
+    assert.equals(200, scheduler:interval({ routeActive = true }))
+    assert.equals(50, scheduler:interval({ combat = true, routeActive = true }))
+    assert.equals(20, scheduler:interval({ emergency = true }))
+  end)
+
+  it("backs optional work off after budget pressure", function()
+    local scheduler = Scheduler.new({ idle = 500, route = 200, combat = 50, emergency = 20, max = 1000 })
+    assert.equals(100, scheduler:interval({ combat = true, overBudget = true, optional = true }))
+    assert.equals(50, scheduler:interval({ combat = true, overBudget = true, optional = false }))
+    assert.has_error(function() Scheduler.new({ combat = 0 }) end)
+  end)
+end)

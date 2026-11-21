@@ -1,0 +1,50 @@
+local function loadModule()
+  _G.IntelligenceCaveBotRouteState = nil
+  dofile("core/intelligence/decisions/cavebot_route_state.lua")
+  return IntelligenceCaveBotRouteState.new()
+end
+
+describe("Intelligence CaveBot route state", function()
+  it("preserves the current waypoint across pause and resume", function()
+    local route = loadModule()
+    local generation = route:start({ "north", "east" })
+
+    assert.equals("north", route:currentWaypoint())
+    assert.is_true(route:pause("combat"))
+    assert.equals("north", route:currentWaypoint())
+    assert.is_true(route:resume())
+    assert.equals("running", route.state)
+    assert.is_true(route:applyOutcome(generation, "waypoint_reached"))
+    assert.equals("east", route:currentWaypoint())
+  end)
+
+  it("uses explicit recovery transitions without losing route intent", function()
+    local route = loadModule()
+    local generation = route:start({ "depot" })
+
+    assert.is_true(route:applyOutcome(generation, "path_failed"))
+    assert.equals("recovering", route.state)
+    assert.equals("depot", route:currentWaypoint())
+    assert.is_true(route:applyOutcome(generation, "recovery_succeeded"))
+    assert.equals("running", route.state)
+
+    route:applyOutcome(generation, "path_failed")
+    route:applyOutcome(generation, "recovery_failed")
+    assert.equals("paused", route.state)
+    assert.equals("recovery_failed", route.pauseReason)
+    assert.equals("depot", route:currentWaypoint())
+  end)
+
+  it("rejects outcomes from replaced route generations", function()
+    local route = loadModule()
+    local staleGeneration = route:start({ "old" })
+    local generation = route:start({ "new" })
+
+    local applied, reason = route:applyOutcome(staleGeneration, "waypoint_reached")
+    assert.is_false(applied)
+    assert.equals("stale_route_generation", reason)
+    assert.equals("new", route:currentWaypoint())
+    assert.is_true(route:applyOutcome(generation, "waypoint_reached"))
+    assert.equals("completed", route.state)
+  end)
+end)

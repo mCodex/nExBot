@@ -160,8 +160,6 @@ if voc() == 2 or voc() == 12 then
         return true -- Nothing to do
     end
 
-    UI.Separator()
-    
     -- Pre-cached equipment check to avoid repeated calls
     local cachedLeftId = nil
     local cachedRightId = nil
@@ -291,13 +289,15 @@ if voc() == 2 or voc() == 12 then
             group = "equipment"
         })
         -- Create dummy macro for UI toggle and BotDB compatibility
-        quiverManagerMacro = macro(300, "Quiver Manager", function() end)
+        quiverManagerMacro = macro(300, function() end)
+        quiverManagerMacro.name = "Quiver Manager"
         quiverManagerMacro:setOn(true)
         quiverManagerMacro.onSwitch = function(m)
             UnifiedTick.setEnabled("quiver_manager", m:isOn())
         end
     else
-        quiverManagerMacro = macro(300, "Quiver Manager", quiverManagerHandler)
+        quiverManagerMacro = macro(300, quiverManagerHandler)
+        quiverManagerMacro.name = "Quiver Manager"
     end
     BotDB.registerMacro(quiverManagerMacro, "quiverManager")
 end

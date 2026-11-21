@@ -2,7 +2,7 @@
   CaveBot Auto-Recorder v2.0.0
 
   Records goto waypoints as the player walks, optimized for the Pure Pursuit
-  and corridor-based navigation system in WaypointNavigator.
+  and corridor-based navigation system of the navigation context.
 
   DESIGN PRINCIPLES:
   - SRP: Records waypoints. Does not navigate or pathfind.
@@ -12,7 +12,7 @@
   KEY IMPROVEMENTS OVER v1:
   1. Direction-aware: places waypoints AT corners/turns, not after them
   2. Adaptive spacing: sparse on straight paths (15 tiles), dense at turns
-  3. Euclidean distance: consistent with WaypointNavigator segment math
+  3. Euclidean distance: consistent with route-graph segment math
   4. Collinear elimination: removes redundant mid-straight waypoints
   5. Post-floor-change anchor: records position on the new floor immediately
 

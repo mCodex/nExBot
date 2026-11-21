@@ -89,7 +89,7 @@ function PathUtils.paramsToFlags(params)
   if params.allowUnseen or params.allowNotSeenTiles then
     flags = flags + PathUtils.Flags.ALLOW_NOT_SEEN
   end
-  if params.allowCreatures then
+  if params.allowCreatures or params.ignoreLastCreature then
     flags = flags + PathUtils.Flags.ALLOW_CREATURES
   end
   if params.ignoreNonPathable or params.allowNonPathable then
@@ -289,6 +289,26 @@ function PathUtils.getTileSpeed(pos)
   local tile = PathUtils.getTile(pos)
   if not tile then return 150 end
   return tile.getGroundSpeed and tile:getGroundSpeed() or 150
+end
+
+-- Count walkable tiles among the 8 neighbors of pos. Used by CaveBot to detect
+-- narrow corridors (<=2 walkable neighbors on the waypoint tile itself means
+-- the only way through is forward/backward along the corridor axis), so the
+-- waypoint policy can switch from native chunked autoWalk (which tolerates a
+-- few tiles of slack and overshoots/backtracks in 1-wide passages) to precise
+-- keyboard stepping.
+function PathUtils.walkableNeighborCount(pos, ignoreCreatures)
+  if not pos then return nil end
+  local offsets = Directions and Directions.ADJACENT_OFFSETS
+  if not offsets then return nil end
+  local count = 0
+  for i = 1, #offsets do
+    local off = offsets[i]
+    if PathUtils.isTileWalkable({ x = pos.x + off.x, y = pos.y + off.y, z = pos.z }, ignoreCreatures) then
+      count = count + 1
+    end
+  end
+  return count
 end
 
 -- Check if tile has creatures

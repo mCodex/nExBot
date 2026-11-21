@@ -5,9 +5,8 @@
   This file only provides the TargetBot.Creature.calculatePriority entry point
   expected by creature.lua and any external callers.
 
-  AoE helpers (findBestAoEPosition, countAoEHits, getCreaturesInBeam) have been
-  moved to OpenTibiaBRTargeting (targetbot/opentibiabr_targeting.lua) which is
-  the canonical implementation.  Thin wrappers are kept here for backward compat.
+  AoE helpers (findBestAoEPosition, countAoEHits, getCreaturesInBeam) live in
+  PriorityEngine. Thin wrappers are kept here for backward compat.
 ]]
 
 local DIST_W = (TargetCore and TargetCore.CONSTANTS and TargetCore.CONSTANTS.DISTANCE_WEIGHTS) or {

@@ -22,8 +22,6 @@
   ═══════════════════════════════════════════════════════════════════════════
 ]]
 
-setDefaultTab("HP")
-
 -- Use centralized constants (dofile loads FoodItems globally)
 if not FoodItems then
   dofile("constants/food_items.lua")
@@ -168,7 +166,7 @@ end
 local castFoodMacro = nil
 
 if canUseFoodSpell() then
-  castFoodMacro = macro(CONFIG.CAST_FOOD_INTERVAL, "Cast Food", function()
+  castFoodMacro = macro(CONFIG.CAST_FOOD_INTERVAL, function()
     -- Check regeneration time (in deciseconds)
     local regenTime = getRegenTime()
     
@@ -191,23 +189,13 @@ if canUseFoodSpell() then
     
     State.lastCastFood = now
   end)
-  
-  -- Add tooltip
-  if castFoodMacro and castFoodMacro.button then
-    castFoodMacro.button:setTooltip(
-      "Automatically casts 'Exevo Pan' to create food.\n" ..
-      "Runs every 2 minutes when regeneration < 60 seconds.\n" ..
-      "Requires 50 mana and support spell cooldown.\n" ..
-      "Not available for Knights."
-    )
-  end
+  castFoodMacro.name = "Cast Food"
   
   -- Register with BotDB for persistence
   if BotDB and BotDB.registerMacro then
     BotDB.registerMacro(castFoodMacro, "castFood")
   end
   
-  UI.Separator()
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -317,25 +305,16 @@ if UnifiedTick and UnifiedTick.register then
     group = "tools"
   })
   -- Create dummy macro for UI toggle compatibility
-  eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", function() end)
+  eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, function() end)
+  eatFoodMacro.name = "Eat Food"
   eatFoodMacro:setOn(true)
   eatFoodMacro.onSwitch = function(m)
     UnifiedTick.setEnabled("eat_food", m:isOn())
   end
 else
   -- Fallback to standalone macro
-  eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, "Eat Food", eatFoodHandler)
-end
-
--- Add tooltip
-if eatFoodMacro and eatFoodMacro.button then
-  eatFoodMacro.button:setTooltip(
-    "Automatically eats food when regeneration < 40 seconds.\n" ..
-    "Runs every 500ms and eats one piece at a time.\n" ..
-    "Searches all open containers for supported food items.\n" ..
-    "Uses EventBus for optimized performance.\n" ..
-    "10 second cooldown between eats to prevent spam."
-  )
+  eatFoodMacro = macro(CONFIG.EAT_FOOD_INTERVAL, eatFoodHandler)
+  eatFoodMacro.name = "Eat Food"
 end
 
 -- Register with BotDB for persistence, eat immediately on enable
@@ -347,8 +326,6 @@ end
 
 -- Setup event listener for reactive eating
 setupRegenEventListener()
-
-UI.Separator()
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- EXPORTS (For other modules to use)
@@ -362,4 +339,14 @@ nExBot.Food = {
   tryEat = tryEat,
   FOOD_IDS = FOOD_IDS,
   FOOD_LOOKUP = FOOD_LOOKUP,
+  isEatingEnabled = function() return eatFoodMacro:isOn() end,
+  setEatingEnabled = function(enabled)
+    if enabled then eatFoodMacro:setOn() else eatFoodMacro:setOff() end
+  end,
+  isCastingEnabled = function() return castFoodMacro and castFoodMacro:isOn() or false end,
+  setCastingEnabled = function(enabled)
+    if not castFoodMacro then return false end
+    if enabled then castFoodMacro:setOn() else castFoodMacro:setOff() end
+    return true
+  end,
 }

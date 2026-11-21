@@ -97,7 +97,6 @@ local lootedItems = {}
 local useData = {}
 local usedItems ={}
 local lastDataSend = {0, 0}
-local analyzerButton
 local killList = {}
 local membersData = {}
 HuntingSessionStart = os.date('%Y-%m-%d, %H:%M:%S')
@@ -119,86 +118,6 @@ storage.analyzers.outfits = storage.analyzers.outfits or {}
 storage.analyzers.customPrices = storage.analyzers.customPrices or {}
 
 local trackedLoot = storage.analyzers.trackedLoot
-
---destroy old windows
-local windowsTable = {"MainAnalyzerWindow", 
-                      "HuntingAnalyzerWindow", 
-                      "LootAnalyzerWindow", 
-                      "SupplyAnalyzerWindow", 
-                      "ImpactAnalyzerWindow", 
-                      "XPAnalyzerWindow", 
-                      "PartyAnalyzerWindow", 
-                      "DropTracker", 
-                      "CaveBotStats",
-                      "BossTracker"
-                     }
-
-                      for i, window in ipairs(windowsTable) do
-  local element = g_ui.getRootWidget():recursiveGetChildById(window)
-
-  if element then
-    element:destroy()
-  end
-end
-
-local mainWindow = UI.createMiniWindow("MainAnalyzerWindow")
-mainWindow:hide()
-mainWindow:setContentMaximumHeight(267)
-local huntingWindow = UI.createMiniWindow("HuntingAnalyzer")
-huntingWindow:hide()
-local lootWindow = UI.createMiniWindow("LootAnalyzer")
-lootWindow:hide()
-local supplyWindow = UI.createMiniWindow("SupplyAnalyzer")
-supplyWindow:hide()
-local impactWindow = UI.createMiniWindow("ImpactAnalyzer")
-impactWindow:hide()
-impactWindow:setContentMaximumHeight(615)
-local xpWindow = UI.createMiniWindow("XPAnalyzer")
-xpWindow:hide()
-xpWindow:setContentMaximumHeight(230)
-local settingsWindow = UI.createWindow("FeaturesWindow")
-settingsWindow:hide()
-local partyHuntWindow = UI.createMiniWindow("PartyAnalyzerWindow")
-partyHuntWindow:hide()
-local dropTrackerWindow = UI.createMiniWindow("DropTracker")
-dropTrackerWindow:hide()
-local statsWindow = UI.createMiniWindow("CaveBotStats")
-statsWindow:hide()
-local bossWindow = UI.createMiniWindow("BossTracker")
-bossWindow:hide()
-
---f
-local toggle = function()
-    if mainWindow:isVisible() then
-        analyzerButton:setOn(false)
-        mainWindow:close()
-    else
-        analyzerButton:setOn(true)
-        mainWindow:open()
-    end
-end
-
-local drawGraph = function(graph, value)
-    if not graph then return end
-    -- Ensure graph is created before adding values
-    if graph.getGraphsCount and graph:getGraphsCount() == 0 then
-        graph:createGraph()
-        graph:setLineWidth(1, 1)
-        graph:setLineColor(1, "#00FF00")  -- Default green color
-    end
-    -- Use index 1 for the graph
-    if graph.addValue then
-        graph:addValue(1, value)
-    end
-end
-
-local toggleAnalyzer = function(window)
-    if window:isVisible() then
-        window:hide()
-    else
-        window:show()
-    end
-end
 
 local function getSumStats()
   local totalWaste = 0
@@ -244,60 +163,6 @@ local function clipboardData()
   g_window.setClipboardText(final)
 end
 
--- create analyzers button
-analyzerButton = modules.game_buttons.buttonsWindow.contentsPanel and modules.game_buttons.buttonsWindow.contentsPanel.buttons.botAnalyzersButton
-analyzerButton = analyzerButton or modules.client_topmenu.getButton("botAnalyzersButton")
-if analyzerButton then
-    analyzerButton:destroy()
-end
-
---button
-analyzerButton = modules.client_topmenu.addRightGameToggleButton('botAnalyzersButton', 'nExBot Analyzers', '/images/topbuttons/analyzers', toggle, false, 999999)
-analyzerButton:setOn(false)
-
---toggles window
-mainWindow.contentsPanel.HuntingAnalyzer.onClick = function()
-    toggleAnalyzer(huntingWindow)
-end
-mainWindow.onClose = function()
-  analyzerButton:setOn(false)
-end
-mainWindow.contentsPanel.LootAnalyzer.onClick = function()
-    toggleAnalyzer(lootWindow)
-end
-mainWindow.contentsPanel.SupplyAnalyzer.onClick = function()
-    toggleAnalyzer(supplyWindow)
-end
-mainWindow.contentsPanel.ImpactAnalyzer.onClick = function()
-    toggleAnalyzer(impactWindow)
-end
-mainWindow.contentsPanel.XPAnalyzer.onClick = function()
-    toggleAnalyzer(xpWindow)
-end
-mainWindow.contentsPanel.PartyHunt.onClick = function()
-  toggleAnalyzer(partyHuntWindow)
-end
-mainWindow.contentsPanel.DropTracker.onClick = function()
-  toggleAnalyzer(dropTrackerWindow)
-end
-mainWindow.contentsPanel.Stats.onClick = function()
-  toggleAnalyzer(statsWindow)
-end
-mainWindow.contentsPanel.BossTracker.onClick = function()
-  toggleAnalyzer(bossWindow)
-end
-
--- boss tracker
-bossWindow.contentsPanel.search.onTextChange = function(widget, newText)
-  newText = newText:lower()
-  for i, child in ipairs(bossWindow.contentsPanel:getChildren()) do
-    local text = child:getId():lower()
-    if child:getId() ~= "search" then
-      child:setVisible(text:find(newText))
-    end
-  end
-end
-
 -- on login
 newTimeFormat = function(v) -- v in seconds
   local hours = string.format("%02.f", math.floor(v/3600))
@@ -305,33 +170,6 @@ newTimeFormat = function(v) -- v in seconds
 
   local final = hours.. "h "..mins.."min"
   return final
-end
-
-function createBossPanel(bossName, dueTime)
-  local widget = bossWindow.contentsPanel[bossName] or UI.createWidget("BossCreaturePanel", bossWindow.contentsPanel)
-  local outfit = storage.analyzers.outfits[bossName]
-
-  widget.time = dueTime
-  widget:setId(bossName)
-  if outfit then
-    widget.creature:setOutfit(outfit)
-  else
-    widget.creature:setTooltip("Outfit preview not available.\nTo get one you need to 'attack' ".. bossName.."\nOr you need to correct the boss name inside analyzers.lua file, const BOSSES")
-  end
-  widget.name:setText(bossName)
-
-  local timeLeft = os.difftime(dueTime, os.time())
-  if timeLeft > 0 then
-    widget.cooldown:setText(newTimeFormat(timeLeft))
-    widget.cooldown:setColor('#f29257')
-  else
-    widget.cooldown:setText("No Cooldown")
-    widget.cooldown:setColor('#b8b8b8')
-  end
-end
-
-for bossName, dueTime in pairs(storage.analyzers.trackedBoss) do
-  createBossPanel(bossName, dueTime)
 end
 
 local bossRegex = [[You (?:can|may) challenge ([\w\W]*) again in ([\d]*)]]
@@ -355,7 +193,6 @@ onTalk(function(name, level, mode, text, channelId, pos)
     cd = tonumber(cd) * 60 * 60 -- cd in seconds
 
     storage.analyzers.trackedBoss[name] = os.time() + cd
-    createBossPanel(name, os.time() + cd)
   end
 end)
 
@@ -369,282 +206,8 @@ onAttackingCreatureChange(function(newCreature, oldCreature)
   end
 end)
 
---stats window
-local totalRounds = UI.DualLabel("Total Rounds:", "0", {}, statsWindow.contentsPanel).right
-local avRoundTime = UI.DualLabel("Time by Round:", "00:00h", {}, statsWindow.contentsPanel).right
-UI.Separator(statsWindow.contentsPanel)
-local totalRefills = UI.DualLabel("Total Refills:", "0", {}, statsWindow.contentsPanel).right
-local avRefillTime = UI.DualLabel("Time by Refill:", "00:00h", {}, statsWindow.contentsPanel).right
-local lastRefill = UI.DualLabel("Time since Refill:", "00:00h", {maxWidth = 200}, statsWindow.contentsPanel).right
-UI.Separator(statsWindow.contentsPanel)
-local label = UI.DualLabel("Supplies by Round:", "", {maxWidth = 200}, statsWindow.contentsPanel).left
-label:setColor('#EC9706')
-local suppliesByRound = UI.createWidget("AnalyzerItemsPanel", statsWindow.contentsPanel)
-UI.Separator(statsWindow.contentsPanel)
-label = UI.DualLabel("Supplies by Refill:", "", {maxWidth = 200}, statsWindow.contentsPanel).left
-label:setColor('#ED7117')
-local suppliesByRefill = UI.createWidget("AnalyzerItemsPanel", statsWindow.contentsPanel)
-UI.Separator(statsWindow.contentsPanel)
-
---huntig
-local sessionTimeLabel = UI.DualLabel("Session:", "00:00h", {}, huntingWindow.contentsPanel).right
-local xpGainLabel = UI.DualLabel("XP Gain:", "0", {}, huntingWindow.contentsPanel).right
-local xpHourLabel = UI.DualLabel("XP/h:", "0", {}, huntingWindow.contentsPanel).right
-local lootLabel = UI.DualLabel("Loot:", "0", {}, huntingWindow.contentsPanel).right
-local suppliesLabel = UI.DualLabel("Supplies:", "0", {}, huntingWindow.contentsPanel).right
-local balanceLabel = UI.DualLabel("Balance:", "0", {}, huntingWindow.contentsPanel).right
-local damageLabel = UI.DualLabel("Damage:", "0", {}, huntingWindow.contentsPanel).right
-local damageHourLabel = UI.DualLabel("Damage/h:", "0", {}, huntingWindow.contentsPanel).right
-local healingLabel = UI.DualLabel("Healing:", "0", {}, huntingWindow.contentsPanel).right
-local healingHourLabel = UI.DualLabel("Healing/h:", "0", {}, huntingWindow.contentsPanel).right
-UI.DualLabel("Killed Monsters:", "", {maxWidth = 200}, huntingWindow.contentsPanel)
-local killedList = UI.createWidget("AnalyzerListPanel", huntingWindow.contentsPanel)
-UI.DualLabel("Looted items:", "", {maxWidth = 200}, huntingWindow.contentsPanel)
-local lootList = UI.createWidget("AnalyzerListPanel", huntingWindow.contentsPanel)
-
---party
-UI.Button("Copy to Clipboard", function() clipboardData() end, partyHuntWindow.contentsPanel)
-UI.Button("Reset Sessions", function()
-  if BotServer._websocket then
-    BotServer.send("partyHunt", false)
-  end
-end, partyHuntWindow.contentsPanel)
-
-local switch = addSwitch("sendData", "Send Analyzer Data", function(widget)
-  widget:setOn(not widget:isOn())
-  storage.sendPartyAnalyzerData = widget:isOn()
-end, partyHuntWindow.contentsPanel)
-switch:setOn(storage.sendPartyAnalyzerData)
-UI.Separator(partyHuntWindow.contentsPanel)
-local partySessionTimeLabel = UI.DualLabel("Session:", "00:00h", {}, partyHuntWindow.contentsPanel).right
-local partyLootLabel = UI.DualLabel("Loot:", "0", {}, partyHuntWindow.contentsPanel).right
-local partySuppliesLabel = UI.DualLabel("Supplies:", "0", {}, partyHuntWindow.contentsPanel).right
-local partyBalanceLabel = UI.DualLabel("Balance:", "0", {}, partyHuntWindow.contentsPanel).right
-UI.Separator(partyHuntWindow.contentsPanel)
-
-local function maintainDropTable()
-  local panel = dropTrackerWindow.contentsPanel
-
-  for k,v in pairs(trackedLoot) do
-    local widget = panel[k]
-    if not widget then
-      trackedLoot[k] = nil
-    end
-  end
-end
-
-local function createTrackedItems()
-  local panel = dropTrackerWindow.contentsPanel
-
-  for i, child in ipairs(panel:getChildren()) do
-    if i > 2 then
-      child:destroy()
-    end
-  end
-
-  for k,v in pairs(trackedLoot) do
-    local dropLoot = UI.createWidget("TrackerItem", dropTrackerWindow.contentsPanel)
-    local item = dropLoot.item
-    local name = dropLoot.name
-    local drops = dropLoot.drops
-    local id = tonumber(k)
-    local itemName = id == 3031 and "gold coin" or id == 3035 and "platinum coin" or id == 3043 and "crystal coin" or Item.create(id):getMarketData().name
-
-    dropLoot:setId(id)
-    item:setItemId(id)
-    if item:getItemCount() > 1 then
-      item:setItemCount(1)
-    end
-    name:setText(itemName)
-    drops:setText("Loot Drops: "..v)
-
-    dropLoot.onDoubleClick = function()
-      local id = dropLoot.item:getItemId()
-      trackedLoot[tostring(id)] = 0
-      drops:setText("Loot Drops: 0")
-    end
-  
-    for i, child in pairs(dropLoot:getChildren()) do
-      child:setTooltip("Double click to reset or clear item to remove.")
-    end
-
-    item.onItemChange = function(widget)
-      local id = widget:getItemId()
-      if id == 0 then 
-        trackedLoot[widget:getParent():getId()] = nil
-        if tonumber(widget:getParent():getId()) then
-          widget:getParent():destroy()
-          return
-        end
-        widget:setImageSource('/images/ui/item')
-        widget:getParent():setId("blank")
-        name:setText("Set Item to start track.")
-        drops:setText("Loot Drops: 0")
-        return 
-      end
-
-    -- only amount have changed, ignore
-      if tonumber(widget:getParent():getId()) == id then return end
-      local itemName = id == 3031 and "gold coin" or id == 3035 and "platinum coin" or id == 3043 and "crystal coin" or Item.create(id):getMarketData().name
-
-      if trackedLoot[tostring(id)] then
-        warn("nExBot[Drop Tracker]: Item already added!")
-        name:setText("Set Item to start track.")
-        widget:setItemId(0)
-        return 
-      end
-  
-      widget:setImageSource('')
-      drops:setText("Loot Drops: 0")
-      name:setText(itemName)
-      trackedLoot[tostring(id)] = trackedLoot[tostring(id)] or 0
-      widget:getParent():setId(id)
-      maintainDropTable()
-    end
-  end
-end
-
---drop tracker
-UI.Button("Add item to track drops", function()
-  local dropLoot = UI.createWidget("TrackerItem", dropTrackerWindow.contentsPanel)
-  local item = dropLoot.item
-  local name = dropLoot.name
-  local drops = dropLoot.drops
-
-  item:setImageSource('/images/ui/item')
-
-  dropLoot.onDoubleClick = function()
-    local id = dropLoot.item:getItemId()
-    trackedLoot[tostring(id)] = 0
-    drops:setText("Loot Drops: 0")
-  end
-
-  for i, child in pairs(dropLoot:getChildren()) do
-    child:setTooltip("Double click to reset or clear item to remove.")
-  end
-
-  item.onItemChange = function(widget)
-    local id = widget:getItemId()
-
-    if id == 0 then 
-      trackedLoot[widget:getParent():getId()] = nil
-      if tonumber(widget:getParent():getId()) then
-        widget:getParent():destroy()
-        return
-      end
-      widget:setImageSource('/images/ui/item')
-      widget:getParent():setId("blank")
-      name:setText("Set Item to start track.")
-      drops:setText("Loot Drops: 0")
-      return 
-    end
-
-    -- only amount have changed, ignore
-    if tonumber(widget:getParent():getId()) == id then return end
-    local itemName = id == 3031 and "gold coin" or id == 3035 and "platinum coin" or id == 3043 and "crystal coin" or Item.create(id):getMarketData().name
-
-    if trackedLoot[tostring(id)] then
-      warn("nExBot[Drop Tracker]: Item already added!")
-      name:setText("Set Item to start track.")
-      widget:setItemId(0)
-      return 
-    end
-
-    widget:setImageSource('')
-    drops:setText("Loot Drops: 0")
-    name:setText(itemName)
-    trackedLoot[tostring(id)] = trackedLoot[tostring(id)] or 0
-    widget:getParent():setId(id)
-    maintainDropTable()
-  end
-end, dropTrackerWindow.contentsPanel)
-
-UI.Separator(dropTrackerWindow.contentsPanel)
-createTrackedItems()
-
---loot
-local lootInLootAnalyzerLabel = UI.DualLabel("Gold Value:", "0", {}, lootWindow.contentsPanel).right
-local lootHourInLootAnalyzerLabel = UI.DualLabel("Per Hour:", "0", {}, lootWindow.contentsPanel).right
-UI.Separator(lootWindow.contentsPanel)
---//items panel
-local lootItems = UI.createWidget("AnalyzerItemsPanel", lootWindow.contentsPanel)
-UI.Separator(lootWindow.contentsPanel)
---//graph
-local lootGraph = UI.createWidget("AnalyzerGraph", lootWindow.contentsPanel)
-      lootGraph:setTitle("Loot/h")
-      drawGraph(lootGraph, 0)
-
---supplies
-local suppliesInSuppliesAnalyzerLabel = UI.DualLabel("Gold Value:", "0", {}, supplyWindow.contentsPanel).right
-local suppliesHourInSuppliesAnalyzerLabel = UI.DualLabel("Per Hour:", "0", {}, supplyWindow.contentsPanel).right
-UI.Separator(supplyWindow.contentsPanel)
---//items panel
-local supplyItems = UI.createWidget("AnalyzerItemsPanel", supplyWindow.contentsPanel)
-UI.Separator(supplyWindow.contentsPanel)
---//graph
-local supplyGraph = UI.createWidget("AnalyzerGraph", supplyWindow.contentsPanel)
-      supplyGraph:setTitle("Waste/h")
-      drawGraph(supplyGraph, 0)      
-
--- impact
-
---- damage
-local title = UI.DualLabel("Damage", "", {}, impactWindow.contentsPanel).left
-title:setColor('#E3242B')
-local totalDamageLabel = UI.DualLabel("Total:", "0", {}, impactWindow.contentsPanel).right
-local maxDpsLabel = UI.DualLabel("Max-DPS:", "0", {}, impactWindow.contentsPanel).right
-local bestHitLabel = UI.DualLabel("All-Time High:", "0", {}, impactWindow.contentsPanel).right
-UI.Separator(impactWindow.contentsPanel)
-local dmgGraph = UI.createWidget("AnalyzerGraph", impactWindow.contentsPanel)
-      dmgGraph:setTitle("DPS")
-      drawGraph(dmgGraph, 0)
-      
-      
---- distribution 
-UI.Separator(impactWindow.contentsPanel)
-local title2 = UI.DualLabel("Damage Distribution", "", {maxWidth = 150}, impactWindow.contentsPanel).left
-title2:setColor('#FABD02')
-local top1 = UI.DualLabel("-", "0", {maxWidth = 200}, impactWindow.contentsPanel)
-local top2 = UI.DualLabel("-", "0", {maxWidth = 200}, impactWindow.contentsPanel)
-local top3 = UI.DualLabel("-", "0", {maxWidth = 200}, impactWindow.contentsPanel)
-local top4 = UI.DualLabel("-", "0", {maxWidth = 200}, impactWindow.contentsPanel)
-local top5 = UI.DualLabel("-", "0", {maxWidth = 200}, impactWindow.contentsPanel)
-
-if top1 and top1.left then top1.left:setWidth(135) end
-if top2 and top2.left then top2.left:setWidth(135) end
-if top3 and top3.left then top3.left:setWidth(135) end
-if top4 and top4.left then top4.left:setWidth(135) end
-if top5 and top5.left then top5.left:setWidth(135) end
-
---- healing
-UI.Separator(impactWindow.contentsPanel)
-local title3 = UI.DualLabel("Healing", "", {}, impactWindow.contentsPanel).left
-title3:setColor('#03C04A')
-local totalHealingLabel = UI.DualLabel("Total:", "0", {}, impactWindow.contentsPanel).right
-local maxHpsLabel = UI.DualLabel("Max-HPS:", "0", {}, impactWindow.contentsPanel).right
-local bestHealLabel = UI.DualLabel("All-Time High:", "0", {}, impactWindow.contentsPanel).right
-UI.Separator(impactWindow.contentsPanel)
---//graph
-local healGraph = UI.createWidget("AnalyzerGraph", impactWindow.contentsPanel)
-      healGraph:setTitle("HPS")
-      drawGraph(healGraph, 0)  
-
---xp
-local xpGrainInXpLabel = UI.DualLabel("XP Gain:", "0", {}, xpWindow.contentsPanel).right
-local xpHourInXpLabel = UI.DualLabel("XP/h:", "0", {}, xpWindow.contentsPanel).right
-local nextLevelLabel = UI.DualLabel("Next Level:", "-", {}, xpWindow.contentsPanel).right
-local progressBar = UI.createWidget("AnalyzerProgressBar", xpWindow.contentsPanel)
-progressBar:setPercent(modules.game_skills.skillsWindow.contentsPanel.level.percent:getPercent())
-UI.Separator(xpWindow.contentsPanel)
---//graph
-local xpGraph = UI.createWidget("AnalyzerGraph", xpWindow.contentsPanel)
-      xpGraph:setTitle("XP/h")
-      drawGraph(xpGraph, 0)
-      
-
 --#############################################   UI DONE
 
-setDefaultTab("Main")
 -- first, the variables
 
 local console = modules.game_console
@@ -838,96 +401,37 @@ if BotServer._websocket then
         balanceH = message[13],
         session = message[14]
       }
-
-      local widgetName = "Widget"..name
-      local widget = partyHuntWindow.contentsPanel[widgetName] or UI.createWidget("MemberWidget", partyHuntWindow.contentsPanel)
-      widget:setId(widgetName)
-      widget.lastUpdate = now
-
-      local t = membersData[name]
-      widget.name:setText(name)
-      widget.name:setColor("white")
-      if t.leader then
-        widget.name:setColor('#f8db38')
-      end
-      schedule(10*1000, function()
-        if widget and widget.lastUpdate and now - widget.lastUpdate > 10000 then
-          widget.name:setText(widget.name:getText().. " [inactive]")
-          widget.name:setColor("#aeaeae")
-          widget.health:setBackgroundColor("#aeaeae")
-          widget.mana:setBackgroundColor("#aeaeae")
-          widget.balance.value:setText("-")
-          widget.damage.value:setText("-")
-          widget.healing.value:setText("-")
-          widget.creature:disable()
-        end
-      end)
-      widget.creature:setOutfit(t.outfit)
-      widget.health:setPercent(t.hp)
-      widget.health:setBackgroundColor("#00c000")
-      widget.mana:setPercent(t.mana)
-      widget.mana:setBackgroundColor("#0000FF")
-      widget.balance.value:setText(format_thousand(t.balance))
-      if t.balance < 0 then
-        widget.balance.value:setColor('#ff9854')
-      elseif t.balance > 0 then
-        widget.balance.value:setColor('#45ad25')
-      else
-        widget.balance.value:setColor('white')
-      end
-      widget.damage.value:setText(format_thousand(t.damage))
-      widget.healing.value:setText(format_thousand(t.heal))
-
-      widget.onDoubleClick = function()
-        membersData[name] = nil
-        widget:destroy()
-      end
-
-      --tooltip
-      local tooltip = "Session: "..t.session.."\n"..
-                      "Stamina: "..t.stamina.."\n"..
-                      "Exp Gained: "..t.expGained.."\n"..
-                      "Exp per Hour: "..t.expH.."\n"..
-                      "Balance: "..t.balanceH
-
-      widget.creature:setTooltip(tooltip)
     end
   end)
 end
 
-function hightlightText(widget, color, duration)
-  for i=0,duration do
-    schedule(i * 250, function()
-      if i == duration or (i > 0 and i % 2 == 0) then
-        widget:setColor("#FFFFFF")
-      else
-        widget:setColor(color)
-      end
-    end)
-  end
-end
+-- empty UI refresh hooks: the standalone Analyzer windows are retired, the
+-- data still lives in the tables above.
+function refreshKills() end
+function refreshLoot() end
+function refreshWaste() end
 
--- forward-declare refreshKills so callbacks can use it before the main definition
-if not refreshKills then
-  function refreshKills()
-    if not killedList then return end
-    killedList:destroyChildren()
-    local kills = 0
-    for k,v in pairs(killList) do
-      kills = kills + 1
-      local label = UI.createWidget("ListLabel", killedList)
-      if label then
-        label:setText(v .. "x " .. k)
-      end
+-- drop tracker: name lookup for tracked item ids (kept in sync by the engine)
+local trackedLootNames = {}
+local function refreshTrackedLootNames()
+  trackedLootNames = {}
+  for id in pairs(trackedLoot) do
+    local nid = tonumber(id)
+    local name
+    if nid == 3031 then
+      name = "gold coin"
+    elseif nid == 3035 then
+      name = "platinum coin"
+    elseif nid == 3043 then
+      name = "crystal coin"
+    elseif Item.create then
+      local ok, market = pcall(function() return Item.create(nid):getMarketData() end)
+      name = ok and market and market.name or nil
     end
-    if kills == 0 then
-      local label = UI.createWidget("ListLabel", killedList)
-      if label then
-        label:setText("None")
-      end
-    end
+    if name then trackedLootNames[name:lower()] = id end
   end
 end
+refreshTrackedLootNames()
 
 local nameRegex = [[Loot of (?:an |a |the |)([^:]+)]]
 onTextMessage(function(mode, text)
@@ -977,26 +481,11 @@ onTextMessage(function(mode, text)
             add(messageT, data, color, i==#re)
 
             --drop tracker
-            local dropPanel = dropTrackerWindow and dropTrackerWindow.contentsPanel
-            local dropChildren = dropPanel and dropPanel:getChildren() or {}
-            for i, child in ipairs(dropChildren) do
-              local childName = child.name
-              childName = childName and childName:getText()
-
-              if childName and formattedLoot:find(childName) then
-                trackedLoot[tostring(child.item:getItemId())] = trackedLoot[tostring(child.item:getItemId())] + (amount or 1)
-                child.drops:setText("Loot Drops: "..trackedLoot[tostring(child.item:getItemId())])
-
-                hightlightText(child.name,"#f0b400", 8)
-                modules.game_textmessage.messagesPanel.statusLabel:setVisible(true)
-                modules.game_textmessage.messagesPanel.statusLabel:setColoredText({
-                  "Valuable loot: ", "#f0b400",
-                  childName.."", messageColor,
-                  " dropped by "..name.."!", "#f0b400"
-                })
-                schedule(3000, function()
-                  modules.game_textmessage.messagesPanel.statusLabel:setVisible(false)
-                end)
+            if formattedLoot then
+              for key, id in pairs(trackedLootNames) do
+                if formattedLoot:find(key) then
+                  trackedLoot[id] = (trackedLoot[id] or 0) + (amount or 1)
+                end
               end
             end
         end
@@ -1072,37 +561,8 @@ resetAnalyzerSessionData = function()
     lootedItems = {}
     useData = {}
     usedItems ={}
-    refreshLoot()
-    refreshWaste()
-    xpGraph:clear()
-    drawGraph(xpGraph, 0)
-    lootGraph:clear()
-    drawGraph(lootGraph, 0)
-    supplyGraph:clear()
-    drawGraph(supplyGraph, 0)
-    dmgGraph:clear()
-    drawGraph(dmgGraph, 0)
-    healGraph:clear()
-    drawGraph(healGraph, 0)
     killList = {}
-    refreshKills()
     HuntingSessionStart = os.date('%Y-%m-%d, %H:%M:%S')
-end
-
-mainWindow.contentsPanel.ResetSession.onClick = function()
-  resetAnalyzerSessionData()
-end
-
-mainWindow.contentsPanel.Settings.onClick = function()
-  settingsWindow:show()
-  settingsWindow:raise()
-  settingsWindow:focus()
-end
-  
-
--- extras window
-settingsWindow.closeButton.onClick = function()
-  settingsWindow:hide()
 end
 
 local function getFrame(v)
@@ -1189,55 +649,6 @@ function smallNumbers(n)
   else
       return tostring(n)
   end
-end
-
-function refreshList()
-  local list = settingsWindow.CustomPrices
-  list:destroyChildren()
-
-  for name, price in pairs(storage.analyzers.customPrices) do
-    local label = UI.createWidget("AnalyzerPriceLabel", list)
-    label.remove.onClick = function()
-      storage.analyzers.customPrices[name] = nil
-      label:destroy()
-      schedule(5, function()
-        setFrames()
-      end)
-    end
-    label:setText("["..name.."] = "..smallNumbers(price).." gp")
-  end
-end
-refreshList()
-
-settingsWindow.addItem.onClick = function()
-  local newPrices = storage.analyzers.customPrices
-  local id = settingsWindow.ID:getItemId()
-  local newPrice = tonumber(settingsWindow.NewPrice:getText())
-
-  if id < 100 then
-    return warn("No item added!")
-  end
-
-  local name = Item.create(id):getMarketData().name
-
-  if newPrices[name] then
-    return warn("Item already added! Remove it from the list to set a new price!")
-  end
-
-  newPrices[name] = newPrice
-  settingsWindow.ID:setItemId(0)
-  settingsWindow.NewPrice:setText(0)
-  schedule(5, function()
-    setFrames()
-  end)
-  refreshList()
-end
-
-settingsWindow.RarityFrames:setOn(storage.analyzers.rarityFrames)
-settingsWindow.RarityFrames.onClick = function(widget)
-  storage.analyzers.rarityFrames = not storage.analyzers.rarityFrames
-  widget:setOn(storage.analyzers.rarityFrames)
-  setFrames()
 end
 
 local timeToLevel = function()
@@ -1371,82 +782,6 @@ macro(500, function()
     end
 end)
 
-function refreshLoot()
-
-    lootItems:destroyChildren()
-    lootList:destroyChildren()
-
-    for k,v in pairs(lootedItems) do
-      local label1 = UI.createWidget("AnalyzerLootItem", lootItems)
-      local price = v.count and getPrice(v.name) * v.count or getPrice(v.name)
-
-      label1:setItemId(k)
-      label1:setItemCount(50)
-      label1:setShowCount(false)
-      label1.count:setText(niceFormat(v.count))
-      label1.count:setColor(getColor(price))
-      local tooltipName = v.count > 1 and v.name.."s" or v.name
-      label1:setTooltip(v.count .. "x " .. tooltipName .. " (Value: "..format_thousand(getPrice(v.name)).."gp, Sum: "..format_thousand(price).."gp)")
-      --hunting window loot list
-      local label2 = UI.createWidget("ListLabel", lootList)
-      label2:setText(v.count .. "x " .. v.name)
-    end
-
-    if lootItems:getChildCount() == 0 then
-      local label = UI.createWidget("ListLabel", lootList)
-      label:setText("None")
-    end
-end
-refreshLoot()
-
-function refreshKills()
-    killedList:destroyChildren()
-    local kills = 0
-    for k,v in pairs(killList) do
-      kills = kills + 1
-      local label = UI.createWidget("ListLabel", killedList)
-      if label then
-        label:setText(v .. "x " .. k)
-      end
-    end
-
-    if kills == 0 then
-      local label = UI.createWidget("ListLabel", killedList)
-      if label then
-        label:setText("None")
-      end
-    end
-end
-refreshKills()
-
-function refreshWaste()
-
-    supplyItems:destroyChildren()
-    suppliesByRefill:destroyChildren()
-    suppliesByRound:destroyChildren()
-
-    local parents = {supplyItems, suppliesByRound, suppliesByRefill}    
-
-    for k,v in pairs(usedItems) do
-      for i=1,#parents do
-        local amount = i == 1 and v.count or 
-                       i == 2 and v.count/(nExBot.CaveBotData.rounds + 1) or 
-                       i == 3 and v.count/(nExBot.CaveBotData.refills + 1)
-        amount = math.floor(amount)
-        local label1 = UI.createWidget("AnalyzerLootItem", parents[i])
-        local price = amount and getPrice(v.name) * amount or getPrice(v.name)
-
-        label1:setItemId(k)
-        label1:setItemCount(50)
-        label1:setShowCount(false)
-        label1.count:setText(niceFormat(amount))
-        label1.count:setColor(getColor(price))
-        local tooltipName = amount > 1 and v.name.."s" or v.name
-        label1:setTooltip(amount .. "x " .. tooltipName .. " (Value: "..format_thousand(getPrice(v.name)).."gp, Sum: "..format_thousand(price).."gp)")
-      end
-    end
-end
-
 -- loot analyzer
 -- adding
 local containers = CaveBot.GetLootContainers()
@@ -1464,9 +799,6 @@ onAddItem(function(container, slot, item, oldItem)
     lootedItems[name].count =  lootedItems[name].count + item:getCount()
   end
   lastCap = freecap()
-  refreshLoot()
-
-  -- drop tracker
 end)
 
 onContainerUpdateItem(function(container, slot, item, oldItem)
@@ -1487,7 +819,6 @@ onContainerUpdateItem(function(container, slot, item, oldItem)
       lootedItems[name].count = lootedItems[name].count + amount
   end
   lastCap = freecap()
-  refreshLoot()
 end)
 
 -- ammo
@@ -1505,7 +836,6 @@ onContainerUpdateItem(function(container, slot, item, oldItem)
     else
       usedItems[id].count = usedItems[id].count + 1
     end
-    refreshWaste()
   end
 end)
 
@@ -1544,7 +874,6 @@ onTextMessage(function(mode, text)
     else
       useData[name] = amount
     end
-    refreshWaste()
   end
 end)
 function bottingStats()
@@ -1658,7 +987,7 @@ local bestHPS = 0
 --main loop
 macro(500, function()
     local lootWorth, wasteWorth, balance = bottingStats()
-    local balanceDesc, hourDesc = bottingLabels(lootWorth, wasteWorth, balance)
+    bottingLabels(lootWorth, wasteWorth, balance)
 
     -- hps and dps
     local curHPS = valueInSeconds(healTable)
@@ -1666,77 +995,6 @@ macro(500, function()
 
     bestHPS = bestHPS > curHPS and bestHPS or curHPS
     bestDPS = bestDPS > curDPS and bestDPS or curDPS
-
-    --hunt window
-    sessionTimeLabel:setText(sessionTime())
-    xpGainLabel:setText(format_thousand(expGained()))
-    xpHourLabel:setText(expPerHour())
-    lootLabel:setText(format_thousand(lootWorth))
-    suppliesLabel:setText(format_thousand(wasteWorth))
-    balanceLabel:setColor(balance >= 0 and "#45ad25" or "#ff9854")
-    balanceLabel:setText(balanceDesc .. " (" .. hourDesc .. ")")
-    damageLabel:setText(format_thousand(totalDmg))
-    damageHourLabel:setText(format_thousand(damageHour()))
-    healingLabel:setText(format_thousand(totalHeal))
-    healingHourLabel:setText(format_thousand(healHour()))
-
-    --loot window
-    lootInLootAnalyzerLabel:setText(format_thousand(lootWorth))
-    lootHourInLootAnalyzerLabel:setText(format_thousand(lootHour()))
-
-    --supply window
-    suppliesInSuppliesAnalyzerLabel:setText(format_thousand(wasteWorth))
-    suppliesHourInSuppliesAnalyzerLabel:setText(format_thousand(wasteHour()))
-
-    --impact window
-    totalDamageLabel:setText(format_thousand(totalDmg))
-    maxDpsLabel:setText(format_thousand(bestDPS))
-    bestHitLabel:setText(storage.bestHit)
-
-    if top1 and top1.left then top1.left:setText(first.l) end
-    if top1 and top1.right then top1.right:setText(first.r) end
-    if top2 and top2.left then top2.left:setText(second.l) end
-    if top2 and top2.right then top2.right:setText(second.r) end
-    if top3 and top3.left then top3.left:setText(third.l) end
-    if top3 and top3.right then top3.right:setText(third.r) end
-    if top4 and top4.left then top4.left:setText(fourth.l) end
-    if top4 and top4.right then top4.right:setText(fourth.r) end
-    if top5 and top5.left then top5.left:setText(five.l) end
-    if top5 and top5.right then top5.right:setText(five.r) end
-
-    totalHealingLabel:setText(format_thousand(totalHeal))
-    maxHpsLabel:setText(format_thousand(bestHPS))
-    bestHealLabel:setText(storage.bestHeal)
-
-    --xp window
-    xpGrainInXpLabel:setText(format_thousand(expGained()))
-    xpHourInXpLabel:setText(expPerHour())
-    nextLevelLabel:setText(timeToLevel())
-    if progressBar and progressBar.setPercent then
-      local skillsWindow = modules.game_skills and modules.game_skills.skillsWindow
-      local levelWidget = skillsWindow and skillsWindow.contentsPanel and skillsWindow.contentsPanel.level
-      local percentWidget = levelWidget and levelWidget.percent
-      local percent = percentWidget and percentWidget.getPercent and percentWidget:getPercent() or 0
-      progressBar:setPercent(percent)
-    end
-
-    --stats
-    totalRounds:setText(nExBot.CaveBotData.rounds)
-    avRoundTime:setText(niceTimeFormat(avgTable(nExBot.CaveBotData.time),true))
-    totalRefills:setText(nExBot.CaveBotData.refills)
-    avRefillTime:setText(niceTimeFormat(avgTable(nExBot.CaveBotData.refillTime),true))
-    lastRefill:setText(niceTimeFormat(os.difftime(os.time()-nExBot.CaveBotData.lastRefill),true))
-
-end)
-
---graphs, draw each minute
-macro(60*1000, function()
-
-  drawGraph(xpGraph, expPerHour(true) or 0)
-  drawGraph(lootGraph, lootHour() or 0)
-  drawGraph(supplyGraph, wasteHour() or 0)
-  drawGraph(dmgGraph, valueInSeconds(dmgTable) or 0)
-  drawGraph(healGraph, valueInSeconds(healTable) or 0)
 end)
 
 --party hunt analyzer
@@ -1747,30 +1005,18 @@ macro(2000, function()
   if storage.sendPartyAnalyzerData then
     sendData()
   end
-
-  local totalWaste, totalLoot, totalBalance = getSumStats()
-
-  partySessionTimeLabel:setText(sessionTime())
-  partyLootLabel:setText(format_thousand(totalLoot))
-  partySuppliesLabel:setText(format_thousand(totalWaste))
-  partyBalanceLabel:setText(format_thousand(totalBalance))
-
-  if totalBalance < 0 then
-    partyBalanceLabel:setColor('#ff9854')
-  elseif totalBalance > 0 then
-    partyBalanceLabel:setColor('#45ad25')
-  else
-    partyBalanceLabel:setColor('white')
-  end
-
-  for bossName, dueTime in pairs(storage.analyzers.trackedBoss) do
-    createBossPanel(bossName, dueTime)
-  end
 end)
 
 -- public functions
 -- global namespace
 Analyzer = {}
+
+Analyzer.showWindow = function()
+  -- windows retired; navigation moved to the shell "Analyzer" page
+end
+
+Analyzer.hideWindow = function()
+end
 
 Analyzer.getKillsAmount = function(name)
   return killList[name] or 0
@@ -1821,30 +1067,196 @@ Analyzer.getTimeToNextLevel = function()
 end
 
 Analyzer.getCaveBotStats = function()
-  local parents = {suppliesByRound, suppliesByRefill}
   local round = {}
   local refill = {}
-  for i=1,2 do
-    local data = parents[i]
-    for j, child in ipairs(data:getChildren()) do
-      local id = child:getItemId()
-      local count = child.count
-
-      if i == 1 then
-        round[id] = count
-      else
-        refill[id] = count
-      end
-    end
+  for k, v in pairs(usedItems) do
+    round[k] = math.floor(v.count / (nExBot.CaveBotData.rounds + 1))
+    refill[k] = math.floor(v.count / (nExBot.CaveBotData.refills + 1))
   end
 
   return {
-    totalRounds = totalRounds:getText(),
-    avRoundTime = avRoundTime:getText(),
-    totalRefills = totalRefills:getText(),
-    avRefillTime = avRefillTime:getText(),
-    lastRefill = lastRefill:getText(),
+    totalRounds = nExBot.CaveBotData.rounds,
+    avRoundTime = niceTimeFormat(avgTable(nExBot.CaveBotData.time), true),
+    totalRefills = nExBot.CaveBotData.refills,
+    avRefillTime = niceTimeFormat(avgTable(nExBot.CaveBotData.refillTime), true),
+    lastRefill = niceTimeFormat(os.difftime(os.time() - nExBot.CaveBotData.lastRefill), true),
     roundSupplies = round, -- { [id] = amount, [id2] = amount ...}
     refillSupplies = refill -- { [id] = amount, [id2] = amount ...}
   }
+end
+
+-- shell read APIs: return plain tables backed by the engine data above
+
+Analyzer.getHuntStats = function()
+  local lootWorth, wasteWorth, balance = bottingStats()
+  local balanceDesc, hourDesc = bottingLabels(lootWorth, wasteWorth, balance)
+  local kills = {}
+  for k, v in pairs(killList) do
+    kills[#kills + 1] = { name = k, count = v }
+  end
+  table.sort(kills, function(a, b) return a.count > b.count end)
+
+  return {
+    sessionTime = sessionTime(),
+    xpGained = expGained(),
+    xpHour = expPerHour(),
+    loot = lootWorth,
+    supplies = wasteWorth,
+    balance = balance,
+    balanceLabel = balanceDesc .. " (" .. hourDesc .. ")",
+    damage = totalDmg,
+    damageHour = damageHour(),
+    healing = totalHeal,
+    healingHour = healHour(),
+    kills = kills,
+  }
+end
+
+Analyzer.getLootStats = function()
+  local lootWorth, wasteWorth, balance = bottingStats()
+  local items = {}
+  for k, v in pairs(lootedItems) do
+    items[#items + 1] = { id = tonumber(k), name = v.name, count = v.count }
+  end
+  table.sort(items, function(a, b) return a.count > b.count end)
+
+  return { loot = lootWorth, lootHour = lootHour(), items = items }
+end
+
+Analyzer.getSupplyStats = function()
+  local lootWorth, wasteWorth, balance = bottingStats()
+  local items = {}
+  for k, v in pairs(usedItems) do
+    items[#items + 1] = { id = tonumber(k), name = v.name, count = v.count }
+  end
+  table.sort(items, function(a, b) return a.count > b.count end)
+
+  return { supplies = wasteWorth, suppliesHour = wasteHour(), items = items }
+end
+
+Analyzer.getImpactStats = function()
+  local distribution = {}
+  local all = { first, second, third, fourth, five }
+  for i, entry in ipairs(all) do
+    distribution[i] = { name = entry.l, value = entry.r }
+  end
+
+  return {
+    damage = totalDmg,
+    bestDps = bestDPS,
+    bestHit = storage.bestHit,
+    healing = totalHeal,
+    bestHps = bestHPS,
+    bestHeal = storage.bestHeal,
+    distribution = distribution,
+  }
+end
+
+Analyzer.getXpStats = function()
+  return {
+    xpGained = expGained(),
+    xpHour = expPerHour(),
+    nextLevel = timeToLevel(),
+    xpLeft = expLeft(),
+  }
+end
+
+Analyzer.getPartyStats = function()
+  local totalWaste, totalLoot, totalBalance = getSumStats()
+  local members = {}
+  for k, v in pairs(membersData) do
+    members[#members + 1] = {
+      name = k,
+      loot = v.loot,
+      supplies = v.waste,
+      balance = v.balance,
+      damage = v.damage,
+      heal = v.heal,
+    }
+  end
+  table.sort(members, function(a, b) return a.name < b.name end)
+
+  return {
+    sessionTime = sessionTime(),
+    loot = totalLoot,
+    supplies = totalWaste,
+    balance = totalBalance,
+    sendData = storage.sendPartyAnalyzerData,
+    members = members,
+  }
+end
+
+Analyzer.setSendPartyData = function(enabled)
+  storage.sendPartyAnalyzerData = not not enabled
+  return storage.sendPartyAnalyzerData
+end
+
+Analyzer.getDropTracker = function()
+  local items = {}
+  for k, v in pairs(trackedLoot) do
+    items[#items + 1] = { id = tonumber(k) or 0, count = v }
+  end
+  table.sort(items, function(a, b) return a.count > b.count end)
+  return items
+end
+
+Analyzer.addDropTrackerItem = function(id)
+  id = tonumber(id)
+  if not id or id <= 0 then return false end
+  if trackedLoot[tostring(id)] then return false end
+  trackedLoot[tostring(id)] = 0
+  refreshTrackedLootNames()
+  return true
+end
+
+Analyzer.resetDropTrackerItem = function(id)
+  trackedLoot[tostring(id)] = 0
+end
+
+Analyzer.removeDropTrackerItem = function(id)
+  trackedLoot[tostring(id)] = nil
+  refreshTrackedLootNames()
+end
+
+Analyzer.getBossTracker = function()
+  local bosses = {}
+  for bossName, dueTime in pairs(storage.analyzers.trackedBoss) do
+    bosses[#bosses + 1] = {
+      name = bossName,
+      dueTime = dueTime,
+      timeLeft = os.difftime(dueTime, os.time()),
+    }
+  end
+  table.sort(bosses, function(a, b) return a.timeLeft < b.timeLeft end)
+  return bosses
+end
+
+Analyzer.getCustomPrices = function()
+  return storage.analyzers.customPrices
+end
+
+Analyzer.setCustomPrice = function(name, price)
+  name = tostring(name or ""):lower()
+  price = tonumber(price)
+  if name == "" or not price or price < 0 then return false end
+  storage.analyzers.customPrices[name] = price
+  noData[name] = nil
+  data[name] = nil
+  return true
+end
+
+Analyzer.removeCustomPrice = function(name)
+  storage.analyzers.customPrices[tostring(name or ""):lower()] = nil
+  noData[name] = nil
+  data[name] = nil
+end
+
+Analyzer.getRarityFrames = function()
+  return storage.analyzers.rarityFrames
+end
+
+Analyzer.setRarityFrames = function(enabled)
+  storage.analyzers.rarityFrames = not not enabled
+  setFrames()
+  return storage.analyzers.rarityFrames
 end

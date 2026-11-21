@@ -21,8 +21,6 @@ local function setSpyLevelEnabled(val)
     end
     print("[SpyLevel] " .. (spyLevelEnabled and "enabled" or "disabled"))
 end
-setDefaultTab("Tools")
-
 -- script
 
 local lockedLevel = pos().z
@@ -39,6 +37,11 @@ onPlayerPositionChange(function(newPos, oldPos)
         modules.game_interface.getMapPanel():unlockVisibleFloor()
     end
 end)
+
+nExBot.SpyLevel = {
+    isEnabled = function() return spyLevelEnabled end,
+    setEnabled = setSpyLevelEnabled,
+}
 
 onKeyPress(function(keys)
     if keys == keyToggle then

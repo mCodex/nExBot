@@ -1,44 +1,134 @@
 CaveBotEditorButton < Button
+  height: 26
+  font: verdana-11px-rounded
+  text-align: center
 
+CaveBotEditorCloseButton < Button
+  size: 14 14
+  anchors.top: parent.top
+  anchors.right: parent.right
+  margin-top: -30
+  margin-right: -10
+  text: X
+  font: verdana-11px-rounded
+  text-align: center
+  text-auto-resize: false
+  tooltip: Close
 
-CaveBotEditorPanel < Panel
+CaveBotEditorPanel < MainWindow
   id: cavebotEditor
+  text: Cave route editor
+  size: 640 480
   visible: false
-  layout:
-    type: verticalBox
-    fit-children: true
-  
+  @onEscape: self:hide()
+
+  CaveBotEditorCloseButton
+    id: close
+
   Label
     id: pos
+    height: 22
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    font: verdana-11px-rounded
     text-align: center
     text: -
-    
-  Panel
-    id: buttons
-    margin-top: 2
+
+  VerticalScrollBar
+    id: paletteScrollBar
+    width: 10
+    anchors.top: pos.bottom
+    anchors.right: parent.right
+    anchors.bottom: message.top
+    margin-top: 4
+    margin-bottom: 4
+    step: 20
+    pixels-scroll: true
+
+  ScrollablePanel
+    id: palette
+    width: 210
+    anchors.top: pos.bottom
+    anchors.right: paletteScrollBar.left
+    anchors.bottom: message.top
+    margin-top: 4
+    margin-bottom: 4
+    vertical-scrollbar: paletteScrollBar
     layout:
-      type: grid
-      cell-size: 86 20
-      cell-spacing: 1
-      flow: true
-      fit-children: true
+      type: verticalBox
+
+  VerticalScrollBar
+    id: tableScrollBar
+    width: 10
+    anchors.top: pos.bottom
+    anchors.right: palette.left
+    anchors.bottom: commands.top
+    margin-top: 4
+    margin-right: 4
+    margin-bottom: 4
+    step: 20
+    pixels-scroll: true
+
+  ScrollablePanel
+    id: tableContainer
+    anchors.top: pos.bottom
+    anchors.left: parent.left
+    anchors.right: tableScrollBar.left
+    anchors.bottom: commands.top
+    margin-top: 4
+    margin-right: 4
+    margin-bottom: 4
+    vertical-scrollbar: tableScrollBar
+    layout:
+      type: verticalBox
+
+  Panel
+    id: commands
+    height: 30
+    anchors.left: parent.left
+    anchors.right: palette.left
+    anchors.bottom: message.top
+    margin-right: 4
+    margin-bottom: 4
+    layout:
+      type: horizontalBox
+      spacing: 4
 
   Label
-    text: Double click on action from action list to edit it
+    id: message
+    height: 32
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: autoRecording.top
+    margin-left: 8
+    margin-right: 8
+    margin-bottom: 4
+    text: Select a route action, then choose an edit command.
     text-align: center
-    text-auto-resize: true
     text-wrap: true
-    margin-top: 3
-    margin-left: 2
-    margin-right: 2
+    font: verdana-11px-rounded
 
   BotSwitch
     id: autoRecording
     text: Auto Recording
-    margin-top: 3
+    font: verdana-11px-rounded
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: docButton.top
+    margin-left: 4
+    margin-right: 4
+    margin-bottom: 4
 
   BotButton
-    margin-top: 3
+    id: docButton
+    height: 26
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    margin-left: 4
+    margin-right: 4
     margin-bottom: 3
+    font: verdana-11px-rounded
     text: Documentation
     @onClick: g_platform.openUrl("https://www.nexbot.cc/docs")

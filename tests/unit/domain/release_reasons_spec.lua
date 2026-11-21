@@ -1,0 +1,38 @@
+describe("ReleaseReason", function()
+  local RR
+
+  before_each(function()
+    _G.ReleaseReason = nil
+    RR = dofile("targetbot/domain/release_reasons.lua")
+  end)
+
+  it("defines all required release reason constants", function()
+    assert.equals("TARGET_DEAD", RR.TARGET_DEAD)
+    assert.equals("TARGET_REMOVED", RR.TARGET_REMOVED)
+    assert.equals("TARGET_DIFFERENT_FLOOR", RR.TARGET_DIFFERENT_FLOOR)
+    assert.equals("MANUAL_OVERRIDE", RR.MANUAL_OVERRIDE)
+    assert.equals("SAFETY_ABORT", RR.SAFETY_ABORT)
+    assert.equals("STRICT_FOLLOW_OVERRIDE", RR.STRICT_FOLLOW_OVERRIDE)
+    assert.equals("CONFIRMED_HARD_UNREACHABLE", RR.CONFIRMED_HARD_UNREACHABLE)
+    assert.equals("TARGET_TIMEOUT_WITH_EVIDENCE", RR.TARGET_TIMEOUT_WITH_EVIDENCE)
+    assert.equals("TARGETBOT_DISABLED", RR.TARGETBOT_DISABLED)
+  end)
+
+  it("validates known reasons", function()
+    assert.is_true(RR.isValid("TARGET_DEAD"))
+    assert.is_true(RR.isValid("MANUAL_OVERRIDE"))
+    assert.is_false(RR.isValid("NOT_A_REASON"))
+    assert.is_false(RR.isValid(nil))
+    assert.is_false(RR.isValid(""))
+  end)
+
+  it("identifies hard release reasons", function()
+    assert.is_true(RR.isHardRelease("TARGET_DEAD"))
+    assert.is_true(RR.isHardRelease("TARGET_REMOVED"))
+    assert.is_true(RR.isHardRelease("TARGET_DIFFERENT_FLOOR"))
+    assert.is_true(RR.isHardRelease("CONFIRMED_HARD_UNREACHABLE"))
+    assert.is_false(RR.isHardRelease("MANUAL_OVERRIDE"))
+    assert.is_false(RR.isHardRelease("SAFETY_ABORT"))
+    assert.is_false(RR.isHardRelease(nil))
+  end)
+end)
