@@ -61,6 +61,7 @@ local function loadService()
   }
 
   _G.TargetReachability = nil
+  _G.PathUtils = nil
   return dofile("targetbot/monster_reachability.lua")
 end
 
@@ -101,6 +102,7 @@ describe("TargetReachability", function()
     local target = creature(2, 105, 100)
     paths[key(target.position) .. ":2:5"] = { 1, 1, 1 }
     shots[key(player.position) .. ">" .. key(target.position)] = false
+    shots["103,100,7>" .. key(target.position)] = false
     local result = service.evaluate(target, { mode = "ranged", minDistance = 2, maxDistance = 5, force = true })
     assert.is_false(result.attackable)
     assert.equals("no_line_of_sight", result.reason)
@@ -115,6 +117,7 @@ describe("TargetReachability", function()
     assert.equals(1, pathCalls)
 
     player.position = pos(101, 100)
+    paths[key(target.position) .. ":1:1"] = { 1 }
     assert.is_true(service.evaluate(target, { mode = "melee" }).attackable)
     assert.equals(2, pathCalls)
 
@@ -151,5 +154,57 @@ describe("TargetReachability", function()
     local result = service.evaluate(creature(10, 103, 100), { mode = "melee", force = true })
     assert.is_false(result.attackable)
     assert.equals("no_attack_position", result.reason)
+  end)
+
+  it("does not let the sandbox path wrapper change the collision policy", function()
+    _G.findPath = function(_, _, _, profile)
+      local ignoresCreatures = profile.ignoreCreatures
+      profile.ignoreCreatures = ignoresCreatures and 1 or 0
+      if ignoresCreatures then return { 1, 1 } end
+    end
+
+    local result = service.evaluate(creature(12, 103, 100), { mode = "melee" })
+    assert.equals("creature_blocked", result.reason)
+    assert.is_false(result.attackable)
+  end)
+
+  it("uses native ignore-creatures flags only to diagnose temporary blocking", function()
+    _G.findPath = nil
+    _G.g_map.findPath = function(_, destination, _, flags)
+      if flags == 16 and key(destination) == "102,100,7" then return { 1, 1 }, 0 end
+      return {}, 4
+    end
+
+    local result = service.evaluate(creature(13, 103, 100), { mode = "melee" })
+    assert.equals("creature_blocked", result.reason)
+    assert.is_false(result.attackable)
+  end)
+
+  it("treats an exhausted native search as temporary", function()
+    _G.findPath = nil
+    _G.g_map.findPath = function() return {}, 3 end
+
+    local result = service.evaluate(creature(15, 103, 100), { mode = "melee" })
+    assert.equals("search_budget", result.reason)
+    assert.equals("temporarily_blocked", result.classification)
+  end)
+
+  it("finds a reachable firing position when the current tile is in range but blocked", function()
+    local target = creature(14, 104, 100)
+    shots[key(player.position) .. ">" .. key(target.position)] = false
+    _G.PathUtils = {
+      findEveryPath = function()
+        return {
+          ["100,101,7"] = { 2, 1, 2, "100,100,7" },
+          ["101,101,7"] = { 3, 1, 5, "100,100,7" },
+        }
+      end,
+    }
+    shots["100,101,7>" .. key(target.position)] = false
+
+    local result = service.evaluate(target, { mode = "ranged", minDistance = 2, maxDistance = 4 })
+    assert.is_true(result.attackable)
+    assert.same({ 5 }, result.path)
+    assert.same(pos(101, 101), result.attackPosition)
   end)
 end)

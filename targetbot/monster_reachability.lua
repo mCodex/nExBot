@@ -78,7 +78,7 @@ local function profileFor(context)
     mode = mode,
     marginMin = minDistance,
     marginMax = maxDistance,
-    ignoreLastCreature = true,
+    maxSteps = context.maxSteps or 15,
     ignoreCreatures = context.ignoreCreatures == true,
     ignoreNonPathable = false,
     ignoreNonWalkable = false,
@@ -89,7 +89,7 @@ local function profileFor(context)
 end
 
 local function profileKey(p)
-  return table.concat({ p.name, p.mode, p.marginMin, p.marginMax,
+  return table.concat({ p.name, p.mode, p.marginMin, p.marginMax, p.maxSteps,
     p.ignoreCreatures and 1 or 0, p.allowOnlyVisibleTiles and 1 or 0 }, ":")
 end
 
@@ -98,7 +98,8 @@ local function makeKey(id, pp, cp, profile)
 end
 
 local function classificationFor(reason)
-  if reason == "creature_blocked" or reason == "incomplete_map" or reason == "no_path_api" then
+  if reason == "creature_blocked" or reason == "incomplete_map"
+    or reason == "search_budget" or reason == "no_path_api" then
     return "temporarily_blocked"
   end
   if reason == "different_floor" then return "different_floor" end
@@ -139,61 +140,144 @@ local function pathEnd(start, path)
   return endpoint
 end
 
-local function findPathToRing(pp, cp, maxSteps, profile)
-  local currentDistance = math.max(math.abs(pp.x - cp.x), math.abs(pp.y - cp.y))
-  if currentDistance >= profile.marginMin and currentDistance <= profile.marginMax then
-    return {}, { x = pp.x, y = pp.y, z = pp.z }, "already_in_attack_position"
-  end
-  local fn = type(findPath) == "function" and findPath or nil
-  local capability = fn and "findPath_wrapper" or nil
-  if not fn and PathUtils and type(PathUtils.findPath) == "function" then
-    fn, capability = PathUtils.findPath, "PathUtils.findPath"
-  end
-  if fn then
-    stats.pathCalls = stats.pathCalls + 1
-    local ok, path = pcall(fn, pp, cp, maxSteps, profile)
-    if ok and type(path) == "table" and #path > 0 then
-      return path, pathEnd(pp, path), capability
-    end
-    return nil, nil, capability, "no_attack_position"
+local function distance(a, b)
+  return math.max(math.abs(a.x - b.x), math.abs(a.y - b.y))
+end
+
+local function hasShot(from, target, currentPosition, range)
+  if g_map and type(g_map.isSightClear) == "function" then
+    local ok, clear = pcall(g_map.isSightClear, from, target)
+    if ok then return clear == true end
   end
 
-  -- Last-resort native API has no margin support; probe the small attack ring.
-  if g_map and type(g_map.findPath) == "function" then
-    local bestPath, bestPosition
-    for dx = -profile.marginMax, profile.marginMax do
-      for dy = -profile.marginMax, profile.marginMax do
-        local distance = math.max(math.abs(dx), math.abs(dy))
-        if distance >= profile.marginMin and distance <= profile.marginMax then
-          local candidate = { x = cp.x + dx, y = cp.y + dy, z = cp.z }
+  -- Tile:canShoot uses the actual player position, so it cannot assess a future tile.
+  if distance(from, currentPosition) == 0 and g_map and type(g_map.getTile) == "function" then
+    local okTile, tile = pcall(g_map.getTile, target)
+    if okTile and tile and type(tile.canShoot) == "function" then
+      local ok, clear = pcall(tile.canShoot, tile, range)
+      if ok then return clear == true end
+    end
+  end
+  return false
+end
+
+local function inAttackRing(position, target, profile)
+  local range = distance(position, target)
+  return range >= profile.marginMin and range <= profile.marginMax
+end
+
+local function canAttackFrom(position, target, playerPosition, profile)
+  return profile.mode ~= "ranged" or hasShot(position, target, playerPosition, profile.marginMax)
+end
+
+local function pathFromNodes(nodes, destination, origin, maxSteps)
+  local nodeKey, originKey = posKey(destination), posKey(origin)
+  local reversed = {}
+  while nodeKey ~= originKey do
+    local node = nodes[nodeKey]
+    if not node or not OFFSETS[node[3]] or type(node[4]) ~= "string" or #reversed >= maxSteps then
+      return nil
+    end
+    reversed[#reversed + 1] = node[3]
+    nodeKey = node[4]
+  end
+
+  local path = {}
+  for i = #reversed, 1, -1 do path[#path + 1] = reversed[i] end
+  return path
+end
+
+local function findAlternative(pp, cp, profile, noSight)
+  local nodes
+  if PathUtils and type(PathUtils.findEveryPath) == "function" then
+    stats.pathCalls = stats.pathCalls + 1
+    local ok, result = pcall(PathUtils.findEveryPath, pp, profile.maxSteps, profile)
+    if ok and type(result) == "table" then nodes = result end
+  end
+
+  local nativePath = g_map and g_map.findPath
+  local capability = nodes and "PathUtils.findEveryPath" or "g_map.findPath"
+  if not nodes and type(nativePath) ~= "function" then
+    return nil, nil, "none", noSight and "no_line_of_sight" or "no_path_api"
+  end
+
+  local flags = profile.ignoreCreatures and 16 or 0
+  local maxComplexity = profile.maxSteps * profile.maxSteps
+  local bestPath, bestPosition, bestCost
+  local exhausted = false
+  local probes = 0
+  local radius = profile.marginMax
+
+  -- Restrict the ring to candidates within the movement budget of the player.
+  for x = math.max(cp.x - radius, pp.x - profile.maxSteps), math.min(cp.x + radius, pp.x + profile.maxSteps) do
+    for y = math.max(cp.y - radius, pp.y - profile.maxSteps), math.min(cp.y + radius, pp.y + profile.maxSteps) do
+      local candidate = { x = x, y = y, z = cp.z }
+      if inAttackRing(candidate, cp, profile) and distance(candidate, pp) > 0 then
+        if nodes then
+          local node = nodes[posKey(candidate)]
+          if node and type(node[1]) == "number" and (not bestCost or node[1] < bestCost) then
+            if canAttackFrom(candidate, cp, pp, profile) then
+              local path = pathFromNodes(nodes, candidate, pp, profile.maxSteps)
+              if path then bestPath, bestPosition, bestCost = path, candidate, node[1] end
+            else
+              noSight = true
+            end
+          end
+        elseif canAttackFrom(candidate, cp, pp, profile) then
+          if probes == 32 then
+            exhausted = true
+            break
+          end
+          probes = probes + 1
           stats.pathCalls = stats.pathCalls + 1
-          local ok, path, code = pcall(g_map.findPath, pp, candidate, maxSteps, 0)
-          if ok and code == 0 and type(path) == "table" and #path > 0
-            and (not bestPath or #path < #bestPath) then
-            bestPath, bestPosition = path, candidate
+          local ok, path, code = pcall(nativePath, pp, candidate, maxComplexity, flags)
+          if ok and code == 3 then exhausted = true end
+          if ok and code == 0 and type(path) == "table" and #path > 0 and #path <= profile.maxSteps
+            and (not bestCost or #path < bestCost) then
+            local endpoint = pathEnd(pp, path)
+            if endpoint and distance(endpoint, candidate) == 0 then
+              bestPath, bestPosition, bestCost = path, candidate, #path
+            end
           end
         end
       end
     end
-    if bestPath then return bestPath, bestPosition, "g_map.findPath" end
-    return nil, nil, "g_map.findPath", "no_attack_position"
+    if probes == 32 then break end
   end
-  return nil, nil, "none", "no_path_api"
+
+  if bestPath then return bestPath, bestPosition, capability end
+  if probes == 32 or exhausted then return nil, nil, capability, "search_budget" end
+  return nil, nil, capability, noSight and "no_line_of_sight" or "no_attack_position"
 end
 
-local function hasShot(pp, cp, maxDistance)
-  if g_map and type(g_map.isSightClear) == "function" then
-    local ok, clear = pcall(g_map.isSightClear, pp, cp)
-    if ok then return clear == true, "g_map.isSightClear" end
+local function findPathToRing(pp, cp, profile)
+  local noSight = false
+  if inAttackRing(pp, cp, profile) then
+    if canAttackFrom(pp, cp, pp, profile) then return {}, pp, "already_in_attack_position" end
+    noSight = true
   end
-  if g_map and type(g_map.getTile) == "function" then
-    local okTile, tile = pcall(g_map.getTile, cp)
-    if okTile and tile and type(tile.canShoot) == "function" then
-      local ok, clear = pcall(tile.canShoot, tile, maxDistance)
-      if ok then return clear == true, "tile.canShoot" end
+
+  local fn = type(findPath) == "function" and findPath or nil
+  if fn then
+    -- The sandbox wrapper rewrites boolean options in place.
+    local options = {}
+    for key, value in pairs(profile) do options[key] = value end
+    stats.pathCalls = stats.pathCalls + 1
+    local ok, path = pcall(fn, pp, cp, profile.maxSteps, options)
+    if ok and type(path) == "table" and #path > 0 and #path <= profile.maxSteps then
+      local endpoint = pathEnd(pp, path)
+      if endpoint and inAttackRing(endpoint, cp, profile) then
+        if canAttackFrom(endpoint, cp, pp, profile) then return path, endpoint, "findPath_wrapper" end
+        noSight = true
+      end
+    end
+    if profile.mode ~= "ranged" then return nil, nil, "findPath_wrapper", "no_attack_position" end
+    if not PathUtils and not (g_map and g_map.findPath) then
+      return nil, nil, "findPath_wrapper", noSight and "no_line_of_sight" or "no_attack_position"
     end
   end
-  return false, "shoot_api_unavailable"
+
+  return findAlternative(pp, cp, profile, noSight)
 end
 
 local function prune(tableValue)
@@ -230,21 +314,17 @@ function R.evaluate(creature, context)
   end
 
   stats.evaluations = stats.evaluations + 1
-  local path, attackPosition, capability, failure = findPathToRing(pp, cp, context.maxSteps or 15, profile)
+  local path, attackPosition, capability, failure = findPathToRing(pp, cp, profile)
   local evaluated
   if not path then
-    if failure == "no_attack_position" and not profile.ignoreCreatures then
+    if (failure == "no_attack_position" or failure == "no_line_of_sight") and not profile.ignoreCreatures then
       local optimistic = {}
       for key, value in pairs(profile) do optimistic[key] = value end
       optimistic.ignoreCreatures = true
-      local probe = findPathToRing(pp, cp, context.maxSteps or 15, optimistic)
+      local probe = findPathToRing(pp, cp, optimistic)
       if probe then failure = "creature_blocked" end
     end
     evaluated = result(id, pp, cp, profile, false, failure, nil, capability)
-  elseif profile.mode == "ranged" then
-    local clear, shotCapability = hasShot(attackPosition or pp, cp, profile.marginMax)
-    evaluated = result(id, pp, cp, profile, clear, clear and "reachable" or "no_line_of_sight", path,
-      capability .. "+" .. shotCapability)
   else
     evaluated = result(id, pp, cp, profile, true, "reachable", path, capability)
   end

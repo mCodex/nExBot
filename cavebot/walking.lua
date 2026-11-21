@@ -48,8 +48,27 @@ local getClient = nExBot.Shared.getClient
 local Dirs          = Directions or {}
 local DIR_TO_OFFSET = Dirs.DIR_TO_OFFSET or {}
 
-local function canWalkDirection(dir)
-  return (player.canWalk and player:canWalk(dir)) or true
+local function canWalkDirection(dir, playerPos)
+  local offset = DIR_TO_OFFSET[dir]
+  if not offset or not player then return false end
+
+  if player.canWalk then
+    -- OpenTibiaBR takes ignoreLock here, while OTCv8 takes a direction.
+    local canWalk
+    if nExBot.clientName == "OpenTibiaBR" then
+      canWalk = player:canWalk(false)
+    else
+      canWalk = player:canWalk(dir)
+    end
+    if not canWalk then return false end
+  end
+
+  if not PathUtils or not PathUtils.isTileWalkable then return false end
+  return PathUtils.isTileWalkable({
+    x = playerPos.x + offset.x,
+    y = playerPos.y + offset.y,
+    z = playerPos.z,
+  }, false)
 end
 
 local function getDirectionTo(fromPos, toPos)
@@ -70,10 +89,6 @@ end
 
 local function applyOffset(p, off)
   return {x = p.x + off.x, y = p.y + off.y, z = p.z}
-end
-
-local function posEquals(a, b)
-  return a.x == b.x and a.y == b.y and a.z == b.z
 end
 
 local function isFloorChangeTile(tilePos)
@@ -135,17 +150,12 @@ local function tryKeyboardNudge(playerPos, dest)
   end
 
   for _, d in ipairs(candidates) do
-    if canWalkDirection(d) then
-      local off = DIR_TO_OFFSET[d]
-      if off then
-        local target = {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}
-        if not isFloorChangeTile(target) and PathUtils.isTileWalkable(target) then
-          PS().walkStep(d)
-          lastNudgeDir  = d
-          lastNudgeTime = now
-          return "nudge"
-        end
-      end
+    local offset = DIR_TO_OFFSET[d]
+    if offset and not isFloorChangeTile(applyOffset(playerPos, offset)) and canWalkDirection(d, playerPos) then
+      if PS().walkStep(d) == false then return false end
+      lastNudgeDir = d
+      lastNudgeTime = now
+      return "nudge"
     end
   end
   return false
@@ -163,11 +173,11 @@ local MAX_PATHFIND_DIST = 50
 
 --- Check if a direction (or its smoothed variant) is physically walkable.
 --- Returns the walkable direction, or nil.
-local function resolveWalkableDir(dir)
-  if PS() == NOOP_PS then return canWalkDirection(dir) and dir or nil end
+local function resolveWalkableDir(dir, playerPos)
+  if PS() == NOOP_PS then return canWalkDirection(dir, playerPos) and dir or nil end
   local smoothed = PS().smoothDirection(dir) or dir
-  if canWalkDirection(smoothed) then return smoothed end
-  if smoothed ~= dir and canWalkDirection(dir) then return dir end
+  if canWalkDirection(smoothed, playerPos) then return smoothed end
+  if smoothed ~= dir and canWalkDirection(dir, playerPos) then return dir end
   return nil
 end
 
@@ -182,7 +192,7 @@ local function findWalkablePath(playerPos, dest, opts)
       local path = cursor.path
       local idx  = cursor.idx
       if path and idx and idx <= #path then
-        if resolveWalkableDir(path[idx]) then
+        if resolveWalkableDir(path[idx], playerPos) then
           return path, false
         end
         -- First step blocked -> cache is stale
@@ -208,7 +218,7 @@ local function findWalkablePath(playerPos, dest, opts)
     path = PS().findPath(playerPos, dest, strictOpts)
   end
 
-  if path and #path > 0 and resolveWalkableDir(path[1]) then
+  if path and #path > 0 and resolveWalkableDir(path[1], playerPos) then
     PS().setCursor(path, dest)
     local sm = PS().smoothPath(path, playerPos)
     if sm and #sm > 0 and #sm <= #path then
@@ -228,17 +238,17 @@ local function findWalkablePath(playerPos, dest, opts)
   }
   local relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
 
-  if not (relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1])) then
+  if not (relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1], playerPos)) then
     relaxedOpts.allowUnseen = true
     relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
   end
 
-  if not (relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1])) then
+  if not (relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1], playerPos)) then
     relaxedOpts.ignoreFields = true
     relaxedPath = PS().findPath(playerPos, dest, relaxedOpts)
   end
 
-  if relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1]) then
+  if relaxedPath and #relaxedPath > 0 and resolveWalkableDir(relaxedPath[1], playerPos) then
     PS().setCursor(relaxedPath, dest)
     local sm = PS().smoothPath(relaxedPath, playerPos)
     if sm and #sm > 0 and #sm <= #relaxedPath then
@@ -262,14 +272,14 @@ local function keyboardStep(path, playerPos, curIdx)
   local dir = path[curIdx]
   if not dir then return false end
 
-  local walkDir = resolveWalkableDir(dir)
+  local walkDir = resolveWalkableDir(dir, playerPos)
   if not walkDir then return false end
 
   local isDiag = walkDir >= 4
   local stepDur = PS().rawStepDuration(isDiag) or 180
   if (now - lastStepTime) < stepDur then return "walking" end
 
-  PS().walkStep(walkDir)
+  if PS().walkStep(walkDir) == false then return "rejected" end
   lastStepTime = now
   PS().advanceCursor(1, stepDur)
   return true
@@ -303,7 +313,7 @@ local function autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist)
   end
 
   local precision = chunkSteps >= 10 and 1 or 0
-  PS().autoWalk(chunkDest, maxDist, {precision = precision})
+  if PS().autoWalk(chunkDest, maxDist, {precision = precision}) == false then return "rejected" end
   PS().advanceCursor(chunkSteps, PS().rawStepDuration(false))
   return true
 end
@@ -371,12 +381,11 @@ CaveBot.walkTo = function(dest, maxDist, params)
       if fcPath and #fcPath > 0 then
         local dir = fcPath[1]
         local smoothed = PS().smoothDirection(dir, true) or dir
-        if canWalkDirection(smoothed) then
-          PS().walkStep(smoothed)
-          return true
-        elseif canWalkDirection(dir) then
-          PS().walkStep(dir)
-          return true
+        if canWalkDirection(smoothed, playerPos) then
+          return PS().walkStep(smoothed) ~= false
+        end
+        if dir ~= smoothed and canWalkDirection(dir, playerPos) then
+          return PS().walkStep(dir) ~= false
         end
       end
       return false
@@ -384,18 +393,10 @@ CaveBot.walkTo = function(dest, maxDist, params)
       -- Far: guarded autoWalk
       local isSafe = PS().nativePathIsSafe(playerPos, walkDest, {ignoreNonPathable = true})
       if isSafe then
-        PS().autoWalk(walkDest, maxDist, {precision = precision})
-      else
-        local dirToDest = getDirectionTo(playerPos, walkDest)
-        if dirToDest and canWalkDirection(dirToDest) then
-          local off = DIR_TO_OFFSET[dirToDest]
-          local target = off and {x = playerPos.x + off.x, y = playerPos.y + off.y, z = playerPos.z}
-          if target and PathUtils.isTileWalkable(target) then
-            PS().walkStep(dirToDest)
-          end
-        end
+        return PS().autoWalk(walkDest, maxDist, {precision = precision}) ~= false
       end
-      return true
+      local direction = getDirectionTo(playerPos, walkDest)
+      return direction ~= nil and canWalkDirection(direction, playerPos) and PS().walkStep(direction) ~= false
     end
   end
 
@@ -446,47 +447,20 @@ CaveBot.walkTo = function(dest, maxDist, params)
   local curObj = PS().getCursor()
   if curObj then curObj.dest = dest end
 
-  -- Field handling: keyboard-walk through field tiles
-  if ignoreFields or wasRelaxed then
-    local peekDir = path[curIdx]
-    local peekOff = peekDir and DIR_TO_OFFSET[peekDir]
-    if peekOff then
-      local peekPos = applyOffset(playerPos, peekOff)
-      if isFieldTile(peekPos) then
-        local currentPos = {x = playerPos.x, y = playerPos.y, z = playerPos.z}
-        local lastWalked = curIdx - 1
-        for i = curIdx, #path do
-          local d   = path[i]
-          local off = DIR_TO_OFFSET[d]
-          if not off then break end
-          local nextPos = applyOffset(currentPos, off)
-          if not isFieldTile(nextPos) then break end
-          if isFloorChangeTile(nextPos) then break end
-          walk(d)
-          currentPos = nextPos
-          lastWalked = i
-          if posEquals(currentPos, dest) then
-            PS().resetCursor()
-            return true
-          end
-        end
-        local fc = PS().getCursor()
-        if fc then fc.idx = lastWalked + 1 end
-        return true
-      end
-    end
-  end
-
-  -- Dispatch: keyboard for short paths, autoWalk for long
-  if stepsToWalk <= KEYBOARD_THRESHOLD then
-    if keyboardStep(path, playerPos, curIdx) then return true end
-    PS().resetCursor()
-    return tryKeyboardNudge(playerPos, dest)
+  -- A field is crossed one checked step at a time so a rejected walk does not queue later tiles.
+  local firstOffset = DIR_TO_OFFSET[path[curIdx]]
+  local fieldAhead = (ignoreFields or wasRelaxed) and firstOffset and isFieldTile(applyOffset(playerPos, firstOffset))
+  local result
+  if fieldAhead or stepsToWalk <= KEYBOARD_THRESHOLD then
+    result = keyboardStep(path, playerPos, curIdx)
   else
-    if autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist) then return true end
-    PS().resetCursor()
-    return tryKeyboardNudge(playerPos, dest)
+    result = autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist)
   end
+  if result and result ~= "rejected" then return true end
+
+  PS().resetCursor()
+  if result == "rejected" then return false end
+  return tryKeyboardNudge(playerPos, dest)
 end
 
 -- CONVENIENCE & PUBLIC API

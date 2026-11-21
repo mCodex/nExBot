@@ -105,20 +105,13 @@ end
 -- PATHFINDING — ACL-UNIFIED ENTRY POINT (one-time backend detection)
 
 --- Build native flags from human-readable option table.
--- Module-level 1-entry cache to avoid recomputation without mutating caller opts.
-local _flagsCacheRef = nil   -- last opts table reference
-local _flagsCacheVal = 0     -- cached flags for that reference
-
 local function optsToFlags(opts)
-  if opts == _flagsCacheRef then return _flagsCacheVal end
   local flags = 0
   if opts.allowUnseen       then flags = flags + PF_ALLOW_NOT_SEEN end
   if opts.allowCreatures    then flags = flags + PF_ALLOW_CREATURES end
   if opts.ignoreNonPathable then flags = flags + PF_ALLOW_NON_PATHABLE end
   if opts.ignoreNonWalkable then flags = flags + PF_ALLOW_NON_WALKABLE end
   if opts.ignoreCreatures   then flags = flags + PF_IGNORE_CREATURES end
-  _flagsCacheRef = opts
-  _flagsCacheVal = flags
   return flags
 end
 
@@ -447,7 +440,7 @@ function PathStrategy.nativePathIsSafe(startPos, goalPos, opts)
   local probe = {x = startPos.x, y = startPos.y, z = startPos.z}
   for i = 1, #nativePath do
     local off = dirOffset(nativePath[i])
-    if not off then break end
+    if not off then return false, nativePath, i end
     probe = applyOff(probe, off)
     if isFC(probe) then
       return false, nativePath, i
