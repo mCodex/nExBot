@@ -4,11 +4,12 @@ describe("Rust bridge", function()
   local serverProof = string.rep("b", 64)
 
   before_each(function()
-    state = { sent = {}, pending = {}, closed = false }
+    state = { sent = {}, pending = {}, logs = {}, closed = false }
     position = { x = 100, y = 100, z = 7 }
     local player = { getPosition = function() return position end }
 
     env = setmetatable({
+      print = function(message) table.insert(state.logs, message) end,
       configDir = "/bot/rust-probe",
       g_resources = {
         fileExists = function() return true end,
@@ -62,8 +63,10 @@ describe("Rust bridge", function()
     assert.equals("hello", state.sent[1].type)
     assert.equals(clientToken, state.sent[1].token)
     assert.equals(1, #state.sent)
+    assert.same({ "[nExBot] Ponte Rust v5.0.0-alpha.1 · conectando" }, state.logs)
 
     receive({ type = "ready", protocol = 1, proof = serverProof })
+    assert.equals("[nExBot] Ponte Rust v5.0.0-alpha.1 · conectado e autenticado · diagnóstico", state.logs[2])
     assert.equals("snapshot", state.sent[2].type)
     assert.equals(1, state.sent[2].sequence)
 
@@ -83,6 +86,7 @@ describe("Rust bridge", function()
     receive({ type = "ready", protocol = 1, proof = clientToken })
     assert.is_true(state.closed)
     assert.equals(1, #state.sent)
+    assert.equals("[nExBot] Ponte Rust v5.0.0-alpha.1 · autenticação recusada", state.logs[2])
 
     state.sent = {}
     start()

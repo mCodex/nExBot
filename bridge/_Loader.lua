@@ -2,6 +2,7 @@ local VERSION = "5.0.0-alpha.1"
 local label = UI and UI.Label and UI.Label("Motor Rust · desconectado")
 local function status(message)
   if label then label:setText("Motor Rust · " .. message) end
+  print("[nExBot] Ponte Rust v" .. VERSION .. " · " .. message)
 end
 
 if not HTTP or not HTTP.WebSocket or not json or not json.decode
@@ -133,7 +134,7 @@ local callbacks = {
       if not isPosition(position) then return close("personagem indisponível") end
       connected = true
       emit({ type = "snapshot", position = position })
-      status("conectado · diagnóstico")
+      status("conectado e autenticado · diagnóstico")
       return
     end
 

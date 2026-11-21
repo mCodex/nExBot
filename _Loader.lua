@@ -506,6 +506,7 @@ loadCategory("analytics", {
 
 local totalTime = math.floor((os.clock() - startTime) * 1000)
 loadTimes["_total"] = totalTime
+print("[nExBot v" .. nExBot.version .. "] Motor ativo: Lua (perfil padrão)")
 
 -- ============================================================================
 -- STARTUP PROFILING SUMMARY
