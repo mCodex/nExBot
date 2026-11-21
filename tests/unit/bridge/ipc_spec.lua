@@ -49,7 +49,11 @@ describe("Rust bridge", function()
   end)
 
   local function start()
-    assert(loadfile("bridge/_Loader.lua", "t", env))()
+    env.dofile = function(path)
+      assert.equals("bridge/_Loader.lua", path)
+      assert(loadfile(path, "t", env))()
+    end
+    assert(loadfile("_Loader.lua", "t", env))()
     state.handlers.onOpen()
   end
 

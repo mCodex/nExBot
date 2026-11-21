@@ -10,3 +10,4 @@ rust/target/
 /rust/.env
 /rust/lcov.info
 /tools/__pycache__/
+/rust-session
