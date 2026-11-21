@@ -16,6 +16,14 @@ Install paths:
 - **vBot:** `%APPDATA%/OTClientV8/<ServerName>/bot/nExBot`
 - **OTCR:** `~/.local/share/<otcr-data>/<ServerName>/bot/nExBot`
 
+### Start the Rust engine automatically
+
+Install the per-user startup service once for the bot profile, using a verified engine build that supports `serve`. The installer starts the engine immediately and registers it for OS sign-in. The default Lua profile connects over loopback and authenticates again after a game relog. The Rust bridge currently runs in diagnostic mode.
+
+- [macOS LaunchAgent](tools/macos/README.md)
+- [Linux systemd user service](tools/linux/README.md)
+- [Windows Task Scheduler](tools/windows/README.md)
+
 ## Modules
 
 | Module | Function |

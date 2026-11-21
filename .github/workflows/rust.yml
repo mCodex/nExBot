@@ -36,12 +36,33 @@ jobs:
       - run: cargo test --locked --workspace --target ${{ matrix.target }}
       - run: cargo build --locked --release --workspace --target ${{ matrix.target }}
       - run: cargo build --locked --profile balanced -p nexbot-engine --target ${{ matrix.target }}
+      - name: Check Windows startup task definition
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ../tools/windows/test-autostart.ps1 -Engine (Resolve-Path "target/${{ matrix.target }}/release/nexbot-engine.exe")
+      - name: Check Linux login service
+        if: runner.os == 'Linux'
+        run: |
+          python3 ../tools/linux/test_autostart.py
+          mkdir -p "$HOME/.local/share/nexbot/service"
+          install -m 700 "target/${{ matrix.target }}/release/nexbot-engine" "$HOME/.local/share/nexbot/service/nexbot-engine"
+          systemd-analyze --user --man=no verify ../tools/linux/nexbot-engine.service
+      - name: Package startup installer
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux) platform=linux ;;
+            macOS) platform=macos ;;
+            Windows) platform=windows ;;
+          esac
+          cp -R "../tools/$platform" "target/${{ matrix.target }}/release/autostart"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: unsigned-${{ matrix.target }}
           path: |
             rust/target/${{ matrix.target }}/release/nexbot-engine*
             rust/target/${{ matrix.target }}/release/nexbot-bootstrap*
+            rust/target/${{ matrix.target }}/release/autostart/
             !**/*.d
             !**/*.pdb
           if-no-files-found: error

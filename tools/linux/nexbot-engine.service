@@ -1,0 +1,12 @@
+[Unit]
+Description=nExBot Rust engine
+
+[Service]
+ExecStart=%h/.local/share/nexbot/service/nexbot-engine serve %h/.local/share/nexbot/service/profile
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
