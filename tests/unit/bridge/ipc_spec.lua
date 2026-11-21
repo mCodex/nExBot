@@ -48,12 +48,16 @@ describe("Rust bridge", function()
     }, { __index = _G })
   end)
 
-  local function start()
+  local function loadProfile()
     env.dofile = function(path)
       assert.equals("bridge/_Loader.lua", path)
       assert(loadfile(path, "t", env))()
     end
     assert(loadfile("_Loader.lua", "t", env))()
+  end
+
+  local function start()
+    loadProfile()
     state.handlers.onOpen()
   end
 
@@ -62,15 +66,36 @@ describe("Rust bridge", function()
     state.handlers.onMessage("{}")
   end
 
+  it("connects when the engine starts after the bot without reloading the profile", function()
+    local available = false
+    env.g_resources.fileExists = function(path)
+      assert.equals(env.configDir .. "/rust-session", path)
+      return available
+    end
+    loadProfile()
+    assert.is_nil(state.handlers)
+    for _ = 1, 3 do
+      assert.equals(1, #state.pending)
+      table.remove(state.pending, 1)()
+    end
+    assert.same({ "[nExBot] Rust bridge v5.0.0-alpha.1 - waiting for the local Rust engine" }, state.logs)
+    available = true
+    table.remove(state.pending, 1)()
+    assert.equals(0, #state.pending)
+    state.handlers.onOpen()
+    receive({ type = "ready", protocol = 1, proof = serverProof })
+    assert.equals("snapshot", state.sent[2].type)
+  end)
+
   it("authenticates before emitting snapshots and reports native query results", function()
     start()
     assert.equals("hello", state.sent[1].type)
     assert.equals(clientToken, state.sent[1].token)
     assert.equals(1, #state.sent)
-    assert.same({ "[nExBot] Ponte Rust v5.0.0-alpha.1 · conectando" }, state.logs)
+    assert.same({ "[nExBot] Rust bridge v5.0.0-alpha.1 - connecting" }, state.logs)
 
     receive({ type = "ready", protocol = 1, proof = serverProof })
-    assert.equals("[nExBot] Ponte Rust v5.0.0-alpha.1 · conectado e autenticado · diagnóstico", state.logs[2])
+    assert.equals("[nExBot] Rust bridge v5.0.0-alpha.1 - connected and authenticated (diagnostic mode)", state.logs[2])
     assert.equals("snapshot", state.sent[2].type)
     assert.equals(1, state.sent[2].sequence)
 
@@ -90,7 +115,7 @@ describe("Rust bridge", function()
     receive({ type = "ready", protocol = 1, proof = clientToken })
     assert.is_true(state.closed)
     assert.equals(1, #state.sent)
-    assert.equals("[nExBot] Ponte Rust v5.0.0-alpha.1 · autenticação recusada", state.logs[2])
+    assert.equals("[nExBot] Rust bridge v5.0.0-alpha.1 - authentication failed", state.logs[2])
 
     state.sent = {}
     start()

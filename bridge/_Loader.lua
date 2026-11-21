@@ -1,34 +1,17 @@
 local VERSION = "5.0.0-alpha.1"
-local label = UI and UI.Label and UI.Label("Motor Rust · desconectado")
+local label = UI and UI.Label and UI.Label("Rust engine - disconnected")
 local function status(message)
-  if label then label:setText("Motor Rust · " .. message) end
-  print("[nExBot] Ponte Rust v" .. VERSION .. " · " .. message)
+  if label then label:setText("Rust engine - " .. message) end
+  print("[nExBot] Rust bridge v" .. VERSION .. " - " .. message)
 end
 
 if not HTTP or not HTTP.WebSocket or not json or not json.decode
   or not configDir or not _websockets or not onPlayerPositionChange or not schedule then
-  status("ponte indisponível neste cliente")
+  status("bridge unavailable in this client")
   return
 end
 
-local rendezvous = configDir .. "/rust-session"
-if not g_resources.fileExists(rendezvous) then
-  status("aguardando configuração local")
-  return
-end
-
-local config = g_resources.readFileContents(rendezvous)
-if type(config) ~= "string" then
-  status("configuração local indisponível")
-  return
-end
-local port, token, proof = config:match("^(%d+)\n([a-f0-9]+)\n([a-f0-9]+)\n$")
-port = tonumber(port)
-if not port or port < 1 or port > 65535 or #token ~= 64 or #proof ~= 64 then
-  status("configuração local inválida")
-  return
-end
-
+local token, proof
 local socket
 local connected, sequence, lastProbeId = false, 0, 0
 local function close(message)
@@ -117,29 +100,29 @@ local callbacks = {
   onMessage = function(raw)
     if not socket then return end
     if type(raw) ~= "string" or #raw > 4096 then
-      return close("resposta inválida")
+      return close("invalid response")
     end
     local ok, message = pcall(json.decode, raw)
     if not ok or type(message) ~= "table" then
-      return close("resposta inválida")
+      return close("invalid response")
     end
 
     if not connected then
       if message.type ~= "ready" or message.protocol ~= 1 or message.proof ~= proof then
-        return close("autenticação recusada")
+        return close("authentication failed")
       end
 
       proof = nil
       local position = localPosition()
-      if not isPosition(position) then return close("personagem indisponível") end
+      if not isPosition(position) then return close("character unavailable") end
       connected = true
       emit({ type = "snapshot", position = position })
-      status("conectado e autenticado · diagnóstico")
+      status("connected and authenticated (diagnostic mode)")
       return
     end
 
     if message.type == "watch_tile" then
-      if not routeProbed or not isPosition(message.position) then return close("tile inválido") end
+      if not routeProbed or not isPosition(message.position) then return close("invalid tile") end
       local player = localPosition()
       local tile = message.position
       if player and player.z == tile.z and math.max(math.abs(player.x - tile.x), math.abs(player.y - tile.y)) <= 1 then
@@ -153,13 +136,13 @@ local callbacks = {
     if (not route and message.type ~= "probe") or not pathProbe
       or not isCoordinate(message.id, 4294967295) or message.id <= lastProbeId
       or not isPosition(origin) or not isPosition(destination) or origin.z ~= destination.z then
-      return close("comando inválido")
+      return close("invalid command")
     end
 
     local dx, dy = math.abs(origin.x - destination.x), math.abs(origin.y - destination.y)
     if (route and (math.max(dx, dy) > 32 or dx + dy == 0))
       or (not route and (message.id ~= 1 or dy ~= 0 or dx ~= 1)) then
-      return close("destino inválido")
+      return close("invalid destination")
     end
 
     lastProbeId = message.id
@@ -181,19 +164,10 @@ local callbacks = {
       emit(frame)
     end)
   end,
-  onError = function() close("falha de conexão") end,
-  onClose = function() close("desconectado") end,
+  onError = function() close("connection failed") end,
+  onClose = function() close("disconnected") end,
 }
 
-local started
-started, socket = pcall(HTTP.WebSocket, "ws://127.0.0.1:" .. port .. "/", callbacks, 5)
-if not started or not socket or type(socket.id) ~= "number" or socket.id < 0 then
-  status("falha ao iniciar WebSocket")
-  return
-end
-
-_websockets[socket.id] = socket
-status("conectando")
 onPlayerPositionChange(function(position)
   if connected and isPosition(position) then
     emit({ type = "move", position = position })
@@ -220,3 +194,41 @@ if onCreaturePositionChange then
     latest = { type = "creature_move", id = id, position = position }
   end)
 end
+
+local rendezvous = configDir .. "/rust-session"
+local waiting = false
+local function connect()
+  if not g_resources.fileExists(rendezvous) then
+    if not waiting then
+      waiting = true
+      status("waiting for the local Rust engine")
+    end
+    schedule(1000, connect)
+    return
+  end
+
+  local port
+  local config = g_resources.readFileContents(rendezvous)
+  if type(config) ~= "string" then
+    status("local session file unavailable")
+    return
+  end
+  port, token, proof = config:match("^(%d+)\n([a-f0-9]+)\n([a-f0-9]+)\n$")
+  port = tonumber(port)
+  if not port or port < 1 or port > 65535 or #token ~= 64 or #proof ~= 64 then
+    status("invalid local session file")
+    return
+  end
+
+  local started
+  started, socket = pcall(HTTP.WebSocket, "ws://127.0.0.1:" .. port .. "/", callbacks, 5)
+  if not started or not socket or type(socket.id) ~= "number" or socket.id < 0 then
+    status("could not open WebSocket")
+    return
+  end
+
+  _websockets[socket.id] = socket
+  status("connecting")
+end
+
+connect()
