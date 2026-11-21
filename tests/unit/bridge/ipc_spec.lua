@@ -41,7 +41,7 @@ describe("Rust bridge", function()
       },
       json = { decode = function() return state.serverFrame end },
       _websockets = {},
-      UI = { Label = function() return { setText = function() end } end },
+      UI = { Label = function() error("the bridge must only report status in the console") end },
       onPlayerPositionChange = function(callback) state.move = callback end,
       onCreaturePositionChange = function(callback) state.creatureMove = callback end,
       schedule = function(_, callback) table.insert(state.pending, callback) end,
@@ -49,12 +49,28 @@ describe("Rust bridge", function()
   end)
 
   local function loadProfile()
+    assert(loadfile("bridge/_Loader.lua", "t", env))()
+  end
+
+  it("loads the normal bot controls and the diagnostic bridge from the default profile", function()
+    local loaded = {}
+    env.modules = { game_bot = { contentsPanel = { config = {
+      getCurrentOption = function() return { text = "nExBot" } end,
+    } } } }
+    env.g_resources.listDirectoryFiles = function() return {} end
+    env.warn = function() end
+    env.info = function() end
+    env.setDefaultTab = function(tab) state.tab = tab end
     env.dofile = function(path)
-      assert.equals("bridge/_Loader.lua", path)
-      assert(loadfile(path, "t", env))()
+      loaded[path] = (loaded[path] or 0) + 1
     end
     assert(loadfile("_Loader.lua", "t", env))()
-  end
+    assert.equals(1, loaded["/core/main.lua"])
+    assert.equals(1, loaded["/core/cavebot.lua"])
+    assert.equals(1, loaded["/core/cavebot_control_panel.lua"])
+    assert.equals("Main", state.tab)
+    assert.equals(1, loaded["bridge/_Loader.lua"])
+  end)
 
   local function start()
     loadProfile()

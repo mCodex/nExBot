@@ -1,7 +1,5 @@
 local VERSION = "5.0.0-alpha.1"
-local label = UI and UI.Label and UI.Label("Rust engine - disconnected")
 local function status(message)
-  if label then label:setText("Rust engine - " .. message) end
   print("[nExBot] Rust bridge v" .. VERSION .. " - " .. message)
 end
 
