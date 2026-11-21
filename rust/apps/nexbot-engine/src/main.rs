@@ -172,8 +172,10 @@ fn diagnose(path: &Path, goal: Option<Position>) -> io::Result<()> {
         .max_frame_size(Some(MAX_FRAME));
 
     let host = address.to_string();
+    let native_origin = format!("ws://{address}");
     #[allow(clippy::result_large_err)] // Tungstenite owns the callback signature.
     let handshake = |request: &Request, response: Response| {
+        let mut origins = request.headers().get_all("origin").iter();
         if request
             .uri()
             .path_and_query()
@@ -182,7 +184,10 @@ fn diagnose(path: &Path, goal: Option<Position>) -> io::Result<()> {
                 .headers()
                 .get("host")
                 .is_some_and(|value| value.as_bytes() == host.as_bytes())
-            && !request.headers().contains_key("origin")
+            && origins
+                .next()
+                .is_none_or(|value| value.as_bytes() == native_origin.as_bytes())
+            && origins.next().is_none()
         {
             Ok(response)
         } else {

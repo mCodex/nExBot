@@ -64,7 +64,11 @@ fn spawn(suffix: &str, goal: Option<[&str; 3]>) -> (Child, PathBuf, String, Stri
 #[test]
 fn engine_accepts_only_the_rendezvous_and_completes_a_native_probe_reply() {
     let (engine, path, endpoint, token, proof) = spawn("probe", None);
-    let (mut client, _) = connect(endpoint).unwrap();
+    let mut request = endpoint.as_str().into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("origin", endpoint.trim_end_matches('/').parse().unwrap());
+    let (mut client, _) = connect(request).unwrap();
     let version = env!("CARGO_PKG_VERSION");
 
     client.send(Message::text(json!({
