@@ -10,17 +10,23 @@ if not HTTP or not HTTP.WebSocket or not json or not json.decode
 end
 
 local token, proof
-local socket
+local socket, connect
+local generation = 0
+local watched, observationPending, lastObservation, latest
+local watchingEnabled, routeProbed = false, false
 local connected, sequence, lastProbeId = false, 0, 0
 local function close(message)
+  if not socket then return end
+  generation = generation + 1
+  watched, observationPending, lastObservation, latest = nil, false, nil, nil
+  routeProbed, sequence, lastProbeId = false, 0, 0
   connected = false
-  if socket then
-    local previous = socket
-    socket = nil
-    _websockets[previous.id] = nil
-    previous.close()
-  end
+  local previous = socket
+  socket = nil
+  _websockets[previous.id] = nil
+  previous.close()
   status(message)
+  schedule(1000, connect)
 end
 
 local function emit(frame)
@@ -48,13 +54,12 @@ local function samePosition(a, b)
   return a and a.x == b.x and a.y == b.y and a.z == b.z
 end
 
-local watched, observationPending, lastObservation
-local watchingEnabled, routeProbed = false, false
-
 local function observeTile()
   if not watched or observationPending then return end
   observationPending = true
+  local current = generation
   schedule(25, function()
+    if current ~= generation then return end
     observationPending = false
     if not connected or not watched then return end
     local tile = g_map.getTile(watched)
@@ -146,7 +151,9 @@ local callbacks = {
     lastProbeId = message.id
     watched = nil
     routeProbed = routeProbed or route
+    local current = generation
     schedule(0, function()
+      if current ~= generation then return end
       if not connected then return end
       local frame = { type = route and "route_ack" or "ack", id = message.id }
       if samePosition(localPosition(), origin) then
@@ -174,7 +181,6 @@ end)
 
 -- shortcut: diagnostic sends only the latest creature movement per 50 ms, expand for world state.
 if onCreaturePositionChange then
-  local latest
   onCreaturePositionChange(function(creature, position, previous)
     if connected and watched and (samePosition(previous, watched) or samePosition(position, watched)) then
       observeTile()
@@ -183,7 +189,9 @@ if onCreaturePositionChange then
     local id = creature:getId()
     if not isCoordinate(id, 4294967295) or id == 0 then return end
     if not latest then
+      local current = generation
       schedule(50, function()
+        if current ~= generation then return end
         local frame = latest
         latest = nil
         if connected then emit(frame) end
@@ -193,9 +201,11 @@ if onCreaturePositionChange then
   end)
 end
 
-local rendezvous = configDir .. "/rust-session"
+local manual = configDir .. "/rust-session"
+local service = configDir .. "/rust-service-session"
 local waiting = false
-local function connect()
+connect = function()
+  local rendezvous = g_resources.fileExists(service) and service or manual
   if not g_resources.fileExists(rendezvous) then
     if not waiting then
       waiting = true
@@ -206,22 +216,32 @@ local function connect()
   end
 
   local port
-  local config = g_resources.readFileContents(rendezvous)
-  if type(config) ~= "string" then
-    status("local session file unavailable")
+  local ok, config = pcall(g_resources.readFileContents, rendezvous)
+  if not ok or type(config) ~= "string" then
+    schedule(1000, connect)
     return
   end
   port, token, proof = config:match("^(%d+)\n([a-f0-9]+)\n([a-f0-9]+)\n$")
   port = tonumber(port)
   if not port or port < 1 or port > 65535 or #token ~= 64 or #proof ~= 64 then
-    status("invalid local session file")
+    schedule(1000, connect)
     return
   end
 
+  local current = generation
+  local handlers = {}
+  for name, callback in pairs(callbacks) do
+    handlers[name] = function(...)
+      if current == generation then return callback(...) end
+    end
+  end
   local started
-  started, socket = pcall(HTTP.WebSocket, "ws://127.0.0.1:" .. port .. "/", callbacks, 5)
+  started, socket = pcall(HTTP.WebSocket, "ws://127.0.0.1:" .. port .. "/", handlers, 5)
   if not started or not socket or type(socket.id) ~= "number" or socket.id < 0 then
+    socket = nil
+    generation = generation + 1
     status("could not open WebSocket")
+    schedule(1000, connect)
     return
   end
 

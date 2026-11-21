@@ -11,3 +11,5 @@ rust/target/
 /rust/lcov.info
 /tools/__pycache__/
 /rust-session
+/rust-service.lock
+/rust-service-session

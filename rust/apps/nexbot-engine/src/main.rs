@@ -22,6 +22,7 @@ fn main() -> ExitCode {
             println!("nexbot-engine {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+        [command, profile] if command == "serve" => serve(Path::new(profile)),
         [command, path] if command == "diagnose" => diagnose(Path::new(path), None),
         [command, path, x, y, z] if command == "preview" => {
             match (parse_number(x), parse_number(y), parse_number(z)) {
@@ -32,7 +33,7 @@ fn main() -> ExitCode {
             }
         }
         _ => Err(io::Error::other(
-            "usage: nexbot-engine --version | diagnose <rust-session> | preview <rust-session> X Y Z",
+            "usage: nexbot-engine --version | serve <profile-directory> | diagnose <rust-session> | preview <rust-session> X Y Z",
         )),
     };
 
@@ -41,6 +42,28 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("nExBot: {error}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+fn serve(profile: &Path) -> io::Result<()> {
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(profile.join("rust-service.lock"))?;
+    lock.try_lock().map_err(io::Error::from)?;
+    let session = profile.join("rust-service-session");
+    match fs::remove_file(&session) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    loop {
+        if let Err(error) = diagnose(&session, None) {
+            eprintln!("nExBot: {error}");
+            thread::sleep(Duration::from_secs(1));
         }
     }
 }

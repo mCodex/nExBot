@@ -85,6 +85,7 @@ describe("Rust bridge", function()
   it("connects when the engine starts after the bot without reloading the profile", function()
     local available = false
     env.g_resources.fileExists = function(path)
+      if path == env.configDir .. "/rust-service-session" then return false end
       assert.equals(env.configDir .. "/rust-session", path)
       return available
     end
@@ -101,6 +102,20 @@ describe("Rust bridge", function()
     state.handlers.onOpen()
     receive({ type = "ready", protocol = 1, proof = serverProof })
     assert.equals("snapshot", state.sent[2].type)
+  end)
+
+  it("reauthenticates after a disconnect and ignores callbacks from the old socket", function()
+    start()
+    receive({ type = "ready", protocol = 1, proof = serverProof })
+    local old = state.handlers
+    old.onClose()
+    table.remove(state.pending, 1)()
+    state.handlers.onOpen()
+    old.onClose()
+    receive({ type = "ready", protocol = 1, proof = serverProof })
+    assert.equals("snapshot", state.sent[4].type)
+    assert.equals(1, state.sent[4].sequence)
+    assert.equals(0, #state.pending)
   end)
 
   it("authenticates before emitting snapshots and reports native query results", function()
@@ -134,7 +149,8 @@ describe("Rust bridge", function()
     assert.equals("[nExBot] Rust bridge v5.0.0-alpha.1 - authentication failed", state.logs[2])
 
     state.sent = {}
-    start()
+    table.remove(state.pending, 1)()
+    state.handlers.onOpen()
     receive({ type = "ready", protocol = 1, proof = serverProof })
     receive({
       type = "probe", id = 1, origin = position,

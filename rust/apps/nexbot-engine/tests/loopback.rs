@@ -203,3 +203,63 @@ fn preview_process_reuses_the_native_route_and_reports_a_blocked_step() {
     assert!(!logs.contains("nexbot-ipc-health-v1"));
     assert!(!path.exists());
 }
+
+#[test]
+fn service_recovers_a_stale_session_and_advertises_again_after_disconnect() {
+    let dir = std::env::temp_dir().join(format!("nexbot-service-{}", std::process::id()));
+    fs::create_dir(&dir).unwrap();
+    let path = dir.join("rust-service-session");
+    fs::write(&path, "stale").unwrap();
+    let mut engine = Command::new(env!("CARGO_BIN_EXE_nexbot-engine"))
+        .arg("serve")
+        .arg(&dir)
+        .spawn()
+        .unwrap();
+    let mut previous = String::new();
+    for _ in 0..2 {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let contents = loop {
+            if let Ok(text) = fs::read_to_string(&path)
+                && text.lines().count() == 3
+                && text.ends_with('\n')
+                && text != previous
+            {
+                break text;
+            }
+            assert!(Instant::now() < deadline && engine.try_wait().unwrap().is_none());
+            thread::sleep(Duration::from_millis(20));
+        };
+        let (mut socket, _) = connect(format!(
+            "ws://127.0.0.1:{}/",
+            contents.lines().next().unwrap()
+        ))
+        .unwrap();
+        let mut lines = contents.lines().skip(1);
+        socket
+            .send(Message::text(
+                json!({
+                    "type": "hello", "protocol": 1, "bridge_version": env!("CARGO_PKG_VERSION"),
+                    "path_probe": true, "token": lines.next().unwrap()
+                })
+                .to_string(),
+            ))
+            .unwrap();
+        let ready: Value = serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
+        assert_eq!(
+            ready,
+            json!({"type":"ready", "protocol":1, "proof":lines.next().unwrap()})
+        );
+        assert!(!path.exists());
+        let duplicate = Command::new(env!("CARGO_BIN_EXE_nexbot-engine"))
+            .arg("serve")
+            .arg(&dir)
+            .output()
+            .unwrap();
+        assert!(!duplicate.status.success());
+        socket.close(None).unwrap();
+        previous = contents;
+    }
+    engine.kill().unwrap();
+    engine.wait().unwrap();
+    fs::remove_dir_all(dir).unwrap();
+}
