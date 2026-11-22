@@ -49,7 +49,6 @@ ToolTipLabel < UIWidget
 
 HealerPlayerEntry < Label
   background-color: alpha
-  text-offset: 5 1
   focusable: true
   height: 16
   font: verdana-11px-rounded
@@ -58,19 +57,26 @@ HealerPlayerEntry < Label
   $focus:
     background-color: #00000055
   
+  Label
+    id: caption
+    anchors.left: parent.left
+    anchors.right: remove.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-left: 4
+    margin-right: 3
+    font: verdana-11px-rounded
+
   Button
     id: remove
     anchors.right: parent.right
-    margin-right: 2
     anchors.verticalCenter: parent.verticalCenter
     size: 15 15
-    margin-right: 15
+    margin-right: 2
     text: X
     tooltip: Remove player from the list
 
 PriorityEntry < ToolTipLabel
   background-color: alpha
-  text-offset: 18 1
   focusable: true
   height: 16
   font: verdana-11px-rounded
@@ -86,6 +92,15 @@ PriorityEntry < ToolTipLabel
     size: 15 15
     margin-top: 2
     margin-left: 3 
+
+  Label
+    id: caption
+    anchors.left: enabled.right
+    anchors.right: decrement.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-left: 3
+    margin-right: 3
+    font: verdana-11px-rounded
 
   Button
     id: remove
@@ -116,7 +131,7 @@ PriorityEntry < ToolTipLabel
     tooltip: Decrease Priority
 
 TargetSettings < Panel
-  size: 280 140
+  size: 348 130
   padding: 3
   image-source: /images/ui/window
   image-border: 6
@@ -138,7 +153,9 @@ TargetSettings < Panel
     id: vocations
     anchors.left: prev.right
     margin-left: 5
-    anchors.verticalCenter: prev.verticalCenter
+    anchors.top: prev.top
+    anchors.right: parent.right
+    margin-right: 5
 
 Groups < FlatPanel
   size: 150 90
@@ -232,7 +249,7 @@ Vocations < FlatPanel
       text: Monks
 
 Priority < Panel
-  size: 190 155
+  size: 238 188
   padding: 6
   padding-top: 3
   image-source: /images/ui/window
@@ -251,10 +268,19 @@ Priority < Panel
     margin-top: 3
     anchors.left: parent.left
     anchors.right: parent.right
+    margin-right: 13
     anchors.bottom: addSpellButton.top
     margin-bottom: 3
-    fit-children: true
+    vertical-scrollbar: priorityScroll
     padding-top: 1
+
+  VerticalScrollBar
+    id: priorityScroll
+    anchors.top: list.top
+    anchors.right: parent.right
+    anchors.bottom: list.bottom
+    pixels-scroll: true
+    step: 16
 
   Button
     id: addSpellButton
@@ -327,7 +353,7 @@ PlayerList < Panel
   TextList
     id: list
     anchors.fill: parent
-    fit-children: true
+    margin-right: 13
     padding-top: 2
     vertical-scrollbar: listScrollBar
 
@@ -335,12 +361,12 @@ PlayerList < Panel
     id: listScrollBar
     anchors.top: list.top
     anchors.bottom: list.bottom
-    anchors.right: list.right
+    anchors.right: parent.right
     step: 14
     pixels-scroll: true
 
 CustomList < Panel
-  size: 190 140
+  size: 238 156
   padding: 6
   padding-top: 3
   image-source: /images/ui/window
@@ -355,6 +381,7 @@ CustomList < Panel
 
   AddPlayer
     id: addPanel
+    visible: false
     anchors.top: prev.bottom
     margin-top: 3
     anchors.left: parent.left
@@ -366,7 +393,7 @@ CustomList < Panel
     anchors.fill: prev
 
 Conditions < Panel
-  size: 280 170
+  size: 348 224
   padding: 3
   image-source: /images/ui/window
   image-border: 6
@@ -385,13 +412,13 @@ Conditions < Panel
     padding-top: 3
     layout: 
       type: grid
-      cell-size: 128 31
+      cell-size: 162 35
       cell-spacing: 5
       num-columns: 2
 
 FriendHealer < MainWindow
   !text: tr('Friend Healer')
-  size: 512 390
+  size: 626 444
   padding-top: 30
   @onEscape: self:hide()
 
@@ -424,11 +451,6 @@ FriendHealer < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NexBotCloseButton
     id: closeButton
-    !text: tr('Close')
-    font: cipsoftFont
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 45 21
-    @onClick: self:getParent():hide()    
+    @onClick: self:getParent():hide()

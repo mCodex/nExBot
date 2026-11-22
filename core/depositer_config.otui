@@ -88,11 +88,6 @@ DepositerPanel < MainWindow
     anchors.bottom: CloseButton.top
     margin-bottom: 8    
 
-  Button
+  NexBotCloseButton
     id: CloseButton
-    !text: tr('Close')
-    font: cipsoftFont
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 45 21
     margin-right: 5

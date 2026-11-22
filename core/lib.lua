@@ -150,18 +150,22 @@ end)
 -- if delay is nil or delay is lower than 100 then this function will act as a normal say function
 -- checks or adds a spell to SpellCastTable and updates cast time if exist
 function cast(text, delay)
+    if type(text) ~= "string" then return false end
     text = text:lower()
-    if type(text) ~= "string" then return end
     if not delay or delay < 100 then
-        return say(text) -- if not added delay or delay is really low then just treat it like casual say
+        say(text)
+        return true
     end
     if not SpellCastTable[text] or SpellCastTable[text].d ~= delay then
         SpellCastTable[text] = {t = now - delay, d = delay}
-        return say(text)
+        say(text)
+        return true
     end
     local lastCast = SpellCastTable[text].t
     local spellDelay = SpellCastTable[text].d
-    if now - lastCast > spellDelay then return say(text) end
+    if now - lastCast <= spellDelay then return false end
+    say(text)
+    return true
 end
 
 -- canCast is a base for AttackBot and HealBot

@@ -29,14 +29,6 @@ BossLabel < UIWidget
     text-offset: 0 1
     tooltip: Remove profile from the list.
 
-ConditionBoxPopupMenu < ComboBoxPopupMenu
-ConditionBoxPopupMenuButton < ComboBoxPopupMenuButton
-ConditionBox < ComboBox
-  @onSetup: |
-    self:addOption("-")
-    self:addOption("and")
-    self:addOption("or")
-
 PreButton < PreviousButton
   background: #363636
   height: 15
@@ -253,12 +245,13 @@ InputPanel < FlatPanel
     anchors.left: parent.left
     anchors.right: parent.right
 
-  ConditionBox
+  NexBotDropdown
+    &choices: {"-", "and", "or"}
     id: useSecondCondition
     anchors.top: condition.bottom
     margin-top: 10
     anchors.horizontalCenter: parent.horizontalCenter
-    width: 50
+    width: 62
 
   ConditionPanel
     id: optionalCondition
@@ -462,6 +455,7 @@ BossList < FlatPanel
     anchors.top: list.bottom
     margin-top: 3
     height: 21
+    width: 72
     text: Add Boss
     text-align: center
     font: verdana-11px-rounded
@@ -522,13 +516,8 @@ EquipWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NexBotCloseButton
     id: closeButton
-    !text: tr('Close')
-    font: cipsoftFont
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 45 21  
 
   Button
     id: bossList

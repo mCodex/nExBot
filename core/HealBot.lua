@@ -427,15 +427,15 @@ if rootWidget then
       currentSettings.spellTable = currentSettings.spellTable or {}
       local spellFormula = healWindow.healer.spells.spellFormula:getText():trim()
       local manaCost = tonumber(healWindow.healer.spells.manaCost:getText())
-      local trigger = tonumber(healWindow.healer.spells.spellValue:getText())
-      local src = healWindow.healer.spells.spellSource:getCurrentOption().text
-      local eq = healWindow.healer.spells.spellCondition:getCurrentOption().text
+      local trigger = tonumber(healWindow.healer.spells.threshold:getText())
+      local src = healWindow.healer.spells.source:getCurrentOption().text
+      local eq = healWindow.healer.spells.comparison:getCurrentOption().text
       if not manaCost or not trigger or spellFormula:len() == 0 then return end
       local origin = (src == "Current Mana" and "MP") or (src == "Current Health" and "HP") or (src == "Mana Percent" and "MP%") or (src == "Health Percent" and "HP%") or "burst"
       local sign = (eq == "Above" and ">") or (eq == "Below" and "<") or "="
       table.insert(currentSettings.spellTable, {index = #currentSettings.spellTable+1, spell = spellFormula, sign = sign, origin = origin, cost = manaCost, value = trigger, enabled = true})
       healWindow.healer.spells.spellFormula:setText('')
-      healWindow.healer.spells.spellValue:setText('')
+      healWindow.healer.spells.threshold:setText('')
       healWindow.healer.spells.manaCost:setText('')
       refreshSpells()
       applyHealEngineToggles()
@@ -444,15 +444,15 @@ if rootWidget then
 
     healWindow.healer.items.addItem.onClick = function()
       local id = healWindow.healer.items.itemId:getItemId()
-      local trigger = tonumber(healWindow.healer.items.itemValue:getText())
-      local src = healWindow.healer.items.itemSource:getCurrentOption().text
-      local eq = healWindow.healer.items.itemCondition:getCurrentOption().text
+      local trigger = tonumber(healWindow.healer.items.threshold:getText())
+      local src = healWindow.healer.items.source:getCurrentOption().text
+      local eq = healWindow.healer.items.comparison:getCurrentOption().text
       if not trigger or id <= 100 then return end
       local origin = (src == "Current Mana" and "MP") or (src == "Current Health" and "HP") or (src == "Mana Percent" and "MP%") or (src == "Health Percent" and "HP%") or "burst"
       local sign = (eq == "Above" and ">") or (eq == "Below" and "<") or "="
       table.insert(currentSettings.itemTable, {index = #currentSettings.itemTable+1, item = id, sign = sign, origin = origin, value = trigger, enabled = true})
       healWindow.healer.items.itemId:setItemId(0)
-      healWindow.healer.items.itemValue:setText('')
+      healWindow.healer.items.threshold:setText('')
       refreshItems()
       applyHealEngineToggles()
       saveHeal()
@@ -983,7 +983,8 @@ if rootW then
         saveAllyCustomPlayers()
         syncAllyBotCore()
     end
-    widget:setText("["..health.."%]  "..name)
+    widget.caption:setText("["..health.."%]  "..name)
+    widget:setTooltip(widget.caption:getText())
     return widget
   end
 
@@ -993,11 +994,13 @@ if rootW then
 
   allyCustomList.playerList.onDoubleClick = function()
     allyCustomList.playerList:hide()
+    allyCustomList.addPanel:show()
   end
 
   local function clearAllyFields()
     allyCustomList.addPanel.name:setText("friend name")
     allyCustomList.addPanel.health:setText("1")
+    allyCustomList.addPanel:hide()
     allyCustomList.playerList:show()
   end
 
@@ -1097,7 +1100,8 @@ local function validateAlly(widget, category)
   local function createAllyPriorityWidget(action, index)
     local widget = UI.createWidget("PriorityEntry", allyPriority.list)
 
-    widget:setText(action.name)
+    widget.caption:setText(action.name)
+    widget:setTooltip(action.name)
     widget.increment.onClick = function()
         local idx = allyPriority.list:getChildIndex(widget)
         local tbl = allyConfig.priorities
@@ -1117,10 +1121,10 @@ local function validateAlly(widget, category)
         syncAllyBotCore()
     end
     widget.enabled:setChecked(action.enabled)
-    widget:setColor(action.enabled and "#98BF64" or "#dfdfdf")
+    widget.caption:setColor(action.enabled and "#98BF64" or "#dfdfdf")
     widget.enabled.onClick = function()
         action.enabled = not action.enabled
-        widget:setColor(action.enabled and "#98BF64" or "#dfdfdf")
+        widget.caption:setColor(action.enabled and "#98BF64" or "#dfdfdf")
         widget.enabled:setChecked(action.enabled)
         validateAlly(widget, 1)
         syncAllyBotCore()
@@ -1137,17 +1141,18 @@ local function validateAlly(widget, category)
             syncAllyBotCore()
         end
         widget.onDoubleClick = function()
-            local window = modules.client_textedit.show(widget, {title = "Custom Spell", description = "Enter below formula for a custom healing spell"})
+            local window = modules.client_textedit.show(widget.caption, {title = "Custom Spell", description = "Enter below formula for a custom healing spell"})
             schedule(50, function()
               window:raise()
               window:focus()
             end)
         end
-        widget.onTextChange = function(w, text)
+        widget.caption.onTextChange = function(w, text)
             action.name = text
+            widget:setTooltip(text .. "\nDouble click to edit. X to remove.")
             syncAllyBotCore()
         end
-        widget:setTooltip("Double click to edit. X to remove.")
+        widget:setTooltip(action.name .. "\nDouble click to edit. X to remove.")
     end
 
     return widget
@@ -1222,7 +1227,7 @@ local function validateAlly(widget, category)
     syncAllyBotCore()
 
     schedule(100, function()
-        local window = modules.client_textedit.show(widget, {title = "Custom Spell", description = "Enter below formula for a custom healing spell"})
+        local window = modules.client_textedit.show(widget.caption, {title = "Custom Spell", description = "Enter below formula for a custom healing spell"})
         schedule(50, function()
             window:raise()
             window:focus()

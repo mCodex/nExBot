@@ -1,0 +1,58 @@
+NexBotDropdownPopupMenu < ComboBoxPopupMenu
+
+NexBotDropdownPopupMenuButton < ComboBoxPopupMenuButton
+  font: verdana-11px-rounded
+  @onTextChange: self:setTooltip(self:getText())
+
+NexBotDropdownPopupScrollMenu < ComboBoxPopupScrollMenu
+  @display: |
+    function(self, pos)
+      local width = self:getWidth()
+      for _, row in ipairs(self.scrollArea:getChildren()) do
+        width = math.max(width, row:getTextSize().width + self.scrollBar:getWidth() + 10)
+      end
+      self:setWidth(math.min(width, g_ui.getRootWidget():getWidth()))
+      UIPopupScrollMenu.display(self, pos)
+    end
+
+NexBotDropdownPopupScrollMenuButton < ComboBoxPopupScrollMenuButton
+  font: verdana-11px-rounded
+  @onTextChange: self:setTooltip(self:getText())
+
+NexBotDropdown < ComboBox
+  height: 21
+  text-offset: 0 0
+  color: alpha
+  $disabled:
+    color: alpha
+  @onSetup: |
+    for _, option in ipairs(self.choices or {}) do self:addOption(option) end
+  @replaceClientDropdown: |
+    function(self, original)
+      local parent = original:getParent()
+      local index, id = parent:getChildIndex(original), original:getId()
+      for _, option in ipairs(original.options) do self:addOption(option.text, option.data) end
+      self:setCurrentIndex(original.currentIndex)
+      self.onOptionChange = original.onOptionChange
+      original:destroy()
+      self:setId(id)
+      parent:moveChildToIndex(self, index)
+    end
+  @onTextChange: |
+    self.caption:setText(self:getText())
+    self:setTooltip(self:getText())
+
+  Label
+    id: caption
+    phantom: true
+    anchors.fill: parent
+    margin-left: 5
+    margin-right: 22
+    font: verdana-11px-rounded
+    text-align: left
+
+NexBotCloseButton < Button
+  !text: tr('Close')
+  anchors.right: parent.right
+  anchors.bottom: parent.bottom
+  size: 50 21

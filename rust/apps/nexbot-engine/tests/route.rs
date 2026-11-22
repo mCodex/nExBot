@@ -65,7 +65,7 @@ fn floor_change_deadline_and_collision_invalidate_older_paths() {
             position: step,
             obstruction: Obstruction::Creature
         }),
-        Decision::Blocked
+        Decision::WaitCreature(step)
     );
     assert_eq!(
         route.on_event(Event::Tile {
@@ -145,6 +145,31 @@ fn malformed_paths_and_unexpected_movement_never_authorize_a_step() {
             generation: 3,
             from: start,
             to: goal
+        }
+    );
+}
+
+#[test]
+fn terrain_change_replans_without_waiting_for_the_tile_to_clear() {
+    let start = tile(10, 10, 7);
+    let step = tile(11, 10, 7);
+    let goal = tile(12, 10, 7);
+    let mut route = Route::default();
+    route.on_event(Event::Player(start));
+    route.on_event(Event::Goal(goal));
+    route.on_event(Event::Path {
+        generation: 1,
+        tiles: &[step, goal],
+    });
+    assert_eq!(
+        route.on_event(Event::Tile {
+            position: step,
+            obstruction: Obstruction::Terrain,
+        }),
+        Decision::Plan {
+            generation: 2,
+            from: start,
+            to: goal,
         }
     );
 }

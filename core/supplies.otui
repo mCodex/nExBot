@@ -215,13 +215,8 @@ SuppliesWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8
 
-  Button
+  NexBotCloseButton
     id: closeButton
-    !text: tr('Close')
-    font: cipsoftFont
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 45 21
     margin-top: 15   
     tooltip: Close supplies window and save settings.
     @onClick: self:getParent():hide()

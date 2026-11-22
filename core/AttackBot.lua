@@ -678,14 +678,23 @@ local function isGlobalBackoffActive()
   return nowMs() < globalCastBackoffUntil
 end
 
-local function confirmSpellCast(spellKey, beforeTs, onSuccess, onFail)
-  schedule(120, function()
-    local afterTs = SpellCastTable and SpellCastTable[spellKey] and SpellCastTable[spellKey].t or 0
-    if afterTs > (beforeTs or 0) then
-      if onSuccess then onSuccess() end
-    else
-      if onFail then onFail() end
-    end
+local pendingCast
+onTalk(function(name, _, _, text)
+  if pendingCast and player and name == player:getName() and text:lower() == pendingCast.key then
+    local pending = pendingCast
+    pendingCast = nil
+    pending.success()
+  end
+end)
+
+local function confirmSpellCast(spellKey, _, onSuccess, onFail)
+  local pending = { key = spellKey, success = onSuccess }
+  pendingCast = pending
+  local ping = g_game.getPing and g_game.getPing() or 0
+  schedule(math.max(500, ping * 2 + 150), function()
+    if pendingCast ~= pending then return end
+    pendingCast = nil
+    onFail()
   end)
 end
 
@@ -1096,7 +1105,7 @@ function attackBotMain()
   if not panel or not panel.entryList then return end
   if not target() then return end
   if SafeCall.isInPz() then return end
-  if isGlobalBackoffActive() then return end
+  if pendingCast or isGlobalBackoffActive() then return end
   if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then return end
   if modules.game_cooldown.isGroupCooldownIconActive(1) then return end
   if BotCore and BotCore.Priority and not BotCore.Priority.canAttack() then return end

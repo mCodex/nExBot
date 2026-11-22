@@ -47,7 +47,7 @@ function M.attemptSpellCast(entry, context, deps)
   local beforeTs = deps.SpellCastTable and deps.SpellCastTable[spellKey] and deps.SpellCastTable[spellKey].t or 0
   if state then state.lastAttemptAt = deps.nowMs() end
 
-  deps.cast(spellKey, math.max(cdMs, 100))
+  if deps.cast(spellKey, math.max(cdMs, 100)) == false then return false end
 
   local globalBackoff = deps.GLOBAL_CAST_BACKOFF or 250
   local failedBackoff = deps.FAILED_CAST_BACKOFF or 350

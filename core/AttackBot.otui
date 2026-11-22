@@ -449,6 +449,7 @@ SettingsPanel < Panel
     anchors.right: parent.right
     anchors.bottom: parent.bottom
     text-align: center
+    width: 82
     text: Reset Settings
 
   CheckBox 
@@ -609,13 +610,8 @@ AttackBotWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 10
 
-  Button
+  NexBotCloseButton
     id: closeButton
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 45 21
-    text: Close
-    font: cipsoftFont
 
   Button
     id: settings

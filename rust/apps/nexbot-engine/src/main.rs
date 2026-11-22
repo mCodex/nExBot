@@ -267,6 +267,12 @@ fn diagnose(path: &Path, goal: Option<Position>) -> io::Result<()> {
                         }
                         Decision::Arrived => println!("preview destination reached"),
                         Decision::Blocked => println!("preview route unavailable"),
+                        Decision::WaitCreature(tile) => {
+                            println!(
+                                "preview waiting for creature at {},{},{}",
+                                tile.x, tile.y, tile.z
+                            )
+                        }
                         Decision::AwaitFloor => println!("preview waiting for floor"),
                         Decision::Wait | Decision::Plan { .. } => {}
                     }

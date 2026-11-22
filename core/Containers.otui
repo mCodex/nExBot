@@ -1,6 +1,77 @@
+ContainerPanelAction < Button
+  height: 20
+  font: verdana-11px-rounded
+
+ContainerPanelOption < CheckBox
+  height: 16
+  font: verdana-11px-rounded
+  anchors.left: parent.left
+  anchors.right: parent.right
+  anchors.top: prev.bottom
+  margin-top: 3
+
+NexBotContainerPanel < Panel
+  height: 130
+
+  Label
+    text: Containers
+    anchors.left: parent.left
+    anchors.verticalCenter: setupBtn.verticalCenter
+    font: verdana-11px-rounded
+
+  Button
+    id: setupBtn
+    !text: tr('Setup')
+    anchors.right: parent.right
+    anchors.top: parent.top
+    size: 47 20
+
+  ContainerPanelAction
+    id: reopenAll
+    !text: tr('Reopen All')
+    anchors.top: setupBtn.bottom
+    anchors.left: parent.left
+    anchors.right: parent.horizontalCenter
+    margin-top: 4
+    margin-right: 2
+
+  ContainerPanelAction
+    id: closeAll
+    !text: tr('Close All')
+    anchors.top: reopenAll.top
+    anchors.left: parent.horizontalCenter
+    anchors.right: parent.right
+    margin-left: 2
+
+  ContainerPanelAction
+    id: minimizeAll
+    !text: tr('Minimize')
+    anchors.top: reopenAll.bottom
+    anchors.left: reopenAll.left
+    anchors.right: reopenAll.right
+    margin-top: 3
+
+  ContainerPanelAction
+    id: maximizeAll
+    !text: tr('Maximize')
+    anchors.top: minimizeAll.top
+    anchors.left: closeAll.left
+    anchors.right: closeAll.right
+
+  ContainerPanelOption
+    id: openAll
+    !text: tr('Auto open on login')
+
+  ContainerPanelOption
+    id: purseSwitch
+    !text: tr('Open purse')
+
+  ContainerPanelOption
+    id: autoMinSwitch
+    !text: tr('Auto minimize')
+
 ContainerEntry < Label
   background-color: alpha
-  text-offset: 20 2
   focusable: true
   height: 18
   font: verdana-11px-rounded
@@ -15,6 +86,15 @@ ContainerEntry < Label
 
   $focus:
     background-color: #00000066
+
+  Label
+    id: caption
+    anchors.left: enabled.right
+    anchors.right: minimize.left
+    anchors.verticalCenter: parent.verticalCenter
+    margin-left: 4
+    margin-right: 3
+    font: verdana-11px-rounded
 
   Button
     id: minimize
@@ -45,7 +125,7 @@ ContainerEntry < Label
 
 ContainerSetupWindow < MainWindow
   !text: tr('Container Setup')
-  size: 550 220
+  size: 550 260
   @onEscape: self:hide()
 
   TextList
@@ -80,7 +160,7 @@ ContainerSetupWindow < MainWindow
     id: lblName
     anchors.left: sep.right
     anchors.top: sep.top
-    width: 65
+    width: 78
     text: Name:
     margin-left: 10
     margin-top: 3
@@ -98,7 +178,7 @@ ContainerSetupWindow < MainWindow
     id: lblContainer
     anchors.left: lblName.left
     anchors.top: containerName.bottom
-    width: 65
+    width: 78
     text: Container:
     margin-top: 8
     font: verdana-11px-rounded
@@ -123,7 +203,7 @@ ContainerSetupWindow < MainWindow
     id: lblItems
     anchors.left: lblName.left
     anchors.top: containerId.bottom
-    width: 65
+    width: 78
     text: Items:
     margin-top: 8
     font: verdana-11px-rounded
@@ -151,8 +231,8 @@ ContainerSetupWindow < MainWindow
     anchors.bottom: parent.bottom
     text: Sort Items
     tooltip: Automatically move items to designated containers
-    width: 80
-    height: 15
+    width: 92
+    height: 16
     margin-left: 8
     font: verdana-11px-rounded
 
@@ -162,8 +242,8 @@ ContainerSetupWindow < MainWindow
     anchors.bottom: parent.bottom
     text: Keep Open
     tooltip: Force containers to stay open
-    width: 85
-    height: 15
+    width: 100
+    height: 16
     margin-left: 10
     font: verdana-11px-rounded
 
@@ -173,8 +253,8 @@ ContainerSetupWindow < MainWindow
     anchors.bottom: parent.bottom
     text: Rename
     tooltip: Rename container windows with custom names
-    width: 70
-    height: 15
+    width: 76
+    height: 16
     margin-left: 10
     font: verdana-11px-rounded
 
@@ -184,24 +264,19 @@ ContainerSetupWindow < MainWindow
     anchors.bottom: parent.bottom
     text: Loot Bag
     tooltip: Also manage loot bag
-    width: 75
-    height: 15
+    width: 85
+    height: 16
     margin-left: 10
     font: verdana-11px-rounded
 
-  Button
+  NexBotCloseButton
     id: closeBtn
-    !text: tr('Close')
-    font: verdana-11px-rounded
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 50 20
 
   ResizeBorder
     id: bottomResizeBorder
     anchors.fill: separator
     height: 3
-    minimum: 180
+    minimum: 240
     maximum: 350
     margin-left: 3
     margin-right: 3

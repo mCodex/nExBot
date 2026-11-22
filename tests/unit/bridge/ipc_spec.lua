@@ -57,29 +57,6 @@ describe("Rust bridge", function()
     env.modules = { game_bot = { contentsPanel = { config = {
       getCurrentOption = function() return { text = "nExBot" } end,
     } } } }
-    local width, spacing = 45, 0
-    local destroyed = false
-    local tabs = {}
-    for _, name in ipairs({ "Main", "Tools", "Cave", "Target", "HP" }) do
-      tabs[#tabs + 1] = {
-        getText = function() return name end,
-        setFont = function(widget, font) widget.font = font end,
-        setPaddingHorizontal = function(widget, padding) widget.padding = padding end,
-      }
-    end
-    tabs[1].onDestroy = function() destroyed = true end
-    env.modules.game_bot.contentsPanel.botTabs = {
-      getTabs = function() return tabs end,
-      getLayout = function()
-        return {
-          isUIGridLayout = function() return true end,
-          getCellSize = function() return { width = width } end,
-          getCellSpacing = function() return spacing end,
-          setCellWidth = function(_, value) width = value end,
-          setCellSpacing = function(_, value) spacing = value end,
-        }
-      end,
-    }
     env.g_resources.listDirectoryFiles = function() return {} end
     env.warn = function() end
     env.info = function() end
@@ -93,14 +70,6 @@ describe("Rust bridge", function()
     assert.equals(1, loaded["/core/cavebot_control_panel.lua"])
     assert.equals("Main", state.tab)
     assert.equals(1, loaded["bridge/_Loader.lua"])
-    assert.equals(30, width)
-    assert.equals(1, spacing)
-    assert.equals("Target", tabs[4]:getText())
-    assert.equals("small-9px", tabs[4].font)
-    tabs[1].onDestroy(tabs[1])
-    assert.equals(45, width)
-    assert.equals(0, spacing)
-    assert.is_true(destroyed)
   end)
 
   local function start()

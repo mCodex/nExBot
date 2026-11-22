@@ -24,10 +24,20 @@ for i=1,scripts do
   if not autoEquip[i] then
     autoEquip[i] = {on=false, title="Auto Equip", item1=i == 1 and 3052 or 0, item2=i == 1 and 3089 or 0, slot=i == 1 and 9 or 0}
   end
-  UI.TwoItemsAndSlotPanel(autoEquip[i], function(widget, newParams)
+  local panel = UI.TwoItemsAndSlotPanel(autoEquip[i], function(widget, newParams)
     autoEquip[i] = newParams
     setProfileSetting("autoEquip", autoEquip)
   end)
+  local slot = setupUI([[
+NexBotDropdown
+  anchors.left: title.left
+  anchors.right: title.right
+  anchors.top: title.bottom
+  margin-top: 2
+  &disableScroll: true
+]], panel)
+  slot:replaceClientDropdown(panel.slot)
+  panel:setHeight(39)
 end
 
 -- Auto equip handler function (shared by UnifiedTick and fallback macro)

@@ -54,10 +54,6 @@ local friendSpells = {
   { name = "exura sio",      key = "exura sio",      hp = 80, mpCost = 100, cd = 1100, prio = 3 },
 }
 
--- Event debounce (25ms for burst damage protection)
-local lastEventHeal = 0
-local EVENT_DEBOUNCE_MS = 25
-
 -- LOGGING
 
 local VERBOSE = (type(nExBotVerbose) == "boolean" and nExBotVerbose) or false
@@ -550,7 +546,7 @@ function HealEngine.execute(action)
     -- Cast the spell (prefer cast() for proper cooldown integration, fallback to say())
     local cdMs = action.cd or 1100
     if type(cast) == "function" then
-      cast(action.name, cdMs)
+      if cast(action.name, cdMs) == false then return false end
     elseif type(say) == "function" then
       say(action.name)
     else
@@ -598,72 +594,34 @@ end
 -- Event-driven fast-heal watcher: listen to player health/mana changes
 -- CRITICAL: This provides instant reaction to damage for player safety!
 do
-  local registered = false
-  local _lastStatEvent = 0
-  local _debounceMs = 25 -- Reduced from 50ms for faster burst damage response
-
-  local function handleSnapshot()
-    local nowTime = nowMs()
-    if (nowTime - _lastStatEvent) < _debounceMs then return end
-    _lastStatEvent = nowTime
-
-    local hpNow = getHpPercent()
-    local mpNow = getMpPercent()
-    local currentMana = getCurrentMana()
-
-    logDebug(string.format("handleSnapshot triggered: hp=%.1f mp=%.1f mana=%d", hpNow, mpNow, currentMana))
-
-    local snap = {
-      hp = hpNow,
-      mp = mpNow,
-      currentMana = currentMana,
+  local function handleSnapshot(hp)
+    hp = hp or getHpPercent()
+    if hp <= 0 then return end
+    local action = HealEngine.planSelf({
+      hp = hp,
+      mp = manapercent and manapercent() or getMpPercent(),
+      currentMana = mana and mana() or getCurrentMana(),
       inPz = getInPz(),
-    }
-
-    local action = HealEngine.planSelf(snap)
-    if action then
-      logDebug(string.format("handleSnapshot executing: %s", action.name or "unknown"))
-      HealEngine.execute(action)
-    end
+    })
+    if action then HealEngine.execute(action) end
   end
 
-  -- Primary: EventBus if available
+  if EventBus and onHealthChange then
+    EventBus.on("player:health", function(health, maxHealth, oldHealth)
+      if maxHealth > 0 and oldHealth and health < oldHealth then
+        handleSnapshot(health * 100 / maxHealth)
+      end
+    end)
+  elseif onPlayerHealthChange then
+    onPlayerHealthChange(handleSnapshot)
+  end
+
   if EventBus then
-    EventBus.on("player:health", function(health, maxHealth, oldHealth, oldMaxHealth)
-      local hpNow = health and maxHealth and maxHealth > 0 and (health / maxHealth) * 100 or getHpPercent()
-      local hpOld = oldHealth and oldMaxHealth and oldMaxHealth > 0 and (oldHealth / oldMaxHealth) * 100 or hpNow
-      logDebug(string.format("player:health event: hpNow=%.1f hpOld=%.1f", hpNow, hpOld))
-      if hpNow < hpOld then handleSnapshot() end
+    EventBus.on("player:mana", function(mp, _, oldMp)
+      if oldMp and mp < oldMp then handleSnapshot() end
     end)
-
-    EventBus.on("player:mana", function(mana, maxMana, oldMana, oldMaxMana)
-      local mpNow = mana and maxMana and maxMana > 0 and (mana / maxMana) * 100 or getMpPercent()
-      local mpOld = oldMana and oldMaxMana and oldMaxMana > 0 and (oldMana / oldMaxMana) * 100 or mpNow
-      if mpNow < mpOld then handleSnapshot() end
-    end)
-    registered = true
-  end
-
-  -- Fallbacks for environments lacking EventBus: try client callback hooks
-  if not registered then
-    if type(onPlayerHealthChange) == 'function' then
-      onPlayerHealthChange(function(healthPercent)
-        -- healthPercent is absolute percent value
-        handleSnapshot()
-      end)
-      registered = true
-    end
-
-    if type(onPlayerManaChange) == 'function' then
-      onPlayerManaChange(function(manaPercent)
-        handleSnapshot()
-      end)
-      registered = true
-    end
-  end
-
-  if not registered then
-    logWarn("HealEngine: no event source found (EventBus or onPlayerHealthChange). Active polling may be required.")
+  elseif onPlayerManaChange then
+    onPlayerManaChange(function() handleSnapshot() end)
   end
 end
 

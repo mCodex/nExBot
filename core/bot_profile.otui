@@ -2,7 +2,7 @@ NexBotProfileSelector < Panel
   id: botConfig
   height: 46
 
-  ComboBox
+  NexBotDropdown
     id: list
     &menuScroll: true
     &menuHeight: 450
@@ -12,8 +12,6 @@ NexBotProfileSelector < Panel
     anchors.left: parent.left
     anchors.right: switch.left
     margin-right: 3
-    height: 20
-    text-offset: 3 0
 
   Button
     id: switch

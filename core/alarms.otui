@@ -124,12 +124,7 @@ AlarmsWindow < MainWindow
     margin-right: 3
     background: #ffffff88  
 
-  Button
+  NexBotCloseButton
     id: closeButton
-    !text: tr('Close')
-    font: cipsoftFont
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 45 21
     margin-right: 5
     @onClick: self:getParent():hide()

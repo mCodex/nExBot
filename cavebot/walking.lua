@@ -347,6 +347,8 @@ CaveBot.walkTo = function(dest, maxDist, params)
   end
   lastWalkZ = playerPos.z
 
+  if RustBridge and RustBridge.caveGoal then RustBridge.caveGoal(dest) end
+
   -- Already at destination?
   local distX = math.abs(dest.x - playerPos.x)
   local distY = math.abs(dest.y - playerPos.y)

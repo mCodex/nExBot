@@ -494,12 +494,7 @@ FeaturesWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NexBotCloseButton
     id: closeButton
-    !text: tr('Close')
-    font: cipsoftFont
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 45 21
     margin-top: 15
-    margin-right: 5 
+    margin-right: 5

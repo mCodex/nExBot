@@ -1,10 +1,3 @@
-UturaComboBoxPopupMenu < ComboBoxPopupMenu
-UturaComboBoxPopupMenuButton < ComboBoxPopupMenuButton
-UturaComboBox < ComboBox
-  @onSetup: |
-    self:addOption("Utura")
-    self:addOption("Utura Gran")    
-
 CureConditions < Panel
   id: Cure
   image-source: /images/ui/panel_flat
@@ -374,13 +367,14 @@ HoldConditions < Panel
     text: Spell:
     font: verdana-11px-rounded
 
-  UturaComboBox
+  NexBotDropdown
+    &choices: {"Utura", "Utura Gran"}
     id: UturaType
     anchors.verticalCenter: prev.verticalCenter
     anchors.left: prev.right
     margin-left: 10
-    width: 100
-    font: verdana-11px-rounded
+    anchors.right: parent.right
+    margin-right: 8
 
   CheckBox
     id: IgnoreInPz
@@ -452,12 +446,7 @@ ConditionsWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8    
 
-  Button
+  NexBotCloseButton
     id: closeButton
-    !text: tr('Close')
-    font: cipsoftFont
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 45 21
     margin-top: 15
-    margin-right: 5    
+    margin-right: 5

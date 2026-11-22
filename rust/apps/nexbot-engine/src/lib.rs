@@ -57,11 +57,21 @@ pub enum ClientFrame {
         id: u32,
         position: Position,
     },
+    TargetShadow {
+        sequence: u32,
+        selected: Option<u32>,
+        current: Option<u32>,
+        candidates: Vec<navigation::TargetCandidate>,
+    },
     Tile {
         sequence: u32,
         position: Position,
         walkable: Option<bool>,
         ignore_creatures: Option<bool>,
+    },
+    RouteGoal {
+        sequence: u32,
+        position: Position,
     },
     RouteAck {
         sequence: u32,
@@ -81,6 +91,13 @@ pub enum ServerFrame {
     Ready {
         proof: String,
         protocol: u8,
+        cave_shadow: bool,
+        target_shadow: bool,
+    },
+    TargetComparison {
+        observation: u32,
+        selected: Option<u32>,
+        suggested: Option<u32>,
     },
     Probe {
         id: u32,
@@ -229,6 +246,27 @@ impl Session {
                 }
                 Ok(None)
             }
+            ClientFrame::TargetShadow {
+                sequence,
+                selected,
+                current,
+                candidates,
+            } => {
+                self.advance(sequence)?;
+                let player = self.position.ok_or(SessionError::Sequence)?;
+                if candidates.len() > 24
+                    || candidates.iter().any(|candidate| {
+                        candidate.id == 0 || candidate.position.z > 15 || candidate.hp > 100
+                    })
+                {
+                    return Err(SessionError::InvalidFrame);
+                }
+                Ok(Some(ServerFrame::TargetComparison {
+                    observation: sequence,
+                    selected,
+                    suggested: navigation::choose_target(player, current, &candidates),
+                }))
+            }
             ClientFrame::Tile {
                 sequence,
                 position,
@@ -241,6 +279,20 @@ impl Session {
                     return Err(SessionError::InvalidFrame);
                 }
                 preview.tile(position, walkable.zip(ignore_creatures));
+                Ok(preview.response(sequence, now_ms))
+            }
+            ClientFrame::RouteGoal { sequence, position } => {
+                self.advance(sequence)?;
+                let current = self.position.ok_or(SessionError::Sequence)?;
+                if !self.path_probe || position.z > 15 {
+                    return Err(SessionError::InvalidFrame);
+                }
+                let preview = self.preview.get_or_insert_with(|| {
+                    let mut preview = Preview::new(position);
+                    preview.initialize(current);
+                    preview
+                });
+                preview.observe(route::Event::Goal(position));
                 Ok(preview.response(sequence, now_ms))
             }
             ClientFrame::RouteAck {
@@ -297,6 +349,8 @@ impl Session {
         Ok(Some(ServerFrame::Ready {
             proof,
             protocol: PROTOCOL,
+            cave_shadow: self.preview.is_none() && path_probe,
+            target_shadow: true,
         }))
     }
 

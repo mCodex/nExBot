@@ -28,6 +28,7 @@ pub enum Decision {
     },
     Step(Position),
     AwaitFloor,
+    WaitCreature(Position),
     Blocked,
     Arrived,
 }
@@ -121,12 +122,23 @@ impl Route {
         if obstruction == Obstruction::Clear && self.blocked == Some(position) {
             return self.plan();
         }
-        if obstruction != Obstruction::Clear && self.path[self.cursor..].contains(&position) {
-            self.reset_path();
-            self.blocked = Some(position);
-            return Decision::Blocked;
+        if !self.path[self.cursor..].contains(&position) && self.blocked != Some(position) {
+            return Decision::Wait;
         }
-        Decision::Wait
+        match obstruction {
+            Obstruction::Terrain => self.plan(),
+            Obstruction::Creature => {
+                self.reset_path();
+                self.blocked = Some(position);
+                Decision::WaitCreature(position)
+            }
+            Obstruction::Unknown => {
+                self.reset_path();
+                self.blocked = Some(position);
+                Decision::Blocked
+            }
+            Obstruction::Clear => Decision::Wait,
+        }
     }
 
     fn reset_path(&mut self) {

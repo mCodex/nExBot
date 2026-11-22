@@ -14,12 +14,16 @@ local socket, connect
 local generation = 0
 local watched, observationPending, lastObservation, latest
 local watchingEnabled, routeProbed = false, false
+local targetShadowEnabled, pendingTarget, lastTargetSent
+RustBridge = RustBridge or {}
+RustBridge.targetStats = { samples = 0, matches = 0, stale = 0 }
 local connected, sequence, lastProbeId = false, 0, 0
 local function close(message)
   if not socket then return end
   generation = generation + 1
   watched, observationPending, lastObservation, latest = nil, false, nil, nil
   routeProbed, sequence, lastProbeId = false, 0, 0
+  targetShadowEnabled, pendingTarget, lastTargetSent = false, nil, nil
   connected = false
   local previous = socket
   socket = nil
@@ -48,6 +52,19 @@ end
 local function isPosition(value)
   return type(value) == "table" and isCoordinate(value.x, 65535)
     and isCoordinate(value.y, 65535) and isCoordinate(value.z, 15)
+end
+
+function RustBridge.targetEnabled()
+  return connected and targetShadowEnabled
+end
+
+function RustBridge.targetShadow(candidates, selected, current)
+  if not RustBridge.targetEnabled() then return end
+  local captured = g_clock.millis()
+  if lastTargetSent and captured - lastTargetSent < 200 then return end
+  lastTargetSent = captured
+  pendingTarget = { observation = sequence + 1, captured = captured, position = localPosition() }
+  emit({ type = "target_shadow", candidates = candidates, selected = selected, current = current })
 end
 
 local function samePosition(a, b)
@@ -93,6 +110,7 @@ local function watch(position)
   observeTile()
 end
 
+local caveShadow, caveGoal
 local pathProbe = g_map and type(g_map.findPath) == "function" or false
 local callbacks = {
   onOpen = function()
@@ -118,9 +136,30 @@ local callbacks = {
       proof = nil
       local position = localPosition()
       if not isPosition(position) then return close("character unavailable") end
+      targetShadowEnabled = message.target_shadow == true
       connected = true
+      caveShadow, caveGoal = message.cave_shadow == true, nil
       emit({ type = "snapshot", position = position })
       status("connected and authenticated (diagnostic mode)")
+      return
+    end
+
+    if message.type == "target_comparison" and targetShadowEnabled then
+      local stats = RustBridge.targetStats
+      if not pendingTarget or pendingTarget.observation ~= message.observation then
+        stats.stale = stats.stale + 1
+        return
+      end
+      local elapsed = g_clock.millis() - pendingTarget.captured
+      local fresh = elapsed < 200 and samePosition(localPosition(), pendingTarget.position)
+      pendingTarget = nil
+      if fresh then
+        stats.samples = stats.samples + 1
+        stats.lastRoundTripMs = elapsed
+        if message.selected == message.suggested then stats.matches = stats.matches + 1 end
+      else
+        stats.stale = stats.stale + 1
+      end
       return
     end
 
@@ -179,7 +218,7 @@ onPlayerPositionChange(function(position)
   end
 end)
 
--- shortcut: diagnostic sends only the latest creature movement per 50 ms, expand for world state.
+-- Coalesce movement within each 50 ms window by creature ID.
 if onCreaturePositionChange then
   onCreaturePositionChange(function(creature, position, previous)
     if connected and watched and (samePosition(previous, watched) or samePosition(position, watched)) then
@@ -194,11 +233,24 @@ if onCreaturePositionChange then
         if current ~= generation then return end
         local frame = latest
         latest = nil
-        if connected then emit(frame) end
+        if connected then
+          for _, movement in pairs(frame) do emit(movement) end
+        end
       end)
     end
-    latest = { type = "creature_move", id = id, position = position }
+    latest = latest or {}
+    latest[id] = { type = "creature_move", id = id, position = position }
   end)
+end
+
+RustBridge = RustBridge or {}
+function RustBridge.caveGoal(position)
+  if not connected or not caveShadow or not storage or storage.rustCaveShadow ~= true then return end
+  if not isPosition(position) or samePosition(caveGoal, position) then return end
+  local origin = localPosition()
+  if not origin or math.max(math.abs(origin.x - position.x), math.abs(origin.y - position.y)) > 32 then return end
+  caveGoal = {x = position.x, y = position.y, z = position.z}
+  emit({type = "route_goal", position = caveGoal})
 end
 
 local manual = configDir .. "/rust-session"

@@ -964,6 +964,7 @@ recalculateBestTarget = function()
 
   local bestTarget = nil
   local bestPriority = 0
+  local shadow = RustBridge and RustBridge.targetEnabled() and {}
   local totalDanger = 0
   local targetCount = 0
   local reachableCount = 0  -- Track only reachable creatures
@@ -1053,6 +1054,12 @@ recalculateBestTarget = function()
         -- Current and new targets share the same authoritative validation.
         if path and params and params.config then
           params.priority = getAdjustedPriority(creature, params, dist)
+          if shadow and #shadow < 25 then
+            shadow[#shadow + 1] = {
+              id = id, position = cpos, priority = math.floor(params.priority),
+              hp = creature:getHealthPercent(), cost = #path, sight = creature:canShoot(),
+            }
+          end
           -- Creature is reachable - add to cache
           monsterCache.monsters[id] = {
             creature = creature,
@@ -1121,8 +1128,11 @@ recalculateBestTarget = function()
     end
   end
   
+  if shadow and #shadow > 0 and #shadow <= 24 then
+    RustBridge.targetShadow(shadow, bestTarget and bestTarget.creature:getId(), currentTargetId)
+  end
   monsterCache.lastFullUpdate = now
-  
+
   -- Update cache state
   monsterCache.bestTarget = bestTarget
   monsterCache.bestPriority = bestPriority

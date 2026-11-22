@@ -1,17 +1,3 @@
-AttackComboBoxPopupMenu < ComboBoxPopupMenu
-AttackComboBoxPopupMenuButton < ComboBoxPopupMenuButton
-AttackComboBox < ComboBox
-  @onSetup: |
-    self:addOption("LEADER TARGET")
-    self:addOption("COMMAND TARGET")    
-
-FollowComboBoxPopupMenu < ComboBoxPopupMenu
-FollowComboBoxPopupMenuButton < ComboBoxPopupMenuButton
-FollowComboBox < ComboBox
-  @onSetup: |
-    self:addOption("LEADER TARGET")
-    self:addOption("LEADER")
-
 ComboTrigger < Panel
   id: trigger
   image-source: /images/ui/panel_flat
@@ -136,7 +122,7 @@ ComboActions < Panel
   image-source: /images/ui/panel_flat
   image-border: 6
   padding: 3
-  size: 220 100
+  size: 246 123
 
   Label
     id: label1
@@ -148,62 +134,56 @@ ComboActions < Panel
     height: 15
     color: #ffaa00    
 
-  FollowComboBox
+  NexBotDropdown
+    &choices: {"LEADER TARGET", "LEADER"}
     id: followLeader
     anchors.left: prev.right
-    anchors.top: prev.top 
+    anchors.verticalCenter: prev.verticalCenter
     margin-left: 7 
-    height: 15
-    width: 145
-    font: cipsoftFont    
+    anchors.right: parent.right
+    margin-right: 24
 
   CheckBox
     id: followLeaderToggle
     anchors.left: followLeader.right
-    anchors.top: followLeader.top
-    margin-top: 2
+    anchors.verticalCenter: followLeader.verticalCenter
     margin-left: 5    
 
   Label
     id: label2
     anchors.left: label1.left
-    anchors.top: label1.bottom
+    anchors.top: followLeader.bottom
     margin-top: 5
     text: Attack:
     color: #ffaa00
 
-  AttackComboBox
+  NexBotDropdown
+    &choices: {"LEADER TARGET", "COMMAND TARGET"}
     id: attackLeaderTarget
-    anchors.left: prev.right
-    anchors.top: prev.top 
-    margin-left: 5 
-    height: 15
-    width: 145
-    font: cipsoftFont
+    anchors.left: followLeader.left
+    anchors.verticalCenter: prev.verticalCenter
+    anchors.right: followLeader.right
 
   CheckBox
     id: attackLeaderTargetToggle
     anchors.left: attackLeaderTarget.right
-    anchors.top: attackLeaderTarget.top
-    margin-top: 2
+    anchors.verticalCenter: attackLeaderTarget.verticalCenter
     margin-left: 5
 
   Label
     id: label3
     anchors.left: label2.left
-    anchors.top: label2.bottom
+    anchors.top: attackLeaderTarget.bottom
     margin-top: 5
     text: Spell:
     color: #ffaa00
 
   TextEdit
     id: attackSpell
-    anchors.left: prev.right
-    anchors.top: prev.top 
+    anchors.left: followLeader.left
+    anchors.verticalCenter: prev.verticalCenter
     anchors.right: attackLeaderTarget.right
-    margin-left: 17 
     height: 15
-    width: 145
     font: cipsoftFont
 
   CheckBox
@@ -246,7 +226,7 @@ ComboActions < Panel
 
 ComboWindow < MainWindow
   !text: tr('Combo Options')
-  size: 480 280
+  size: 488 300
   @onEscape: self:hide()
 
   ComboTrigger
@@ -285,13 +265,8 @@ ComboWindow < MainWindow
     anchors.bottom: closeButton.top
     margin-bottom: 8
 
-  Button
+  NexBotCloseButton
     id: closeButton
-    !text: tr('Close')
-    font: cipsoftFont
-    anchors.right: parent.right
-    anchors.bottom: parent.bottom
-    size: 45 21
     margin-top: 15
     margin-right: 5
 

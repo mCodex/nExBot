@@ -193,7 +193,12 @@ CaveBot.Editor.edit = function(action, value, callback) -- callback = function(a
     end
   end
 
-  UI.EditorWindow(value, params, function(newText)
+  local window = UI.EditorWindow(value, params, function(newText)
     callback(action, newText)
-  end)   
+  end)
+  if params.examples and window and window.examples then
+    local examples = UI.createWidget("NexBotDropdown", window)
+    examples:setMarginBottom(window.examples:getMarginBottom())
+    examples:replaceClientDropdown(window.examples)
+  end
 end
