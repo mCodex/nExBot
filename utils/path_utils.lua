@@ -188,7 +188,7 @@ local CACHE_MAX_SIZE = 200  -- Safety valve: clear entire cache if too large
 
 -- Pure: Check if position is floor-change tile (cached with lazy per-entry TTL)
 -- Uses integer key: pos.x * 1048576 + pos.y * 16 + pos.z — zero allocation vs string concat
-function PathUtils.isFloorChangeTile(pos)
+function PathUtils.isFloorChangeTile(pos, tile)
   if not pos then return false end
   
   -- Safety valve: prevent unbounded growth
@@ -219,7 +219,7 @@ function PathUtils.isFloorChangeTile(pos)
   
   -- Slow path: tile inspection
   local result = false
-  local tile = map and map.getTile and map.getTile(pos)
+  tile = tile or (map and map.getTile and map.getTile(pos))
   if tile then
     local ground = tile:getGround()
     if ground and PathUtils.FLOOR_CHANGE_ITEMS[ground:getId()] then
@@ -238,10 +238,9 @@ function PathUtils.isFloorChangeTile(pos)
 end
 
 -- Pure: Check if position has a field
-function PathUtils.isFieldTile(pos)
+function PathUtils.isFieldTile(pos, tile)
   if not pos then return false end
-  local map = getMap()
-  local tile = map and map.getTile and map.getTile(pos)
+  tile = tile or PathUtils.getTile(pos)
   if not tile then return false end
   
   local ground = tile:getGround()

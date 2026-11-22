@@ -478,11 +478,7 @@ impl Session {
             } => {
                 self.advance(sequence)?;
                 let player = self.position.ok_or(SessionError::Sequence)?;
-                if candidates.len() > 24
-                    || candidates.iter().any(|candidate| {
-                        candidate.id == 0 || candidate.position.z > 15 || candidate.hp > 100
-                    })
-                {
+                if !navigation::valid_target_candidates(&candidates) {
                     return Err(SessionError::InvalidFrame);
                 }
                 Ok(Some(ServerFrame::TargetComparison {
@@ -600,8 +596,26 @@ impl Session {
 
 /// Dispatch a native observation to its domain. The OTClient owns execution.
 pub fn decide(operation: &str, input: serde_json::Value) -> Option<serde_json::Value> {
+    decide_with(operation, input)
+}
+
+pub fn decide_json(operation: &str, input: &[u8]) -> Option<serde_json::Value> {
+    let mut reader = serde_json::Deserializer::from_slice(input);
+    if let Some(decision) = decide_with(operation, &mut reader) {
+        reader.end().ok()?;
+        return Some(decision);
+    }
+    // ABI v1 resolves repeated object keys using the last value.
+    decide(operation, serde_json::from_slice(input).ok()?)
+}
+
+fn decide_with<'de>(
+    operation: &str,
+    input: impl serde::Deserializer<'de>,
+) -> Option<serde_json::Value> {
     match operation {
         "corridor_path" => corridor::decide(input),
+        "target_rank" => navigation::rank_observation(input),
         "self_heal" | "ally_heal" | "ally_target" | "attack" => {
             combat_runtime::decide(operation, input)
         }

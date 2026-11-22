@@ -81,7 +81,6 @@ if EventBus then
       if AttackStateMachine and AttackStateMachine.clearSkipList then AttackStateMachine.clearSkipList() end
       return
     end
-    I.clearPaths()
     I.invalidateCache()
   end, 60)
   -- combat:target with deferred combat_end

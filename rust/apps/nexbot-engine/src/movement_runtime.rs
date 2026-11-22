@@ -172,10 +172,10 @@ struct VoteObservation {
     intents: Vec<Intent>,
 }
 
-pub fn decide(operation: &str, input: Value) -> Option<Value> {
+pub fn decide<'de>(operation: &str, input: impl serde::Deserializer<'de>) -> Option<Value> {
     match operation {
         "movement_dispatch" => {
-            let observation = serde_json::from_value(input).ok()?;
+            let observation = Deserialize::deserialize(input).ok()?;
             Some(json!(match select_dispatch(&observation) {
                 Dispatch::Stop => 0,
                 Dispatch::Step => 1,
@@ -183,7 +183,7 @@ pub fn decide(operation: &str, input: Value) -> Option<Value> {
             }))
         }
         "movement_goal" => {
-            let observation: GoalObservation = serde_json::from_value(input).ok()?;
+            let observation: GoalObservation = Deserialize::deserialize(input).ok()?;
             let margin = observation.margin_min.zip(observation.margin_max);
             Some(json!(match goal_status(
                 observation.player,
@@ -197,7 +197,7 @@ pub fn decide(operation: &str, input: Value) -> Option<Value> {
             }))
         }
         "movement_vote" => {
-            let observation: VoteObservation = serde_json::from_value(input).ok()?;
+            let observation: VoteObservation = Deserialize::deserialize(input).ok()?;
             if observation.intents.len() > MAX_VOTERS {
                 return None;
             }

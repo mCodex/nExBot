@@ -79,6 +79,10 @@ pub fn deposit(items: &[DepositItem], loot: &[u32]) -> Option<DepositDecision> {
 }
 
 pub fn next_reopen_page(page: u32, capacity: u32, size: u32, visited: &[u32]) -> Option<u32> {
+    following_page(page, capacity, size).filter(|next| !visited.contains(next))
+}
+
+fn following_page(page: u32, capacity: u32, size: u32) -> Option<u32> {
     if capacity == 0 || size == 0 || page >= size {
         return None;
     }
@@ -86,7 +90,7 @@ pub fn next_reopen_page(page: u32, capacity: u32, size: u32, visited: &[u32]) ->
         .checked_add(capacity)
         .filter(|next| *next < size)
         .unwrap_or(0);
-    (!visited.contains(&next_page)).then_some(next_page)
+    Some(next_page)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -152,7 +156,9 @@ struct PageRequest {
     page: u32,
     capacity: u32,
     size: u32,
-    visited: Vec<u32>,
+    visited: Option<Vec<u32>>,
+    continuation_visited: Option<bool>,
+    first_visited: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -162,19 +168,22 @@ struct ConversationRequest {
     interval_ms: u32,
 }
 
-pub fn decide(operation: &str, input: serde_json::Value) -> Option<serde_json::Value> {
-    use serde_json::{from_value, json};
+pub fn decide<'de>(
+    operation: &str,
+    input: impl serde::Deserializer<'de>,
+) -> Option<serde_json::Value> {
+    use serde_json::json;
 
     match operation {
         "equipment" => {
-            let request: EquipmentRequest = from_value(input).ok()?;
+            let request: EquipmentRequest = Deserialize::deserialize(input).ok()?;
             if request.slots.len() > 9 {
                 return None;
             }
             serde_json::to_value(equipment(&request.slots, request.safe_to_unequip)).ok()
         }
         "deposit" => {
-            let request: DepositRequest = from_value(input).ok()?;
+            let request: DepositRequest = Deserialize::deserialize(input).ok()?;
             if request.items.len() > 256 || request.loot.len() > 512 {
                 return None;
             }
@@ -182,24 +191,29 @@ pub fn decide(operation: &str, input: serde_json::Value) -> Option<serde_json::V
             Some(decision.map_or_else(|| json!({}), |plan| json!({"plan": plan})))
         }
         "reopen_job" => {
-            let queues: ReopenQueues = from_value(input).ok()?;
+            let queues: ReopenQueues = Deserialize::deserialize(input).ok()?;
             serde_json::to_value(queues.next()).ok()
         }
         "reopen_page" => {
-            let request: PageRequest = from_value(input).ok()?;
-            if request.visited.len() > 256 {
-                return None;
-            }
-            let page = next_reopen_page(
-                request.page,
-                request.capacity,
-                request.size,
-                &request.visited,
-            );
+            let request: PageRequest = Deserialize::deserialize(input).ok()?;
+            let page = match (
+                request.visited,
+                request.continuation_visited,
+                request.first_visited,
+            ) {
+                (None, Some(continuation), Some(first)) => {
+                    following_page(request.page, request.capacity, request.size)
+                        .filter(|next| if *next == 0 { !first } else { !continuation })
+                }
+                (Some(visited), None, None) if visited.len() <= 256 => {
+                    next_reopen_page(request.page, request.capacity, request.size, &visited)
+                }
+                _ => return None,
+            };
             Some(page.map_or_else(|| json!({}), |page| json!({"page": page})))
         }
         "npc_conversation" => {
-            let request: ConversationRequest = from_value(input).ok()?;
+            let request: ConversationRequest = Deserialize::deserialize(input).ok()?;
             Some(json!({ "delays": conversation(request.count, request.interval_ms)? }))
         }
         _ => None,

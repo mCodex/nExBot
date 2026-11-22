@@ -14,7 +14,7 @@ describe("CaveBot first-step collision", function()
   before_each(function()
     original = {}
     for _, name in ipairs({ "CaveBot", "Directions", "East", "nExBot", "now", "onPlayerPositionChange",
-      "PathUtils", "player", "pos", "walk", "nExBotRuntime" }) do
+      "PathUtils", "g_map", "player", "pos", "walk", "nExBotRuntime" }) do
       original[#original + 1] = { name, _G[name] }
     end
 
@@ -107,12 +107,36 @@ describe("CaveBot first-step collision", function()
     offsets[2] = {x = 0, y = 1}
     offsets[5] = {x = 1, y = 1}
     path = {5}
-    PathUtils.isTileWalkable = function(pos)
-      return pos.x ~= 101 or pos.y ~= 100
+    local rowReads = {}
+    local function item(id)
+      return { getId = function() return id end, isItem = function() return true end }
     end
+    _G.g_map = {
+      getMinimapColor = function(pos) return pos.y == 96 and pos.x == 98 and 210 or 0 end,
+      getTile = function(pos)
+        local row = pos.y == 96
+        if row then rowReads[pos.x] = (rowReads[pos.x] or 0) + 1 end
+        if row and pos.x == 96 then return nil end
+        return {
+          isWalkable = function(_, ignoreCreatures)
+            assert.is_false(ignoreCreatures)
+            return not (row and pos.x == 97) and not (pos.x == 101 and pos.y == 100)
+          end,
+          getGround = function()
+            if row and pos.x == 99 then return item(414) end
+            if row and pos.x == 101 then return item(1487) end
+          end,
+          getTopThing = function() if row and pos.x == 100 then return item(414) end end,
+          getItems = function() return row and pos.x == 102 and {item(1487)} or {} end,
+        }
+      end,
+    }
+    dofile("utils/path_utils.lua")
     _G.nExBotRuntime = {decide = function(operation, map)
       assert.equals("corridor_path", operation)
       assert.equals(10, map.width)
+      assert.equals("0000000111", map.tiles:sub(1, map.width))
+      for x = 96, 105 do assert.equals(1, rowReads[x]) end
       assert.equals("0", map.tiles:sub(map.start + 2, map.start + 2))
       return {2, 1}
     end}

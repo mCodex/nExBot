@@ -100,3 +100,36 @@ pub fn choose_target(
     }
     Some(best.id)
 }
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TargetObservation {
+    player: Position,
+    current: Option<u32>,
+    candidates: Vec<TargetCandidate>,
+}
+
+pub(crate) fn valid_target_candidates(candidates: &[TargetCandidate]) -> bool {
+    candidates.len() <= 24
+        && candidates
+            .iter()
+            .all(|c| c.id != 0 && c.position.z <= 15 && c.hp <= 100)
+}
+
+pub(crate) fn rank_observation<'de>(
+    input: impl serde::Deserializer<'de>,
+) -> Option<serde_json::Value> {
+    use serde::Deserialize;
+    let observation = TargetObservation::deserialize(input).ok()?;
+    if observation.player.z > 15 || !valid_target_candidates(&observation.candidates) {
+        return None;
+    }
+    Some(serde_json::Value::from(
+        choose_target(
+            observation.player,
+            observation.current,
+            &observation.candidates,
+        )
+        .unwrap_or(0),
+    ))
+}

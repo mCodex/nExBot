@@ -199,23 +199,13 @@ local CREATURE_TYPE = {
   SUMMON = 3        -- Non-targetable (other player's summons)
 }
 
--- Pre-allocated constants for pathfinding (PERFORMANCE: avoid table creation in loop)
-local PATH_PARAMS = {
-  ignoreLastCreature = true,
-  ignoreNonPathable = true,
-  ignoreCost = true,
-  ignoreCreatures = true,
-  allowOnlyVisibleTiles = true,  -- OTCLIENT API: Safety first
-  precision = 1
-}
-
 -- Pre-allocated status strings (PERFORMANCE: avoid string concatenation)
 local STATUS_WAITING = "Waiting"
 
 -- PERFORMANCE: Optimized Creature Cache
 -- Uses event-driven updates with LRU eviction and TargetCore integration
 local monsterCache = {
-  monsters = {},          -- {id -> {creature, path, params, lastUpdate, priority}}
+  monsters = {},          -- Creature membership and timestamps
   monsterCount = 0,
   bestTarget = nil,
   bestPriority = 0,
@@ -223,7 +213,6 @@ local monsterCache = {
   dirty = true,           -- Flag to recalculate on next tick
   lastFullUpdate = 0,
   FULL_UPDATE_INTERVAL = 400,  -- Reduced for faster adaptation
-  PATH_TTL = 400,         -- Path cache valid for 400ms
   lastCleanup = 0,
   CLEANUP_INTERVAL = 1500,
   -- LRU eviction
@@ -245,13 +234,6 @@ if EventBus then
       visibilityCheckUntil = count > 0 and now + 150 or 0
     end
   end)
-end
-
-local function clearPaths()
-  for id, data in pairs(monsterCache.monsters) do
-    data.path = nil
-    data.pathTime = nil
-  end
 end
 
 -- Helper to set UI status text on the right side only when changed (reduces layout churn)
@@ -463,12 +445,7 @@ local function updateCreatureInCache(creature)
     touchCreature(id)
   end
   
-  -- Recalculate path if needed
-  if not entry.path or now - (entry.pathTime or 0) > monsterCache.PATH_TTL then
-    entry.path = findPath(pos, cpos, 10, PATH_PARAMS)
-    entry.pathTime = now
-  end
-  
+  -- Reachability is evaluated once against the active profile during selection.
   invalidateCache()
 end
 
@@ -948,8 +925,10 @@ recalculateBestTarget = function()
   local bestPriority = 0
   local sampleTargets = RustBridge and RustBridge.beginTargetSample and RustBridge.beginTargetSample()
   local useRustRanking = RustBridge and RustBridge.useTargetRanking and RustBridge.useTargetRanking()
-  local shadow = (sampleTargets or useRustRanking) and {}
-  local validatedTargets = useRustRanking and {}
+  local nativeRank = storage and storage.rustTargetRanking == true and nExBotRuntime and nExBotRuntime.decide
+  local shadow = (sampleTargets or useRustRanking or nativeRank) and {}
+  local validatedTargets = (useRustRanking or nativeRank) and {}
+  local completeRanking = true
   local totalDanger = 0
   local targetCount = 0
   local reachableCount = 0  -- Track only reachable creatures
@@ -986,8 +965,8 @@ recalculateBestTarget = function()
     if creature and targetPathfinding.isTargetableCreature(creature) then
       local cpos = SC.getPosition(creature)
       if cpos and cpos.z == playerZ then
-        local id = SC.getId(creature)
-        id = id or i
+        local observedId = SC.getId(creature)
+        local id = observedId or i
         
         -- v2.2: Special handling for current target - be more lenient with path validation
         local isCurrentTarget = (currentTargetId and id == currentTargetId)
@@ -999,7 +978,8 @@ recalculateBestTarget = function()
         -- Current and new targets share the same authoritative validation.
         if path and params and params.config then
           params.priority = getAdjustedPriority(creature, params, dist)
-          if shadow and #shadow < 25 then
+          if shadow and (not observedId or #shadow == 24) then completeRanking = false end
+          if shadow and completeRanking then
             local sightOk, sight = pcall(function() return creature:canShoot() end)
             shadow[#shadow + 1] = {
               id = id, position = cpos, priority = math.floor(params.priority * 100 + 0.5),
@@ -1010,8 +990,6 @@ recalculateBestTarget = function()
           -- Creature is reachable - add to cache
           monsterCache.monsters[id] = {
             creature = creature,
-            path = path,
-            pathTime = now,
             lastUpdate = now,
             reachable = true
           }
@@ -1039,10 +1017,16 @@ recalculateBestTarget = function()
     end
   end
   
-  if validatedTargets and #shadow > 0 and #shadow <= 24 then
-    local suggested = RustBridge.rankedTarget(shadow, currentTargetId)
+  if validatedTargets and completeRanking and #shadow > 0 then
+    local suggested
+    if nativeRank then
+      suggested = nativeRank("target_rank", {player = pos, current = currentTargetId, candidates = shadow})
+    end
+    if suggested == nil and useRustRanking then suggested = RustBridge.rankedTarget(shadow, currentTargetId) end
     local candidate = suggested and validatedTargets[suggested]
-    if candidate and candidate.priority > 0 then
+    if suggested == 0 then
+      bestTarget, bestPriority = nil, 0
+    elseif candidate and candidate.priority > 0 then
       bestTarget = candidate
       bestPriority = candidate.priority
     end
@@ -1084,7 +1068,7 @@ recalculateBestTarget = function()
     end
   end
   
-  if sampleTargets and #shadow > 0 and #shadow <= 24 then
+  if sampleTargets and completeRanking and #shadow > 0 then
     RustBridge.targetShadow(shadow, bestTarget and bestTarget.creature:getId(), currentTargetId)
   end
   monsterCache.lastFullUpdate = now
@@ -1149,8 +1133,6 @@ local function primeCreatureCache()
       local id = creature:getId()
       monsterCache.monsters[id] = {
         creature = creature,
-        path = nil,
-        pathTime = 0,
         lastUpdate = now
       }
       table.insert(snapshotCreatures, { id = id, pos = creature:getPosition(), creature = creature })
@@ -1721,7 +1703,6 @@ end
 -- Export internals for target_events.lua cross-module access
 TargetBot.__internals = {
   invalidateCache = invalidateCache,
-  clearPaths = clearPaths,
   recalculateBestTarget = recalculateBestTarget,
   getMonsterCount = function() return monsterCache.monsterCount or 0 end,
   debouncedInvalidateAndRecalc = debouncedInvalidateAndRecalc,

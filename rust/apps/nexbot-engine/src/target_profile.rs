@@ -76,10 +76,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reads_real_priorities_chase_and_loot_without_reordering_rules() {
-        let profile: TargetProfile =
-            serde_json::from_str(include_str!("../../../../targetbot_configs/Chicken.json"))
-                .unwrap();
+    fn reads_priorities_chase_and_loot_without_reordering_rules() {
+        let profile: TargetProfile = serde_json::from_str(
+            r#"{"targeting":[
+                {"name":"Chicken","priority":10,"keepDistance":true,"dontLoot":true},
+                {"name":"Bear"},{"name":"Orc*"}
+            ],"looting":{"everyItem":false,"minCapacity":100,"eatFromCorpses":false}}"#,
+        )
+        .unwrap();
         let names: Vec<_> = profile
             .targeting
             .iter()

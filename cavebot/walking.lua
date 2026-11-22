@@ -198,8 +198,10 @@ local function findCorridorPath(start, goal)
   for dy = 0, height - 1 do
     for dx = 0, width - 1 do
       local position = {x = x + dx, y = y + dy, z = start.z}
-      tiles[#tiles + 1] = PathUtils.isTileWalkable(position, false)
-        and not isFloorChangeTile(position) and not isFieldTile(position) and "1" or "0"
+      local tile = PathUtils.getTile(position)
+      tiles[#tiles + 1] = tile and tile:isWalkable(false)
+        and not PathUtils.isFloorChangeTile(position, tile)
+        and not PathUtils.isFieldTile(position, tile) and "1" or "0"
     end
   end
   local path = nExBotRuntime.decide("corridor_path", {

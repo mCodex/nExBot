@@ -7,7 +7,7 @@ local function client(root, options)
   options = options or {}
   local timers, windows, requests, opened, warnings = {}, {}, {}, {}, {}
   local clock, complete, inFlight = 0, 0, false
-  local openEvent, closeEvent, addEvent, sortTick
+  local openEvent, closeEvent, addEvent, updateEvent, sortTick
   local sidebar = {}
   local noop = function() end
   local function schedule(ms, fn)
@@ -23,7 +23,7 @@ local function client(root, options)
     local capacity = #item.pages[1]
     local items = item.pages[page]
     return {
-      getId = function() return id end, getName = function() return "Backpack" end,
+      getId = function() return id end, getName = function() return item.name or "Backpack" end,
       getContainerItem = function() return item end, getItems = function() return items end,
       getItem = function(_, slot) return items[slot + 1] end,
       getFirstIndex = function() return (page - 1) * capacity end,
@@ -37,7 +37,12 @@ local function client(root, options)
     move = options.move,
     getContainers = function() return windows end,
     getContainer = function(id) return windows[id] end,
-    getLocalPlayer = function() return nil end,
+    getLocalPlayer = function()
+      if options.equipped then return {getInventoryItem = function(_, slot)
+        if options.v8 then assert(slot >= 1 and slot <= 10) end
+        return options.equipped[slot]
+      end} end
+    end,
     close = function(c)
       schedule(650, function()
         windows[c:getId()] = nil
@@ -67,12 +72,13 @@ local function client(root, options)
         windows[id] = c
         opened[#opened + 1] = item
         openEvent(c)
-        if options.afterOpen then options.afterOpen(item, c, addEvent) end
+        if options.afterOpen then options.afterOpen(item, c, addEvent, updateEvent) end
       end)
       return id
     end,
     seekInContainer = function(id, index)
       assert(not inFlight)
+      if options.dropPage == index then return end
       inFlight = true
       schedule(80, function()
         inFlight = false
@@ -85,8 +91,9 @@ local function client(root, options)
     end,
   }
   local env = setmetatable({
-    nExBot = {paths = {core = "core"}, Shared = {deepClone = function(v) return v end, getClient = noop}},
-    storage = {containerPanel = {autoMinimize = false, purse = options.purse ~= nil, containerList = options.rules or {}, sortEnabled = options.rules ~= nil}},
+    nExBot = {isOpenTibiaBR = not options.v8, paths = {core = "core"}, Shared = {deepClone = function(v) return v end, getClient = noop}},
+    nExBotRuntime = options.runtime,
+    storage = {containerPanel = {autoMinimize = false, purse = options.purse ~= nil and not options.skipPurse, containerList = options.rules or {}, sortEnabled = options.rules ~= nil}},
     RustBridge = {observeReopen = options.observeReopen},
     g_game = game, g_clock = {millis = function() return clock end},
     getBack = function() return root end, getPurse = function() return options.purse end,
@@ -97,6 +104,7 @@ local function client(root, options)
     schedule = schedule, macro = function(_, fn) sortTick = fn end, setDefaultTab = noop,
     getContainerByItem = options.findContainer,
     onContainerOpen = function(fn) openEvent = fn end, onContainerClose = function(fn) closeEvent = fn end,
+    onContainerUpdateItem = function(fn) updateEvent = fn end,
     onAddItem = function(fn) addEvent = fn end, onRemoveItem = noop, onPlayerInventoryChange = noop,
     onPlayerHealthChange = noop, warn = function(msg) warnings[#warnings + 1] = msg end,
   }, {__index = _G})
@@ -128,6 +136,128 @@ local function client(root, options)
 end
 
 describe("Reopen All", function()
+  it("opens bags on equipped slots, including extended slots when the back slot is empty", function()
+    local pouch, left, right, extra, other, deep = bag(23396), bag(2866), bag(2866), bag(2866), bag(2866), bag(5000)
+    extra.pages = {{deep}}
+    local ui, run, _, opened = client(nil, {
+      equipped = {[5] = right, [6] = left, [11] = pouch, [12] = extra, [15] = other}, purse = pouch, skipPurse = true,
+    })
+    ui.reopenAll:onClick()
+    assert.equals(1, run())
+    assert.same({right, left, extra, other, deep}, opened)
+  end)
+
+  it("uses only standard slots and the dedicated purse accessor on OTCv8", function()
+    local ammo, purse = bag(2866), bag(23396)
+    local ui, run, _, opened = client(nil, {equipped = {[10] = ammo}, purse = purse, v8 = true})
+    ui.reopenAll:onClick()
+    assert.equals(1, run())
+    assert.same({purse, ammo}, opened)
+  end)
+
+  it("traverses bags with excluded words in their names and the enabled store inbox, skipping actual excluded containers", function()
+    local root, supplies, purse, quiver = bag(2854), bag(3000), bag(23396), bag(35847)
+    local a, b, hidden = bag(101), bag(102), bag(103)
+    supplies.name, supplies.pages = "Deadeye Backpack", {{a}}
+    purse.name, purse.pages = "Store Inbox", {{b}}
+    quiver.name, quiver.pages = "Jungle Quiver", {{hidden}}
+    root.pages = {{supplies, quiver}}
+    local ui, run, _, opened = client(root, {purse = purse})
+    ui.reopenAll:onClick()
+    assert.equals(1, run())
+    assert.same({root, purse, supplies, quiver, b, a}, opened)
+  end)
+
+  it("follows a refreshed bag handle and discovers a bag created by slot update", function()
+    local old, refreshed, sibling, created, child = bag(2866), bag(2866), bag(2866), bag(2866), bag(111)
+    local ordinary = {isContainer = function() return false end}
+    refreshed.pages = {{child}}
+    local root = bag(2854, {{old, sibling, ordinary}})
+    local ui, run, _, opened = client(root, {afterOpen = function(item, c, _, update)
+      if item ~= root then return end
+      root.pages[1][1], root.pages[1][3] = refreshed, created
+      if update then update(c, 0, refreshed, old); update(c, 2, created, ordinary) end
+    end})
+    ui.reopenAll:onClick()
+    assert.equals(1, run())
+    assert.same({root, refreshed, sibling, created, child}, opened)
+  end)
+
+  it("sends constant-size page membership and falls back when the native binding does not support it", function()
+    local child = bag(2866)
+    local root = bag(2854, {{{isContainer = function() return false end}}, {child}})
+    for _, supported in ipairs({true, false}) do
+      local frames = {}
+      local ui, run, _, opened = client(root, {runtime = {decide = function(op, request)
+        if op ~= "reopen_page" then return end
+        frames[#frames + 1] = request
+        if supported then return request.page == 0 and {page = 1} or {} end
+      end}})
+      ui.reopenAll:onClick()
+      assert.equals(1, run())
+      assert.same({root, child}, opened)
+      assert.same({page = 0, capacity = 1, size = 2, first_visited = true, continuation_visited = false}, frames[1])
+    end
+  end)
+
+  it("recognizes equivalent client handles delivered again for the same bag", function()
+    local original = bag(2866)
+    local metatable = {__eq = function(a, b) return a.nativeId == b.nativeId end}
+    original.nativeId = 42
+    setmetatable(original, metatable)
+    local alias = setmetatable({nativeId = 42, getId = original.getId, isContainer = original.isContainer,
+      pages = original.pages}, metatable)
+    local root = bag(2854, {{original}})
+    local ui, run, requests = client(root, {afterOpen = function(item, c, add)
+      if item == root then add(c, 0, alias) end
+    end})
+    ui.reopenAll:onClick()
+    assert.equals(1, run())
+    assert.equals(2, #requests)
+  end)
+
+  it("does not reopen an acknowledged bag on a same-slot, same-type refresh", function()
+    local first, refresh = bag(2866), bag(2866)
+    local root = bag(2854, {{first}})
+    local parent
+    local ui, run, requests = client(root, {afterOpen = function(item, c, _, update)
+      if item == root then parent = c end
+      if item ~= first then return end
+      root.pages[1][1] = refresh
+      update(parent, 0, refresh, first)
+    end})
+    ui.reopenAll:onClick()
+    assert.equals(1, run())
+    assert.same({root, first}, requests)
+  end)
+
+  it("uses the replacement bag when its type changes before the queued open", function()
+    local first, replacement = bag(2866), bag(3003)
+    local root = bag(2854, {{first}})
+    local ui, run, requests = client(root, {afterOpen = function(item, c, _, update)
+      if item ~= root then return end
+      root.pages[1][1] = replacement
+      update(c, 0, replacement, first)
+    end})
+    ui.reopenAll:onClick()
+    assert.equals(1, run())
+    assert.same({root, replacement}, requests)
+  end)
+
+  it("reports an unacknowledged later page as incomplete", function()
+    local child = bag(2866)
+    local root = bag(2854, {{{isContainer = function() return false end}}, {child}})
+    local summary
+    local ui, run, _, opened, warnings = client(root, {
+      dropPage = 1, observeReopen = function(metrics) summary = metrics end,
+    })
+    ui.reopenAll:onClick()
+    assert.equals(0, run())
+    assert.same({root}, opened)
+    assert.equals(2, summary.timeouts)
+    assert.equals(1, #warnings)
+  end)
+
   it("drains the old windows, then opens identical siblings, deep bags and the purse exactly once", function()
     local leaf, otherLeaf = bag(3003), bag(3003)
     local left, right = bag(2866, {{leaf}}), bag(2866, {{otherLeaf}})

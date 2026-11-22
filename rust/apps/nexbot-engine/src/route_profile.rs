@@ -133,13 +133,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bundled_route_keeps_waypoint_order_and_reports_floor_change() {
-        let report = parse(include_str!("../../../../cavebot_configs/Demon_Alburn.cfg"));
+    fn route_keeps_waypoint_order_and_reports_floor_change() {
+        let report = parse("goto:100,200,6\ngoto:101,200,6\nuse:101,201,6\ngoto:101,201,7");
         assert!(report.malformed.is_empty());
-        assert_eq!(report.waypoints, 49);
+        assert_eq!(report.waypoints, 3);
         assert_eq!(report.floor_transitions.len(), 1);
         let change = &report.floor_transitions[0];
-        assert_eq!((change.from_line, change.to_line), (49, 50));
+        assert_eq!((change.from_line, change.to_line), (2, 4));
         assert_eq!((change.from.z, change.to.z), (6, 7));
     }
 

@@ -182,24 +182,24 @@ fn attack(rule: &AttackRule) -> bool {
     }
 }
 
-pub fn decide(operation: &str, input: Value) -> Option<Value> {
+pub fn decide<'de>(operation: &str, input: impl serde::Deserializer<'de>) -> Option<Value> {
     match operation {
         "self_heal" => {
-            let input = serde_json::from_value(input).ok()?;
+            let input = Deserialize::deserialize(input).ok()?;
             Some(Value::from(self_heal(&input).map_or(0, |index| index + 1)))
         }
         "ally_heal" => {
-            let input = serde_json::from_value(input).ok()?;
+            let input = Deserialize::deserialize(input).ok()?;
             Some(Value::from(ally_heal(&input).map_or(0, |index| index + 1)))
         }
         "ally_target" => {
-            let input = serde_json::from_value(input).ok()?;
+            let input = Deserialize::deserialize(input).ok()?;
             Some(Value::from(
                 ally_target(&input).map_or(0, |index| index + 1),
             ))
         }
         "attack" => {
-            let rule = serde_json::from_value(input).ok()?;
+            let rule = Deserialize::deserialize(input).ok()?;
             Some(Value::from(attack(&rule)))
         }
         _ => None,

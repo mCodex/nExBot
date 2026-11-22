@@ -28,31 +28,39 @@ local function finish(run, reason)
   end
 end
 
-local function enqueueItem(run, node, item, slot)
-  if item:isContainer() and not node.items[item] then
-    node.items[item] = true
-    node.queue:enqueue({node = node, item = item, slot = slot, page = firstIndex(node.container)})
+local function enqueueItem(node, item, slot)
+  if item:isContainer() then
+    local job = {node = node, item = item, slot = slot, page = firstIndex(node.container)}
+    node.items[#node.items + 1] = job
+    node.queue:enqueue(job)
+  end
+end
+
+local function findJob(node, item)
+  -- Separate Lua userdata can refer to the same native item. Compare with __eq.
+  for _, job in ipairs(node.items) do
+    if job.item == item then return job end
   end
 end
 
 local function nextPage(container, node, page, capacity)
   local size = container:getSize()
+  if size == 0 or page >= size then return end
+  local nextIndex = page + capacity
   if nExBotRuntime and nExBotRuntime.decide then
-    local visited = {}
-    for index in pairs(node.pages) do visited[#visited + 1] = index end
     local decision = nExBotRuntime.decide("reopen_page", {
-      page = page, capacity = capacity, size = size, visited = visited,
+      page = page, capacity = capacity, size = size,
+      continuation_visited = node.pages[nextIndex] == true, first_visited = node.pages[0] == true,
     })
     if decision then return decision.page end
   end
-  local nextIndex = page + capacity
   if nextIndex >= size then nextIndex = 0 end
   if not node.pages[nextIndex] then return nextIndex end
 end
 
-local function scan(run, container, node)
-  if run.exclude(container:getName()) then return end
-  node = node or {pages = {}}
+local function scan(run, container, node, purse)
+  node = node or {pages = {}, purse = purse}
+  if run.exclude(container:getName(), node.purse) then return end
   local rule = run.rule(container:getContainerItem():getId())
   node.queue = rule and rule.openNested and run.priority or run.queue
   node.container = container
@@ -60,15 +68,21 @@ local function scan(run, container, node)
   run.nodes[container:getId()] = node
   local page = firstIndex(container)
   node.pages[page] = true
-  for slot, item in ipairs(container:getItems()) do enqueueItem(run, node, item, slot) end
+  for slot, item in ipairs(container:getItems()) do enqueueItem(node, item, slot) end
 
   if container.hasPages and container:hasPages() then
     local capacity = container:getCapacity()
     if capacity > 0 then
       local nextIndex = nextPage(container, node, page, capacity)
       if nextIndex then
-        run.pages:enqueue({node = node, target = nextIndex})
+        if g_game.seekInContainer then
+          run.pages:enqueue({node = node, target = nextIndex})
+        else
+          run.failed = run.failed + 1
+        end
       end
+    elseif container:getSize() > 0 then
+      run.failed = run.failed + 1
     end
   end
 end
@@ -102,6 +116,7 @@ local function send(run, job, item)
   if job.target then
     g_game.seekInContainer(job.node.container:getId(), job.target)
   else
+    job.sent = true
     pending.itemId = item:getId()
     pending.window = g_game.open(item)
   end
@@ -160,7 +175,7 @@ advance = function(run)
         return
       end
     end
-    if not job.optional then run.failed = run.failed + 1 end
+    run.failed = run.failed + 1
   end
 end
 
@@ -177,7 +192,7 @@ function Reopen.onOpen(container, previous)
     local item = container:getContainerItem()
     if previous or not item or item:getId() ~= pending.itemId then return end
     if pending.window ~= nil and pending.window ~= container:getId() then return end
-    scan(run, container)
+    scan(run, container, nil, job.purse)
   end
   if not job.retried then
     local ms = g_clock.millis() - pending.sent
@@ -208,7 +223,23 @@ end
 function Reopen.onAdd(container, item, slot)
   local run = active
   local node = run and run.nodes[container:getId()]
-  if node and node.container == container then enqueueItem(run, node, item, slot + 1) end
+  if node and node.container == container and item:isContainer() and not findJob(node, item) then
+    enqueueItem(node, item, slot + 1)
+  end
+end
+
+function Reopen.onUpdate(container, item, slot, oldItem)
+  local run = active
+  local node = run and run.nodes[container:getId()]
+  if not node or node.container ~= container or not item:isContainer() then return end
+  if oldItem and oldItem:isContainer() then
+    local job = findJob(node, oldItem)
+    if job and (not job.sent or oldItem:getId() == item:getId()) then
+      job.item, job.slot = item, slot + 1
+      return
+    end
+  end
+  Reopen.onAdd(container, item, slot)
 end
 
 function Reopen.isActive()

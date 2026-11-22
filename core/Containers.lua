@@ -209,7 +209,7 @@ containerUI:setId(panelName)
 
 containerUI.openAll:setTooltip("When enabled, automatically opens all containers on re-login\n(Toggle ON to enable auto-open on each login)")
 containerUI.setupBtn:setTooltip("Configure container names, sorting rules, and behavior")
-containerUI.reopenAll:setTooltip("Close all containers and reopen from back slot")
+containerUI.reopenAll:setTooltip("Reopen all equipped containers and their nested bags")
 containerUI.closeAll:setTooltip("Close all open containers")
 containerUI.minimizeAll:setTooltip("Minimize all container windows")
 containerUI.maximizeAll:setTooltip("Maximize all container windows")
@@ -484,63 +484,44 @@ local function applyMinimize(container)
     end
 end
 
-local function getQuiverItem()
-    local player = g_game.getLocalPlayer()
-    if not player then return nil, nil end
-
-    -- Right hand slot (quiver is equipped here for paladins)
-    -- OTClient: InventorySlotRight = 5 (not 6 — slot 6 is left hand)
-    local rightSlot = 5
-    if player.getInventoryItem then
-        local ok, item = pcall(function() return player:getInventoryItem(rightSlot) end)
-        if ok and item then
-            local okC, isC = pcall(function() return item:isContainer() end)
-            if okC and isC then return item, "right" end
+local function equippedRoots()
+    local getters = {getHead, getNeck, getBack, getBody, getRight, getLeft, getLeg, getFeet, getFinger, getAmmo, getPurse}
+    local function itemAt(slot)
+        if slot == 11 and not nExBot.isOpenTibiaBR then return getPurse and getPurse() end
+        local player = g_game.getLocalPlayer()
+        if player and player.getInventoryItem then
+            local item = player:getInventoryItem(slot)
+            if item then return item end
         end
-    end
-    if getRight then
-        local ok, item = pcall(getRight)
-        if ok and item then
-            local okC, isC = pcall(function() return item:isContainer() end)
-            if okC and isC then return item, "right_global" end
-        end
+        local getter = getters[slot]
+        return getter and getter()
     end
 
-    -- Ammo slot (some quiver types go here)
-    local ammoSlot = InventorySlotAmmo or 10
-    if player.getInventoryItem then
-        local ok, item = pcall(function() return player:getInventoryItem(ammoSlot) end)
-        if ok and item then
-            local okC, isC = pcall(function() return item:isContainer() end)
-            if okC and isC then return item, "ammo" end
-        end
-    end
-    if getAmmo then
-        local ok, item = pcall(getAmmo)
-        if ok and item then
-            local okC, isC = pcall(function() return item:isContainer() end)
-            if okC and isC then return item, "ammo_global" end
-        end
+    local roots = {}
+    local function add(slot, purse)
+        local item = itemAt(slot)
+        if not item or not item:isContainer() then return end
+        roots[#roots + 1] = {purse = purse, root = function()
+            local current = itemAt(slot)
+            if current and current:isContainer() then return current end
+        end}
     end
 
-    -- Fallback: scan all inventory slots for quiver by item ID range
-    local QUIVER_IDS = { [35847]=true, [35848]=true, [35849]=true, [35850]=true,
-        [35851]=true, [35852]=true, [35853]=true, [35854]=true,
-        [35855]=true, [35856]=true, [35857]=true, [35858]=true,
-        [35859]=true, [35860]=true }
-    if player.getInventoryItem then
-        for slot = 0, 10 do
-            local ok, item = pcall(function() return player:getInventoryItem(slot) end)
-            if ok and item then
-                local okId, itemId = pcall(function() return item:getId() end)
-                if okId and QUIVER_IDS[itemId] then
-                    return item, "slot_" .. slot
-                end
-            end
-        end
+    add(3)
+    if config.purse then add(11, true) end
+    -- The OpenTibiaBR inventory has four extension slots after the purse.
+    local last = nExBot.isOpenTibiaBR and 15 or 10
+    for slot = 1, last do
+        if slot ~= 3 and slot ~= 11 then add(slot) end
     end
+    return roots
+end
 
-    return nil, nil
+local function excludeNested(name, purse)
+    if purse then return false end
+    name = (name or ""):lower()
+    if name:match("backpack$") or name:match("%f[%a]bag$") then return false end
+    return isExcludedContainer(name)
 end
 
 local function getNow()
@@ -598,6 +579,12 @@ onAddItem(function(container, slot, item, oldItem)
     end
 end)
 
+if onContainerUpdateItem then
+    onContainerUpdateItem(function(container, slot, item, oldItem)
+        if container and slot and item then Reopen.onUpdate(container, item, slot, oldItem) end
+    end)
+end
+
 onRemoveItem(function(container, slot, item)
     if sortingMacro and (config.sortEnabled or config.forceOpen) and not isLootLocked() then
         sortingMacro:setOn()
@@ -612,15 +599,16 @@ end)
 
 
 function reopenBackpacks(onComplete)
-    if not Reopen.isActive() and not getBack() then
-        warn("[Container Panel] No backpack in back slot!")
-        if onComplete then onComplete(false) end
-        return
+    local roots = {}
+    if not Reopen.isActive() then
+        roots = equippedRoots()
+        if #roots == 0 then
+            warn("[Container Panel] No equipped containers to reopen.")
+            if onComplete then onComplete(false) end
+            return
+        end
     end
-    local roots = {{root = getBack}}
-    if config.purse then roots[#roots + 1] = {root = getPurse, optional = true} end
-    roots[#roots + 1] = {root = getQuiverItem, optional = true}
-    Reopen.start(roots, isExcludedContainer, getContainerConfig, onComplete)
+    Reopen.start(roots, excludeNested, getContainerConfig, onComplete)
 end
 
 

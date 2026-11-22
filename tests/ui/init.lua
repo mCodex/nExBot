@@ -42,8 +42,31 @@ scheduleEvent(function()
       }) == 5)
       assert(decide("npc_conversation", {count = 3, interval_ms = 150}).delays[3] == 300)
       assert(decide("reopen_page", {page = 0, capacity = 8, size = 10, visited = {0}}).page == 8)
+      assert(decide("reopen_page", {page = 0, capacity = 8, size = 10,
+        continuation_visited = false, first_visited = true}).page == 8)
+      assert(decide("reopen_page", {page = 8, capacity = 8, size = 10,
+        continuation_visited = false, first_visited = true}).page == nil)
+      local position = {x = 100, y = 100, z = 7}
+      local targets = {
+        {id = 1, position = position, priority = 100, hp = 100, cost = 1, sight = false},
+        {id = 2, position = position, priority = 100, hp = 100, cost = 1, sight = true},
+      }
+      assert(decide("target_rank", {player = position, candidates = targets}) == 2)
       local detour = decide("corridor_path", {width = 3, height = 3, start = 0, goal = 2, tiles = "101101111"})
       assert(table.concat(detour, ",") == "2,2,1,1,0,0")
+      local rows = {}
+      for y = 0, 32 do
+        if y % 2 == 0 then
+          rows[#rows + 1] = string.rep("1", 33)
+        elseif y % 4 == 1 then
+          rows[#rows + 1] = string.rep("0", 32) .. "1"
+        else
+          rows[#rows + 1] = "1" .. string.rep("0", 32)
+        end
+      end
+      local longPath = decide("corridor_path", {width = 33, height = 33, start = 0, goal = 1088,
+        tiles = table.concat(rows)})
+      assert(#longPath == 576, "incomplete native corridor path")
       assert(decide("unknown", {}) == nil)
       local samples = {}
       for i = 1, 10000 do

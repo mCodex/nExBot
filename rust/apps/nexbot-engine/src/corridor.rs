@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -12,72 +10,90 @@ struct Map {
     tiles: String,
 }
 
-// OTClient direction IDs, cardinal directions first for stable ties.
-const DIRECTIONS: [(isize, isize); 8] = [
-    (0, -1),
-    (1, 0),
-    (0, 1),
-    (-1, 0),
-    (1, -1),
-    (1, 1),
-    (-1, 1),
-    (-1, -1),
-];
+fn reconstruct_path(cells: &[u8], stride: usize, start: usize, goal: usize) -> Vec<u8> {
+    let stride = stride as isize;
+    let backstep = [
+        stride,
+        -1,
+        -stride,
+        1,
+        stride - 1,
+        -stride - 1,
+        1 - stride,
+        stride + 1,
+    ];
+    let mut route = Vec::new();
+    let mut index = goal;
+    while index != start {
+        let direction = cells[index];
+        route.push(direction);
+        index = index
+            .checked_add_signed(backstep[usize::from(direction)])
+            .expect("visited cells point to an interior predecessor");
+    }
+    route.reverse();
+    route
+}
 
 fn shortest_path(tiles: &[u8], width: usize, start: usize, goal: usize) -> Vec<u8> {
-    if tiles[goal] != b'1' {
+    if start == goal || tiles[goal] != b'1' {
         return Vec::new();
     }
     let height = tiles.len() / width;
-    let cell = |x: isize, y: isize| {
-        let (x, y) = (usize::try_from(x).ok()?, usize::try_from(y).ok()?);
-        (x < width && y < height).then_some(y * width + x)
-    };
-    const UNVISITED: u8 = u8::MAX;
-    let mut previous = vec![UNVISITED; tiles.len()];
-    let mut queue = VecDeque::with_capacity(tiles.len());
-    queue.push_back(start);
-    previous[start] = 8;
-
-    while let Some(current) = queue.pop_front() {
-        if current == goal {
-            let mut route = Vec::new();
-            let mut index = current;
-            while index != start {
-                let direction = previous[index];
-                route.push(direction);
-                let (dx, dy) = DIRECTIONS[usize::from(direction)];
-                index = index
-                    .checked_add_signed(-dy * width as isize - dx)
-                    .expect("route predecessor is inside the grid");
-            }
-            route.reverse();
-            return route;
-        }
-        let (x, y) = ((current % width) as isize, (current / width) as isize);
-        for (direction, (dx, dy)) in DIRECTIONS.iter().copied().enumerate() {
-            let Some(next) = cell(x + dx, y + dy) else {
+    let stride = width + 2;
+    // A wall border keeps every neighbor of a queued cell inside the buffer.
+    let mut cells = vec![b'0'; stride * (height + 2)];
+    for (y, row) in tiles.chunks_exact(width).enumerate() {
+        let first = (y + 1) * stride + 1;
+        cells[first..first + width].copy_from_slice(row);
+    }
+    let padded = |index: usize| (index / width + 1) * stride + index % width + 1;
+    let start = padded(start);
+    let goal = padded(goal);
+    if cells[start] == b'1' {
+        cells[start] = 8;
+    }
+    let mut queue = Vec::with_capacity(tiles.len());
+    queue.push(start);
+    let mut head = 0;
+    while head < queue.len() {
+        let current = queue[head];
+        head += 1;
+        let north = current - stride;
+        let south = current + stride;
+        let east = current + 1;
+        let west = current - 1;
+        let walk_north = cells[north] != b'0';
+        let walk_south = cells[south] != b'0';
+        let walk_east = cells[east] != b'0';
+        let walk_west = cells[west] != b'0';
+        // OTClient direction order breaks ties between equally short paths.
+        let neighbors = [
+            (north, true),
+            (east, true),
+            (south, true),
+            (west, true),
+            (north + 1, walk_north && walk_east),
+            (south + 1, walk_south && walk_east),
+            (south - 1, walk_south && walk_west),
+            (north - 1, walk_north && walk_west),
+        ];
+        for (direction, (next, clear)) in neighbors.into_iter().enumerate() {
+            if !clear || cells[next] != b'1' {
                 continue;
-            };
-            if tiles[next] != b'1' || previous[next] != UNVISITED {
-                continue;
             }
-            if dx != 0
-                && dy != 0
-                && (tiles[cell(x + dx, y).expect("diagonal inside grid")] != b'1'
-                    || tiles[cell(x, y + dy).expect("diagonal inside grid")] != b'1')
-            {
-                continue;
+            cells[next] = direction as u8;
+            if next == goal {
+                return reconstruct_path(&cells, stride, start, goal);
             }
-            previous[next] = direction as u8;
-            queue.push_back(next);
+            queue.push(next);
         }
     }
     Vec::new()
 }
 
-pub(crate) fn decide(input: serde_json::Value) -> Option<serde_json::Value> {
-    let map: Map = serde_json::from_value(input).ok()?;
+pub(crate) fn decide<'de>(input: impl serde::Deserializer<'de>) -> Option<serde_json::Value> {
+    let map: Map = Deserialize::deserialize(input).ok()?;
     if !(1..=33).contains(&map.width)
         || !(1..=33).contains(&map.height)
         || map.tiles.len() != map.width * map.height
@@ -108,5 +124,12 @@ mod tests {
     #[test]
     fn refuses_to_cut_a_blocked_diagonal() {
         assert!(shortest_path(b"1001", 2, 0, 3).is_empty());
+    }
+
+    #[test]
+    fn leaves_an_occupied_start_and_never_wraps_across_row_edges() {
+        assert_eq!(shortest_path(b"011", 1, 0, 2), [2, 2]);
+        assert_eq!(shortest_path(b"111111", 3, 2, 3), [3, 6]);
+        assert!(shortest_path(b"001100", 3, 2, 3).is_empty());
     }
 }

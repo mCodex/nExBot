@@ -11,7 +11,8 @@ extern "C" std::size_t nexbot_decide_v1(
 
 inline std::string nexbotDecide(const std::string& operation, const std::string& input)
 {
-    std::array<unsigned char, 1024> output;
+    // A 33 x 33 corridor can return up to 1088 single-digit directions as JSON.
+    std::array<unsigned char, 2 * (33 * 33 - 1) + 1> output;
     const auto size = nexbot_decide_v1(
         reinterpret_cast<const unsigned char*>(operation.data()), operation.size(),
         reinterpret_cast<const unsigned char*>(input.data()), input.size(),
