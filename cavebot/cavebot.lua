@@ -693,14 +693,6 @@ local currentWaypointTarget = {
 }
 
 -- Check if player is at waypoint position
-local function isAtWaypoint(playerPos, waypointPos, precision)
-  if not playerPos or not waypointPos then return false end
-  if playerPos.z ~= waypointPos.z then return false end
-  local dx = math.abs(playerPos.x - waypointPos.x)
-  local dy = math.abs(playerPos.y - waypointPos.y)
-  return dx <= precision and dy <= precision
-end
-
 -- Set current waypoint target (called from goto action)
 CaveBot.setCurrentWaypointTarget = function(pos, precision)
   currentWaypointTarget.pos = pos
@@ -727,7 +719,7 @@ if EventBus then
     if not newPos then return end
     
     -- Check if we arrived at the waypoint
-    if isAtWaypoint(newPos, currentWaypointTarget.pos, currentWaypointTarget.precision) then
+    if CaveBot.isAtWaypoint and CaveBot.isAtWaypoint(newPos, currentWaypointTarget.pos, currentWaypointTarget.precision) then
       currentWaypointTarget.arrived = true
       currentWaypointTarget.arrivedTime = now
       -- Emit event for other modules
@@ -790,53 +782,25 @@ cavebotMacro = macro(75, function()  -- 75ms for smooth, responsive walking
     initTargetBotCache()
   end
   
-  -- Check TargetBot allows CaveBot action (cached function refs)
+  local checkingMonsters = TargetBot and TargetBot.isCheckingVisibleMonsters and TargetBot.isCheckingVisibleMonsters()
   local targetBotBlocking = false
-  if targetBotIsActive and targetBotIsActive() then
-    if targetBotIsCaveBotAllowed and not targetBotIsCaveBotAllowed() then
-      safeResetWalking()
-      WaypointEngine.wasTargetBotBlocking = true
-      return
-    end
-    
-    -- PULL SYSTEM PAUSE: If smartPull is active, pause waypoint walking
-    if TargetBot.smartPullActive then
-      safeResetWalking()
-      WaypointEngine.wasTargetBotBlocking = true
-      return
-    end
-    
-    -- MONSTER DETECTION: Pause for targetable monsters on screen
-    -- Defer to TargetBot's cavebotAllowance: when TargetBot has evaluated all
-    -- monsters and explicitly allowed CaveBot (e.g., all targets unreachable),
-    -- respect that decision instead of blocking based on passive monster detection.
-    if TargetBot.shouldWaitForMonsters and TargetBot.shouldWaitForMonsters() then
-      if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
-        safeResetWalking()
-        WaypointEngine.wasTargetBotBlocking = true
-        return
-      end
+  if checkingMonsters or (targetBotIsActive and targetBotIsActive()) then
+    local blocked = checkingMonsters or TargetBot.smartPullActive
+    if not blocked and targetBotIsCaveBotAllowed then
+      blocked = not targetBotIsCaveBotAllowed()
+    elseif not blocked then
+      blocked = (TargetBot.shouldWaitForMonsters and TargetBot.shouldWaitForMonsters())
+        or (AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive())
+        or (EventTargeting and EventTargeting.isCombatActive and EventTargeting.isCombatActive())
     end
 
-    -- ASM BACKUP: block CaveBot while attack is in progress
-    if AttackStateMachine and AttackStateMachine.isActive and AttackStateMachine.isActive() then
-      if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
-        safeResetWalking()
-        WaypointEngine.wasTargetBotBlocking = true
-        return
-      end
-    end
-    
-    -- BACKUP CHECK: If EventTargeting reports combat active, also pause
-    if EventTargeting and EventTargeting.isCombatActive and EventTargeting.isCombatActive() then
-      if not (targetBotIsCaveBotAllowed and targetBotIsCaveBotAllowed()) then
-        safeResetWalking()
-        WaypointEngine.wasTargetBotBlocking = true
-        return
-      end
+    if blocked then
+      safeResetWalking()
+      WaypointEngine.wasTargetBotBlocking = true
+      return
     end
   end
-  
+
   -- DRIFT DETECTION: Proactive nearest-WP refocus
   -- Trigger 1: Combat just ended (TargetBot was blocking, now allows CaveBot)
   if WaypointEngine.wasTargetBotBlocking then

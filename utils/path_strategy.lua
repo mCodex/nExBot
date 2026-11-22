@@ -124,7 +124,7 @@ local function resolveBackend()
   if adapter and adapter.map and adapter.map.findPath then
     return function(startPos, goalPos, maxSteps, flags, _opts)
       local ok, result = pcall(adapter.map.findPath, startPos, goalPos, {
-        maxSteps = maxSteps, flags = flags,
+        maxSteps = maxSteps, maxComplexity = _opts.maxComplexity, flags = flags,
       })
       if ok and result and #result > 0 then return result end
       return nil
@@ -141,7 +141,7 @@ local function resolveBackend()
   -- 3) Raw g_map.findPath
   if g_map and g_map.findPath then
     return function(startPos, goalPos, maxSteps, flags, _opts)
-      local ok, result = pcall(g_map.findPath, startPos, goalPos, maxSteps, flags)
+      local ok, result = pcall(g_map.findPath, startPos, goalPos, _opts.maxComplexity or maxSteps, flags)
       if ok and result and #result > 0 then return result end
       return nil
     end
@@ -369,6 +369,7 @@ local Cursor = {
 }
 
 function PathStrategy.setCursor(path, dest)
+  Cursor.expected = nil
   Cursor.path     = path
   Cursor.idx      = 1
   Cursor.ts       = tick()
@@ -377,6 +378,7 @@ function PathStrategy.setCursor(path, dest)
 end
 
 function PathStrategy.resetCursor()
+  Cursor.expected = nil
   Cursor.path     = nil
   Cursor.idx      = 1
   Cursor.ts       = 0
@@ -441,6 +443,11 @@ function PathStrategy.nativePathIsSafe(startPos, goalPos, opts)
   for i = 1, #nativePath do
     local off = dirOffset(nativePath[i])
     if not off then return false, nativePath, i end
+    if off.x ~= 0 and off.y ~= 0
+        and (not PU().isTileWalkable({x = probe.x + off.x, y = probe.y, z = probe.z}, false)
+          or not PU().isTileWalkable({x = probe.x, y = probe.y + off.y, z = probe.z}, false)) then
+      return false, nativePath, i
+    end
     probe = applyOff(probe, off)
     if isFC(probe) then
       return false, nativePath, i
@@ -476,13 +483,6 @@ function PathStrategy.safeStepCount(path, startPos, fromIdx)
   local safe  = 0
   local pu = PU()
   local isFC  = (pu and pu.isFloorChangeTile) or function() return false end
-
-  for i = 1, math.max(0, fromIdx - 1) do
-    local off = dirOffset(path[i])
-    if not off then break end
-    probe = applyOff(probe, off)
-    if isFC(probe) then break end
-  end
 
   for i = fromIdx, #path do
     local off = dirOffset(path[i])

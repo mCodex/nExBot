@@ -102,6 +102,35 @@ describe("CaveBot first-step collision", function()
     assert.equals(1, advances)
   end)
 
+  it("rejects an unchecked diagonal and follows the corridor detour from Rust", function()
+    local offsets = Directions.DIR_TO_OFFSET
+    offsets[2] = {x = 0, y = 1}
+    offsets[5] = {x = 1, y = 1}
+    path = {5}
+    PathUtils.isTileWalkable = function(pos)
+      return pos.x ~= 101 or pos.y ~= 100
+    end
+    _G.nExBotRuntime = {decide = function(operation, map)
+      assert.equals("corridor_path", operation)
+      assert.equals(10, map.width)
+      assert.equals("0", map.tiles:sub(map.start + 2, map.start + 2))
+      return {2, 1}
+    end}
+    nExBot.PathStrategy.walkStep = function(dir)
+      assert.equals(2, dir)
+      emitted = emitted + 1
+      return true
+    end
+    assert.is_true(CaveBot.walkTo({x = 101, y = 101, z = 7}, 20, {precision = 0, corridor = true}))
+    assert.equals(1, emitted)
+    assert.equals(1, advances)
+  end)
+
+  it("checks walking distance before accepting proximity to a waypoint behind a wall", function()
+    nExBot.PathStrategy.nativePathIsSafe = function() return true, {2, 1, 0} end
+    assert.is_false(CaveBot.isAtWaypoint(currentPosition, {x = 101, y = 100, z = 7}, 1))
+  end)
+
   it("dispatches the segment selected by Rust without skipping native validation", function()
     path = { 1, 1, 1, 1 }
     local strategy = nExBot.PathStrategy

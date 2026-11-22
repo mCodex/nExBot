@@ -59,7 +59,6 @@ CaveBot.Editor.setup = function()
     CaveBot.actionList:moveChildToIndex(action, index - 1)
     CaveBot.actionList:ensureChildVisible(action)
     if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
-    if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
     CaveBot.save()
   end)
   registerAction("edit", function()
@@ -75,7 +74,6 @@ CaveBot.Editor.setup = function()
     CaveBot.actionList:moveChildToIndex(action, index + 1)
     CaveBot.actionList:ensureChildVisible(action)
     if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
-    if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
     CaveBot.save()
   end)
   registerAction("remove", function()
@@ -83,7 +81,6 @@ CaveBot.Editor.setup = function()
     if not action then return end
     action:destroy()
     if CaveBot.invalidateWaypointCache then CaveBot.invalidateWaypointCache() end
-    if CaveBot.invalidateGotoDistCache then CaveBot.invalidateGotoDistCache() end
     CaveBot.save()
   end)
     

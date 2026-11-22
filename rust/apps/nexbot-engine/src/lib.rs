@@ -1,4 +1,5 @@
 pub mod combat_runtime;
+mod corridor;
 pub mod healing;
 pub mod inventory_runtime;
 pub mod movement_runtime;
@@ -600,6 +601,7 @@ impl Session {
 /// Dispatch a native observation to its domain. The OTClient owns execution.
 pub fn decide(operation: &str, input: serde_json::Value) -> Option<serde_json::Value> {
     match operation {
+        "corridor_path" => corridor::decide(input),
         "self_heal" | "ally_heal" | "ally_target" | "attack" => {
             combat_runtime::decide(operation, input)
         }

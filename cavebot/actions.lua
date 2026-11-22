@@ -174,9 +174,6 @@ CaveBot.addAction = function(action, value, focus)
   if CaveBot.invalidateWaypointCache then
     CaveBot.invalidateWaypointCache()
   end
-  if CaveBot.invalidateGotoDistCache then
-    CaveBot.invalidateGotoDistCache()
-  end
   widget.onDoubleClick = function(cwidget) -- edit on double click
     if CaveBot.Editor then
       schedule(20, function() -- schedule to have correct focus
@@ -211,9 +208,6 @@ CaveBot.editAction = function(widget, action, value)
   widget.value = value
   if raction.color then
     widget:setColor(raction.color)
-  end
-  if CaveBot.invalidateGotoDistCache then
-    CaveBot.invalidateGotoDistCache()
   end
   return widget
 end
@@ -338,7 +332,6 @@ local function getBlockingMonster(playerPos, destPos, maxDist)
   
   -- Try to find path ignoring creatures
   local path = findPath(playerPos, destPos, maxDist, {
-    ignoreNonPathable = true,
     ignoreCreatures = true,
     precision = 1
   })
@@ -374,64 +367,6 @@ local function getBlockingMonster(playerPos, destPos, maxDist)
   return nil
 end
 
--- Get Chebyshev distance to the next goto waypoint in the list
--- Used for adaptive arrival precision (prevents zone overlap on close WPs)
-local nextGotoDistCache = {}
-local nextGotoDistCacheCount = 0
-local function invalidateGotoDistCache()
-  nextGotoDistCache = {}
-  nextGotoDistCacheCount = 0
-end
-CaveBot.invalidateGotoDistCache = invalidateGotoDistCache
-local function getDistanceToNextGoto(currentIdx)
-  -- Build composite key from index + action value for cache stability
-  local currentAction = ui and ui.list and ui.list:getChildren() and ui.list:getChildren()[currentIdx]
-  local actionVal = currentAction and (currentAction.value or currentAction:getText()) or ""
-  local cacheKey = currentIdx .. ":" .. tostring(actionVal)
-  if nextGotoDistCache[cacheKey] then return nextGotoDistCache[cacheKey] end
-  if not ui or not ui.list then return 50 end
-  local children = ui.list:getChildren()
-  if not children then return 50 end
-  for i = currentIdx + 1, #children do
-    local child = children[i]
-    if child then
-      local actionType = child.action or child:getText()
-      if type(actionType) == "string" and actionType:match("^goto$") then
-        local val = child.value or child:getText()
-        if val then
-          local m = regexMatch(val, "([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
-          if m and m[1] then
-            local nextPos = {x = tonumber(m[1][2]), y = tonumber(m[1][3]), z = tonumber(m[1][4])}
-            if nextPos.x and nextPos.y then
-              -- Chebyshev from current WP to next goto WP
-              local currentAction = children[currentIdx]
-              if currentAction then
-                local cv = currentAction.value or currentAction:getText()
-                if cv then
-                  local cm = regexMatch(cv, "([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+)")
-                  if cm and cm[1] then
-                    local curPos = {x = tonumber(cm[1][2]), y = tonumber(cm[1][3])}
-                    if curPos.x and curPos.y then
-                      local d = math.max(math.abs(nextPos.x - curPos.x), math.abs(nextPos.y - curPos.y))
-                      -- Cache with size limit
-                      if nextGotoDistCacheCount < 200 then
-                        nextGotoDistCache[cacheKey] = d
-                        nextGotoDistCacheCount = nextGotoDistCacheCount + 1
-                      end
-                      return d
-                    end
-                  end
-                end
-              end
-            end
-          end
-        end
-      end
-    end
-  end
-  return 50  -- Default: no next goto found, use wide precision
-end
-
 CaveBot.registerAction("goto", "green", function(value, retries, prev)
   -- ========== PARSE POSITION ==========
   local posMatch = regexMatch(value, "\\s*([0-9]+)\\s*,\\s*([0-9]+)\\s*,\\s*([0-9]+),?\\s*([0-9]?)")
@@ -445,7 +380,7 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     y = tonumber(posMatch[1][3]),
     z = tonumber(posMatch[1][4])
   }
-  local precision = tonumber(posMatch[1][5]) or 1
+  local precision = tonumber(posMatch[1][5]) or 0
   local playerPos = player:getPosition()
   local maxDist = CaveBot.getMaxGotoDistance()
 
@@ -487,40 +422,13 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
     return false, true
   end
 
-  -- ========== FORWARD PASS CHECK ==========
-  -- If the navigator confirms the player has already passed this WP on the route,
-  -- advance immediately. This handles smooth walk-through transitions where A* paths
-  -- carry the player past a WP before the goto action's arrival check fires.
-  if WaypointNavigator and WaypointNavigator.hasPassedWaypoint then
-    local currentAction = ui and ui.list and ui.list:getFocusedChild()
-    local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
-    if waypointIdx and WaypointNavigator.hasPassedWaypoint(playerPos, waypointIdx, destPos) then
-      CaveBot.clearWaypointTarget()
-      return true
-    end
-  end
-
-  -- ========== ARRIVAL PRECISION ==========
-  -- Adaptive: scale precision by distance to next goto WP to prevent zone overlap.
-  -- Floor-change WPs keep precision=0 (must step on the exact tile).
-  if not isFloorChange and precision > 0 then
-    local currentAction = ui and ui.list and ui.list:getFocusedChild()
-    local waypointIdx = currentAction and ui.list:getChildIndex(currentAction) or nil
-    if waypointIdx then
-      local nextDist = getDistanceToNextGoto(waypointIdx)
-      precision = math.max(1, math.min(3, math.floor(nextDist / 2.5)))
-    else
-      precision = math.max(precision, 3)
-    end
-  end
-
   -- ========== DISTANCE CALCULATIONS ==========
   local distX = math.abs(destPos.x - playerPos.x)
   local distY = math.abs(destPos.y - playerPos.y)
   local dist  = math.max(distX, distY)
 
   -- ========== ARRIVAL CHECK ==========
-  if distX <= precision and distY <= precision then
+  if CaveBot.isAtWaypoint(playerPos, destPos, precision) then
     CaveBot.clearWaypointTarget()
     if isFloorChange then
       if playerPos.z == expectedFloorAfterChange then
@@ -534,12 +442,6 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
 
   -- ========== CURRENTLY WALKING ==========
   if player and player:isWalking() then
-    -- Check instant arrival via EventBus
-    if CaveBot.hasArrivedAtWaypoint and CaveBot.hasArrivedAtWaypoint() then
-      CaveBot.clearWaypointTarget()
-      return true
-    end
-    -- Don't count walking ticks as retries
     return "walking"
   end
 
@@ -585,10 +487,10 @@ CaveBot.registerAction("goto", "green", function(value, retries, prev)
   end
 
   -- ========== WALK PARAMETERS ==========
-  -- Walk precision matches arrival precision minus 1: A* stops at the zone
-  -- boundary rather than overshooting to the center.
+  -- Plan to the tile. Explicit arrival tolerance is verified against terrain.
   local walkParams = {
-    precision = isFloorChange and 0 or math.max(0, precision - 1),
+    precision = 0,
+    corridor = not isFloorChange,
     allowFloorChange = isFloorChange
   }
   if retries > 1 then

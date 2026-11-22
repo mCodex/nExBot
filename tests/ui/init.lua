@@ -42,6 +42,8 @@ scheduleEvent(function()
       }) == 5)
       assert(decide("npc_conversation", {count = 3, interval_ms = 150}).delays[3] == 300)
       assert(decide("reopen_page", {page = 0, capacity = 8, size = 10, visited = {0}}).page == 8)
+      local detour = decide("corridor_path", {width = 3, height = 3, start = 0, goal = 2, tiles = "101101111"})
+      assert(table.concat(detour, ",") == "2,2,1,1,0,0")
       assert(decide("unknown", {}) == nil)
       local samples = {}
       for i = 1, 10000 do

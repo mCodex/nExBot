@@ -19,7 +19,7 @@ local CACHE_TTL = 10000      -- Clear cache every 10 seconds to free memory more
 local CACHE_LRU_SIZE = 20    -- Keep only 20 most recent entries when pruning
 
 -- LRU tracking for smart cache eviction
-local cacheAccessOrder = {}  -- Array of {name, accessTime}
+local cacheAccessOrder, cacheAccessByName = {}, {}  -- Array of {name, accessTime}
 
 TargetBot.Creature.resetConfigs = function()
   -- Safety check: targetList may not be initialized yet
@@ -34,7 +34,7 @@ TargetBot.Creature.resetConfigsCache = function()
   TargetBot.Creature.configsCache = (WC and WC.createWeakValues) and WC.createWeakValues() or {}
   TargetBot.Creature.cached = 0
   TargetBot.Creature.lastCacheClear = now
-  cacheAccessOrder = {}
+  cacheAccessOrder, cacheAccessByName = {}, {}
   -- Rebuild global excludes from current config entries
   TargetBot.Creature._rebuildGlobalExcludes()
 end
@@ -50,7 +50,7 @@ local function evictOldCacheEntries()
   
   -- Keep only CACHE_LRU_SIZE most recent entries
   local newCache = {}
-  local newOrder = {}
+  local newOrder, newIndex = {}, {}
   local kept = 0
   
   for i = 1, math.min(CACHE_LRU_SIZE, #cacheAccessOrder) do
@@ -58,12 +58,13 @@ local function evictOldCacheEntries()
     if entry and TargetBot.Creature.configsCache[entry.name] then
       newCache[entry.name] = TargetBot.Creature.configsCache[entry.name]
       newOrder[#newOrder + 1] = entry
+      newIndex[entry.name] = entry
       kept = kept + 1
     end
   end
   
   TargetBot.Creature.configsCache = newCache
-  cacheAccessOrder = newOrder
+  cacheAccessOrder, cacheAccessByName = newOrder, newIndex
   TargetBot.Creature.cached = kept
 end
 
@@ -204,13 +205,8 @@ TargetBot.Creature.getConfigs = function(creature)
   -- Fast path: check cache first
   local cached = TargetBot.Creature.configsCache[name]
   if cached then
-    -- Update LRU access time
-    for i = 1, #cacheAccessOrder do
-      if cacheAccessOrder[i].name == name then
-        cacheAccessOrder[i].time = now
-        break
-      end
-    end
+    local entry = cacheAccessByName[name]
+    if entry then entry.time = now end
     return cached
   end
 
@@ -223,7 +219,8 @@ TargetBot.Creature.getConfigs = function(creature)
         -- Creature is globally excluded — cache empty result and return
         evictOldCacheEntries()
         TargetBot.Creature.configsCache[name] = {}
-        cacheAccessOrder[#cacheAccessOrder + 1] = { name = name, time = now }
+        local entry = { name = name, time = now }
+        cacheAccessByName[name], cacheAccessOrder[#cacheAccessOrder + 1] = entry, entry
         TargetBot.Creature.cached = TargetBot.Creature.cached + 1
         return {}
       end
@@ -263,14 +260,15 @@ TargetBot.Creature.getConfigs = function(creature)
   evictOldCacheEntries()
   
   TargetBot.Creature.configsCache[name] = configs
-  cacheAccessOrder[#cacheAccessOrder + 1] = { name = name, time = now }
+  local entry = { name = name, time = now }
+  cacheAccessByName[name], cacheAccessOrder[#cacheAccessOrder + 1] = entry, entry
   TargetBot.Creature.cached = TargetBot.Creature.cached + 1
   return configs
 end
 
 -- Optimized calculateParams with reduced function calls
-TargetBot.Creature.calculateParams = function(creature, path)
-  local configs = TargetBot.Creature.getConfigs(creature)
+TargetBot.Creature.calculateParams = function(creature, path, configs)
+  configs = configs or TargetBot.Creature.getConfigs(creature)
   local configCount = #configs
   
   if configCount == 0 then

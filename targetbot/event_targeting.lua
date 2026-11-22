@@ -108,8 +108,7 @@ EventTargeting.CONSTANTS = {
   DEBOUNCE_INTERVAL = 50,         -- PERFORMANCE: Increased from 25ms
   
   -- LIVE COUNTING - uses direct API for accuracy
-  LIVE_COUNT_INTERVAL = 100,      -- How often to refresh live count
-  LIVE_COUNT_RANGE = 8            -- Range for live monster counting
+  LIVE_COUNT_RANGE = 14           -- Same candidate range as TargetBot
 }
 
 local CONST = EventTargeting.CONSTANTS
@@ -175,6 +174,8 @@ local PATH_PARAMS = {
 -- STATE MANAGEMENT
 
 -- Clear all EventTargeting state (called when TargetBot is disabled)
+local visibleMonsters
+
 function EventTargeting.clearState()
   -- Clear target state
   targetState.currentTarget = nil
@@ -192,9 +193,7 @@ function EventTargeting.clearState()
   creatureCache.lastCleanup = 0
   
   -- Clear live monster state
-  liveMonsterState.count = 0
-  liveMonsterState.creatures = {}
-  liveMonsterState.lastUpdate = 0
+  if visibleMonsters then visibleMonsters.reset() end
   
   if EventTargeting.DEBUG then
     print("[EventTargeting] State cleared")
@@ -215,73 +214,73 @@ local function canAttack()
   return true
 end
 
--- LIVE MONSTER COUNTING (Direct API - Most Accurate)
--- Uses g_map.getSpectators/getSpectatorsInRange directly for accurate counting
--- This bypasses the cache which may have stale data
+-- Use native lifecycle events for membership, including events the tactical bus throttles.
+visibleMonsters = nExBot.VisibleMonsters and nExBot.VisibleMonsters.new({
+  range = CONST.LIVE_COUNT_RANGE,
+  reconcileMs = 1000,
+  id = SC.getId,
+  position = SC.getPosition,
+  eligible = targetPathfinding.isTargetableMonster,
+  scan = function(position)
+    if g_map and g_map.getSpectators then return g_map.getSpectators(position, false) end
+    return BotCore.Creatures.getNearby(CONST.LIVE_COUNT_RANGE, CONST.LIVE_COUNT_RANGE)
+  end,
+})
 
-local liveMonsterState = {
-  count = 0,              -- Live count from direct API call
-  lastUpdate = 0,         -- When we last updated
-  creatures = {},         -- Array of live monster references
-  oldTibia = getClientVersion() < 960
-}
+local function notifyMembershipChanged(changed)
+  if changed and EventBus then EventBus.emit("monster:visibility_changed", visibleMonsters.count()) end
+end
 
--- Get live count of targetable monsters using direct API
--- This is the AUTHORITATIVE count - always accurate
-function EventTargeting.getLiveMonsterCount()
-  local currentTime = now or (os.time() * 1000)
-  
-  -- Update cached player reference
-  if not player or not player:getPosition() then
-    local Client = getClient()
-    player = (Client and Client.getLocalPlayer) and Client.getLocalPlayer() or (g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()) or player
-  end
-  if not player then return 0, {} end
-  
-  local playerPos = player:getPosition()
-  if not playerPos then return 0, {} end
-  
-  -- Only refresh if interval elapsed (but with a short interval for accuracy)
-  if (currentTime - liveMonsterState.lastUpdate) < CONST.LIVE_COUNT_INTERVAL then
-    return liveMonsterState.count, liveMonsterState.creatures
-  end
-  
-  -- Get creatures from cache
-  local range = CONST.LIVE_COUNT_RANGE
-  local creatures = BotCore.Creatures.getNearby(range, range)
-  
-  if not creatures then
-    return liveMonsterState.count, liveMonsterState.creatures
-  end
-  
-  -- Count targetable monsters on same floor
-  local count = 0
-  local monsters = {}
-  local playerZ = playerPos.z
-  
-  for i = 1, #creatures do
-    local creature = creatures[i]
-    if targetPathfinding.isTargetableMonster(creature) then
-      local cpos = SC.getPosition(creature)
-      if cpos and cpos.z == playerZ then
-        count = count + 1
-        monsters[#monsters + 1] = creature
+if visibleMonsters then
+  if onCreatureAppear then
+    onCreatureAppear(function(creature)
+      if SC.isMonster(creature) then
+        notifyMembershipChanged(visibleMonsters.update(creature, SC.getPosition(creature)))
       end
+    end)
+  end
+  if onCreatureDisappear then
+    onCreatureDisappear(function(creature) notifyMembershipChanged(visibleMonsters.remove(creature)) end)
+  end
+  if onCreaturePositionChange then
+    onCreaturePositionChange(function(creature, position)
+      if SC.isMonster(creature) then notifyMembershipChanged(visibleMonsters.update(creature, position)) end
+    end)
+  end
+  if onCreatureHealthPercentChange then
+    onCreatureHealthPercentChange(function(creature, percent)
+      if SC.isMonster(creature) then
+        local changed
+        if percent <= 0 then changed = visibleMonsters.remove(creature)
+        else changed = visibleMonsters.update(creature, SC.getPosition(creature)) end
+        notifyMembershipChanged(changed)
+      end
+    end)
+  end
+end
+
+function EventTargeting.getLiveMonsterCount()
+  local active = g_game and g_game.isOnline and g_game.isOnline()
+  local localPlayer = active and g_game.getLocalPlayer and g_game.getLocalPlayer()
+  if visibleMonsters then
+    return visibleMonsters.get(localPlayer and SC.getPosition(localPlayer), now or 0)
+  end
+  if not localPlayer then return 0, {} end
+  local result = {}
+  local position = SC.getPosition(localPlayer)
+  if not position then return 0, result end
+  for _, creature in pairs(BotCore.Creatures.getNearby(CONST.LIVE_COUNT_RANGE, CONST.LIVE_COUNT_RANGE)) do
+    local other = SC.getPosition(creature)
+    if other and other.z == position.z and targetPathfinding.isTargetableMonster(creature) then
+      result[#result + 1] = creature
     end
   end
-  
-  -- Update state
-  liveMonsterState.count = count
-  liveMonsterState.creatures = monsters
-  liveMonsterState.lastUpdate = currentTime
-  
-  return count, monsters
+  return #result, result
 end
 
 -- Check if there are ANY monsters on screen (fast check)
 -- Force refresh of live count (useful after events)
 function EventTargeting.refreshLiveCount()
-  liveMonsterState.lastUpdate = 0
   return EventTargeting.getLiveMonsterCount()
 end
 
@@ -1250,8 +1249,7 @@ if EventBus then
   -- Z-CHANGE: Refresh live counts and scan on new floor
   EventBus.on("player:z_change_settled", function()
     if TargetBot and TargetBot.isOn and not TargetBot.isOn() then return end
-    liveMonsterState.lastUpdate = 0
-    if EventTargeting.refreshLiveCount then
+      if EventTargeting.refreshLiveCount then
       EventTargeting.refreshLiveCount()
     end
     if EventTargeting.scanVisibleMonsters then

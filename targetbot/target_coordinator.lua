@@ -3,6 +3,7 @@ local targetbotMacro = nil
 local config = nil
 lastAction = 0
 local cavebotAllowance = 0
+local visibilityCheckUntil = 0
 local lureEnabled = true
 local recalculateBestTarget  -- forward declaration: defined at ~L2054, used by EventBus closures above it
 
@@ -26,21 +27,7 @@ local targetPathfinding = nExBot.target_pathfinding
 -- Load enhanced targeting module for OpenTibiaBR-specific optimizations
 -- Provides line-of-sight detection and pattern-based AoE helpers.
 -- ═══════════════════════════════════════════════════════════════════════════
-local OpenTibiaBRTargeting = nil
 
-local function getOpenTibiaBRTargeting()
-  if OpenTibiaBRTargeting ~= nil then return OpenTibiaBRTargeting end
-  if nExBot and nExBot.OpenTibiaBRTargeting then
-    OpenTibiaBRTargeting = nExBot.OpenTibiaBRTargeting
-    return OpenTibiaBRTargeting
-  end
-  return nil
-end
-
-local function hasSightSpectators()
-  local otbr = getOpenTibiaBRTargeting()
-  return otbr and otbr.getVisibleCreatures ~= nil
-end
 
 -- Load PathUtils if available (shared module for creature validation)
 local PathUtils = nil
@@ -248,6 +235,16 @@ local monsterCache = {
 -- Mark cache as dirty (needs recalculation)
 local function invalidateCache()
   monsterCache.dirty = true
+end
+
+if EventBus then
+  EventBus.on("monster:visibility_changed", function(count)
+    invalidateCache()
+    if TargetBot.isOn and TargetBot.isOn() then
+      cavebotAllowance = 0
+      visibilityCheckUntil = count > 0 and now + 150 or 0
+    end
+  end)
 end
 
 local function clearPaths()
@@ -548,6 +545,10 @@ TargetBot.isActive = function() -- return true if attacking or looting takes pla
   return lastAction + 1000 > now
 end
 
+TargetBot.isCheckingVisibleMonsters = function()
+  return now < visibilityCheckUntil and TargetBot.isOn and TargetBot.isOn()
+end
+
 TargetBot.isCaveBotActionAllowed = function()
   return cavebotAllowance > now
 end
@@ -559,37 +560,21 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 TargetBot.hasTargetableMonstersOnScreen = function()
   if not TargetBot.isOn() then return false end
-  
-  local p = player and player:getPosition()
-  if not p then return false end
-  
-  -- Get all creatures in detection range
-  local creatures = BotCore.Creatures.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
-  
-  if not creatures or #creatures == 0 then return false end
-  
-  local monsterCount = 0
-  local playerZ = p.z
-  
-  for i = 1, #creatures do
-    local creature = creatures[i]
-    if creature then
-      if SC.isMonster(creature) then
-        if not SC.isDead(creature) then
-          local cpos = SC.getPosition(creature)
-          if cpos and cpos.z == playerZ then
-            -- Check if this creature has a matching TargetBot config (it's targetable)
-            local cfgs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(creature)
-            if cfgs and cfgs[1] then
-              monsterCount = monsterCount + 1
-            end
-          end
-        end
-      end
+  local creatures
+  if EventTargeting and EventTargeting.getLiveMonsterCount then
+    local _, visible = EventTargeting.getLiveMonsterCount()
+    creatures = visible
+  else
+    creatures = BotCore.Creatures.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
+  end
+  local count = 0
+  for _, creature in ipairs(creatures or {}) do
+    if targetPathfinding.isTargetableCreature(creature) then
+      local configs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(creature)
+      if configs and configs[1] then count = count + 1 end
     end
   end
-  
-  return monsterCount > 0, monsterCount
+  return count > 0, count
 end
 
 -- Check if bot should wait for monsters (stricter version)
@@ -880,9 +865,7 @@ TargetBot.hasTargetableMonsters = function()
   -- PRIORITY 1: Use EventTargeting live count (most accurate)
   if EventTargeting and EventTargeting.getLiveMonsterCount then
     local liveCount = EventTargeting.getLiveMonsterCount()
-    if liveCount > 0 then
-      return true
-    end
+    return liveCount > 0
   end
   -- PRIORITY 2: Fall back to cache
   return monsterCache.monsterCount > 0
@@ -894,9 +877,7 @@ TargetBot.getTargetableMonsterCount = function()
   -- PRIORITY 1: Use EventTargeting live count (most accurate)
   if EventTargeting and EventTargeting.getLiveMonsterCount then
     local liveCount = EventTargeting.getLiveMonsterCount()
-    if liveCount > 0 then
-      return liveCount
-    end
+    return liveCount
   end
   -- PRIORITY 2: Fall back to cache
   return monsterCache.monsterCount or 0
@@ -916,6 +897,7 @@ local function processCandidate(creature, pos, isCurrentTarget)
   if TargetReachability.isQuarantined and TargetReachability.isQuarantined(creature) then return nil, nil end
 
   local configs = TargetBot.Creature.getConfigs and TargetBot.Creature.getConfigs(creature)
+  if configs and not configs[1] then return nil, nil, false end
   local config = configs and configs[1] or nil
   local mode = config and (config.keepDistance or (config.distance or 1) > 1) and "ranged" or "melee"
   local evaluated = TargetReachability.evaluate(creature, {
@@ -931,7 +913,7 @@ local function processCandidate(creature, pos, isCurrentTarget)
   end
   local path = evaluated.path
 
-  local params = TargetBot.Creature.calculateParams(creature, path)
+  local params = TargetBot.Creature.calculateParams(creature, path, configs)
   if not params or not params.config then return nil, nil end
   if params.priority <= 0 and dist > 3 then return nil, nil end
   return params, path
@@ -979,55 +961,15 @@ recalculateBestTarget = function()
   local currentTargetId = currentAttackTarget and currentAttackTarget:getId() or nil
   local currentTargetStillValid = false  -- Will be set to true if current target is found
 
-  -- IMPROVED: Get creatures from live detection first
-  local creatures = nil
-  local liveCount, liveCreatures = 0, nil
+  local creatures
   if EventTargeting and EventTargeting.getLiveMonsterCount then
-    liveCount, liveCreatures = EventTargeting.getLiveMonsterCount()
-  end
-  
-  -- If we have live creatures, use those as the authoritative source
-  if liveCreatures and #liveCreatures > 0 then
-    creatures = liveCreatures
-  elseif monsterCache.monsterCount > 0 and not monsterCache.dirty then
-    -- Fall back to cache only if live detection found nothing
-    -- This handles edge cases where EventTargeting hasn't initialized
-    local cacheCreatures = {}
-    for id, data in pairs(monsterCache.monsters) do
-      if data.creature and not data.creature:isDead() then
-        cacheCreatures[#cacheCreatures + 1] = data.creature
-      end
-    end
-    creatures = cacheCreatures
-  end
-  
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- OPENTIBIABR ENHANCEMENT: Use getSightSpectators for line-of-sight detection
-  -- This gives us only creatures we can actually see (no obstacles between)
-  -- Falls back to standard detection on non-OpenTibiaBR clients
-  -- ═══════════════════════════════════════════════════════════════════════════
-  if not creatures or #creatures == 0 then
-    local otbr = getOpenTibiaBRTargeting()
-    if otbr and hasSightSpectators() then
-      -- Use OpenTibiaBR's optimized sight spectators
-      local sightCreatures = otbr.getVisibleCreatures(pos, false)
-      if sightCreatures and #sightCreatures > 0 then
-        creatures = sightCreatures
-      end
-    end
-  end
-  
-  -- If still no creatures, do a fresh scan with standard methods
-  if not creatures or #creatures == 0 then
+    local _, visible = EventTargeting.getLiveMonsterCount()
+    creatures = visible
+  else
     creatures = BotCore.Creatures.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
   end
-  
   if not creatures then return nil, 0, 0 end
-  
-  -- ═══════════════════════════════════════════════════════════════════════════
-  -- OPENTIBIABR ENHANCEMENT: Pre-calculate batch paths to all monsters
-  -- Instead of calculating paths one by one, batch them for ~30-50% speedup
-  -- ═══════════════════════════════════════════════════════════════════════════
+
   -- Rebuild cache from live creatures
   monsterCache.monsters = {}
   monsterCache.monsterCount = 0
@@ -1052,7 +994,7 @@ recalculateBestTarget = function()
         
         -- Calculate path and params (pass isCurrentTarget for enhanced path finding)
         local dist = math.max(math.abs(cpos.x - pos.x), math.abs(cpos.y - pos.y))
-        local params, path = processCandidate(creature, pos, isCurrentTarget)
+        local params, path, configured = processCandidate(creature, pos, isCurrentTarget)
         
         -- Current and new targets share the same authoritative validation.
         if path and params and params.config then
@@ -1089,7 +1031,7 @@ recalculateBestTarget = function()
             bestPriority = params.priority
             bestTarget = params
           end
-        else
+        elseif configured ~= false then
           -- Creature has blocked path - don't add to active targeting
           unreachableCount = unreachableCount + 1
         end
@@ -1146,6 +1088,7 @@ recalculateBestTarget = function()
     RustBridge.targetShadow(shadow, bestTarget and bestTarget.creature:getId(), currentTargetId)
   end
   monsterCache.lastFullUpdate = now
+  visibilityCheckUntil = 0
 
   -- Update cache state
   monsterCache.bestTarget = bestTarget
@@ -1189,7 +1132,13 @@ local function primeCreatureCache()
   local p = Client and Client.getLocalPlayer and Client.getLocalPlayer()
   if p then pos = p:getPosition() end
   if not pos then return end
-  local creatures = getSpectators(pos, false, false, 8) or {}
+  local creatures
+  if EventTargeting and EventTargeting.getLiveMonsterCount then
+    local _, visible = EventTargeting.getLiveMonsterCount()
+    creatures = visible
+  else
+    creatures = BotCore.Creatures.getNearby(MONSTER_DETECTION_RANGE, MONSTER_DETECTION_RANGE)
+  end
   local now = os.clock()
   monsterCache.monsters = {}
   monsterCache.monsterCount = 0
@@ -1404,14 +1353,14 @@ targetbotMacro = macro(250, function()
 
     local Client_g = getClient()
     local currentAttack_g = ClientService.getAttackingCreature()
-    if currentAttack_g and not currentAttack_g:isDead() and (now - lastEngagementAt) < 1500 then
+    if not monsterCache.dirty and currentAttack_g and not currentAttack_g:isDead() and (now - lastEngagementAt) < 1500 then
       bestTarget = monsterCache.bestTarget
       targetCount = monsterCache.monsterCount or 0
       totalDanger = monsterCache.totalDanger or 0
     -- If cache is clean and recent and we recalculated very recently, use cached values to avoid heavy work
     elseif not monsterCache.dirty and (now - (monsterCache.lastFullUpdate or 0)) < (monsterCache.FULL_UPDATE_INTERVAL or 400) and (now - lastRecalcTime) < RECALC_COOLDOWN_MS then
       bestTarget = monsterCache.bestTarget
-      targetCount = 0
+      targetCount = monsterCache.monsterCount or 0
       totalDanger = monsterCache.totalDanger or 0
     else
       lastRecalcTime = now

@@ -83,8 +83,9 @@ function A.game.forceWalk(direction)
   if g_game and g_game.walk      then return g_game.walk(direction) end
 end
 
-function A.game.autoWalk(destination, options)
-  return g_game and g_game.autoWalk and g_game.autoWalk(destination, options) or false
+function A.game.autoWalk(destination)
+  local localPlayer = g_game and g_game.getLocalPlayer and g_game.getLocalPlayer()
+  return localPlayer and localPlayer.autoWalk and localPlayer:autoWalk(destination, false) or false
 end
 
 function A.game.setScheduleLastWalk(s)     return gameMethod("setScheduleLastWalk", s) end
@@ -223,7 +224,7 @@ end
 function A.map.findPath(startPos, goalPos, options)
   if g_map and g_map.findPath then
     options = options or {}
-    return g_map.findPath(startPos, goalPos, options.maxSteps or 50, options.flags or 0)
+    return g_map.findPath(startPos, goalPos, options.maxComplexity or options.maxSteps or 50, options.flags or 0)
   end
   return nil
 end

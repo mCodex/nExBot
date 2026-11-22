@@ -432,6 +432,7 @@ loadCategory("architecture", {
   "zchange_guard",
   "kill_tracker",
   "event_bus",
+  "visible_monsters",
   "unified_storage",
   "unified_tick",
   "creature_cache",
