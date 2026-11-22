@@ -74,10 +74,47 @@ function Equipper.rulePasses(rule, ctx)
   return mainOk
 end
 
+local function inventoryContains(inventoryIndex, itemId)
+  if inventoryIndex[itemId] and #inventoryIndex[itemId] > 0 then return true end
+  if not g_game or not g_game.findItemInContainers then return false end
+  local ok, found = pcall(g_game.findItemInContainers, itemId)
+  return ok and found ~= nil and found ~= false
+end
+
+local function planWithRuntime(rule, ctx, inventoryIndex, helpers)
+  local runtime = nExBotRuntime
+  if not runtime or not runtime.decide then return end
+  local slots = {}
+  for i, plan in ipairs(rule.slots) do
+    local row = { change = plan.mode, available = false }
+    if plan.mode == "unequip" then
+      row.needs_change = not not helpers.slotHasItem(plan.slotIdx)
+    else
+      row.needs_change = not helpers.slotHasItemId(plan.slotIdx, plan.itemId)
+      row.available = row.needs_change and inventoryContains(inventoryIndex, plan.itemId) or false
+    end
+    slots[i] = row
+  end
+  if #slots == 0 then return end
+  return runtime.decide("equipment", {
+    slots = slots,
+    safe_to_unequip = not (helpers.isUnsafeToUnequip and helpers.isUnsafeToUnequip(ctx)),
+  })
+end
+
 -- Compute next action for a given normalized rule. Two safety helpers must be
 -- provided as part of 'helpers' table: slotHasItem, slotHasItemId, isUnsafeToUnequip.
 -- This keeps core logic pure and testable.
 function Equipper.computeAction(rule, ctx, inventoryIndex, helpers)
+  local result = planWithRuntime(rule, ctx, inventoryIndex, helpers)
+  if result then
+    local plan = rule.slots[result.index]
+    if plan then
+      return {kind = plan.mode, slotIdx = plan.slotIdx, itemId = plan.itemId}, result.missing
+    end
+    return nil, result.missing
+  end
+
   local missing = false
   local slotHasItem = helpers.slotHasItem
   local slotHasItemId = helpers.slotHasItemId
@@ -102,19 +139,7 @@ function Equipper.computeAction(rule, ctx, inventoryIndex, helpers)
     if slotPlan.mode == "equip" and slotPlan.itemId then
       local hasItemId = slotHasItemId(slotPlan.slotIdx, slotPlan.itemId)
       if not hasItemId then
-        -- Check inventory index first, fall back to g_game.findItemInContainers (closed containers)
-        local hasItem = false
-        if inventoryIndex[slotPlan.itemId] and #inventoryIndex[slotPlan.itemId] > 0 then
-          hasItem = true
-        else
-          if g_game and g_game.findItemInContainers then
-            local ok, found = pcall(g_game.findItemInContainers, slotPlan.itemId)
-            if ok and found then 
-              hasItem = true 
-            end
-          end
-        end
-        if hasItem then
+        if inventoryContains(inventoryIndex, slotPlan.itemId) then
           return {kind = "equip", slotIdx = slotPlan.slotIdx, itemId = slotPlan.itemId}, missing
         else
           missing = true

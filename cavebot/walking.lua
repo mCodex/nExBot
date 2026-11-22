@@ -286,8 +286,7 @@ local function keyboardStep(path, playerPos, curIdx)
 end
 
 --- Walk via autoWalk for longer distances. Returns true on success.
-local function autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist)
-  local chunkSteps = math.min(safeSteps, 40)
+local function autoWalkDispatch(path, playerPos, curIdx, chunkSteps, maxDist)
   local chunkDest  = PS().chunkDestination(path, playerPos, curIdx, chunkSteps)
 
   -- Don't interrupt ongoing walk toward same destination
@@ -452,11 +451,26 @@ CaveBot.walkTo = function(dest, maxDist, params)
   -- A field is crossed one checked step at a time so a rejected walk does not queue later tiles.
   local firstOffset = DIR_TO_OFFSET[path[curIdx]]
   local fieldAhead = (ignoreFields or wasRelaxed) and firstOffset and isFieldTile(applyOffset(playerPos, firstOffset))
+  local runtime = nExBotRuntime
+  local dispatch = runtime and runtime.decide("movement_dispatch", {
+    safe_steps = stepsToWalk,
+    field_ahead = not not fieldAhead,
+    allow_segment = true,
+  })
+  if dispatch == nil then
+    dispatch = (fieldAhead or stepsToWalk <= KEYBOARD_THRESHOLD) and 1 or math.min(stepsToWalk, 40)
+  end
+  if type(dispatch) ~= "number" or dispatch < 1 or dispatch > math.min(stepsToWalk, 40)
+      or dispatch % 1 ~= 0 or (fieldAhead and dispatch ~= 1) then
+    PS().resetCursor()
+    return false
+  end
+
   local result
-  if fieldAhead or stepsToWalk <= KEYBOARD_THRESHOLD then
+  if dispatch == 1 then
     result = keyboardStep(path, playerPos, curIdx)
   else
-    result = autoWalkDispatch(path, playerPos, curIdx, safeSteps, maxDist)
+    result = autoWalkDispatch(path, playerPos, curIdx, dispatch, maxDist)
   end
   if result and result ~= "rejected" then return true end
 

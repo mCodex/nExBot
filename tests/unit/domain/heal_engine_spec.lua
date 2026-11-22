@@ -155,6 +155,22 @@ describe("HealEngine", function()
     end)
   end)
 
+  it("dispatches a threshold crossing from the native HP callback even with an event bus", function()
+    local react
+    _G.EventBus = {on = function() end}
+    _G.onHealthChange = nil
+    _G.onPlayerHealthChange = function(callback) react = callback end
+    local engine = dofile("core/heal_engine.lua")
+    engine.configure({selfSpells = true})
+    engine.setCustomSpells({{name = "exura", hp = 50, mana = 0}})
+    local casts = 0
+    _G.cast = function() casts = casts + 1 return true end
+    react(51)
+    react(49)
+    react(48)
+    assert.equals(1, casts)
+  end)
+
   describe("evaluateAlly()", function()
     it("returns nil for nil ally", function()
       assert.is_nil(HealEngine.evaluateAlly(nil, 50))

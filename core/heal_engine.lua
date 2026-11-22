@@ -83,12 +83,9 @@ local nowMs = nExBot.Shared.nowMs
 -- Check individual action cooldown
 local function ready(key, cd)
   if not key then return true end
-  -- Prefer BotCore.Cooldown for spell-level checks when available
-  if BotCore and BotCore.Cooldown and BotCore.Cooldown.isSpellOnCooldown then
-    return not BotCore.Cooldown.isSpellOnCooldown(key)
-  end
-  local last = cooldowns[key] or 0
-  return (nowMs() - last) >= (cd or 1000)
+  local last = cooldowns[key]
+  if last and nowMs() - last < (cd or 1000) then return false end
+  return true
 end
 
 -- Mark action as used
@@ -101,7 +98,9 @@ end
 -- Healing group readiness (delegates to BotCore.Cooldown)
 local function healingGroupReady()
   if BotCore and BotCore.Cooldown and BotCore.Cooldown.isHealingOnCooldown then
-    return not BotCore.Cooldown.isHealingOnCooldown()
+    local cooldown = BotCore.Cooldown
+    return not cooldown.isHealingOnCooldown()
+      and not (cooldown.isHealingExhausted and cooldown.isHealingExhausted())
   end
   if modules and modules.game_cooldown and modules.game_cooldown.isGroupCooldownIconActive then
     return not modules.game_cooldown.isGroupCooldownIconActive(2)
@@ -308,6 +307,73 @@ end
 -- Public status for debugging: returns current toggles and counts
 -- Get loaded spells for debugging
 -- Get loaded potions for debugging
+local function potionAction(pot, potionType)
+  -- Get the actual potion name - prefer pot.name, then try to look up by ID
+  local potionName = pot.name
+  if not potionName and pot.id then
+    -- Try to get item name from game data
+    if g_things and g_things.getThingType then
+      local thing = g_things.getThingType(pot.id, ThingCategoryItem)
+      if thing then
+        if thing.getName then
+          local name = thing:getName()
+          if name and name ~= "" then potionName = name:lower() end
+        elseif thing.getMarketData then
+          local marketData = thing:getMarketData()
+          if marketData and marketData.name and marketData.name ~= "" then
+            potionName = marketData.name:lower()
+          end
+        end
+      end
+    end
+  end
+  potionName = potionName or ("potion #" .. (pot.id or 0))
+  return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = potionType}
+end
+
+local function spellAction(spell)
+  return {kind = "spell", name = spell.name, key = spell.key, cd = spell.cd, mana = spell.mana or 0}
+end
+
+local function planSelfWithRust(hp, mp, mana, inPz)
+  if not nExBotRuntime or not nExBotRuntime.decide then return false end
+
+  local rows, entries = {}, {}
+  local function add(entry, potion, isReady)
+    rows[#rows + 1] = {
+      hp = entry.hp, mp = entry.mp, above = not potion and (entry.op == ">" or entry.op == ">="),
+      potion = potion, cost = potion and 0 or (entry.mana or 0), ready = isReady and true or false
+    }
+    entries[#entries + 1] = entry
+  end
+
+  if options.selfSpells then
+    local groupReady = healingGroupReady()
+    for _, spell in ipairs(selfSpells) do
+      add(spell, false, groupReady and spell.name ~= "" and ready(spell.key, spell.cd)
+        and not (getSpellCoolDown and getSpellCoolDown(spell.key)))
+    end
+  end
+  if options.potions then
+    local groupReady = canUseItem()
+    for _, pot in ipairs(selfPotions) do
+      add(pot, true, groupReady and ready(pot.key, pot.cd))
+    end
+  end
+
+  if #rows == 0 then return true end
+  local selected = nExBotRuntime.decide("self_heal", {hp = hp, mp = mp, mana = mana, in_pz = inPz, rules = rows})
+  if selected == nil then return false end
+  if selected == 0 then return true end
+
+  local row, entry = rows[selected], entries[selected]
+  if not row then return false end
+  if row.potion then
+    return true, potionAction(entry, row.hp and hp <= row.hp and "heal" or "mana")
+  end
+  return true, spellAction(entry)
+end
+
 -- Select best self action based on snapshot
 -- CRITICAL: This is the main healing decision function!
 function HealEngine.planSelf(snap)
@@ -341,7 +407,9 @@ function HealEngine.planSelf(snap)
   local allowPotion = not inPz or hp <= 30
   
   -- Get current mana (absolute value, not percent) for mana cost check
-  local currentMana = getCurrentMana()
+  local currentMana = snap.currentMana or getCurrentMana()
+  local decided, action = planSelfWithRust(hp, mp, currentMana, inPz)
+  if decided then return action end
   
   -- Pure predicate: decide if a spell is eligible to be cast based on current snapshot
   -- CRITICAL FIX: Now properly checks mana cost and HP threshold independently
@@ -411,7 +479,7 @@ function HealEngine.planSelf(snap)
     end
     
     -- STEP 5: Check individual spell cooldown
-    if not ready(spell.key, spell.cd or 1100) then
+    if not ready(spell.key, spell.cd or 1100) or (getSpellCoolDown and getSpellCoolDown(spell.key)) then
       return false, "spell_individual_cooldown"
     end
     
@@ -423,7 +491,7 @@ function HealEngine.planSelf(snap)
     for _, spell in ipairs(selfSpells) do
       local ok, reason = spellEligible(spell)
       if ok then
-        return {kind = "spell", name = spell.name, key = spell.key, cd = spell.cd, mana = spell.mana or spell.mana or 0}
+        return spellAction(spell)
       else
         table.insert(rejectReasons, string.format('%s => %s', spell.name or '<noname>', tostring(reason)))
       end
@@ -436,37 +504,12 @@ function HealEngine.planSelf(snap)
 
   if options.potions and #selfPotions > 0 then
     for _, pot in ipairs(selfPotions) do
-      -- Get the actual potion name - prefer pot.name, then try to look up by ID
-      local potionName = pot.name
-      if not potionName and pot.id then
-        -- Try to get item name from game data
-        if g_things and g_things.getThingType then
-          local thing = g_things.getThingType(pot.id, ThingCategoryItem)
-          if thing then
-            if thing.getName then
-              local name = thing:getName()
-              if name and name ~= "" then potionName = name:lower() end
-            elseif thing.getMarketData then
-              local marketData = thing:getMarketData()
-              if marketData and marketData.name and marketData.name ~= "" then
-                potionName = marketData.name:lower()
-              end
-            end
-          end
-        end
-      end
-      potionName = potionName or ("potion #" .. (pot.id or 0))
-
-      -- Evaluate reasons for not selecting this pot
-
       if pot.hp and hp <= pot.hp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
-        if VERBOSE then print("[HealBot] Executing potion: " .. tostring(potionName) .. " (id=" .. tostring(pot.id) .. ") for HP " .. tostring(hp) .. "% <= " .. tostring(pot.hp) .. "%") end
-        return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "heal"}
+        return potionAction(pot, "heal")
       end
 
       if pot.mp and mp <= pot.mp and allowPotion and ready(pot.key, pot.cd) and canUseItem() then
-        if VERBOSE then print("[HealBot] Executing potion: " .. tostring(potionName) .. " (id=" .. tostring(pot.id) .. ") for MP " .. tostring(mp) .. "% <= " .. tostring(pot.mp) .. "%") end
-        return {kind = "potion", id = pot.id, key = pot.key, cd = pot.cd, name = potionName, potionType = "mana"}
+        return potionAction(pot, "mana")
       end
     end
   end
@@ -503,6 +546,7 @@ function HealEngine.evaluateAlly(ally, allyHp, spellList)
     return {
       kind = "spell",
       name = string.format('%s "%s"', bestAction.name, targetName),
+      spell = bestAction.name,
       key = bestAction.key,
       cd = bestAction.cd or 1100,
       mana = bestAction.mpCost or bestAction.mana or 0,
@@ -591,19 +635,59 @@ function HealEngine.execute(action)
   return false
 end
 
+local function comparisonFrame(snap, action)
+  local rows, selected = {}, nil
+  if #selfSpells + #selfPotions > 24 or snap.hp < 0 or snap.hp > 100
+      or snap.mp < 0 or snap.mp > 100 or snap.currentMana < 0 or snap.currentMana > 4294967295 then return end
+  local function add(entry, available, kind)
+    local threshold = entry.hp or entry.mp
+    if type(threshold) ~= "number" or threshold < 0 or threshold > 100 or threshold % 1 ~= 0 then return false end
+    local cost = entry.mana or 0
+    if type(cost) ~= "number" or cost < 0 or cost > 4294967295 or cost % 1 ~= 0 then return false end
+    rows[#rows + 1] = {
+      mana_cost = cost, threshold = threshold, mana_trigger = not entry.hp,
+      above = entry.op == ">" or entry.op == ">=", ready = available and ready(entry.key, entry.cd)
+        and not (kind == "spell" and getSpellCoolDown and getSpellCoolDown(entry.key)) or false,
+    }
+    if not selected and action and action.kind == kind and action.key == entry.key then selected = #rows end
+    return true
+  end
+  if options.selfSpells then
+    local available = healingGroupReady()
+    for _, entry in ipairs(selfSpells) do
+      if not add(entry, available, "spell") then return end
+    end
+  end
+  if options.potions then
+    local available = (not snap.inPz or snap.hp <= 30) and canUseItem()
+    for _, entry in ipairs(selfPotions) do
+      if not add(entry, available, "potion") then return end
+    end
+  end
+  if #rows == 0 then return end
+  return { type = "heal_comparison", hp = math.floor(snap.hp * 100 + 0.5),
+    mp = math.floor(snap.mp * 100 + 0.5), mana = snap.currentMana, rules = rows, selected = selected }
+end
+
 -- Event-driven fast-heal watcher: listen to player health/mana changes
 -- CRITICAL: This provides instant reaction to damage for player safety!
 do
   local function handleSnapshot(hp)
+    local measure = RustBridge and RustBridge.measureHeal and RustBridge.measureHeal()
+    local started = measure and g_clock.realMillis()
     hp = hp or getHpPercent()
     if hp <= 0 then return end
-    local action = HealEngine.planSelf({
-      hp = hp,
-      mp = manapercent and manapercent() or getMpPercent(),
-      currentMana = mana and mana() or getCurrentMana(),
-      inPz = getInPz(),
-    })
-    if action then HealEngine.execute(action) end
+    local snap = {
+      hp = hp, mp = manapercent and manapercent() or getMpPercent(),
+      currentMana = mana and mana() or getCurrentMana(), inPz = getInPz(),
+    }
+    local action = HealEngine.planSelf(snap)
+    local sample = RustBridge and RustBridge.sampleHeal and RustBridge.sampleHeal()
+    local frame = sample and comparisonFrame(snap, action)
+    local sent = action and HealEngine.execute(action)
+    if started and sent then RustBridge.healDispatch(math.max(0, g_clock.realMillis() - started), action) end
+    if frame then RustBridge.observeHeal(frame) end
+
   end
 
   if EventBus and onHealthChange then

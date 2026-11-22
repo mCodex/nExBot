@@ -14,17 +14,27 @@ local socket, connect
 local generation = 0
 local watched, observationPending, lastObservation, latest
 local watchingEnabled, routeProbed = false, false
-local targetShadowEnabled, pendingTarget, lastTargetSent
+local refillEnabled, pendingRefill
+local lootAnalyticsEnabled
+local containerMetricsEnabled
+local lastHealSample
+local lastHealSpell
+local healTiming
+local targetShadowEnabled, pendingTarget, lastTargetSample, rankedTarget
+local pendingFiring, lastFiringSample
 RustBridge = RustBridge or {}
+RustBridge.firingStats = { samples = 0, matches = 0 }
 RustBridge.targetStats = { samples = 0, matches = 0, stale = 0 }
 local connected, sequence, lastProbeId = false, 0, 0
 local function close(message)
   if not socket then return end
   generation = generation + 1
+  healTiming, lastHealSample, lastHealSpell = false, nil, nil
   watched, observationPending, lastObservation, latest = nil, false, nil, nil
   routeProbed, sequence, lastProbeId = false, 0, 0
-  targetShadowEnabled, pendingTarget, lastTargetSent = false, nil, nil
-  connected = false
+  targetShadowEnabled, pendingTarget, lastTargetSample, rankedTarget = false, nil, nil, nil
+  refillEnabled, pendingRefill = false, nil
+  connected, containerMetricsEnabled, lootAnalyticsEnabled = false, false, false
   local previous = socket
   socket = nil
   _websockets[previous.id] = nil
@@ -37,6 +47,54 @@ local function emit(frame)
   sequence = sequence + 1
   frame.sequence = sequence
   socket.send(frame)
+end
+
+function RustBridge.observeReopen(metrics)
+  if not connected or not containerMetricsEnabled then return end
+  local current = generation
+  schedule(0, function()
+    if current ~= generation or not connected then return end
+    emit({type = "container_metrics", metrics = metrics})
+  end)
+end
+
+function RustBridge.measureHeal()
+  return connected and healTiming and storage and storage.rustHealTiming == true
+end
+
+function RustBridge.sampleHeal()
+  if not connected or not healTiming or not storage or storage.rustHealComparison ~= true then return false end
+  local t = g_clock.realMillis()
+  if lastHealSample and t - lastHealSample < 1000 then return false end
+  lastHealSample = t
+  return true
+end
+
+function RustBridge.observeHeal(frame)
+  local current = generation
+  schedule(0, function()
+    if current == generation and connected and healTiming then emit(frame) end
+  end)
+end
+
+function RustBridge.healDispatch(elapsed, action)
+  if not RustBridge.measureHeal() then return end
+  if action.kind == "spell" then
+    lastHealSpell = {key = action.name:lower(), sent = g_clock.realMillis()}
+  end
+  RustBridge.observeHeal({type = "heal_dispatch", elapsed_ms = elapsed})
+end
+
+if onTalk then
+  onTalk(function(name, _, _, text)
+    if not lastHealSpell or not RustBridge.measureHeal() or not player or name ~= player:getName() then return end
+    if text:lower() ~= lastHealSpell.key then return end
+    local elapsed = g_clock.realMillis() - lastHealSpell.sent
+    lastHealSpell = nil
+    if elapsed >= 0 and elapsed <= 2000 then
+      RustBridge.observeHeal({type = "heal_dispatch", elapsed_ms = elapsed, echo = true})
+    end
+  end)
 end
 
 local function localPosition()
@@ -54,21 +112,81 @@ local function isPosition(value)
     and isCoordinate(value.y, 65535) and isCoordinate(value.z, 15)
 end
 
+function RustBridge.supplyRefill(stock, key)
+  if not connected or not refillEnabled or #stock > 48 then return end
+  local clock = g_clock.millis()
+  if pendingRefill then
+    local request = pendingRefill
+    pendingRefill = nil
+    if request.key == key and request.reply and clock - request.sent <= 250 then
+      return "ready", request.reply.purchase
+    end
+    return
+  end
+  pendingRefill = {observation = sequence + 1, sent = clock, key = key}
+  emit({type = "supply_refill", stock = stock})
+  return "pending"
+end
+
 function RustBridge.targetEnabled()
   return connected and targetShadowEnabled
+end
+
+function RustBridge.useTargetRanking()
+  return RustBridge.targetEnabled() and storage and storage.rustTargetRanking == true
+end
+
+function RustBridge.beginTargetSample()
+  if not RustBridge.targetEnabled() then return false end
+  local captured = g_clock.millis()
+  if lastTargetSample and captured - lastTargetSample < 200 then return false end
+  lastTargetSample = captured
+  return true
 end
 
 function RustBridge.targetShadow(candidates, selected, current)
   if not RustBridge.targetEnabled() then return end
   local captured = g_clock.millis()
-  if lastTargetSent and captured - lastTargetSent < 200 then return end
-  lastTargetSent = captured
-  pendingTarget = { observation = sequence + 1, captured = captured, position = localPosition() }
+  local byId = {}
+  for _, candidate in ipairs(candidates) do byId[candidate.id] = candidate end
+  pendingTarget = {
+    observation = sequence + 1, captured = captured, position = localPosition(),
+    candidates = byId, count = #candidates, current = current, selected = selected,
+  }
   emit({ type = "target_shadow", candidates = candidates, selected = selected, current = current })
+end
+
+function RustBridge.beginFiringSample()
+  if not RustBridge.targetEnabled() then return false end
+  local captured = g_clock.millis()
+  if lastFiringSample and captured - lastFiringSample < 1000 then return false end
+  lastFiringSample = captured
+  return true
+end
+
+function RustBridge.firingShadow(target, min, max, selected, positions)
+  if not RustBridge.targetEnabled() then return end
+  pendingFiring = { observation = sequence + 1, sent = g_clock.millis() }
+  emit({ type = "firing_shadow", target = target, min = min, max = max, selected = selected, positions = positions })
 end
 
 local function samePosition(a, b)
   return a and a.x == b.x and a.y == b.y and a.z == b.z
+end
+
+function RustBridge.rankedTarget(candidates, current)
+  local result = rankedTarget
+  if not RustBridge.useTargetRanking() or not result or result.changed
+    or g_clock.millis() - result.captured >= 200 or result.current ~= current
+    or result.count ~= #candidates or not samePosition(result.position, localPosition()) then return end
+
+  for _, candidate in ipairs(candidates) do
+    local captured = result.candidates[candidate.id]
+    if not captured or not samePosition(captured.position, candidate.position)
+      or captured.priority ~= candidate.priority or captured.hp ~= candidate.hp
+      or captured.cost ~= candidate.cost or captured.sight ~= candidate.sight then return end
+  end
+  return result.suggested
 end
 
 local function observeTile()
@@ -136,11 +254,43 @@ local callbacks = {
       proof = nil
       local position = localPosition()
       if not isPosition(position) then return close("character unavailable") end
+      healTiming = message.heal_timing == true
       targetShadowEnabled = message.target_shadow == true
+      containerMetricsEnabled = message.container_metrics == true
+      lootAnalyticsEnabled = message.loot_analytics == true
+      refillEnabled = message.supply_refill == true
+      RustBridge.lootStats = {total = {reports = 0, nonempty = 0}, byMonster = {}}
       connected = true
       caveShadow, caveGoal = message.cave_shadow == true, nil
       emit({ type = "snapshot", position = position })
       status("connected and authenticated (diagnostic mode)")
+      return
+    end
+
+    if message.type == "supply_refill_plan" and refillEnabled then
+      if pendingRefill and pendingRefill.observation == message.observation then
+        pendingRefill.reply = message
+      end
+      return
+    end
+
+    if message.type == "loot_summary" and lootAnalyticsEnabled then
+      local stats = RustBridge.lootStats
+      stats.total = message.total
+      if type(message.monster_total) == "table" then
+        stats.byMonster[message.monster] = message.monster_total
+      end
+      return
+    end
+
+    if message.type == "firing_comparison" and targetShadowEnabled then
+      if pendingFiring and pendingFiring.observation == message.observation
+        and g_clock.millis() - pendingFiring.sent < 200 then
+        local stats = RustBridge.firingStats
+        stats.samples = stats.samples + 1
+        if message.matches == true then stats.matches = stats.matches + 1 end
+        pendingFiring = nil
+      end
       return
     end
 
@@ -150,13 +300,22 @@ local callbacks = {
         stats.stale = stats.stale + 1
         return
       end
-      local elapsed = g_clock.millis() - pendingTarget.captured
-      local fresh = elapsed < 200 and samePosition(localPosition(), pendingTarget.position)
+      local sample = pendingTarget
       pendingTarget = nil
+      local elapsed = g_clock.millis() - sample.captured
+      local fresh = not sample.changed and elapsed < 200 and samePosition(localPosition(), sample.position)
       if fresh then
         stats.samples = stats.samples + 1
         stats.lastRoundTripMs = elapsed
         if message.selected == message.suggested then stats.matches = stats.matches + 1 end
+        if RustBridge.useTargetRanking() and message.selected == sample.selected
+          and isCoordinate(message.suggested, 4294967295)
+          and sample.candidates[message.suggested] and sample.candidates[message.suggested].priority > 0 then
+          sample.suggested = message.suggested
+          rankedTarget = sample
+        else
+          rankedTarget = nil
+        end
       else
         stats.stale = stats.stale + 1
       end
@@ -214,6 +373,8 @@ local callbacks = {
 
 onPlayerPositionChange(function(position)
   if connected and isPosition(position) then
+    if pendingTarget then pendingTarget.changed = true end
+    rankedTarget = nil
     emit({ type = "move", position = position })
   end
 end)
@@ -227,6 +388,12 @@ if onCreaturePositionChange then
     if not connected or not creature or creature == g_game.getLocalPlayer() or not isPosition(position) then return end
     local id = creature:getId()
     if not isCoordinate(id, 4294967295) or id == 0 then return end
+    if pendingTarget and pendingTarget.candidates[id] and not samePosition(pendingTarget.candidates[id].position, position) then
+      pendingTarget.changed = true
+    end
+    if rankedTarget and rankedTarget.candidates[id] and not samePosition(rankedTarget.candidates[id].position, position) then
+      rankedTarget.changed = true
+    end
     if not latest then
       local current = generation
       schedule(50, function()
@@ -245,12 +412,29 @@ end
 
 RustBridge = RustBridge or {}
 function RustBridge.caveGoal(position)
-  if not connected or not caveShadow or not storage or storage.rustCaveShadow ~= true then return end
+  if not connected or not caveShadow then return end
+  if not position or not storage or storage.rustCaveShadow ~= true then
+    if caveGoal then
+      caveGoal, watched = nil, nil
+      emit({type = "route_goal"})
+    end
+    return
+  end
   if not isPosition(position) or samePosition(caveGoal, position) then return end
   local origin = localPosition()
   if not origin or math.max(math.abs(origin.x - position.x), math.abs(origin.y - position.y)) > 32 then return end
   caveGoal = {x = position.x, y = position.y, z = position.z}
   emit({type = "route_goal", position = caveGoal})
+end
+
+if EventBus then
+  EventBus.on("loot:received", function(monster, items)
+    if not connected or not lootAnalyticsEnabled or not storage or storage.rustLootAnalytics ~= true then return end
+    monster = monster:lower():match("^%s*(.-)%s*$")
+    if #monster == 0 or #monster > 96 or monster:find("%c") then return end
+    items = items:lower():match("^%s*(.-)%s*$")
+    emit({type = "loot_report", monster = monster, nonempty = items ~= "" and items ~= "nothing"})
+  end)
 end
 
 local manual = configDir .. "/rust-session"

@@ -24,6 +24,19 @@ Install the per-user startup service once for the bot profile, using a verified 
 - [Linux systemd user service](tools/linux/README.md)
 - [Windows Task Scheduler](tools/windows/README.md)
 
+### Inspect profiles with the Rust binary
+
+Run these commands against saved profiles while the client is open or closed.
+
+```sh
+nexbot-engine inspect-route cavebot_configs/Demon_Alburn.cfg
+nexbot-engine inspect-target targetbot_configs/Chicken.json
+```
+
+`inspect-route` reports valid waypoints, floor changes and malformed rows with line numbers. Custom actions are counted as data. `inspect-target` reports target priority, matching patterns, chase and distance rules, plus loot items and destination containers. Both commands write JSON to stdout and leave the profiles untouched.
+
+Set `storage.rustTargetRanking = true` in the bot profile to use the Rust ranking for combat targets. The client requires a reply from the last 200 ms and checks that the same reachable creatures, positions, health, scores, path costs and line of sight still apply. The client checks target switches against the profile and uses its Lua ranking when a reply is missing or the snapshot changed.
+
 ## Modules
 
 | Module | Function |

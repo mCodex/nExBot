@@ -13,6 +13,10 @@ end
 
 local function finish(run, reason)
   active = nil
+  if RustBridge and RustBridge.observeReopen then
+    run.metrics.elapsed_ms = g_clock.millis() - run.started
+    RustBridge.observeReopen(run.metrics)
+  end
   if reason then warn("[Container Panel] " .. reason) end
   if run.failed > 0 then
     warn("[Container Panel] Reopen All: " .. run.failed .. " bag or page request(s) could not be completed.")
@@ -31,6 +35,21 @@ local function enqueueItem(run, node, item, slot)
   end
 end
 
+local function nextPage(container, node, page, capacity)
+  local size = container:getSize()
+  if nExBotRuntime and nExBotRuntime.decide then
+    local visited = {}
+    for index in pairs(node.pages) do visited[#visited + 1] = index end
+    local decision = nExBotRuntime.decide("reopen_page", {
+      page = page, capacity = capacity, size = size, visited = visited,
+    })
+    if decision then return decision.page end
+  end
+  local nextIndex = page + capacity
+  if nextIndex >= size then nextIndex = 0 end
+  if not node.pages[nextIndex] then return nextIndex end
+end
+
 local function scan(run, container, node)
   if run.exclude(container:getName()) then return end
   node = node or {pages = {}}
@@ -46,10 +65,9 @@ local function scan(run, container, node)
   if container.hasPages and container:hasPages() then
     local capacity = container:getCapacity()
     if capacity > 0 then
-      local nextPage = page + capacity
-      if nextPage >= container:getSize() then nextPage = 0 end
-      if not node.pages[nextPage] then
-        run.pages:enqueue({node = node, target = nextPage})
+      local nextIndex = nextPage(container, node, page, capacity)
+      if nextIndex then
+        run.pages:enqueue({node = node, target = nextIndex})
       end
     end
   end
@@ -77,9 +95,10 @@ local function wake(run)
 end
 
 local function send(run, job, item)
-  local pending = {job = job}
+  local pending = {job = job, sent = g_clock.millis()}
+  run.metrics.requests = run.metrics.requests + 1
   run.pending = pending
-  run.nextSend = g_clock.millis() + OPEN_INTERVAL
+  run.nextSend = pending.sent + OPEN_INTERVAL
   if job.target then
     g_game.seekInContainer(job.node.container:getId(), job.target)
   else
@@ -90,6 +109,7 @@ local function send(run, job, item)
   schedule(ACK_TIMEOUT, function()
     if active ~= run or run.pending ~= pending then return end
     run.pending = nil
+    run.metrics.timeouts = run.metrics.timeouts + 1
     if not job.retried then
       job.retried = true
       run.retry = job
@@ -100,11 +120,28 @@ local function send(run, job, item)
   end)
 end
 
+local function nextJob(run)
+  if nExBotRuntime and nExBotRuntime.decide then
+    local queue = nExBotRuntime.decide("reopen_job", {
+      retry = run.retry ~= nil,
+      priority = run.priority.size > 0,
+      visible = run.queue.size > 0,
+      pages = run.pages.size > 0,
+    })
+    if queue == "retry" then return run.retry end
+    if queue == "priority" then return run.priority:dequeue() end
+    if queue == "visible" then return run.queue:dequeue() end
+    if queue == "pages" then return run.pages:dequeue() end
+    if queue == "empty" then return end
+  end
+  return run.retry or run.priority:dequeue() or run.queue:dequeue() or run.pages:dequeue()
+end
+
 advance = function(run)
   if run.pending or run.closing then return end
   while true do
     -- Drain visible bags before seeking away from their page.
-    local job = run.retry or run.priority:dequeue() or run.queue:dequeue() or run.pages:dequeue()
+    local job = nextJob(run)
     run.retry = nil
     if not job then
       finish(run)
@@ -141,6 +178,12 @@ function Reopen.onOpen(container, previous)
     if previous or not item or item:getId() ~= pending.itemId then return end
     if pending.window ~= nil and pending.window ~= container:getId() then return end
     scan(run, container)
+  end
+  if not job.retried then
+    local ms = g_clock.millis() - pending.sent
+    run.metrics.samples = run.metrics.samples + 1
+    run.metrics.ack_ms = run.metrics.ack_ms + ms
+    run.metrics.max_ack_ms = math.max(run.metrics.max_ack_ms, ms)
   end
   run.pending = nil
   wake(run)
@@ -183,6 +226,8 @@ function Reopen.start(roots, exclude, rule, callback)
   end
   local run = {
     queue = Queue.new(math.huge), priority = Queue.new(math.huge), pages = Queue.new(math.huge),
+    started = g_clock.millis(),
+    metrics = {requests = 0, timeouts = 0, samples = 0, ack_ms = 0, max_ack_ms = 0},
     nodes = {}, nextSend = 0, failed = 0, callbacks = {callback}, exclude = exclude, rule = rule,
   }
   for _, root in ipairs(roots) do run.queue:enqueue(root) end

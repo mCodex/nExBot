@@ -32,6 +32,36 @@ local function resetCache()
 	end
 end
 
+local function findLoot(container, configuredLoot, stashingIndexes)
+	local items = container:getItems()
+	if stashingIndexes then
+		local observed, candidates = {}, {}
+		for _, item in pairs(items) do
+			local id = item:getId()
+			local index = #candidates + 1
+			candidates[index] = item
+			local configuredIndex = stashingIndexes and stashingIndexes[id]
+			observed[index] = {
+				id = id, stackable = item:isStackable(), configured_index = configuredIndex,
+			}
+		end
+		if #observed > 0 then
+			local result = nExBotRuntime.decide("deposit", {items = observed, loot = configuredLoot})
+			if result then
+				local plan = result.plan
+				if plan then return candidates[plan.item], plan.destination_index end
+				return
+			end
+		end
+	end
+	for _, item in pairs(items) do
+		local id = item:getId()
+		if table.find(configuredLoot, id) then
+			return item, getStashingIndex(id) or item:isStackable() and 1 or 0
+		end
+	end
+end
+
 local description = getClientVersion() > 960 and "No - just deposit \n Yes - also reopen loot containers" or "currently not supported, will be added in near future"
 
 CaveBot.Extensions.Depositor.setup = function()
@@ -114,17 +144,19 @@ CaveBot.Extensions.Depositor.setup = function()
 		destination = destination or getContainerByName("Depot chest")
 		if not destination then return "retry" end
 
+		local stashingIndexes
+		if nExBotRuntime and nExBotRuntime.decide and getStashingIndexes then
+			stashingIndexes = getStashingIndexes()
+		end
+
 		for _, container in pairs(getContainers()) do
-    	    local name = container:getName():lower()
-    	    if not name:find("depot") and not name:find("your inbox") then
-    	        for _, item in pairs(container:getItems()) do
-    	            local id = item:getId()
-					if table.find(lootTable, id) then
-						local index = getStashingIndex(id) or item:isStackable() and 1 or 0
-						statusMessage("[Depositer] stashing item: " ..id.. " to depot: "..index+1)
-						CaveBot.StashItem(item, index, destination)
-						return "retry"
-					end
+			local name = container:getName():lower()
+			if not name:find("depot") and not name:find("your inbox") then
+				local item, index = findLoot(container, lootTable, stashingIndexes)
+				if item then
+					statusMessage("[Depositer] stashing item: " .. item:getId() .. " to depot: " .. (index + 1))
+					CaveBot.StashItem(item, index, destination)
+					return "retry"
 				end
 			end
 		end

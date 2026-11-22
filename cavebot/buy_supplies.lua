@@ -41,27 +41,54 @@ CaveBot.Extensions.BuySupplies.setup = function()
       return "retry"
     end
 
-    -- get items from npc
-    local npcItems = NPC.getBuyItems()
-    for i,v in pairs(npcItems) do
-      table.insert(possibleItems, v.id)
+    for _, item in pairs(NPC.getBuyItems()) do
+      possibleItems[item.id] = true
     end
 
+    local stock, byId = {}, {}
+    local bridgeSafe = true
+    local localPurchase
     for key, values in pairs(Supplies.getItemsData()) do
       local id = tonumber(key)
-      if table.find(possibleItems, id) then
-        local max = values.max
-        local current = player:getItemsCount(id)
-        local toBuy = max - current
+      if id and possibleItems[id] then
+        local current, maximum = player:getItemsCount(id), values.max
+        if current < maximum and not localPurchase then
+          localPurchase = {id, math.min(100, maximum - current)}
+        end
+        if id < 1 or id > 65535 or id % 1 ~= 0 or current < 0 or current > 4294967295
+            or current % 1 ~= 0 or maximum < 0 or maximum > 4294967295 or maximum % 1 ~= 0 then
+          bridgeSafe = false
+        end
+        stock[#stock + 1] = {id, current, maximum}
+        byId[id] = stock[#stock]
+      end
+    end
 
-        if toBuy > 0 then
-          toBuy = math.min(100, toBuy)
-
-          NPC.buy(id, math.min(100, toBuy))
-          print("CaveBot[BuySupplies]: bought " .. toBuy .. "x " .. id)
-          return "retry"
+    local purchase = localPurchase
+    if bridgeSafe and localPurchase and RustBridge and RustBridge.supplyRefill then
+      table.sort(stock, function(left, right) return left[1] < right[1] end)
+      local fingerprint = {npcName}
+      for _, row in ipairs(stock) do
+        fingerprint[#fingerprint + 1] = table.concat(row, ":")
+      end
+      local result, suggested = RustBridge.supplyRefill(stock, table.concat(fingerprint, "|"))
+      if result == "pending" then
+        -- This wait does not consume an NPC purchase retry.
+        CaveBot.delay(50)
+        return "walking"
+      end
+      if result == "ready" and type(suggested) == "table" then
+        local row = byId[suggested[1]]
+        if row and suggested[2] == math.min(100, row[3] - row[2]) and suggested[2] > 0 then
+          purchase = suggested
         end
       end
+    end
+
+    if purchase then
+      NPC.buy(purchase[1], purchase[2])
+      print("CaveBot[BuySupplies]: bought " .. purchase[2] .. "x " .. purchase[1])
+      return "retry"
     end
 
     print("CaveBot[BuySupplies]: bought everything, proceeding")

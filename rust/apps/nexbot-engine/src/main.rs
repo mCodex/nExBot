@@ -15,6 +15,10 @@ use tungstenite::{
     protocol::WebSocketConfig,
 };
 
+mod combat_profile;
+mod route_profile;
+mod target_profile;
+
 fn main() -> ExitCode {
     let arguments: Vec<_> = env::args_os().skip(1).collect();
     let result = match arguments.as_slice() {
@@ -23,6 +27,11 @@ fn main() -> ExitCode {
             Ok(())
         }
         [command, profile] if command == "serve" => serve(Path::new(profile)),
+        [command, path] if command == "inspect-target" => target_profile::inspect(Path::new(path)),
+        [command, path] if command == "inspect-route" => route_profile::inspect(Path::new(path)),
+        [command, profile] if command == "audit-combat" => {
+            combat_profile::audit(Path::new(profile))
+        }
         [command, path] if command == "diagnose" => diagnose(Path::new(path), None),
         [command, path, x, y, z] if command == "preview" => {
             match (parse_number(x), parse_number(y), parse_number(z)) {
@@ -33,7 +42,7 @@ fn main() -> ExitCode {
             }
         }
         _ => Err(io::Error::other(
-            "usage: nexbot-engine --version | serve <profile-directory> | diagnose <rust-session> | preview <rust-session> X Y Z",
+            "usage: nexbot-engine --version | audit-combat <profile-directory> | serve <profile-directory> | diagnose <rust-session> | preview <rust-session> X Y Z | inspect-route <route-file.cfg> | inspect-target <target-file.json>",
         )),
     };
 
@@ -259,6 +268,13 @@ fn diagnose(path: &Path, goal: Option<Position>) -> io::Result<()> {
                         None => println!("native path query rejected by bridge"),
                     }
                     probe_reported = true;
+                }
+                if let Some(run) = session.take_container_metrics() {
+                    let mean = run.ack_ms.checked_div(run.samples);
+                    println!(
+                        "container reopen elapsed={}ms requests={} timeouts={} ack_samples={} ack_mean_ms={mean:?} ack_max_ms={}",
+                        run.elapsed_ms, run.requests, run.timeouts, run.samples, run.max_ack_ms
+                    );
                 }
                 if let Some(decision) = session.take_preview_decision() {
                     match decision {

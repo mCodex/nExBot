@@ -964,7 +964,10 @@ recalculateBestTarget = function()
 
   local bestTarget = nil
   local bestPriority = 0
-  local shadow = RustBridge and RustBridge.targetEnabled() and {}
+  local sampleTargets = RustBridge and RustBridge.beginTargetSample and RustBridge.beginTargetSample()
+  local useRustRanking = RustBridge and RustBridge.useTargetRanking and RustBridge.useTargetRanking()
+  local shadow = (sampleTargets or useRustRanking) and {}
+  local validatedTargets = useRustRanking and {}
   local totalDanger = 0
   local targetCount = 0
   local reachableCount = 0  -- Track only reachable creatures
@@ -1055,10 +1058,12 @@ recalculateBestTarget = function()
         if path and params and params.config then
           params.priority = getAdjustedPriority(creature, params, dist)
           if shadow and #shadow < 25 then
+            local sightOk, sight = pcall(function() return creature:canShoot() end)
             shadow[#shadow + 1] = {
-              id = id, position = cpos, priority = math.floor(params.priority),
-              hp = creature:getHealthPercent(), cost = #path, sight = creature:canShoot(),
+              id = id, position = cpos, priority = math.floor(params.priority * 100 + 0.5),
+              hp = creature:getHealthPercent(), cost = #path, sight = sightOk and sight == true,
             }
+            if validatedTargets then validatedTargets[id] = params end
           end
           -- Creature is reachable - add to cache
           monsterCache.monsters[id] = {
@@ -1092,6 +1097,15 @@ recalculateBestTarget = function()
     end
   end
   
+  if validatedTargets and #shadow > 0 and #shadow <= 24 then
+    local suggested = RustBridge.rankedTarget(shadow, currentTargetId)
+    local candidate = suggested and validatedTargets[suggested]
+    if candidate and candidate.priority > 0 then
+      bestTarget = candidate
+      bestPriority = candidate.priority
+    end
+  end
+
   -- v2.2: If current target is still valid, ensure it's not replaced by a marginally better target
   -- This implements "target stickiness" at the recalculation level
 
@@ -1128,7 +1142,7 @@ recalculateBestTarget = function()
     end
   end
   
-  if shadow and #shadow > 0 and #shadow <= 24 then
+  if sampleTargets and #shadow > 0 and #shadow <= 24 then
     RustBridge.targetShadow(shadow, bestTarget and bestTarget.creature:getId(), currentTargetId)
   end
   monsterCache.lastFullUpdate = now

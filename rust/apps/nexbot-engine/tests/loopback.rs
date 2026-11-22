@@ -76,10 +76,10 @@ fn engine_accepts_only_the_rendezvous_and_completes_a_native_probe_reply() {
     }).to_string())).unwrap();
     client.send(Message::Ping(Vec::new().into())).unwrap();
     let ready: Value = serde_json::from_str(client.read().unwrap().to_text().unwrap()).unwrap();
-    assert_eq!(
-        ready,
-        json!({"type": "ready", "proof": proof, "protocol": 1})
-    );
+    assert_eq!(ready["type"], "ready");
+    assert_eq!(ready["proof"], proof);
+    assert_eq!(ready["protocol"], 1);
+    assert_eq!(ready["heal_timing"], true);
 
     assert!(matches!(client.read().unwrap(), Message::Pong(_)));
 
@@ -199,7 +199,7 @@ fn preview_process_reuses_the_native_route_and_reports_a_blocked_step() {
     assert!(output.status.success());
     let logs = String::from_utf8(output.stdout).unwrap();
     assert!(logs.contains("preview next tile 61,100,7"));
-    assert!(logs.contains("preview route unavailable"));
+    assert!(logs.contains("preview waiting for creature at 61,100,7"));
     assert!(!logs.contains("nexbot-ipc-health-v1"));
     assert!(!path.exists());
 }
@@ -245,10 +245,9 @@ fn service_recovers_a_stale_session_and_advertises_again_after_disconnect() {
             ))
             .unwrap();
         let ready: Value = serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
-        assert_eq!(
-            ready,
-            json!({"type":"ready", "protocol":1, "proof":lines.next().unwrap()})
-        );
+        assert_eq!(ready["type"], "ready");
+        assert_eq!(ready["protocol"], 1);
+        assert_eq!(ready["proof"], lines.next().unwrap());
         assert!(!path.exists());
         let duplicate = Command::new(env!("CARGO_BIN_EXE_nexbot-engine"))
             .arg("serve")

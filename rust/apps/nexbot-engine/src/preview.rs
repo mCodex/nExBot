@@ -30,6 +30,12 @@ impl Preview {
         }
     }
 
+    pub(crate) fn clear_goal(&mut self) {
+        self.route.clear_goal();
+        self.decision = None;
+        self.watch = None;
+    }
+
     pub(crate) fn observe(&mut self, event: Event<'_>) {
         let decision = self.route.on_event(event);
         if decision != Decision::Wait {

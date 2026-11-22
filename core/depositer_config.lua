@@ -145,6 +145,17 @@ function getStashingIndex(id)
     end
 end
 
+function getStashingIndexes()
+    local indexes = {}
+    for _, item in pairs(config.items) do
+        local index = tonumber(item.index)
+        if type(item.id) == "number" and index and indexes[item.id] == nil then
+            indexes[item.id] = index - 1
+        end
+    end
+    return indexes
+end
+
 UI.Separator()
 UI.Label("Sell Exceptions")
 

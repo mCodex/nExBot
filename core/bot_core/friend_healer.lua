@@ -95,6 +95,7 @@ local _state = {
 local function isHealingGroupOnCooldown()
   if BotCore.Cooldown and BotCore.Cooldown.isHealingOnCooldown then
     return BotCore.Cooldown.isHealingOnCooldown()
+      or (BotCore.Cooldown.isHealingExhausted and BotCore.Cooldown.isHealingExhausted())
   end
   return false
 end
@@ -337,6 +338,57 @@ local function buildAllySpellList(config, healAt, granSioAt, tioSioAt, distance)
   return list
 end
 
+local function planAllyWithRust(friend, friendName, hp, distance, config, input)
+  if not nExBotRuntime or not nExBotRuntime.decide then return false end
+
+  local settings = config.settings or {}
+  local healAt = settings.healAt or 80
+  local rules, actions = {}, {}
+  local function add(action, threshold, range, cost, available, minFriends)
+    actions[#actions + 1] = action
+    rules[#rules + 1] = {
+      action = action.type, threshold = threshold, range = range, cost = cost,
+      ready = not not available, min_friends = minFriends or 0
+    }
+  end
+
+  local spellsReady = not isHealingGroupOnCooldown()
+  local urgency = calculateUrgency(hp, distance)
+  for _, spell in ipairs(buildAllySpellList(config, healAt, settings.granSioAt or 40, settings.tioSioAt or 65, distance)) do
+    add({type = "spell", spell = spell.name, targetName = friendName, manaCost = spell.mpCost,
+      urgency = urgency, source = "healEngine"}, spell.hp, 7, spell.mpCost, spellsReady
+      and not (getSpellCoolDown and getSpellCoolDown(spell.name)))
+  end
+
+  local friendsNeedingHeal = 0
+  if config.useMasRes and hp < healAt and spellsReady then
+    friendsNeedingHeal = countFriendsInRange(config, 7)
+    add({type = "area_spell", spell = "exura gran mas res", manaCost = 150, friendCount = friendsNeedingHeal,
+      urgency = urgency, source = "masRes"}, healAt, 7, 150, true, settings.masResPlayers or 2)
+  end
+  if config.useHealthItem then
+    add({type = "rune", runeId = settings.healthItem or RUNE_IDS.ULTIMATE_HEALING,
+      target = friend, name = friendName, urgency = urgency, source = "healthItem"},
+      healAt, settings.itemRange or 6, 0, not isRuneOnCooldown())
+  end
+  if config.useManaItem and config.manaFriends and config.manaFriends[friendName] then
+    add({type = "mana_potion", potionId = settings.manaItem or POTION_IDS.GREAT_MANA,
+      target = friend, name = friendName, source = "manaItem"}, 0, 1, 0, not isPotionOnCooldown())
+  end
+
+  if #rules == 0 then return true end
+  local okShoot, canShoot = pcall(function() return friend:canShoot() end)
+  input.mana = (BotCore.Stats and BotCore.Stats.getMp) and BotCore.Stats.getMp() or (mana and mana()) or 0
+  input.hp, input.distance = hp, distance
+  input.can_shoot = not okShoot or canShoot == true
+  input.friends_needing_heal = friendsNeedingHeal
+  input.rules = rules
+  local selected = nExBotRuntime.decide("ally_heal", input)
+  if selected == 0 then return true end
+  local action = actions[selected]
+  return action ~= nil, action
+end
+
 function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
   if not friend or not config then return nil end
   
@@ -351,6 +403,15 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
   
   local distance = (okPos and friendPos and distanceFromPlayer) and distanceFromPlayer(friendPos) or 99
   
+  local playerPos = player and player:getPosition()
+  if playerPos and friendPos and playerPos.z ~= friendPos.z then return nil end
+  if not friendHp or friendHp <= 0 then return nil end
+
+  local decided, action = planAllyWithRust(friend, friendName, friendHp, distance, config, {
+    self_hp = selfHp, self_mp = selfMp, min_hp = settings.minPlayerHp or 80, min_mp = settings.minPlayerMp or 50
+  })
+  if decided then return action end
+
   -- Config values from UI
   local healAt = settings.healAt or 80
   local granSioAt = settings.granSioAt or 40
@@ -382,7 +443,7 @@ function FriendHealerEnhanced.planHealAction(friend, friendHp, config)
       if engineAction then
         return {
           type = "spell",
-          spell = engineAction.name,
+          spell = engineAction.spell or engineAction.name,
           targetName = friendName,
           manaCost = engineAction.mana or 100,
           urgency = calculateUrgency(friendHp, distance),
@@ -452,6 +513,7 @@ function FriendHealerEnhanced.executeAction(action)
     local success = useItemOnFriend(action.runeId, action.target)
     if success then
       markHealingUsed()
+      if BotCore.Cooldown and BotCore.Cooldown.markPotionUsed then BotCore.Cooldown.markPotionUsed() end
       _state.healCount = _state.healCount + 1
       if EventBus then
         EventBus.emit("friend:heal_rune", action.name, action.runeId, action.source)
@@ -462,6 +524,7 @@ function FriendHealerEnhanced.executeAction(action)
   elseif action.type == "potion" or action.type == "mana_potion" then
     local success = useItemOnFriend(action.potionId, action.target)
     if success then
+      if BotCore.Cooldown and BotCore.Cooldown.markPotionUsed then BotCore.Cooldown.markPotionUsed() end
       _state.potionCount = _state.potionCount + 1
       if EventBus then
         EventBus.emit("friend:heal_potion", action.name, action.potionId, action.source)
@@ -511,7 +574,11 @@ function FriendHealerEnhanced.findBestTarget(config)
   local selfHp = getSelfHpPercent()
   local bestTarget = nil
   local bestUrgency = 0
-  
+  local candidates, targets
+  if nExBotRuntime and nExBotRuntime.decide then
+    candidates, targets = {}, {}
+  end
+
   for _, spec in ipairs(spectators) do
     -- Safely check if this is a friend
     local isFriendMatch, customHp = isFriend(spec, config)
@@ -526,9 +593,16 @@ function FriendHealerEnhanced.findBestTarget(config)
       if okHp and okName and hp and name then
         local dist = (okPos and pos and distanceFromPlayer) and distanceFromPlayer(pos) or 99
         
-        -- Check if in healing range
-        if dist <= 7 and (not okShoot or canShoot) then
-          local healThreshold = customHp or config.settings and config.settings.healAt or 80
+        local healThreshold = customHp or config.settings and config.settings.healAt or 80
+        local canReach = not okShoot or canShoot
+        if candidates then
+          candidates[#candidates + 1] = {hp = hp, threshold = healThreshold, distance = dist,
+            can_shoot = not not canReach}
+          targets[#targets + 1] = {creature = spec, name = name, hp = hp, distance = dist,
+            urgency = calculateUrgency(hp, dist), customHp = customHp}
+        end
+
+        if dist <= 7 and canReach then
           
           if hp < healThreshold then
             local shouldHeal = shouldHealFriend(selfHp, hp)
@@ -552,6 +626,12 @@ function FriendHealerEnhanced.findBestTarget(config)
     end
   end
   
+  if candidates then
+    if #candidates == 0 then return nil end
+    local selected = nExBotRuntime.decide("ally_target", {self_hp = selfHp, candidates = candidates})
+    if selected == 0 then return nil end
+    if selected and targets[selected] then return targets[selected] end
+  end
   return bestTarget
 end
 
@@ -608,6 +688,20 @@ function FriendHealerEnhanced.setupEventListeners()
   -- Clean up old subscriptions
   FriendHealerEnhanced.cleanup()
   
+  local function nativeReady()
+    return nExBotRuntime and nExBotRuntime.decide
+  end
+
+  -- creature:health is emitted before friend:health for the same client update.
+  _state.subscriptions[#_state.subscriptions + 1] = EventBus.on("creature:health", function(creature, percent, previous)
+    local config = _state.config
+    if not nativeReady() or not _state.enabled or not config or not creature then return end
+    if not percent or percent <= 0 or percent >= (previous or 100) then return end
+    local matched, threshold = isFriend(creature, config)
+    if not matched or (type(threshold) == "number" and percent >= threshold) then return end
+    FriendHealerEnhanced.executeAction(FriendHealerEnhanced.planHealAction(creature, percent, config))
+  end, 85)
+
   -- PRIORITY 1: React to friend:health event (directly emitted for friends/party members)
   -- This is more efficient as it's pre-filtered by EventBus
   _state.subscriptions[#_state.subscriptions + 1] = EventBus.on("friend:health", function(creature, percent, oldPercent)
@@ -637,7 +731,7 @@ function FriendHealerEnhanced.setupEventListeners()
     local healAt = _state.config.settings and _state.config.settings.healAt or 80
     local shouldReact = (drop >= 10 and percent < 70) or (percent < healAt and percent < 50)
     
-    if shouldReact then
+    if shouldReact and not nativeReady() then
       -- React with minimal delay for responsiveness
       schedule(15, function()
         if not safeIsDead(creature) then
@@ -681,7 +775,7 @@ function FriendHealerEnhanced.setupEventListeners()
     }
     
     -- React to significant drops
-    if drop >= 10 and percent < 70 then
+    if not nativeReady() and drop >= 10 and percent < 70 then
       schedule(25, function()
         if not safeIsDead(creature) then
           local currentHp = safeGetHpPercent(creature) or percent

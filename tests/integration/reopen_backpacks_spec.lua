@@ -87,6 +87,7 @@ local function client(root, options)
   local env = setmetatable({
     nExBot = {paths = {core = "core"}, Shared = {deepClone = function(v) return v end, getClient = noop}},
     storage = {containerPanel = {autoMinimize = false, purse = options.purse ~= nil, containerList = options.rules or {}, sortEnabled = options.rules ~= nil}},
+    RustBridge = {observeReopen = options.observeReopen},
     g_game = game, g_clock = {millis = function() return clock end},
     getBack = function() return root end, getPurse = function() return options.purse end,
     UI = {Separator = noop, createWidget = function() return sidebar end},
@@ -181,6 +182,21 @@ describe("Reopen All", function()
       assert.equals(sibling, requests[4])
       assert.equals(permanent and 1 or 0, #warnings)
     end
+  end)
+
+  it("reports request latency separately from retries and pacing", function()
+    local leaf = bag(2866)
+    local root = bag(2854, {{leaf}})
+    local summary
+    local ui, run = client(root, {drop = leaf, observeReopen = function(metrics) summary = metrics end})
+    ui.reopenAll:onClick()
+    assert.equals(1, run())
+    assert.equals(3, summary.requests)
+    assert.equals(1, summary.timeouts)
+    assert.equals(1, summary.samples)
+    assert.equals(45, summary.ack_ms)
+    assert.equals(45, summary.max_ack_ms)
+    assert.is_true(summary.elapsed_ms >= 2200)
   end)
 
   it("does not stop at 19 open windows or 50 bags of the same type", function()

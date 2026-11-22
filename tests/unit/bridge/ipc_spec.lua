@@ -41,6 +41,7 @@ describe("Rust bridge", function()
       },
       json = { decode = function() return state.serverFrame end },
       _websockets = {},
+      g_clock = { millis = function() return state.clock or 0 end },
       UI = { Label = function() error("the bridge must only report status in the console") end },
       onPlayerPositionChange = function(callback) state.move = callback end,
       onCreaturePositionChange = function(callback) state.creatureMove = callback end,
@@ -81,6 +82,26 @@ describe("Rust bridge", function()
     state.serverFrame = frame
     state.handlers.onMessage("{}")
   end
+
+  it("reports local heal dispatch and the matching player's spell echo separately", function()
+    env.storage = {rustHealTiming = true}
+    env.player = {getName = function() return "Healer" end}
+    env.g_clock.realMillis = function() return state.clock end
+    env.onTalk = function(callback) state.talk = callback end
+    start()
+    receive({type = "ready", protocol = 1, proof = serverProof, heal_timing = true})
+    state.clock = 100
+    env.RustBridge.healDispatch(2, {kind = "spell", name = "Exura"})
+    state.clock = 280
+    state.talk("Else", 1, 1, "exura")
+    state.talk("Healer", 1, 1, "exura")
+    state.talk("Healer", 1, 1, "exura")
+    for _, callback in ipairs(state.pending) do callback() end
+    assert.equals(4, #state.sent)
+    assert.equals(2, state.sent[3].elapsed_ms)
+    assert.equals(180, state.sent[4].elapsed_ms)
+    assert.is_true(state.sent[4].echo)
+  end)
 
   it("connects when the engine starts after the bot without reloading the profile", function()
     local available = false
@@ -160,6 +181,82 @@ describe("Rust bridge", function()
     state.pending[1]()
     assert.same({ type = "ack", sequence = 2, id = 1 }, state.sent[3])
   end)
+  it("collects negotiated loot reports only after opt-in", function()
+    env.EventBus = { on = function(event, callback)
+      if event == "loot:received" then state.loot = callback end
+    end }
+    env.storage = {}
+    start()
+    receive({type = "ready", protocol = 1, proof = serverProof, loot_analytics = true})
+    state.loot("Dragon", "nothing")
+    assert.equals(2, #state.sent)
+    env.storage.rustLootAnalytics = true
+    state.loot(" Dragon ", " Nothing ")
+    assert.same({type = "loot_report", sequence = 2, monster = "dragon", nonempty = false}, state.sent[3])
+    state.loot("Dragon", "12 gold coins")
+    assert.same({type = "loot_report", sequence = 3, monster = "dragon", nonempty = true}, state.sent[4])
+    local totals = {reports = 2, nonempty = 1}
+    receive({type = "loot_summary", total = totals, monster = "dragon", monster_total = totals})
+    assert.same({total = totals, byMonster = {dragon = totals}}, env.RustBridge.lootStats)
+  end)
+
+  it("compares shadow targets and rejects a reply after a candidate moves", function()
+    start()
+    receive({ type = "ready", protocol = 1, proof = serverProof, target_shadow = true })
+    local candidates = {
+      { id = 10, position = { x = 101, y = 100, z = 7 }, priority = 1200, hp = 40, cost = 2, sight = true },
+    }
+    env.RustBridge.targetShadow(candidates, 10, 10)
+    assert.equals("target_shadow", state.sent[3].type)
+    state.clock = 15
+    receive({ type = "target_comparison", observation = 2, selected = 10, suggested = 10 })
+    assert.same({ samples = 1, matches = 1, stale = 0, lastRoundTripMs = 15 }, env.RustBridge.targetStats)
+
+    state.clock = 201
+    env.RustBridge.targetShadow(candidates, 10, 10)
+    local creature = { getId = function() return 10 end }
+    state.creatureMove(creature, { x = 102, y = 100, z = 7 })
+    receive({ type = "target_comparison", observation = 3, selected = 10, suggested = 10 })
+    assert.same({ samples = 1, matches = 1, stale = 1, lastRoundTripMs = 15 }, env.RustBridge.targetStats)
+  end)
+
+  it("uses Rust ranking only for a fresh, identical, opt-in snapshot", function()
+    env.storage = {rustTargetRanking = true}
+    start()
+    receive({type = "ready", protocol = 1, proof = serverProof, target_shadow = true})
+    local first = {id = 10, position = {x = 101, y = 100, z = 7}, priority = 1200, hp = 40, cost = 2, sight = true}
+    local second = {id = 11, position = {x = 100, y = 101, z = 7}, priority = 1200, hp = 40, cost = 1, sight = true}
+    env.RustBridge.targetShadow({first, second}, 10, 10)
+    state.clock = 15
+    receive({type = "target_comparison", observation = 2, selected = 10, suggested = 11})
+    assert.equals(11, env.RustBridge.rankedTarget({second, first}, 10))
+    assert.is_nil(env.RustBridge.rankedTarget({second, first}, 11))
+    assert.is_nil(env.RustBridge.rankedTarget({second}, 10))
+    env.storage.rustTargetRanking = false
+    assert.is_nil(env.RustBridge.rankedTarget({second, first}, 10))
+    env.storage.rustTargetRanking = true
+    assert.is_nil(env.RustBridge.rankedTarget({
+      {id = 11, position = second.position, priority = 1200, hp = 39, cost = 1, sight = true},
+      first,
+    }, 10))
+    state.clock = 200
+    assert.is_nil(env.RustBridge.rankedTarget({second, first}, 10))
+  end)
+
+  it("samples native firing positions at most once per second", function()
+    start()
+    receive({ type = "ready", protocol = 1, proof = serverProof, target_shadow = true })
+    assert.is_true(env.RustBridge.beginFiringSample())
+    assert.is_false(env.RustBridge.beginFiringSample())
+    local target = { x = 102, y = 100, z = 7 }
+    env.RustBridge.firingShadow(target, 1, 4, position, { { position, 0 } })
+    assert.equals("firing_shadow", state.sent[3].type)
+    receive({ type = "firing_comparison", observation = 2, matches = true })
+    assert.same({ samples = 1, matches = 1 }, env.RustBridge.firingStats)
+    state.clock = 1000
+    assert.is_true(env.RustBridge.beginFiringSample())
+  end)
+
   it("coalesces creature movement and discards scheduled data after disconnect", function()
     start()
     receive({ type = "ready", protocol = 1, proof = serverProof })
@@ -177,6 +274,20 @@ describe("Rust bridge", function()
     state.pending[2]()
     assert.equals(3, #state.sent)
   end)
+  it("keeps the newest move for each creature within the same batch", function()
+    start()
+    receive({ type = "ready", protocol = 1, proof = serverProof })
+    local first = { getId = function() return 10 end }
+    local second = { getId = function() return 11 end }
+    state.creatureMove(first, { x = 101, y = 100, z = 7 })
+    state.creatureMove(second, { x = 104, y = 100, z = 7 })
+    state.creatureMove(first, { x = 102, y = 100, z = 7 })
+    assert.equals(1, #state.pending)
+    state.pending[1]()
+    local byId = { [state.sent[3].id] = state.sent[3].position.x, [state.sent[4].id] = state.sent[4].position.x }
+    assert.same({ [10] = 102, [11] = 104 }, byId)
+  end)
+
   it("queries a bounded route and reports changes to the watched tile", function()
     local blocked = false
     local nextTile = { x = 101, y = 100, z = 7 }
@@ -209,5 +320,19 @@ describe("Rust bridge", function()
     state.changed(tile)
     state.pending[4]()
     assert.same({ type = "tile", sequence = 4, position = nextTile, walkable = false, ignore_creatures = true }, state.sent[5])
+  end)
+  it("sends nearby CaveBot goals once when shadow diagnostics are enabled", function()
+    env.storage = { rustCaveShadow = true }
+    start()
+    receive({ type = "ready", protocol = 1, proof = serverProof, cave_shadow = true })
+    env.RustBridge.caveGoal({ x = 200, y = 100, z = 7 })
+    local goal = { x = 102, y = 101, z = 7 }
+    env.RustBridge.caveGoal(goal)
+    env.RustBridge.caveGoal(goal)
+    env.storage.rustCaveShadow = false
+    env.RustBridge.caveGoal({ x = 103, y = 101, z = 7 })
+    assert.same({ type = "route_goal", sequence = 2, position = goal }, state.sent[3])
+    assert.same({ type = "route_goal", sequence = 3 }, state.sent[4])
+    assert.equals(4, #state.sent)
   end)
 end)

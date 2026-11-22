@@ -2,12 +2,35 @@ name: Desktop installers
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/installer.yml'
+      - 'tools/installer/**'
+      - 'tools/windows/**'
+      - 'tools/macos/**'
+      - 'tools/linux/**'
+      - 'rust/**'
+      - '_Loader.lua'
+      - 'bridge/**'
+      - 'version'
+  push:
+    tags: ['v5.*']
 
 permissions:
   contents: read
 
 jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - run: python3 -m unittest discover -s tools/installer -p test_release.py
+      - if: github.event_name == 'push'
+        run: python3 tools/installer/release.py check-version
+
   package:
+    needs: validate
+    environment: ${{ github.event_name == 'push' && 'installer-signing' || '' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -42,23 +65,112 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/nexbot-python"
           "$RUNNER_TEMP/nexbot-python/bin/python" -m pip install 'PyInstaller==6.16.0'
-          "$RUNNER_TEMP/nexbot-python/bin/python" -m unittest discover -s tools/installer
+          "$RUNNER_TEMP/nexbot-python/bin/python" -m unittest discover -s tools/installer -p test_install.py
           "$RUNNER_TEMP/nexbot-python/bin/python" tools/installer/package.py "${{ matrix.target }}"
       - name: Build macOS installer
         if: runner.os == 'macOS'
         run: |
           "$(brew --prefix python@3.12)/bin/python3.12" -m venv "$RUNNER_TEMP/nexbot-python"
           "$RUNNER_TEMP/nexbot-python/bin/python" -m pip install 'PyInstaller==6.16.0'
-          "$RUNNER_TEMP/nexbot-python/bin/python" -m unittest discover -s tools/installer
+          "$RUNNER_TEMP/nexbot-python/bin/python" -m unittest discover -s tools/installer -p test_install.py
           "$RUNNER_TEMP/nexbot-python/bin/python" tools/installer/package.py "${{ matrix.target }}"
       - name: Build Windows installer
         if: runner.os == 'Windows'
         run: |
           python -m pip install PyInstaller==6.16.0
-          python -m unittest discover -s tools/installer
+          python -m unittest discover -s tools/installer -p test_install.py
           python tools/installer/package.py "${{ matrix.target }}"
+      - name: Sign Windows installer
+        if: github.event_name == 'push' && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SIGNING_PFX: ${{ secrets.INSTALLER_WINDOWS_PFX }}
+          SIGNING_PASSWORD: ${{ secrets.INSTALLER_WINDOWS_PASSWORD }}
+        run: |
+          if (!$env:SIGNING_PFX -or !$env:SIGNING_PASSWORD) { throw "Windows signing credentials are required" }
+          $certificate = Join-Path $env:RUNNER_TEMP 'installer.pfx'
+          try {
+            [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:SIGNING_PFX))
+            $tool = Get-ChildItem "$([Environment]::GetFolderPath('ProgramFilesX86'))\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+            if (!$tool) { throw "SignTool is missing" }
+            $file = 'dist/installer/nexbot-installer-windows-x64.exe'
+            & $tool.FullName sign /f $certificate /p $env:SIGNING_PASSWORD /fd SHA256 /tr https://timestamp.digicert.com /td SHA256 $file
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            & $tool.FullName verify /pa $file
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            & ".\$file" --verify-package
+            exit $LASTEXITCODE
+          } finally {
+            Remove-Item -Force -ErrorAction SilentlyContinue $certificate
+          }
+      - name: Sign and notarize macOS installer
+        if: github.event_name == 'push' && runner.os == 'macOS'
+        env:
+          SIGNING_P12: ${{ secrets.INSTALLER_MACOS_P12 }}
+          SIGNING_PASSWORD: ${{ secrets.INSTALLER_MACOS_P12_PASSWORD }}
+          SIGNING_IDENTITY: ${{ vars.INSTALLER_MACOS_IDENTITY }}
+          NOTARY_APPLE_ID: ${{ secrets.INSTALLER_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.INSTALLER_NOTARY_PASSWORD }}
+          NOTARY_TEAM: ${{ vars.INSTALLER_NOTARY_TEAM }}
+          INSTALLER_TARGET: ${{ matrix.name }}
+        run: |
+          : "${SIGNING_P12:?}" "${SIGNING_PASSWORD:?}" "${SIGNING_IDENTITY:?}" "${NOTARY_APPLE_ID:?}" "${NOTARY_PASSWORD:?}" "${NOTARY_TEAM:?}"
+          keychain="$RUNNER_TEMP/installer.keychain-db"
+          p12="$RUNNER_TEMP/installer.p12"
+          work="$(mktemp -d)"
+          trap 'security delete-keychain "$keychain"; rm -f "$p12"; rm -rf "$work"' EXIT
+          keychain_password="$(openssl rand -hex 24)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$SIGNING_P12" | base64 -D > "$p12"
+          security import "$p12" -k "$keychain" -P "$SIGNING_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          archive="dist/installer/nexbot-installer-$INSTALLER_TARGET.zip"
+          ditto -x -k "$archive" "$work"
+          app="$work/nExBot Installer.app"
+          find "$app/Contents" -type f -print0 | while IFS= read -r -d '' binary; do
+            if file -b "$binary" | grep -q Mach-O; then
+              codesign --force --timestamp --options runtime --keychain "$keychain" --sign "$SIGNING_IDENTITY" "$binary"
+            fi
+          done
+          codesign --force --timestamp --options runtime --keychain "$keychain" --sign "$SIGNING_IDENTITY" "$app"
+          codesign --verify --deep --strict "$app"
+          "$app/Contents/MacOS/nExBot Installer" --verify-package
+          ditto -c -k --keepParent "$app" "$work/notary.zip"
+          xcrun notarytool submit "$work/notary.zip" --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM" --wait
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+          rm "$archive"
+          ditto -c -k --keepParent "$app" "$archive"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: unsigned-installer-${{ matrix.name }}
+          name: installer-${{ matrix.name }}
           path: dist/installer/*
           if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-24.04
+    environment: installer-release
+    concurrency:
+      group: installer-release-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: installer-*
+          path: dist/installer
+          merge-multiple: true
+      - run: python3 tools/installer/release.py manifest dist/installer
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: dist/installer/*
+      - run: python3 tools/installer/release.py publish dist/installer
+        env:
+          GH_TOKEN: ${{ github.token }}

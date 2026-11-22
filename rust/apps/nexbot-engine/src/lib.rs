@@ -1,3 +1,7 @@
+pub mod combat_runtime;
+pub mod healing;
+pub mod inventory_runtime;
+pub mod movement_runtime;
 pub mod navigation;
 pub mod route;
 
@@ -36,6 +40,39 @@ impl Position {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ContainerMetrics {
+    pub elapsed_ms: u32,
+    pub requests: u32,
+    pub timeouts: u32,
+    pub samples: u32,
+    pub ack_ms: u32,
+    pub max_ack_ms: u32,
+}
+
+impl ContainerMetrics {
+    fn valid(&self) -> bool {
+        self.samples.saturating_add(self.timeouts) <= self.requests
+            && self.ack_ms <= self.elapsed_ms
+            && self.max_ack_ms <= self.ack_ms
+            && u64::from(self.ack_ms) <= u64::from(self.samples) * u64::from(self.max_ack_ms)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct LootTotals {
+    pub reports: u32,
+    pub nonempty: u32,
+}
+
+impl LootTotals {
+    fn record(&mut self, nonempty: bool) {
+        self.reports = self.reports.saturating_add(1);
+        self.nonempty = self.nonempty.saturating_add(u32::from(nonempty));
+    }
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ClientFrame {
     Hello {
@@ -57,6 +94,41 @@ pub enum ClientFrame {
         id: u32,
         position: Position,
     },
+    HealComparison {
+        sequence: u32,
+        hp: u16,
+        mp: u16,
+        mana: u32,
+        rules: Vec<healing::Rule>,
+        selected: Option<usize>,
+    },
+    HealDispatch {
+        sequence: u32,
+        elapsed_ms: u32,
+        #[serde(default)]
+        echo: bool,
+    },
+    SupplyRefill {
+        sequence: u32,
+        stock: Vec<(u16, u32, u32)>,
+    },
+    LootReport {
+        sequence: u32,
+        monster: String,
+        nonempty: bool,
+    },
+    ContainerMetrics {
+        sequence: u32,
+        metrics: ContainerMetrics,
+    },
+    FiringShadow {
+        sequence: u32,
+        target: Position,
+        min: u16,
+        max: u16,
+        selected: Position,
+        positions: Vec<(Position, u32)>,
+    },
     TargetShadow {
         sequence: u32,
         selected: Option<u32>,
@@ -71,7 +143,7 @@ pub enum ClientFrame {
     },
     RouteGoal {
         sequence: u32,
-        position: Position,
+        position: Option<Position>,
     },
     RouteAck {
         sequence: u32,
@@ -92,7 +164,24 @@ pub enum ServerFrame {
         proof: String,
         protocol: u8,
         cave_shadow: bool,
+        heal_timing: bool,
         target_shadow: bool,
+        container_metrics: bool,
+        loot_analytics: bool,
+        supply_refill: bool,
+    },
+    SupplyRefillPlan {
+        observation: u32,
+        purchase: Option<(u16, u32)>,
+    },
+    LootSummary {
+        total: LootTotals,
+        monster: String,
+        monster_total: Option<LootTotals>,
+    },
+    FiringComparison {
+        observation: u32,
+        matches: bool,
     },
     TargetComparison {
         observation: u32,
@@ -138,8 +227,12 @@ pub struct Session {
     sequence: u32,
     position: Option<Position>,
     last_creature_move: Option<(u32, Position)>,
+    container_metrics: Option<ContainerMetrics>,
+    loot_total: LootTotals,
+    loot_by_monster: std::collections::BTreeMap<String, LootTotals>,
     pending: Option<(u32, u64)>,
     probe_result: Option<Option<u8>>,
+    heal_times: [Vec<u32>; 2],
     preview: Option<Preview>,
 }
 
@@ -152,8 +245,12 @@ impl Session {
             sequence: 0,
             position: None,
             last_creature_move: None,
+            container_metrics: None,
+            loot_total: LootTotals::default(),
+            loot_by_monster: std::collections::BTreeMap::new(),
             pending: None,
             probe_result: None,
+            heal_times: Default::default(),
             preview: None,
         }
     }
@@ -165,6 +262,10 @@ impl Session {
 
     pub fn take_preview_decision(&mut self) -> Option<route::Decision> {
         self.preview.as_mut()?.take_decision()
+    }
+
+    pub fn take_container_metrics(&mut self) -> Option<ContainerMetrics> {
+        self.container_metrics.take()
     }
 
     pub fn position(&self) -> Option<Position> {
@@ -246,6 +347,128 @@ impl Session {
                 }
                 Ok(None)
             }
+            ClientFrame::HealComparison {
+                sequence,
+                hp,
+                mp,
+                mana,
+                rules,
+                selected,
+            } => {
+                self.advance(sequence)?;
+                self.position.ok_or(SessionError::Sequence)?;
+                if hp > 10000
+                    || mp > 10000
+                    || rules.len() > 24
+                    || rules.iter().any(|r| r.threshold > 100)
+                    || selected.is_some_and(|i| i == 0 || i > rules.len())
+                {
+                    return Err(SessionError::InvalidFrame);
+                }
+                let suggested = healing::choose(hp, mp, mana, &rules);
+                if suggested != selected {
+                    println!("heal comparison {sequence}: local={selected:?} rust={suggested:?}");
+                }
+                Ok(None)
+            }
+            ClientFrame::HealDispatch {
+                sequence,
+                elapsed_ms,
+                echo,
+            } => {
+                self.advance(sequence)?;
+                self.position.ok_or(SessionError::Sequence)?;
+                let times = &mut self.heal_times[usize::from(echo)];
+                let phase = if echo { "spell echo" } else { "dispatch" };
+                times.push(elapsed_ms);
+                if times.len() == 32 {
+                    times.sort_unstable();
+                    println!(
+                        "heal {phase} ms (32 samples): p50={} p95={} max={}",
+                        times[15], times[30], times[31]
+                    );
+                    times.clear();
+                }
+                Ok(None)
+            }
+            ClientFrame::SupplyRefill { sequence, stock } => {
+                self.advance(sequence)?;
+                self.position.ok_or(SessionError::Sequence)?;
+                if stock.len() > 48 || stock.iter().any(|&(id, _, _)| id == 0) {
+                    return Err(SessionError::InvalidFrame);
+                }
+                let purchase = stock.into_iter().find_map(|(id, owned, desired)| {
+                    let missing = desired.saturating_sub(owned).min(100);
+                    (missing > 0).then_some((id, missing))
+                });
+                Ok(Some(ServerFrame::SupplyRefillPlan {
+                    observation: sequence,
+                    purchase,
+                }))
+            }
+            ClientFrame::LootReport {
+                sequence,
+                monster,
+                nonempty,
+            } => {
+                self.advance(sequence)?;
+                self.position.ok_or(SessionError::Sequence)?;
+                if monster.is_empty() || monster.len() > 96 || monster.chars().any(char::is_control)
+                {
+                    return Err(SessionError::InvalidFrame);
+                }
+                self.loot_total.record(nonempty);
+                if self.loot_by_monster.len() < 64 || self.loot_by_monster.contains_key(&monster) {
+                    self.loot_by_monster
+                        .entry(monster.clone())
+                        .or_default()
+                        .record(nonempty);
+                }
+                Ok(Some(ServerFrame::LootSummary {
+                    total: self.loot_total,
+                    monster_total: self.loot_by_monster.get(&monster).copied(),
+                    monster,
+                }))
+            }
+            ClientFrame::ContainerMetrics { sequence, metrics } => {
+                self.advance(sequence)?;
+                self.position.ok_or(SessionError::Sequence)?;
+                if !metrics.valid() {
+                    return Err(SessionError::InvalidFrame);
+                }
+                self.container_metrics = Some(metrics);
+                Ok(None)
+            }
+            ClientFrame::FiringShadow {
+                sequence,
+                target,
+                min,
+                max,
+                selected,
+                positions,
+            } => {
+                use navigation::{Candidate, Obstruction, choose_firing_position};
+
+                self.advance(sequence)?;
+                self.position.ok_or(SessionError::Sequence)?;
+                if target.z > 15 || min > max || positions.len() > 32 {
+                    return Err(SessionError::InvalidFrame);
+                }
+                let candidates: Vec<_> = positions
+                    .into_iter()
+                    .map(|(position, cost)| Candidate {
+                        position,
+                        cost,
+                        obstruction: Obstruction::Clear,
+                        sight: true,
+                    })
+                    .collect();
+                Ok(Some(ServerFrame::FiringComparison {
+                    observation: sequence,
+                    matches: choose_firing_position(target, min..=max, &candidates)
+                        == Some(selected),
+                }))
+            }
             ClientFrame::TargetShadow {
                 sequence,
                 selected,
@@ -284,9 +507,15 @@ impl Session {
             ClientFrame::RouteGoal { sequence, position } => {
                 self.advance(sequence)?;
                 let current = self.position.ok_or(SessionError::Sequence)?;
-                if !self.path_probe || position.z > 15 {
+                if !self.path_probe || position.is_some_and(|position| position.z > 15) {
                     return Err(SessionError::InvalidFrame);
                 }
+                let Some(position) = position else {
+                    if let Some(preview) = self.preview.as_mut() {
+                        preview.clear_goal();
+                    }
+                    return Ok(None);
+                };
                 let preview = self.preview.get_or_insert_with(|| {
                     let mut preview = Preview::new(position);
                     preview.initialize(current);
@@ -350,7 +579,11 @@ impl Session {
             proof,
             protocol: PROTOCOL,
             cave_shadow: self.preview.is_none() && path_probe,
+            heal_timing: true,
             target_shadow: true,
+            container_metrics: true,
+            loot_analytics: true,
+            supply_refill: true,
         }))
     }
 
@@ -361,5 +594,18 @@ impl Session {
 
         self.sequence = sequence;
         Ok(())
+    }
+}
+
+/// Dispatch a native observation to its domain. The OTClient owns execution.
+pub fn decide(operation: &str, input: serde_json::Value) -> Option<serde_json::Value> {
+    match operation {
+        "self_heal" | "ally_heal" | "ally_target" | "attack" => {
+            combat_runtime::decide(operation, input)
+        }
+        "movement_dispatch" | "movement_goal" | "movement_vote" => {
+            movement_runtime::decide(operation, input)
+        }
+        _ => inventory_runtime::decide(operation, input),
     }
 }

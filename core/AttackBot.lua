@@ -929,6 +929,23 @@ local function buildPatternKey(entry, pvpSafe)
   return entry.patternCategory..":"..entry.pattern..":"..tostring(pvpSafe)..":"..entry.minHp..":"..entry.maxHp..":"..monstersKey
 end
 
+local function attackMatches(entry, context, count, playersNearby, protectPlayers)
+  if nExBotRuntime and nExBotRuntime.decide then
+    local approved = nExBotRuntime.decide("attack", {
+      observed = count, required = entry.count, at_least = not not entry.orMore,
+      mana = context.mana, required_mana = entry.mana, target_hp = context.targetHp,
+      min_hp = entry.minHp, max_hp = entry.maxHp, distance = context.targetDist,
+      max_distance = (entry.category == 1 or entry.category == 3) and entry.pattern or nil,
+      players_nearby = not not playersNearby, protect_players = not not protectPlayers
+    })
+    if approved ~= nil then return approved == true end
+  end
+
+  if protectPlayers and playersNearby then return false end
+  if entry.orMore then return count >= entry.count end
+  return count == entry.count
+end
+
 -- Pure evaluator using caching and vBot semantics
 local function evaluateEntry(entry, context, cache)
   if not entry.enabled then return false end
@@ -950,8 +967,8 @@ local function evaluateEntry(entry, context, cache)
 
   -- Target checks
   if not context.target then return false end
-  local targetHp = context.target:getHealthPercent()
-  local targetDist = distanceFromPlayer(context.target:getPosition())
+  local targetHp = context.targetHp
+  local targetDist = context.targetDist
 
   -- Safety checks (context-wide, already computed once per tick)
   if context.blacklisted or context.killsBlocked then return false end
@@ -976,7 +993,7 @@ local function evaluateEntry(entry, context, cache)
     end
     local monsterAmount = data and data.amount or 0
 
-    if entry.orMore then return monsterAmount >= entry.count else return monsterAmount == entry.count end
+    return attackMatches(entry, context, monsterAmount)
   end
 
   -- For targeted/empowerment/absolute entries
@@ -1022,8 +1039,7 @@ local function evaluateEntry(entry, context, cache)
         -- require no players nearby if PvP safe is enabled
         local players = SafeCall.getPlayers and SafeCall.getPlayers(2) or {}
         local playersNearby = (#players > 0)
-        local sweepMatch = entry.orMore and bestSide >= entry.count or bestSide == entry.count
-        if sweepMatch and (not context.settings.PvpSafe or not playersNearby) then
+        if attackMatches(entry, context, bestSide, playersNearby, context.settings.PvpSafe) then
           -- store best sweep direction for executeAttack to use (rotation)
           cache.bestSweepDir = bestDir
           cache.bestSweepSide = bestSide
@@ -1050,7 +1066,7 @@ local function evaluateEntry(entry, context, cache)
         cache.monstersInArea[cacheKey] = monsterAmount
       end
 
-      if entry.orMore then return monsterAmount >= entry.count else return monsterAmount == entry.count end
+      return attackMatches(entry, context, monsterAmount)
     end
 
     -- Fallback for targeted/empowerment entries
@@ -1068,7 +1084,7 @@ local function evaluateEntry(entry, context, cache)
     if entry.category == 1 or entry.category == 3 then
       if targetDist > entry.pattern then return false end
     end
-    if entry.orMore then return monsterAmount >= entry.count else return monsterAmount == entry.count end
+    return attackMatches(entry, context, monsterAmount)
   end
 
   return true
@@ -1103,17 +1119,20 @@ function attackBotMain()
   -- Global guards (cannot attack at all)
   if not currentSettings or not currentSettings.enabled then return end
   if not panel or not panel.entryList then return end
-  if not target() then return end
+  local targetCreature = target()
+  if not targetCreature then return end
   if SafeCall.isInPz() then return end
   if pendingCast or isGlobalBackoffActive() then return end
   if BotCore and BotCore.Cooldown and BotCore.Cooldown.isAttackOnCooldown() then return end
   if modules.game_cooldown.isGroupCooldownIconActive(1) then return end
   if BotCore and BotCore.Priority and not BotCore.Priority.canAttack() then return end
-  if currentSettings.Training and target():getName():lower():find("training") then return end
+  if currentSettings.Training and targetCreature:getName():lower():find("training") then return end
 
   -- Build context snapshot (computed ONCE per tick, shared across all entries)
   local context = {
-    target = target(),
+    target = targetCreature,
+    targetHp = targetCreature:getHealthPercent(),
+    targetDist = distanceFromPlayer(targetCreature:getPosition()),
     mana = manapercent(),
     settings = currentSettings,
     -- Pre-compute context-wide safety flags (avoids per-entry recalc)

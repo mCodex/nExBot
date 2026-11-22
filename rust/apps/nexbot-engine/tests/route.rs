@@ -173,3 +173,28 @@ fn terrain_change_replans_without_waiting_for_the_tile_to_clear() {
         }
     );
 }
+
+#[test]
+fn unchanged_terrain_does_not_trigger_an_endless_replan() {
+    let start = tile(10, 10, 7);
+    let step = tile(11, 10, 7);
+    let goal = tile(12, 10, 7);
+    let mut route = Route::default();
+    route.on_event(Event::Player(start));
+    route.on_event(Event::Goal(goal));
+    for generation in 1..=2 {
+        route.on_event(Event::Path {
+            generation,
+            tiles: &[step, goal],
+        });
+        let decision = route.on_event(Event::Tile {
+            position: step,
+            obstruction: Obstruction::Terrain,
+        });
+        if generation == 1 {
+            assert!(matches!(decision, Decision::Plan { generation: 2, .. }));
+        } else {
+            assert_eq!(decision, Decision::Blocked);
+        }
+    }
+}

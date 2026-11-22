@@ -40,18 +40,28 @@ pub struct Route {
     generation: u64,
     planning: bool,
     blocked: Option<Position>,
+    terrain_replan: Option<Position>,
     path: Vec<Position>,
     cursor: usize,
 }
 
 impl Route {
+    pub(crate) fn clear_goal(&mut self) {
+        self.goal = None;
+        self.blocked = None;
+        self.terrain_replan = None;
+        self.reset_path();
+    }
+
     pub fn on_event(&mut self, event: Event<'_>) -> Decision {
         match event {
             Event::Goal(position) if self.goal != Some(position) => {
+                self.terrain_replan = None;
                 self.goal = Some(position);
                 self.plan()
             }
             Event::Player(position) if self.player != Some(position) => {
+                self.terrain_replan = None;
                 self.player = Some(position);
                 if self.path.get(self.cursor) == Some(&position) {
                     self.cursor += 1;
@@ -119,6 +129,9 @@ impl Route {
     }
 
     fn observe_tile(&mut self, position: Position, obstruction: Obstruction) -> Decision {
+        if obstruction == Obstruction::Clear && self.terrain_replan == Some(position) {
+            self.terrain_replan = None;
+        }
         if obstruction == Obstruction::Clear && self.blocked == Some(position) {
             return self.plan();
         }
@@ -126,13 +139,16 @@ impl Route {
             return Decision::Wait;
         }
         match obstruction {
-            Obstruction::Terrain => self.plan(),
+            Obstruction::Terrain if self.terrain_replan.is_none() => {
+                self.terrain_replan = Some(position);
+                self.plan()
+            }
             Obstruction::Creature => {
                 self.reset_path();
                 self.blocked = Some(position);
                 Decision::WaitCreature(position)
             }
-            Obstruction::Unknown => {
+            Obstruction::Unknown | Obstruction::Terrain => {
                 self.reset_path();
                 self.blocked = Some(position);
                 Decision::Blocked

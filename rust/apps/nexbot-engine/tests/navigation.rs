@@ -60,3 +60,28 @@ fn follow_holds_within_one_sqm_and_requires_an_observed_floor() {
     assert_eq!(follow_distance(follower, position(10, 15, 7)), Some(4));
     assert_eq!(follow_distance(follower, position(10, 10, 6)), None);
 }
+
+#[test]
+fn target_shadow_respects_floor_sight_path_cost_and_a_nearly_finished_target() {
+    use nexbot_engine::navigation::{TargetCandidate, choose_target};
+
+    let player = position(10, 10, 7);
+    let candidate = |id, z, priority, hp, cost, sight| TargetCandidate {
+        id,
+        position: position(11, 11, z),
+        priority,
+        hp,
+        cost,
+        sight,
+    };
+    let candidates = [
+        candidate(1, 7, 10000, 90, 3, true),
+        candidate(2, 7, 10000, 90, 1, false),
+        candidate(3, 7, 10000, 90, 4, true),
+        candidate(4, 6, 20000, 90, 1, true),
+        candidate(5, 7, 9000, 12, 2, true),
+    ];
+    assert_eq!(choose_target(player, None, &candidates), Some(1));
+    assert_eq!(choose_target(player, Some(5), &candidates), Some(5));
+    assert_eq!(choose_target(player, Some(4), &candidates), Some(1));
+}

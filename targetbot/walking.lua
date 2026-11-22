@@ -169,25 +169,28 @@ TargetBot.walk = function()
   end
   WalkCache.lastZ = playerPos.z
   
-  -- Calculate distance
-  local distX = math.abs(playerPos.x - dest.x)
-  local distY = math.abs(playerPos.y - dest.y)
-  local dist = math.max(distX, distY)
-  
-  -- Check precision
-  if params.precision and params.precision >= dist then 
-    dest = nil
-    return 
-  end
-  
-  -- Check margin range
-  if params.marginMin and params.marginMax then
-    if dist >= params.marginMin and dist <= params.marginMax then 
-      dest = nil
-      return
+  local runtime = nExBotRuntime
+  local status = runtime and runtime.decide("movement_goal", {
+    player = playerPos,
+    goal = dest,
+    precision = params.precision,
+    margin_min = params.marginMin,
+    margin_max = params.marginMax,
+  })
+  if status == nil then
+    local distance = math.max(math.abs(playerPos.x - dest.x), math.abs(playerPos.y - dest.y))
+    if (params.precision and params.precision >= distance) or
+        (params.marginMin and params.marginMax and distance >= params.marginMin and distance <= params.marginMax) then
+      status = "reached"
+    else
+      status = "continue"
     end
   end
-  
+  if status ~= "continue" then
+    dest = nil
+    return
+  end
+
   -- Check cache
   if WalkCache.path and WalkCache.idx <= #WalkCache.path and (now - WalkCache.timestamp) < WalkCache.TTL then
     -- Safety: abort if next step leads to floor change
@@ -206,8 +209,11 @@ TargetBot.walk = function()
     end
     
     -- Use cached path - take first step
-    walk(nextDir)
-    WalkCache.idx = WalkCache.idx + 1
+    if off and walk(nextDir) ~= false then
+      WalkCache.idx = WalkCache.idx + 1
+    else
+      WalkCache.path = nil
+    end
     return
   end
   
@@ -238,8 +244,12 @@ TargetBot.walk = function()
     WalkCache.idx = 1
     
     -- Take first step
-    walk(firstDir)
-    WalkCache.idx = WalkCache.idx + 1
+    local firstDirection = path[1]
+    if DIR_TO_OFFSET[firstDirection] and walk(firstDirection) ~= false then
+      WalkCache.idx = 2
+    else
+      WalkCache.path = nil
+    end
   end
   
   -- Clear destination after attempting walk

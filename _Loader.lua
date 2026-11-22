@@ -7,6 +7,10 @@
 ]]--
 
 local startTime = os.clock()
+if nexbotDecide and storage and storage.rustNativeRuntime == true then
+  dofile("bridge/native_runtime.lua")
+end
+
 local loadTimes = {}
 
 -- Initialize global nExBot namespace if not exists

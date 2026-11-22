@@ -702,7 +702,10 @@ function MovementCoordinator.Intent.getSorted()
     if a.priority ~= b.priority then
       return a.priority > b.priority
     end
-    return a.confidence > b.confidence
+    if a.confidence ~= b.confidence then
+      return a.confidence > b.confidence
+    end
+    return a.source < b.source
   end)
   
   return sorted
@@ -738,6 +741,23 @@ function MovementCoordinator.Vote.aggregate()
     return nil, 0
   end
   
+  local runtime = nExBotRuntime
+  local playerPos = runtime and player and player:getPosition()
+  if playerPos and #intents <= 32 then
+    local observations = {}
+    for i, intent in ipairs(intents) do
+      observations[i] = { position = intent.position, priority = intent.priority, confidence = intent.confidence }
+    end
+    local vote = runtime.decide("movement_vote", { player = playerPos, intents = observations })
+    if type(vote) == "table" then
+      local selected = intents[vote.index]
+      if selected and type(vote.confidence) == "number" and vote.confidence >= 0 and vote.confidence <= 1 then
+        return selected, vote.confidence
+      end
+      return nil, 0
+    end
+  end
+
   -- Group similar intents
   local groups = {}
   

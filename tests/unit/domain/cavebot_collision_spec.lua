@@ -14,7 +14,7 @@ describe("CaveBot first-step collision", function()
   before_each(function()
     original = {}
     for _, name in ipairs({ "CaveBot", "Directions", "East", "nExBot", "now", "onPlayerPositionChange",
-      "PathUtils", "player", "pos", "walk" }) do
+      "PathUtils", "player", "pos", "walk", "nExBotRuntime" }) do
       original[#original + 1] = { name, _G[name] }
     end
 
@@ -100,6 +100,42 @@ describe("CaveBot first-step collision", function()
     assert.is_true(CaveBot.walkTo({ x = 103, y = 100, z = 7 }, 20, { precision = 0, ignoreFields = true }))
     assert.equals(1, emitted)
     assert.equals(1, advances)
+  end)
+
+  it("dispatches the segment selected by Rust without skipping native validation", function()
+    path = { 1, 1, 1, 1 }
+    local strategy = nExBot.PathStrategy
+    local destination = { x = 103, y = 100, z = 7 }
+    strategy.chunkDestination = function(_, _, _, steps)
+      assert.equals(3, steps)
+      return destination
+    end
+    strategy.nativePathIsSafe = function(_, target)
+      assert.same(destination, target)
+      return true
+    end
+    strategy.autoWalk = function(target)
+      assert.same(destination, target)
+      emitted = emitted + 1
+      return true
+    end
+    _G.nExBotRuntime = { decide = function(operation, observation)
+      assert.equals("movement_dispatch", operation)
+      assert.same({ safe_steps = 4, field_ahead = false, allow_segment = true }, observation)
+      return 3
+    end }
+
+    assert.is_true(CaveBot.walkTo({ x = 104, y = 100, z = 7 }, 20, { precision = 0 }))
+    assert.equals(1, emitted)
+    assert.equals(1, advances)
+  end)
+
+  it("rejects a Rust segment crossing a checked field", function()
+    field, path = true, { 1, 1, 1 }
+    _G.nExBotRuntime = { decide = function() return 3 end }
+    assert.is_false(CaveBot.walkTo({ x = 103, y = 100, z = 7 }, 20, { precision = 0, ignoreFields = true }))
+    assert.equals(0, emitted)
+    assert.equals(0, advances)
   end)
 
   it("dispatches an allowed step", function()

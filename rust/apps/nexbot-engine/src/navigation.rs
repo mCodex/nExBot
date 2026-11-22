@@ -22,7 +22,7 @@ impl Obstruction {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Candidate {
     pub position: Position,
     pub cost: u32,
@@ -59,7 +59,7 @@ pub fn follow_distance(follower: Position, leader: Position) -> Option<u16> {
 pub struct TargetCandidate {
     pub id: u32,
     pub position: Position,
-    pub priority: i32,
+    pub priority: i32, // Lua priority in hundredths
     pub hp: u8,
     pub cost: u16,
     pub sight: bool,
@@ -94,7 +94,7 @@ pub fn choose_target(
             50..=69 => 15,
             _ => 0,
         };
-        if best.priority.saturating_sub(active.priority) < threshold {
+        if best.priority.saturating_sub(active.priority) < threshold * 100 {
             return Some(active.id);
         }
     }

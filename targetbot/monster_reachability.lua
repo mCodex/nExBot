@@ -207,6 +207,16 @@ local function findAlternative(pp, cp, profile, noSight)
   local exhausted = false
   local probes = 0
   local radius = profile.marginMax
+  local shadow = profile.mode == "ranged" and not profile.ignoreCreatures
+    and RustBridge and RustBridge.beginFiringSample and RustBridge.beginFiringSample() and {}
+  local function recordCandidate(path, position, cost)
+    if shadow and #shadow <= 32 then
+      shadow[#shadow + 1] = {position, math.floor(cost * 100 + 0.5)}
+    end
+    if not bestCost or cost < bestCost then
+      bestPath, bestPosition, bestCost = path, position, cost
+    end
+  end
 
   -- Restrict the ring to candidates within the movement budget of the player.
   for x = math.max(cp.x - radius, pp.x - profile.maxSteps), math.min(cp.x + radius, pp.x + profile.maxSteps) do
@@ -215,10 +225,10 @@ local function findAlternative(pp, cp, profile, noSight)
       if inAttackRing(candidate, cp, profile) and distance(candidate, pp) > 0 then
         if nodes then
           local node = nodes[posKey(candidate)]
-          if node and type(node[1]) == "number" and (not bestCost or node[1] < bestCost) then
+          if node and type(node[1]) == "number" and (not bestCost or node[1] < bestCost or (shadow and #shadow <= 32)) then
             if canAttackFrom(candidate, cp, pp, profile) then
               local path = pathFromNodes(nodes, candidate, pp, profile.maxSteps)
-              if path then bestPath, bestPosition, bestCost = path, candidate, node[1] end
+              if path then recordCandidate(path, candidate, node[1]) end
             else
               noSight = true
             end
@@ -233,10 +243,10 @@ local function findAlternative(pp, cp, profile, noSight)
           local ok, path, code = pcall(nativePath, pp, candidate, maxComplexity, flags)
           if ok and code == 3 then exhausted = true end
           if ok and code == 0 and type(path) == "table" and #path > 0 and #path <= profile.maxSteps
-            and (not bestCost or #path < bestCost) then
+            and (not bestCost or #path < bestCost or shadow) then
             local endpoint = pathEnd(pp, path)
             if endpoint and distance(endpoint, candidate) == 0 then
-              bestPath, bestPosition, bestCost = path, candidate, #path
+              recordCandidate(path, candidate, #path)
             end
           end
         end
@@ -245,7 +255,12 @@ local function findAlternative(pp, cp, profile, noSight)
     if probes == 32 then break end
   end
 
-  if bestPath then return bestPath, bestPosition, capability end
+  if bestPath then
+    if shadow and #shadow > 0 and #shadow <= 32 then
+      RustBridge.firingShadow(cp, profile.marginMin, profile.marginMax, bestPosition, shadow)
+    end
+    return bestPath, bestPosition, capability
+  end
   if probes == 32 or exhausted then return nil, nil, capability, "search_budget" end
   return nil, nil, capability, noSight and "no_line_of_sight" or "no_attack_position"
 end

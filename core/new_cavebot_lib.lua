@@ -596,10 +596,17 @@ function CaveBot.Conversation(...)
     local expressions = {...}
     local delay = storage.extras.talkDelay or 1000
 
-    local talkDelay = 0
-    for i, expr in ipairs(expressions) do
+    local delays
+    if nExBotRuntime and nExBotRuntime.decide then
+        local result = nExBotRuntime.decide("npc_conversation", {
+            count = #expressions, interval_ms = delay,
+        })
+        if result then delays = result.delays end
+    end
+
+    for index, expr in ipairs(expressions) do
+        local talkDelay = delays and delays[index] or (index - 1) * delay
         schedule(talkDelay, function() NPC.say(expr) end)
-        talkDelay = talkDelay + delay
     end
 end
 
